@@ -35,6 +35,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame =>
     stopAfterRejectedRounds: 3,
     significance: {},
     allowUnverifiedIdentity: false,
+    observationPolicy: { allowDivergent: false },
     ...over,
   }) as unknown as CampaignFrame;
 
@@ -45,6 +46,8 @@ const round = (over: {
   heldOutRegressions?: number;
   trainingImprovements?: number;
   trainingRegressions?: number;
+  divergent?: number;
+  unclear?: number;
 }): CampaignRound =>
   ({
     seq: 1,
@@ -60,6 +63,7 @@ const round = (over: {
         improvements: over.heldOutImprovements ?? 0,
         regressions: over.heldOutRegressions ?? 0,
       },
+      observations: { divergent: over.divergent ?? 0, unclear: over.unclear ?? 0 },
       unverifiedAxes: [],
       confoundedAxes: [],
     },
@@ -119,5 +123,49 @@ describe("[R71 COUNTEREXAMPLE] adoption authority comes from the held-out popula
       round({ heldOutImprovements: 2, heldOutRegressions: 1, trainingImprovements: 9 }),
     ]);
     expect(answer.kind, "a held-out regression was outvoted by training gains").not.toBe("adopt");
+  });
+});
+
+// ── A TYPED FACT THAT COULD NOT REACH THE DECISION (arch-review 71 P1-evolution) ────────────────────
+//
+// A judge shown the platform's own observation account answers whether the trace's claims and that account
+// agree. `divergent` is the judge saying the candidate's story does not match what the platform watched it
+// do — the strongest negative evidence this system can produce.
+//
+// It was born TYPED from the model and folded into `Score.detail` as prose:
+//
+//     [observations: divergent — the trace claims a retry the samples never show]
+//
+// and `judge.ts` said so in its own comment: "a gate that wants to weigh it needs the field on the
+// contract." The campaign round read trial delta, significance, regressions and identity — never this. So a
+// candidate could improve its numbers while its own judges said it was not telling the truth about how, and
+// adopt on the improvement.
+//
+// Seen RED before the field reached the gate, observed:
+//   a candidate whose own judge called its account divergent was adopted: expected 'adopt' to be 'continue'
+
+describe("[R71 COUNTEREXAMPLE] a divergent observation account refuses adoption", () => {
+  it("does NOT adopt when the candidate's own judges called its account divergent", () => {
+    const answer = campaignAdoption(frame(), [round({ heldOutImprovements: 3, divergent: 1 })]);
+    expect(answer.kind, "a candidate whose own judge called its account divergent was adopted").toBe("continue");
+  });
+
+  it("adopts under a frame that RECORDED the waiver at open", () => {
+    // The escape hatch is a frozen decision, not a runtime argument: a campaign optimizing through known
+    // observation noise says so in the frame, before it sees any rounds.
+    const permissive = frame({ observationPolicy: { allowDivergent: true } } as never);
+    expect(campaignAdoption(permissive, [round({ heldOutImprovements: 1, divergent: 2 })]).kind).toBe("adopt");
+  });
+
+  it("REFUSES when unclear exceeds the frame's bound", () => {
+    // `unclear` is neither arm. A round mostly made of "I could not tell" is not evidence, and a campaign
+    // that cares says how much it will accept.
+    const bounded = frame({ observationPolicy: { allowDivergent: false, maxUnclear: 1 } } as never);
+    expect(campaignAdoption(bounded, [round({ heldOutImprovements: 2, unclear: 5 })]).kind).toBe("continue");
+    expect(campaignAdoption(bounded, [round({ heldOutImprovements: 2, unclear: 1 })]).kind).toBe("adopt");
+  });
+
+  it("adopts normally when the account holds up", () => {
+    expect(campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]).kind).toBe("adopt");
   });
 });

@@ -100,6 +100,23 @@ export const MeasuredScoreSchema = z
     // 1<2<3; 0 when unordered) so trend/diff/leaderboard still have a number. Absent ⇒ a plain numeric/boolean metric.
     label: z.string().optional(),
     status: z.literal("measured").optional(),
+    // ── WHAT THE PLATFORM SAW, BESIDE WHAT THE AGENT CLAIMED (arch-review 71 P1-evolution) ──────────
+    //
+    // A judge that is shown the platform's own observation account answers whether the trace's claims and
+    // that account agree. It was born TYPED from the model and then folded into `detail` as prose —
+    // `[observations: divergent — …]` — which is durable and unreadable: a gate may not re-derive a decision
+    // from rendered text (L3), so the strongest thing a judge can say about a candidate could not reach the
+    // decision that adopts it.
+    //
+    // Structured here because this is the row a scorecard stores and a campaign reads. `unclear` is its own
+    // arm and not a soft `consistent`: "I could not tell" is the third value (L2), and a policy that wants
+    // to bound it needs to see it.
+    observationAssessment: z
+      .object({
+        status: z.enum(["consistent", "divergent", "unclear"]),
+        note: z.string().max(2000).optional(),
+      })
+      .optional(),
   })
   .strict();
 export type MeasuredScore = z.infer<typeof MeasuredScoreSchema>;

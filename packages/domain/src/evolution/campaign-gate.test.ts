@@ -24,6 +24,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame => ({
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  observationPolicy: { allowDivergent: false },
   ...over,
 });
 

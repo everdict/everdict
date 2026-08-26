@@ -22,6 +22,11 @@ const ALLOWED = new Set([
   // …and the same completion on the ONE path that does not commit through the committer: a recovery adopting
   // a result a backend produced, which re-judges the case before its adopt-settle (arch-review 34 P0).
   "scorecard/recovery-planner.ts",
+  // GATED via `isMeasured`: counts the judges' observation assessments on the CANDIDATE side so the campaign
+  // gate can refuse a candidate whose own judge said its account diverges from what the platform observed
+  // (arch-review 71 P1-evolution). It reads no `.value` and no `.pass` — an unmeasured row is a grader
+  // failure, carries no assessment, and counting one would be reading a verdict out of an absence.
+  "evolution/campaign-service.ts",
   // producer — a case whose verdict is reached in a SECOND unit (arch-review 56, Wave K): it appends the
   // verifier's scores to the agent half's, and when that unit could not run it appends an explicit
   // `unmeasured` verdict instead. Never a zero and never nothing: a case whose verdict never happened must

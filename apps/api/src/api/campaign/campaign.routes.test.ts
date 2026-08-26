@@ -30,6 +30,7 @@ const frame: CampaignFrame = {
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  observationPolicy: { allowDivergent: false },
 };
 
 function build(snapshot: CampaignSnapshot) {

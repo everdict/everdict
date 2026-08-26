@@ -47,6 +47,24 @@ export const CampaignFrameSchema = z
     // refuses (`identity_unverified`) — an optimization verdict on an unverifiable world is the claim this
     // product exists to prevent.
     allowUnverifiedIdentity: z.boolean().default(false),
+    // ── WHAT A JUDGE'S OBSERVATION VERDICT COSTS THIS CAMPAIGN (arch-review 71 P1-evolution) ────────
+    //
+    // A judge shown the platform's own observation account answers whether the trace's claims and that
+    // account agree. `divergent` is the judge saying the candidate's story does not match what the platform
+    // watched it do — the strongest negative evidence the system can produce — and it could not reach this
+    // decision, because it lived in rendered prose.
+    //
+    // Frozen with the rest of the frame: a policy chosen after seeing the rounds is not a policy.
+    observationPolicy: z
+      .object({
+        // Default FALSE. Adopting a candidate whose own judge says its account diverges from the observed
+        // world is the claim this product exists to refuse.
+        allowDivergent: z.boolean().default(false),
+        // `unclear` is neither arm — a bound on how much of it a round may carry before the evidence stops
+        // meaning anything. Absent = unbounded, which is what every campaign had.
+        maxUnclear: z.number().int().min(0).optional(),
+      })
+      .default({}),
   })
   // ── THE DISCIPLINE IS ENFORCED HERE, NOT DESCRIBED (arch-review 71 P1-high) ────────────────────────
   //
@@ -106,6 +124,15 @@ export const CampaignRoundSchema = z.object({
       .object({
         improvements: z.number().int().min(0),
         regressions: z.number().int().min(0),
+      })
+      .optional(),
+    // …and what the judges said about the candidate's account of itself (arch-review 71 P1-evolution).
+    // Counted over the CANDIDATE side: the question is whether the thing being adopted tells the truth about
+    // what it did. Optional for the rows written before this existed.
+    observations: z
+      .object({
+        divergent: z.number().int().min(0),
+        unclear: z.number().int().min(0),
       })
       .optional(),
     // Experiment-identity axes the diff could not verify (execution_world, …). Non-empty blocks adoption

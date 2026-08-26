@@ -313,6 +313,10 @@ export class JudgeGrader implements Grader {
       detail: consistency
         ? `${verdict.reason}\n[observations: ${consistency.status}${consistency.note ? ` — ${consistency.note}` : ""}]`
         : verdict.reason,
+      // …and STRUCTURED, so a gate can weigh it (arch-review 71 P1-evolution). The prose above stays for the
+      // analyst reading a case; this is the same answer in the shape a decision may consume without parsing
+      // English back into a verdict.
+      ...(consistency ? { observationAssessment: consistency } : {}),
     };
     if (criteria.length === 0) return overall;
     const perCriterion = criteria.map((c): Score => {

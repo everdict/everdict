@@ -33,6 +33,7 @@ const frame: CampaignFrame = {
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  observationPolicy: { allowDivergent: false },
 };
 
 const round = (seq: number, over: Partial<CampaignRound["verdict"]> = {}): CampaignRound => ({

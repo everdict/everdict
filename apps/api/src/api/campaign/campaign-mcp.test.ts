@@ -29,6 +29,7 @@ const frame: CampaignFrame = {
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  observationPolicy: { allowDivergent: false },
 };
 
 const winning: CampaignSnapshot = {

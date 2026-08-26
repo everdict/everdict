@@ -1,5 +1,5 @@
 import type { CampaignFrame, CampaignRound, DomainFact, EvolutionCampaignRecord } from "@everdict/contracts";
-import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contracts";
+import { BadRequestError, ConflictError, NotFoundError, type Score, isMeasured } from "@everdict/contracts";
 import type { ExperimentIdentity, TrialDiff } from "@everdict/domain";
 import { type CampaignGateAnswer, campaignAdoption, contentDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -27,7 +27,35 @@ export interface CampaignComparisonSide {
   record: {
     harness: { id: string; version: string };
     orchestration?: { judges?: Array<{ id: string }> };
+    // ── WHAT THE JUDGES SAID ABOUT THIS SIDE'S ACCOUNT OF ITSELF (arch-review 71 P1-evolution) ──────
+    //
+    // The per-case scores, for the one thing the round verdict cannot derive from a trials comparison: a
+    // judge that was shown the platform's observation account and answered whether the trace agrees with it.
+    // Without this the field existed on the score, the policy existed on the frame, and nothing joined them
+    // — which is the shape this whole review is about, one layer up.
+    // `record.scorecard.results` is the per-case `CaseResult[]` the detail read carries — the same rows the
+    // analyst sees, so nothing new is fetched and nothing is re-derived from rendering.
+    scorecard?: { results: ReadonlyArray<{ scores: Score[] }> };
   };
+}
+
+// Counted over the CANDIDATE side: the question adoption asks is whether the thing being adopted tells the
+// truth about what it did. `undefined` when the side carries no scores at all — a round that cannot say is
+// not evidence either way, and the gate treats an absent block as "nothing to weigh" rather than as clean.
+function observationsOf(side: CampaignComparisonSide): { divergent: number; unclear: number } | undefined {
+  const results = side.record.scorecard?.results;
+  if (results === undefined) return undefined;
+  let divergent = 0;
+  let unclear = 0;
+  // THROUGH THE MEASURED GATE, like every other consumer of `.scores` (rule `suite`). An `unmeasured` row
+  // is a grader failure, not a judgment about the agent — it carries no assessment, and counting one would
+  // be reading a verdict out of an absence.
+  for (const r of results)
+    for (const sc of r.scores.filter(isMeasured)) {
+      if (sc.observationAssessment?.status === "divergent") divergent += 1;
+      if (sc.observationAssessment?.status === "unclear") unclear += 1;
+    }
+  return { divergent, unclear };
 }
 
 export interface CampaignSnapshot {
@@ -388,6 +416,8 @@ function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRo
       improvements: heldOutCases.filter((c) => c.delta > 0).length,
       regressions: heldOutCases.filter((c) => c.delta < 0).length,
     },
+    // …and the candidate's own judges on whether its account holds up (arch-review 71 P1-evolution).
+    ...(observationsOf(snapshot.candidate) !== undefined ? { observations: observationsOf(snapshot.candidate) } : {}),
     unverifiedAxes,
     confoundedAxes,
   };

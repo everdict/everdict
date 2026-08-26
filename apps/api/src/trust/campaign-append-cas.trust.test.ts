@@ -28,7 +28,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
     const frame: CampaignFrame = {
       subject: { type: "agent", id: "everdict", baselineVersion: "1.0.0" },
       scenarios: [
-        { id: "s1", heldOut: true },
+        { id: "s1", heldOut: false },
         { id: "s2", heldOut: true },
       ],
       judges: [],
@@ -37,6 +37,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       stopAfterRejectedRounds: 3,
       significance: {},
       allowUnverifiedIdentity: false,
+      observationPolicy: { allowDivergent: false },
     };
 
     const record = (id: string): EvolutionCampaignRecord => ({

@@ -27,11 +27,25 @@ export type CampaignGateAnswer =
 // A round that cannot separate the two populations is NOT adoption evidence. Older rows have no `heldOut`
 // block, and treating their whole-round counts as held-out results would be reading a number that answers a
 // different question — so they lose, which is the fail-closed direction.
-function winning(round: CampaignRound): boolean {
+function winning(round: CampaignRound, frame: CampaignFrame): boolean {
   const v = round.verdict;
   if (!v.comparable) return false;
   const held = v.heldOut;
   if (held === undefined) return false;
+  // ── …AND THE CANDIDATE'S OWN ACCOUNT HAS TO HOLD UP (arch-review 71 P1-evolution) ─────────────────
+  //
+  // `divergent` is a judge, shown the platform's own observation account, saying the candidate's story does
+  // not match what the platform watched it do. That is the strongest negative evidence this system can
+  // produce, and it used to live in rendered prose where no decision could reach it — so a candidate could
+  // improve its scores while its own judges said it was not telling the truth about how, and adopt.
+  //
+  // Refused by DEFAULT. A campaign that wants to optimize through the noise says so in its frozen frame.
+  const obs = v.observations;
+  if (obs !== undefined) {
+    if (obs.divergent > 0 && !frame.observationPolicy.allowDivergent) return false;
+    const maxUnclear = frame.observationPolicy.maxUnclear;
+    if (maxUnclear !== undefined && obs.unclear > maxUnclear) return false;
+  }
   return held.improvements >= 1 && held.regressions === 0;
 }
 
@@ -40,7 +54,7 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
   // Only the LATEST round's candidate is on the table: adoption is of the current variant, and a stale win
   // followed by a worse attempt is a loop that returns to the winner explicitly, never a gate doing
   // archaeology over the trace.
-  if (latest !== undefined && winning(latest)) {
+  if (latest !== undefined && winning(latest, frame)) {
     const unverified = latest.verdict.unverifiedAxes;
     if (unverified.length > 0 && !frame.allowUnverifiedIdentity) {
       return {
@@ -61,7 +75,7 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
   let consecutiveRejected = 0;
   for (let i = rounds.length - 1; i >= 0; i -= 1) {
     const r = rounds[i];
-    if (r === undefined || winning(r)) break;
+    if (r === undefined || winning(r, frame)) break;
     consecutiveRejected += 1;
   }
   // The streak halt outranks the budget halt: "K straight rejections" names what is wrong (the hypothesis
