@@ -206,8 +206,9 @@ machinery extended to cover them.
 
 > Status: **landed** (record + stores + pure gate + service + both transports + facts). What remains of
 > this track: the registry-side coupling (a `save_agent`/`register_harness` call that names a campaign
-> candidate refusing without the gate's `adopt` answer — today the settle tool's contract instructs the
-> loop to save with the campaign's issue as origin, which Track A then turns into lineage), and a
+> candidate refusing without the gate's `adopt` answer — today the settle tool points the loop at
+> `register_harness`'s from_issue origin, which Track A turns into lineage; `save_agent` carries no origin
+> declaration yet), and a
 > real-Postgres rung for the append-CAS (the in-memory twin makes the same decision, so the unit suite
 > exercises the refusal; the SQL text is pinned by a fake client).
 
