@@ -27,7 +27,7 @@ const PROOF: CampaignAdoptionProof = {
   campaignId: "camp-1",
   frameDigest: "sha256:frame",
   roundSeq: 2,
-  candidate: { type: "agent", id: "a1", version: "1.1.0", specDigest: "sha256:c1" },
+  candidate: { identity: "exact", type: "agent", id: "a1", version: "1.1.0", specDigest: "sha256:c1" },
   provingScorecardId: "sc-cand",
   issueId: "iss-9",
   gateDigest: "sha256:gate",

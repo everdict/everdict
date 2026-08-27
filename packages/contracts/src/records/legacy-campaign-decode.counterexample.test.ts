@@ -37,6 +37,7 @@ const legacyFrame = {
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  allowLabelOnlyAdoption: false,
 };
 
 const legacyRow = {

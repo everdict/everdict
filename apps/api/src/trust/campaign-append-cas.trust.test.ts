@@ -37,6 +37,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       stopAfterRejectedRounds: 3,
       significance: {},
       allowUnverifiedIdentity: false,
+      allowLabelOnlyAdoption: false,
       observationPolicy: { allowDivergent: false },
     };
 

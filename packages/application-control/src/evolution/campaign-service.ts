@@ -53,7 +53,9 @@ export interface CampaignComparisonSide {
 // Counted over the CANDIDATE side: the question adoption asks is whether the thing being adopted tells the
 // truth about what it did. `undefined` when the side carries no scores at all — a round that cannot say is
 // not evidence either way, and the gate treats an absent block as "nothing to weigh" rather than as clean.
-function observationsOf(side: CampaignComparisonSide): { divergent: number; unclear: number } | undefined {
+function observationsOf(
+  side: CampaignComparisonSide,
+): { divergent: number; unclear: number; assessed: number; eligible: number } | undefined {
   const results = side.record.scorecard?.results;
   if (results === undefined) return undefined;
   let divergent = 0;
@@ -61,12 +63,18 @@ function observationsOf(side: CampaignComparisonSide): { divergent: number; uncl
   // THROUGH THE MEASURED GATE, like every other consumer of `.scores` (rule `suite`). An `unmeasured` row
   // is a grader failure, not a judgment about the agent — it carries no assessment, and counting one would
   // be reading a verdict out of an absence.
+  // COVERAGE, not just failures (arch-review 72 P2). "Every judge said consistent" and "no judge recorded
+  // anything" both produced zeroes, and a gate could not tell them apart.
+  let assessed = 0;
+  let eligible = 0;
   for (const r of results)
     for (const sc of r.scores.filter(isMeasured)) {
+      eligible += 1;
+      if (sc.observationAssessment !== undefined) assessed += 1;
       if (sc.observationAssessment?.status === "divergent") divergent += 1;
       if (sc.observationAssessment?.status === "unclear") unclear += 1;
     }
-  return { divergent, unclear };
+  return { divergent, unclear, assessed, eligible };
 }
 
 export interface CampaignSnapshot {

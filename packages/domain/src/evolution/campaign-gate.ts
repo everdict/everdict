@@ -56,6 +56,11 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
     if (obs.divergent > 0 && !frame.observationPolicy.allowDivergent) return false;
     const maxUnclear = frame.observationPolicy.maxUnclear;
     if (maxUnclear !== undefined && obs.unclear > maxUnclear) return false;
+    // …and enough of the round was actually LOOKED AT (arch-review 72 P2). Zero divergences over zero
+    // assessments is not a clean bill of health; it is silence, and a campaign that wants the independent
+    // account to mean something declares how much of it it needs.
+    const need = frame.observationPolicy.minimumCoverage;
+    if (need !== undefined && (obs.eligible === 0 || obs.assessed / obs.eligible < need)) return false;
   }
   return held.improvements >= 1 && held.regressions === 0;
 }
@@ -76,11 +81,18 @@ export function adoptionProofOf(
   if (answer.kind !== "adopt") return undefined;
   const latest = rounds.at(-1);
   if (latest === undefined) return undefined;
+  // ── AND HOW STRONG THIS PROOF IS (arch-review 72 P1-medium) ──────────────────────────────────────
+  //
+  // A campaign that could not name the bytes it measured may only authorize a LABEL, and that is a weaker
+  // adoption an operator has to be able to see. It is legal only when the frozen frame said so.
+  const exact = answer.candidateSpecDigest !== undefined;
+  if (!exact && !campaign.frame.allowLabelOnlyAdoption) return undefined;
   return {
     campaignId: campaign.id,
     frameDigest: campaign.frameDigest,
     roundSeq: latest.seq,
     candidate: {
+      identity: exact ? ("exact" as const) : ("label_only" as const),
       type: campaign.frame.subject.type,
       id: campaign.frame.subject.id,
       version: answer.version,

@@ -46,6 +46,10 @@ const CampaignFrameShape = z.object({
   // refuses (`identity_unverified`) — an optimization verdict on an unverifiable world is the claim this
   // product exists to prevent.
   allowUnverifiedIdentity: z.boolean().default(false),
+  // …and whether this campaign may adopt a candidate it can only name by LABEL (arch-review 72 P1-medium).
+  // Default FALSE: a scorecard that sealed no spec digest cannot prove which bytes it measured, and adopting
+  // on that is exactly the C1-evaluated/C2-saved substitution with nothing to catch it.
+  allowLabelOnlyAdoption: z.boolean().default(false),
   // ── WHAT A JUDGE'S OBSERVATION VERDICT COSTS THIS CAMPAIGN (arch-review 71 P1-evolution) ────────
   //
   // A judge shown the platform's own observation account answers whether the trace's claims and that
@@ -59,6 +63,10 @@ const CampaignFrameShape = z.object({
       // Default FALSE. Adopting a candidate whose own judge says its account diverges from the observed
       // world is the claim this product exists to refuse.
       allowDivergent: z.boolean().default(false),
+      // …and how much of the round must actually have been LOOKED AT, as a fraction of the measured scores
+      // that could carry an assessment. Absent = no requirement, which is what every campaign had: a
+      // deployment that wants "the candidate's account was independently checked" to mean something says so.
+      minimumCoverage: z.number().min(0).max(1).optional(),
       // `unclear` is neither arm — a bound on how much of it a round may carry before the evidence stops
       // meaning anything. Absent = unbounded, which is what every campaign had.
       maxUnclear: z.number().int().min(0).optional(),
@@ -162,6 +170,15 @@ export const CampaignRoundSchema = z.object({
       .object({
         divergent: z.number().int().min(0),
         unclear: z.number().int().min(0),
+        // ── COVERAGE, BECAUSE MISSING IS NOT CONSISTENT (arch-review 72 P2) ────────────────────────
+        //
+        // Counting only divergent and unclear made two very different rounds identical: one where every
+        // observation-aware judge answered "consistent", and one where NO judge recorded an assessment at
+        // all. Both read `divergent: 0, unclear: 0`, and a gate cannot tell "checked and clean" from "never
+        // checked" — which is the annotation failure this whole review series is about, in the evidence
+        // rather than in the wiring.
+        assessed: z.number().int().min(0),
+        eligible: z.number().int().min(0),
       })
       .optional(),
     // Experiment-identity axes the diff could not verify (execution_world, …). Non-empty blocks adoption
@@ -234,9 +251,18 @@ export const CampaignAdoptionProofSchema = z.object({
     type: z.enum(["agent", "harness"]),
     id: z.string().min(1).max(200),
     version: z.string().min(1).max(100),
-    // The bytes, not the label (arch-review 71). Absent for a built-in with no declarative spec — an effect
-    // that cannot compare bytes says so rather than pretending the label was enough.
+    // The bytes, not the label (arch-review 71). Absent for a built-in with no declarative spec.
     specDigest: z.string().optional(),
+    // ── HOW STRONG THIS PROOF IS, SAID OUT LOUD (arch-review 72 P1-medium) ────────────────────────
+    //
+    // `specDigest` being optional meant an adoption that named exact bytes and one that named only a version
+    // LABEL were the same value to every reader: same `adopted` state, same `decided` operation, no way to
+    // see which one you had. A weak proof that reads like a strong one is the annotation failure this review
+    // series is named for.
+    //
+    // So the strength is a field, and a label-only adoption is only legal when the frame RECORDED that it
+    // would be (`allowLabelOnlyAdoption`) — a decision made before any round was seen.
+    identity: z.enum(["exact", "label_only"]),
   }),
   provingScorecardId: z.string().min(1),
   // The issue this campaign was opened against, carried so the effect and the intent cannot come apart.

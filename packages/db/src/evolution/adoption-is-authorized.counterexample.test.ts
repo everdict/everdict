@@ -36,6 +36,7 @@ const FRAME = {
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  allowLabelOnlyAdoption: false,
   observationPolicy: { allowDivergent: false },
 } as unknown as CampaignFrame;
 

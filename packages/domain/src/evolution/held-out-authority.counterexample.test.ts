@@ -1,7 +1,7 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { CampaignFrameSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { campaignAdoption } from "./campaign-gate.js";
+import { adoptionProofOf, campaignAdoption } from "./campaign-gate.js";
 
 // ── HELD-OUT WAS AN ANNOTATION NOBODY READ (arch-review 71 P1-high) ─────────────────────────────────
 //
@@ -35,6 +35,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame =>
     stopAfterRejectedRounds: 3,
     significance: {},
     allowUnverifiedIdentity: false,
+    allowLabelOnlyAdoption: false,
     observationPolicy: { allowDivergent: false },
     ...over,
   }) as unknown as CampaignFrame;
@@ -207,5 +208,81 @@ describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
     // weaker adoption an operator can see — not one that reads the same as a strong one.
     const answer = campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]);
     expect(answer.kind === "adopt" ? answer.candidateSpecDigest : "x").toBeUndefined();
+  });
+});
+
+// ── A WEAK PROOF THAT READS LIKE A STRONG ONE (arch-review 72 P1-medium / P2) ───────────────────────
+//
+// `specDigest` was optional, so an adoption naming EXACT BYTES and one naming only a version LABEL were the
+// same value to every reader: same `adopted` state, same `decided` operation, nothing to tell them apart.
+// And observation coverage counted only failures, so "every judge said consistent" and "no judge recorded
+// anything" both read `divergent: 0, unclear: 0`.
+//
+// Both are the same defect in the EVIDENCE rather than in the wiring: an absence rendered as a clean bill of
+// health. Strength is a field now, a label-only adoption needs a waiver the frame recorded before it saw any
+// round, and a campaign that wants the independent account to mean something declares how much of it it needs.
+//
+// Seen RED before the split, observed:
+//   a campaign that could not name the bytes adopted anyway: expected 'adopt' to be undefined
+//   zero divergences over zero assessments read as a clean account: expected 'adopt' to be 'continue'
+
+describe("[R72 COUNTEREXAMPLE] a proof says how strong it is", () => {
+  const proofFor = (f: CampaignFrame, r: CampaignRound[], digest?: string) => {
+    const withDigest = r.map((x) => ({
+      ...x,
+      verdict: { ...x.verdict, ...(digest !== undefined ? { candidateSpecDigest: digest } : {}) },
+    }));
+    const campaign = { id: "camp-1", frameDigest: "sha256:f", issueId: "iss-1", frame: f };
+    return adoptionProofOf(campaignAdoption(f, withDigest), campaign, withDigest);
+  };
+
+  it("mints an EXACT proof when the campaign could name the bytes", () => {
+    const proof = proofFor(frame(), [round({ heldOutImprovements: 1 })], "sha256:c1");
+    expect(proof?.candidate.identity).toBe("exact");
+    expect(proof?.candidate.specDigest).toBe("sha256:c1");
+  });
+
+  it("REFUSES to authorize at all when it cannot name them and the frame never allowed it", () => {
+    const proof = proofFor(frame(), [round({ heldOutImprovements: 1 })]);
+    expect(proof, "a campaign that could not name the bytes adopted anyway").toBeUndefined();
+  });
+
+  it("mints a LABEL_ONLY proof under the frame's recorded waiver, and says so", () => {
+    // Allowed, and visible. The point is not to forbid it — some candidates genuinely have no declarative
+    // spec — but to stop it reading identically to an adoption that proved bytes.
+    const permissive = frame({ allowLabelOnlyAdoption: true } as never);
+    const proof = proofFor(permissive, [round({ heldOutImprovements: 1 })]);
+    expect(proof?.candidate.identity).toBe("label_only");
+    expect(proof?.candidate.specDigest).toBeUndefined();
+  });
+});
+
+describe("[R72 COUNTEREXAMPLE] missing observations are not a clean account", () => {
+  const covered = (assessed: number, eligible: number): CampaignRound =>
+    ({
+      ...round({ heldOutImprovements: 1 }),
+      verdict: {
+        ...round({ heldOutImprovements: 1 }).verdict,
+        observations: { divergent: 0, unclear: 0, assessed, eligible },
+      },
+    }) as unknown as CampaignRound;
+
+  it("REFUSES a round nobody looked at, under a frame that requires coverage", () => {
+    const strict = frame({ observationPolicy: { allowDivergent: false, minimumCoverage: 0.5 } } as never);
+    expect(
+      campaignAdoption(strict, [covered(0, 10)]).kind,
+      "zero divergences over zero assessments read as a clean account",
+    ).toBe("continue");
+  });
+
+  it("ADOPTS when enough of the round was actually assessed", () => {
+    const strict = frame({ observationPolicy: { allowDivergent: false, minimumCoverage: 0.5 } } as never);
+    expect(campaignAdoption(strict, [covered(8, 10)]).kind).toBe("adopt");
+  });
+
+  it("leaves a frame that asked for no coverage exactly as it was", () => {
+    // The control: coverage is opt-in, and a campaign that never declared a requirement keeps the behaviour
+    // it had. This adds a way to demand evidence; it does not silently start refusing.
+    expect(campaignAdoption(frame(), [covered(0, 10)]).kind).toBe("adopt");
   });
 });

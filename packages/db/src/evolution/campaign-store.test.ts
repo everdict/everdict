@@ -33,6 +33,7 @@ const frame: CampaignFrame = {
   stopAfterRejectedRounds: 3,
   significance: {},
   allowUnverifiedIdentity: false,
+  allowLabelOnlyAdoption: false,
   observationPolicy: { allowDivergent: false },
 };
 
@@ -258,6 +259,10 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
   const side = (version: string, judges?: string[]) => ({
     record: {
       harness: { id: "agent:everdict", version },
+      // The sealed manifest a real scorecard carries — the digest of the spec that batch actually ran. A
+      // fixture without it exercises the LABEL-ONLY path, which the gate now refuses unless the frame waived
+      // it (arch-review 72 P1-medium), so leaving it out would measure the waiver rather than the settlement.
+      manifest: { harness: { specDigest: `sha256:spec-${version}` } },
       ...(judges !== undefined ? { orchestration: { judges: judges.map((id) => ({ id })) } } : {}),
     },
   });
@@ -297,6 +302,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       // frame are held out, so the one significant improvement is a held-out one — which is why the gate
       // below still answers `adopt`. On a training-only improvement it would answer `continue`.
       heldOut: { improvements: 1, regressions: 0 },
+      // The bytes this round actually evaluated, taken from the candidate scorecard's sealed manifest — the
+      // join an adoption is checked against (arch-review 71 P0 / 72 P1-medium).
+      candidateSpecDigest: "sha256:spec-1.0.1",
       unverifiedAxes: [],
       confoundedAxes: [],
     });
@@ -462,7 +470,13 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     snapshots.set("sc-win", snapshot(comparison()));
     await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
     const { record: settled, answer } = await svc.settle("acme", rec.id, "alice");
-    expect(answer).toEqual({ kind: "adopt", version: "1.0.1", provingScorecardId: "sc-win", waivedAxes: [] });
+    expect(answer).toEqual({
+      kind: "adopt",
+      version: "1.0.1",
+      provingScorecardId: "sc-win",
+      waivedAxes: [],
+      candidateSpecDigest: "sha256:spec-1.0.1",
+    });
     expect(settled.state).toBe("adopted");
     expect(store.outbox().map((e) => e.kind)).toEqual(["campaign.opened", "campaign.round_logged", "campaign.closed"]);
     await expect(svc.settle("acme", rec.id, "alice")).rejects.toBeInstanceOf(ConflictError);
