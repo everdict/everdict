@@ -2392,19 +2392,27 @@ const MUTATIONS = [
   {
     // …and the re-pin preserves the team that owns the harness: detached from the base's row, the
     // successor becomes the newest own version with no owner and re-files the entity out of its team.
-    name: "wave C — the re-pin detaches from the base version's owning team",
-    file: "packages/application-control/src/harness/harness-pin-service.ts",
-    from: "  const teamId = await instances.teamOfVersion(tenant, id, base.version);",
-    to: '  const teamId = await instances.teamOfVersion(tenant, id, "");',
-    build: "@everdict/application-control",
+    // ⚠️ RE-AIMED (arch-review 106). Both lanes used to resolve the team themselves and pass it to
+    // `register` — a read-then-write with a window an ownership transfer fits through — and each carried its
+    // own rung on its own read. arch-review 92 replaced BOTH with `registerPreservingOwner`, which resolves
+    // the owner INSIDE the write, so the two subjects those rungs named no longer exist and the gate refused
+    // them (a mutation whose target is gone FAILS, which is the check working). The protocol is now one
+    // mechanism, so it gets one rung on that mechanism — neutralize the resolution and every lane that
+    // depends on it must go red.
+    name: "wave C — a successor is registered without the team its entity is owned by",
+    file: "packages/registry/src/versioned-store.ts",
+    from: "    this.register(tenant, item, createdBy, this.entityTeam(tenant, item.id), origin);",
+    to: "    this.register(tenant, item, createdBy, undefined, origin);",
+    build: "@everdict/registry",
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
   },
   {
-    // …and the agent bump preserves its entity's team the same way.
+    // …and the agent bump rides the same resolution, on the transport an owner actually uses.
     name: "wave C — the agent bump detaches from its entity's owning team",
-    file: "apps/api/src/core/agent/agent-service.ts",
-    from: "      const teamId = (await this.deps.agents.list(tenant)).find((e) => e.id === id)?.teamId;",
-    to: '      const teamId = (await this.deps.agents.list(tenant)).find((e) => e.id === "")?.teamId;',
+    file: "packages/registry/src/versioned-store.ts",
+    from: "      if (entry.deletedAt === undefined && entry.teamId !== undefined) return entry.teamId;",
+    to: "      if (entry.deletedAt === undefined && entry.teamId !== undefined) return undefined;",
+    build: "@everdict/registry",
     suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
   },
   {
@@ -2541,7 +2549,9 @@ const MUTATIONS = [
     // did not (rule `protocol` L3, in its tracker-shaped form).
     name: "R73 — an adoption completes on any resolution, not on its own evidence",
     file: "packages/application-control/src/evolution/adoption-completion-watch.ts",
-    from: "        if (operation.proof.provingScorecardId !== resolvedBy) continue;",
+    // ⚠️ RE-AIMED (arch-review 106): arch-review 84 moved this comparison into `adoption-completion.ts` —
+    // the module both writers import so neither imports the other — and the inline spelling is gone.
+    from: "        if (!issueSettledThisAdoption(settled, operation.proof)) continue;",
     to: "        if (false) continue;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/evolution/adoption-completion.counterexample.test.ts"],
@@ -2584,7 +2594,9 @@ const MUTATIONS = [
     // the only event that would have completed it.
     name: "R76 — only one ordering of the completion join is owned",
     file: "packages/application-control/src/evolution/campaign-adoption-service.ts",
-    from: "    const completed = await this.completeIfIntentSettled(input.tenant, operation);",
+    // ⚠️ RE-AIMED (arch-review 106): the call gained the `causedBy` argument when the completion learned to
+    // stamp the agent that caused it, so the old exact line no longer exists.
+    from: "    const completed = await this.completeIfIntentSettled(input.tenant, operation, causedByOf(input.agent));",
     to: "    const completed = undefined;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/evolution/adoption-consumes-proof.counterexample.test.ts"],
@@ -2644,7 +2656,28 @@ const MUTATIONS = [
 // So the whole suite stays the CI contract and `--only <substring>` is the author's loop. It is deliberately
 // not a way to run less in CI: `pnpm protocol-mutations` with no argument is every rung, and the summary line
 // below says how many ran.
-const only = process.argv.slice(2).includes("--only") ? process.argv[process.argv.indexOf("--only") + 1] : undefined;
+// ⚠️ AN UNKNOWN FLAG RAN THE WHOLE SUITE IN SILENCE (arch-review 111). `--filter <name>` — a plausible spelling
+// of the flag below, and not the one this script has — was accepted without comment and the run became a full
+// one: ninety minutes instead of one rung, mutating files the author was editing at the time, and an answer to
+// a question nobody asked. The tool said nothing, and nothing is not confirmation (rule `ci`, the same shape as
+// `biome check --write` exiting 0 over unapplied fixes). Anything not recognised here is now a refusal.
+const ARGS = process.argv.slice(2);
+const KNOWN_FLAGS = new Set(["--only"]);
+for (let i = 0; i < ARGS.length; i++) {
+  const arg = ARGS[i];
+  if (!arg.startsWith("--")) continue; // a flag's value
+  if (!KNOWN_FLAGS.has(arg)) {
+    console.error(`✖ unknown option ${JSON.stringify(arg)}. This script takes only: ${[...KNOWN_FLAGS].join(", ")}.`);
+    console.error("  Refusing rather than running the full suite under a flag you did not mean to omit.");
+    process.exit(2);
+  }
+  i++; // skip the value belonging to this flag
+}
+const only = ARGS.includes("--only") ? ARGS[ARGS.indexOf("--only") + 1] : undefined;
+if (ARGS.includes("--only") && (only === undefined || only.startsWith("--"))) {
+  console.error("✖ --only needs a substring of a mutation's name.");
+  process.exit(2);
+}
 const SELECTED = only === undefined ? MUTATIONS : MUTATIONS.filter((m) => m.name.includes(only));
 if (only !== undefined && SELECTED.length === 0) {
   console.error(`✖ no protocol mutation's name contains ${JSON.stringify(only)} — nothing would have run.`);
