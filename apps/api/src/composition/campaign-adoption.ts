@@ -134,7 +134,7 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
       const wouldResolve = resolveHarnessInstance(template, parsed);
       const would = digestOf(wouldResolve);
       if (measured !== undefined && would !== measured) refuseDigest(would);
-      const existed = await deps.harnesses.has(tenant, id, version);
+      const existed = (await deps.harnesses.ownVersions(tenant, id)).includes(version);
       await deps.harnesses.registerPreservingOwner(tenant, parsed, by, origin);
       const held = digestOf(await deps.harnesses.get(tenant, id, version));
       return {

@@ -71,6 +71,7 @@ run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);
 run("pnpm unwired-capabilities", "pnpm", ["unwired-capabilities"]);
+run("pnpm authz-optional", "pnpm", ["authz-optional"]);
 run("pnpm option-forwarding", "pnpm", ["option-forwarding"]);
 run("pnpm language-policy", "pnpm", ["language-policy"]);
 run("pnpm source-bytes", "pnpm", ["source-bytes"]);

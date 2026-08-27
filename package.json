@@ -17,6 +17,7 @@
     "migrations": "node scripts/check-migrations.mjs",
     "artifact-frame": "node scripts/check-artifact-frame.mjs",
     "convention-harness": "node scripts/check-convention-harness.mjs",
+    "authz-optional": "node scripts/check-authz-optional.mjs",
     "protocol-mutations": "node scripts/trust/protocol-mutations.mjs",
     "plugin-manifests": "node scripts/check-plugin-manifests.mjs",
     "docs-check": "node scripts/check-docs.mjs",

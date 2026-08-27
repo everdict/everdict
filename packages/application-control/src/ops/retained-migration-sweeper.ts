@@ -43,6 +43,16 @@ export interface RetainedSweepTick {
   released: number;
   live: number;
   unknown: number;
+  // ── WHY THE ROWS THAT STAYED, STAYED (arch-review 80) ────────────────────────────────────────────
+  //
+  // arch-review 76 gave the `live` arm a `reason` with a comment saying an operator reading a row that never
+  // converges needs to tell "the run is running" from "an attempt is still open". Nothing read it — a field
+  // added for a reader that did not exist, which is this series' own shape in miniature.
+  //
+  // Counts alone cannot answer the question this sweep exists to raise: a migration whose `live` number
+  // never falls is either a healthy backlog or a resolver that says `live` about everything, and those look
+  // identical. Deduplicated because a hundred rows blocked on one cause is one fact, not a hundred.
+  heldBy: string[];
 }
 
 export class RetainedMigrationSweeper {
@@ -52,6 +62,7 @@ export class RetainedMigrationSweeper {
     const now = this.deps.now ?? (() => new Date().toISOString());
     const olderThan = new Date(Date.parse(now()) - (this.deps.minAgeMs ?? 24 * 60 * 60 * 1000)).toISOString();
     const candidates = await this.deps.cleanup.staleRetained(olderThan, this.deps.batch ?? 100);
+    const heldBy = new Set<string>();
     let released = 0;
     let live = 0;
     let unknown = 0;
@@ -65,8 +76,10 @@ export class RetainedMigrationSweeper {
       switch (disposition.kind) {
         case "live":
           live += 1;
+          heldBy.add(disposition.reason);
           continue;
         case "unknown":
+          heldBy.add(disposition.reason);
           // Deliberately silent about the row: an unreadable ledger is the one state where doing nothing is
           // the whole correct behaviour, and the next tick asks again.
           unknown += 1;
@@ -80,6 +93,6 @@ export class RetainedMigrationSweeper {
         }
       }
     }
-    return { scanned: candidates.length, released, live, unknown };
+    return { scanned: candidates.length, released, live, unknown, heldBy: [...heldBy] };
   }
 }

@@ -437,6 +437,7 @@ export {
 } from "./evolution/campaign-adoption-service.js";
 export {
   adoptionCompletionWatch,
+  issueSettledThisAdoption,
   type AdoptionCompletionWatchDeps,
 } from "./evolution/adoption-completion-watch.js";
 export type {

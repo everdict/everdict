@@ -60,6 +60,14 @@ function build(snapshot: CampaignSnapshot) {
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
+    // Opening a campaign resolves the issue's TEAM, so the tracker is a REQUIRED dependency of that route
+    // now (arch-review 79: an optional call there deleted the whole team check). These cases run with no
+    // teams configured, which is the unowned shape — the workspace's, writable by every member.
+    issueService: {
+      async get(_t: string, ref: string) {
+        return ref === "iss_1" ? { id: "iss_1" } : undefined;
+      },
+    } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
     campaignAdoption: buildCampaignAdoption({
       operations: store,
       agents,
@@ -453,3 +461,181 @@ function openIssue() {
     },
   };
 }
+
+// ── A CAMPAIGN IS A TEAM'S, AND ANOTHER TEAM MAY NOT REACH IT (arch-review 81) ──────────────────────
+//
+// arch-review 76 gave campaigns a team and gated every surface on it, and arch-review 78/79 closed three
+// spellings that made the gate evaporate. None of them shipped a test that DRIVES a cross-team caller — a
+// guard nobody has seen refuse is a comment (rule `testing`), and this whole family of holes was found by
+// reading rather than by anything going red.
+//
+// `teamService` is the one place team privacy is decided, so the double answers for it exactly: Team B's
+// member is on team-b, sees team-b, and is on no other roster.
+//
+// Seen RED with each gate removed in turn, observed:
+//   open      201 — a campaign was created inside another team
+//   rounds    201 — another team's append-only evidence was extended
+//   get       200 — a private team's campaign, its issue id and its hypotheses were readable
+//   settle    200 — another team's campaign was closed
+function crossTeam() {
+  const store = new InMemoryEvolutionCampaignStore();
+  const campaignService = new CampaignService({
+    store,
+    operations: store,
+    // Both issues exist; they belong to different teams. Knowing the id is exactly what used to be enough.
+    issues: {
+      async get(_t: string, ref: string) {
+        return ref === "iss_a" ? { id: "iss_a", teamId: "team-a" } : { id: "iss_b", teamId: "team-b" };
+      },
+    },
+    diffs: { diffSnapshot: async () => winning },
+    newId: () => `camp_${Math.random().toString(36).slice(2, 8)}`,
+    now: () => "2026-08-27T05:00:00.000Z",
+  });
+  const app = buildServer({
+    service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+    campaignService,
+    issueService: {
+      async get(_t: string, ref: string) {
+        return ref === "iss_a" ? { id: "iss_a", teamId: "team-a" } : { id: "iss_b", teamId: "team-b" };
+      },
+    } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+    // The caller is on team-b only, and cannot see team-a.
+    teamService: {
+      async list() {
+        return [{ id: "team-b" }];
+      },
+      async defaultTeam() {
+        return undefined;
+      },
+      async visibleTeamIds() {
+        return ["team-b"];
+      },
+      async canSeeTeam(_t: string, teamId: string) {
+        return teamId === "team-b";
+      },
+    } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
+  });
+  return { app, campaignService };
+}
+
+describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team cannot reach it", () => {
+  it("REFUSES to open a campaign inside a team the caller is not on", async () => {
+    const { app } = crossTeam();
+    const res = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_a", frame },
+    });
+    expect(res.statusCode, "a campaign was created inside another team").not.toBe(201);
+    await app.close();
+  });
+
+  it("REFUSES to write into a VISIBLE team the caller is not on — privacy and membership are different", async () => {
+    // ⚠️ The case the first version of this file did not have, and neutralization is what said so:
+    // removing the open route's `gate(..., {teamId})` failed NOTHING, because `assertTeamVisible` already
+    // refused a team the caller could not SEE. Those are two questions and the kernel answers them apart —
+    // READ is decided by team privacy (404), WRITE by the roster (403). A team that is not private but not
+    // mine passes the first and must fail the second, and only that case proves the gate.
+    const store = new InMemoryEvolutionCampaignStore();
+    const issues = {
+      async get(_t: string, ref: string) {
+        return ref === "iss_a" ? { id: "iss_a", teamId: "team-a" } : { id: "iss_b", teamId: "team-b" };
+      },
+    };
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      campaignService: new CampaignService({
+        store,
+        operations: store,
+        issues,
+        diffs: { diffSnapshot: async () => winning },
+        newId: () => "camp_open",
+        now: () => "2026-08-27T05:00:00.000Z",
+      }),
+      issueService: issues as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+      teamService: {
+        async list() {
+          return [{ id: "team-b" }]; // the caller's roster: team-b only
+        },
+        async defaultTeam() {
+          return undefined;
+        },
+        async visibleTeamIds() {
+          return undefined; // nothing is hidden — team-a is a normal, non-private team
+        },
+        async canSeeTeam() {
+          return true;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
+      // ⚠️ A MEMBER, and `requireAuth` so the dev-header fallback cannot answer instead. An admin governs
+      // every team in the workspace BY DESIGN (`canReachTeam` says so), so an admin fixture "proves" this
+      // gate by bypassing it — which is exactly what the first draft of this case did, silently, because
+      // the dev fallback hands out `roles: ["admin"]`.
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "u-b", workspace: "acme", roles: ["member"], via: "oidc" as const };
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: { authorization: "Bearer t" },
+      payload: { issueId: "iss_a", frame },
+    });
+    expect(res.statusCode, "a campaign was opened in a team the caller is not a member of").toBe(403);
+    await app.close();
+  });
+
+  it("ALLOWS the caller's own team — the control", async () => {
+    // A gate that refused everything would be a feature nobody can use, which is the other way to fail.
+    const { app } = crossTeam();
+    const res = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_b", frame },
+    });
+    expect(res.statusCode, "the caller could not open a campaign in their OWN team").toBe(201);
+    await app.close();
+  });
+
+  it("HIDES another team's campaign from read, round and settle", async () => {
+    const { app, campaignService } = crossTeam();
+    // Seeded through the service, so the row is exactly what an open in team-a produces.
+    const foreign = await campaignService.open("acme", { issueId: "iss_a", frame }, "someone-on-team-a");
+    expect(foreign.teamId).toBe("team-a");
+
+    for (const [method, url] of [
+      ["GET", `/campaigns/${foreign.id}`],
+      ["GET", `/campaigns/${foreign.id}/decision`],
+      ["GET", `/campaigns/${foreign.id}/adoption`],
+      ["POST", `/campaigns/${foreign.id}/settle`],
+    ] as const) {
+      const res = await app.inject({ method, url, headers: H });
+      expect(res.statusCode, `${method} ${url} exposed another team's campaign`).toBe(404);
+    }
+
+    const round = await app.inject({
+      method: "POST",
+      url: `/campaigns/${foreign.id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "h",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    expect(round.statusCode, "another team's append-only evidence was extended").toBe(404);
+
+    // …and it is not on this caller's list either.
+    const list = await app.inject({ method: "GET", url: "/campaigns", headers: H });
+    expect((list.json() as Array<{ id: string }>).map((c) => c.id)).not.toContain(foreign.id);
+    await app.close();
+  });
+});

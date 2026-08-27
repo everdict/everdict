@@ -63,6 +63,17 @@ See skill `ci`.
   leaving every production private-verifier case recording no cleanup debt. Ports satisfied STRUCTURALLY (an
   object literal at the root) are deliberately not flagged — the compiler already refuses a missing one where
   it is passed. `DECLARED_UNWIRED` states why a capability is inert on purpose.
+- **`pnpm authz-optional` is the "an authorization input may not be a maybe" law, enforced instead of stated**
+  (arch-review 79). In an authz call `undefined` is the PERMISSIVE arm — no team constraint, so the
+  workspace-level action decides alone — and optional chaining produces `undefined` for reasons that have
+  nothing to do with the resource: a service this deployment did not wire, a row that is not there. The prose
+  version failed THREE TIMES IN TWO HOURS, all by its author: `deps.campaignService?.get(...)` inside the
+  security fix that added the team gate, then `deps.issueService?.get(...)` in the fix for that (both
+  transports), then `issue?.teamId` handed straight to `gate` in the fix for THAT. The mechanism is not
+  forgetfulness: the dep's type is `issueService?: IssueService`, so a plain `.get` does not compile, and the
+  shortest path from that compile error is `?.` rather than a refusal — the optional type makes the unsafe
+  spelling the one that builds. Two fixes are allowed at a flagged site and no third: refuse when the
+  capability is absent, or narrow the value first and pass it plainly.
 - **`pnpm option-forwarding` is the allowlist-forwarding law, enforced instead of stated** (arch-review 69).
   `DispatchOptions` travels through several decorating dispatchers and the Scheduler; most links pass the
   object whole, but a Scheduler entry WAITS, so its options are taken apart into `QueueEntry` and rebuilt at

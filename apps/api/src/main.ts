@@ -1044,7 +1044,26 @@ async function main(): Promise<void> {
       }),
     });
     setInterval(
-      whenLeader(leader, () => void retainedSweeper.tick().catch(() => {})),
+      // ⚠️ The tick's ANSWER is read (arch-review 80). `void tick().catch(() => {})` discarded it, so a
+      // migration that released nothing for weeks was indistinguishable from one with nothing to do — and
+      // the `reason` the disposition carries, added so an operator could tell those apart, reached nobody.
+      // A sweep that leaves rows says which cause held them; a sweep that releases some says so once.
+      whenLeader(leader, () => {
+        void retainedSweeper
+          .tick()
+          .then((t) => {
+            if (t.released > 0 || t.heldBy.length > 0) {
+              const held = t.heldBy.length > 0 ? ` held-by=${t.heldBy.join(" | ")}` : "";
+              console.log(
+                `[retained-migration] scanned=${t.scanned} released=${t.released} live=${t.live} unknown=${t.unknown}${held}`,
+              );
+            }
+          })
+          .catch((err: unknown) => {
+            // NOT swallowed into silence: a sweeper that cannot run is a leak nobody is working on.
+            console.error(`[retained-migration] tick failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      }),
       60 * 60_000,
     ).unref();
   }

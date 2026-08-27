@@ -2,6 +2,7 @@ import type { AdoptionOperation, CampaignAdoptionProof, CapabilityOriginChannel 
 import { ConflictError, NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
+import { issueSettledThisAdoption } from "./adoption-completion-watch.js";
 
 // ── AN AUTHORIZATION IS SPENT BY THE EFFECT, OR IT IS DECORATION (arch-review 72 P0) ────────────────
 //
@@ -246,10 +247,9 @@ export class CampaignAdoptionService {
       (record) => record,
       () => undefined, // unreadable ≠ unresolved: leave it owed (L2)
     );
-    if (issue === undefined || issue.status !== "done") return undefined;
-    // The SAME predicate the watcher uses, and the reason it is a predicate: an issue closed on other
-    // evidence is not this adoption discharging its intent (L3).
-    if (issue.resolution?.scorecardId !== operation.proof.provingScorecardId) return undefined;
+    // The SAME predicate the watcher consumes — imported, not re-spelled (arch-review 80, rule `protocol`
+    // L3): an issue closed on other evidence is not this adoption discharging its intent.
+    if (issue === undefined || !issueSettledThisAdoption(issue, operation.proof)) return undefined;
     const outcome = await this.deps.operations.markCompleted(
       tenant,
       operation.proof.campaignId,

@@ -50,6 +50,9 @@ function event(over: Partial<ActivationEvent> = {}): ActivationEvent {
 function registryOf(theSpec: AgentSpec, createdBy: string | null = "alice"): AgentRegistry {
   return {
     register: async () => {},
+    // The owner-preserving successor path (arch-review 77) — this double registers nothing, so it
+    // answers the same way its `register` does.
+    registerPreservingOwner: async () => {},
     has: async () => true,
     get: async () => theSpec,
     versions: async () => [theSpec.version],

@@ -15,11 +15,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:run");
-    } catch (err) {
-      return sendError(reply, err);
-    }
     let body: z.infer<typeof OpenCampaignBodySchema>;
     try {
       body = OpenCampaignBodySchema.parse(req.body);
@@ -27,6 +22,29 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
     try {
+      // ── OPENING A CAMPAIGN IS A WRITE INTO THE ISSUE'S TEAM (arch-review 78 P1-security) ────────────
+      //
+      // The campaign inherits the issue's team, so opening one against another team's private issue
+      // CREATES a row in that team's space — a write authorized by nothing but a workspace-level action.
+      // `IssueService.get` takes a tenant and a ref; team visibility is not one of its inputs, so knowing
+      // the id was enough. The team is resolved here and both questions are asked of it: may this caller
+      // SEE it (privacy), and may they WRITE to it (membership).
+      // ⚠️ NOT `deps.issueService?.get(...)` — and this file had that spelling for the length of one fix
+      // (arch-review 79). The optional call makes the whole team check evaporate when the tracker is absent:
+      // `undefined` reads as UNOWNED, which is allowed. A campaign whose authority cannot be established
+      // must not be opened.
+      if (!deps.issueService)
+        return reply.code(404).send({
+          code: "NOT_FOUND",
+          message: "issue service not configured — a campaign's team cannot be established",
+        });
+      const issue = await deps.issueService.get(principal.workspace, body.issueId);
+      if (issue === undefined) return reply.code(404).send({ code: "NOT_FOUND", message: "issue not found" });
+      // …and now the gate's input is unambiguous. An `issue?.teamId` here would hand authorization an
+      // `undefined` that means "the issue is missing" while authz reads it as "no team constraint" — the
+      // permissive arm, reached for a reason that has nothing to do with the resource (arch-review 79).
+      await assertTeamVisible(deps, principal, issue.teamId, "Issue");
+      gate(principal, "scorecards:run", { teamId: issue.teamId });
       return reply.code(201).send(await deps.campaignService.open(principal.workspace, body, principal.subject));
     } catch (err) {
       return sendError(reply, err); // unknown issue → 404
@@ -78,11 +96,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
-      try {
-        gate(principal, "scorecards:run");
-      } catch (err) {
-        return sendError(reply, err);
-      }
       let body: z.infer<typeof LogCampaignRoundBodySchema>;
       try {
         body = LogCampaignRoundBodySchema.parse(req.body);
@@ -90,6 +103,11 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
       }
       try {
+        // Appending a round MUTATES the campaign's append-only evidence, so it is gated against the
+        // campaign's own team — not just a workspace action (arch-review 78 P1-security).
+        const record = await deps.campaignService.get(principal.workspace, req.params.id);
+        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
+        gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
         return reply
           .code(201)
           .send(
@@ -191,10 +209,19 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     // The team model is explicit that READ is decided by team privacy and WRITE by team membership; a write
     // gated without `{ teamId }` has asked neither question about the resource it is about to change.
     try {
-      const campaign = await deps.campaignService?.get(principal.workspace, req.params.id);
+      // ⚠️ NOT `deps.campaignService?.get(...)` (arch-review 78). The optional call made the campaign's team
+      // check vanish whenever the settlement service was absent — `undefined` reads as UNOWNED, which is
+      // allowed. That is the law this very wave wrote, broken by the security fix that carries it: a
+      // capability a protocol depends on is REQUIRED at the deciding seam, or its absence is a NAMED
+      // outcome. An adoption cannot be gated against a campaign nobody can read.
+      if (!deps.campaignService)
+        return reply
+          .code(404)
+          .send({ code: "NOT_FOUND", message: "campaign service not configured — an adoption cannot be authorized" });
+      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
       // Two authorities, both required: the campaign this proof came from, and the entity being written.
       // The proof carries the team frozen at open, so a later ownership move cannot widen what it authorizes.
-      await assertTeamVisible(deps, principal, campaign?.teamId, "Campaign");
+      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
       if (body.proof.teamId !== undefined) gate(principal, "scorecards:run", { teamId: body.proof.teamId });
       const candidate = body.proof.candidate;
       const owner =

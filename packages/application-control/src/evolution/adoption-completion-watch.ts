@@ -28,6 +28,25 @@ import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.j
 // claim the capability is good, or that nothing will regress — the regression watch is what reopens the
 // issue later, and that transition leaves the operation `completed`, because it WAS completed. History is
 // not rewritten by what happened next.
+// ── ONE PREDICATE, TWO WRITERS (arch-review 80) ─────────────────────────────────────────────────────
+//
+// Both sides of the symmetric join ask the same question — did THIS issue close on THIS adoption's proving
+// scorecard — and arch-review 76 wrote the law ("one shared predicate, consumed from both sides") and then
+// spelled it twice: once here over an event payload, once in `CampaignAdoptionService` over an issue record.
+// A predicate written twice has already diverged (rule `protocol` L3); the two spellings even disagreed in
+// shape, one reading `payload.scorecardId` and the other `resolution.scorecardId`.
+export function issueSettledThisAdoption(
+  issue: { status: string; resolution?: { scorecardId?: string } },
+  proof: { provingScorecardId: string },
+): boolean {
+  // `done` and nothing else: `regressed` is a later fact about the capability, not a retraction of the
+  // completion, and an issue still open has settled nothing.
+  if (issue.status !== "done") return false;
+  // Absence is not a match. An issue closed on something other than measured evidence — a different fix, a
+  // sibling campaign, a member's judgement — did not discharge THIS adoption's intent.
+  return issue.resolution?.scorecardId === proof.provingScorecardId;
+}
+
 export interface AdoptionCompletionWatchDeps {
   operations: AdoptionOperationStore;
 }
@@ -37,12 +56,15 @@ export function adoptionCompletionWatch(deps: AdoptionCompletionWatchDeps): Plat
     name: "evolution:adoption-completion",
     kinds: ["issue.status_changed"],
     async handle(event) {
+      // The fact carries the transition and the evidence it closed on; `issueSettledThisAdoption` is the ONE
+      // predicate both sides of the join consume, so the event shape is normalized into the record shape it
+      // reads rather than being asked a second, slightly different question (arch-review 80).
       const payload = event.payload as { to?: unknown; scorecardId?: unknown };
-      if (payload.to !== "done") return;
-      // A resolution with no scorecard closed the issue on something other than measured evidence. That is a
-      // legitimate way to close an issue and it is not this adoption's completion — absence is not a match.
-      const resolvedBy = payload.scorecardId;
-      if (typeof resolvedBy !== "string") return;
+      const settled = {
+        status: typeof payload.to === "string" ? payload.to : "",
+        ...(typeof payload.scorecardId === "string" ? { resolution: { scorecardId: payload.scorecardId } } : {}),
+      };
+      if (settled.status !== "done") return;
       const operations = await deps.operations.forIssue(event.tenant, event.subject.id);
       for (const operation of operations) {
         // An early-out, NOT the guard: the authority is `markCompleted`'s conditional write, which refuses
@@ -50,7 +72,7 @@ export function adoptionCompletionWatch(deps: AdoptionCompletionWatchDeps): Plat
         // line changes nothing observable, and saying so is the point — an unspent authorization must not be
         // recorded as having settled its intent, and the store is what enforces that.
         if (operation.state !== "registered") continue;
-        if (operation.proof.provingScorecardId !== resolvedBy) continue;
+        if (!issueSettledThisAdoption(settled, operation.proof)) continue;
         // ── AND ITS ANSWER IS CONSUMED (arch-review 74, self-review) ──────────────────────────────────
         //
         // The first draft awaited this and discarded the result, under a comment saying the answer was

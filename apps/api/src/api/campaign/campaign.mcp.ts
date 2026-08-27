@@ -1,7 +1,7 @@
 import { CampaignAdoptionProofSchema, CampaignFrameSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { teamCeiling, teamOfEntity } from "../../common/team-scope.js";
+import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 import { gate } from "../route-context.js";
 
@@ -28,9 +28,20 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       },
     },
     ({ issue_id, frame }) =>
-      run(principal, "scorecards:run", async () =>
-        ok(await campaigns.open(ws, { issueId: issue_id, frame }, principal.subject)),
-      ),
+      run(principal, "scorecards:run", async () => {
+        // The issue's team, asked both questions — the campaign inherits it, so opening one against another
+        // team's private issue is a write into that team (arch-review 78 P1-security). Parity with the route.
+        // NOT `deps.issueService?.get(...)` — see the route (arch-review 79): the optional call deletes the
+        // team check whenever the tracker is absent.
+        if (!deps.issueService) return fail("NOT_FOUND: issue service is not configured.");
+        const issue = await deps.issueService.get(ws, issue_id);
+        if (issue === undefined) return fail("NOT_FOUND: issue not found.");
+        // See the route: an `issue?.teamId` hands authorization an `undefined` that means "missing issue"
+        // while authz reads it as "no constraint" (arch-review 79).
+        await assertTeamVisible(deps, principal, issue.teamId, "Issue");
+        gate(principal, "scorecards:run", { teamId: issue.teamId });
+        return ok(await campaigns.open(ws, { issueId: issue_id, frame }, principal.subject));
+      }),
   );
 
   server.registerTool(
@@ -49,7 +60,12 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       description: "Read one campaign — frame, round trace, state, and close",
       inputSchema: { id: z.string() },
     },
-    ({ id }) => run(principal, "scorecards:read", async () => ok(await campaigns.get(ws, id))),
+    ({ id }) =>
+      run(principal, "scorecards:read", async () => {
+        const record = await campaigns.get(ws, id);
+        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
+        return ok(record);
+      }),
   );
 
   server.registerTool(
@@ -70,8 +86,11 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       },
     },
     ({ id, hypothesis, candidate_version, baseline_scorecard_id, candidate_scorecard_id }) =>
-      run(principal, "scorecards:run", async () =>
-        ok(
+      run(principal, "scorecards:run", async () => {
+        const record = await campaigns.get(ws, id);
+        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
+        gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
+        return ok(
           await campaigns.logRound(
             ws,
             id,
@@ -84,8 +103,8 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
             principal.subject,
             await teamCeiling(deps, principal),
           ),
-        ),
-      ),
+        );
+      }),
   );
 
   server.registerTool(
@@ -98,7 +117,11 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         "identity_unverified — the last refuses adoption but keeps the campaign open).",
       inputSchema: { id: z.string() },
     },
-    ({ id }) => run(principal, "scorecards:read", async () => ok(await campaigns.decision(ws, id))),
+    ({ id }) =>
+      run(principal, "scorecards:read", async () => {
+        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
+        return ok(await campaigns.decision(ws, id));
+      }),
   );
 
   server.registerTool(
@@ -117,6 +140,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     ({ id }) =>
       run(principal, "scorecards:read", async () => {
         const { campaign, operation } = await campaigns.adoption(ws, id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         return ok({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
       }),
   );
@@ -155,6 +179,11 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
         // The family's write action AND the team that owns the entity, gated like the route: preserving an
         // owner team is not the same question as being allowed to write to it (arch-review 76 P1-security).
+        // The campaign's own authority, like the route — BFF↔MCP parity means the same GUARDS, not just the
+        // same service (arch-review 78: this transport checked the entity's team and not the campaign's).
+        const campaign = await campaigns.get(ws, id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+        if (checked.data.teamId !== undefined) gate(principal, "scorecards:run", { teamId: checked.data.teamId });
         const candidate = checked.data.candidate;
         const owner =
           candidate.type === "agent"
@@ -196,6 +225,12 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         "operation, so the registration can be re-driven rather than lost.",
       inputSchema: { id: z.string() },
     },
-    ({ id }) => run(principal, "scorecards:run", async () => ok(await campaigns.settle(ws, id, principal.subject))),
+    ({ id }) =>
+      run(principal, "scorecards:run", async () => {
+        const record = await campaigns.get(ws, id);
+        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
+        gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
+        return ok(await campaigns.settle(ws, id, principal.subject));
+      }),
   );
 }

@@ -105,6 +105,14 @@ function makeDeps(
   return {
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
+    // Opening a campaign resolves the issue's TEAM, so the tracker is a REQUIRED dependency of that tool
+    // now (arch-review 79). These cases run with no teams configured — the unowned shape, which is the
+    // workspace's and writable by every member.
+    issueService: {
+      async get(_t: string, ref: string) {
+        return ref === "iss_1" ? { id: "iss_1" } : undefined;
+      },
+    } as unknown as McpDeps["issueService"],
     // Through the PRODUCTION builder over a real registry — BFF↔MCP parity means the same consumer, not a
     // second one (arch-review 72 P0 / 73).
     campaignAdoption: buildCampaignAdoption({
