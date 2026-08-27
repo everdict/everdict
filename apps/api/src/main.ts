@@ -1606,7 +1606,17 @@ async function main(): Promise<void> {
       }),
       60_000,
     ).unref();
-    if (leader.isLeader()) void browserSessionService.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+    // Boot pass — reclaim what the LAST process leaked. Reports like the periodic tick does: the boot
+    // sweep is the one most likely to find something, and it ran silent (arch-review 102).
+    if (leader.isLeader())
+      void browserSessionService
+        .sweepOrphans()
+        .then((n) => {
+          if (n > 0) console.log(`[browser-orphans] boot pass settled ${n} row(s) the last process leaked`);
+        })
+        .catch((err: unknown) => {
+          console.error(`[browser-orphans] boot sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
   }
   // N3 retention: operator-configured TTL over the owned trajectory store (unset = keep forever). Hourly
   // sweep, logged — evidence never leaves silently.
@@ -1761,7 +1771,17 @@ async function main(): Promise<void> {
       }),
       60_000,
     ).unref();
-    if (leader.isLeader()) void sandboxSessions.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
+    // Boot pass — reclaim what the LAST process leaked. Reports like the periodic tick does: the boot
+    // sweep is the one most likely to find something, and it ran silent (arch-review 102).
+    if (leader.isLeader())
+      void sandboxSessions
+        .sweepOrphans()
+        .then((n) => {
+          if (n > 0) console.log(`[sandbox-orphans] boot pass settled ${n} row(s) the last process leaked`);
+        })
+        .catch((err: unknown) => {
+          console.error(`[sandbox-orphans] boot sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
   }
   // Session rows whose lane is NOT configured here still share this ledger (another process — a dev host
   // stack, a dead replica — may have written and abandoned them). Settle those from the ledger alone; lanes
