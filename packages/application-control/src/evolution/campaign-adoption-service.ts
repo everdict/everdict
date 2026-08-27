@@ -262,6 +262,14 @@ export class CampaignAdoptionService {
         identity: recorded.proof.candidate.identity,
         provingScorecardId: recorded.proof.provingScorecardId,
         issueId: recorded.proof.issueId,
+        // ── WHETHER THE LABEL WAS BORN HERE (arch-review 103) ─────────────────────────────────────
+        //
+        // `RegistrationOutcome.kind` was introduced as "observation" and no decision read it, which is this
+        // series' own shape: a field nobody consumes is one nobody maintains, and it silently stops being
+        // true. It reaches a reader now — the fact — where it answers the question an operator actually has
+        // about an adoption that landed: did this create the version, or did the campaign prove a version
+        // that already existed? Those are different stories about the same `registered` state.
+        created: landed.kind === "created",
         ...(recorded.proof.teamId !== undefined ? { teamId: recorded.proof.teamId } : {}),
       },
     };

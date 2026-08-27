@@ -501,6 +501,47 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     expect(registered?.actor).toBe("u-1");
   });
 
+  it("says whether the label was BORN here — the outcome's `kind` reaches a reader (arch-review 103)", async () => {
+    // `RegistrationOutcome.kind` shipped as "observation" with no decision reading it, which is this series'
+    // own shape: a field nobody consumes is one nobody maintains. It reaches the FACT now, where it answers
+    // the question an operator actually has about an adoption that landed — did this create the version, or
+    // did the campaign prove one that already existed? Both are `registered`, and they are different stories.
+    //
+    // Seen RED before the field travelled: the fact carried no `created` at all.
+    for (const [kind, expected] of [
+      ["created", true],
+      ["already_exists", false],
+    ] as const) {
+      const { store, facts } = operationsWithFacts();
+      await new CampaignAdoptionService({
+        operations: store,
+        issues: { get: async () => ({ status: "in_progress" }) },
+        register: async ({ proof }) => ({
+          kind,
+          candidate: {
+            type: proof.candidate.type,
+            id: proof.candidate.id,
+            version: proof.candidate.version,
+            specDigest: "sha256:c1",
+          },
+        }),
+      }).adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "u-1",
+        via: "web" as const,
+      });
+
+      const fact = facts().find((f) => f.kind === "campaign.adoption_registered") as
+        | { payload?: { created?: boolean } }
+        | undefined;
+      expect(fact?.payload?.created, `the outcome kind ${kind} never reached the fact`).toBe(expected);
+    }
+  });
+
   it("stamps NOTHING when a member acted directly — an invented cause suppresses a real wakeup", async () => {
     const { store, facts } = operationsWithFacts();
 
