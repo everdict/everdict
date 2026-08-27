@@ -94,7 +94,15 @@ export class IntermediateCleanupReconciler {
       }
       // Completed only when EVERY ref converged. A partially-drained debt stays owed, because the row is the
       // worklist and a worklist that forgets half its items is not one (rule `protocol` L5).
-      if (await this.deps.cleanup.complete(debt.tenant, debt.executionId)) completed += 1;
+      // ── CONDITIONAL ON WHAT THIS TICK DECIDED OVER (arch-review 72 P1-high) ──────────────────────
+      //
+      // Every ref above was judged against the object store while the row could move: a paused writer whose
+      // put lands mid-probe makes "this ref was never written" false, and the old guard could not see it
+      // because the writer's confirm leaves the row in exactly the states it allowed. `changed` is not a
+      // failure — the next tick re-evaluates every ref, including the one that just landed.
+      const closed = await this.deps.cleanup.complete(debt.tenant, debt.executionId, debt.revision);
+      if (closed === "completed") completed += 1;
+      else if (closed === "changed") deferred += 1;
     }
 
     return { claimed: due.length, completed, deferred };

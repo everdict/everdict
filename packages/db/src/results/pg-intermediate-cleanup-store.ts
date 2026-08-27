@@ -25,6 +25,7 @@ interface CleanupRow {
   state: string;
   attempts: string | number;
   next_attempt_at: string | Date | null;
+  revision: number | string;
   last_error: string | null;
 }
 
@@ -46,6 +47,7 @@ function toDebt(row: CleanupRow): IntermediateCleanupDebt {
     refs: (row.refs as ArtifactRef[]) ?? [],
     state: row.state as IntermediateCleanupDebt["state"],
     attempts: Number(row.attempts),
+    revision: Number(row.revision),
     ...(row.next_attempt_at !== null ? { nextAttemptAt: new Date(row.next_attempt_at).toISOString() } : {}),
     ...(row.last_error !== null ? { lastError: row.last_error } : {}),
   };
@@ -90,6 +92,9 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
          -- trap as arch-review 67, hit again in 70.)
          state = CASE WHEN everdict_intermediate_cleanup.state = 'retained' THEN 'retained' ELSE 'gc_owed' END,
          next_attempt_at = NULL,
+         -- Every mutation bumps the generation, so a sweep that decided over an older one is detectable
+         -- (arch-review 72 P1-high).
+         revision = everdict_intermediate_cleanup.revision + 1,
          updated_at = now()
        RETURNING *`,
       [operationIdOf(input.tenant, input.executionId), input.tenant, input.executionId, JSON.stringify(input.refs)],
@@ -122,6 +127,7 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
          -- put, so a writer can be paused between them; the sweep probes an absent key, correctly closes the
          -- debt, and then the put lands. Bytes proven to exist under a settled debt are collectable NOW.
          state = CASE WHEN everdict_intermediate_cleanup.state = 'retained' THEN 'retained' ELSE 'gc_owed' END,
+         revision = everdict_intermediate_cleanup.revision + 1,
          updated_at = now()
        WHERE operation_id = $1 AND tenant = $2`,
       [operationIdOf(input.tenant, input.executionId), input.tenant, input.keys],
@@ -133,7 +139,8 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
   // reconciler is the correctness owner either way.
   async releaseForGc(tenant: string, executionId: ExecutionId): Promise<ReleasedCleanup | undefined> {
     const { rows } = await this.client.query<CleanupRow>(
-      `UPDATE everdict_intermediate_cleanup SET state = 'gc_owed', next_attempt_at = NULL, updated_at = now()
+      `UPDATE everdict_intermediate_cleanup
+          SET state = 'gc_owed', next_attempt_at = NULL, revision = revision + 1, updated_at = now()
         WHERE operation_id = $1 AND tenant = $2 AND state <> 'completed'
         RETURNING *`,
       [operationIdOf(tenant, executionId), tenant],
@@ -144,19 +151,34 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
     // failure deferred against a row that did not exist (arch-review 69 P2).
     if (!row) return undefined;
     const debt = toDebt(row);
-    return { operationId: debt.operationId, refs: debt.refs };
+    return { operationId: debt.operationId, refs: debt.refs, revision: debt.revision };
   }
 
   // Only a RELEASED debt may be completed. Refusing from `retained` is the guard that keeps a stray caller
   // from marking an artifact collected while the case that needs it is still running.
-  async complete(tenant: string, executionId: ExecutionId): Promise<boolean> {
+  async complete(
+    tenant: string,
+    executionId: ExecutionId,
+    expectedRevision: number,
+  ): Promise<"completed" | "changed" | "absent"> {
+    // CONDITIONAL ON THE GENERATION THE SWEEP DECIDED OVER (arch-review 72 P1-high). The state guard alone
+    // could not see a paused writer whose put landed mid-probe: its confirm leaves the row in exactly the
+    // states this allowed, so the sweep closed a debt over an object that exists.
     const { rows } = await this.client.query<{ operation_id: string }>(
-      `UPDATE everdict_intermediate_cleanup SET state = 'completed', updated_at = now()
-        WHERE operation_id = $1 AND tenant = $2 AND state IN ('gc_owed', 'retry_wait')
+      `UPDATE everdict_intermediate_cleanup
+          SET state = 'completed', revision = revision + 1, updated_at = now()
+        WHERE operation_id = $1 AND tenant = $2 AND state IN ('gc_owed', 'retry_wait') AND revision = $3::int
         RETURNING operation_id`,
+      [operationIdOf(tenant, executionId), tenant, expectedRevision],
+    );
+    if (rows.length > 0) return "completed";
+    // Refused — read back WHY. "Nothing to complete" and "somebody moved it" are opposite answers to a
+    // sweep: the first is done, the second must be re-evaluated next tick.
+    const { rows: back } = await this.client.query<{ operation_id: string }>(
+      "SELECT operation_id FROM everdict_intermediate_cleanup WHERE operation_id = $1 AND tenant = $2",
       [operationIdOf(tenant, executionId), tenant],
     );
-    return rows.length > 0;
+    return back.length > 0 ? "changed" : "absent";
   }
 
   // The reconciler's worklist — RELEASED debts only. A `retained` row is an artifact the case may still need,
@@ -198,7 +220,7 @@ export class PgIntermediateCleanupStore implements IntermediateCleanupStore {
   async deferred(operationId: string, error: string, nextAttemptAt: string): Promise<void> {
     await this.client.query(
       `UPDATE everdict_intermediate_cleanup SET
-         state = 'retry_wait', attempts = attempts + 1, last_error = $2,
+         state = 'retry_wait', attempts = attempts + 1, last_error = $2, revision = revision + 1,
          next_attempt_at = $3::timestamptz, updated_at = now()
        WHERE operation_id = $1`,
       [operationId, error, nextAttemptAt],

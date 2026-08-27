@@ -37,7 +37,10 @@ describe("[R70 COUNTEREXAMPLE] a settled execution cannot be dragged back into r
     // The winner's whole life: stage, settle, sweep.
     await cleanup.owe({ tenant: "acme", executionId: EXECUTION, refs: [ref("agent-half/winner.json")] });
     await cleanup.releaseForGc("acme", EXECUTION);
-    expect(await cleanup.complete("acme", EXECUTION), "the winner's debt did not complete").toBe(true);
+    expect(
+      await cleanup.complete("acme", EXECUTION, cleanup.snapshot()[0]?.revision ?? 0),
+      "the winner's debt did not complete",
+    ).toBe("completed");
 
     // A speculative loser, still in flight when the winner settled, stages its own half.
     await cleanup.owe({ tenant: "acme", executionId: EXECUTION, refs: [ref("agent-half/loser.json")] });
@@ -209,7 +212,7 @@ describe("[R71 COUNTEREXAMPLE] a write that lands after the sweep is owed again"
     // The winner settles and the sweep converges: the bytes are absent, so the ref is abandoned and the debt
     // closes. Everything here is correct given what the sweep could see.
     await cleanup.releaseForGc("acme", EXECUTION);
-    expect(await cleanup.complete("acme", EXECUTION)).toBe(true);
+    expect(await cleanup.complete("acme", EXECUTION, cleanup.snapshot()[0]?.revision ?? 0)).toBe("completed");
 
     // …and now the paused writer wakes up and its put lands.
     await cleanup.confirm({ tenant: "acme", executionId: EXECUTION, keys: [key] });

@@ -15,6 +15,7 @@ import {
   ProductService,
   ProductVersionSync,
   ProjectService,
+  RetainedMigrationSweeper,
   SeriesEvaluator,
   type SeriesRunSubmitter,
   TaskService,
@@ -63,10 +64,11 @@ import type {
   ExecutionId,
   ProductSeries,
   RegistryAuth,
+  RunRecord,
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
-import { UpstreamError } from "@everdict/contracts";
+import { TERMINAL_RUN_STATUSES, UpstreamError } from "@everdict/contracts";
 import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
@@ -1017,6 +1019,42 @@ async function main(): Promise<void> {
     setInterval(
       whenLeader(leader, () => void cleanupReconciler.tick().catch(() => {})),
       60_000,
+    ).unref();
+    // ── …AND THE ROWS NO SETTLEMENT WILL EVER RELEASE (arch-review 72 P1) ─────────────────────────
+    //
+    // The release rides the settlement transaction now, so a row written after that cannot get stuck. Rows
+    // written BEFORE it can: their settlement committed, the separate release never ran, and `due()`
+    // correctly refuses to return a retained row — so their artifacts are kept forever by a reconciler
+    // working exactly as designed. The sweeper for that shipped unwired, which is the same defect one
+    // level up.
+    //
+    // It decides nothing on its own: it asks the run ledger whether the execution is actually terminal, and
+    // leaves a live one — or one the ledger will not answer for — exactly as it is. Hourly, because these
+    // are legacy rows rather than a live queue.
+    const retainedSweeper = new RetainedMigrationSweeper({
+      cleanup: intermediateCleanup,
+      dispositionOf: async (_tenant, executionId) => {
+        // A standalone execution id is `evd-run-<record id>` — the ONE derivation, read back rather than
+        // re-spelled. Anything else (a batch case) is not this sweeper's to judge, and saying so is the
+        // fail-closed answer.
+        const id = executionId.startsWith("evd-run-") ? executionId.slice("evd-run-".length) : undefined;
+        if (id === undefined) return { kind: "unknown", reason: "not a standalone execution coordinate" };
+        // NOT `.catch(() => undefined)` collapsed into absence: a ledger that would not answer and a run
+        // that is gone are different states, and only one of them is a licence to collect (L2).
+        const run = await store.get(id).then(
+          (r: RunRecord | undefined) => ({ ok: true as const, r }),
+          (e: unknown) => ({ ok: false as const, e }),
+        );
+        if (!run.ok) return { kind: "unknown", reason: "the run ledger did not answer" };
+        if (run.r === undefined) return { kind: "unknown", reason: "no such run — this row names nothing we own" };
+        return (TERMINAL_RUN_STATUSES as readonly string[]).includes(run.r.status)
+          ? { kind: "terminal" }
+          : { kind: "live" };
+      },
+    });
+    setInterval(
+      whenLeader(leader, () => void retainedSweeper.tick().catch(() => {})),
+      60 * 60_000,
     ).unref();
   }
   // The cancel teardown's reconciler (mig 0184, arch-review 47 §5.2). Boot recovery above resumes batches

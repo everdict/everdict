@@ -177,9 +177,17 @@ describeTrust("TRUST-180 — the intermediate cleanup debt outlives the process 
     const executionId = `evd-${trustId("run")}` as ExecutionId;
     const store = await staged(executionId, [`agent-half/acme/${executionId}/x.json`]);
 
+    // The revision is the one the row ACTUALLY has, read straight from the table, so this refuses for the
+    // right reason — the debt is still `retained` — rather than because the generation happened to disagree
+    // (arch-review 72 P1-high). `staleRetained` is age-filtered and would not return a row made a moment ago.
+    const { rows } = await pg.client.query<{ revision: number }>(
+      "SELECT revision FROM everdict_intermediate_cleanup WHERE tenant = 'acme' AND execution_id = $1",
+      [executionId],
+    );
+    expect(rows[0], "the fixture staged nothing, so this measures nothing").toBeDefined();
     expect(
-      await store.complete("acme", executionId),
+      await store.complete("acme", executionId, Number(rows[0]?.revision)),
       "a retained debt was completed without any settlement releasing it",
-    ).toBe(false);
+    ).toBe("changed");
   });
 });

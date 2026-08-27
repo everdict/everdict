@@ -62,6 +62,16 @@ export interface IntermediateCleanupDebt {
   refs: ArtifactRef[];
   state: IntermediateLifecycle;
   attempts: number;
+  // ── THE ROW'S GENERATION, SO A SNAPSHOT CAN BE TOLD FROM THE PRESENT (arch-review 72 P1-high) ─────
+  //
+  // A sweep reads its worklist, probes the object store, and decides. That decision is about a MOMENT, and
+  // committing it needs the row to still be that moment — a paused writer whose put lands in between makes
+  // the sweep's "this ref was never written" answer false, and `state IN ('gc_owed','retry_wait')` cannot
+  // see it because the writer's confirm leaves the row in exactly those states.
+  //
+  // Every mutation bumps this. `complete` is conditional on it (rule `protocol` L1: a proof has a lifetime,
+  // and the write re-proves it).
+  revision: number;
   nextAttemptAt?: string;
   lastError?: string;
 }
@@ -95,7 +105,14 @@ export interface IntermediateCleanupStore {
   // the row that was released, so there is no second spelling to keep in step.
   releaseForGc(tenant: string, executionId: ExecutionId): Promise<ReleasedCleanup | undefined>;
   // The reconciler's discharge: mark a released debt paid.
-  complete(tenant: string, executionId: ExecutionId): Promise<boolean>;
+  // Conditional on the revision the caller DECIDED OVER. `changed` is not a failure — it means a writer
+  // moved the row while the sweep was probing, so the next tick re-evaluates every ref including the one
+  // that just landed. A boolean could not say that, which is why this is a union.
+  complete(
+    tenant: string,
+    executionId: ExecutionId,
+    expectedRevision: number,
+  ): Promise<"completed" | "changed" | "absent">;
   // The reconciler's worklist — RELEASED debts only, oldest first. A `retained` row is not work.
   due(now: string, limit: number): Promise<IntermediateCleanupDebt[]>;
   // ── …AND THE ROWS NO SETTLEMENT WILL EVER RELEASE (arch-review 71, migration) ──────────────────────
@@ -121,6 +138,8 @@ export interface IntermediateCleanupStore {
 export interface ReleasedCleanup {
   operationId: string;
   refs: ArtifactRef[];
+  // The generation this release produced — what a later `complete` must still find (arch-review 72 P1-high).
+  revision: number;
 }
 
 // In-process store for dev/test, the same posture as the other InMemory ports.
@@ -162,6 +181,7 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
       // stage arriving afterwards is owed COLLECTABLE and the sweep takes it. Nothing is waiting for it.
       state: prior !== undefined && prior.state !== "retained" ? "gc_owed" : "retained",
       attempts: prior?.attempts ?? 0,
+      revision: (prior?.revision ?? 0) + 1,
     };
     this.debts.set(k, debt);
     return debt;
@@ -190,6 +210,7 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
     const settled = debt.state !== "retained";
     this.debts.set(k, {
       ...debt,
+      revision: debt.revision + 1,
       ...(settled ? { state: "gc_owed" as const } : {}),
       refs: debt.refs.map((r) => (input.keys.includes(r.key) ? { ...r, written: true } : r)),
     });
@@ -199,16 +220,24 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
     const k = this.key(tenant, executionId);
     const debt = this.debts.get(k);
     if (!debt || debt.state === "completed") return undefined;
-    this.debts.set(k, { ...debt, state: "gc_owed" });
-    return { operationId: debt.operationId, refs: debt.refs };
+    this.debts.set(k, { ...debt, state: "gc_owed", revision: debt.revision + 1 });
+    return { operationId: debt.operationId, refs: debt.refs, revision: debt.revision + 1 };
   }
 
-  async complete(tenant: string, executionId: ExecutionId): Promise<boolean> {
+  async complete(
+    tenant: string,
+    executionId: ExecutionId,
+    expectedRevision: number,
+  ): Promise<"completed" | "changed" | "absent"> {
     const k = this.key(tenant, executionId);
     const debt = this.debts.get(k);
-    if (!debt || debt.state === "completed" || debt.state === "retained") return false;
-    this.debts.set(k, { ...debt, state: "completed" });
-    return true;
+    if (!debt) return "absent";
+    // A writer moved the row while the sweep was probing: its "never written" answer is stale, and the next
+    // tick re-evaluates every ref including the one that just landed.
+    if (debt.revision !== expectedRevision) return "changed";
+    if (debt.state === "completed" || debt.state === "retained") return "changed";
+    this.debts.set(k, { ...debt, state: "completed", revision: debt.revision + 1 });
+    return "completed";
   }
 
   // No clock here, and none needed: this store lives for one process, so it cannot hold a row left behind by
@@ -237,7 +266,14 @@ export class InMemoryIntermediateCleanupStore implements IntermediateCleanupStor
         // …INCLUDING THE STATE. This set the counters and left `state` alone, so a deferred debt still read
         // as `gc_owed` — indistinguishable from one no sweep had ever tried. The Pg adapter sets it, and an
         // adapter pair that disagrees is a protocol only one of them has (arch-review 68).
-        this.debts.set(k, { ...d, state: "retry_wait", attempts: d.attempts + 1, lastError: error, nextAttemptAt });
+        this.debts.set(k, {
+          ...d,
+          state: "retry_wait",
+          attempts: d.attempts + 1,
+          lastError: error,
+          nextAttemptAt,
+          revision: d.revision + 1,
+        });
   }
 }
 
@@ -355,7 +391,9 @@ export async function collectReleased(
       .catch(() => undefined);
     return { deleted, owed: failures.length };
   }
-  await deps.cleanup.complete(tenant, executionId);
+  // …conditional on the revision this collection decided over (arch-review 72 P1-high). A writer that moved
+  // the row while we were deleting makes this answer stale, and `changed` leaves it for the next sweep.
+  await deps.cleanup.complete(tenant, executionId, released.revision);
   return { deleted, owed: 0 };
 }
 
