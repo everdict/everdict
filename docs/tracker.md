@@ -48,8 +48,19 @@ A team is the smallest thing that fixes it, and deliberately no bigger:
   address depends on where its team sits in the tree. Re-parenting under one's own descendant is a `409`, and a
   team with children cannot be deleted (that would strand them).
 - **It has its own roster**, separate from workspace membership — "my teams" is only a useful filter if belonging
-  is a real statement. The roster carries no role: permission still comes from the workspace role, so a team is a
-  visibility and ownership statement, never a second authorization axis. The trust zone stays `workspace = tenant`.
+  is a real statement. The roster carries no role — *what* you may do still comes from the workspace role — but it
+  does decide *what you may do it to*: writing an **eval asset or result** owned by a team you are not on is
+  refused (`canReachTeam`, 403), while reading is decided by team **privacy** rather than by membership. The
+  tracker's own records keep the roster as a filing and visibility statement only: an issue, project or
+  initiative is not roster-gated on write, which is why none of their routes passes a `teamId` to `gate`. The
+  trust zone stays `workspace = tenant` either way — the team axis lives INSIDE a workspace, it does not add a
+  tenancy boundary. `docs/auth.md` §"The team axis" is the SSOT for which resources each half covers.
+
+  > ⚠️ This paragraph used to read "never a second authorization axis", which stopped being true two days after
+  > it was written — the commit that made it false is titled *"a team is an authorization axis, not just a
+  > label"*. Nothing caught it: `docs-check` verifies that cited paths and symbols are alive, and every name here
+  > was. A reader adding a team-owned resource would have concluded no write gate was needed and shipped exactly
+  > the gap that change closed (arch-review 108).
 
 **A workspace always has at least one team, and exactly one of them is the default.** The default is where an
 issue filed without a team lands, which is what lets `teamId` stay required on an issue while callers stay free
