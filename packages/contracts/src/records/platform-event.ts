@@ -117,6 +117,16 @@ export const PLATFORM_EVENT_KINDS = [
   "campaign.opened",
   "campaign.round_logged",
   "campaign.closed",
+  // ── THE ADOPTION'S OWN LIFECYCLE (arch-review 83) ────────────────────────────────────────────────
+  //
+  // `campaign.closed` says the gate decided. It does NOT say the decision took effect: the registry write
+  // and the intent settlement are two later, durable transitions, and rule `events` is explicit that a PR
+  // adding a state transition adds its fact in the same PR ("a version registered" is its own example).
+  // Three waves shipped this lifecycle with no facts at all, so the activity feed showed a campaign closing
+  // and never showed the capability arriving, and a subscription could react to the decision but not to the
+  // effect — which is precisely the gap between them this whole feature exists to close.
+  "campaign.adoption_registered",
+  "campaign.adoption_completed",
   // A team's iteration was planned, or closed with whatever was left. `cycle.completed` carries `carriedOver`,
   // which is the number a retro actually asks for — and the wake signal for "write the iteration summary".
   "cycle.created",

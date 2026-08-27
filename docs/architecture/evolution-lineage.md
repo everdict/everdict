@@ -241,8 +241,14 @@ machinery extended to cover them.
 > converges on. The gate refuses to answer `adopt` at all when it cannot name the candidate's bytes unless
 > the frozen frame recorded `allowLabelOnlyAdoption` — an ingested scorecard names no registry document, so
 > a loop running on ingested traces declares that waiver at open or runs a batch that seals a manifest.
-> Still open on this track: `completed` (the third operation state) has no writer — the link from a spent
-> adoption to the issue resolution that closes the intent.
+> `completed` is written too: the join between a spent adoption and the issue resolution that closes its
+> intent is SYMMETRIC — an E1 consumer over `issue.status_changed` and the registration path itself both
+> perform it, so whichever fact lands second completes the operation and neither ordering is privileged. The
+> join is the SCORECARD the proof names, never that a resolution happened nearby. The campaign carries its
+> own `teamId` (frozen at open from the issue it journals into, mig 0198), every read is team-filtered and
+> every mutation is team-gated on both transports. Still open on this track: an ingested scorecard resolves
+> no registry document, so a loop running on ingested traces needs `allowLabelOnlyAdoption` on the frame —
+> the stronger answer is for ingest to seal the digest of the agent document it evaluated.
 
 **The gap.** Everything the `agent-evolve` skill mandates — frozen frame, N ≥ 3 trials, budget cap stated
 up front, stop after 3 rejected rounds, adoption only on significant-improvement-zero-regressions — is

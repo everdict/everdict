@@ -1,6 +1,12 @@
-import type { AdoptionOperation, CampaignAdoptionProof, CapabilityOriginChannel } from "@everdict/contracts";
+import type {
+  AdoptionOperation,
+  CampaignAdoptionProof,
+  CapabilityOriginChannel,
+  DomainFact,
+} from "@everdict/contracts";
 import { ConflictError, NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
+import { stampFacts } from "../platform-event/outbox.js";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
 import { issueSettledThisAdoption } from "./adoption-completion-watch.js";
 
@@ -36,6 +42,8 @@ export interface CampaignAdoptionDeps {
   // A read that fails is NOT "the issue is not resolved" — it leaves the operation `registered` and owed,
   // which the reconciler and any later issue event both still converge on (L2).
   issues: { get(tenant: string, ref: string): Promise<IssueResolutionView> };
+  newId?: () => string;
+  now?: () => string;
   // The effect itself, injected: this package owns no registry. It takes the SPEC the caller is registering
   // and answers with what the registry now HOLDS at that version — the version, and the digest of the
   // document a later read resolves to.
@@ -110,8 +118,35 @@ export interface AdoptionRequest {
   via: CapabilityOriginChannel; // …and the door it came through
 }
 
+// The completion fact, authored once and consumed by BOTH writers of the transition — the same reason the
+// join predicate has one owner (arch-review 80/83).
+export function completionFact(operation: AdoptionOperation): DomainFact {
+  return {
+    kind: "campaign.adoption_completed",
+    subject: { type: "campaign", id: operation.proof.campaignId },
+    actor: "everdict:adoption-completion",
+    payload: {
+      campaignId: operation.proof.campaignId,
+      candidateId: operation.proof.candidate.id,
+      version: operation.registeredVersion ?? operation.proof.candidate.version,
+      issueId: operation.proof.issueId,
+      provingScorecardId: operation.proof.provingScorecardId,
+      ...(operation.proof.teamId !== undefined ? { teamId: operation.proof.teamId } : {}),
+    },
+  };
+}
+
 export class CampaignAdoptionService {
-  constructor(private readonly deps: CampaignAdoptionDeps) {}
+  private readonly newId: () => string;
+  private readonly now: () => string;
+  constructor(private readonly deps: CampaignAdoptionDeps) {
+    this.newId = deps.newId ?? (() => `evt_${Math.random().toString(36).slice(2, 12)}`);
+    this.now = deps.now ?? (() => new Date().toISOString());
+  }
+
+  private stamped(tenant: string, facts: DomainFact[]) {
+    return stampFacts(tenant, facts, { newId: this.newId, now: this.now }).map((f) => f.record);
+  }
 
   async adopt(input: AdoptionRequest): Promise<AdoptionOutcome> {
     const recorded = await this.deps.operations.forCampaign(input.tenant, input.campaignId);
@@ -209,11 +244,36 @@ export class CampaignAdoptionService {
         { campaign: input.campaignId, drift, landed: landedCandidate, authorized: authorizedCandidate },
         `the registry now holds a different capability than this campaign authorized — ${drift}. The authorization stays unspent`,
       );
+    // ── AND THE FACT RIDES THE SPEND (arch-review 83, rule `events`) ────────────────────────────────
+    //
+    // `campaign.closed` says the gate decided; this says the decision TOOK EFFECT. Three waves shipped the
+    // whole `decided → registered → completed` lifecycle with no facts, so the activity feed showed a
+    // campaign closing and never showed the capability arriving, and a subscription could react to the
+    // decision but not to the effect — the gap this feature exists to close, reproduced in its own telemetry.
+    //
+    // Semantic data only: the message is the projector's (`renderFactMessage`), so the payload carries every
+    // value that rendering needs rather than just filterable ids.
+    const registeredFact: DomainFact = {
+      kind: "campaign.adoption_registered",
+      subject: { type: "campaign", id: input.campaignId },
+      actor: input.by,
+      payload: {
+        campaignId: input.campaignId,
+        candidateType: landedCandidate.type,
+        candidateId: landedCandidate.id,
+        version: landedCandidate.version,
+        identity: recorded.proof.candidate.identity,
+        provingScorecardId: recorded.proof.provingScorecardId,
+        issueId: recorded.proof.issueId,
+        ...(recorded.proof.teamId !== undefined ? { teamId: recorded.proof.teamId } : {}),
+      },
+    };
     const spent = await this.deps.operations.markRegistered(
       input.tenant,
       input.campaignId,
       authorized,
       landedCandidate.version,
+      this.stamped(input.tenant, [registeredFact]),
     );
     if (spent === "already_registered") return { kind: "already_adopted", version: landedCandidate.version };
     if (spent !== "registered")
@@ -254,6 +314,7 @@ export class CampaignAdoptionService {
       tenant,
       operation.proof.campaignId,
       contentDigest(operation.proof),
+      this.stamped(tenant, [completionFact(operation)]),
     );
     if (outcome !== "completed" && outcome !== "already_completed") return undefined;
     return await this.deps.operations.forCampaign(tenant, operation.proof.campaignId);

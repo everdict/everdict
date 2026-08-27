@@ -82,6 +82,12 @@ function template(fact: DomainFact): string | undefined {
       return p?.state === "adopted"
         ? `Campaign adopted ${s(p, "subjectId")}@${s(p, "version")}`
         : `Campaign closed — ${s(p, "state")}`;
+    // The decision took EFFECT — a different sentence from the close, and the one an operator was missing:
+    // "adopted" is what the gate concluded, this is the capability arriving (arch-review 83).
+    case "campaign.adoption_registered":
+      return `Adopted ${s(p, "candidateType")} ${s(p, "candidateId")}@${s(p, "version")} registered — proved by scorecard ${s(p, "provingScorecardId")}`;
+    case "campaign.adoption_completed":
+      return `Adoption of ${s(p, "candidateId")}@${s(p, "version")} settled its issue ${s(p, "issueId")}`;
     case "issue_label.created":
       return `Label ${s(p, "name")} was defined.`;
     case "issue_label.updated":

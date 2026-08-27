@@ -89,12 +89,14 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     campaignId: string,
     proofDigest: string,
     registeredVersion: string,
+    events?: OutboxEvent[],
   ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch"> {
     const op = await this.forCampaign(tenant, campaignId);
     if (op === undefined) return "no_such_operation";
     if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
     if (op.state !== "decided") return "already_registered";
     this.adoptions.set(campaignId, { ...op, state: "registered", registeredVersion });
+    if (events) this.events.push(...events); // same write, same twin behaviour as the Pg CTE (E0)
     return "registered";
   }
 
@@ -106,6 +108,7 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     tenant: string,
     campaignId: string,
     proofDigest: string,
+    events?: OutboxEvent[],
   ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch"> {
     const op = await this.forCampaign(tenant, campaignId);
     if (op === undefined) return "no_such_operation";
@@ -114,6 +117,7 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     // `registered` only: an adoption whose registry write never landed has no intent to settle.
     if (op.state !== "registered") return "not_registered";
     this.adoptions.set(campaignId, { ...op, state: "completed" });
+    if (events) this.events.push(...events);
     return "completed";
   }
 

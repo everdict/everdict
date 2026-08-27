@@ -1,7 +1,8 @@
-import type { AdoptionOperationStore } from "@everdict/application-control";
+import type { AdoptionOperationStore, OutboxEvent } from "@everdict/application-control";
 import { type AdoptionOperation, AdoptionOperationSchema } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
+import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 // ── WHO MAY SPEND AN ADOPTION, AND WHETHER IT IS STILL UNSPENT (arch-review 71 P0-evolution) ────────
 //
@@ -56,6 +57,7 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     campaignId: string,
     proofDigest: string,
     registeredVersion: string,
+    events?: OutboxEvent[],
   ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch"> {
     // AUTHORITY FIRST, then the single-spend guard. The proof cannot be compared in SQL — the digest is our
     // canonical-JSON function, not Postgres's — so it is checked here, and the UPDATE below carries the
@@ -70,12 +72,28 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     // Compared as a DIGEST of what was recorded, never against the object the caller handed us: a
     // structurally-equal proof that was never issued is not authority (rule `protocol` L3).
     if (contentDigest(existing.proof) !== proofDigest) return "proof_mismatch";
+    // The fact rides the SAME statement as the transition (E0): a spend that lost its race must leave no
+    // fact, and a landed one must leave one — two writes that agree most of the time is the shape rule
+    // `events` exists to forbid (arch-review 83).
+    const base = [tenant, campaignId, registeredVersion];
+    const ev = events && events.length > 0 ? eventValuesClause(events, base.length + 1) : undefined;
     const { rows } = await this.client.query<{ operation_id: string }>(
-      `UPDATE everdict_adoption_operations
-          SET state = 'registered', registered_version = $3, updated_at = now()
-        WHERE tenant = $1 AND campaign_id = $2 AND state = 'decided'
-        RETURNING operation_id`,
-      [tenant, campaignId, registeredVersion],
+      `WITH upd AS (
+         UPDATE everdict_adoption_operations
+            SET state = 'registered', registered_version = $3, updated_at = now()
+          WHERE tenant = $1 AND campaign_id = $2 AND state = 'decided'
+          RETURNING operation_id
+       )${
+         ev !== undefined
+           ? `, ev AS (
+         INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+         SELECT * FROM (VALUES ${ev.sql}) AS v
+         WHERE EXISTS (SELECT 1 FROM upd)
+       )`
+           : ""
+       }
+       SELECT operation_id FROM upd`,
+      ev !== undefined ? [...base, ...ev.params] : base,
     );
     // Zero rows now means somebody else spent it between the read and the write — which is the ordinary
     // at-least-once convergence, not a failure.
@@ -103,6 +121,7 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     tenant: string,
     campaignId: string,
     proofDigest: string,
+    events?: OutboxEvent[],
   ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch"> {
     const existing = await this.forCampaign(tenant, campaignId);
     if (existing === undefined) return "no_such_operation";
@@ -111,12 +130,25 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     // registered — both produce zero rows, and they are different answers to the caller.
     if (existing.state === "completed") return "already_completed";
     if (existing.state !== "registered") return "not_registered";
+    const base = [tenant, campaignId];
+    const ev = events && events.length > 0 ? eventValuesClause(events, base.length + 1) : undefined;
     const { rows } = await this.client.query<{ operation_id: string }>(
-      `UPDATE everdict_adoption_operations
-          SET state = 'completed', updated_at = now()
-        WHERE tenant = $1 AND campaign_id = $2 AND state = 'registered'
-        RETURNING operation_id`,
-      [tenant, campaignId],
+      `WITH upd AS (
+         UPDATE everdict_adoption_operations
+            SET state = 'completed', updated_at = now()
+          WHERE tenant = $1 AND campaign_id = $2 AND state = 'registered'
+          RETURNING operation_id
+       )${
+         ev !== undefined
+           ? `, ev AS (
+         INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+         SELECT * FROM (VALUES ${ev.sql}) AS v
+         WHERE EXISTS (SELECT 1 FROM upd)
+       )`
+           : ""
+       }
+       SELECT operation_id FROM upd`,
+      ev !== undefined ? [...base, ...ev.params] : base,
     );
     // Zero rows now = somebody completed it between the read and the write: at-least-once convergence.
     return rows.length > 0 ? "completed" : "already_completed";

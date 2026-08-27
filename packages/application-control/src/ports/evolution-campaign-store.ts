@@ -78,11 +78,14 @@ export interface AdoptionOperationStore {
   // Spend it. Conditional on the operation still being `decided` and on the proof matching, so two writes
   // presenting one authorization cannot both succeed. Returns what happened rather than void: a decision
   // rests on this (rule `protocol` L1).
+  // `events` rides the SAME write as the transition (the E0 outbox contract every aggregate store carries):
+  // a fact for a spend that lost its race must not exist, and a landed one's fact must (rule `events`).
   markRegistered(
     tenant: string,
     campaignId: string,
     proofDigest: string,
     registeredVersion: string,
+    events?: OutboxEvent[],
   ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch">;
   // ── …AND WHETHER THE INTENT IT SERVED IS SETTLED (arch-review 73) ────────────────────────────────
   //
@@ -102,5 +105,6 @@ export interface AdoptionOperationStore {
     tenant: string,
     campaignId: string,
     proofDigest: string,
+    events?: OutboxEvent[],
   ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch">;
 }

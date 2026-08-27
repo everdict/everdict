@@ -1,7 +1,9 @@
 import { ConflictError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { PlatformEventConsumer } from "../platform-event/event-consumer-runner.js";
+import { stampFacts } from "../platform-event/outbox.js";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
+import { completionFact } from "./campaign-adoption-service.js";
 
 // ── THE DECISION AND ITS INTENT, REJOINED (arch-review 73) ───────────────────────────────────────────
 //
@@ -49,6 +51,8 @@ export function issueSettledThisAdoption(
 
 export interface AdoptionCompletionWatchDeps {
   operations: AdoptionOperationStore;
+  newId?: () => string;
+  now?: () => string;
 }
 
 export function adoptionCompletionWatch(deps: AdoptionCompletionWatchDeps): PlatformEventConsumer {
@@ -90,6 +94,13 @@ export function adoptionCompletionWatch(deps: AdoptionCompletionWatchDeps): Plat
           event.tenant,
           operation.proof.campaignId,
           contentDigest(operation.proof),
+          // The SAME fact the registration path writes — one author, two writers, for the same reason the
+          // join predicate has one owner (arch-review 83). `causedBy` carries the event this reaction came
+          // from, so an agent woken by the completion can see what caused it without re-deriving it.
+          stampFacts(event.tenant, [completionFact(operation)], {
+            newId: deps.newId ?? (() => `evt_${Math.random().toString(36).slice(2, 12)}`),
+            now: deps.now ?? (() => new Date().toISOString()),
+          }).map((f) => f.record),
         );
         if (outcome === "proof_mismatch" || outcome === "no_such_operation")
           throw new ConflictError(

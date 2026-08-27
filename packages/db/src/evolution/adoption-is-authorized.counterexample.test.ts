@@ -146,6 +146,66 @@ describe("[R71 COUNTEREXAMPLE] an adopted campaign leaves an authorization someb
     expect((await store.forCampaign("acme", "camp-1"))?.state).toBe("completed");
   });
 
+  it("EMITS a fact on each lifecycle transition, riding the same write (arch-review 83)", async () => {
+    // `campaign.closed` says the gate decided; it does not say the decision took effect. Three waves shipped
+    // `decided → registered → completed` with no facts at all, so the activity feed showed a campaign
+    // closing and never showed the capability arriving — rule `events` is explicit that a state transition
+    // ships its fact in the same PR, and "a version registered" is its own example.
+    //
+    // Seen RED before the facts existed, observed:
+    //   the spend emitted no fact: expected [] to have a length of 1
+    const { store, proof } = await settled("sha256:c1");
+    const digest = contentDigest(proof);
+    const before = store.outbox().length;
+
+    expect(
+      await store.markRegistered("acme", "camp-1", digest, "1.1.0", [
+        {
+          id: "ev-r",
+          tenant: "acme",
+          kind: "campaign.adoption_registered",
+          subject: { type: "campaign", id: "camp-1" },
+          actor: "alice",
+          payload: {},
+          at: "t",
+        },
+      ] as never),
+    ).toBe("registered");
+    expect(store.outbox().length - before, "the spend emitted no fact").toBe(1);
+
+    expect(
+      await store.markCompleted("acme", "camp-1", digest, [
+        {
+          id: "ev-c",
+          tenant: "acme",
+          kind: "campaign.adoption_completed",
+          subject: { type: "campaign", id: "camp-1" },
+          actor: "watch",
+          payload: {},
+          at: "t",
+        },
+      ] as never),
+    ).toBe("completed");
+    expect(store.outbox().length - before, "the discharge emitted no fact").toBe(2);
+
+    // …and a REFUSED transition leaves none: a fact for a spend that lost its race must not exist.
+    const refused = store.outbox().length;
+    expect(
+      await store.markRegistered("acme", "camp-1", digest, "1.1.0", [
+        {
+          id: "ev-x",
+          tenant: "acme",
+          kind: "campaign.adoption_registered",
+          subject: { type: "campaign", id: "camp-1" },
+          actor: "alice",
+          payload: {},
+          at: "t",
+        },
+      ] as never),
+    ).toBe("already_registered");
+    expect(store.outbox().length, "a refused spend still wrote its fact").toBe(refused);
+  });
+
   it("finds the authorizations an ISSUE owns, and only that issue's", async () => {
     // The lookup the completion watch performs, through the proof's own issueId — never a duplicated
     // column, which would be a second copy of a value the proof already owns.

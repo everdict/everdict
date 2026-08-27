@@ -82,7 +82,12 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       // A private team's campaign reads as nonexistent to everybody else — the same 404 an absent one gets,
       // so the surface does not leak which ids exist (arch-review 76 P1-security).
       await assertTeamVisible(deps, principal, record.teamId, "Campaign");
-      return reply.send(await deps.campaignService.get(principal.workspace, req.params.id));
+      // ⚠️ THE ROW CHECKED IS THE ROW RETURNED (arch-review 83). This read the campaign twice — once to
+      // authorize, once to answer — so the value the check passed on was not the value the caller received.
+      // A campaign's team happens to be immutable after open, which makes this harmless TODAY and not a
+      // property to build on: rule `protocol` L1 asks the decision and the effect to rest on one read, and a
+      // second `get` is a second moment.
+      return reply.send(record);
     } catch (err) {
       return sendError(reply, err);
     }
