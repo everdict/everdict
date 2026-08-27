@@ -217,6 +217,23 @@ describe("eval tracker MCP tools", () => {
     expect(textOf(again)).toContain("not in triage");
   });
 
+  // The accept tool declares `status: z.enum([...]).default("todo")`. Whether an MCP argument DEFAULT is
+  // applied at all is a property of the transport's own parse, not of the schema literal — and if it were not,
+  // `acceptTriage` would receive `undefined` where its parameter says `IssueStatus`, which is the silent
+  // nullable default rule `typescript` forbids. Asserted rather than assumed.
+  it("applies the accept tool's default landing status when the caller omits it", async () => {
+    const { deps } = makeDeps();
+    const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
+    const filed = JSON.parse(
+      textOf(await client.callTool({ name: "create_issue", arguments: { title: "Queued", inTriage: true } })),
+    );
+    const accepted = JSON.parse(
+      textOf(await client.callTool({ name: "accept_issue_triage", arguments: { id: filed.id } })),
+    );
+    expect(accepted.status, "the omitted default never reached the service").toBe("todo");
+    expect(accepted.inTriage).toBe(false);
+  });
+
   it("declining cancels the issue and keeps it on the record, with the reason", async () => {
     const { deps } = makeDeps();
     const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
