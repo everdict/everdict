@@ -192,3 +192,29 @@ describe("initiativeProgress — the same numbers, from an aggregate", () => {
     expect(progress.get(INITIATIVE)).toEqual({ open: 0, total: 0, projects: 0 });
   });
 });
+
+// ── A QUEUED REQUEST IS STILL OPEN WORK — DECIDED, NOT OVERLOOKED (arch-review 110) ────────────────────
+//
+// arch-review 106 gave the triage queue a door, and `inTriage: true` became a state a live workspace can
+// actually be in. The phase-readers law then applies: every reader of an issue folds the world into its own
+// vocabulary, and a reader with no word for the new phase does not fail loudly, it MISFILES. This rollup and
+// the four counters that mirror it read `status` alone, and a triaged issue's status is an ordinary open one —
+// so a request an agent filed and nobody has accepted counts toward a project's open work and holds the
+// completion gate shut.
+//
+// That is the ANSWER, not an oversight, and it is written down here because it was neither before: unfinished
+// work in the workspace is unfinished whether or not a human has agreed to own it, and the alternative — a goal
+// reporting `ready` over a queue of unread requests — is the "not evaluated is never green" failure this
+// repository already refuses everywhere else. What makes it a decision rather than an accident is this test:
+// changing it is now a change somebody makes on purpose.
+describe("triage and the rollup", () => {
+  it("counts an issue nobody has accepted as open work", () => {
+    const queued = { ...issue("q1", "backlog"), inTriage: true };
+    const rollup = projectRollup([queued, issue("a", "done", "sc-1")]);
+    expect(rollup.open, "a queued request stopped counting as open work").toBe(1);
+    expect(rollup.ready, "a project reported ready over an unread queue").toBe(false);
+    // The rollup deliberately has no `triaged` field: the queue is a filter on the LIST (`?triage=true`), and a
+    // second count here would be a number two readers could disagree about.
+    expect(rollup.byStatus.backlog).toBe(1);
+  });
+});
