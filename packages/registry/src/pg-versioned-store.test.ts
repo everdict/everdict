@@ -146,3 +146,47 @@ describe("PgVersionedStore.moveToTeam — ownership transfer is entity-wide", ()
     expect(calls.some(([text]) => text.startsWith("UPDATE"))).toBe(false);
   });
 });
+
+// ── THE SUCCESSOR'S OWNER IS RESOLVED IN THE INSERT (arch-review 96) ────────────────────────────────
+//
+// arch-review 77 removed the read-then-write window between resolving an entity's team and registering a
+// successor under it, by moving the resolution INTO the statement that writes. The in-memory twin's version
+// of that is a same-moment read and is covered; the Postgres one is a scalar subquery in the INSERT, and it
+// had no test at all — which is exactly the gap the file's own opening regression is about ("the unit fakes
+// returned a `team_id` the query never asked for").
+//
+// What locks it is the SQL: the team column has to be filled BY A SUBQUERY, not by a parameter, or the
+// window is back and nothing here would notice.
+describe("PgVersionedStore.registerPreservingOwner — the owner is read where the write happens", () => {
+  const spec = { id: "h", version: "1.1.0" };
+
+  it("fills team_id from a SUBQUERY over the entity's live rows, not from a caller parameter", async () => {
+    const { client, calls } = fake([]);
+    await store(client, true).registerPreservingOwner("acme", spec, "alice");
+
+    const insert = calls.find(([text]) => text.startsWith("INSERT INTO everdict_things"));
+    expect(insert, "nothing was inserted").toBeDefined();
+    const [sql, params] = insert ?? ["", []];
+    // The team is a subquery over this entity, and it is CORRELATED to the same tenant/id the row is for.
+    expect(sql, "the owning team was not resolved inside the insert").toContain("SELECT team_id FROM everdict_things");
+    expect(sql).toContain("tenant = $1 AND id = $2");
+    // …and no caller-supplied team travelled: a parameter here is the read-then-write spelling returning.
+    expect(params, "a caller-resolved team was passed alongside the subquery").not.toContain("mobile");
+  });
+
+  it("excludes tombstones, so a deleted version cannot decide the successor's team", async () => {
+    const { client, calls } = fake([]);
+    await store(client, true).registerPreservingOwner("acme", spec, "alice");
+    const sql = calls.find(([text]) => text.startsWith("INSERT INTO everdict_things"))?.[0] ?? "";
+    expect(sql).toContain("deleted_at IS NULL");
+  });
+
+  it("passes the team as a PARAMETER on the ordinary register — the two paths stay distinguishable", async () => {
+    // The control. If both spellings produced the same SQL, the first assertion above would be vacuous.
+    const { client, calls } = fake([]);
+    await store(client, true).register("acme", spec, "alice", "mobile");
+    const [sql, params] = calls.find(([text]) => text.startsWith("INSERT INTO everdict_things")) ?? ["", []];
+    expect(sql).not.toContain("SELECT team_id FROM everdict_things");
+    expect(params).toContain("mobile");
+  });
+});
