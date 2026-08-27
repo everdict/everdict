@@ -79,6 +79,16 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           .max(50)
           .optional()
           .describe("capabilities that verify this issue (harness/dataset/judge/scorecard/run/view)"),
+        // `Issue.create`'s comment names an agent as one of the two surfaces that files INTO triage; until
+        // arch-review 106 neither surface had a door, so nothing in the repository ever set this and the whole
+        // triage lifecycle was unreachable. An agent filing work for a human to admit is the point of the queue.
+        inTriage: z
+          .boolean()
+          .optional()
+          .describe(
+            "file into the team's TRIAGE queue instead of straight into the workflow — a member then accepts " +
+              "or declines it. Use this when filing work somebody should agree to before it becomes the team's.",
+          ),
       },
     },
     (a) =>
@@ -102,6 +112,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
             ...(a.labelIds !== undefined ? { labelIds: a.labelIds } : {}),
             ...(a.links !== undefined ? { links: a.links } : {}),
+            ...(a.inTriage !== undefined ? { inTriage: a.inTriage } : {}),
             ...(agent ? { agent } : {}),
           }),
         ),
@@ -299,6 +310,48 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           ),
         ),
       ),
+  );
+
+  // ── TRIAGE, ON THE TRANSPORT AGENTS ACTUALLY USE (arch-review 106) ────────────────────────────────
+  //
+  // This file's own header says it is "the surface an agent uses to triage its own regressions" and it had no
+  // triage tool: both routes read `agentAttributionFrom(req.headers)`, so the HTTP side was built expecting an
+  // agent actor, while the transport an agent reaches the control plane through exposed neither move. Rule
+  // `api-layer` calls parity structural for exactly this reason — a capability with one transport is a
+  // capability half the callers do not have, and the half missing here is the autonomous one.
+  server.registerTool(
+    "accept_issue_triage",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Take an issue OUT of triage and INTO the team's workflow. `status` says where it lands (todo by " +
+        "default). An issue that is not in triage is refused — read it first. Declining instead is " +
+        "decline_issue_triage; the two are the only ways out of the queue.",
+      inputSchema: {
+        id: z.string().describe("issue id or identifier (ENG-12)"),
+        status: z
+          .enum(["backlog", "todo", "in_progress", "in_review"])
+          .default("todo")
+          .describe("where the issue lands in the workflow"),
+      },
+    },
+    (a) => run(principal, "issues:write", async () => ok(await issues.acceptTriage(ws, a.id, a.status, actor))),
+  );
+
+  server.registerTool(
+    "decline_issue_triage",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Decline an issue in triage — it is cancelled, with the reason on the record. The issue is NOT deleted: " +
+        '"we said no to this" is an answer somebody will look for later, and a declined issue is the evidence ' +
+        "the request was seen.",
+      inputSchema: {
+        id: z.string().describe("issue id or identifier (ENG-12)"),
+        note: z.string().max(2000).optional().describe("why it was declined — read by whoever asks later"),
+      },
+    },
+    (a) => run(principal, "issues:write", async () => ok(await issues.declineTriage(ws, a.id, a.note, actor))),
   );
 
   server.registerTool(

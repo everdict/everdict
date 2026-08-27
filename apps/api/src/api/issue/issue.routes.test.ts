@@ -797,3 +797,75 @@ describe("PATCH /issues/:id — the project checkpoint", () => {
     expect(cleared.json().milestoneId).toBeUndefined();
   });
 });
+
+// ── THE TRIAGE QUEUE HAS A DOOR, AND BOTH WAYS OUT OF IT (arch-review 106) ────────────────────────
+//
+// `Issue.create` says the queue is "entered explicitly by the surfaces that bring work in from outside
+// (import, an agent)". No surface wrote `inTriage: true`, so accept and decline — two endpoints, two domain
+// transitions, a store filter and the `?triage=` list param — were unreachable in production and untested
+// anywhere. Nothing in this repository exercised either route before this file.
+//
+// Seen RED before the door: "an issue filed into triage was in the workflow instead: expected false to be
+// true", and the accept then answered 409 "not in triage".
+describe("issue triage — the queue in front of the workflow", () => {
+  it("a caller files into triage, accepts out of it, and cannot accept twice", async () => {
+    const { app } = build();
+    const filed = await createIssue(app, { title: "Retry drops tool results", inTriage: true });
+    expect(filed.inTriage, "an issue filed into triage was in the workflow instead").toBe(true);
+
+    // The list filter the queue is read through — it filters on a flag that until now nothing set.
+    const queued = await app.inject({ method: "GET", url: "/issues?triage=true", headers: H });
+    expect(queued.json().items.map((i: { id: string }) => i.id)).toEqual([filed.id]);
+
+    const accepted = await app.inject({
+      method: "POST",
+      url: `/issues/${filed.id}/triage/accept`,
+      headers: H,
+      payload: { status: "in_progress" },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json().inTriage).toBe(false);
+    expect(accepted.json().status).toBe("in_progress");
+
+    // Leaving the queue is once — a second accept is the domain's conflict, not a silent no-op.
+    const again = await app.inject({
+      method: "POST",
+      url: `/issues/${filed.id}/triage/accept`,
+      headers: H,
+      payload: {},
+    });
+    expect(again.statusCode).toBe(409);
+  });
+
+  it("declining cancels the issue and keeps it on the record", async () => {
+    const { app } = build();
+    const filed = await createIssue(app, { title: "Rewrite it all in Rust", inTriage: true });
+    const declined = await app.inject({
+      method: "POST",
+      url: `/issues/${filed.id}/triage/decline`,
+      headers: H,
+      payload: { note: "out of scope this quarter" },
+    });
+    expect(declined.statusCode).toBe(200);
+    expect(declined.json().inTriage).toBe(false);
+
+    // "We said no to this" is an answer somebody looks for later, so the issue survives its own decline.
+    const readBack = await app.inject({ method: "GET", url: `/issues/${filed.id}`, headers: H });
+    expect(readBack.statusCode, "the declined issue vanished from the record").toBe(200);
+  });
+
+  it("refuses to triage an issue that is already in the workflow", async () => {
+    const { app } = build();
+    const filed = await createIssue(app, { title: "Filed straight into the workflow" });
+    expect(filed.inTriage).toBe(false);
+    for (const path of ["accept", "decline"]) {
+      const res = await app.inject({
+        method: "POST",
+        url: `/issues/${filed.id}/triage/${path}`,
+        headers: H,
+        payload: {},
+      });
+      expect(res.statusCode, `${path} moved an issue that was never in the queue`).toBe(409);
+    }
+  });
+});

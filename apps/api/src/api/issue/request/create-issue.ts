@@ -38,4 +38,17 @@ export const CreateIssueBodySchema = z.object({
   // Registry ids (GET /issue-labels), not names — a label is a record now, so an issue points at one.
   labelIds: z.array(z.string().min(1).max(200)).max(50).optional(),
   links: z.array(IssueLinkInputSchema).max(50).optional(),
+  // ── THE DOOR INTO TRIAGE (arch-review 106) ──────────────────────────────────────────────────────
+  //
+  // `Issue.create`'s own comment names who enters the queue: "the surfaces that bring work in from outside
+  // (import, an agent) — never the default for a member filing". Neither surface had a door. Nothing in the
+  // repository wrote `inTriage: true`, so the flag, both triage endpoints, both domain transitions, the store
+  // filter and the `?triage=` list param were all reachable only in principle — a designed lifecycle with no
+  // producer, which no gate can see because the field is required on the record with a legal default.
+  //
+  // Opt-in, so a member filing by hand is unaffected: absent still means "straight into the workflow".
+  inTriage: z
+    .boolean()
+    .optional()
+    .describe("file into the team's triage queue instead of the workflow — accept or decline decides"),
 });

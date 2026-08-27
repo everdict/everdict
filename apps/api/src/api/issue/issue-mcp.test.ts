@@ -129,6 +129,8 @@ describe("eval tracker MCP tools", () => {
       "get_issue",
       "update_issue",
       "set_issue_status",
+      "accept_issue_triage",
+      "decline_issue_triage",
       "add_issue_link",
       "remove_issue_link",
       "list_issue_scorecards",
@@ -172,6 +174,73 @@ describe("eval tracker MCP tools", () => {
     ]) {
       expect(names).toContain(name);
     }
+  });
+
+  // ── THE TRIAGE LIFECYCLE, END TO END, ON THE TRANSPORT THAT WAS MISSING IT (arch-review 106) ─────
+  //
+  // Two findings meeting. `Issue.create`'s own comment names who enters the queue — "the surfaces that bring
+  // work in from outside (import, an agent)" — and NOTHING in the repository wrote `inTriage: true`, so the
+  // flag, both triage routes, both domain transitions, the store filter and the `?triage=` list param were a
+  // designed lifecycle with no producer. Meanwhile both triage ROUTES read `agentAttributionFrom(req.headers)`
+  // — built expecting an agent actor — while the transport an agent actually reaches the control plane
+  // through exposed neither move, and this file's header calls itself "the surface an agent uses to triage".
+  //
+  // Nothing anywhere tested accept or decline, on any transport, which is how both halves stayed invisible.
+  //
+  // Seen RED before the doors existed: `create_issue` rejected `inTriage` ("Unrecognized key") and
+  // `accept_issue_triage` did not exist ("Tool accept_issue_triage not found").
+  it("an agent files into triage, and a member's accept takes it into the workflow", async () => {
+    const { deps, pushed } = makeDeps();
+    const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
+
+    const filed = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "create_issue",
+          arguments: { title: "The retry loop drops tool results", inTriage: true },
+        }),
+      ),
+    );
+    expect(filed.inTriage, "an agent could not file into the queue the design says it files into").toBe(true);
+
+    const accepted = JSON.parse(
+      textOf(await client.callTool({ name: "accept_issue_triage", arguments: { id: filed.id, status: "todo" } })),
+    );
+    expect(accepted.inTriage, "accepting left the issue in the queue").toBe(false);
+    expect(accepted.status).toBe("todo");
+    // The transition rides the same choke point as every other one, so the agent's own fact is stamped and it
+    // does not wake itself on it (loop guard #1).
+    expect(pushed.at(-1)).toMatchObject({ kind: "issue.status_changed", causedBy: "agent:triage-bot:conv-9" });
+
+    // Accepting is once: the queue is left, and leaving it again is a conflict rather than a silent no-op.
+    const again = await client.callTool({ name: "accept_issue_triage", arguments: { id: filed.id } });
+    expect(textOf(again)).toContain("not in triage");
+  });
+
+  it("declining cancels the issue and keeps it on the record, with the reason", async () => {
+    const { deps } = makeDeps();
+    const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
+    const filed = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "create_issue",
+          arguments: { title: "Rewrite everything in Rust", inTriage: true },
+        }),
+      ),
+    );
+
+    const declined = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "decline_issue_triage",
+          arguments: { id: filed.id, note: "out of scope for this quarter" },
+        }),
+      ),
+    );
+    // "We said no to this" is an answer somebody looks for later — the issue survives its own decline.
+    expect(declined.inTriage).toBe(false);
+    const readBack = JSON.parse(textOf(await client.callTool({ name: "get_issue", arguments: { id: filed.id } })));
+    expect(readBack.id, "the declined issue vanished from the record").toBe(filed.id);
   });
 
   it("an agent's issue transitions stamp causedBy so it never wakes on its own fact", async () => {
