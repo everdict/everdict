@@ -134,6 +134,41 @@ describe("PgEvolutionCampaignStore — the guards live in the statement", () => 
     return { client, calls };
   }
 
+  it("WRITES the owning team and FILTERS the list on it, in the statement (arch-review 82)", async () => {
+    // The team axis was added to the record, the in-memory twin and every transport — and the Postgres half
+    // had no test at all. Two halves can be wrong here in ways the twin cannot show: a column missing from
+    // the INSERT (the campaign is stored unowned, so every team sees it) and a list built without the
+    // predicate (filtered after the page, which lets one team's rows push everyone else's off it).
+    //
+    // Seen RED before the column reached the insert, observed:
+    //   the owning team never reached the INSERT: expected [...] to contain 'team-a'
+    const { client, calls } = fakeClient([]);
+    const store = new PgEvolutionCampaignStore(client);
+
+    await store.create(record({ id: "camp_t", teamId: "team-a" }));
+    const insert = calls[0];
+    expect(insert?.text, "the team column never reached the INSERT").toContain("team_id");
+    expect(insert?.params, "the owning team never reached the INSERT").toContain("team-a");
+
+    // …and a campaign with no team stores NULL rather than a string: unowned is a real state, not a gap.
+    const { client: c2, calls: calls2 } = fakeClient([]);
+    await new PgEvolutionCampaignStore(c2).create(record({ id: "camp_u" }));
+    expect(calls2[0]?.params).toContain(null);
+
+    // The ceiling is applied IN THE QUERY. `IS NULL OR = ANY` because an unowned row is the workspace's and
+    // belongs on every caller's page.
+    const { client: c3, calls: calls3 } = fakeClient([{ match: "SELECT *", rows: [] }]);
+    await new PgEvolutionCampaignStore(c3).list("acme", ["team-b"]);
+    expect(calls3[0]?.text, "the list page was not filtered by the caller's teams").toContain("team_id IS NULL");
+    expect(calls3[0]?.params).toContain("acme");
+
+    // No ceiling (an admin, or a deployment with no teams) reads the unfiltered statement — a query that
+    // always carried the predicate would make `undefined` mean "sees nothing" instead of "nothing hidden".
+    const { client: c4, calls: calls4 } = fakeClient([{ match: "SELECT *", rows: [] }]);
+    await new PgEvolutionCampaignStore(c4).list("acme");
+    expect(calls4[0]?.text).not.toContain("team_id IS NULL");
+  });
+
   it("appendRound CASes on the round count and the open state IN THE WHERE, and reads the landed count back", async () => {
     const { client, calls } = fakeClient([{ match: "WITH upd AS", rows: [{ n: 3 }] }]);
     const store = new PgEvolutionCampaignStore(client);
