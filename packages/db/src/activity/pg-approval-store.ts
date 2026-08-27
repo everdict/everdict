@@ -106,10 +106,26 @@ export class PgApprovalStore implements ApprovalStore {
     }
     if (sets.length === 0) return this.get(id);
     vals.push(id);
+    // ── FIRST TERMINAL WRITE WINS — IN THE STATEMENT (arch-review 97) ────────────────────────────────
+    //
+    // `Approval.decide` refuses a second decision and its comment says "the first terminal write wins". The
+    // aggregate is a READ-THEN-WRITE: two approvers who both loaded a `pending` ask both pass the guard, and
+    // this UPDATE — `WHERE id = $n`, no status condition — let the later one overwrite a settled decision.
+    // Both then emit `approval.decided`, and the delivery and resume legs run twice for one ask.
+    //
+    // A decision that flips by arrival order is the annotation failure this review series is named for, in
+    // the one seam where a human was asked to be the authority. The condition belongs where atomicity is:
+    // zero rows is the REFUSAL, and `update` already answers `undefined` for it, which is what a caller must
+    // consume (rule `protocol` L1).
+    //
+    // Only a decision transition is fenced. The expiry sweep and any other pending→terminal writer race the
+    // same way and are refused the same way; a patch that touches no status (a metadata refresh) carries no
+    // fence because it settles nothing.
+    const fence = patch.status !== undefined ? " AND status = 'pending'" : "";
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, vals.length + 1);
       const res = await this.client.query<ApprovalRow>(
-        `WITH upd AS (UPDATE everdict_approvals SET ${sets.join(", ")} WHERE id = $${i} RETURNING *),
+        `WITH upd AS (UPDATE everdict_approvals SET ${sets.join(", ")} WHERE id = $${i}${fence} RETURNING *),
          ev AS (INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
                 SELECT * FROM (VALUES ${ev.sql}) AS v
                 WHERE EXISTS (SELECT 1 FROM upd))
@@ -119,7 +135,7 @@ export class PgApprovalStore implements ApprovalStore {
       return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
     }
     const res = await this.client.query<ApprovalRow>(
-      `UPDATE everdict_approvals SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      `UPDATE everdict_approvals SET ${sets.join(", ")} WHERE id = $${i}${fence} RETURNING *`,
       vals,
     );
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;

@@ -1,4 +1,4 @@
-import { type ApprovalRecord, NotFoundError } from "@everdict/contracts";
+import { type ApprovalRecord, ConflictError, NotFoundError } from "@everdict/contracts";
 import { Approval } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { ApprovalListFilter, ApprovalStore } from "../ports/approval-store.js";
@@ -110,7 +110,22 @@ export class ApprovalService {
       stamped.map((f) => f.record),
     );
     if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
-    const record = updated ?? { ...current, ...transition.patch };
+    // ── ZERO ROWS IS A REFUSAL, NOT A MISSING RETURN VALUE (arch-review 97) ─────────────────────────
+    //
+    // The UPDATE is fenced on `status = 'pending'` now, so `undefined` means somebody else decided this ask
+    // between our read and our write. `updated ?? { ...current, ...transition.patch }` synthesized the
+    // record we WANTED and carried on: the caller was told its decision landed, the delivery and resume legs
+    // ran for a decision that does not exist, and the ask's real outcome was the other writer's.
+    //
+    // A decision that rests on a conditional write consumes its answer (rule `protocol` L1). This is the
+    // same 409 a second decision gets from the aggregate — the race just makes it arrive later.
+    if (updated === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { approval: current.id },
+        "this approval was decided by somebody else — read it back for the decision that landed",
+      );
+    const record = updated;
     void this.deps.workflow?.signalDecided(record.id).catch(() => {}); // prompt workflow completion (best-effort)
     const delivered = (await this.deps.deliver?.(record, input.decision).catch(() => false)) ?? false;
     // The resume leg: no live wait → the run died with a restart; a continuation turn picks the decision up
