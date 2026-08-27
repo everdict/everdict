@@ -28,7 +28,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
     const frame: CampaignFrame = {
       subject: { type: "agent", id: "everdict", baselineVersion: "1.0.0" },
       scenarios: [
-        { id: "s1", heldOut: false },
+        { id: "s1", heldOut: true },
         { id: "s2", heldOut: true },
       ],
       judges: [],

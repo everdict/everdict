@@ -437,6 +437,24 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     expect((await svc.get("acme", rec.id)).state).toBe("open");
   });
 
+  it("leaves a DECIDED adoption operation the registry write must spend (arch-review 71 P0)", async () => {
+    // The production path, end to end: the service settles, and the authorization the close owes is there
+    // for a registry write to present. Before this, `adopted` was a decision with no effect and no debt —
+    // a settle followed by a crash left a campaign claiming adoption with no capability anywhere.
+    const store = new InMemoryEvolutionCampaignStore();
+    const svc = service(store);
+    const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+    snapshots.set("sc-win", snapshot(comparison()));
+    await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    await svc.settle("acme", rec.id, "alice");
+
+    const op = await store.forCampaign("acme", rec.id);
+    expect(op, "the service settled adopted and authorized nothing").toBeDefined();
+    expect(op?.state).toBe("decided");
+    expect(op?.proof.campaignId).toBe(rec.id);
+    expect(op?.proof.issueId, "the authorization lost the intent it was opened against").toBe("iss_1");
+  });
+
   it("settle on an adoptable latest closes as adopted with the proving scorecard and the fact", async () => {
     const store = new InMemoryEvolutionCampaignStore();
     const svc = service(store);
@@ -463,9 +481,11 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       get: store.get.bind(store),
       list: store.list.bind(store),
       appendRound: store.appendRound.bind(store),
-      close: async (tenant, id, state, close, expectedRounds, events) => {
+      // FORWARDS THE ADOPTION RIDER. A double that drops it would make this file green over exactly the
+      // defect arch-review 71 found one seam over — a forwarder that carries some riders and not others.
+      close: async (tenant, id, state, close, expectedRounds, events, adoption) => {
         await store.appendRound(tenant, id, round(2, { significantImprovements: 1 }), 1);
-        return store.close(tenant, id, state, close, expectedRounds, events);
+        return store.close(tenant, id, state, close, expectedRounds, events, adoption);
       },
     };
     const svc2 = new CampaignService({ store: raced, issues, diffs, newId: () => "x", now: () => "t" });

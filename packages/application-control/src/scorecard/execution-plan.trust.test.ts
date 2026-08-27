@@ -194,7 +194,17 @@ describeTrust("TRUST-120 — no execution path re-derives the plan", () => {
       pattern:
         /\bmanifest\??\.(cases|gradingCases|grading|harness|judges|judgeRun|judgeRunModelDigest|verdictPolicy|dataset)\b/,
       what: "any sealed manifest facet",
-      allow: ["execution-plan.ts", "scorecard-service.ts", "scorecard-score-service.ts"],
+      // `campaign-service.ts` reads ONE facet and re-derives nothing (arch-review 71 P0-evolution): the
+      // candidate's sealed `harness.specDigest`, recorded onto the round as WHAT WAS EVALUATED so an
+      // adoption can be checked against the bytes rather than against a version label. It executes nothing
+      // from the manifest — no selection, no pins, no closure — which is the distinction this guard is
+      // about: re-deriving the plan is forbidden, quoting the seal's own answer for the record is not.
+      allow: [
+        "execution-plan.ts",
+        "scorecard-service.ts",
+        "scorecard-score-service.ts",
+        "evolution/campaign-service.ts",
+      ],
     },
   ];
 

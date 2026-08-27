@@ -5,12 +5,14 @@ import type {
   OutboxEvent,
 } from "@everdict/application-control";
 import {
+  type AdoptionOperation,
   type CampaignClose,
   type CampaignRound,
   type CampaignState,
   type EvolutionCampaignRecord,
   EvolutionCampaignRecordSchema,
 } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
@@ -23,6 +25,9 @@ import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
   private readonly byId = new Map<string, EvolutionCampaignRecord>();
+  // The authorizations this store's closes have written. One process holds both; the Pg deployment splits
+  // them because the CONSUMER is the registry write, not the campaign.
+  private readonly adoptions = new Map<string, AdoptionOperation>();
   private readonly events: OutboxEvent[] = [];
 
   async create(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void> {
@@ -62,6 +67,25 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     return { kind: "appended", seq: rounds.length };
   }
 
+  // The `AdoptionOperationStore` half, on the same object: a single-process deployment has nothing to split.
+  async forCampaign(_tenant: string, campaignId: string): Promise<AdoptionOperation | undefined> {
+    return this.adoptions.get(campaignId);
+  }
+
+  async markRegistered(
+    _tenant: string,
+    campaignId: string,
+    proofDigest: string,
+    registeredVersion: string,
+  ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch"> {
+    const op = this.adoptions.get(campaignId);
+    if (op === undefined) return "no_such_operation";
+    if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
+    if (op.state !== "decided") return "already_registered";
+    this.adoptions.set(campaignId, { ...op, state: "registered", registeredVersion });
+    return "registered";
+  }
+
   async close(
     tenant: string,
     id: string,
@@ -69,6 +93,7 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     close: CampaignClose,
     expectedRounds: number,
     events?: OutboxEvent[],
+    adoption?: AdoptionOperation,
   ): Promise<CampaignCloseOutcome> {
     const record = await this.get(tenant, id);
     if (!record) return { kind: "absent" };
@@ -79,6 +104,11 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     if (record.rounds.length !== expectedRounds)
       return { kind: "conflict", expected: expectedRounds, actual: record.rounds.length };
     this.byId.set(id, { ...record, state, close, updatedAt: close.at });
+    // …and the authorization the close owes, written with it. One process, so "the same transaction" is the
+    // same statement; what matters is that a refused close (every branch above) writes neither. Once only:
+    // a campaign adopts once, so an at-least-once settle converges rather than minting a second one.
+    if (adoption !== undefined && !this.adoptions.has(adoption.proof.campaignId))
+      this.adoptions.set(adoption.proof.campaignId, adoption);
     if (events) this.events.push(...events);
     return { kind: "closed" };
   }
@@ -220,9 +250,23 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
     close: CampaignClose,
     expectedRounds: number,
     events?: OutboxEvent[],
+    adoption?: AdoptionOperation,
   ): Promise<CampaignCloseOutcome> {
     const base = [tenant, id, state, JSON.stringify(close), close.at, expectedRounds];
     const ev = events && events.length > 0 ? eventValuesClause(events, base.length + 1) : undefined;
+    // ── THE AUTHORIZATION RIDES THE CLOSE (arch-review 71 P0-evolution) ────────────────────────────
+    //
+    // `adopted` and "somebody owes a registration" are one durable fact or the settle-then-crash window is
+    // exactly the hole this operation exists to close. It joins the SAME statement — guarded by
+    // `EXISTS (SELECT 1 FROM upd)` like the outbox rows, so a refused close (already settled, or a round
+    // landed since the gate's read) authorizes nothing.
+    //
+    // `ON CONFLICT DO NOTHING` on (tenant, campaign_id): a campaign adopts ONCE, so an at-least-once settle
+    // converges rather than minting a second authorization.
+    const adoptParams = adoption
+      ? [adoption.operationId, JSON.stringify(adoption.proof), adoption.state, adoption.createdAt]
+      : [];
+    const adoptOffset = base.length + (ev?.params.length ?? 0);
     const { rows } = await this.client.query<{ id: string }>(
       `WITH upd AS (
          UPDATE everdict_evolution_campaigns
@@ -237,9 +281,20 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
          WHERE EXISTS (SELECT 1 FROM upd)
        )`
            : ""
+       }${
+         adoption !== undefined
+           ? `, adopt AS (
+         INSERT INTO everdict_adoption_operations
+           (operation_id, tenant, campaign_id, proof, state, created_at, updated_at)
+         SELECT $${adoptOffset + 1}, $1, $2, $${adoptOffset + 2}::jsonb, $${adoptOffset + 3},
+                $${adoptOffset + 4}::timestamptz, $${adoptOffset + 4}::timestamptz
+         WHERE EXISTS (SELECT 1 FROM upd)
+         ON CONFLICT (tenant, campaign_id) DO NOTHING
+       )`
+           : ""
        }
        SELECT id FROM upd`,
-      [...base, ...(ev?.params ?? [])],
+      [...base, ...(ev?.params ?? []), ...adoptParams],
     );
     if (rows[0] !== undefined) return { kind: "closed" };
     // The write refused — read back WHY: closed already, a round landed since the gate's read, or gone.

@@ -1,4 +1,10 @@
-import type { CampaignClose, CampaignRound, CampaignState, EvolutionCampaignRecord } from "@everdict/contracts";
+import type {
+  AdoptionOperation,
+  CampaignClose,
+  CampaignRound,
+  CampaignState,
+  EvolutionCampaignRecord,
+} from "@everdict/contracts";
 import type { OutboxEvent } from "./run-store.js";
 
 // ── THE CAMPAIGN STORE (docs/architecture/evolution-lineage.md, Track D) ─────────────────────────────
@@ -45,5 +51,35 @@ export interface EvolutionCampaignStore {
     close: CampaignClose,
     expectedRounds: number,
     events?: OutboxEvent[],
+    // ── …AND THE DEBT THE CLOSE CREATES (arch-review 71 P0-evolution) ─────────────────────────────
+    //
+    // An adopted close authorizes a registry write that has not happened yet. Written HERE, in the same
+    // transaction, so `adopted` and "somebody owes a registration" are one durable fact — a settle followed
+    // by a crash leaves an operation somebody can re-drive instead of a campaign claiming adoption with no
+    // capability anywhere.
+    //
+    // Absent on a halted close: nothing was authorized, so nothing is owed.
+    adoption?: AdoptionOperation,
   ): Promise<CampaignCloseOutcome>;
+}
+
+// ── WHO MAY SPEND AN AUTHORIZATION, AND WHETHER IT IS STILL UNSPENT (arch-review 71 P0-evolution) ──
+//
+// The registry effect presents a proof; this is what checks it against what the campaign actually recorded.
+// Separate from the campaign store because the CONSUMER is the registry write, not the campaign — and a
+// capability the consumer cannot reach is the shape this whole review series keeps finding.
+export interface AdoptionOperationStore {
+  // The operation this proof claims to spend, or undefined when no such authorization exists. The caller
+  // compares the proof it was HANDED against the one recorded — an equal-looking proof is not the same
+  // proof, and only the stored one is authority.
+  forCampaign(tenant: string, campaignId: string): Promise<AdoptionOperation | undefined>;
+  // Spend it. Conditional on the operation still being `decided` and on the proof matching, so two writes
+  // presenting one authorization cannot both succeed. Returns what happened rather than void: a decision
+  // rests on this (rule `protocol` L1).
+  markRegistered(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+    registeredVersion: string,
+  ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch">;
 }

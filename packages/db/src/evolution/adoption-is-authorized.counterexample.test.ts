@@ -1,0 +1,174 @@
+import type { CampaignClose, CampaignFrame, CampaignRound, EvolutionCampaignRecord } from "@everdict/contracts";
+import { adoptionProofOf, campaignAdoption, contentDigest } from "@everdict/domain";
+import { describe, expect, it } from "vitest";
+import { InMemoryEvolutionCampaignStore } from "./campaign-store.js";
+
+// ── A CAMPAIGN CLOSED "ADOPTED" AND NOTHING ADOPTED ANYTHING (arch-review 71 P0-evolution) ──────────
+//
+// `settle` computed the gate's answer, wrote `adopted` with the version and the proving scorecard, and
+// executed no effect. The MCP tool told the caller to go run `save_agent` or `register_harness` afterwards —
+// generic authoring APIs with no campaign id, no frame digest, no round sequence, no candidate digest and no
+// gate answer. Four states were reachable and all of them silent:
+//
+//     settle → crash             adopted, and no capability anywhere
+//     save with no gate          a capability with no adoption authority
+//     C1 evaluated, C2 saved     one version label over two different specs
+//     adopted, issue unresolved  the decision and its intent came apart
+//
+//     CampaignGateAnswer exists   ≠   a registry effect consumed it
+//
+// The authorization is a durable OPERATION now, written in the same statement as the close, and a registry
+// write spends it by presenting the exact proof. `decided` is the state a crash lands in — visible,
+// addressable, re-drivable — where a campaign that merely said `adopted` was none of those.
+//
+// Seen RED before the operation existed, observed:
+//   an adopted campaign authorized nothing anybody could spend: expected undefined to be defined
+
+const FRAME = {
+  subject: { type: "agent", id: "a1", baselineVersion: "1.0.0" },
+  scenarios: [
+    { id: "h1", heldOut: true },
+    { id: "h2", heldOut: true },
+  ],
+  judges: [],
+  trialsPerCase: 3,
+  budget: { maxRounds: 5 },
+  stopAfterRejectedRounds: 3,
+  significance: {},
+  allowUnverifiedIdentity: false,
+  observationPolicy: { allowDivergent: false },
+} as unknown as CampaignFrame;
+
+const round = (specDigest?: string): CampaignRound =>
+  ({
+    seq: 1,
+    hypothesis: "structure over phrasing",
+    candidateVersion: "1.1.0",
+    baselineScorecardId: "sc-base",
+    candidateScorecardId: "sc-cand",
+    at: "2026-08-27T00:00:00.000Z",
+    verdict: {
+      comparable: true,
+      significantImprovements: 1,
+      significantRegressions: 0,
+      heldOut: { improvements: 1, regressions: 0 },
+      observations: { divergent: 0, unclear: 0 },
+      unverifiedAxes: [],
+      confoundedAxes: [],
+      ...(specDigest !== undefined ? { candidateSpecDigest: specDigest } : {}),
+    },
+  }) as unknown as CampaignRound;
+
+const record = (rounds: CampaignRound[]): EvolutionCampaignRecord =>
+  ({
+    id: "camp-1",
+    tenant: "acme",
+    issueId: "iss-9",
+    frame: FRAME,
+    frameDigest: contentDigest(FRAME),
+    rounds,
+    state: "open",
+    createdBy: "alice",
+    createdAt: "2026-08-27T00:00:00.000Z",
+    updatedAt: "2026-08-27T00:00:00.000Z",
+  }) as unknown as EvolutionCampaignRecord;
+
+const closeDoc = (version: string): CampaignClose =>
+  ({
+    outcome: { kind: "adopted", version, provingScorecardId: "sc-cand", waivedAxes: [] },
+    at: "2026-08-27T01:00:00.000Z",
+    by: "alice",
+  }) as unknown as CampaignClose;
+
+// The whole settle, as the service performs it: gate → proof → close carrying the authorization.
+const settled = async (specDigest?: string) => {
+  const store = new InMemoryEvolutionCampaignStore();
+  const rec = record([round(specDigest)]);
+  await store.create(rec);
+  const answer = campaignAdoption(rec.frame, rec.rounds);
+  const proof = adoptionProofOf(answer, rec, rec.rounds);
+  expect(proof, "the gate authorized nothing, so this fixture measures nothing").toBeDefined();
+  if (proof === undefined) throw new Error("unreachable");
+  await store.close("acme", rec.id, "adopted", closeDoc("1.1.0"), 1, undefined, {
+    operationId: `adopt/acme/${rec.id}`,
+    tenant: "acme",
+    proof,
+    state: "decided",
+    createdAt: "2026-08-27T01:00:00.000Z",
+    updatedAt: "2026-08-27T01:00:00.000Z",
+  });
+  return { store, proof };
+};
+
+describe("[R71 COUNTEREXAMPLE] an adopted campaign leaves an authorization somebody must spend", () => {
+  it("writes a DECIDED operation with the close — the state a crash lands in", async () => {
+    const { store } = await settled("sha256:c1");
+
+    const op = await store.forCampaign("acme", "camp-1");
+    expect(op, "an adopted campaign authorized nothing anybody could spend").toBeDefined();
+    expect(op?.state, "the authorization was born already spent").toBe("decided");
+    // It names the bytes, the exam and the trace position — everything an effect must be held to.
+    expect(op?.proof.candidate.specDigest).toBe("sha256:c1");
+    expect(op?.proof.frameDigest).toBe(contentDigest(FRAME));
+    expect(op?.proof.roundSeq).toBe(1);
+    expect(op?.proof.issueId, "the decision and its intent came apart").toBe("iss-9");
+  });
+
+  it("SPENDS it exactly once", async () => {
+    // Two registry writes presenting one authorization must not both land: the second is told it is a
+    // convergence, not granted a second adoption.
+    const { store, proof } = await settled("sha256:c1");
+    const digest = contentDigest(proof);
+
+    expect(await store.markRegistered("acme", "camp-1", digest, "1.1.0")).toBe("registered");
+    expect(await store.markRegistered("acme", "camp-1", digest, "1.1.0")).toBe("already_registered");
+    expect((await store.forCampaign("acme", "camp-1"))?.registeredVersion).toBe("1.1.0");
+  });
+
+  it("REFUSES a proof that is not the one recorded", async () => {
+    // The substitution the review named: a structurally-plausible proof the campaign never issued. Compared
+    // as a digest of what was STORED, never against the object the caller handed over.
+    const { store } = await settled("sha256:c1");
+    const forged = contentDigest({ campaignId: "camp-1", candidate: { version: "9.9.9" } });
+
+    expect(await store.markRegistered("acme", "camp-1", forged, "9.9.9")).toBe("proof_mismatch");
+    expect((await store.forCampaign("acme", "camp-1"))?.state, "a forged proof spent the authorization").toBe(
+      "decided",
+    );
+  });
+
+  it("has NOTHING to spend for a campaign that never adopted", async () => {
+    // A save claiming campaign-adopted provenance against a campaign with no authorization is refused by
+    // the absence itself — which is what makes the generic authoring API safe to keep.
+    const store = new InMemoryEvolutionCampaignStore();
+    await store.create(record([round()]));
+
+    expect(await store.markRegistered("acme", "camp-1", "sha256:whatever", "1.1.0")).toBe("no_such_operation");
+  });
+
+  it("authorizes NOTHING when the close is refused", async () => {
+    // The atomicity that makes the operation trustworthy: a stale gate answer (a round landed since the
+    // read) closes nothing, so it must authorize nothing either.
+    const store = new InMemoryEvolutionCampaignStore();
+    const rec = record([round("sha256:c1")]);
+    await store.create(rec);
+    const proof = adoptionProofOf(campaignAdoption(rec.frame, rec.rounds), rec, rec.rounds);
+    if (proof === undefined) throw new Error("unreachable");
+
+    // `expectedRounds` disagrees with the record — the CAS the close already had.
+    const outcome = await store.close("acme", rec.id, "adopted", closeDoc("1.1.0"), 99, undefined, {
+      operationId: "adopt/acme/camp-1",
+      tenant: "acme",
+      proof,
+      state: "decided",
+      createdAt: "2026-08-27T01:00:00.000Z",
+      updatedAt: "2026-08-27T01:00:00.000Z",
+    });
+
+    expect(outcome.kind).toBe("conflict");
+    expect(
+      await store.forCampaign("acme", "camp-1"),
+      "a refused close still authorized a registry write",
+    ).toBeUndefined();
+  });
+});

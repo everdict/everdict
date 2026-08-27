@@ -189,6 +189,68 @@ export const CampaignCloseSchema = z.object({
 });
 export type CampaignClose = z.infer<typeof CampaignCloseSchema>;
 
+// ── THE DECISION, IN A FORM AN EFFECT CAN BE HELD TO (arch-review 71 P0-evolution) ─────────────────
+//
+// A campaign closed `adopted` and executed nothing. The MCP tool told the caller to go run `save_agent` or
+// `register_harness` afterwards — generic authoring APIs with no campaign id, no frame digest, no round
+// sequence, no candidate digest and no gate answer — so four states were reachable and all of them silent:
+//
+//     settle → crash                 adopted, and no capability anywhere
+//     save with no gate              a capability with no adoption authority
+//     C1 evaluated, C2 saved         one version label over two different specs
+//     adopted, issue unresolved      the decision and its intent came apart
+//
+//     CampaignGateAnswer exists   ≠   a registry effect consumed it
+//
+// This is the value that closes the gap: everything an effect needs to prove it is the one this campaign
+// authorized, minted where the decision is made and never re-derived downstream (L3). `gateDigest` covers
+// the answer itself, so a proof cannot be edited into authorizing something else.
+export const CampaignAdoptionProofSchema = z.object({
+  campaignId: z.string().min(1),
+  // The frozen exam this decision was made under. A proof whose frame digest no longer matches the campaign
+  // is a proof about a different experiment.
+  frameDigest: z.string().min(1),
+  // WHICH round proved it — the trace position, so a later round cannot borrow an earlier answer.
+  roundSeq: z.number().int().min(1),
+  candidate: z.object({
+    type: z.enum(["agent", "harness"]),
+    id: z.string().min(1).max(200),
+    version: z.string().min(1).max(100),
+    // The bytes, not the label (arch-review 71). Absent for a built-in with no declarative spec — an effect
+    // that cannot compare bytes says so rather than pretending the label was enough.
+    specDigest: z.string().optional(),
+  }),
+  provingScorecardId: z.string().min(1),
+  // The issue this campaign was opened against, carried so the effect and the intent cannot come apart.
+  issueId: z.string().min(1),
+  gateDigest: z.string().min(1),
+});
+export type CampaignAdoptionProof = z.infer<typeof CampaignAdoptionProofSchema>;
+
+// ── AND THE OPERATION THAT OWES THE EFFECT ────────────────────────────────────────────────────────
+//
+// The close is a decision; this is the debt it creates. Written in the SAME transaction as the close (the
+// store's `close` takes it), so `adopted` and "somebody owes a registration" are one durable fact — the
+// atomic-seam law this repository just spent two waves on, applied to the feature that needed it most.
+//
+// `decided` is the state a crash leaves behind, and it is the whole point: an operation nobody has consumed
+// is visible, addressable and re-drivable, where a campaign that merely said `adopted` was none of those.
+export const AdoptionOperationStateSchema = z.enum(["decided", "registered", "completed"]);
+export type AdoptionOperationState = z.infer<typeof AdoptionOperationStateSchema>;
+
+export const AdoptionOperationSchema = z.object({
+  operationId: z.string().min(1),
+  tenant: z.string().min(1),
+  proof: CampaignAdoptionProofSchema,
+  state: AdoptionOperationStateSchema,
+  // What actually consumed it, stamped when the registry write landed — so "registered" names a version
+  // somebody can go look at rather than asserting one happened.
+  registeredVersion: z.string().max(100).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type AdoptionOperation = z.infer<typeof AdoptionOperationSchema>;
+
 export const EvolutionCampaignRecordSchema = z.object({
   id: z.string().min(1),
   tenant: z.string().min(1),

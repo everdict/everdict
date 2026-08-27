@@ -525,7 +525,7 @@ export {
   stripReservedObservationEvents,
 } from "./observation/observation-trace.js";
 // evolution — the campaign settlement's pure adoption gate (docs/architecture/evolution-lineage.md, Track D)
-export { type CampaignGateAnswer, campaignAdoption } from "./evolution/campaign-gate.js";
+export { type CampaignGateAnswer, adoptionProofOf, campaignAdoption } from "./evolution/campaign-gate.js";
 // image — which BYTES a case ran from: the manifest reader, the driver/placement merge, and the comparison
 export {
   imageProvenanceOf,

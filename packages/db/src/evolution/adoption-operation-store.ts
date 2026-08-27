@@ -1,0 +1,84 @@
+import type { AdoptionOperationStore } from "@everdict/application-control";
+import { type AdoptionOperation, AdoptionOperationSchema } from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
+import type { SqlClient } from "../client.js";
+
+// ── WHO MAY SPEND AN ADOPTION, AND WHETHER IT IS STILL UNSPENT (arch-review 71 P0-evolution) ────────
+//
+// The campaign's close writes the authorization (see `PgEvolutionCampaignStore.close`); this is the half a
+// registry write reaches for. Two stores because the CONSUMER is the registry effect, not the campaign — a
+// capability the consumer cannot reach is the defect this whole review series keeps finding.
+interface OperationRow {
+  operation_id: string;
+  tenant: string;
+  campaign_id: string;
+  proof: unknown;
+  state: string;
+  registered_version: string | null;
+  created_at: string | Date;
+  updated_at: string | Date;
+}
+
+const toOperation = (row: OperationRow): AdoptionOperation =>
+  AdoptionOperationSchema.parse({
+    operationId: row.operation_id,
+    tenant: row.tenant,
+    proof: row.proof,
+    state: row.state,
+    ...(row.registered_version !== null ? { registeredVersion: row.registered_version } : {}),
+    createdAt: new Date(row.created_at).toISOString(),
+    updatedAt: new Date(row.updated_at).toISOString(),
+  });
+
+export class PgAdoptionOperationStore implements AdoptionOperationStore {
+  constructor(private readonly client: SqlClient) {}
+
+  async forCampaign(tenant: string, campaignId: string): Promise<AdoptionOperation | undefined> {
+    const { rows } = await this.client.query<OperationRow>(
+      "SELECT * FROM everdict_adoption_operations WHERE tenant = $1 AND campaign_id = $2",
+      [tenant, campaignId],
+    );
+    const row = rows[0];
+    return row ? toOperation(row) : undefined;
+  }
+
+  // ── SPENDING IT IS A CONDITIONAL WRITE, AND ITS ANSWER IS THE PROTOCOL ────────────────────────────
+  //
+  // One statement, because a read followed by a write is the window the write exists to close: two registry
+  // writes presenting one authorization must not both land. The guard carries BOTH conditions — still
+  // `decided`, and the proof the caller presented is byte-for-byte the one recorded — so a proof edited into
+  // naming a different version fails here rather than being trusted because it looked right.
+  //
+  // The digest is compared, not the object: the caller may hold a structurally-equal proof that was never
+  // issued, and only the stored one is authority (L3).
+  async markRegistered(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+    registeredVersion: string,
+  ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch"> {
+    // AUTHORITY FIRST, then the single-spend guard. The proof cannot be compared in SQL — the digest is our
+    // canonical-JSON function, not Postgres's — so it is checked here, and the UPDATE below carries the
+    // condition that actually needs atomicity: still `decided`.
+    //
+    // The split is safe because of WHAT each half decides. A wrong proof is refused here and would be
+    // refused on any ordering; the only thing two concurrent callers can race for is spending a VALID
+    // authorization, and `state = 'decided'` lets exactly one of them win. There is no interleaving in which
+    // a bad proof lands because a good one was in flight.
+    const existing = await this.forCampaign(tenant, campaignId);
+    if (existing === undefined) return "no_such_operation";
+    // Compared as a DIGEST of what was recorded, never against the object the caller handed us: a
+    // structurally-equal proof that was never issued is not authority (rule `protocol` L3).
+    if (contentDigest(existing.proof) !== proofDigest) return "proof_mismatch";
+    const { rows } = await this.client.query<{ operation_id: string }>(
+      `UPDATE everdict_adoption_operations
+          SET state = 'registered', registered_version = $3, updated_at = now()
+        WHERE tenant = $1 AND campaign_id = $2 AND state = 'decided'
+        RETURNING operation_id`,
+      [tenant, campaignId, registeredVersion],
+    );
+    // Zero rows now means somebody else spent it between the read and the write — which is the ordinary
+    // at-least-once convergence, not a failure.
+    return rows.length > 0 ? "registered" : "already_registered";
+  }
+}

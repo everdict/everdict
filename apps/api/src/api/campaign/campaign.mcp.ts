@@ -104,10 +104,13 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       description:
         "Settle per the gate's answer: close as adopted (version + proving scorecard + waived axes recorded) " +
         "or as the gate's own ending. Refuses (CONFLICT) while the gate answers continue or " +
-        "identity_unverified. Adoption approval is over THIS answer. Afterwards, register the adopted " +
-        "version declaring the campaign's issue as its origin — register_harness and save_agent both take " +
-        "fromIssue: a first version records born_from intent, and a bump records the base it succeeds, so " +
-        "lineage and intent both land in the graph.",
+        "identity_unverified. Adoption approval is over THIS answer. " +
+        "An ADOPTED close writes a durable adoption operation in the same statement — the authorization a " +
+        "registry write must present to claim this campaign proved its version. It carries the frame " +
+        "digest, the round that proved it, the exact candidate spec digest and the campaign's issue, and it " +
+        "is spendable ONCE. Registering the adopted version presents that proof; registering different " +
+        "bytes under the same label is refused by it. A campaign that crashed after settling still has the " +
+        "operation, so the registration can be re-driven rather than lost.",
       inputSchema: { id: z.string() },
     },
     ({ id }) => run(principal, "scorecards:run", async () => ok(await campaigns.settle(ws, id, principal.subject))),

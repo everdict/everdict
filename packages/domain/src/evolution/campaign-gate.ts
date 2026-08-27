@@ -1,4 +1,5 @@
-import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
+import type { CampaignAdoptionProof, CampaignFrame, CampaignRound } from "@everdict/contracts";
+import { contentDigest } from "../provenance/content-digest.js";
 
 // ── THE PURE ADOPTION GATE (docs/architecture/evolution-lineage.md, Track D) ─────────────────────────
 //
@@ -57,6 +58,38 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
     if (maxUnclear !== undefined && obs.unclear > maxUnclear) return false;
   }
   return held.improvements >= 1 && held.regressions === 0;
+}
+
+// ── THE ANSWER, IN A FORM AN EFFECT CAN BE HELD TO (arch-review 71 P0-evolution) ────────────────────
+//
+// `campaignAdoption` answers whether to adopt; this turns that answer into the PROOF a registry write has to
+// present. Minted here, from the round that proved it and the frame it was proved under — never re-derived
+// at the effect, which is where a substitution would enter (L3).
+//
+// `gateDigest` covers the answer itself, so a proof cannot be edited into authorizing a different version.
+// Returns undefined for any answer that is not an adoption: there is nothing to authorize.
+export function adoptionProofOf(
+  answer: CampaignGateAnswer,
+  campaign: { id: string; frameDigest: string; issueId: string; frame: CampaignFrame },
+  rounds: readonly CampaignRound[],
+): CampaignAdoptionProof | undefined {
+  if (answer.kind !== "adopt") return undefined;
+  const latest = rounds.at(-1);
+  if (latest === undefined) return undefined;
+  return {
+    campaignId: campaign.id,
+    frameDigest: campaign.frameDigest,
+    roundSeq: latest.seq,
+    candidate: {
+      type: campaign.frame.subject.type,
+      id: campaign.frame.subject.id,
+      version: answer.version,
+      ...(answer.candidateSpecDigest !== undefined ? { specDigest: answer.candidateSpecDigest } : {}),
+    },
+    provingScorecardId: answer.provingScorecardId,
+    issueId: campaign.issueId,
+    gateDigest: contentDigest(answer),
+  };
 }
 
 export function campaignAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {

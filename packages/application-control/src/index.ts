@@ -428,6 +428,7 @@ export {
 } from "./harness/harness-pin-service.js";
 // evolution campaign — the agent-evolve loop's settlement (docs/architecture/evolution-lineage.md, Track D)
 export type {
+  AdoptionOperationStore,
   CampaignAppendOutcome,
   CampaignCloseOutcome,
   EvolutionCampaignStore,

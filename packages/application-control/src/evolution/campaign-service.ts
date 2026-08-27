@@ -1,7 +1,14 @@
 import type { CampaignFrame, CampaignRound, DomainFact, EvolutionCampaignRecord } from "@everdict/contracts";
-import { BadRequestError, ConflictError, NotFoundError, type Score, isMeasured } from "@everdict/contracts";
+import {
+  type AdoptionOperation,
+  BadRequestError,
+  ConflictError,
+  NotFoundError,
+  type Score,
+  isMeasured,
+} from "@everdict/contracts";
 import type { ExperimentIdentity, TrialDiff } from "@everdict/domain";
-import { type CampaignGateAnswer, campaignAdoption, contentDigest } from "@everdict/domain";
+import { type CampaignGateAnswer, adoptionProofOf, campaignAdoption, contentDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { EvolutionCampaignStore } from "../ports/evolution-campaign-store.js";
 
@@ -276,6 +283,24 @@ export class CampaignService {
       );
     let state: "adopted" | "no_improvement" | "budget_exhausted";
     let close: NonNullable<EvolutionCampaignRecord["close"]>;
+    // ── THE AUTHORIZATION THE CLOSE OWES (arch-review 71 P0-evolution) ───────────────────────────────
+    //
+    // A close that says `adopted` and executes nothing leaves four silent states — settle-then-crash with no
+    // capability, a save with no gate, C1 evaluated with C2 saved, and an issue nobody resolved. The proof is
+    // minted from the round that proved it and the frozen frame, and the operation carrying it is written in
+    // the SAME statement as the close, so `adopted` and "somebody owes a registration" are one durable fact.
+    const proof = adoptionProofOf(answer, record, record.rounds);
+    const adoption: AdoptionOperation | undefined =
+      proof === undefined
+        ? undefined
+        : {
+            operationId: `adopt/${record.tenant}/${record.id}`,
+            tenant: record.tenant,
+            proof,
+            state: "decided",
+            createdAt: this.now(),
+            updatedAt: this.now(),
+          };
     if (answer.kind === "adopt") {
       state = "adopted";
       close = {
@@ -320,6 +345,9 @@ export class CampaignService {
       close,
       record.rounds.length,
       this.stamped(tenant, [fact]),
+      // …and the authorization, in the same statement. A refused close (already settled, or a round landed
+      // since the gate's read) authorizes nothing.
+      adoption,
     );
     switch (outcome.kind) {
       case "closed":
