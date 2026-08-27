@@ -59,12 +59,17 @@ for (const f of tracked) {
 // ③ …and which are actually CONSTRUCTED where a deployment is assembled. An implementation is a class that
 //    `implements <Port>`; constructing any of them counts.
 const implsOf = new Map();
+// …and WHERE each implementation lives, so the reachability check below can exclude a port's own files:
+// "somebody can reach this" means a reference from somewhere other than the port and its implementations.
+const implFiles = new Map();
 for (const f of tracked) {
   for (const m of read(f).matchAll(/^export class (\w+)[^{]*implements ([\w,\s]+)\{/gm)) {
     for (const port of m[2].split(",").map((s) => s.trim())) {
       if (!ports.has(port)) continue;
       if (!implsOf.has(port)) implsOf.set(port, new Set());
       implsOf.get(port).add(m[1]);
+      if (!implFiles.has(port)) implFiles.set(port, new Set());
+      implFiles.get(port).add(f);
     }
   }
 }
@@ -73,6 +78,47 @@ const compositionSources = tracked
   .filter((f) => f.startsWith("apps/"))
   .map((f) => read(f))
   .join("\n");
+
+// ── …AND AN IMPLEMENTATION NOBODY EVEN DECLARES A DEP FOR (arch-review 72 P0) ───────────────────────
+//
+// The check above asks whether a DECLARED optional dep has a producer. `PgAdoptionOperationStore` was
+// written, exported, tested — and never declared as anyone's dependency, so it was never a candidate and
+// this gate reported PASS over a whole feature nobody could reach.
+//
+// That is the same law in its third form, and the third time it shipped:
+//   64  an optional dependency with no producer
+//   67  a constructed capability that misses one of its consumers
+//   72  an implementation with NO consumer at all
+//
+// So the question widens. Writing an `InMemoryX`/`PgX` for a port is the act that says "a deployment picks
+// one of these"; if NOTHING anywhere accepts that port — not as an optional dep, not as a required one, not
+// as a constructor parameter — the promise was never kept and the code is unreachable by construction.
+//
+// A port used only inside its own package is not the target: the reference has to be somewhere OTHER than
+// the port's own file and its implementations, which is what "somebody can reach this" means.
+const portFileOf = new Map();
+for (const f of tracked.filter((f) => f.endsWith(".ts") && !f.includes(".test."))) {
+  for (const m of read(f).matchAll(/^export interface (\w+)/gm)) portFileOf.set(m[1], f);
+}
+const unreachable = [];
+for (const [port, impls] of implsOf) {
+  if (DECLARED_UNWIRED.has(port)) continue;
+  if (optionallyAccepted.has(port)) continue; // the check below already owns it
+  const own = new Set([portFileOf.get(port), ...implFiles.get(port)].filter(Boolean));
+  // Two things that name a port without consuming it, and both defeated the first draft of this check:
+  //
+  //   a BARREL re-export      `index.ts` makes it importable, not used — the promise, restated
+  //   a COMMENT               prose about the port reads identically to a use, to a raw regex
+  //
+  // So the reference has to look like a TYPE POSITION: annotated, implemented, or a generic argument. That
+  // is what "somebody can reach this" means, and it is the difference between a check people read and one
+  // they learn to skip.
+  const used = new RegExp(`(:\\s*|implements\\s+|<)${port}\\b`);
+  const referenced = tracked
+    .filter((f) => f.endsWith(".ts") && !f.includes(".test.") && !own.has(f) && !f.endsWith("/index.ts"))
+    .some((f) => used.test(read(f)));
+  if (!referenced) unreachable.push({ port, impls: [...impls] });
+}
 
 const unwired = [];
 for (const [port, sites] of optionallyAccepted) {
@@ -87,6 +133,21 @@ for (const [port, sites] of optionallyAccepted) {
   if (impls === undefined || impls.size === 0) continue;
   const constructed = [...impls].some((impl) => compositionSources.includes(`new ${impl}(`));
   if (!constructed) unwired.push({ port, sites: [...sites], impls: [...impls] });
+}
+
+if (unreachable.length > 0) {
+  console.error(`unwired capability check FAILED — ${unreachable.length} port implementation(s) nobody can reach:\n`);
+  for (const { port, impls } of unreachable) {
+    console.error(`  ✗ ${port}`);
+    console.error(`      implementations: ${impls.join(", ")}`);
+    console.error("      referenced outside its own port/impl files: NO");
+  }
+  console.error(
+    "\n  Writing an implementation for a port is a promise that a deployment picks one. Nothing accepts this\n" +
+      "  port anywhere, so the code is unreachable by construction — the arch-review 72 form of the law.\n" +
+      "  Wire a consumer, or record it in DECLARED_UNWIRED with the reason it is inert on purpose.",
+  );
+  process.exitCode = 1;
 }
 
 if (unwired.length > 0) {

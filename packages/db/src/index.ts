@@ -185,6 +185,7 @@ export {
 // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, facts on the E0 same-tx outbox.
 export { InMemoryCycleStore, PgCycleStore } from "./tracker/cycle-store.js";
 export { InMemoryIssueStore, PgIssueStore } from "./tracker/issue-store.js";
+export { PgAdoptionOperationStore } from "./evolution/adoption-operation-store.js";
 export { InMemoryEvolutionCampaignStore, PgEvolutionCampaignStore } from "./evolution/campaign-store.js";
 export { InMemoryIssueLabelStore, PgIssueLabelStore } from "./tracker/issue-label-store.js";
 export { InMemoryTeamStore, PgTeamStore } from "./tracker/team-store.js";
