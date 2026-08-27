@@ -5,13 +5,7 @@ import type {
   ReleaseListFilter,
   ReleaseStore,
 } from "@everdict/application-control";
-import {
-  ISSUE_STATUSES,
-  ISSUE_STATUS_CATEGORY,
-  type ReleaseRecord,
-  ReleaseRecordSchema,
-  type ReleaseStatus,
-} from "@everdict/contracts";
+import { OPEN_ISSUE_STATUSES, type ReleaseRecord, ReleaseRecordSchema, type ReleaseStatus } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row.js";
@@ -19,10 +13,6 @@ import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row
 // The statuses readiness counts as OPEN — derived from the same category map the services use, never a
 // hand-listed copy: a new status added to one list and not the other would silently change what "blocking"
 // means at exactly the boundary this fence exists to hold.
-const OPEN_ISSUE_STATUSES = ISSUE_STATUSES.filter(
-  (status) => ISSUE_STATUS_CATEGORY[status] !== "completed" && ISSUE_STATUS_CATEGORY[status] !== "canceled",
-);
-
 export class InMemoryReleaseStore implements ReleaseStore {
   private readonly byId = new Map<string, ReleaseRecord>();
   private readonly events: OutboxEvent[] = [];

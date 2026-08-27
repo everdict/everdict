@@ -7,14 +7,10 @@ import {
   type InitiativeUpdateRecord,
   type IssueRecord,
   NotFoundError,
+  OPEN_ISSUE_STATUSES,
   type TrackerHealth,
 } from "@everdict/contracts";
-import {
-  ISSUE_STATUSES,
-  ISSUE_STATUS_CATEGORY,
-  type InitiativeResource,
-  type ProjectRecord,
-} from "@everdict/contracts";
+import type { InitiativeResource, ProjectRecord } from "@everdict/contracts";
 import type { InitiativeDetailResponse, InitiativeListItem, InitiativeProgress } from "@everdict/contracts/wire";
 import {
   Initiative,
@@ -41,10 +37,6 @@ const EMPTY_PROGRESS: InitiativeProgress = { open: 0, total: 0, projects: 0 };
 // "Open" has ONE definition in this codebase (records/tracker.ts): anything whose category is neither completed
 // nor canceled — `regressed` included. Derived from the category table rather than listed again, so the count a
 // list row shows can never disagree with the gate.
-const OPEN_ISSUE_STATUSES = ISSUE_STATUSES.filter(
-  (status) => ISSUE_STATUS_CATEGORY[status] !== "completed" && ISSUE_STATUS_CATEGORY[status] !== "canceled",
-);
-
 export interface InitiativeActor {
   subject: string;
   isAdmin?: boolean;
@@ -137,7 +129,7 @@ export class InitiativeService {
     const projectIds = projects.map((project) => project.id);
     const [total, open] = await Promise.all([
       this.deps.issues.countByGroup(tenant, "project", { projectIds }),
-      this.deps.issues.countByGroup(tenant, "project", { projectIds, statuses: OPEN_ISSUE_STATUSES }),
+      this.deps.issues.countByGroup(tenant, "project", { projectIds, statuses: [...OPEN_ISSUE_STATUSES] }),
     ]);
     for (const row of total) {
       if (row.key === null) continue; // the unset bucket is "no project", which no goal claims

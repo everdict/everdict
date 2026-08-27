@@ -4,10 +4,9 @@ import {
   ConflictError,
   ForbiddenError,
   type GateScoringPin,
-  ISSUE_STATUSES,
-  ISSUE_STATUS_CATEGORY,
   type IssueRecord,
   NotFoundError,
+  OPEN_ISSUE_STATUSES,
   type ProductAutoEval,
   type ProductRecord,
   type ProductSeries,
@@ -69,10 +68,6 @@ import type { SeriesEvaluator, SeriesRunOutcome } from "./series-evaluator.js";
 // The GitHub sync + the auto-eval fan-out live in the ProductVersionSync collaborator, composed beside this.
 
 // "Open" has ONE definition in this codebase (records/tracker.ts) — the same derivation the tracker services use.
-const OPEN_ISSUE_STATUSES = ISSUE_STATUSES.filter(
-  (status) => ISSUE_STATUS_CATEGORY[status] !== "completed" && ISSUE_STATUS_CATEGORY[status] !== "canceled",
-);
-
 // How much of the version ledger a detail read serves — the timeline's visible past, not an export.
 const DETAIL_VERSION_LIMIT = 100;
 
@@ -975,7 +970,7 @@ export class ProductService {
         : (
             await this.deps.issues.list(tenant, {
               link: { type: "release", id: release.id },
-              statuses: OPEN_ISSUE_STATUSES,
+              statuses: [...OPEN_ISSUE_STATUSES],
             })
           ).length;
     const previous = await this.previousShip(tenant, release);

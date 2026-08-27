@@ -56,6 +56,25 @@ export const CLOSED_ISSUE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filt
   (status) => ISSUE_STATUS_CATEGORY[status] === "completed" || ISSUE_STATUS_CATEGORY[status] === "canceled",
 );
 
+// ── AND ITS COMPLEMENT, BECAUSE FOUR CALLERS WERE WRITING IT OUT (arch-review 110) ────────────────────
+//
+// The comment above says the closed vector exists so "open" means one thing in TypeScript and in Postgres. The
+// POSITIVE spelling — the one a SQL filter actually passes, because a store selects the statuses it WANTS —
+// had no home, so four call sites each re-derived it verbatim: the release store, the product service, the
+// initiative service and the workspace pulse. `@everdict/domain` exports `isOpenIssueStatus`, but a predicate
+// is not what an `= ANY($1)` takes.
+//
+// They had not diverged. L3 calls that the state a duplicated predicate is in BEFORE it diverges, and the bill
+// arrives the day one of them learns something the others do not — which is exactly the question arch-review
+// 106 raised by making `inTriage` reachable: whether a queued request counts as open work is one decision, and
+// with four copies it would have been four.
+//
+// Derived as the strict complement of the closed half, so the two vectors partition the vocabulary by
+// construction and a status added tomorrow lands in exactly one of them.
+export const OPEN_ISSUE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filter(
+  (status) => !CLOSED_ISSUE_STATUSES.includes(status),
+);
+
 // Calendar dates, not instants: "did we finish evaluation by the 14th" is a date question, and storing the
 // literal YYYY-MM-DD round-trips exactly with no timezone reinterpretation on the way in or out.
 const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");

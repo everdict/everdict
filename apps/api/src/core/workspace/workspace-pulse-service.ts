@@ -9,9 +9,8 @@ import type {
   ScorecardStore,
 } from "@everdict/application-control";
 import {
-  ISSUE_STATUSES,
-  ISSUE_STATUS_CATEGORY,
   type IssueStatus,
+  OPEN_ISSUE_STATUSES,
   type PlatformEventDailyCount,
   type ScorecardRecord,
   type WorkspacePulse,
@@ -37,13 +36,6 @@ import {
 // It composes STORES, never peer services (the api-layer rule): cross-resource data comes from the owning store.
 // The two questions it does NOT answer itself are handed in by the transport, because only the transport knows
 // them — who is asking (`visibleTeams`, resolved by the one place team privacy is decided) and when "now" is.
-
-// Everything not done or cancelled, `regressed` included — the same reading `CLOSED_ISSUE_STATUSES` gives, spelled
-// as the positive half because the store filters by the statuses it WANTS.
-const OPEN_ISSUE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filter((status) => {
-  const category = ISSUE_STATUS_CATEGORY[status];
-  return category !== "completed" && category !== "canceled";
-});
 
 // A project counts as "in flight" while somebody could still work on it. `paused` is in: work that stopped
 // without being abandoned is still a commitment the workspace carries, and hiding it is how a paused project
