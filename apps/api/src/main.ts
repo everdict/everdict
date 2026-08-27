@@ -734,7 +734,18 @@ async function main(): Promise<void> {
   // Leader-gated: the sweep does not just settle the row, it PINGS the asker — on N replicas one dead turn
   // would notify them N times (docs/architecture/multi-replica.md).
   setInterval(
-    whenLeader(leader, () => void commentService.sweepStuckAgentAnswers(15 * 60_000).catch(() => {})),
+    // The answer is read, like the cancellation-gap sweep below (arch-review 101). A sweep whose count and
+    // whose failures are both discarded is indistinguishable from one that never ran.
+    whenLeader(leader, () => {
+      void commentService
+        .sweepStuckAgentAnswers(15 * 60_000)
+        .then((n) => {
+          if (n > 0) console.log(`[comment-sweep] ${n} stuck agent answer(s) marked failed`);
+        })
+        .catch((err: unknown) => {
+          console.error(`[comment-sweep] failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }),
     60_000,
   ).unref();
 
@@ -1583,7 +1594,16 @@ async function main(): Promise<void> {
     // The ledger half: settle rows a dead process left `running` past their deadline (zombie prevention).
     // Leader-gated — it acts on rows this process does not own, and the facts it emits must fire once.
     setInterval(
-      whenLeader(leader, () => void browserSessionService.sweepOrphans().catch(() => {})),
+      whenLeader(leader, () => {
+        void browserSessionService
+          .sweepOrphans()
+          .then((n) => {
+            if (n > 0) console.log(`[browser-orphans] ${n} row(s) settled`);
+          })
+          .catch((err: unknown) => {
+            console.error(`[browser-orphans] sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      }),
       60_000,
     ).unref();
     if (leader.isLeader()) void browserSessionService.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
@@ -1729,7 +1749,16 @@ async function main(): Promise<void> {
     // safety net for a durable reaper that never armed or a process that died holding the session. Leader-gated:
     // it reaches rows other replicas wrote (ORPHAN_GRACE_MS is the second guard, not the only one).
     setInterval(
-      whenLeader(leader, () => void sandboxSessions.sweepOrphans().catch(() => {})),
+      whenLeader(leader, () => {
+        void sandboxSessions
+          .sweepOrphans()
+          .then((n) => {
+            if (n > 0) console.log(`[sandbox-orphans] ${n} row(s) settled`);
+          })
+          .catch((err: unknown) => {
+            console.error(`[sandbox-orphans] sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      }),
       60_000,
     ).unref();
     if (leader.isLeader()) void sandboxSessions.sweepOrphans().catch(() => {}); // boot pass — reclaim what the LAST process leaked
@@ -1741,7 +1770,9 @@ async function main(): Promise<void> {
     const excludeTriggers = [...(sandboxSessions ? ["sandbox"] : []), ...(browserSessionService ? ["browser"] : [])];
     // Leader-gated: every row it settles belongs to some other process, and each settle emits a fact.
     const sweepUnowned = whenLeader(leader, () => {
-      void settleOrphanSessionRuns({ store, events: lateEvents, excludeTriggers }).catch(() => {});
+      void settleOrphanSessionRuns({ store, events: lateEvents, excludeTriggers }).catch((err: unknown) => {
+        console.error(`[orphan-session-runs] sweep failed: ${err instanceof Error ? err.message : String(err)}`);
+      });
     });
     setInterval(sweepUnowned, 60_000).unref();
     sweepUnowned(); // boot pass
