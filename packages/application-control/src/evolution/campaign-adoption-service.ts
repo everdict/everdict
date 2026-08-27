@@ -115,7 +115,21 @@ export interface AdoptionRequest {
   // `register` for why the digest a proof carries is not a hash of this document.
   spec: unknown;
   by: string; // the subject the registration is attributed to
+  // ── …AND THE AGENT THAT ACTED, WHEN ONE DID (arch-review 85, rule `events`) ──────────────────────
+  //
+  // `adopt_campaign_candidate` is an MCP tool, so the ordinary caller here IS an agent — and loop guard #1
+  // keys on the exact `agent:<id>:<conversation>` prefix to stop an agent waking on its own effects. A fact
+  // emitted without it is one the loop guard cannot recognize, so the agent that adopted a candidate would
+  // be woken by its own adoption. Absent = a member acted directly.
+  agent?: { agentId?: string; conversationId?: string };
   via: CapabilityOriginChannel; // …and the door it came through
+}
+
+// The loop guard's key, spelled the way every other agent-caused fact spells it (`IssueService` owns the
+// same helper). A second spelling here would be a prefix the guard does not recognize (rule `protocol` L3).
+function causedByOf(agent: { agentId?: string; conversationId?: string } | undefined): string | undefined {
+  if (!agent?.agentId) return undefined;
+  return `agent:${agent.agentId}:${agent.conversationId ?? "unknown"}`;
 }
 
 export class CampaignAdoptionService {
@@ -239,6 +253,7 @@ export class CampaignAdoptionService {
       kind: "campaign.adoption_registered",
       subject: { type: "campaign", id: input.campaignId },
       actor: input.by,
+      ...(causedByOf(input.agent) !== undefined ? { causedBy: causedByOf(input.agent) } : {}),
       payload: {
         campaignId: input.campaignId,
         candidateType: landedCandidate.type,
@@ -277,13 +292,14 @@ export class CampaignAdoptionService {
     // deliberately so: the adoption succeeded, and an operation left `registered` is owed rather than lost —
     // the periodic reconciler and any later issue transition both still reach it. What must never happen is
     // the reverse: reporting a failure for an adoption that landed.
-    const completed = await this.completeIfIntentSettled(input.tenant, operation);
+    const completed = await this.completeIfIntentSettled(input.tenant, operation, causedByOf(input.agent));
     return { kind: "adopted", operation: completed ?? operation, version: landedCandidate.version };
   }
 
   private async completeIfIntentSettled(
     tenant: string,
     operation: AdoptionOperation,
+    causedBy?: string,
   ): Promise<AdoptionOperation | undefined> {
     const issue = await this.deps.issues.get(tenant, operation.proof.issueId).then(
       (record) => record,
@@ -296,7 +312,7 @@ export class CampaignAdoptionService {
       tenant,
       operation.proof.campaignId,
       contentDigest(operation.proof),
-      this.stamped(tenant, [completionFact(operation)]),
+      this.stamped(tenant, [completionFact(operation, causedBy)]),
     );
     if (outcome !== "completed" && outcome !== "already_completed") return undefined;
     return await this.deps.operations.forCampaign(tenant, operation.proof.campaignId);

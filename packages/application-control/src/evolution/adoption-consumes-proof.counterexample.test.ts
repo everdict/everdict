@@ -82,6 +82,21 @@ function operations(over: Partial<AdoptionOperation> = {}) {
 // never entering the branch. A double that is quietly more permissive than the real thing (rule `testing`).
 // `lands` lets a case make the registry answer with an identity that is NOT the authorized one — the only
 // way to reach the post-effect comparison (arch-review 75). Default: exactly what the proof authorized.
+// Captures the facts that ride the spend — the E0 contract is that they land WITH the transition, so a
+// double that dropped them would make the assertions above unfalsifiable.
+function operationsWithFacts() {
+  const built = operations();
+  const seen: Array<{ kind: string; actor: string; causedBy?: string }> = [];
+  const store: AdoptionOperationStore = {
+    ...built.store,
+    async markRegistered(t, c, digest, version, events) {
+      for (const e of events ?? []) seen.push(e as unknown as { kind: string; actor: string; causedBy?: string });
+      return built.store.markRegistered(t, c, digest, version);
+    },
+  };
+  return { store, facts: () => seen, current: built.current };
+}
+
 const serviceOver = (
   store: AdoptionOperationStore,
   registered: string[],
@@ -450,6 +465,56 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       expect(outcome.kind, "an unreadable tracker failed an adoption that had already landed").toBe("adopted");
       expect(current()?.state).toBe("registered");
     }
+  });
+
+  // ── AN AGENT-CAUSED FACT CARRIES THE LOOP GUARD'S KEY (arch-review 85, rule `events`) ────────────
+  //
+  // `adopt_campaign_candidate` is an MCP tool, so the ordinary caller here IS an agent. Loop guard #1 keys
+  // on the exact `agent:<id>:<conversation>` prefix to stop an agent waking on its own effects — a fact
+  // emitted without it is one the guard cannot recognize, so the agent that adopted a candidate would be
+  // woken by its own adoption and start the loop again.
+  //
+  // Seen RED before the attribution travelled, observed:
+  //   the adoption fact carried no cause, so the agent that caused it will wake on it: expected undefined to be 'agent:a-7:conv-1'
+  it("STAMPS the agent that adopted, so the guard can recognize its own effect", async () => {
+    const { store, facts } = operationsWithFacts();
+
+    await serviceOver(store, []).adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "u-1",
+      via: "mcp" as const,
+      agent: { agentId: "a-7", conversationId: "conv-1" },
+    });
+
+    const registered = facts().find((f) => f.kind === "campaign.adoption_registered");
+    expect(registered, "the spend emitted no fact at all").toBeDefined();
+    expect(
+      registered?.causedBy,
+      "the adoption fact carried no cause, so the agent that caused it will wake on it",
+    ).toBe("agent:a-7:conv-1");
+    // …and the actor stays the SUBJECT the agent acted for: `causedBy` says who caused it, `actor` says
+    // whose authority it ran under, and collapsing them would lose one of the two.
+    expect(registered?.actor).toBe("u-1");
+  });
+
+  it("stamps NOTHING when a member acted directly — an invented cause suppresses a real wakeup", async () => {
+    const { store, facts } = operationsWithFacts();
+
+    await serviceOver(store, []).adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "u-1",
+      via: "web" as const,
+    });
+
+    expect(facts().find((f) => f.kind === "campaign.adoption_registered")?.causedBy).toBeUndefined();
   });
 
   it("does NOT spend the authorization when the registry write fails", async () => {

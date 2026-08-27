@@ -1,3 +1,4 @@
+import { stampFacts } from "@everdict/application-control";
 import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contracts";
 import type { CampaignClose, CampaignFrame, EvolutionCampaignRecord } from "@everdict/contracts";
 import { PgAdoptionOperationStore, PgEvolutionCampaignStore } from "@everdict/db";
@@ -136,6 +137,58 @@ describe.skipIf(!TRUST_PG_ENABLED)(
         "two writers discharged one adoption",
       ).toHaveLength(1);
       expect((await operations.forCampaign("trust", id))?.state).toBe("completed");
+    });
+
+    it("LANDS the fact with the transition, and NOT with a refused one (arch-review 86)", async () => {
+      // The facts ride a CTE gated on the conditional UPDATE. A fake client proves the SQL TEXT contains one;
+      // only Postgres proves the text parses, that the gating subquery sees `upd`, and that the outbox insert
+      // is skipped when the update matched no row. A CTE that is syntactically wrong fails at execution — the
+      // one place a text assertion cannot look.
+      //
+      // Seen RED with the `WHERE EXISTS (SELECT 1 FROM upd)` dropped: the refused spend wrote its fact anyway.
+      const { id, proof } = await settled(trustId("iss"));
+      const digest = contentDigest(proof);
+      // ⚠️ Shaped by `stampFacts`, not by hand. The first draft omitted `message` — the column the PROJECTOR
+      // fills at the choke point (rule `events`) — and real Postgres answered 23502 NOT NULL. A hand-made
+      // outbox row is a row production never emits, and the fake-client suite could not have said so.
+      const fact = (evId: string, kind: string) =>
+        stampFacts(
+          "trust",
+          [{ kind, subject: { type: "campaign", id }, actor: "trust", payload: { campaignId: id } }] as never,
+          { newId: () => evId, now: () => "2026-08-28T00:00:00.000Z" },
+        ).map((f) => f.record);
+      const factsFor = async (evId: string) =>
+        (
+          await pg.client.query<{ n: string | number }>(
+            "SELECT count(*) AS n FROM everdict_platform_events WHERE id = $1",
+            [evId],
+          )
+        ).rows[0];
+
+      expect(
+        await operations.markRegistered(
+          "trust",
+          id,
+          digest,
+          "1.0.1",
+          fact(trustId("ev-ok"), "campaign.adoption_registered"),
+        ),
+      ).toBe("registered");
+
+      // The SECOND spend is refused by the guard — and its fact must not exist, or the feed would show an
+      // adoption that never happened.
+      const refusedId = trustId("ev-refused");
+      expect(
+        await operations.markRegistered("trust", id, digest, "1.0.1", fact(refusedId, "campaign.adoption_registered")),
+      ).toBe("already_registered");
+      expect(Number((await factsFor(refusedId))?.n ?? -1), "a refused spend still wrote its fact").toBe(0);
+
+      // …and the completion's CTE, same shape, same guard.
+      const completedId = trustId("ev-done");
+      expect(
+        await operations.markCompleted("trust", id, digest, fact(completedId, "campaign.adoption_completed")),
+      ).toBe("completed");
+      expect(Number((await factsFor(completedId))?.n ?? -1), "the discharge emitted no fact").toBe(1);
     });
 
     it("REFUSES either write on a proof the campaign never issued", async () => {

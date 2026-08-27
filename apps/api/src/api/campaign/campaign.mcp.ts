@@ -204,6 +204,9 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
             spec: parsedSpec,
             by: principal.subject,
             via: "mcp",
+            // The agent that acted, so the fact this write emits carries the loop guard's key — without it
+            // the agent that adopted a candidate is woken by its own adoption (arch-review 85).
+            ...(ctx.agent !== undefined ? { agent: ctx.agent } : {}),
           }),
         );
       }),

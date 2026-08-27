@@ -32,11 +32,16 @@ export function issueSettledThisAdoption(
 // The completion fact, authored once and consumed by both writers of the transition — the same reason the
 // predicate above has one owner. Semantic data only: the sentence is the projector's, so the payload carries
 // every value the rendering needs rather than just filterable ids (rule `events`).
-export function completionFact(operation: AdoptionOperation): DomainFact {
+// `causedBy` only where the cause is KNOWN. The registration path knows the agent that adopted, so a
+// completion it performs is that agent's own effect and loop guard #1 must recognize it. The E1 watch does
+// NOT know who resolved the issue, and inventing a cause there would suppress a wakeup somebody is owed —
+// over-stamping this field is as wrong as under-stamping it (arch-review 85).
+export function completionFact(operation: AdoptionOperation, causedBy?: string): DomainFact {
   return {
     kind: "campaign.adoption_completed",
     subject: { type: "campaign", id: operation.proof.campaignId },
     actor: "everdict:adoption-completion",
+    ...(causedBy !== undefined ? { causedBy } : {}),
     payload: {
       campaignId: operation.proof.campaignId,
       candidateId: operation.proof.candidate.id,

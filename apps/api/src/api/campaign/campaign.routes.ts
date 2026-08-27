@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
+import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
@@ -198,6 +199,8 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     } catch (err) {
       return sendError(reply, err);
     }
+    // The agent that acted, read ONCE from the request — two calls are two reads of the same headers (L1).
+    const actingAgent = agentAttributionFrom(req.headers);
     let body: z.infer<typeof AdoptCampaignBodySchema>;
     try {
       body = AdoptCampaignBodySchema.parse(req.body);
@@ -261,6 +264,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
           spec: body.spec,
           by: principal.subject,
           via: "web",
+          // The agent that acted, from the same attribution headers every other write reads — an agent
+          // drives this door over HTTP too, and a fact without the loop guard's key wakes its own author
+          // (arch-review 85). Read ONCE: two calls are two reads of the same request (L1).
+          ...(actingAgent !== undefined ? { agent: actingAgent } : {}),
         }),
       );
     } catch (err) {
