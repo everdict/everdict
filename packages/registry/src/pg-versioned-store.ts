@@ -119,12 +119,29 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return sortVersions(r.rows.map((x) => x.version));
   }
 
+  // ── REGISTERING A SUCCESSOR WITHOUT A READ-THEN-WRITE WINDOW (arch-review 77) ────────────────────
+  //
+  // A caller that resolves the entity's owning team and then registers under it has a window: an ownership
+  // transfer landing in between writes the successor under a team that no longer owns the entity, and the
+  // entity's versions come apart — the split `teamOfVersion` was made REQUIRED to prevent.
+  //
+  //     owner value exists   ≠   owner value remains valid until the write
+  //
+  // Detecting that afterwards is the write-then-verify shape arch-review 76 removed one layer up. So the
+  // value is not carried at all: the owner is read INSIDE the statement that writes. Ownership moves the
+  // ENTITY (`moveToTeam` re-files every version), so any live version answers for all of them — which is
+  // what makes a single scalar subquery a faithful reading rather than a guess about ordering.
+  async registerPreservingOwner(tenant: string, item: T, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    await this.register(tenant, item, createdBy, undefined, origin, { preserveEntityOwner: true });
+  }
+
   async register(
     tenant: string,
     item: T,
     createdBy?: string,
     teamId?: string,
     origin?: CapabilityOrigin,
+    opts?: { preserveEntityOwner?: boolean },
   ): Promise<void> {
     // Non-empty version invariant (parity with VersionedStore) — a blank version sorts to the tail as non-semver and
     // silently becomes `latest`. Reject it before the write.
@@ -191,8 +208,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     }
     if (this.hasTeamId) {
       columns.push("team_id");
-      values.push(teamId ?? null);
-      placeholders.push(`$${values.length}`);
+      if (opts?.preserveEntityOwner === true) {
+        // Resolved in the INSERT, so no transfer can land between reading the owner and writing the row.
+        placeholders.push(
+          `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`,
+        );
+      } else {
+        values.push(teamId ?? null);
+        placeholders.push(`$${values.length}`);
+      }
     }
     if (this.hasOrigin) {
       columns.push("origin");

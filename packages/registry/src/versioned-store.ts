@@ -41,6 +41,29 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return undefined;
   }
 
+  // ── REGISTERING A SUCCESSOR WITHOUT A READ-THEN-WRITE WINDOW (arch-review 77) ────────────────────
+  //
+  // A caller that resolves the entity's owning team and then registers under it has a window: an ownership
+  // transfer landing between the two writes the successor under a team that no longer owns the entity, and
+  // the versions come apart — the exact split `teamOfVersion` was made REQUIRED to prevent.
+  //
+  //     owner value exists   ≠   owner value remains valid until the write
+  //
+  // Detecting that afterwards is the write-then-verify shape this repository just spent a wave removing. So
+  // the value is not carried at all: the store resolves the current owner where the write happens. Ownership
+  // moves the ENTITY (`moveToTeam` re-files every version), so any live version answers for all of them.
+  registerPreservingOwner(tenant: string, item: T, createdBy?: string, origin?: CapabilityOrigin): void {
+    this.register(tenant, item, createdBy, this.entityTeam(tenant, item.id), origin);
+  }
+
+  // The entity's owning team, read from its live versions. Undefined = unowned, which is the workspace's —
+  // never "everyone's" (rule `api-layer`).
+  private entityTeam(tenant: string, id: string): string | undefined {
+    for (const entry of this.byOwner.get(tenant)?.get(id)?.values() ?? [])
+      if (entry.deletedAt === undefined && entry.teamId !== undefined) return entry.teamId;
+    return undefined;
+  }
+
   register(tenant: string, item: T, createdBy?: string, teamId?: string, origin?: CapabilityOrigin): void {
     // Non-empty version is a registry invariant (defense-in-depth for seed/file paths that bypass the contract
     // VersionSchema): an empty/blank version is non-semver, so compareVersions sorts it to the tail → it silently

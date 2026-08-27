@@ -114,6 +114,15 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
     assertPortable(resolveHarnessInstance(template, instance));
     this.store.register(tenant, instance, createdBy, teamId, origin);
   }
+
+  async registerPreservingOwner(
+    tenant: string,
+    instance: HarnessInstanceSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    this.store.registerPreservingOwner(tenant, instance, createdBy, origin);
+  }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }

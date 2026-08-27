@@ -51,6 +51,13 @@ export interface HarnessInstanceRegistry {
     teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void>;
+  // See `AgentRegistry.registerPreservingOwner` — the same window, closed the same way (arch-review 77).
+  registerPreservingOwner(
+    tenant: string,
+    instance: HarnessInstanceSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>; // resolved (template + pins)

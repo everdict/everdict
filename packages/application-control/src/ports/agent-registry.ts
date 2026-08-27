@@ -13,6 +13,15 @@ export interface AgentRegistry {
     teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void>;
+  // Register a SUCCESSOR under whatever team owns the entity right now, resolved where the write happens.
+  // The read-then-write spelling (`teamOfEntity` then `register(..., teamId)`) has a window an ownership
+  // transfer fits through, and detecting that afterwards is write-then-verify (arch-review 77).
+  registerPreservingOwner(
+    tenant: string,
+    spec: AgentSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<AgentSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded

@@ -2599,6 +2599,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/composition/logical-terminal.counterexample.test.ts"],
   },
   {
+    // arch-review 77. The successor's owning team is resolved INSIDE the write; the caller-read spelling
+    // leaves a window an ownership transfer fits through, and the entity's versions then come apart — the
+    // split `teamOfVersion` was made required to prevent.
+    name: "R77 — a successor is filed under a team the caller read earlier",
+    file: "packages/registry/src/versioned-store.ts",
+    from: "    this.register(tenant, item, createdBy, this.entityTeam(tenant, item.id), origin);",
+    to: "    this.register(tenant, item, createdBy, undefined, origin);",
+    build: "@everdict/registry",
+    suite: ["--root", "packages/registry", "src/owner-preserving-register.counterexample.test.ts"],
+  },
+  {
     // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping
     // the read reverts the lane to `unresolved{lane_cannot_report}` for every unpinned reference, and the
     // world axis then degrades exactly where drift is most likely. The dispatch counterexample must notice.

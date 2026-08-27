@@ -53,6 +53,17 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     assertPortable(resolveHarnessInstance(template, instance));
     await this.store.register(tenant, instance, createdBy, teamId, origin);
   }
+  // Same validation, and the owner resolved inside the write rather than by the caller (arch-review 77).
+  async registerPreservingOwner(
+    tenant: string,
+    instance: HarnessInstanceSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+  ): Promise<void> {
+    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
+    assertPortable(resolveHarnessInstance(template, instance));
+    await this.store.registerPreservingOwner(tenant, instance, createdBy, origin);
+  }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }

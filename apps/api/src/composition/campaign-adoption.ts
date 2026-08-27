@@ -14,7 +14,6 @@ import {
   resolveHarnessInstance,
 } from "@everdict/contracts";
 import { digestUnder } from "@everdict/domain";
-import { teamOfEntity } from "../common/team-scope.js";
 
 // ── THE CONSUMER OF WHAT A SETTLE AUTHORIZED (arch-review 72 P0 / 73) ────────────────────────────────
 //
@@ -108,14 +107,15 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         // the byte-for-byte document a later `get` returns.
         const would = digestOf(parsed);
         if (measured !== undefined && would !== measured) refuseDigest(would);
-        // ── THE ADOPTED VERSION STAYS WITH ITS TEAM (evolution review wave C, re-learned in 74) ───────
+        // ── THE ADOPTED VERSION STAYS WITH ITS TEAM, WITHOUT A WINDOW (wave C · 74 · 77) ─────────────
         //
-        // Ownership is read off an entity's NEWEST own version, so registering a successor with no team
-        // re-files the whole agent out of its team's list the moment it becomes latest. `teamOfEntity` is
-        // the single owner of that question.
-        const owner = await teamOfEntity(deps.agents, tenant, id);
+        // Ownership is read off the entity, so a successor registered with no team re-files the whole agent
+        // out of its team's list the moment it becomes latest (wave C, re-learned in 74). Reading the owner
+        // HERE and writing it below leaves a window an ownership transfer fits through — and detecting that
+        // afterwards is the write-then-verify shape arch-review 76 removed. So the store resolves the owner
+        // inside the statement that writes (arch-review 77).
         const existed = await deps.agents.has(tenant, id, version);
-        await deps.agents.register(tenant, parsed, by, owner.teamId, origin);
+        await deps.agents.registerPreservingOwner(tenant, parsed, by, origin);
         // Read back anyway: defence in depth, and the only thing that can see a registry which stored
         // something other than what it was handed. The correctness gate is above; this is the audit.
         const held = digestOf(await deps.agents.get(tenant, id, version));
@@ -134,9 +134,8 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
       const wouldResolve = resolveHarnessInstance(template, parsed);
       const would = digestOf(wouldResolve);
       if (measured !== undefined && would !== measured) refuseDigest(would);
-      const owner = await teamOfEntity(deps.harnesses, tenant, id);
       const existed = await deps.harnesses.has(tenant, id, version);
-      await deps.harnesses.register(tenant, parsed, by, owner.teamId, origin);
+      await deps.harnesses.registerPreservingOwner(tenant, parsed, by, origin);
       const held = digestOf(await deps.harnesses.get(tenant, id, version));
       return {
         kind: existed ? ("already_exists" as const) : ("created" as const),
