@@ -41,9 +41,15 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     return record && record.tenant === tenant ? record : undefined; // another workspace's row reads as nonexistent
   }
 
-  async list(tenant: string): Promise<EvolutionCampaignRecord[]> {
+  // ── THE LIST IS TEAM-FILTERED (arch-review 76 P1-security) ──────────────────────────────────────
+  //
+  // `visibleTeams` is the caller's ceiling, resolved by the transport. Absent = no ceiling (an admin, or a
+  // deployment with no teams). A campaign with no team of its own is UNOWNED — the workspace's, which every
+  // member sees; that is the legacy row's honest reading, not a hole.
+  async list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]> {
     return [...this.byId.values()]
       .filter((r) => r.tenant === tenant)
+      .filter((r) => visibleTeams === undefined || r.teamId === undefined || visibleTeams.includes(r.teamId))
       .sort((a, b) =>
         a.createdAt === b.createdAt ? b.id.localeCompare(a.id) : b.createdAt.localeCompare(a.createdAt),
       );
@@ -148,6 +154,7 @@ interface CampaignRow {
   id: string;
   tenant: string;
   issue_id: string;
+  team_id: string | null;
   frame: unknown;
   frame_digest: string;
   rounds: unknown;
@@ -165,6 +172,7 @@ function rowToRecord(row: CampaignRow): EvolutionCampaignRecord {
     id: row.id,
     tenant: row.tenant,
     issueId: row.issue_id,
+    ...(row.team_id !== null && row.team_id !== undefined ? { teamId: row.team_id } : {}),
     frame: row.frame,
     frameDigest: row.frame_digest,
     rounds: row.rounds,
@@ -176,8 +184,9 @@ function rowToRecord(row: CampaignRow): EvolutionCampaignRecord {
   });
 }
 
-const COLUMNS = "(id, tenant, issue_id, frame, frame_digest, rounds, state, close, created_by, created_at, updated_at)";
-const VALUES = "($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8::jsonb, $9, $10::timestamptz, $11::timestamptz)";
+const COLUMNS =
+  "(id, tenant, issue_id, team_id, frame, frame_digest, rounds, state, close, created_by, created_at, updated_at)";
+const VALUES = "($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8, $9::jsonb, $10, $11::timestamptz, $12::timestamptz)";
 
 export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
   constructor(private readonly client: SqlClient) {}
@@ -187,6 +196,7 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
       record.id,
       record.tenant,
       record.issueId,
+      record.teamId ?? null,
       JSON.stringify(record.frame),
       record.frameDigest,
       JSON.stringify(record.rounds),
@@ -218,11 +228,21 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
     return rows[0] ? rowToRecord(rows[0]) : undefined;
   }
 
-  async list(tenant: string): Promise<EvolutionCampaignRecord[]> {
-    const { rows } = await this.client.query<CampaignRow>(
-      "SELECT * FROM everdict_evolution_campaigns WHERE tenant=$1 ORDER BY created_at DESC, id DESC",
-      [tenant],
-    );
+  // Filtered IN THE QUERY, never after it: a limited page filtered afterwards lets one team's rows push
+  // everyone else's off it (the same reasoning the run list already carries).
+  async list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]> {
+    const { rows } =
+      visibleTeams === undefined
+        ? await this.client.query<CampaignRow>(
+            "SELECT * FROM everdict_evolution_campaigns WHERE tenant=$1 ORDER BY created_at DESC, id DESC",
+            [tenant],
+          )
+        : await this.client.query<CampaignRow>(
+            `SELECT * FROM everdict_evolution_campaigns
+              WHERE tenant=$1 AND (team_id IS NULL OR team_id = ANY($2))
+              ORDER BY created_at DESC, id DESC`,
+            [tenant, visibleTeams],
+          );
     return rows.map(rowToRecord);
   }
 

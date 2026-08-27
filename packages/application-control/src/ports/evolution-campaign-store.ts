@@ -32,7 +32,9 @@ export type CampaignCloseOutcome =
 export interface EvolutionCampaignStore {
   create(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void>; // id collision → throw (ConflictError)
   get(tenant: string, id: string): Promise<EvolutionCampaignRecord | undefined>;
-  list(tenant: string): Promise<EvolutionCampaignRecord[]>;
+  // `visibleTeams` = the caller's team ceiling, resolved by the transport. Applied in the QUERY so a page
+  // is built from what the caller may see rather than filtered after it (arch-review 76 P1-security).
+  list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]>;
   // Append-only, CAS on the current round count — contiguity of `seq` is the store's to enforce.
   appendRound(
     tenant: string,

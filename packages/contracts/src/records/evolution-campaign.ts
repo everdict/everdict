@@ -307,6 +307,10 @@ export const CampaignAdoptionProofSchema = z.object({
   provingScorecardId: z.string().min(1),
   // The issue this campaign was opened against, carried so the effect and the intent cannot come apart.
   issueId: z.string().min(1),
+  // …and the team that owned the campaign when it decided. Carried on the PROOF so a registry write can be
+  // gated against the authority that was frozen at open rather than against whatever the entity's team
+  // happens to be at the moment somebody spends it (arch-review 76 P1-security).
+  teamId: z.string().min(1).optional(),
   gateDigest: z.string().min(1),
 });
 export type CampaignAdoptionProof = z.infer<typeof CampaignAdoptionProofSchema>;
@@ -341,6 +345,17 @@ export const EvolutionCampaignRecordSchema = z.object({
   // The intent hub. The issue journals the narrative, links the scorecards, and carries the resolution /
   // regression watch; the campaign references it rather than duplicating any of that.
   issueId: z.string().min(1),
+  // ── WHOSE CAMPAIGN THIS IS (arch-review 76 P1-security) ─────────────────────────────────────────
+  //
+  // Frozen at open from the ISSUE's team — the campaign journals into it, so they cannot belong to
+  // different teams without one of them being a lie. It is what the read surface filters on and what the
+  // adopt mutation gates against: a campaign carrying no team of its own could only be gated by a
+  // workspace-level action, which asks nothing about the resource being changed.
+  //
+  // OPTIONAL AT REST, because rows written before this existed have none. Absent means UNOWNED, which the
+  // authz kernel lets through — never "everyone's" (rule `api-layer`). Not backfilled: guessing which team
+  // an old campaign belonged to would invent an authority nobody granted.
+  teamId: z.string().min(1).optional(),
   frame: StoredCampaignFrameSchema,
   // contentDigest of the frame at open — what an adoption references, and what makes a frame edit
   // representable only as a NEW campaign.

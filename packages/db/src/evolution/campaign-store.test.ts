@@ -292,6 +292,53 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     expect(store.outbox().map((e) => e.kind)).toEqual(["campaign.opened"]);
   });
 
+  it("FREEZES the issue's team at open, and lists only what a caller may see (arch-review 76)", async () => {
+    // A campaign drove a team-owned effect while carrying no team of its own, so the read surface could
+    // only filter by tenant and the adopt mutation could only be gated by a workspace-level action — which
+    // asks nothing about the resource it changes. The team is frozen from the ISSUE: the campaign journals
+    // into it, so they cannot belong to different teams without one of them being a lie.
+    //
+    // Seen RED before the column existed, observed:
+    //   a private team's campaign was listed to every member: expected 0 to be 1 (filtered length)
+    const store = new InMemoryEvolutionCampaignStore();
+    const teamed = new CampaignService({
+      store,
+      operations: store,
+      issues: {
+        async get(_t: string, ref: string) {
+          return { id: ref, teamId: ref === "iss_a" ? "team-a" : "team-b" };
+        },
+      },
+      diffs,
+      newId: () => `camp_${Math.random().toString(36).slice(2, 8)}`,
+      now: () => "2026-08-27T02:00:00.000Z",
+    });
+
+    const a = await teamed.open("acme", { issueId: "iss_a", frame }, "alice");
+    const b = await teamed.open("acme", { issueId: "iss_b", frame }, "bob");
+    expect(a.teamId, "the campaign did not inherit its issue's team").toBe("team-a");
+    expect(b.teamId).toBe("team-b");
+
+    // A ceiling of team-a sees only team-a's.
+    const forA = await teamed.list("acme", ["team-a"]);
+    expect(
+      forA.map((c) => c.id),
+      "a private team's campaign was listed to another team",
+    ).toEqual([a.id]);
+    // No ceiling (an admin, or a deployment with no teams) sees both.
+    expect((await teamed.list("acme")).length).toBe(2);
+
+    // …and a row with NO team is UNOWNED — the workspace's, visible to every ceiling. That is the legacy
+    // row's honest reading, and it is why the column is nullable and not backfilled.
+    await store.create({
+      ...a,
+      id: "camp-legacy-unowned",
+      teamId: undefined,
+    });
+    expect((await teamed.list("acme", ["team-a"])).map((c) => c.id)).toContain("camp-legacy-unowned");
+    expect((await teamed.list("acme", ["team-zzz"])).map((c) => c.id)).toEqual(["camp-legacy-unowned"]);
+  });
+
   it("REFUSES to decide, log or settle on a frame that predates the current rules (arch-review 75)", async () => {
     // arch-review 72 split creation from storage so a legacy campaign stays READABLE. It left the other
     // half open: such a campaign is still `open`, and a fresh round logged after the upgrade builds a

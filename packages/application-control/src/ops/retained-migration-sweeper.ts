@@ -19,7 +19,11 @@ import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-sto
 // licence to collect (rule `protocol` L2/L5).
 export type ExecutionDisposition =
   | { kind: "terminal" } // settled, and nothing is still driving it — the release simply never ran
-  | { kind: "live" } // still open, or an attempt is still working: these bytes are load-bearing
+  // Still open, or an attempt is still working: these bytes are load-bearing. `reason` because a sweep that
+  // leaves a row alone should be able to say WHY — "the run is running" and "an attempt is still open" are
+  // different worlds, and an operator reading a row that never converges needs to tell them apart
+  // (arch-review 76).
+  | { kind: "live"; reason: string }
   | { kind: "unknown"; reason: string }; // the ledger would not say — leave it exactly as it is
 
 export interface RetainedMigrationSweeperDeps {

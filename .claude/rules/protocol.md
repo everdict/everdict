@@ -396,6 +396,65 @@ returns. The fix for the leak was inert on every deployment with a real Postgres
   over a production path it never entered. That is the adapter-divergence law below, hit while fixing
   something else. A double that lacks the method under test proves the other branch.
 
+## A REFUSAL AFTER AN IRREVERSIBLE WRITE IS NOT A REFUSAL
+The adoption effect registered the candidate, read the document back, digested it, and threw on a mismatch.
+Every one of those steps is right and the ORDER makes them worthless: registry versions are immutable, so
+by the time the mismatch was found the label already held the wrong bytes — and the honest retry that
+follows is refused by immutability, forever (arch-review 76 P0).
+
+    proof authorizes D1 · label absent · caller submits C2
+    register(C2) → readback D2 ≠ D1 → throw, operation stays `decided`
+    honest retry with C1 → 409 immutable · this campaign can never be adopted
+
+    the readback found a mismatch   ≠   the write did not happen
+
+- **This is L1 in its plainest form, and it is easy to feel obeyed.** "Authority before effect" reads as
+  satisfied when the check is *in the same function* as the effect. It is satisfied only when the check
+  cannot be reached AFTER it. Ask: if this refusal fires, is the world exactly as it was?
+- **Look for a write-free resolver before accepting write-then-verify.** Both lanes here had one — an
+  agent's stored document is the parsed spec, a harness's is `resolveHarnessInstance(template, instance)`,
+  a pure function the registry's own read composes. "We can only know after writing" is a claim to check,
+  not a premise.
+- **Where the effect genuinely cannot be previewed**, the write must be reversible (a staging namespace
+  promoted on match) — and soft-delete is NOT reversal when the store refuses re-registration of a
+  tombstoned label.
+- ⚠️ **The test for this asserts the WORLD, not the refusal.** The first version checked "adoption threw"
+  and "operation still decided", both of which stay true while the label is poisoned. The assertions that
+  matter are `has(...) === false` afterwards and *the honest retry then succeeds*.
+
+## A JOIN THAT OWNS ONE ORDERING OWNS NOTHING
+Two durable facts have to meet: an adoption became `registered`, and its issue closed on that adoption's
+proving scorecard. A consumer was written for `issue done → registered` and nothing owned the reverse. An
+issue resolved BEFORE the registration produced one event, the consumer found the operation still `decided`
+and skipped it, the E1 cursor advanced — and there is no second delivery of an event nobody rejected
+(arch-review 76 P1-high).
+
+The code's own comment said *"the next delivery re-reads it"*: a promise about a delivery that does not
+exist. Comment-is-a-claim, with an event runner as the promised component.
+
+- **Whichever fact lands SECOND performs the join.** Both writers check for the other; neither ordering is
+  privileged. One shared predicate, consumed from both sides — written twice it has already diverged (L3).
+- **An at-least-once cursor advances on success.** "The next delivery" only exists after a THROW. If your
+  recovery story says "later", name the mechanism: a reverse consumer, a reconciler over the owed worklist,
+  or a retry the handler actually triggers.
+- The second-side join is best-effort by contract: the effect already landed, and an operation left owed is
+  recoverable where failing a landed adoption is not.
+
+## A PHYSICAL ATTEMPT'S TERMINAL IS NOT THE CASE'S TERMINAL
+The legacy-retained sweeper folded `attempts.every(isTerminalAttemptState)` into "this execution is over".
+`failed` means THIS attempt ended badly; `superseded` means another attempt owns the case. Both are terminal
+for the ROW. The ledger exists to record several attempts per case, so there is always a window where every
+attempt so far is terminal and the replacement has not opened — and collecting there deletes the retry's
+artifacts (arch-review 76 P1).
+
+- **A certificate over a logical unit reads the logical ledger.** The attempt row already carried
+  `childRunId`; the child's status is the case's own outcome. Physical rows narrow the question, they do not
+  answer it.
+- **Fold fail-closed and in order**: any `unknown` wins, then any `live`, and only an all-terminal set is a
+  licence. An attempt row that names no child answers `unknown`, not `terminal`.
+- Same shape as L5's "terminal child rows is not an exited container", one layer up: the row's clock and the
+  work's clock are different clocks.
+
 ## A SCHEMA SPLIT STOPS AT THE FIELD YOU WERE THINKING ABOUT
 arch-review 72 found "a creation rule applied at decode time is a data outage" on the campaign FRAME and
 closed it by splitting `CampaignFrameSchema` (create) from `StoredCampaignFrameSchema` (decode). The SAME

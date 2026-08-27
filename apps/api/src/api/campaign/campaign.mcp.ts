@@ -1,7 +1,7 @@
 import { CampaignAdoptionProofSchema, CampaignFrameSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { teamCeiling } from "../../common/team-scope.js";
+import { teamCeiling, teamOfEntity } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 import { gate } from "../route-context.js";
 
@@ -36,7 +36,10 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
   server.registerTool(
     "list_campaigns",
     { annotations: { readOnlyHint: true }, description: "The workspace's evolution campaigns", inputSchema: {} },
-    () => run(principal, "scorecards:read", async () => ok(await campaigns.list(ws))),
+    () =>
+      run(principal, "scorecards:read", async () =>
+        ok(await campaigns.list(ws, (await teamCeiling(deps, principal)).visibleTeams)),
+      ),
   );
 
   server.registerTool(
@@ -150,20 +153,24 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         }
         const checked = CampaignAdoptionProofSchema.safeParse(parsedProof);
         if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
-        // The family's write action, gated like the route — spending an authorization is not a way around it.
-        gate(principal, checked.data.candidate.type === "agent" ? "agents:write" : "harnesses:register");
+        // The family's write action AND the team that owns the entity, gated like the route: preserving an
+        // owner team is not the same question as being allowed to write to it (arch-review 76 P1-security).
+        const candidate = checked.data.candidate;
+        const owner =
+          candidate.type === "agent"
+            ? await teamOfEntity(deps.agentRegistry, ws, candidate.id)
+            : await teamOfEntity(deps.harnessInstances, ws, candidate.id);
+        gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
         return ok(
           await deps.campaignAdoption.adopt({
             tenant: ws,
             campaignId: id,
             proof: checked.data,
             candidate: {
-              type: checked.data.candidate.type,
-              id: checked.data.candidate.id,
-              version: checked.data.candidate.version,
-              ...(checked.data.candidate.specDigest !== undefined
-                ? { specDigest: checked.data.candidate.specDigest }
-                : {}),
+              type: candidate.type,
+              id: candidate.id,
+              version: candidate.version,
+              ...(candidate.specDigest !== undefined ? { specDigest: candidate.specDigest } : {}),
             },
             spec: parsedSpec,
             by: principal.subject,

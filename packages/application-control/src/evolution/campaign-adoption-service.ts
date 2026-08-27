@@ -21,6 +21,20 @@ import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.j
 // doing the annotation thing this whole review series is about.
 export interface CampaignAdoptionDeps {
   operations: AdoptionOperationStore;
+  // ── THE OTHER HALF OF THE COMPLETION JOIN (arch-review 76 P1-high) ──────────────────────────────
+  //
+  // `adoptionCompletionWatch` handles `issue done → operation registered`. The reverse ordering had NO
+  // owner: an issue resolved BEFORE the registration landed produced one event, the watcher skipped the
+  // operation (it was still `decided`), the E1 cursor advanced past it, and the operation stayed
+  // `registered` forever — there is no second delivery of an event nobody rejected.
+  //
+  // The watcher's own comment claimed "the next delivery re-reads it", which is a promise about a delivery
+  // that does not exist (this repository's comment-is-a-claim law). So the registration path reads the
+  // issue itself: whichever fact lands second performs the join, and neither has to arrive first.
+  //
+  // A read that fails is NOT "the issue is not resolved" — it leaves the operation `registered` and owed,
+  // which the reconciler and any later issue event both still converge on (L2).
+  issues: { get(tenant: string, ref: string): Promise<IssueResolutionView> };
   // The effect itself, injected: this package owns no registry. It takes the SPEC the caller is registering
   // and answers with what the registry now HOLDS at that version — the version, and the digest of the
   // document a later read resolves to.
@@ -66,6 +80,13 @@ export interface CampaignAdoptionDeps {
 export interface RegistrationOutcome {
   kind: "created" | "already_exists";
   candidate: { type: "agent" | "harness"; id: string; version: string; specDigest?: string };
+}
+
+// The only thing this service asks an issue: has it been closed, and on which evidence. Structural, so
+// `IssueService` satisfies it without this package depending on the whole tracker surface.
+export interface IssueResolutionView {
+  status: string;
+  resolution?: { scorecardId?: string };
 }
 
 export type AdoptionOutcome =
@@ -207,6 +228,34 @@ export class CampaignAdoptionService {
         { campaign: input.campaignId },
         "the authorization vanished between spending it and reading it back",
       );
-    return { kind: "adopted", operation, version: landedCandidate.version };
+    // ── …AND IF THE INTENT WAS ALREADY SETTLED, DISCHARGE IT NOW ────────────────────────────────────
+    //
+    // The registration is the SECOND fact here, so this side performs the join. Best-effort by contract and
+    // deliberately so: the adoption succeeded, and an operation left `registered` is owed rather than lost —
+    // the periodic reconciler and any later issue transition both still reach it. What must never happen is
+    // the reverse: reporting a failure for an adoption that landed.
+    const completed = await this.completeIfIntentSettled(input.tenant, operation);
+    return { kind: "adopted", operation: completed ?? operation, version: landedCandidate.version };
+  }
+
+  private async completeIfIntentSettled(
+    tenant: string,
+    operation: AdoptionOperation,
+  ): Promise<AdoptionOperation | undefined> {
+    const issue = await this.deps.issues.get(tenant, operation.proof.issueId).then(
+      (record) => record,
+      () => undefined, // unreadable ≠ unresolved: leave it owed (L2)
+    );
+    if (issue === undefined || issue.status !== "done") return undefined;
+    // The SAME predicate the watcher uses, and the reason it is a predicate: an issue closed on other
+    // evidence is not this adoption discharging its intent (L3).
+    if (issue.resolution?.scorecardId !== operation.proof.provingScorecardId) return undefined;
+    const outcome = await this.deps.operations.markCompleted(
+      tenant,
+      operation.proof.campaignId,
+      contentDigest(operation.proof),
+    );
+    if (outcome !== "completed" && outcome !== "already_completed") return undefined;
+    return await this.deps.operations.forCampaign(tenant, operation.proof.campaignId);
   }
 }

@@ -64,6 +64,8 @@ function build(snapshot: CampaignSnapshot) {
       operations: store,
       agents,
       harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
     }),
   });
   return { app, store, agents };
@@ -286,15 +288,19 @@ describe("campaign routes — the settlement over HTTP", () => {
       "a refused adoption spent its authorization anyway",
     ).toBe("decided");
 
-    // The honest path. NOTE the version already exists now (the substitution wrote it), so this also pins
-    // the immutability refusal: different bytes under one label is the registry's own conflict.
+    // ⚠️ RE-AIMED (arch-review 76). This used to assert 409 here, because the substituted attempt above had
+    // already written its bytes to the label and immutability then refused the honest caller — the test was
+    // pinning the DEFECT. The digest is proved before the write now, so the label is untouched by a refused
+    // attempt and the honest path is the one that lands.
     const adopted = await app.inject({
       method: "POST",
       url: `/campaigns/${id}/adopt`,
       headers: H,
       payload: { proof, spec },
     });
-    expect(adopted.statusCode).toBe(409); // 1.0.1 is already taken by the substituted bytes
+    expect(adopted.statusCode, "a refused attempt poisoned the label the honest caller needed").toBe(200);
+    expect((adopted.json() as { kind: string }).kind).toBe("adopted");
+    expect(await agents.has("acme", "everdict", "1.0.1")).toBe(true);
     await app.close();
   });
 
@@ -426,4 +432,24 @@ function unusedHarnesses() {
       throw new Error("the harness lane is not exercised by these cases");
     },
   } as unknown as Parameters<typeof buildCampaignAdoption>[0]["harnesses"];
+}
+
+// The template half, unexercised for the same reason the harness lane is: resolving one needs a seeded
+// taxonomy, and a double that skipped that would be testing a resolution production does not perform.
+function unusedTemplates() {
+  return {
+    async get() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+  } as unknown as Parameters<typeof buildCampaignAdoption>[0]["templates"];
+}
+
+// An issue nobody has resolved — the ordinary case, and the one that leaves the completion join to the
+// watcher. The cases that exercise the REVERSE ordering supply their own resolved issue.
+function openIssue() {
+  return {
+    async get() {
+      return { status: "in_progress" as const };
+    },
+  };
 }

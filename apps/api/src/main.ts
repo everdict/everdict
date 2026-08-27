@@ -65,11 +65,10 @@ import type {
   ExecutionId,
   ProductSeries,
   RegistryAuth,
-  RunRecord,
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
-import { TERMINAL_RUN_STATUSES, UpstreamError, isTerminalAttemptState } from "@everdict/contracts";
+import { UpstreamError } from "@everdict/contracts";
 import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
@@ -108,6 +107,7 @@ import { lateBoundEmitter, lateBoundIssueLinker } from "./composition/late-event
 import { deploymentNomad } from "./composition/nomad-env.js";
 import { makePersistence } from "./composition/persistence.js";
 import { REPLICA_ID } from "./composition/replica.js";
+import { retainedDispositionOf } from "./composition/retained-disposition.js";
 import { buildRun } from "./composition/run.js";
 import { DeferredRecoverySweep, buildRuntimeAccess, runStartupRecovery } from "./composition/runtime-access.js";
 import { buildRuntimeCompute } from "./composition/runtime-compute.js";
@@ -1036,46 +1036,12 @@ async function main(): Promise<void> {
     // are legacy rows rather than a live queue.
     const retainedSweeper = new RetainedMigrationSweeper({
       cleanup: intermediateCleanup,
-      dispositionOf: async (_tenant, executionId) => {
-        // ── A BATCH CASE IS THE MAJORITY LANE, AND IT WAS PERMANENTLY UNKNOWN (arch-review 75 P1) ──
-        //
-        // The first version answered `unknown` for anything not starting `evd-run-`, which is honest and
-        // useless: a scorecard case's coordinate is `evd-<scorecardId>-<caseId>`, so every batch-lane legacy
-        // retained row stayed retained forever — the leak this sweeper exists to close, in the lane where
-        // most of it lives.
-        //
-        // It is answered through the ATTEMPT LEDGER rather than by parsing the coordinate. Parsing cannot
-        // work: a scorecard id is a UUID and carries its own dashes, so `evd-A-B` has no unambiguous split —
-        // and re-deriving identity from a rendered string is the thing rule `protocol` L3 forbids. The
-        // attempt store is keyed by execution id already; asking it is exact and needs no derivation.
-        if (!executionId.startsWith("evd-run-")) {
-          if (executionAttemptStore === undefined)
-            return { kind: "unknown", reason: "no attempt ledger to ask about a batch case" };
-          const attempts = await executionAttemptStore.list(executionId).then(
-            (rows) => ({ ok: true as const, rows }),
-            () => ({ ok: false as const, rows: [] }),
-          );
-          if (!attempts.ok) return { kind: "unknown", reason: "the attempt ledger did not answer" };
-          // NO ROWS IS NOT "GONE". An execution this ledger never recorded is one we cannot judge — it may
-          // predate the ledger entirely — and collecting on that would be a certificate over compute nobody
-          // observed (L5). Terminal means every recorded attempt is terminal AND at least one exists.
-          if (attempts.rows.length === 0)
-            return { kind: "unknown", reason: "the attempt ledger holds nothing for this execution" };
-          return attempts.rows.every((a) => isTerminalAttemptState(a.state)) ? { kind: "terminal" } : { kind: "live" };
-        }
-        const id = executionId.slice("evd-run-".length);
-        // NOT `.catch(() => undefined)` collapsed into absence: a ledger that would not answer and a run
-        // that is gone are different states, and only one of them is a licence to collect (L2).
-        const run = await store.get(id).then(
-          (r: RunRecord | undefined) => ({ ok: true as const, r }),
-          (e: unknown) => ({ ok: false as const, e }),
-        );
-        if (!run.ok) return { kind: "unknown", reason: "the run ledger did not answer" };
-        if (run.r === undefined) return { kind: "unknown", reason: "no such run — this row names nothing we own" };
-        return (TERMINAL_RUN_STATUSES as readonly string[]).includes(run.r.status)
-          ? { kind: "terminal" }
-          : { kind: "live" };
-      },
+      // The disposition is a NAMED function in `composition/` so its counterexample drives the production
+      // resolver — a closure here is production code no test can reach (arch-review 76 P1).
+      dispositionOf: retainedDispositionOf({
+        runs: store,
+        ...(executionAttemptStore ? { attempts: executionAttemptStore } : {}),
+      }),
     });
     setInterval(
       whenLeader(leader, () => void retainedSweeper.tick().catch(() => {})),
@@ -1271,6 +1237,8 @@ async function main(): Promise<void> {
     operations: adoptionOperationStore,
     agents: agentRegistry,
     harnesses: harnessInstanceRegistry,
+    templates: harnessTemplateRegistry,
+    issues: issueService,
   });
 
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.

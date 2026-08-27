@@ -2569,6 +2569,36 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
+    // back after it, which poisons the label with bytes the campaign never measured and makes the honest
+    // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.
+    name: "R76 — the adoption proves its digest only after the irreversible write",
+    file: "apps/api/src/composition/campaign-adoption.ts",
+    from: "        if (measured !== undefined && would !== measured) refuseDigest(would);",
+    to: "        // MUTATED: the proof moves back after the write",
+    suite: ["--root", "apps/api", "src/composition/adoption-is-spent.counterexample.test.ts"],
+  },
+  {
+    // arch-review 76 P1-high. The registration side of the completion join. Without it an issue resolved
+    // before the adoption landed leaves the operation `registered` forever — the E1 cursor advanced past
+    // the only event that would have completed it.
+    name: "R76 — only one ordering of the completion join is owned",
+    file: "packages/application-control/src/evolution/campaign-adoption-service.ts",
+    from: "    const completed = await this.completeIfIntentSettled(input.tenant, operation);",
+    to: "    const completed = undefined;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/adoption-consumes-proof.counterexample.test.ts"],
+  },
+  {
+    // arch-review 76 P1. Physical attempts terminal is not the case terminal; dropping the child join
+    // collects the artifacts a retry still needs.
+    name: "R76 — a terminal attempt is read as a terminal case",
+    file: "apps/api/src/composition/retained-disposition.ts",
+    from: '    const unknown = dispositions.find((d) => d.kind === "unknown");',
+    to: '    return { kind: "terminal" };\n    const unknown = dispositions.find((d) => d.kind === "unknown");',
+    suite: ["--root", "apps/api", "src/composition/logical-terminal.counterexample.test.ts"],
+  },
+  {
     // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping
     // the read reverts the lane to `unresolved{lane_cannot_report}` for every unpinned reference, and the
     // world axis then degrades exactly where drift is most likely. The dispatch counterexample must notice.

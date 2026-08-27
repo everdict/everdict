@@ -107,7 +107,13 @@ function makeDeps(
     campaignService,
     // Through the PRODUCTION builder over a real registry — BFF↔MCP parity means the same consumer, not a
     // second one (arch-review 72 P0 / 73).
-    campaignAdoption: buildCampaignAdoption({ operations: store, agents, harnesses: unusedHarnesses() }),
+    campaignAdoption: buildCampaignAdoption({
+      operations: store,
+      agents,
+      harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
+    }),
   };
 }
 
@@ -233,4 +239,24 @@ function unusedHarnesses() {
       throw new Error("the harness lane is not exercised by these cases");
     },
   } as unknown as Parameters<typeof buildCampaignAdoption>[0]["harnesses"];
+}
+
+// The template half, unexercised for the same reason the harness lane is: resolving one needs a seeded
+// taxonomy, and a double that skipped that would be testing a resolution production does not perform.
+function unusedTemplates() {
+  return {
+    async get() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+  } as unknown as Parameters<typeof buildCampaignAdoption>[0]["templates"];
+}
+
+// An issue nobody has resolved — the ordinary case, and the one that leaves the completion join to the
+// watcher. The cases that exercise the REVERSE ordering supply their own resolved issue.
+function openIssue() {
+  return {
+    async get() {
+      return { status: "in_progress" as const };
+    },
+  };
 }

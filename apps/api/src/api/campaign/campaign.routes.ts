@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import { teamCeiling } from "../../common/team-scope.js";
+import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
@@ -43,7 +43,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     } catch (err) {
       return sendError(reply, err);
     }
-    return reply.send(await deps.campaignService.list(principal.workspace));
+    // The caller's team ceiling, applied in the store's query — a private team's campaigns are answered as
+    // nonexistent to everybody else (arch-review 76 P1-security).
+    const { visibleTeams } = await teamCeiling(deps, principal);
+    return reply.send(await deps.campaignService.list(principal.workspace, visibleTeams));
   });
 
   app.get<{ Params: { id: string } }>("/campaigns/:id", { schema: campaignDocs.get }, async (req, reply) => {
@@ -57,6 +60,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return sendError(reply, err);
     }
     try {
+      const record = await deps.campaignService.get(principal.workspace, req.params.id);
+      // A private team's campaign reads as nonexistent to everybody else — the same 404 an absent one gets,
+      // so the surface does not leak which ids exist (arch-review 76 P1-security).
+      await assertTeamVisible(deps, principal, record.teamId, "Campaign");
       return reply.send(await deps.campaignService.get(principal.workspace, req.params.id));
     } catch (err) {
       return sendError(reply, err);
@@ -114,6 +121,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return sendError(reply, err);
       }
       try {
+        const record = await deps.campaignService.get(principal.workspace, req.params.id);
+        // A private team's campaign reads as nonexistent to everybody else — the same 404 an absent one gets,
+        // so the surface does not leak which ids exist (arch-review 76 P1-security).
+        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
         return reply.send(await deps.campaignService.decision(principal.workspace, req.params.id));
       } catch (err) {
         return sendError(reply, err);
@@ -139,6 +150,7 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       }
       try {
         const { campaign, operation } = await deps.campaignService.adoption(principal.workspace, req.params.id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         // `operation: null` is an ANSWER — this campaign authorized nothing — never a 404 that reads as "no
         // such campaign". The state it closed in says which of the two absences this is.
         return reply.send({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
@@ -169,8 +181,27 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     } catch (err) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
+    // ── …AND AGAINST THE TEAM THAT OWNS THE THING BEING WRITTEN (arch-review 76 P1-security) ────────
+    //
+    // Preserving the owner team and being ALLOWED to write to it are different questions, and the first
+    // version answered only the first: the composition read the entity's team and registered the successor
+    // under it, while the route gated a workspace-level action with no resource scope. So a member of Team B
+    // holding `agents:write` could adopt a candidate owned by Team A and mint a Team-A-owned successor.
+    //
+    // The team model is explicit that READ is decided by team privacy and WRITE by team membership; a write
+    // gated without `{ teamId }` has asked neither question about the resource it is about to change.
     try {
-      gate(principal, body.proof.candidate.type === "agent" ? "agents:write" : "harnesses:register");
+      const campaign = await deps.campaignService?.get(principal.workspace, req.params.id);
+      // Two authorities, both required: the campaign this proof came from, and the entity being written.
+      // The proof carries the team frozen at open, so a later ownership move cannot widen what it authorizes.
+      await assertTeamVisible(deps, principal, campaign?.teamId, "Campaign");
+      if (body.proof.teamId !== undefined) gate(principal, "scorecards:run", { teamId: body.proof.teamId });
+      const candidate = body.proof.candidate;
+      const owner =
+        candidate.type === "agent"
+          ? await teamOfEntity(deps.agentRegistry, principal.workspace, candidate.id)
+          : await teamOfEntity(deps.harnessInstances, principal.workspace, candidate.id);
+      gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -216,6 +247,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return sendError(reply, err);
     }
     try {
+      const record = await deps.campaignService.get(principal.workspace, req.params.id);
+      // Settling is a WRITE on the campaign, so the gate carries its team — not just the workspace action.
+      await assertTeamVisible(deps, principal, record.teamId, "Campaign");
+      gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
       return reply.send(await deps.campaignService.settle(principal.workspace, req.params.id, principal.subject));
     } catch (err) {
       return sendError(reply, err); // continue/identity_unverified refusals + lost settle races → 409

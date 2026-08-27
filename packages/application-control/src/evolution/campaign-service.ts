@@ -94,7 +94,10 @@ export interface TeamAccess {
 export interface CampaignServiceDeps {
   store: EvolutionCampaignStore;
   // The intent hub the campaign journals into — an unreadable issue refuses the open (its `get` throws).
-  issues: { get(tenant: string, ref: string): Promise<{ id: string }> };
+  // …and the TEAM it belongs to. A campaign journals into this issue, so they cannot be owned by different
+  // teams without one of them being a lie — the campaign's authority is frozen from here at open
+  // (arch-review 76 P1-security).
+  issues: { get(tenant: string, ref: string): Promise<{ id: string; teamId?: string }> };
   // THE diff predicate (the ScorecardService facade's diffSnapshot) — policy-resolved transitions, trial
   // statistics, experiment identity, AND the two sides' records, so the round's declared coordinates are
   // verified against what actually ran. One owner; this service only summarizes its answer.
@@ -149,6 +152,7 @@ export class CampaignService {
       id: this.newId(),
       tenant,
       issueId: issue.id,
+      ...(issue.teamId !== undefined ? { teamId: issue.teamId } : {}),
       frame: input.frame,
       frameDigest: contentDigest(input.frame),
       rounds: [],
@@ -179,8 +183,8 @@ export class CampaignService {
     return record;
   }
 
-  async list(tenant: string): Promise<EvolutionCampaignRecord[]> {
-    return this.deps.store.list(tenant);
+  async list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]> {
+    return this.deps.store.list(tenant, visibleTeams);
   }
 
   // The pure gate over the current trace — a read, never an effect.

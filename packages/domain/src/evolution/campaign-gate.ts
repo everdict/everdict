@@ -86,7 +86,7 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
 // Returns undefined for any answer that is not an adoption: there is nothing to authorize.
 export function adoptionProofOf(
   answer: CampaignGateAnswer,
-  campaign: { id: string; frameDigest: string; issueId: string; frame: CampaignFrame },
+  campaign: { id: string; frameDigest: string; issueId: string; teamId?: string; frame: CampaignFrame },
   rounds: readonly CampaignRound[],
 ): CampaignAdoptionProof | undefined {
   if (answer.kind !== "adopt") return undefined;
@@ -112,6 +112,10 @@ export function adoptionProofOf(
     },
     provingScorecardId: answer.provingScorecardId,
     issueId: campaign.issueId,
+    // …and the authority this campaign decided under. Carried so a registry write is gated against the team
+    // frozen at open rather than whatever the entity's team happens to be when somebody spends it
+    // (arch-review 76 P1-security).
+    ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
     gateDigest: contentDigest(answer),
   };
 }

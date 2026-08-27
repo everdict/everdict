@@ -124,6 +124,8 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
       operations: store,
       agents,
       harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
     }).adopt({
       tenant: "acme",
       campaignId: "camp-1",
@@ -141,26 +143,54 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
     expect(current()?.registeredVersion).toBe("1.1.0");
   });
 
-  it("REFUSES to spend when the registry would hold bytes the campaign never measured", async () => {
-    // The C1-evaluated / C2-saved substitution, at the seam that performs the effect. The proof names one
-    // document and the caller submits another under the same label.
+  // ── A REFUSAL AFTER AN IRREVERSIBLE WRITE IS NOT A REFUSAL (arch-review 76 P0) ────────────────────
+  //
+  // The C1-evaluated / C2-saved substitution, and the thing the first version got WRONG about it. It
+  // registered, read back, and threw — the right answer at the wrong moment. Registry versions are
+  // immutable, so the label already held C2 when the mismatch was found, and the honest retry that follows
+  // is refused by immutability. Forever:
+  //
+  //     campaign adopted · operation decided · registry holds the wrong bytes · retry impossible
+  //
+  // The comment defending that ordering said "`decided` over a capability that exists is recoverable". It
+  // is — when the capability is the right one. This is the half the first version did not assert: not just
+  // that the adoption was refused, but that the WORLD is unchanged and the honest caller can still win.
+  //
+  // Seen RED before the pre-write proof, observed:
+  //   a refused adoption left the wrong bytes at the label: expected true to be false
+  it("REFUSES a substituted candidate WITHOUT touching the label, and the honest retry then succeeds", async () => {
     const proof = proofFor(await measuredDigest());
     const { store, current } = operations(proof);
     const agents = new InMemoryAgentRegistry();
+    const service = buildCampaignAdoption({
+      operations: store,
+      agents,
+      harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
+    });
+    const request = {
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof,
+      candidate: candidateOf(proof),
+      by: "alice",
+      via: "web" as const,
+    };
 
     await expect(
-      buildCampaignAdoption({ operations: store, agents, harnesses: unusedHarnesses() }).adopt({
-        tenant: "acme",
-        campaignId: "camp-1",
-        proof,
-        candidate: candidateOf(proof),
-        spec: { ...SPEC, instructions: "a completely different agent" },
-        by: "alice",
-        via: "web" as const,
-      }),
+      service.adopt({ ...request, spec: { ...SPEC, instructions: "a completely different agent" } }),
       "a substituted candidate was adopted under the measured version's label",
-    ).rejects.toThrow();
+    ).rejects.toThrow(/nothing was registered/);
     expect(current()?.state, "the substitution spent the authorization anyway").toBe("decided");
+    // …and the label is UNTOUCHED. This assertion is what makes the refusal mean something: an immutable
+    // version poisoned by a rejected attempt can never be corrected.
+    expect(await agents.has("acme", "a1", "1.1.0"), "a refused adoption left the wrong bytes at the label").toBe(false);
+
+    // The honest caller then wins — impossible if the refusal happened after the write.
+    const outcome = await service.adopt({ ...request, spec: SPEC });
+    expect(outcome.kind, "the honest retry was refused by bytes a rejected attempt left behind").toBe("adopted");
+    expect(current()?.state).toBe("registered");
   });
 
   it("REFUSES a spec that names a version this campaign did not authorize", async () => {
@@ -172,6 +202,8 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
         operations: store,
         agents: new InMemoryAgentRegistry(),
         harnesses: unusedHarnesses(),
+        templates: unusedTemplates(),
+        issues: openIssue(),
       }).adopt({
         tenant: "acme",
         campaignId: "camp-1",
@@ -194,6 +226,8 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
       operations: store,
       agents: new InMemoryAgentRegistry(),
       harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
     });
     const request = {
       tenant: "acme",
@@ -225,4 +259,24 @@ function unusedHarnesses() {
       throw new Error("the harness lane is not exercised by these cases");
     },
   } as unknown as Parameters<typeof buildCampaignAdoption>[0]["harnesses"];
+}
+
+// The template half, unexercised for the same reason the harness lane is: resolving one needs a seeded
+// taxonomy, and a double that skipped that would be testing a resolution production does not perform.
+function unusedTemplates() {
+  return {
+    async get() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+  } as unknown as Parameters<typeof buildCampaignAdoption>[0]["templates"];
+}
+
+// An issue nobody has resolved — the ordinary case, and the one that leaves the completion join to the
+// watcher. The cases that exercise the REVERSE ordering supply their own resolved issue.
+function openIssue() {
+  return {
+    async get() {
+      return { status: "in_progress" as const };
+    },
+  };
 }

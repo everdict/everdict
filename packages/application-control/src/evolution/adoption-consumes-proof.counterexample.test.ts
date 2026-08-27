@@ -2,7 +2,7 @@ import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contrac
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
-import { CampaignAdoptionService } from "./campaign-adoption-service.js";
+import { type CampaignAdoptionDeps, CampaignAdoptionService } from "./campaign-adoption-service.js";
 
 // ── AN AUTHORIZATION NOBODY SPENDS IS DECORATION (arch-review 72 P0) ────────────────────────────────
 //
@@ -90,6 +90,8 @@ const serviceOver = (
 ) =>
   new CampaignAdoptionService({
     operations: store,
+    // An issue nobody resolved — the ordinary path, which leaves the completion join to the watcher.
+    issues: { get: async () => ({ status: "in_progress" }) },
     register: async ({ proof }) => {
       registered.push(proof.candidate.version);
       return {
@@ -104,6 +106,18 @@ const serviceOver = (
       };
     },
   });
+
+// The registry double, typed rather than cast: `as never` on a constructed argument is what
+// `pnpm constructed-casts` exists to refuse, and here it also erased the parameter types.
+const landsAsAuthorized: CampaignAdoptionDeps["register"] = async ({ proof }) => ({
+  kind: "already_exists",
+  candidate: {
+    type: proof.candidate.type,
+    id: proof.candidate.id,
+    version: proof.candidate.version,
+    specDigest: "sha256:c1",
+  },
+});
 
 // The bytes a caller submits. Opaque to the service by design — the digest that decides is the one the
 // registry resolves, never a hash of this.
@@ -369,12 +383,82 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     }
   });
 
+  // ── THE ISSUE CAN CLOSE FIRST, AND THE JOIN STILL HAPPENS (arch-review 76 P1-high) ───────────────
+  //
+  // `adoptionCompletionWatch` owns `registered → issue done`. The reverse had NO owner: an issue resolved
+  // BEFORE the registration landed produced one event, the watcher found the operation still `decided` and
+  // skipped it, and the E1 cursor advanced. There is no second delivery of an event nobody rejected, so the
+  // operation stayed `registered` forever.
+  //
+  // The watcher's comment claimed "the next delivery re-reads it" — a promise about a delivery that does not
+  // exist. Whichever fact lands SECOND performs the join now, and this is the ordering nothing covered.
+  //
+  // Seen RED before the registration-side join, observed:
+  //   an adoption whose issue had already closed on its evidence stayed registered: expected 'registered' to be 'completed'
+  it("COMPLETES immediately when the issue had ALREADY resolved on this adoption's evidence", async () => {
+    const { store, current } = operations();
+    const service = new CampaignAdoptionService({
+      operations: store,
+      // The issue closed first — before anybody registered anything.
+      issues: { get: async () => ({ status: "done", resolution: { scorecardId: "sc-cand" } }) },
+      register: landsAsAuthorized,
+    });
+
+    const outcome = await service.adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    });
+
+    expect(outcome.kind).toBe("adopted");
+    expect(current()?.state, "an adoption whose issue had already closed on its evidence stayed registered").toBe(
+      "completed",
+    );
+  });
+
+  it("stays REGISTERED when the issue closed on OTHER evidence, or is unreadable", async () => {
+    // The same predicate the watcher uses, on this side of the join: a resolution that names a different
+    // scorecard is not this adoption discharging its intent, and an unreadable issue is not an unresolved
+    // one — both leave the operation owed rather than completed (L2/L3).
+    for (const get of [
+      async () => ({ status: "done", resolution: { scorecardId: "sc-something-else" } }),
+      async () => ({ status: "in_progress" }),
+      async () => {
+        throw new Error("the tracker did not answer");
+      },
+    ]) {
+      const { store, current } = operations();
+      const service = new CampaignAdoptionService({
+        operations: store,
+        issues: { get },
+        register: landsAsAuthorized,
+      });
+
+      const outcome = await service.adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      });
+      expect(outcome.kind, "an unreadable tracker failed an adoption that had already landed").toBe("adopted");
+      expect(current()?.state).toBe("registered");
+    }
+  });
+
   it("does NOT spend the authorization when the registry write fails", async () => {
     // The ordering that makes a crash recoverable: the effect first, the spend after. Spending first would
     // leave `registered` over a capability that does not exist — a lie no read can detect.
     const { store, current } = operations();
     const svc = new CampaignAdoptionService({
       operations: store,
+      issues: { get: async () => ({ status: "in_progress" }) },
       register: async () => {
         throw new Error("the registry refused the write");
       },

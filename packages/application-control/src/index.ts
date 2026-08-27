@@ -432,6 +432,8 @@ export {
   type AdoptionRequest,
   CampaignAdoptionService,
   type CampaignAdoptionDeps,
+  type IssueResolutionView,
+  type RegistrationOutcome,
 } from "./evolution/campaign-adoption-service.js";
 export {
   adoptionCompletionWatch,

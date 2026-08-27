@@ -55,7 +55,7 @@ describe("[R71 COUNTEREXAMPLE] a terminal execution's retained row is migrated, 
     // collecting its half is deleting the evidence its own recovery would need.
     const cleanup = await stuck();
 
-    const tick = await sweeper(cleanup, { kind: "live" }).tick();
+    const tick = await sweeper(cleanup, { kind: "live", reason: "the run is running" }).tick();
 
     expect(tick.released, "a running case's artifacts were collected").toBe(0);
     expect(tick.live).toBe(1);
