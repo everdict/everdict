@@ -51,6 +51,58 @@ describe("InMemoryEnvelopeStore.tryAdmitRuns — the same request is the same ri
   });
 });
 
+// ── A RELEASE IS ONE DECISION, AND THE TWIN KNOWS THE ARGUMENT (arch-review 104) ───────────────────
+//
+// `PgEnvelopeStore.releaseRuns` decides the decrement on `e.tenant = $3`; the in-memory store took `_tenant`
+// on all four methods and stored no tenant at all. Rule `testing` names exactly this blind spot, and it is
+// invisible for as long as it stands because no fixture in this file ever passed a SECOND workspace.
+//
+// The twin mirrors production and does not exceed it: `everdict_envelopes` is keyed by `id` alone and no
+// `ON CONFLICT` arm rewrites `tenant`, so admit and settle are id-keyed here too and only the release asks.
+//
+// Seen RED with the tenant comparison dropped from `releaseRuns`: "another workspace released this claim:
+// expected 0 to be 4".
+describe("InMemoryEnvelopeStore.releaseRuns — the release consults the tenant its statement consults", () => {
+  it("refuses another workspace, and spends nothing while refusing", async () => {
+    const store = new InMemoryEnvelopeStore();
+    expect(await store.tryAdmitRuns("env-1", "acme", "req-a", 4, 10)).toBe(true);
+
+    await store.releaseRuns("env-1", "other", "req-a");
+    expect((await store.spend("env-1")).runs, "another workspace released this claim").toBe(4);
+
+    // …and the refusal consumed nothing: the owner's own release still lands. A release that deleted the
+    // claim while refusing the decrement would leave the capacity held by a grant nobody records.
+    await store.releaseRuns("env-1", "acme", "req-a");
+    expect((await store.spend("env-1")).runs, "the refused release had already spent the claim").toBe(0);
+  });
+
+  it("records the opening workspace once, exactly as ON CONFLICT (id) leaves `tenant` alone", async () => {
+    const store = new InMemoryEnvelopeStore();
+    await store.admit("env-1", "acme", 2);
+    await store.settle("env-1", "other", 5); // id-keyed in Postgres too — this must NOT re-file the envelope
+    expect(await store.tryAdmitRuns("env-1", "other", "req-b", 1, 10)).toBe(true);
+
+    await store.releaseRuns("env-1", "other", "req-b");
+    expect((await store.spend("env-1")).runs, "a later caller re-filed the envelope under its own workspace").toBe(3);
+  });
+});
+
+// The Postgres half of the same finding: the `gone` DELETE matched on `(request_id, envelope_id)` while the
+// decrement additionally required the tenant, so a refused release SPENT the claim and never returned the
+// capacity — and the honest retry then found nothing to delete. Both halves now take one decision.
+describe("PgEnvelopeStore.releaseRuns — the delete and the decrement ask the same question", () => {
+  it("gates the claim deletion on the tenant, not only the counter", async () => {
+    const { client, calls } = fakeClient([() => ({ rows: [] })]);
+    await new PgEnvelopeStore(client).releaseRuns("env-1", "acme", "req-a");
+    const call = calls[0];
+    expect(call, "releaseRuns issued no statement").toBeDefined();
+    const sql = call?.text ?? "";
+    const deleteHalf = sql.slice(0, sql.indexOf("UPDATE everdict_envelopes"));
+    expect(deleteHalf, "the claim is deleted without asking whose envelope it is").toContain("e.tenant = $3");
+    expect(call?.params).toEqual(["req-a", "env-1", "acme"]);
+  });
+});
+
 describe("PgEnvelopeStore.tryAdmitRuns — claim first, decide second, counter exactly once", () => {
   const claimRow = (over: Record<string, unknown> = {}): { rows: unknown[] } => ({
     rows: [{ envelope_id: "env-1", runs: 3, admitted: null, inserted: true, ...over }],
