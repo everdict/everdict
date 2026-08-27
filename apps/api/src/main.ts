@@ -1020,7 +1020,22 @@ async function main(): Promise<void> {
       probe: cleanupProbe({ agentHalves: artifacts, verdicts: artifacts }),
     });
     setInterval(
-      whenLeader(leader, () => void cleanupReconciler.tick().catch(() => {})),
+      // ⚠️ The tick's ANSWER is read, like the migration sweeper's beside it (arch-review 100). This was
+      // `void tick().catch(() => {})`: the primary cleanup path, running every minute, discarding both what
+      // it did and why it failed. A reconciler that defers every debt forever and one with nothing to do are
+      // identical from outside — and `deferred` is exactly the counter that tells them apart.
+      whenLeader(leader, () => {
+        void cleanupReconciler
+          .tick()
+          .then((t) => {
+            if (t.completed > 0 || t.deferred > 0)
+              console.log(`[cleanup-reconciler] claimed=${t.claimed} completed=${t.completed} deferred=${t.deferred}`);
+          })
+          .catch((err: unknown) => {
+            // NOT swallowed: a reconciler that cannot run is a leak nobody is working on.
+            console.error(`[cleanup-reconciler] tick failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+      }),
       60_000,
     ).unref();
     // ── …AND THE ROWS NO SETTLEMENT WILL EVER RELEASE (arch-review 72 P1) ─────────────────────────
