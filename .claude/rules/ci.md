@@ -23,7 +23,7 @@ See skill `ci`.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
-  **`pnpm language-policy`**, **`pnpm source-bytes`**,
+  **`pnpm language-policy`**, **`pnpm source-bytes`**, **`pnpm mutation-leak`**,
   **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
@@ -102,6 +102,22 @@ See skill `ci`.
   repo has paid for twice (a scanner draft green over the defect it was written for, a judgment fixture that
   certified a gap). A new protocol adds its mutation there; a mutation whose target line is gone FAILS rather
   than silently testing nothing.
+  ⚠️ Its options are now REFUSED when unrecognised. `--filter <name>` — a plausible spelling of `--only`, and
+  not a flag this script has — was accepted in silence, so one rung became the full suite: ninety minutes,
+  files mutated while the author was editing them, and an answer to a question nobody asked. Same shape as
+  `biome check --write` exiting 0 over fixes it did not apply.
+- **`pnpm mutation-leak` refuses a COMMIT that carries a neutralized protocol** (arch-review 112). The warning
+  below covers a killed run; it does not cover the run that is alive and WORKING while you stage beside it. The
+  gate's dirty-tree guard protects the GATE, not the author — between two rungs the tree is clean, and while a
+  rung is in flight it is dirty in a file you never opened. That is how `cdef2c2a` shipped
+  `const state = "written" as const; void evaluateRef;` (the arch-review 70 P1 defect, put back) inside a commit
+  about something else, costing a two-commit history rewrite. So: **stage by explicit file list, never `git add`
+  a directory, while the mutation gate runs — and read back `git diff --cached --name-only` before committing.**
+  The check compares every commit ahead of the remote against the `to:` text the rungs already declare, in two
+  seconds, where `ci:commits` would find it slowly at push time. ⚠️ Its first draft joined the diff's added
+  lines WITH their `+` prefixes, so a multi-line replacement could never match and it reported the real
+  incident as clean — the distinctive fingerprints were exactly the ones it could not see. Found by driving it
+  against that commit, which is the only way this class is ever found.
   ⚠️ **A KILLED RUN LEAVES ITS IN-FLIGHT MUTATION IN THE TREE.** The revert is a `finally`, and a `finally`
   does not run when the process is killed — so cancelling the gate mid-rung leaves a production file carrying
   `if (false)` (or whatever that rung writes). The next run refuses to start on it, which is the guard

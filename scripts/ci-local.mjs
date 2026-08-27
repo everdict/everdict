@@ -76,6 +76,7 @@ run("pnpm import-cycles", "pnpm", ["import-cycles"]);
 run("pnpm option-forwarding", "pnpm", ["option-forwarding"]);
 run("pnpm language-policy", "pnpm", ["language-policy"]);
 run("pnpm source-bytes", "pnpm", ["source-bytes"]);
+run("pnpm mutation-leak", "pnpm", ["mutation-leak"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
 
 // Job 2 — web (self-contained; contracts d.ts already exists via the root build above).
