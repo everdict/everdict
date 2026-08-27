@@ -2522,6 +2522,19 @@ const MUTATIONS = [
     suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
   },
   {
+    // arch-review 73. The byte-naming refusal is what keeps `adopt` from being an answer nothing can
+    // authorize: a round whose scorecard sealed no manifest names a version LABEL, and a close over it
+    // carries no operation — arch-review 71's abolished state. The decision belongs to the gate because the
+    // waiver is a frozen frame declaration (rule `suite`); refusing at the proof minter instead is what
+    // reopened the hole, so this rung aims at the gate.
+    name: "R73 — the adoption gate adopts a candidate whose bytes it cannot name",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "    if (latest.verdict.candidateSpecDigest === undefined && !frame.allowLabelOnlyAdoption) {",
+    to: '    if (latest.verdict.candidateSpecDigest === undefined && !frame.allowLabelOnlyAdoption && frame.subject.id === "") {',
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/adopted-implies-authorization.counterexample.test.ts"],
+  },
+  {
     // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping
     // the read reverts the lane to `unresolved{lane_cannot_report}` for every unpinned reference, and the
     // world axis then degrades exactly where drift is most likely. The dispatch counterexample must notice.

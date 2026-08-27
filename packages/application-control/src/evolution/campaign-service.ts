@@ -10,7 +10,7 @@ import {
 import type { ExperimentIdentity, TrialDiff } from "@everdict/domain";
 import { type CampaignGateAnswer, adoptionProofOf, campaignAdoption, contentDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
-import type { EvolutionCampaignStore } from "../ports/evolution-campaign-store.js";
+import type { AdoptionOperationStore, EvolutionCampaignStore } from "../ports/evolution-campaign-store.js";
 
 // ── THE CAMPAIGN SERVICE (docs/architecture/evolution-lineage.md, Track D) ───────────────────────────
 //
@@ -105,6 +105,17 @@ export interface CampaignServiceDeps {
       opts?: { minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] },
     ): Promise<CampaignSnapshot>;
   };
+  // ── WHERE THE AUTHORIZATION CAN BE READ (arch-review 73) ────────────────────────────────────────
+  //
+  // arch-review 71 wrote the durable operation and described `decided` as "visible, addressable,
+  // re-drivable — where a campaign that merely said `adopted` was none of those". Nothing in `apps/api`
+  // called `forCampaign`, so none of those three words was true: a settled campaign left an authorization
+  // no caller could see, let alone present. That is this repo's own comment-is-a-claim law — the half that
+  // was implemented is the WRITE, and the half that was written down is the recovery.
+  //
+  // REQUIRED, not optional: an operation nobody can read is the same defect as one nobody can spend, and
+  // an optional dep is the shape that hides it (rule `protocol`, the optional-dependency law).
+  operations: AdoptionOperationStore;
   newId?: () => string;
   now?: () => string;
 }
@@ -309,6 +320,25 @@ export class CampaignService {
             createdAt: this.now(),
             updatedAt: this.now(),
           };
+    // ── …AND `adopted` WITH NOTHING TO SPEND IS UNREPRESENTABLE (arch-review 73 P0) ─────────────────
+    //
+    // ⚠️ UNREACHABLE BY CONSTRUCTION, and deliberately not a protocol-mutation rung: the gate refuses an
+    // adoption it cannot authorize, and `adoptionProofOf` only declines an `adopt` answer when the trace is
+    // empty — which no adopt answer can be. This is an exhaustiveness assertion in the same category as the
+    // `assertNever` below, NOT a guard with a counterexample. Writing a rung for it would add a mutation no
+    // suite can turn red, which is a worse lie than no rung (rule `testing`).
+    //
+    // It stands because of how the state came back: arch-review 72 put the byte-naming refusal in the proof
+    // minter and left `campaignAdoption` answering `adopt`, and the close went through carrying
+    // `adoption: undefined` — arch-review 71's abolished state, reopened one commit later at the same seam,
+    // green in every suite. The decision is the gate's; this is the write refusing to be the place that
+    // state can re-enter through.
+    if (answer.kind === "adopt" && proof === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { answer },
+        "the gate adopted but authorized nothing — closing 'adopted' with no operation would leave a campaign claiming a version no registry write may claim it proved",
+      );
     if (answer.kind === "adopt") {
       state = "adopted";
       close = {
@@ -375,6 +405,18 @@ export class CampaignService {
       default:
         return assertNever(outcome);
     }
+  }
+
+  // What this campaign authorized, and whether anybody has spent it yet. The read a registry write needs
+  // before it can present a proof — and the read an operator needs to see that a settle crashed before its
+  // registration landed. An absent operation is a real answer, not a failure: a halted campaign authorized
+  // nothing, and the caller is told which of the two it is looking at.
+  async adoption(
+    tenant: string,
+    id: string,
+  ): Promise<{ campaign: EvolutionCampaignRecord; operation: AdoptionOperation | undefined }> {
+    const campaign = await this.get(tenant, id); // unknown campaign → NotFound, before any operation read
+    return { campaign, operation: await this.deps.operations.forCampaign(tenant, id) };
   }
 
   private stamped(tenant: string, facts: DomainFact[]) {

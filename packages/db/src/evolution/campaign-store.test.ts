@@ -1,4 +1,5 @@
 import {
+  type AdoptionOperationStore,
   type CampaignComparison,
   CampaignService,
   type CampaignSnapshot,
@@ -223,9 +224,12 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     },
   };
   let n = 0;
-  const service = (store: EvolutionCampaignStore) =>
+  // Both halves, because the settlement writes through one and the authorization is read through the other
+  // — a fixture that carries only the campaign half cannot see an adoption at all.
+  const service = (store: EvolutionCampaignStore & AdoptionOperationStore) =>
     new CampaignService({
       store,
+      operations: store,
       issues,
       diffs,
       newId: () => `id_${++n}`,
@@ -490,7 +494,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
     // A concurrent loop logs round 2 AFTER the settle computed its answer over 1 round — modeled by a store
     // wrapper that interleaves the append between the settle's read and its close.
-    const raced: EvolutionCampaignStore = {
+    const raced: EvolutionCampaignStore & AdoptionOperationStore = {
       create: store.create.bind(store),
       get: store.get.bind(store),
       list: store.list.bind(store),
@@ -501,8 +505,17 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         await store.appendRound(tenant, id, round(2, { significantImprovements: 1 }), 1);
         return store.close(tenant, id, state, close, expectedRounds, events, adoption);
       },
+      forCampaign: store.forCampaign.bind(store),
+      markRegistered: store.markRegistered.bind(store),
     };
-    const svc2 = new CampaignService({ store: raced, issues, diffs, newId: () => "x", now: () => "t" });
+    const svc2 = new CampaignService({
+      store: raced,
+      operations: raced,
+      issues,
+      diffs,
+      newId: () => "x",
+      now: () => "t",
+    });
     await expect(svc2.settle("acme", rec.id, "alice")).rejects.toBeInstanceOf(ConflictError);
     const after = await svc2.get("acme", rec.id);
     expect(after.state).toBe("open"); // the stale adopt never landed

@@ -255,6 +255,7 @@ async function main(): Promise<void> {
     projectUpdateStore,
     issueStore,
     campaignStore,
+    adoptionOperationStore,
     issueLabelStore,
     projectStore,
     initiativeStore,
@@ -1235,6 +1236,9 @@ async function main(): Promise<void> {
     store: campaignStore,
     issues: issueService,
     diffs: scorecardService,
+    // The authorization an adopted close writes, readable through the campaign's own surface — without it
+    // the operation was durable and unreachable from every transport (arch-review 73).
+    operations: adoptionOperationStore,
   });
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.
   const githubIssueSync = new GithubIssueSync({

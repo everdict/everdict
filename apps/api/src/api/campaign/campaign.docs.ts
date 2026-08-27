@@ -10,7 +10,10 @@ import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 // append-only round trace whose verdicts are derived from the production diff, and a close that carries the
 // pure adoption gate's answer. Authz reuses the scorecard actions (no new action): read = scorecards:read,
 // write = scorecards:run. Design: docs/architecture/evolution-lineage.md (Track D).
-export const campaignDocs: Record<"open" | "list" | "get" | "logRound" | "decision" | "settle", FastifySchema> = {
+export const campaignDocs: Record<
+  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption",
+  FastifySchema
+> = {
   open: {
     summary: "Open an evolution campaign",
     description:
@@ -78,6 +81,23 @@ export const campaignDocs: Record<"open" | "list" | "get" | "logRound" | "decisi
     response: {
       200: { description: "The settled campaign + the gate answer it carries" },
       ...errorResponses(401, 403, 404, 409),
+    },
+  },
+
+  adoption: {
+    summary: "Read the adoption this campaign authorized",
+    description:
+      "The durable authorization an adopted close wrote, and whether it has been spent. `decided` is the " +
+      "state a settle-then-crash lands in — the registration can be re-driven from it rather than lost. " +
+      "The operation carries the frame digest, the round that proved the candidate, the exact candidate " +
+      "spec digest and the campaign's issue; a registry write claiming this campaign proved its version " +
+      "presents exactly this proof. `operation` is null when the campaign authorized nothing — a halted " +
+      "close, or one that has not settled yet.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: {
+      200: { description: "The campaign and the adoption it authorized (operation: null when none)" },
+      ...errorResponses(401, 403, 404),
     },
   },
 };

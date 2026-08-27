@@ -98,6 +98,26 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
   );
 
   server.registerTool(
+    "campaign_adoption",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "Read the authorization an adopted close wrote, and whether it has been spent. Carries the frame " +
+        "digest, the round that proved the candidate, the exact candidate spec digest and the campaign's " +
+        "issue — the proof a registry write presents to claim this campaign proved its version. `decided` " +
+        "means the registration is still owed: a settle that crashed before it landed is re-driven from " +
+        "here rather than lost. operation is null when the campaign authorized nothing (halted, or still " +
+        "open).",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) =>
+      run(principal, "scorecards:read", async () => {
+        const { campaign, operation } = await campaigns.adoption(ws, id);
+        return ok({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
+      }),
+  );
+
+  server.registerTool(
     "settle_campaign",
     {
       annotations: { readOnlyHint: false },

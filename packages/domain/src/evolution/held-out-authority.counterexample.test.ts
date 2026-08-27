@@ -49,6 +49,10 @@ const round = (over: {
   trainingRegressions?: number;
   divergent?: number;
   unclear?: number;
+  // A real round's candidate scorecard seals a manifest, so a digest is the DEFAULT here — leaving it out
+  // put every case in this file on the label-only path, which is not the axis any of them is about
+  // (arch-review 73). Only the case that IS about naming bytes opts out.
+  noBytes?: boolean;
 }): CampaignRound =>
   ({
     seq: 1,
@@ -65,6 +69,7 @@ const round = (over: {
         regressions: over.heldOutRegressions ?? 0,
       },
       observations: { divergent: over.divergent ?? 0, unclear: over.unclear ?? 0 },
+      ...(over.noBytes === true ? {} : { candidateSpecDigest: "sha256:cand" }),
       unverifiedAxes: [],
       confoundedAxes: [],
     },
@@ -191,7 +196,7 @@ describe("[R71 COUNTEREXAMPLE] a divergent observation account refuses adoption"
 
 describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
   it("carries the proving round's candidate spec digest into the answer", () => {
-    const proved = round({ heldOutImprovements: 1 });
+    const proved = round({ heldOutImprovements: 1, noBytes: true });
     (proved.verdict as { candidateSpecDigest?: string }).candidateSpecDigest = "sha256:c1";
 
     const answer = campaignAdoption(frame(), [proved]);
@@ -203,10 +208,16 @@ describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
     ).toBe("sha256:c1");
   });
 
-  it("says plainly when the round could not name them", () => {
+  it("says plainly when the round could not name them — under the frame that allowed it", () => {
     // A built-in harness has no declarative spec to digest, and older rows have none. Absent is an honest
     // weaker adoption an operator can see — not one that reads the same as a strong one.
-    const answer = campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]);
+    //
+    // The FRAME now has to have said so (arch-review 73): the gate refuses an adoption it cannot name
+    // bytes for, because a close carrying no authorization is the state arch-review 71 abolished. What
+    // this case pins is unchanged — the answer says `undefined` rather than inventing a digest.
+    const waiving = frame({ allowLabelOnlyAdoption: true } as never);
+    const answer = campaignAdoption(waiving, [round({ heldOutImprovements: 1, noBytes: true })]);
+    expect(answer.kind).toBe("adopt");
     expect(answer.kind === "adopt" ? answer.candidateSpecDigest : "x").toBeUndefined();
   });
 });
@@ -227,31 +238,47 @@ describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
 //   zero divergences over zero assessments read as a clean account: expected 'adopt' to be 'continue'
 
 describe("[R72 COUNTEREXAMPLE] a proof says how strong it is", () => {
+  // `digest` absent means THIS ROUND COULD NOT NAME ITS BYTES — the digest is stripped rather than merely
+  // not added, so the helper says what it means whatever the round builder defaults to (arch-review 73: the
+  // builder now seals one, and a helper that only ever added would have quietly stopped testing the case).
   const proofFor = (f: CampaignFrame, r: CampaignRound[], digest?: string) => {
-    const withDigest = r.map((x) => ({
-      ...x,
-      verdict: { ...x.verdict, ...(digest !== undefined ? { candidateSpecDigest: digest } : {}) },
-    }));
+    const withDigest = r.map((x) => {
+      const { candidateSpecDigest: _dropped, ...verdict } = x.verdict as CampaignRound["verdict"] & {
+        candidateSpecDigest?: string;
+      };
+      return {
+        ...x,
+        verdict: { ...verdict, ...(digest !== undefined ? { candidateSpecDigest: digest } : {}) },
+      } as unknown as CampaignRound;
+    });
     const campaign = { id: "camp-1", frameDigest: "sha256:f", issueId: "iss-1", frame: f };
-    return adoptionProofOf(campaignAdoption(f, withDigest), campaign, withDigest);
+    return {
+      answer: campaignAdoption(f, withDigest),
+      proof: adoptionProofOf(campaignAdoption(f, withDigest), campaign, withDigest),
+    };
   };
 
   it("mints an EXACT proof when the campaign could name the bytes", () => {
-    const proof = proofFor(frame(), [round({ heldOutImprovements: 1 })], "sha256:c1");
+    const { proof } = proofFor(frame(), [round({ heldOutImprovements: 1 })], "sha256:c1");
     expect(proof?.candidate.identity).toBe("exact");
     expect(proof?.candidate.specDigest).toBe("sha256:c1");
   });
 
-  it("REFUSES to authorize at all when it cannot name them and the frame never allowed it", () => {
-    const proof = proofFor(frame(), [round({ heldOutImprovements: 1 })]);
-    expect(proof, "a campaign that could not name the bytes adopted anyway").toBeUndefined();
+  it("ADOPTS NOTHING when it cannot name them and the frame never allowed it", () => {
+    // ⚠️ RE-AIMED (arch-review 73). The refusal used to live at the proof minter, and a minter that refuses
+    // while the GATE still answers `adopt` is a close carrying no authorization — arch-review 71's abolished
+    // state, reopened by the change that introduced this very case. The invariant is unchanged; its enforcer
+    // moved to the function that decides, which is where the frame's declaration is consumed.
+    const { answer, proof } = proofFor(frame(), [round({ heldOutImprovements: 1 })]);
+    expect(answer.kind, "a campaign that could not name the bytes adopted anyway").toBe("halt");
+    expect(proof, "an adopt-less answer still minted an authorization").toBeUndefined();
   });
 
   it("mints a LABEL_ONLY proof under the frame's recorded waiver, and says so", () => {
     // Allowed, and visible. The point is not to forbid it — some candidates genuinely have no declarative
     // spec — but to stop it reading identically to an adoption that proved bytes.
     const permissive = frame({ allowLabelOnlyAdoption: true } as never);
-    const proof = proofFor(permissive, [round({ heldOutImprovements: 1 })]);
+    const { proof } = proofFor(permissive, [round({ heldOutImprovements: 1 })]);
     expect(proof?.candidate.identity).toBe("label_only");
     expect(proof?.candidate.specDigest).toBeUndefined();
   });

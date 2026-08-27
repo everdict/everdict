@@ -396,6 +396,57 @@ returns. The fix for the leak was inert on every deployment with a real Postgres
   over a production path it never entered. That is the adapter-divergence law below, hit while fixing
   something else. A double that lacks the method under test proves the other branch.
 
+## A REFUSAL BELONGS TO THE FUNCTION THAT ANSWERS, NOT TO THE ONE THAT RENDERS THE ANSWER
+arch-review 71 abolished exactly one state: a campaign that closes `adopted` while nothing anywhere is
+authorized to register what it adopted. arch-review 72 then made a label-only adoption say so — and put the
+refusal in the PROOF MINTER:
+
+    campaignAdoption(frame, rounds)   → adopt{version}       ← the gate still says yes
+    adoptionProofOf(answer, …)        → undefined            ← nothing to authorize
+    settle(…)                         → state "adopted", adoption undefined
+
+So the wave that was tightening the evidence reopened the abolished state, at the same seam, one commit
+later, green in every suite — because the route fixture asserts the close and never asks what the close
+authorized (arch-review 73 P0).
+
+A minter's `undefined` is not a refusal. It is a rendering that produced nothing, and every caller that
+does not ask reads it as "no rider this time" — the optional-field shape this whole file is about.
+
+- **A declaration is enforced by the function whose answer it changes.** `allowLabelOnlyAdoption` is a
+  frozen frame declaration, so it is consumed by the gate — rule `suite` already says a declaration is not
+  constitutional until the deciding function consumes it, and this is that sentence applied to a refusal
+  rather than to a metric.
+- **Then make the bad pair unrepresentable at the write.** A gate that refuses is a gate some later change
+  can stop refusing. `answer.kind === "adopt"` with no proof throws in the settle — unreachable by
+  construction, which is exactly why it stands: it is the seam that state would have to re-enter through.
+- ⚠️ **An unreachable guard gets NO mutation rung.** A rung whose suite cannot go red is a worse lie than
+  no rung (rule `testing`); say in the comment that it is an exhaustiveness assertion, alongside
+  `assertNever`, and put the rung on the gate that can.
+- **The fixture population is part of the finding.** Nine gate tests, two transport tests and one store
+  test failed the moment the gate tightened — all of them adopting with no sealed spec digest. They were
+  not testing the waiver; they had DRIFTED onto it, because a fixture that omits an optional field takes
+  the weak branch silently. A builder whose default is the weaker path makes every case that does not
+  care about identity into an identity test. Default the fixture to the REAL shape and let the one case
+  that is about the weak branch opt in by name.
+
+## A COMMENT CLAIMING A STATE IS ADDRESSABLE IS A CLAIM ABOUT A TRANSPORT
+The same wave's operation was described in its own counterexample as *"`decided` is the state a crash lands
+in — visible, addressable, re-drivable — where a campaign that merely said `adopted` was none of those"*.
+Nothing in `apps/api` ever called `forCampaign`. It was none of the three: an adopted campaign left a
+durable authorization no caller could read, so none could present it either (arch-review 73).
+
+This is the comment-is-a-claim law with the promised component being a ROUTE rather than a function. It is
+easier to miss for exactly one reason: the store method exists, is exported, and is unit-tested, so every
+grep for the capability succeeds.
+
+- **A recoverability claim names the read that performs it.** "Re-drivable" means some transport can fetch
+  the thing and re-present it; grep for a CALLER in `apps/*/src`, not for the method.
+- **A durable operation ships with its read in the same change** — and on both transports, because
+  BFF↔MCP parity is structural (rule `api-layer`). An operation an agent cannot see is one no agent loop
+  can converge.
+- Absent is an ANSWER here, not a 404: a halted campaign authorized nothing, and a caller must be able to
+  tell that from "no such campaign".
+
 ## A FIX CAN CREATE THE NEXT DEFECT BY CLOSING THE LOUDER HALF
 The same wave taught an unconfirmed artifact ref to converge: probe the store, and `absent` means the write is
 not coming, so the debt may close (`abandoned`). That is right when the writer is finished and wrong while it

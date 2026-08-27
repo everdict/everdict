@@ -83,10 +83,11 @@ export function adoptionProofOf(
   if (latest === undefined) return undefined;
   // ── AND HOW STRONG THIS PROOF IS (arch-review 72 P1-medium) ──────────────────────────────────────
   //
-  // A campaign that could not name the bytes it measured may only authorize a LABEL, and that is a weaker
-  // adoption an operator has to be able to see. It is legal only when the frozen frame said so.
+  // A campaign that could not name the bytes it measured authorizes only a LABEL, and that is a weaker
+  // adoption an operator has to be able to see. Recorded here; DECIDED by the gate — this function mints,
+  // it does not adjudicate (arch-review 73: the first version refused here, and a refusal at the minter
+  // left `campaignAdoption` still answering `adopt`, which is a close with nothing to authorize).
   const exact = answer.candidateSpecDigest !== undefined;
-  if (!exact && !campaign.frame.allowLabelOnlyAdoption) return undefined;
   return {
     campaignId: campaign.id,
     frameDigest: campaign.frameDigest,
@@ -116,6 +117,25 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
         kind: "halt",
         reason: "identity_unverified",
         detail: `the winning round's comparison could not verify ${unverified.join(", ")} — an optimization verdict over an unverifiable world is refused unless the frame recorded the waiver at open`,
+      };
+    }
+    // ── …AND THE ADOPTION HAS TO BE ABLE TO NAME ITS BYTES (arch-review 73 P0) ──────────────────────
+    //
+    // Same shape as the axis check above, and refused the same way: a round whose scorecard sealed no
+    // manifest cannot say WHICH spec it measured, so an adoption over it authorizes a version LABEL and
+    // nothing checkable. The frame may waive that at open — and until it does, this is `identity_unverified`
+    // rather than an ending, because the remedy is another round through a lane that seals one.
+    //
+    // The decision lives HERE, in the function that answers, because the waiver is a frozen frame
+    // declaration and rule `suite` says a declaration is not constitutional until the deciding function
+    // consumes it. Refusing at the proof minter instead left this returning `adopt` over an unauthorizable
+    // candidate — arch-review 71's abolished state, reopened by the change that was tightening the evidence.
+    if (latest.verdict.candidateSpecDigest === undefined && !frame.allowLabelOnlyAdoption) {
+      return {
+        kind: "halt",
+        reason: "identity_unverified",
+        detail:
+          "the winning round's candidate scorecard sealed no spec digest, so the adoption could name only the version label — a candidate substituted between the evaluation and the registration would be undetectable. Run a round whose batch seals a manifest, or record allowLabelOnlyAdoption on the frame at open",
       };
     }
     return {

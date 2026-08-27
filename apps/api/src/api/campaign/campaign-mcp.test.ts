@@ -71,12 +71,20 @@ const winning: CampaignSnapshot = {
     experiment: { held: ["execution_world"], confounds: [], unverified: [] },
   },
   baseline: { record: { harness: { id: "agent:everdict", version: "1.0.0" } } },
-  candidate: { record: { harness: { id: "agent:everdict", version: "1.0.1" } } },
+  // …with the manifest a real batch seals: without it the gate refuses (arch-review 73).
+  candidate: {
+    record: {
+      harness: { id: "agent:everdict", version: "1.0.1" },
+      manifest: { harness: { specDigest: "sha256:cand-1.0.1" } },
+    },
+  },
 };
 
 function makeDeps(): McpDeps {
+  const store = new InMemoryEvolutionCampaignStore();
   const campaignService = new CampaignService({
-    store: new InMemoryEvolutionCampaignStore(),
+    store,
+    operations: store,
     issues: { get: async () => ({ id: "iss_1" }) },
     diffs: { diffSnapshot: async () => winning },
     newId: () => "evc_mcp",

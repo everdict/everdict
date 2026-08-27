@@ -38,6 +38,7 @@ function build(snapshot: CampaignSnapshot) {
   const store = new InMemoryEvolutionCampaignStore();
   const campaignService = new CampaignService({
     store,
+    operations: store,
     issues: {
       async get(_t: string, ref: string) {
         if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -93,7 +94,15 @@ const winning: CampaignSnapshot = {
     experiment: { held: ["execution_world"], confounds: [], unverified: [] },
   },
   baseline: { record: { harness: { id: "agent:everdict", version: "1.0.0" } } },
-  candidate: { record: { harness: { id: "agent:everdict", version: "1.0.1" } } },
+  // The candidate side SEALS A MANIFEST, because a real batch does. A fixture without one runs the
+  // label-only path, which the gate refuses without a frame waiver — so a suite built on one is not
+  // exercising an ordinary adoption at all (arch-review 73).
+  candidate: {
+    record: {
+      harness: { id: "agent:everdict", version: "1.0.1" },
+      manifest: { harness: { specDigest: "sha256:cand-1.0.1" } },
+    },
+  },
 };
 
 describe("campaign routes — the settlement over HTTP", () => {
@@ -130,6 +139,64 @@ describe("campaign routes — the settlement over HTTP", () => {
     const settled = await app.inject({ method: "POST", url: `/campaigns/${id}/settle`, headers: H });
     expect(settled.statusCode).toBe(200);
     expect((settled.json() as { record: { state: string } }).record.state).toBe("adopted");
+    await app.close();
+  });
+
+  // ── THE AUTHORIZATION IS REACHABLE FROM A TRANSPORT (arch-review 73) ──────────────────────────────
+  //
+  // arch-review 71 wrote the durable operation and called `decided` "visible, addressable, re-drivable".
+  // Nothing in apps/api called `forCampaign`, so it was none of the three: an adopted campaign left an
+  // authorization no caller could read, and therefore none could present it either. That is this repo's own
+  // comment-is-a-claim law — the half implemented is the WRITE, the half written down is the recovery.
+  //
+  // Seen RED before the route existed, observed:
+  //   the authorization a settled campaign wrote is unreachable: expected 404 to be 200
+  it("exposes what an adopted close AUTHORIZED, and says plainly when a campaign authorized nothing", async () => {
+    const { app } = build(winning);
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const { id } = opened.json() as { id: string };
+
+    // Before any settle there is nothing to spend — an ANSWER, not a 404 that reads as "no such campaign".
+    const beforeRes = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    expect(beforeRes.statusCode).toBe(200);
+    const before = beforeRes.json() as { state: string; operation: unknown };
+    expect(before.state).toBe("open");
+    expect(before.operation).toBeNull();
+
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "structure over phrasing",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    expect((await app.inject({ method: "POST", url: `/campaigns/${id}/settle`, headers: H })).statusCode).toBe(200);
+
+    const res = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    expect(res.statusCode, "the authorization a settled campaign wrote is unreachable").toBe(200);
+    const body = res.json() as {
+      state: string;
+      operation: {
+        state: string;
+        proof: { candidate: { identity: string; version: string; specDigest?: string }; issueId: string };
+      } | null;
+    };
+    expect(body.state).toBe("adopted");
+    // `decided` — the state a settle-then-crash lands in, and the one a registry write spends.
+    expect(body.operation?.state, "an adopted campaign authorized nothing anybody could spend").toBe("decided");
+    expect(body.operation?.proof.candidate.version).toBe("1.0.1");
+    expect(body.operation?.proof.candidate.identity).toBe("exact");
+    expect(body.operation?.proof.candidate.specDigest).toBe("sha256:cand-1.0.1");
+    expect(body.operation?.proof.issueId, "the decision and its intent came apart").toBe("iss_1");
     await app.close();
   });
 

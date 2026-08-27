@@ -48,6 +48,13 @@ const round = (
         significantRegressions: 0,
         unverifiedAxes: [],
         confoundedAxes: [],
+        // ── …AND THE BYTES, FOR THE SAME REASON AS THE HELD-OUT BLOCK BELOW (arch-review 73) ────────
+        //
+        // A real round's candidate scorecard seals a manifest. Leaving it out made every case here run the
+        // label-only path, so tightening that path turned nine tests about the waiver / the streak / the
+        // budget into failures about byte identity — the fixture had drifted onto the weaker branch, which
+        // is the same defect class as the code it was testing.
+        candidateSpecDigest: `sha256:cand-${seq}`,
         ...verdict,
       };
       // ── HELD-OUT MIRRORS THE ROUND HERE, ON PURPOSE (arch-review 71 P1-high) ──────────────────────
@@ -84,6 +91,7 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
       version: "1.0.2",
       provingScorecardId: "sc-cand-2",
       waivedAxes: [],
+      candidateSpecDigest: "sha256:cand-2",
     });
   });
 
@@ -119,6 +127,7 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
       kind: "adopt",
       version: "1.0.1",
       provingScorecardId: "sc-cand-1",
+      candidateSpecDigest: "sha256:cand-1",
       waivedAxes: ["execution_world"],
     });
   });

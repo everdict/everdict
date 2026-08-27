@@ -120,6 +120,33 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     },
   );
 
+  // What the close AUTHORIZED, and whether anybody spent it. Without this read the durable operation was
+  // unreachable from every transport — `decided` was described as re-drivable by a comment and by nothing
+  // else (arch-review 73).
+  app.get<{ Params: { id: string } }>(
+    "/campaigns/:id/adoption",
+    { schema: campaignDocs.adoption },
+    async (req, reply) => {
+      if (!deps.campaignService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      try {
+        const { campaign, operation } = await deps.campaignService.adoption(principal.workspace, req.params.id);
+        // `operation: null` is an ANSWER — this campaign authorized nothing — never a 404 that reads as "no
+        // such campaign". The state it closed in says which of the two absences this is.
+        return reply.send({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.post<{ Params: { id: string } }>("/campaigns/:id/settle", { schema: campaignDocs.settle }, async (req, reply) => {
     if (!deps.campaignService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
