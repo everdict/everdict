@@ -67,10 +67,20 @@ export function adoptionCompletionWatch(deps: AdoptionCompletionWatchDeps): Plat
         // into silence (rule `protocol` L1/L2).
         //
         // `completed` and `already_completed` are both success: at-least-once delivery means the second
-        // arrival SHOULD find it done. `not_registered` is a live race with the adopt path (the row moved
-        // between our read and this write) and the next delivery re-reads it. The remaining two are a
-        // disagreement no retry fixes by itself, so they THROW — the E1 runner retries three times and then
-        // dead-letters visibly, which is the escalation L5 asks for rather than a decision made by silence.
+        // arrival SHOULD find it done.
+        //
+        // ⚠️ `not_registered` is a live race with the adopt path — the row moved between our read and this
+        // write — and it is NOT recovered by "the next delivery". There is no next delivery: an E1 cursor
+        // advances on a handler that returns, so the only redelivery is after a THROW. arch-review 76 found
+        // that exact sentence false one branch away and this line kept saying it (arch-review 99).
+        //
+        // It converges anyway, and by the mechanism that actually exists: the ADOPT path performs the join
+        // from its own side the moment the registration lands, so a completion this consumer skipped is
+        // picked up there. Returning here is correct — what was wrong was the reason given for it.
+        //
+        // The remaining two are a disagreement no retry fixes by itself, so they THROW — the E1 runner
+        // retries three times and then dead-letters visibly, which is the escalation L5 asks for rather than
+        // a decision made by silence.
         const outcome = await deps.operations.markCompleted(
           event.tenant,
           operation.proof.campaignId,
