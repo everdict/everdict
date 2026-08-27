@@ -3,7 +3,7 @@ import { contentDigest } from "@everdict/domain";
 import type { PlatformEventConsumer } from "../platform-event/event-consumer-runner.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
-import { completionFact } from "./campaign-adoption-service.js";
+import { completionFact, issueSettledThisAdoption } from "./adoption-completion.js";
 
 // ── THE DECISION AND ITS INTENT, REJOINED (arch-review 73) ───────────────────────────────────────────
 //
@@ -30,25 +30,6 @@ import { completionFact } from "./campaign-adoption-service.js";
 // claim the capability is good, or that nothing will regress — the regression watch is what reopens the
 // issue later, and that transition leaves the operation `completed`, because it WAS completed. History is
 // not rewritten by what happened next.
-// ── ONE PREDICATE, TWO WRITERS (arch-review 80) ─────────────────────────────────────────────────────
-//
-// Both sides of the symmetric join ask the same question — did THIS issue close on THIS adoption's proving
-// scorecard — and arch-review 76 wrote the law ("one shared predicate, consumed from both sides") and then
-// spelled it twice: once here over an event payload, once in `CampaignAdoptionService` over an issue record.
-// A predicate written twice has already diverged (rule `protocol` L3); the two spellings even disagreed in
-// shape, one reading `payload.scorecardId` and the other `resolution.scorecardId`.
-export function issueSettledThisAdoption(
-  issue: { status: string; resolution?: { scorecardId?: string } },
-  proof: { provingScorecardId: string },
-): boolean {
-  // `done` and nothing else: `regressed` is a later fact about the capability, not a retraction of the
-  // completion, and an issue still open has settled nothing.
-  if (issue.status !== "done") return false;
-  // Absence is not a match. An issue closed on something other than measured evidence — a different fix, a
-  // sibling campaign, a member's judgement — did not discharge THIS adoption's intent.
-  return issue.resolution?.scorecardId === proof.provingScorecardId;
-}
-
 export interface AdoptionCompletionWatchDeps {
   operations: AdoptionOperationStore;
   newId?: () => string;

@@ -8,7 +8,7 @@ import { ConflictError, NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
-import { issueSettledThisAdoption } from "./adoption-completion-watch.js";
+import { completionFact, issueSettledThisAdoption } from "./adoption-completion.js";
 
 // ── AN AUTHORIZATION IS SPENT BY THE EFFECT, OR IT IS DECORATION (arch-review 72 P0) ────────────────
 //
@@ -116,24 +116,6 @@ export interface AdoptionRequest {
   spec: unknown;
   by: string; // the subject the registration is attributed to
   via: CapabilityOriginChannel; // …and the door it came through
-}
-
-// The completion fact, authored once and consumed by BOTH writers of the transition — the same reason the
-// join predicate has one owner (arch-review 80/83).
-export function completionFact(operation: AdoptionOperation): DomainFact {
-  return {
-    kind: "campaign.adoption_completed",
-    subject: { type: "campaign", id: operation.proof.campaignId },
-    actor: "everdict:adoption-completion",
-    payload: {
-      campaignId: operation.proof.campaignId,
-      candidateId: operation.proof.candidate.id,
-      version: operation.registeredVersion ?? operation.proof.candidate.version,
-      issueId: operation.proof.issueId,
-      provingScorecardId: operation.proof.provingScorecardId,
-      ...(operation.proof.teamId !== undefined ? { teamId: operation.proof.teamId } : {}),
-    },
-  };
 }
 
 export class CampaignAdoptionService {

@@ -74,6 +74,17 @@ See skill `ci`.
   shortest path from that compile error is `?.` rather than a refusal — the optional type makes the unsafe
   spelling the one that builds. Two fixes are allowed at a flagged site and no third: refuse when the
   capability is absent, or narrow the value first and pass it plainly.
+- **`pnpm import-cycles` is a RATCHET over circular imports** (arch-review 84). ESM tolerates a cycle only
+  while every use is deferred to call time; one module-scope use — a `const` derived at import, a decorator,
+  a registry populated on load — and one side sees a half-initialized namespace, which surfaces as a runtime
+  `undefined` in a module that type-checks. The symmetric completion join produced one the moment its shared
+  predicate and fact were put inside one of the two writers. Sixteen cycles predate the check and are
+  baselined (`scripts/import-cycles-baseline.txt`); a NEW one fails, and a baselined one that is GONE must
+  leave the list in the same change. The fix is almost always the same shape: the value both sides need
+  belongs to neither, so give it its own module that imports from neither.
+  ⚠️ madge EXITS 1 when it finds cycles — that is its job — so the first draft's plain `execFileSync` threw
+  on the only interesting case and the check would have passed exactly when there was something to report.
+  Found by driving it against a tree that HAS cycles, not by reading it.
 - **`pnpm option-forwarding` is the allowlist-forwarding law, enforced instead of stated** (arch-review 69).
   `DispatchOptions` travels through several decorating dispatchers and the Scheduler; most links pass the
   object whole, but a Scheduler entry WAITS, so its options are taken apart into `QueueEntry` and rebuilt at

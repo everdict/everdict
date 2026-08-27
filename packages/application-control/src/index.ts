@@ -435,11 +435,8 @@ export {
   type IssueResolutionView,
   type RegistrationOutcome,
 } from "./evolution/campaign-adoption-service.js";
-export {
-  adoptionCompletionWatch,
-  issueSettledThisAdoption,
-  type AdoptionCompletionWatchDeps,
-} from "./evolution/adoption-completion-watch.js";
+export { adoptionCompletionWatch, type AdoptionCompletionWatchDeps } from "./evolution/adoption-completion-watch.js";
+export { completionFact, issueSettledThisAdoption } from "./evolution/adoption-completion.js";
 export type {
   AdoptionOperationStore,
   CampaignAppendOutcome,

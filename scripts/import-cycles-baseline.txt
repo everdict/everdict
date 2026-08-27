@@ -1,0 +1,16 @@
+apps/api/src :: ../../../packages/application-control/dist/ops/startup-recovery.d.ts > ../../../packages/application-control/dist/run/run-service.d.ts
+apps/api/src :: ../../../packages/application-control/dist/scorecard/scorecard-deps.d.ts > ../../../packages/application-control/dist/scorecard/scorecard-observability.d.ts
+packages/application-control/src :: ops/startup-recovery.ts > ops/tombstone.ts
+packages/application-control/src :: run/run-service.ts > ops/startup-recovery.ts
+packages/application-control/src :: scorecard/scorecard-deps.ts > scorecard/scorecard-observability.ts
+packages/backends/src :: ../../application-control/dist/ops/startup-recovery.d.ts > ../../application-control/dist/run/run-service.d.ts
+packages/backends/src :: ../../application-control/dist/scorecard/scorecard-deps.d.ts > ../../application-control/dist/scorecard/scorecard-observability.d.ts
+packages/backends/src :: orchestrators/nomad-session.ts > orchestrators/nomad.ts
+packages/contracts/src :: execution/eval-case.ts > execution/grader.ts
+packages/db/src :: ../../application-control/dist/ops/startup-recovery.d.ts > ../../application-control/dist/run/run-service.d.ts
+packages/db/src :: ../../application-control/dist/scorecard/scorecard-deps.d.ts > ../../application-control/dist/scorecard/scorecard-observability.d.ts
+packages/domain/src :: run/run.ts > run/agent-run.ts
+packages/domain/src :: run/run.ts > run/command-run.ts
+packages/domain/src :: run/run.ts > run/session-run.ts
+packages/registry/src :: ../../application-control/dist/ops/startup-recovery.d.ts > ../../application-control/dist/run/run-service.d.ts
+packages/registry/src :: ../../application-control/dist/scorecard/scorecard-deps.d.ts > ../../application-control/dist/scorecard/scorecard-observability.d.ts
