@@ -740,9 +740,19 @@ Everdict's tools load on demand. Before anything else:
 ## 4. Decide — adoption is a gate, not a feeling
 - Adopt only when ALL hold: at least one significant improvement · zero significant regressions · the
   aggregate delta clears the noise floor measured in step 1 (never a fixed magic number).
-- Adoption = \`save_agent\` (a NEW immutable version) + the campaign issue updated with both scorecard ids and
-  the diff. Present the diff and ask the member BEFORE saving when working interactively; in headless
-  automation park the save behind an approval — never silently swap a live configuration.
+- When the campaign is a RECORD (\`open_campaign\`), adoption is not a save you perform — it is an
+  authorization you spend. \`settle_campaign\` writes it, \`campaign_adoption\` reads it back, and
+  \`adopt_campaign_candidate\` presents it with the spec being registered: the platform compares every
+  coordinate against the stored proof and refuses a candidate substituted between the evaluation and the
+  registration. Spendable ONCE, and re-drivable after a crash. Bare \`save_agent\` still works for
+  campaign-less work; it carries no proof, so it claims nothing about having been measured.
+- ⚠️ An INGESTED scorecard names no registry document, so its rounds carry no candidate spec digest and the
+  gate can authorize only the version LABEL. It refuses that by default: record
+  \`allowLabelOnlyAdoption: true\` on the frame at open when the loop runs on ingested traces, or run the
+  candidate through a batch that seals a manifest. The refusal reads \`identity_unverified\` and keeps the
+  campaign open — it is asking which bytes you measured, not ending the walk.
+- Present the diff and ask the member BEFORE adopting when working interactively; in headless automation park
+  it behind an approval — never silently swap a live configuration.
 - Rejection changes nothing: record the hypothesis and the diff in the issue and move on.
 - Close the campaign (\`update_issue\`) naming the adopted version and the scorecard that proved it — or close
   as no-improvement after 3 consecutive rejected rounds; a longer walk is spending, not learning.

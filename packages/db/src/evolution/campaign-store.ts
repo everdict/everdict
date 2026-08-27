@@ -68,22 +68,47 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
   }
 
   // The `AdoptionOperationStore` half, on the same object: a single-process deployment has nothing to split.
-  async forCampaign(_tenant: string, campaignId: string): Promise<AdoptionOperation | undefined> {
-    return this.adoptions.get(campaignId);
+  //
+  // ⚠️ TENANT-SCOPED, like the campaign half above (arch-review 74, self-review). All four of these ignored
+  // the tenant while `PgAdoptionOperationStore` filters on it — so the twin was more permissive than
+  // production on the one axis where that is worst, and no unit test could see a cross-workspace read
+  // (rule `testing`: a guard the in-memory twin does not have is a guard no unit test can see).
+  async forCampaign(tenant: string, campaignId: string): Promise<AdoptionOperation | undefined> {
+    const op = this.adoptions.get(campaignId);
+    return op !== undefined && op.tenant === tenant ? op : undefined; // another workspace's reads as nonexistent
   }
 
   async markRegistered(
-    _tenant: string,
+    tenant: string,
     campaignId: string,
     proofDigest: string,
     registeredVersion: string,
   ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch"> {
-    const op = this.adoptions.get(campaignId);
+    const op = await this.forCampaign(tenant, campaignId);
     if (op === undefined) return "no_such_operation";
     if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
     if (op.state !== "decided") return "already_registered";
     this.adoptions.set(campaignId, { ...op, state: "registered", registeredVersion });
     return "registered";
+  }
+
+  async forIssue(tenant: string, issueId: string): Promise<AdoptionOperation[]> {
+    return [...this.adoptions.values()].filter((op) => op.tenant === tenant && op.proof.issueId === issueId);
+  }
+
+  async markCompleted(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+  ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch"> {
+    const op = await this.forCampaign(tenant, campaignId);
+    if (op === undefined) return "no_such_operation";
+    if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
+    if (op.state === "completed") return "already_completed";
+    // `registered` only: an adoption whose registry write never landed has no intent to settle.
+    if (op.state !== "registered") return "not_registered";
+    this.adoptions.set(campaignId, { ...op, state: "completed" });
+    return "completed";
   }
 
   async close(

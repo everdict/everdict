@@ -126,6 +126,43 @@ describe("[R71 COUNTEREXAMPLE] an adopted campaign leaves an authorization someb
     expect((await store.forCampaign("acme", "camp-1"))?.registeredVersion).toBe("1.1.0");
   });
 
+  it("DISCHARGES the intent only from `registered`, and only once (arch-review 73)", async () => {
+    // `completed` had no writer for two waves — the fourth of arch-review 71's four silent states. The
+    // store's conditional write is the authority the E1 watch rests on: an adoption whose registry write
+    // never landed has no intent to settle, and a redelivery converges rather than discharging twice.
+    const { store, proof } = await settled("sha256:c1");
+    const digest = contentDigest(proof);
+
+    // Still `decided` — nothing was registered, so there is nothing to have settled.
+    expect(
+      await store.markCompleted("acme", "camp-1", digest),
+      "an unspent authorization was marked as having settled its intent",
+    ).toBe("not_registered");
+
+    expect(await store.markRegistered("acme", "camp-1", digest, "1.1.0")).toBe("registered");
+    expect(await store.markCompleted("acme", "camp-1", digest)).toBe("completed");
+    // At-least-once redelivery: convergence, not a second discharge and not an error.
+    expect(await store.markCompleted("acme", "camp-1", digest)).toBe("already_completed");
+    expect((await store.forCampaign("acme", "camp-1"))?.state).toBe("completed");
+  });
+
+  it("finds the authorizations an ISSUE owns, and only that issue's", async () => {
+    // The lookup the completion watch performs, through the proof's own issueId — never a duplicated
+    // column, which would be a second copy of a value the proof already owns.
+    const { store } = await settled("sha256:c1");
+
+    expect(await store.forIssue("acme", "iss-9")).toHaveLength(1);
+    expect(await store.forIssue("acme", "iss-other")).toEqual([]);
+  });
+
+  it("REFUSES to discharge on a proof that is not the one recorded", async () => {
+    const { store, proof } = await settled("sha256:c1");
+    await store.markRegistered("acme", "camp-1", contentDigest(proof), "1.1.0");
+
+    expect(await store.markCompleted("acme", "camp-1", "sha256:forged")).toBe("proof_mismatch");
+    expect((await store.forCampaign("acme", "camp-1"))?.state).toBe("registered");
+  });
+
   it("REFUSES a proof that is not the one recorded", async () => {
     // The substitution the review named: a structurally-plausible proof the campaign never issued. Compared
     // as a digest of what was STORED, never against the object the caller handed over.
@@ -136,6 +173,24 @@ describe("[R71 COUNTEREXAMPLE] an adopted campaign leaves an authorization someb
     expect((await store.forCampaign("acme", "camp-1"))?.state, "a forged proof spent the authorization").toBe(
       "decided",
     );
+  });
+
+  it("answers ANOTHER WORKSPACE nothing at all (arch-review 74, self-review)", async () => {
+    // The twin ignored the tenant on all four adoption methods while `PgAdoptionOperationStore` filters on
+    // it — more permissive than production on the one axis where that is worst, and invisible to every unit
+    // test because no fixture ever passed a second workspace (rule `testing`).
+    const { store, proof } = await settled("sha256:c1");
+    const digest = contentDigest(proof);
+
+    expect(await store.forCampaign("other", "camp-1"), "another workspace read acme's authorization").toBeUndefined();
+    expect(await store.forIssue("other", "iss-9")).toEqual([]);
+    expect(
+      await store.markRegistered("other", "camp-1", digest, "1.1.0"),
+      "another workspace spent acme's authorization",
+    ).toBe("no_such_operation");
+    expect(await store.markCompleted("other", "camp-1", digest)).toBe("no_such_operation");
+    // …and acme's own row is untouched by any of it.
+    expect((await store.forCampaign("acme", "camp-1"))?.state).toBe("decided");
   });
 
   it("has NOTHING to spend for a campaign that never adopted", async () => {

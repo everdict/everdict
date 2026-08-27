@@ -3,6 +3,7 @@ import type { z } from "zod";
 import { teamCeiling } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
+import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 
@@ -146,6 +147,63 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       }
     },
   );
+
+  // Spend it. The registry effect lives at the composition root (this package owns no registry) and the
+  // service is the ONE seam that turns "the gate authorized a version" into "this registry write is that
+  // version" — arch-review 72's P0 was that no production code path reached it at all.
+  app.post<{ Params: { id: string } }>("/campaigns/:id/adopt", { schema: campaignDocs.adopt }, async (req, reply) => {
+    if (!deps.campaignAdoption)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "campaign adoption not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      // The EFFECT is a registry write, so the write action for the candidate's family is gated as well as
+      // the campaign's own — spending an authorization must not be a way around `agents:write`.
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof AdoptCampaignBodySchema>;
+    try {
+      body = AdoptCampaignBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      gate(principal, body.proof.candidate.type === "agent" ? "agents:write" : "harnesses:register");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      return reply.send(
+        await deps.campaignAdoption.adopt({
+          tenant: principal.workspace,
+          campaignId: req.params.id,
+          proof: body.proof,
+          // ⚠️ DERIVED FROM THE PRESENTED PROOF, so the service's coordinate comparison cannot fire on this
+          // path — the proof digest already binds every one of these fields, and an edited coordinate is
+          // refused as a proof the campaign never issued, one check earlier. That comparison is the SERVICE's
+          // contract for callers that state a candidate independently; it is not what protects this route.
+          //
+          // What protects THIS route is three other things, and saying so is the point (a comment claiming a
+          // check nobody performs is the failure this file's whole review series is about): the proof digest
+          // vs the stored operation, the SPEC's own id/version vs the authorized ones (in
+          // `composition/campaign-adoption.ts`), and the registry read-back vs what the campaign measured.
+          candidate: {
+            type: body.proof.candidate.type,
+            id: body.proof.candidate.id,
+            version: body.proof.candidate.version,
+            ...(body.proof.candidate.specDigest !== undefined ? { specDigest: body.proof.candidate.specDigest } : {}),
+          },
+          spec: body.spec,
+          by: principal.subject,
+          via: "web",
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // no authorization → 404 · forged proof / wrong candidate / already spent → 409
+    }
+  });
 
   app.post<{ Params: { id: string } }>("/campaigns/:id/settle", { schema: campaignDocs.settle }, async (req, reply) => {
     if (!deps.campaignService)

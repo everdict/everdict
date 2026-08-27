@@ -2,6 +2,7 @@ import { EvolutionCampaignRecordSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
+import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 
@@ -11,7 +12,7 @@ import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 // pure adoption gate's answer. Authz reuses the scorecard actions (no new action): read = scorecards:read,
 // write = scorecards:run. Design: docs/architecture/evolution-lineage.md (Track D).
 export const campaignDocs: Record<
-  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption",
+  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption" | "adopt",
   FastifySchema
 > = {
   open: {
@@ -98,6 +99,27 @@ export const campaignDocs: Record<
     response: {
       200: { description: "The campaign and the adoption it authorized (operation: null when none)" },
       ...errorResponses(401, 403, 404),
+    },
+  },
+
+  adopt: {
+    summary: "Spend the campaign's adoption authorization on a registry write",
+    description:
+      "Present the proof the settle recorded and the spec being registered. The proof is compared as a " +
+      "digest against the stored operation, which binds every coordinate it carries (a structurally-equal " +
+      "proof the campaign never issued is not authority, and an edited one is not the recorded one). The " +
+      "spec's own id and version are compared against the authorized ones, it is registered at the " +
+      "authorized version (immutable versions make identical bytes an idempotent no-op and different bytes " +
+      "a conflict), and what the registry then RESOLVES is digested and checked against what the campaign " +
+      "measured. Only then is the authorization spent, and it is spendable once: a retry of the same " +
+      "adoption converges rather than granting a second one. A mismatch leaves the operation `decided` — " +
+      "the registration happened, the claim that this campaign proved it did not.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(AdoptCampaignBodySchema),
+    response: {
+      200: { description: "The spent authorization and the version that landed" },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
 };

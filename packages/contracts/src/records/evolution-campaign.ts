@@ -103,22 +103,31 @@ const CampaignFrameShape = z.object({
 export const StoredCampaignFrameSchema = CampaignFrameShape;
 export type StoredCampaignFrame = z.infer<typeof StoredCampaignFrameSchema>;
 
-// The CREATION schema: the shape above plus the discipline a NEW campaign must satisfy.
-export const CampaignFrameSchema = CampaignFrameShape.superRefine((frame, ctx) => {
+// ── ONE PREDICATE, TWO CONSUMERS: THE CREATION SCHEMA AND THE DECISION PATH (arch-review 75) ────────
+//
+// Reading a legacy frame is right; letting it produce NEW adoption evidence is not. A campaign stored with
+// one held-out scenario (or duplicate ids) is still `open`, and nothing stopped it logging a fresh round
+// after the upgrade — that round carries a `heldOut` block derived from the frame's single flag, the gate
+// asks only `improvements >= 1 && regressions === 0`, and the campaign adopts on evidence the current rule
+// exists to forbid. The legacy-decode test's "a legacy campaign is not adoption evidence" was true only of
+// rows written BEFORE the upgrade.
+//
+// So the rule is exported as a predicate the creation schema and the decision path both consume. Written
+// twice it would already have diverged (rule `protocol` L3); written once, tightening it tightens both.
+export function campaignFrameDefects(frame: { scenarios: ReadonlyArray<{ id: string; heldOut?: boolean }> }): string[] {
+  const defects: string[] = [];
   const ids = frame.scenarios.map((s) => s.id);
   if (new Set(ids).size !== ids.length)
-    ctx.addIssue({
-      code: "custom",
-      path: ["scenarios"],
-      message: "scenario ids must be unique — the gate compares the two sides by id set",
-    });
-  const held = frame.scenarios.filter((s) => s.heldOut).length;
+    defects.push("scenario ids must be unique — the gate compares the two sides by id set");
+  const held = frame.scenarios.filter((s) => s.heldOut === true).length;
   if (held < 2)
-    ctx.addIssue({
-      code: "custom",
-      path: ["scenarios"],
-      message: `a campaign needs at least 2 held-out scenarios to have adoption evidence (this frame has ${held})`,
-    });
+    defects.push(`a campaign needs at least 2 held-out scenarios to have adoption evidence (this frame has ${held})`);
+  return defects;
+}
+
+// The CREATION schema: the shape above plus the discipline a NEW campaign must satisfy.
+export const CampaignFrameSchema = CampaignFrameShape.superRefine((frame, ctx) => {
+  for (const message of campaignFrameDefects(frame)) ctx.addIssue({ code: "custom", path: ["scenarios"], message });
 });
 export type CampaignFrame = z.infer<typeof CampaignFrameSchema>;
 
@@ -177,8 +186,18 @@ export const CampaignRoundSchema = z.object({
         // all. Both read `divergent: 0, unclear: 0`, and a gate cannot tell "checked and clean" from "never
         // checked" — which is the annotation failure this whole review series is about, in the evidence
         // rather than in the wiring.
-        assessed: z.number().int().min(0),
-        eligible: z.number().int().min(0),
+        // ⚠️ OPTIONAL, because a round written before these existed is a round that was legitimately
+        // stored (arch-review 75). Making them required tightened the READ path for a rule that belongs to
+        // the write path — the same "a creation rule applied at decode time is a data outage" defect
+        // arch-review 72 closed for the FRAME, reproduced one level down by the change that closed it.
+        // `list()` maps every row through this schema, so one legacy round takes down a workspace's whole
+        // campaign list.
+        //
+        // Absent is UNKNOWN COVERAGE, never zero and never clean: `campaignAdoption` refuses a round with no
+        // coverage block whenever the frame demanded coverage. Backfilling numbers here would manufacture
+        // exactly the evidence the policy exists to require.
+        assessed: z.number().int().min(0).optional(),
+        eligible: z.number().int().min(0).optional(),
       })
       .optional(),
     // Experiment-identity axes the diff could not verify (execution_world, …). Non-empty blocks adoption
@@ -240,6 +259,43 @@ export type CampaignClose = z.infer<typeof CampaignCloseSchema>;
 // This is the value that closes the gap: everything an effect needs to prove it is the one this campaign
 // authorized, minted where the decision is made and never re-derived downstream (L3). `gateDigest` covers
 // the answer itself, so a proof cannot be edited into authorizing something else.
+// ── THE CANDIDATE, NORMALIZED ON THE WAY IN (arch-review 75) ───────────────────────────────────────
+//
+// `identity` was added in arch-review 72 and made REQUIRED, which turned every operation written before it
+// into a row that cannot be read — the same "a creation rule applied at decode time is a data outage"
+// defect arch-review 72 itself closed for the frame, reproduced one level down by the change that closed
+// it. `PgAdoptionOperationStore` parses whatever the ledger holds, so a legacy row breaks the adoption
+// read for that campaign.
+//
+// The repair is a NORMALIZATION rather than an optional field: `exact` MEANS the proof named bytes, so
+// `specDigest !== undefined` is the same predicate the minter applies — deriving it on read is not a
+// guess, and it is the only way downstream stays unable to confuse a weak proof with a strong one. An
+// optional `identity` would have handed every consumer a third case and reopened arch-review 72's finding.
+const AdoptionCandidateShape = z.object({
+  type: z.enum(["agent", "harness"]),
+  id: z.string().min(1).max(200),
+  version: z.string().min(1).max(100),
+  // The bytes, not the label (arch-review 71). Absent for a built-in with no declarative spec.
+  specDigest: z.string().optional(),
+  // ── HOW STRONG THIS PROOF IS, SAID OUT LOUD (arch-review 72 P1-medium) ──────────────────────────
+  //
+  // `specDigest` being optional meant an adoption that named exact bytes and one that named only a version
+  // LABEL were the same value to every reader: same `adopted` state, same `decided` operation, no way to
+  // see which one you had. A weak proof that reads like a strong one is the annotation failure this review
+  // series is named for.
+  //
+  // So the strength is a field, and a label-only adoption is only legal when the frame RECORDED that it
+  // would be (`allowLabelOnlyAdoption`) — a decision made before any round was seen.
+  identity: z.enum(["exact", "label_only"]),
+});
+
+export const AdoptionCandidateSchema = z.preprocess((value) => {
+  if (typeof value !== "object" || value === null) return value;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.identity !== undefined) return candidate;
+  return { ...candidate, identity: candidate.specDigest === undefined ? "label_only" : "exact" };
+}, AdoptionCandidateShape);
+
 export const CampaignAdoptionProofSchema = z.object({
   campaignId: z.string().min(1),
   // The frozen exam this decision was made under. A proof whose frame digest no longer matches the campaign
@@ -247,23 +303,7 @@ export const CampaignAdoptionProofSchema = z.object({
   frameDigest: z.string().min(1),
   // WHICH round proved it — the trace position, so a later round cannot borrow an earlier answer.
   roundSeq: z.number().int().min(1),
-  candidate: z.object({
-    type: z.enum(["agent", "harness"]),
-    id: z.string().min(1).max(200),
-    version: z.string().min(1).max(100),
-    // The bytes, not the label (arch-review 71). Absent for a built-in with no declarative spec.
-    specDigest: z.string().optional(),
-    // ── HOW STRONG THIS PROOF IS, SAID OUT LOUD (arch-review 72 P1-medium) ────────────────────────
-    //
-    // `specDigest` being optional meant an adoption that named exact bytes and one that named only a version
-    // LABEL were the same value to every reader: same `adopted` state, same `decided` operation, no way to
-    // see which one you had. A weak proof that reads like a strong one is the annotation failure this review
-    // series is named for.
-    //
-    // So the strength is a field, and a label-only adoption is only legal when the frame RECORDED that it
-    // would be (`allowLabelOnlyAdoption`) — a decision made before any round was seen.
-    identity: z.enum(["exact", "label_only"]),
-  }),
+  candidate: AdoptionCandidateSchema,
   provingScorecardId: z.string().min(1),
   // The issue this campaign was opened against, carried so the effect and the intent cannot come apart.
   issueId: z.string().min(1),

@@ -396,6 +396,80 @@ returns. The fix for the leak was inert on every deployment with a real Postgres
   over a production path it never entered. That is the adapter-divergence law below, hit while fixing
   something else. A double that lacks the method under test proves the other branch.
 
+## A SCHEMA SPLIT STOPS AT THE FIELD YOU WERE THINKING ABOUT
+arch-review 72 found "a creation rule applied at decode time is a data outage" on the campaign FRAME and
+closed it by splitting `CampaignFrameSchema` (create) from `StoredCampaignFrameSchema` (decode). The SAME
+commit tightened two NESTED shapes and split neither:
+
+    round.verdict.observations   gained REQUIRED assessed / eligible
+    proof.candidate              gained a REQUIRED identity
+
+Stored rows are parsed whole — `EvolutionCampaignRecordSchema` covers every round, and `list()` maps every
+row through it — so one legacy round takes down a workspace's campaign list, and a legacy operation breaks
+the adoption read added to make `decided` visible. Shipped, and pushed (arch-review 75 P1-high).
+
+- **The split is a property of the ROW, not of the field you happened to name.** When a change makes any
+  field required, list every schema that PARSES STORED BYTES containing it — including the ones that embed
+  it — and ask each whether rows written yesterday still decode. `safeParse` a hand-written legacy literal;
+  it takes a minute and it is the only evidence.
+- **Two repairs, and choosing between them is the design.** Derive when the value is a RESTATEMENT of
+  something already stored (`identity` is exactly `specDigest !== undefined`, the minter's own predicate) —
+  normalize on read so the field stays non-optional and no consumer gains a third case. Leave ABSENT when
+  the value cannot be derived from anything (`assessed`/`eligible`): a manufactured number is the evidence
+  the policy exists to demand, invented.
+- **And a row that may be READ may not produce new EVIDENCE.** The permissive decode is availability; it is
+  not permission. A legacy campaign is still `open`, and a round logged after the upgrade BUILDS the
+  held-out block the old frame could never have had — so the campaign regains the authority the new rule
+  exists to withhold. Export the creation rule as a predicate (`campaignFrameDefects`) and consume it at
+  every entry point that produces or consumes new evidence. Not in the pure gate: a total decision function
+  may not depend on a schema version.
+
+## A POLICY IS READ FROM THE POLICY, NEVER FROM THE DATA IT JUDGES
+`minimumCoverage` was added so a frame could demand that some of a round was actually looked at. The check
+was written inside the block that reads the data:
+
+    if (obs !== undefined) {
+      …
+      const need = frame.observationPolicy.minimumCoverage;
+      if (need !== undefined && …) return false;
+    }
+
+So a frame demanding 50% coverage was satisfied by a round carrying NO observations block at all — the
+"an absence is not a clean bill of health" defect that same commit was written to close, reproduced by its
+own fix one branch up (arch-review 75 P1-medium). Third occurrence of this shape.
+
+- **Enter on the requirement, not on the evidence.** `if (need !== undefined) { if (data === undefined)
+  return false; … }`. Data-first nesting silently exempts the case with no data, which is always the case
+  the requirement was written for.
+- The tell in review: a policy field read INSIDE a `if (value !== undefined)` guard. The policy did not ask
+  about the value's presence; it asked for a level.
+
+## A LANE THAT DID NOT EXIST WHEN THE LESSON WAS PAID FOR STILL HAS TO LEARN IT
+The one-lane-only law says: after changing a guarded write's contract, grep every OTHER caller and count
+them in the commit message. That instruction assumes the lanes all exist at the time. arch-review 74 found
+the shape a NEW lane makes, which the counting cannot reach:
+
+    saveAgent              teamId = the entity's own team    (learned in evolution review wave C)
+    harness routes / mcp   owner.teamId
+    harness re-pin         teamOfVersion (REQUIRED for it)
+    campaign adopt         undefined                          ← written after the lesson, by its author
+
+Ownership is read off an entity's NEWEST own version, so registering a successor with no team re-files the
+whole entity out of its team's list the moment it becomes latest. Wave C paid for that, and the adoption
+door — added three waves later, in the same repository, by someone who had read the fix — reproduced it
+exactly, because there was nothing to grep: the lane was new.
+
+- **A new call site of an old effect inherits every constraint that effect's other callers carry.** Before
+  writing `register(...)` / `submit(...)` / `transition(...)` for the first time in a new module, read what
+  the EXISTING callers pass and why. An argument that every other caller resolves and this one passes
+  `undefined` is the finding.
+- **The reusable answer is a named helper, not a remembered rule.** `teamOfEntity` already existed and is
+  the single owner of "whose is this". A lane that hand-rolls the answer (or omits it) is a second spelling
+  — and omission is the spelling nobody notices, because it type-checks.
+- ⚠️ The gates cannot see this: `unwired-capabilities` asks whether an optional PORT has an implementation,
+  and this is a required argument with a legal value. What catches it is reading the sibling call sites,
+  which is why that instruction now leads with "read", not "count".
+
 ## A REFUSAL BELONGS TO THE FUNCTION THAT ANSWERS, NOT TO THE ONE THAT RENDERS THE ANSWER
 arch-review 71 abolished exactly one state: a campaign that closes `adopted` while nothing anywhere is
 authorized to register what it adopted. arch-review 72 then made a label-only adoption say so — and put the

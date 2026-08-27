@@ -21,6 +21,7 @@ import {
   TaskService,
   TeamService,
   WorkflowStateService,
+  adoptionCompletionWatch,
   cleanupProbe,
   cleanupRemover,
   collectDeferredTrace,
@@ -68,7 +69,7 @@ import type {
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
-import { TERMINAL_RUN_STATUSES, UpstreamError } from "@everdict/contracts";
+import { TERMINAL_RUN_STATUSES, UpstreamError, isTerminalAttemptState } from "@everdict/contracts";
 import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
@@ -84,6 +85,7 @@ import { LiveTraceStore } from "./common/live-trace-store.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
+import { buildCampaignAdoption } from "./composition/campaign-adoption.js";
 import { deploymentCompute } from "./composition/compute-env.js";
 import { buildDispatch } from "./composition/dispatch.js";
 import {
@@ -1035,11 +1037,33 @@ async function main(): Promise<void> {
     const retainedSweeper = new RetainedMigrationSweeper({
       cleanup: intermediateCleanup,
       dispositionOf: async (_tenant, executionId) => {
-        // A standalone execution id is `evd-run-<record id>` — the ONE derivation, read back rather than
-        // re-spelled. Anything else (a batch case) is not this sweeper's to judge, and saying so is the
-        // fail-closed answer.
-        const id = executionId.startsWith("evd-run-") ? executionId.slice("evd-run-".length) : undefined;
-        if (id === undefined) return { kind: "unknown", reason: "not a standalone execution coordinate" };
+        // ── A BATCH CASE IS THE MAJORITY LANE, AND IT WAS PERMANENTLY UNKNOWN (arch-review 75 P1) ──
+        //
+        // The first version answered `unknown` for anything not starting `evd-run-`, which is honest and
+        // useless: a scorecard case's coordinate is `evd-<scorecardId>-<caseId>`, so every batch-lane legacy
+        // retained row stayed retained forever — the leak this sweeper exists to close, in the lane where
+        // most of it lives.
+        //
+        // It is answered through the ATTEMPT LEDGER rather than by parsing the coordinate. Parsing cannot
+        // work: a scorecard id is a UUID and carries its own dashes, so `evd-A-B` has no unambiguous split —
+        // and re-deriving identity from a rendered string is the thing rule `protocol` L3 forbids. The
+        // attempt store is keyed by execution id already; asking it is exact and needs no derivation.
+        if (!executionId.startsWith("evd-run-")) {
+          if (executionAttemptStore === undefined)
+            return { kind: "unknown", reason: "no attempt ledger to ask about a batch case" };
+          const attempts = await executionAttemptStore.list(executionId).then(
+            (rows) => ({ ok: true as const, rows }),
+            () => ({ ok: false as const, rows: [] }),
+          );
+          if (!attempts.ok) return { kind: "unknown", reason: "the attempt ledger did not answer" };
+          // NO ROWS IS NOT "GONE". An execution this ledger never recorded is one we cannot judge — it may
+          // predate the ledger entirely — and collecting on that would be a certificate over compute nobody
+          // observed (L5). Terminal means every recorded attempt is terminal AND at least one exists.
+          if (attempts.rows.length === 0)
+            return { kind: "unknown", reason: "the attempt ledger holds nothing for this execution" };
+          return attempts.rows.every((a) => isTerminalAttemptState(a.state)) ? { kind: "terminal" } : { kind: "live" };
+        }
+        const id = executionId.slice("evd-run-".length);
         // NOT `.catch(() => undefined)` collapsed into absence: a ledger that would not answer and a run
         // that is gone are different states, and only one of them is a licence to collect (L2).
         const run = await store.get(id).then(
@@ -1240,6 +1264,15 @@ async function main(): Promise<void> {
     // the operation was durable and unreachable from every transport (arch-review 73).
     operations: adoptionOperationStore,
   });
+  // …and the consumer of what it authorized. The registry effect lives in `composition/campaign-adoption.ts`
+  // as a named function so its counterexample drives the production closure rather than one of its own
+  // (arch-review 72 P0 / 73).
+  const campaignAdoptionService = buildCampaignAdoption({
+    operations: adoptionOperationStore,
+    agents: agentRegistry,
+    harnesses: harnessInstanceRegistry,
+  });
+
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.
   const githubIssueSync = new GithubIssueSync({
     store: issueStore,
@@ -1255,6 +1288,13 @@ async function main(): Promise<void> {
   // itself as `regressed` and finds its owner in the bell. Registered here (after IssueService exists) rather
   // than beside the feed consumers — the runner picks up a late registration on its next tick, and the
   // consumer's own cursor makes that indistinguishable from having been there since start.
+  // The adoption's INTENT, rejoined to its decision (arch-review 73). `completed` was in the operation's
+  // state vocabulary from the day the table was created and nothing wrote it — the fourth of the four
+  // silent states arch-review 71 enumerated. Registered beside the regression watch because they read the
+  // same fact from opposite ends: this one closes an adoption when its issue resolves ON ITS EVIDENCE, and
+  // that one reopens the issue when the evidence stops holding. A regression leaves the operation
+  // `completed`, because it was — history is not rewritten by what happened next.
+  eventConsumers.register(adoptionCompletionWatch({ operations: adoptionOperationStore }));
   eventConsumers.register(
     regressionWatch({
       issues: issueStore,
@@ -1753,6 +1793,7 @@ async function main(): Promise<void> {
     queueService,
     viewService,
     campaignService,
+    campaignAdoption: campaignAdoptionService,
     checkpointService,
     taskService,
     teamService,

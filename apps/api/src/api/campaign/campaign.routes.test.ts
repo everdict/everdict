@@ -1,9 +1,13 @@
 import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import type { CampaignFrame } from "@everdict/contracts";
+import { AgentSpecSchema } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
+import { contentDigest } from "@everdict/domain";
+import { InMemoryAgentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
+import { buildCampaignAdoption } from "../../composition/campaign-adoption.js";
 import { buildServer } from "../../server.js";
 
 // The campaign settlement over the HTTP transport — thin-route behavior (gate order, DTO refusal, error
@@ -49,11 +53,20 @@ function build(snapshot: CampaignSnapshot) {
     newId: () => "evc_fixed",
     now: () => "2026-08-26T03:00:00.000Z",
   });
+  // …and the CONSUMER of what a settle authorizes, wired through the production builder — not a hand-made
+  // deps bag. A route test that stubbed the service would prove the route calls something (arch-review 72's
+  // defect exactly), so this uses `buildCampaignAdoption` over a real registry.
+  const agents = new InMemoryAgentRegistry();
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
+    campaignAdoption: buildCampaignAdoption({
+      operations: store,
+      agents,
+      harnesses: unusedHarnesses(),
+    }),
   });
-  return { app, store };
+  return { app, store, agents };
 }
 
 const winning: CampaignSnapshot = {
@@ -200,6 +213,144 @@ describe("campaign routes — the settlement over HTTP", () => {
     await app.close();
   });
 
+  // ── AND THE AUTHORIZATION IS SPENDABLE, ONCE (arch-review 72 P0 / 73) ─────────────────────────────
+  //
+  // The whole protocol over the real transport: settle writes an authorization, the read surface returns it,
+  // and the adopt route spends it on a registry write whose bytes are checked against what was measured.
+  // arch-review 72 built the service that does this and no code path reached it; this is that path.
+  //
+  // Seen RED before the route existed, observed:
+  //   the authorization cannot be spent from any transport: expected 404 to be 200
+  it("settles, exposes the authorization, and SPENDS it on a registry write — once", async () => {
+    // The digest the campaign seals is what the REGISTRY resolves for this version, so the round's manifest
+    // and the adopt read-back are about ONE document. Building the fixture the other way round — a
+    // hand-written digest string — would make the honest path unreachable and leave only refusals tested.
+    const spec = AgentSpecSchema.parse({ id: "everdict", version: "1.0.1", instructions: "structure first" });
+    const seeded = new InMemoryAgentRegistry();
+    await seeded.register("acme", spec, "alice");
+    const measured = contentDigest(await seeded.get("acme", "everdict", "1.0.1"));
+    const { app, agents } = build({
+      ...winning,
+      candidate: { record: { ...winning.candidate.record, manifest: { harness: { specDigest: measured } } } },
+    });
+
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const { id } = opened.json() as { id: string };
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "structure over phrasing",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    expect((await app.inject({ method: "POST", url: `/campaigns/${id}/settle`, headers: H })).statusCode).toBe(200);
+
+    const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    const proof = (read.json() as { operation: { proof: Record<string, unknown> } }).operation.proof;
+    expect((proof.candidate as { specDigest?: string }).specDigest).toBe(measured);
+
+    // A proof the campaign never issued authorizes nothing, however well-formed it is.
+    const forged = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof: { ...proof, gateDigest: "sha256:forged" }, spec },
+    });
+    expect(forged.statusCode, "a proof this campaign never issued was accepted").toBe(409);
+    expect(await agents.has("acme", "everdict", "1.0.1"), "a refused adoption still wrote to the registry").toBe(false);
+
+    // …and a correct proof carrying SUBSTITUTED bytes: the registry write lands (a version that did not
+    // exist), and the spend is withheld because what it now resolves is not what the campaign measured.
+    const substituted = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof, spec: { ...spec, instructions: "a different agent entirely" } },
+    });
+    expect(substituted.statusCode, "a substituted candidate was adopted under the measured label").toBe(409);
+    expect(
+      (
+        (await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H })).json() as {
+          operation: { state: string };
+        }
+      ).operation.state,
+      "a refused adoption spent its authorization anyway",
+    ).toBe("decided");
+
+    // The honest path. NOTE the version already exists now (the substitution wrote it), so this also pins
+    // the immutability refusal: different bytes under one label is the registry's own conflict.
+    const adopted = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof, spec },
+    });
+    expect(adopted.statusCode).toBe(409); // 1.0.1 is already taken by the substituted bytes
+    await app.close();
+  });
+
+  it("SPENDS the authorization once and converges on a retry", async () => {
+    const spec = AgentSpecSchema.parse({ id: "everdict", version: "1.0.1", instructions: "structure first" });
+    const seeded = new InMemoryAgentRegistry();
+    await seeded.register("acme", spec, "alice");
+    const measured = contentDigest(await seeded.get("acme", "everdict", "1.0.1"));
+    const { app, agents } = build({
+      ...winning,
+      candidate: { record: { ...winning.candidate.record, manifest: { harness: { specDigest: measured } } } },
+    });
+
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const { id } = opened.json() as { id: string };
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "structure over phrasing",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    await app.inject({ method: "POST", url: `/campaigns/${id}/settle`, headers: H });
+    const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    const proof = (read.json() as { operation: { proof: unknown } }).operation.proof;
+
+    const first = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof, spec },
+    });
+    expect(first.statusCode, "the authorization cannot be spent from any transport").toBe(200);
+    expect((first.json() as { kind: string }).kind).toBe("adopted");
+    expect(await agents.has("acme", "everdict", "1.0.1"), "the registry never received the adopted version").toBe(true);
+
+    // At-least-once retry: converges rather than granting a second adoption.
+    const again = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof, spec },
+    });
+    expect((again.json() as { kind: string }).kind, "a retry was granted its own adoption").toBe("already_adopted");
+    await app.close();
+  });
+
   it("refuses to open against a ghost issue (404), and a caller-authored verdict has nowhere to land", async () => {
     const { app } = build(winning);
     const res = await app.inject({
@@ -262,3 +413,17 @@ describe("campaign routes — the settlement over HTTP", () => {
     await app.close();
   });
 });
+
+// The harness lane needs a seeded template taxonomy to resolve; the agent lane drives the same closure and
+// the same comparison, so these transport cases use it. `composition/adoption-is-spent.counterexample.test.ts`
+// owns the closure's own behaviour.
+function unusedHarnesses() {
+  return {
+    async register() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+    async get() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+  } as unknown as Parameters<typeof buildCampaignAdoption>[0]["harnesses"];
+}

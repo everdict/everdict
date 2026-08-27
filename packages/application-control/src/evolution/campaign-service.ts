@@ -7,6 +7,7 @@ import {
   type Score,
   isMeasured,
 } from "@everdict/contracts";
+import { campaignFrameDefects } from "@everdict/contracts";
 import type { ExperimentIdentity, TrialDiff } from "@everdict/domain";
 import { type CampaignGateAnswer, adoptionProofOf, campaignAdoption, contentDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -183,8 +184,29 @@ export class CampaignService {
   }
 
   // The pure gate over the current trace — a read, never an effect.
+  // ── A LEGACY FRAME MAY BE READ, NEVER DECIDED ON (arch-review 75 P1-high) ────────────────────────
+  //
+  // arch-review 72 split creation from storage so a campaign written before the held-out rule stays
+  // readable. That was right, and it left the other half open: such a campaign is still `open`, and nothing
+  // stopped it logging a NEW round after the upgrade — the round carries a `heldOut` block built from the
+  // frame's single flag, and the gate adopts on evidence the current rule forbids.
+  //
+  // So reads stay permissive and every DECISION and MUTATION re-checks the frame against the rule in force.
+  // The refusal names the remedy, because "open a new campaign" is the only thing a caller can do: the frame
+  // is frozen by construction, so an ineligible one cannot be repaired in place.
+  private requireEligibleFrame(record: EvolutionCampaignRecord): void {
+    const defects = campaignFrameDefects(record.frame);
+    if (defects.length === 0) return;
+    throw new ConflictError(
+      "CONFLICT",
+      { campaign: record.id, defects },
+      `this campaign's frame predates the current adoption rules (${defects.join("; ")}) — it stays readable, but it may not produce new adoption evidence. Open a new campaign with a conforming frame`,
+    );
+  }
+
   async decision(tenant: string, id: string): Promise<CampaignGateAnswer> {
     const record = await this.get(tenant, id);
+    this.requireEligibleFrame(record);
     return campaignAdoption(record.frame, record.rounds);
   }
 
@@ -198,6 +220,9 @@ export class CampaignService {
     const record = await this.get(tenant, id);
     if (record.state !== "open")
       throw new ConflictError("CONFLICT", { state: record.state }, "the campaign is closed — open a new one");
+    // …and the frame still has to satisfy the rules in force, or this round would MANUFACTURE the held-out
+    // block a legacy frame could never have produced before the upgrade (arch-review 75 P1-high).
+    this.requireEligibleFrame(record);
     // The verdict is DERIVED from the production diff. A missing/unfinished/invisible scorecard throws
     // inside the read (requireSucceeded, under the caller's team ceiling) and the round is refused with that
     // reason — never logged half-known (L2), never read around the team axis.
@@ -293,6 +318,7 @@ export class CampaignService {
     const record = await this.get(tenant, id);
     if (record.state !== "open")
       throw new ConflictError("CONFLICT", { state: record.state }, "the campaign already settled");
+    this.requireEligibleFrame(record);
     const answer = campaignAdoption(record.frame, record.rounds);
     if (answer.kind === "continue")
       throw new ConflictError(

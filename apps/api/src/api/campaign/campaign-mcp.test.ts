@@ -1,11 +1,14 @@
 import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import type { CampaignFrame } from "@everdict/contracts";
+import { AgentSpecSchema, type CampaignFrame } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
+import { contentDigest } from "@everdict/domain";
+import { InMemoryAgentRegistry } from "@everdict/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
+import { buildCampaignAdoption } from "../../composition/campaign-adoption.js";
 import { type McpDeps, buildMcpServer } from "../../mcp.js";
 
 // BFF↔MCP parity for the campaign settlement: the agent-evolve loop drives the SAME service over MCP that
@@ -80,19 +83,31 @@ const winning: CampaignSnapshot = {
   },
 };
 
-function makeDeps(): McpDeps {
+function makeDeps(
+  agents: InMemoryAgentRegistry = new InMemoryAgentRegistry(),
+  // The digest the round seals. Overridable so an adoption case can make the campaign's manifest and the
+  // registry's document ONE document — a fixed string would leave only the refusals reachable.
+  specDigest = "sha256:cand-1.0.1",
+): McpDeps {
   const store = new InMemoryEvolutionCampaignStore();
+  const snapshot: CampaignSnapshot = {
+    ...winning,
+    candidate: { record: { ...winning.candidate.record, manifest: { harness: { specDigest } } } },
+  };
   const campaignService = new CampaignService({
     store,
     operations: store,
     issues: { get: async () => ({ id: "iss_1" }) },
-    diffs: { diffSnapshot: async () => winning },
+    diffs: { diffSnapshot: async () => snapshot },
     newId: () => "evc_mcp",
     now: () => "2026-08-26T04:00:00.000Z",
   });
   return {
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
+    // Through the PRODUCTION builder over a real registry — BFF↔MCP parity means the same consumer, not a
+    // second one (arch-review 72 P0 / 73).
+    campaignAdoption: buildCampaignAdoption({ operations: store, agents, harnesses: unusedHarnesses() }),
   };
 }
 
@@ -139,6 +154,50 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
     expect(JSON.parse(textOf(settled)).record.state).toBe("adopted");
   });
 
+  it("campaign_adoption reads the authorization and adopt_campaign_candidate SPENDS it", async () => {
+    // The MCP half of the same protocol. arch-review 72 shipped the consumer with no caller on EITHER
+    // transport; parity here means both reach the one service, never two implementations of it.
+    const spec = AgentSpecSchema.parse({ id: "everdict", version: "1.0.1", instructions: "structure first" });
+    const seeded = new InMemoryAgentRegistry();
+    await seeded.register("acme", spec, "alice");
+    const measured = contentDigest(await seeded.get("acme", "everdict", "1.0.1"));
+    const agents = new InMemoryAgentRegistry();
+    const client = await connect(makeDeps(agents, measured), ["member"]);
+
+    const opened = await client.callTool({ name: "open_campaign", arguments: { issue_id: "iss_1", frame } });
+    const { id } = JSON.parse(textOf(opened)) as { id: string };
+    await client.callTool({
+      name: "log_campaign_round",
+      arguments: {
+        id,
+        hypothesis: "h",
+        candidate_version: "1.0.1",
+        baseline_scorecard_id: "sc-b",
+        candidate_scorecard_id: "sc-c",
+      },
+    });
+    await client.callTool({ name: "settle_campaign", arguments: { id } });
+
+    const read = await client.callTool({ name: "campaign_adoption", arguments: { id } });
+    const operation = JSON.parse(textOf(read)).operation as { state: string; proof: unknown };
+    expect(operation.state, "an adopted campaign authorized nothing anybody could spend").toBe("decided");
+
+    const adopted = await client.callTool({
+      name: "adopt_campaign_candidate",
+      arguments: { id, proof: JSON.stringify(operation.proof), spec: JSON.stringify(spec) },
+    });
+    expect(adopted.isError, textOf(adopted)).toBeFalsy();
+    expect(JSON.parse(textOf(adopted)).kind).toBe("adopted");
+    expect(await agents.has("acme", "everdict", "1.0.1"), "the registry never received the adopted version").toBe(true);
+
+    // Spendable ONCE — an at-least-once retry converges rather than granting a second adoption.
+    const again = await client.callTool({
+      name: "adopt_campaign_candidate",
+      arguments: { id, proof: JSON.stringify(operation.proof), spec: JSON.stringify(spec) },
+    });
+    expect(JSON.parse(textOf(again)).kind).toBe("already_adopted");
+  });
+
   it("a premature settle is a CONFLICT the agent can read, and the campaign stays open", async () => {
     const client = await connect(makeDeps(), ["member"]);
     const opened = await client.callTool({ name: "open_campaign", arguments: { issue_id: "iss_1", frame } });
@@ -162,3 +221,16 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
     expect(denied.isError).toBe(true);
   });
 });
+
+// The harness lane resolves through a template taxonomy; the agent lane drives the same closure, so these
+// transport cases use it. `composition/adoption-is-spent.counterexample.test.ts` owns the closure itself.
+function unusedHarnesses() {
+  return {
+    async register() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+    async get() {
+      throw new Error("the harness lane is not exercised by these cases");
+    },
+  } as unknown as Parameters<typeof buildCampaignAdoption>[0]["harnesses"];
+}

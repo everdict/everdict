@@ -56,11 +56,22 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
     if (obs.divergent > 0 && !frame.observationPolicy.allowDivergent) return false;
     const maxUnclear = frame.observationPolicy.maxUnclear;
     if (maxUnclear !== undefined && obs.unclear > maxUnclear) return false;
-    // …and enough of the round was actually LOOKED AT (arch-review 72 P2). Zero divergences over zero
-    // assessments is not a clean bill of health; it is silence, and a campaign that wants the independent
-    // account to mean something declares how much of it it needs.
-    const need = frame.observationPolicy.minimumCoverage;
-    if (need !== undefined && (obs.eligible === 0 || obs.assessed / obs.eligible < need)) return false;
+  }
+  // ── …AND ENOUGH OF THE ROUND WAS ACTUALLY LOOKED AT (arch-review 72 P2, fixed 75) ─────────────────
+  //
+  // Read from the POLICY, not from the data. The first version put this inside `if (obs !== undefined)`,
+  // so a frame demanding `minimumCoverage: 0.5` was satisfied by a round carrying no observations block at
+  // all — the exact "an absence is not a clean bill of health" defect the same commit was written to close,
+  // reproduced by its own fix one branch up. Zero divergences over zero assessments is silence; NO BLOCK is
+  // a louder silence, and a campaign that declared it needs coverage may not be answered with either.
+  //
+  // `assessed`/`eligible` are optional at rest so rows written before they existed still decode
+  // (arch-review 75); absent means UNKNOWN COVERAGE, which is refused here rather than backfilled — a
+  // manufactured number would be exactly the evidence the policy exists to require.
+  const need = frame.observationPolicy.minimumCoverage;
+  if (need !== undefined) {
+    if (obs?.assessed === undefined || obs.eligible === undefined) return false;
+    if (obs.eligible === 0 || obs.assessed / obs.eligible < need) return false;
   }
   return held.improvements >= 1 && held.regressions === 0;
 }

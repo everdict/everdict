@@ -292,6 +292,67 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     expect(store.outbox().map((e) => e.kind)).toEqual(["campaign.opened"]);
   });
 
+  it("REFUSES to decide, log or settle on a frame that predates the current rules (arch-review 75)", async () => {
+    // arch-review 72 split creation from storage so a legacy campaign stays READABLE. It left the other
+    // half open: such a campaign is still `open`, and a fresh round logged after the upgrade builds a
+    // heldOut block from the frame's single flag — manufacturing exactly the evidence the two-scenario rule
+    // exists to require, and the gate then adopts on it.
+    //
+    // Seen RED before the eligibility guard, observed:
+    //   legacy 1-held-out frame + new round → adopt ADOPTS v1.1.0
+    const store = new InMemoryEvolutionCampaignStore();
+    const svc = service(store);
+    // Written directly, because `open` correctly refuses this frame — the row is one an older deployment
+    // stored, which is the whole premise (a fixture that could open it would be testing nothing).
+    const legacy = {
+      id: "camp-legacy",
+      tenant: "acme",
+      issueId: "iss_1",
+      frame: {
+        ...frame,
+        scenarios: [
+          { id: "only-one", heldOut: true },
+          { id: "train", heldOut: false },
+        ],
+      },
+      frameDigest: "sha256:legacy",
+      rounds: [],
+      state: "open" as const,
+      createdBy: "alice",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    await store.create(legacy);
+
+    // READ still works — that is the availability half arch-review 72 bought, and it stays bought.
+    expect((await svc.get("acme", "camp-legacy")).id).toBe("camp-legacy");
+    expect((await svc.list("acme")).map((c) => c.id)).toContain("camp-legacy");
+
+    // …and every path that produces or consumes NEW adoption evidence refuses, naming the remedy.
+    await expect(svc.decision("acme", "camp-legacy"), "a legacy frame decided").rejects.toThrow(
+      /predates the current adoption rules/,
+    );
+    await expect(
+      svc.logRound(
+        "acme",
+        "camp-legacy",
+        {
+          hypothesis: "h",
+          candidateVersion: "1.0.1",
+          baselineScorecardId: "sc-b",
+          candidateScorecardId: "sc-c",
+        },
+        "alice",
+        {},
+      ),
+      "a legacy frame manufactured a held-out block",
+    ).rejects.toThrow(/predates the current adoption rules/);
+    await expect(svc.settle("acme", "camp-legacy", "alice")).rejects.toThrow(/predates the current adoption rules/);
+    // Nothing was written by any of the three.
+    expect((await svc.get("acme", "camp-legacy")).rounds).toHaveLength(0);
+    expect((await svc.get("acme", "camp-legacy")).state).toBe("open");
+  });
+
   it("a round's verdict comes from the diff — the caller cannot write its own report card", async () => {
     const store = new InMemoryEvolutionCampaignStore();
     const svc = service(store);
@@ -507,6 +568,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       },
       forCampaign: store.forCampaign.bind(store),
       markRegistered: store.markRegistered.bind(store),
+      forIssue: store.forIssue.bind(store),
+      markCompleted: store.markCompleted.bind(store),
     };
     const svc2 = new CampaignService({
       store: raced,

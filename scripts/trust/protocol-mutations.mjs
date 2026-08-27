@@ -2535,6 +2535,40 @@ const MUTATIONS = [
     suite: ["--root", "packages/domain", "src/evolution/adopted-implies-authorization.counterexample.test.ts"],
   },
   {
+    // arch-review 73. `completed` means the adoption's INTENT settled — the issue it was opened against
+    // closed ON THIS ADOPTION'S EVIDENCE. The join is the scorecard the proof names; without it any
+    // resolution nearby completes the operation, which records that this adoption discharged an intent it
+    // did not (rule `protocol` L3, in its tracker-shaped form).
+    name: "R73 — an adoption completes on any resolution, not on its own evidence",
+    file: "packages/application-control/src/evolution/adoption-completion-watch.ts",
+    from: "        if (operation.proof.provingScorecardId !== resolvedBy) continue;",
+    to: "        if (false) continue;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/adoption-completion.counterexample.test.ts"],
+  },
+  {
+    // arch-review 75. The coverage requirement is read from the POLICY; nesting it under the data made a
+    // frame demanding 50% coverage satisfiable by a round with no observations block at all. Neutralizing
+    // the policy-first entry must be caught, or "an absence is not a clean bill of health" is prose again.
+    name: "R75 — a coverage requirement is skipped when the round recorded nothing",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "  if (need !== undefined) {",
+    to: "  if (need !== undefined && obs !== undefined) {",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/held-out-authority.counterexample.test.ts"],
+  },
+  {
+    // arch-review 75. A legacy frame may be READ and may not DECIDE. Neutralizing the eligibility guard
+    // lets a campaign stored with one held-out scenario log a fresh round — which BUILDS the held-out block
+    // the rule exists to require — and adopt on it.
+    name: "R75 — a legacy frame is allowed to produce new adoption evidence",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    const defects = campaignFrameDefects(record.frame);",
+    to: "    const defects = [];",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
     // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping
     // the read reverts the lane to `unresolved{lane_cannot_report}` for every unpinned reference, and the
     // world axis then degrades exactly where drift is most likely. The dispatch counterexample must notice.

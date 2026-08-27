@@ -82,4 +82,23 @@ export interface AdoptionOperationStore {
     proofDigest: string,
     registeredVersion: string,
   ): Promise<"registered" | "already_registered" | "no_such_operation" | "proof_mismatch">;
+  // ── …AND WHETHER THE INTENT IT SERVED IS SETTLED (arch-review 73) ────────────────────────────────
+  //
+  // The operations an ISSUE authorized. `completed` is the state that says the adoption's reason — the issue
+  // the campaign was opened against — has itself been closed on the evidence this adoption proved; without
+  // this read nothing could join a resolution back to the authorization it discharges, and the third state
+  // had no writer at all.
+  //
+  // Plural because an issue can carry more than one campaign over its life (a second attempt after a halt),
+  // and each has its own authorization.
+  forIssue(tenant: string, issueId: string): Promise<AdoptionOperation[]>;
+  // Discharge it. Conditional on the operation being `registered` — an adoption whose registry write never
+  // landed has no intent to settle — and on the proof still being the recorded one. Answers what happened
+  // rather than void: an at-least-once redelivery must be able to tell "I completed it" from "it already
+  // was" without either being an error (rule `protocol` L1).
+  markCompleted(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+  ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch">;
 }

@@ -1,4 +1,4 @@
-import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contracts";
+import type { AdoptionOperation, CampaignAdoptionProof, CapabilityOriginChannel } from "@everdict/contracts";
 import { ConflictError, NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
@@ -21,9 +21,51 @@ import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.j
 // doing the annotation thing this whole review series is about.
 export interface CampaignAdoptionDeps {
   operations: AdoptionOperationStore;
-  // The effect itself, injected: this package owns no registry. It returns the version that actually landed,
-  // so the operation records a version somebody can go look at rather than the one we hoped for.
-  register: (input: { proof: CampaignAdoptionProof }) => Promise<{ version: string }>;
+  // The effect itself, injected: this package owns no registry. It takes the SPEC the caller is registering
+  // and answers with what the registry now HOLDS at that version — the version, and the digest of the
+  // document a later read resolves to.
+  //
+  // ── WHY THE DIGEST IS READ BACK RATHER THAN COMPUTED HERE (arch-review 73) ──────────────────────────
+  //
+  // The obvious implementation is `contentDigest(input.spec)` in this file, and it can never match. A
+  // scorecard's `manifest.harness.specDigest` seals the RESOLVED harness document (template + pins), which
+  // is what `HarnessInstanceRegistry.get` returns and what the drift check in `ScorecardService` already
+  // re-derives — while what a caller registers is the INSTANCE spec. Two different documents; digesting the
+  // caller's copy would compare a hash of the wrong thing and refuse every honest adoption.
+  //
+  // So the effect resolves it: register (immutable versions make identical bytes an idempotent no-op and
+  // different bytes a conflict), then read the resolved document back and digest THAT. `specDigest` absent
+  // means the deployment could not resolve one — never "it matched".
+  register: (input: {
+    tenant: string;
+    by: string;
+    // The CHANNEL the request arrived through — a fact about the request, carried rather than assumed. The
+    // adopted version's birth stamp records it, and a hardcoded one files every caller under the wrong door.
+    via: CapabilityOriginChannel;
+    proof: CampaignAdoptionProof;
+    spec: unknown;
+    //
+    // ── AND IT ANSWERS WITH THE WHOLE IDENTITY, NOT JUST A VERSION (arch-review 75 P1-high) ─────────
+    //
+    // The first version returned `{version}` and the service recorded whatever came back. An adapter bound
+    // to a server-side-versioning door — `save_agent` auto patch-bumps a changed spec — would answer 1.1.1
+    // for a proof authorizing 1.1.0, and the operation would be marked `registered` at a version the
+    // campaign never proved. The pre-effect comparison cannot see that: it checks the REQUEST, and this is
+    // about the RESULT.
+    //
+    // So the effect reports the identity the registry now holds, and every coordinate of it is compared
+    // again before the authorization is spent. `kind` distinguishes a write that created the version from
+    // one that found it already there — both are success under an idempotent registry, and telling them
+    // apart is what makes an at-least-once retry legible instead of ambiguous.
+  }) => Promise<RegistrationOutcome>;
+}
+
+// What the registry now holds at the adopted label, reported by the effect rather than assumed by its
+// caller. `already_exists` is the ordinary path: the candidate version was registered when it was evaluated,
+// so an honest adoption re-presents identical bytes and the immutable store makes that a no-op.
+export interface RegistrationOutcome {
+  kind: "created" | "already_exists";
+  candidate: { type: "agent" | "harness"; id: string; version: string; specDigest?: string };
 }
 
 export type AdoptionOutcome =
@@ -39,6 +81,11 @@ export interface AdoptionRequest {
   campaignId: string;
   proof: CampaignAdoptionProof;
   candidate: { type: "agent" | "harness"; id: string; version: string; specDigest?: string };
+  // The bytes being registered. Passed through to the effect rather than digested here — see the note on
+  // `register` for why the digest a proof carries is not a hash of this document.
+  spec: unknown;
+  by: string; // the subject the registration is attributed to
+  via: CapabilityOriginChannel; // …and the door it came through
 }
 
 export class CampaignAdoptionService {
@@ -99,9 +146,54 @@ export class CampaignAdoptionService {
     // version, so re-driving it lands on the same row and the spend follows.
     //
     // So a crash between them is the honest state, and it is the one that can be repaired.
-    const { version } = await this.deps.register({ proof: recorded.proof });
-    const spent = await this.deps.operations.markRegistered(input.tenant, input.campaignId, authorized, version);
-    if (spent === "already_registered") return { kind: "already_adopted", version };
+    const landed = await this.deps.register({
+      tenant: input.tenant,
+      by: input.by,
+      via: input.via,
+      proof: recorded.proof,
+      spec: input.spec,
+    });
+    // ── …AND WHAT LANDED IS WHAT WAS MEASURED (arch-review 73) ──────────────────────────────────────
+    //
+    // The caller's claim about its own bytes was checked above; this checks the REGISTRY's. An immutable
+    // version makes a substituted spec a conflict, so the ordinary path is a no-op — but "the write did not
+    // throw" is not "the document under this label is the one the campaign evaluated", and a deployment
+    // whose registry resolves a version through a template can hold something the caller never sent.
+    //
+    // A disagreement leaves the operation `decided` over a capability that exists, which is the recoverable
+    // direction (an operator re-drives it once the label points at the measured bytes). Spending first and
+    // discovering the mismatch after would record `registered` over an adoption that never happened.
+    const authorizedCandidate = recorded.proof.candidate;
+    const landedCandidate = landed.candidate;
+    const measured = authorizedCandidate.specDigest;
+    const drift =
+      landedCandidate.type !== authorizedCandidate.type
+        ? `type ${landedCandidate.type} (authorized: ${authorizedCandidate.type})`
+        : landedCandidate.id !== authorizedCandidate.id
+          ? `id ${landedCandidate.id} (authorized: ${authorizedCandidate.id})`
+          : // The one a server-side-versioning door produces: an auto patch-bump answering 1.1.1 for a proof
+            // that authorized 1.1.0. Recording that would mark the operation spent on a version the campaign
+            // never proved.
+            landedCandidate.version !== authorizedCandidate.version
+            ? `version ${landedCandidate.version} (authorized: ${authorizedCandidate.version})`
+            : measured !== undefined && landedCandidate.specDigest !== measured
+              ? landedCandidate.specDigest === undefined
+                ? `no resolvable document (this campaign proved ${measured})`
+                : `spec digest ${landedCandidate.specDigest} (this campaign proved ${measured})`
+              : undefined;
+    if (drift !== undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: input.campaignId, drift, landed: landedCandidate, authorized: authorizedCandidate },
+        `the registry now holds a different capability than this campaign authorized — ${drift}. The authorization stays unspent`,
+      );
+    const spent = await this.deps.operations.markRegistered(
+      input.tenant,
+      input.campaignId,
+      authorized,
+      landedCandidate.version,
+    );
+    if (spent === "already_registered") return { kind: "already_adopted", version: landedCandidate.version };
     if (spent !== "registered")
       throw new ConflictError(
         "CONFLICT",
@@ -115,6 +207,6 @@ export class CampaignAdoptionService {
         { campaign: input.campaignId },
         "the authorization vanished between spending it and reading it back",
       );
-    return { kind: "adopted", operation, version };
+    return { kind: "adopted", operation, version: landedCandidate.version };
   }
 }

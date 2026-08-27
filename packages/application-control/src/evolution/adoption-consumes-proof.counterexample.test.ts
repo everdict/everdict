@@ -57,18 +57,57 @@ function operations(over: Partial<AdoptionOperation> = {}) {
       op = { ...op, state: "registered", registeredVersion };
       return "registered";
     },
+    // The completion half, answering the way the real store does — a double that always succeeded would
+    // make a guard that refuses every real call read as a green test (rule `testing`).
+    async forIssue(_t, issueId) {
+      return op !== undefined && op.proof.issueId === issueId ? [op] : [];
+    },
+    async markCompleted(_t, _c, proofDigest) {
+      if (op === undefined) return "no_such_operation";
+      if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
+      if (op.state === "completed") return "already_completed";
+      if (op.state !== "registered") return "not_registered";
+      op = { ...op, state: "completed" };
+      return "completed";
+    },
   };
   return { store, current: () => op };
 }
 
-const serviceOver = (store: AdoptionOperationStore, registered: string[]) =>
+// The registry double answers with what it now HOLDS at that version — the read-back, not an echo of the
+// caller's bytes. `holds` lets a case make the registry disagree with the proof without the write failing,
+// which is the only way to reach the arch-review 73 check.
+// ⚠️ `null`, not `undefined`, for "the registry resolves nothing": passing `undefined` explicitly SELECTS
+// THE DEFAULT in JS, so the unresolvable case silently became the matching one and its test passed while
+// never entering the branch. A double that is quietly more permissive than the real thing (rule `testing`).
+// `lands` lets a case make the registry answer with an identity that is NOT the authorized one — the only
+// way to reach the post-effect comparison (arch-review 75). Default: exactly what the proof authorized.
+const serviceOver = (
+  store: AdoptionOperationStore,
+  registered: string[],
+  holds: string | null = "sha256:c1",
+  lands: Partial<{ type: "agent" | "harness"; id: string; version: string }> = {},
+) =>
   new CampaignAdoptionService({
     operations: store,
     register: async ({ proof }) => {
       registered.push(proof.candidate.version);
-      return { version: proof.candidate.version };
+      return {
+        kind: "already_exists" as const,
+        candidate: {
+          type: proof.candidate.type,
+          id: proof.candidate.id,
+          version: proof.candidate.version,
+          ...(holds !== null ? { specDigest: holds } : {}),
+          ...lands,
+        },
+      };
     },
   });
+
+// The bytes a caller submits. Opaque to the service by design — the digest that decides is the one the
+// registry resolves, never a hash of this.
+const SPEC = { id: "a1", instructions: "structure over phrasing" };
 
 describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it was given", () => {
   it("registers and SPENDS, once", async () => {
@@ -80,6 +119,9 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       campaignId: "camp-1",
       proof: PROOF,
       candidate: CANDIDATE,
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
     });
 
     expect(outcome.kind).toBe("adopted");
@@ -100,6 +142,9 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
         campaignId: "camp-1",
         proof: PROOF,
         candidate: { ...CANDIDATE, version: "9.9.9" },
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
       }),
       "a correct proof registered a version it never authorized",
     ).rejects.toThrow(/different candidate/);
@@ -116,7 +161,15 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     ]) {
       const { store } = operations();
       await expect(
-        serviceOver(store, []).adopt({ tenant: "acme", campaignId: "camp-1", proof: PROOF, candidate }),
+        serviceOver(store, []).adopt({
+          tenant: "acme",
+          campaignId: "camp-1",
+          proof: PROOF,
+          candidate,
+          spec: SPEC,
+          by: "alice",
+          via: "web" as const,
+        }),
       ).rejects.toThrow(/different candidate/);
     }
   });
@@ -126,7 +179,15 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     const forged = { ...PROOF, gateDigest: "sha256:forged" };
 
     await expect(
-      serviceOver(store, []).adopt({ tenant: "acme", campaignId: "camp-1", proof: forged, candidate: CANDIDATE }),
+      serviceOver(store, []).adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: forged,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      }),
     ).rejects.toThrow(/not the one this campaign recorded/);
   });
 
@@ -138,9 +199,23 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       async markRegistered() {
         return "no_such_operation";
       },
+      async forIssue() {
+        return [];
+      },
+      async markCompleted() {
+        return "no_such_operation";
+      },
     };
     await expect(
-      serviceOver(empty, []).adopt({ tenant: "acme", campaignId: "camp-1", proof: PROOF, candidate: CANDIDATE }),
+      serviceOver(empty, []).adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      }),
     ).rejects.toThrow(/never authorized an adoption/);
   });
 
@@ -149,11 +224,149 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     const registered: string[] = [];
     const svc = serviceOver(store, registered);
 
-    await svc.adopt({ tenant: "acme", campaignId: "camp-1", proof: PROOF, candidate: CANDIDATE });
-    const second = await svc.adopt({ tenant: "acme", campaignId: "camp-1", proof: PROOF, candidate: CANDIDATE });
+    await svc.adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    });
+    const second = await svc.adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    });
 
     expect(second.kind, "a second consumer was granted its own adoption").toBe("already_adopted");
     expect(registered, "the effect ran twice for one authorization").toEqual(["1.1.0"]);
+  });
+
+  // ── WHAT THE REGISTRY NOW HOLDS IS CHECKED, NOT WHAT THE CALLER CLAIMED (arch-review 73) ──────────
+  //
+  // The coordinate comparison above is about the REQUEST. This is about the WORLD: the registry's own
+  // document under the adopted label, digested after the write. Two reasons it is a separate check —
+  //
+  //   · a caller can present a correct proof and a correct coordinate triple and still register a document
+  //     the campaign never measured, whenever the deployment's registry resolves a version through anything
+  //     the caller does not fully supply (a harness template, a pin, a `_shared` fallback);
+  //   · "the write did not throw" is not "the label points at these bytes" — immutability refuses a
+  //     CHANGED version, and says nothing about one that was already there.
+  //
+  // Seen RED before the read-back, observed:
+  //   an adoption was spent on a version the registry does not hold the measured bytes for: expected [Function] to throw
+  it("REFUSES to spend when the registry resolves DIFFERENT bytes than the campaign measured", async () => {
+    const { store, current } = operations();
+    const registered: string[] = [];
+
+    await expect(
+      serviceOver(store, registered, "sha256:something-else").adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      }),
+      "an adoption was spent on a version the registry does not hold the measured bytes for",
+    ).rejects.toThrow(/this campaign proved sha256:c1/);
+    // …and it is the SPEND that is withheld, not the write: the effect ran, so the operation stays
+    // `decided` over a capability that exists — the direction an operator can repair.
+    expect(registered).toEqual(["1.1.0"]);
+    expect(current()?.state, "a mismatched registration spent its authorization anyway").toBe("decided");
+  });
+
+  it("REFUSES to spend when the registry cannot resolve a document at all", async () => {
+    // L2: "we could not find out" is not "it matched". A deployment whose registry answers nothing about
+    // the adopted version has not confirmed the adoption — it has failed to check it.
+    const { store, current } = operations();
+
+    await expect(
+      serviceOver(store, [], null).adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      }),
+    ).rejects.toThrow(/no resolvable document/);
+    expect(current()?.state).toBe("decided");
+  });
+
+  it("SPENDS a label-only adoption the registry cannot digest", async () => {
+    // The control, and the reason the check is conditional on the proof: a campaign that never named bytes
+    // has nothing to compare, and refusing it would make `allowLabelOnlyAdoption` unusable. The weaker
+    // adoption stays visible as the weaker one on the operation's own proof.
+    // Built WITHOUT the digest rather than deleting it afterwards: a proof that never named bytes is a
+    // different document, not one with a field removed.
+    const { specDigest: _unnamed, ...withoutBytes } = PROOF.candidate;
+    const labelOnly = { ...PROOF, candidate: { ...withoutBytes, identity: "label_only" as const } };
+    const { store, current } = operations({ proof: labelOnly });
+
+    const outcome = await serviceOver(store, [], null).adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: labelOnly,
+      candidate: { type: "agent", id: "a1", version: "1.1.0" },
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    });
+
+    expect(outcome.kind).toBe("adopted");
+    expect(current()?.state).toBe("registered");
+  });
+
+  it("REFUSES to spend when the registry landed a DIFFERENT VERSION than the proof authorized", async () => {
+    // The defect a server-side-versioning door produces: `save_agent` auto patch-bumps a changed spec, so an
+    // adapter bound to it answers 1.1.1 for a proof authorizing 1.1.0. The pre-effect comparison cannot see
+    // that — it checks the REQUEST — and the first version recorded whatever came back, marking the
+    // operation `registered` at a version the campaign never proved (arch-review 75 P1-high).
+    //
+    // Seen RED before the post-effect comparison, observed:
+    //   registeredVersion recorded 1.1.1 for a proof authorizing 1.1.0
+    const { store, current } = operations();
+
+    await expect(
+      serviceOver(store, [], "sha256:c1", { version: "1.1.1" }).adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      }),
+      "an auto-bumped version was recorded as the one this campaign proved",
+    ).rejects.toThrow(/version 1\.1\.1 \(authorized: 1\.1\.0\)/);
+    expect(current()?.state, "a drifted registration spent its authorization anyway").toBe("decided");
+    expect(current()?.registeredVersion).toBeUndefined();
+  });
+
+  it("REFUSES to spend when the registry landed a different id or type", async () => {
+    for (const lands of [{ id: "a2" }, { type: "harness" as const }]) {
+      const { store, current } = operations();
+      await expect(
+        serviceOver(store, [], "sha256:c1", lands).adopt({
+          tenant: "acme",
+          campaignId: "camp-1",
+          proof: PROOF,
+          candidate: CANDIDATE,
+          spec: SPEC,
+          by: "alice",
+          via: "web" as const,
+        }),
+      ).rejects.toThrow(/a different capability than this campaign authorized/);
+      expect(current()?.state).toBe("decided");
+    }
   });
 
   it("does NOT spend the authorization when the registry write fails", async () => {
@@ -168,7 +381,15 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     });
 
     await expect(
-      svc.adopt({ tenant: "acme", campaignId: "camp-1", proof: PROOF, candidate: CANDIDATE }),
+      svc.adopt({
+        tenant: "acme",
+        campaignId: "camp-1",
+        proof: PROOF,
+        candidate: CANDIDATE,
+        spec: SPEC,
+        by: "alice",
+        via: "web" as const,
+      }),
     ).rejects.toThrow(/refused the write/);
     expect(current()?.state, "a failed registration spent its authorization anyway").toBe("decided");
   });

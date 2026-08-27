@@ -12,7 +12,12 @@ import type { CommentService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
 import type { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import type { GithubAppService } from "@everdict/application-control";
-import type { EnvironmentAdoptionService, ImageRegistryService, WorkspaceImages } from "@everdict/application-control";
+import type {
+  CampaignAdoptionService,
+  EnvironmentAdoptionService,
+  ImageRegistryService,
+  WorkspaceImages,
+} from "@everdict/application-control";
 import type { ProxyService } from "@everdict/application-control";
 import type { MattermostCommandService } from "@everdict/application-control";
 import type { MattermostService } from "@everdict/application-control";
@@ -129,6 +134,10 @@ export interface ServerDeps {
   subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3) (route disabled if absent)
   viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
   campaignService?: CampaignService; // evolution-campaign settlement (route disabled if absent)
+  // The consumer of what a settle AUTHORIZED — the one seam that turns "the gate authorized a version" into
+  // "this registry write is that version". Separate from the settlement because its dependency is the
+  // REGISTRY, not the campaign store (arch-review 72 P0: the port existed and no production path reached it).
+  campaignAdoption?: CampaignAdoptionService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/read (routes disabled if absent)
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).

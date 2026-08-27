@@ -81,4 +81,44 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     // at-least-once convergence, not a failure.
     return rows.length > 0 ? "registered" : "already_registered";
   }
+
+  // ── THE OPERATIONS AN ISSUE AUTHORIZED (arch-review 73) ──────────────────────────────────────────
+  //
+  // Read through the proof's own `issueId` (indexed expressionally, mig 0197) rather than through a
+  // duplicated column: the proof is the authority, and a second copy of a field it already owns is a value
+  // that will eventually disagree with it.
+  async forIssue(tenant: string, issueId: string): Promise<AdoptionOperation[]> {
+    const { rows } = await this.client.query<OperationRow>(
+      "SELECT * FROM everdict_adoption_operations WHERE tenant = $1 AND proof ->> 'issueId' = $2",
+      [tenant, issueId],
+    );
+    return rows.map(toOperation);
+  }
+
+  // Discharging the INTENT, guarded the same way spending it is: the proof compared here (our canonical-JSON
+  // digest, which Postgres cannot compute) and the state condition in the statement, where atomicity is what
+  // is actually needed. `registered` only — an adoption whose registry write never landed has no intent to
+  // settle, and saying it did would be the annotation failure this whole series is about.
+  async markCompleted(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+  ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch"> {
+    const existing = await this.forCampaign(tenant, campaignId);
+    if (existing === undefined) return "no_such_operation";
+    if (contentDigest(existing.proof) !== proofDigest) return "proof_mismatch";
+    // Read BEFORE the conditional write so a redelivery can be told apart from an adoption that never
+    // registered — both produce zero rows, and they are different answers to the caller.
+    if (existing.state === "completed") return "already_completed";
+    if (existing.state !== "registered") return "not_registered";
+    const { rows } = await this.client.query<{ operation_id: string }>(
+      `UPDATE everdict_adoption_operations
+          SET state = 'completed', updated_at = now()
+        WHERE tenant = $1 AND campaign_id = $2 AND state = 'registered'
+        RETURNING operation_id`,
+      [tenant, campaignId],
+    );
+    // Zero rows now = somebody completed it between the read and the write: at-least-once convergence.
+    return rows.length > 0 ? "completed" : "already_completed";
+  }
 }

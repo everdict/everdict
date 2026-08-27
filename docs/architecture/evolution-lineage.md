@@ -231,9 +231,18 @@ machinery extended to cover them.
 > the diffSnapshot dependency so the identity checks read the documents the significance was computed
 > from. Derivation writes also preserve the owning team (wave C: re-pin reads the base's team through the
 > now-REQUIRED `teamOfVersion` port method; the agent bump reads its entity's team), and the MCP pin tool
-> authorizes against the entity's team like the route. Still open on this track: a hard refusal of a
-> campaign-candidate save that arrives WITHOUT the gate's `adopt` answer (today the coupling is the settle
-> tool's contract, not a guard).
+> authorizes against the entity's team like the route. **Adoption is now an authorization somebody spends**
+> (arch-review 71-73): an adopted close writes a durable `AdoptionOperation` in the same statement,
+> `GET /campaigns/:id/adoption` + `campaign_adoption` read it back, and `POST /campaigns/:id/adopt` +
+> `adopt_campaign_candidate` present it with the spec being registered — every coordinate compared against
+> the STORED proof, the spec registered at the authorized version, and what the registry then RESOLVES
+> digested and checked against what the campaign measured before the authorization is spent. Spendable once;
+> a crash between the effect and the spend leaves `decided` over a capability that exists, which the retry
+> converges on. The gate refuses to answer `adopt` at all when it cannot name the candidate's bytes unless
+> the frozen frame recorded `allowLabelOnlyAdoption` — an ingested scorecard names no registry document, so
+> a loop running on ingested traces declares that waiver at open or runs a batch that seals a manifest.
+> Still open on this track: `completed` (the third operation state) has no writer — the link from a spent
+> adoption to the issue resolution that closes the intent.
 
 **The gap.** Everything the `agent-evolve` skill mandates — frozen frame, N ≥ 3 trials, budget cap stated
 up front, stop after 3 rejected rounds, adoption only on significant-improvement-zero-regressions — is

@@ -49,6 +49,14 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   while the production store refused every one of those writes (arch-review 66 P0). When a protocol's decision
   lives in the ADAPTER — a join, a constraint, a conditional UPDATE's WHERE clause — its counterexample is a
   `*.trust.test.ts` against real Postgres, and the in-memory test proves only the shape.
+- **A twin that ignores an argument the real store filters on is a guard no unit test can see — and TENANT
+  is the argument this happens to.** `InMemoryEvolutionCampaignStore`'s campaign half scoped every read by
+  workspace ("another workspace's row reads as nonexistent"); its adoption half took `_tenant` on all four
+  methods and ignored it, while the Postgres twin filters on it. So the in-memory store was more permissive
+  than production on the one axis where that is worst, and no fixture could see it because no fixture ever
+  passed a second workspace (arch-review 74). When a method takes an argument it does not use, the
+  underscore is the tell: either the twin is wrong, or the parameter is. Add the second-workspace case —
+  the one that asserts the OTHER tenant is answered nothing — beside the ordinary one.
 - **A parity test compares the two PRODUCTION entry points.** The durability file compared
   `recoverStagedVerdict` against `recoverVerifiedCase` — two helpers, both missing what the real normal path
   (`withVerifierPass`) adds — so a field present on one path and absent on the other stayed green. Parity is

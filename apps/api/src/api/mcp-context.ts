@@ -25,6 +25,7 @@ import type { FileExecutionService, FsService } from "@everdict/application-cont
 import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
+  CampaignAdoptionService,
   CampaignService,
   CheckpointService,
   CycleService,
@@ -124,6 +125,8 @@ export interface McpDeps {
   subscriptionService?: SubscriptionService; // subscription registry (event → reaction rules, E3)
   viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
   campaignService?: CampaignService; // evolution-campaign settlement — open/round/decision/settle
+  // The consumer of what a settle authorized — the MCP twin of POST /campaigns/:id/adopt (BFF↔MCP parity).
+  campaignAdoption?: CampaignAdoptionService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/list/get
   taskService?: TaskService; // workspace task ledger — cross-agent coordination
   // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.

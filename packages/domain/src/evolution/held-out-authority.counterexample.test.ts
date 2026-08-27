@@ -307,6 +307,35 @@ describe("[R72 COUNTEREXAMPLE] missing observations are not a clean account", ()
     expect(campaignAdoption(strict, [covered(8, 10)]).kind).toBe("adopt");
   });
 
+  it("REFUSES a round with NO observations block at all, under a frame that requires coverage", () => {
+    // ⚠️ The case the first version did not have, and the reason it passed over its own defect: the
+    // coverage check was nested under `if (obs !== undefined)`, so the round that recorded NOTHING — the
+    // loudest silence there is — skipped the requirement entirely (arch-review 75 P1-medium).
+    //
+    // Seen RED before the policy-first entry, observed:
+    //   minimumCoverage 0.5 + NO observations block → adopt (bypassed)
+    const strict = frame({ observationPolicy: { allowDivergent: false, minimumCoverage: 0.5 } } as never);
+    // Built WITHOUT the block rather than deleting it: a round that never recorded observations is a
+    // different document, not one with a field removed.
+    const { observations: _none, ...bareVerdict } = round({ heldOutImprovements: 1 }).verdict;
+    const bare = { ...round({ heldOutImprovements: 1 }), verdict: bareVerdict } as unknown as CampaignRound;
+
+    expect(
+      campaignAdoption(strict, [bare]).kind,
+      "a frame demanding coverage was satisfied by a round that recorded none",
+    ).toBe("continue");
+  });
+
+  it("REFUSES a round whose coverage block predates assessed/eligible", () => {
+    // The legacy shape (arch-review 75 P1-high): decodable, and NOT clean. Absent coverage is unknown, and
+    // a campaign that demanded a level may not be answered with an unknown.
+    const strict = frame({ observationPolicy: { allowDivergent: false, minimumCoverage: 0.5 } } as never);
+    const legacy = round({ heldOutImprovements: 1 });
+    (legacy.verdict as { observations?: unknown }).observations = { divergent: 0, unclear: 0 };
+
+    expect(campaignAdoption(strict, [legacy]).kind).toBe("continue");
+  });
+
   it("leaves a frame that asked for no coverage exactly as it was", () => {
     // The control: coverage is opt-in, and a campaign that never declared a requirement keeps the behaviour
     // it had. This adds a way to demand evidence; it does not silently start refusing.

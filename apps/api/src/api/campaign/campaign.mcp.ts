@@ -1,8 +1,9 @@
-import { CampaignFrameSchema } from "@everdict/contracts";
+import { CampaignAdoptionProofSchema, CampaignFrameSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { teamCeiling } from "../../common/team-scope.js";
-import { type McpToolContext, ok, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
+import { gate } from "../route-context.js";
 
 // Evolution campaigns — MCP twin of the /campaigns routes (BFF↔MCP parity: same service, second transport).
 // This is the surface the agent-evolve loop drives; the tools' descriptions teach the settlement's rules.
@@ -114,6 +115,61 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       run(principal, "scorecards:read", async () => {
         const { campaign, operation } = await campaigns.adoption(ws, id);
         return ok({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
+      }),
+  );
+
+  server.registerTool(
+    "adopt_campaign_candidate",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Spend a settled campaign's adoption authorization on the registry write it authorizes. Present the " +
+        "proof from campaign_adoption and the spec JSON being registered. The proof is compared against the " +
+        "stored operation (its digest binds every coordinate), the spec's own id and version against the " +
+        "authorized ones, and what the registry RESOLVES after the write against what the campaign " +
+        "measured — a candidate substituted between the " +
+        "evaluation and the registration is refused rather than recorded. Spendable ONCE: a retry of the " +
+        "same adoption converges (already_adopted) instead of granting a second one. Requires " +
+        "scorecards:run and the candidate family's write action.",
+      inputSchema: {
+        id: z.string().describe("campaign id"),
+        proof: z.string().describe("CampaignAdoptionProof JSON, exactly as campaign_adoption returned it"),
+        spec: z.string().describe("The AgentSpec / HarnessInstanceSpec JSON being registered"),
+      },
+    },
+    ({ id, proof, spec }) =>
+      run(principal, "scorecards:run", async () => {
+        if (!deps.campaignAdoption) return fail("NOT_FOUND: campaign adoption is not configured.");
+        let parsedProof: unknown;
+        let parsedSpec: unknown;
+        try {
+          parsedProof = JSON.parse(proof);
+          parsedSpec = JSON.parse(spec);
+        } catch {
+          return fail("BAD_REQUEST: proof and spec must both be valid JSON.");
+        }
+        const checked = CampaignAdoptionProofSchema.safeParse(parsedProof);
+        if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
+        // The family's write action, gated like the route — spending an authorization is not a way around it.
+        gate(principal, checked.data.candidate.type === "agent" ? "agents:write" : "harnesses:register");
+        return ok(
+          await deps.campaignAdoption.adopt({
+            tenant: ws,
+            campaignId: id,
+            proof: checked.data,
+            candidate: {
+              type: checked.data.candidate.type,
+              id: checked.data.candidate.id,
+              version: checked.data.candidate.version,
+              ...(checked.data.candidate.specDigest !== undefined
+                ? { specDigest: checked.data.candidate.specDigest }
+                : {}),
+            },
+            spec: parsedSpec,
+            by: principal.subject,
+            via: "mcp",
+          }),
+        );
       }),
   );
 
