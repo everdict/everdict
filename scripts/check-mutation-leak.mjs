@@ -36,11 +36,39 @@ try {
 }
 
 const source = readFileSync(`${ROOT}/${RUNGS}`, "utf8");
-const replacements = [...source.matchAll(/^\s*to:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\s*,/gm)]
-  .map((m) => (m[1] ?? m[2]).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'").trim())
+
+// Two `to:` FORMS, because the rungs use two. A single-line replacement is a quoted string; a multi-line one is
+// sometimes an array of quoted lines `.join("\n")`, and reading only the first form left two rungs — both K8s
+// adoption, both several lines long — with no fingerprint at all. A scanner that silently covers 234 of 236
+// reports the same "PASS" as one that covers all of them, which is why the two counts are printed below: an
+// author who adds a third form sees the total stop matching the file.
+const QUOTED = String.raw`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`;
+const unquote = (literal) =>
+  literal.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'").replace(/\\\\/g, "\\");
+
+const declared = (source.match(/^\s*to:/gm) ?? []).length;
+const single = [...source.matchAll(new RegExp(String.raw`^\s*to:\s*(${QUOTED})\s*,`, "gm"))].map((m) => unquote(m[1]));
+// ⚠️ `\\n` — TWO characters in the SOURCE being scanned (`.join("\\n")`), not a newline. `biome check --write`
+// rewrote an earlier `String.raw` spelling of this regex into a literal and dropped one backslash, which broke
+// the extractor into matching nothing; the commit shipped because a formatter run was treated as evidence. It
+// was caught one command later by the coverage counter above — which is the argument for the counter.
+const joined = [...source.matchAll(/^\s*to:\s*\[([\s\S]*?)\]\.join\("\\n"\)/gm)].map((m) =>
+  [...m[1].matchAll(new RegExp(QUOTED, "g"))].map((q) => unquote(q[0])).join("\n"),
+);
+
+const replacements = [...single, ...joined]
+  .map((text) => text.trim())
   // A fingerprint has to be long enough to mean something. `to: "false"` is a rung too, and matching it would
   // flag every commit that writes the word — a check that cries wolf is one nobody reads (rule `ci`).
   .filter((text) => text.length > 18);
+
+if (single.length + joined.length < declared) {
+  console.error(
+    `✖ ${declared - single.length - joined.length} of ${declared} rung replacement(s) are in a form this check`,
+  );
+  console.error("  cannot read, so a commit could carry one invisibly. Teach the extractor the new form.");
+  process.exit(1);
+}
 
 const commits = git(["log", "--format=%h", `${base}..HEAD`])
   .trim()
