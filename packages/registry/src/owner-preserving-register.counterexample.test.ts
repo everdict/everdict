@@ -1,6 +1,8 @@
 import type { AgentSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryAgentRegistry } from "./agent/agent-registry.js";
+import { InMemoryHarnessInstanceRegistry } from "./harness/harness-instance-registry.js";
+import { InMemoryHarnessTemplateRegistry } from "./harness/harness-template-registry.js";
 import { VersionedStore } from "./versioned-store.js";
 
 // ── OWNER VALUE EXISTS ≠ OWNER VALUE REMAINS VALID UNTIL THE WRITE (arch-review 77) ─────────────────
@@ -78,6 +80,20 @@ describe("[R77 COUNTEREXAMPLE] a successor is filed under the owner at the momen
     agents.registerPreservingOwner("acme", spec("1.0.0"), "alice");
 
     expect(agents.teamOfVersion("acme", "a1", "1.0.0")).toBeUndefined();
+  });
+
+  it("is the surface EVERY successor-writing lane uses, not just the one that found the bug", () => {
+    // arch-review 77 closed this window in the campaign adoption lane. `saveAgent`'s auto-bump and the
+    // harness re-pin write successors the same way and kept the read-then-write spelling for fifteen waves
+    // — the one-lane-only shape this series keeps finding, and the reason the fix is a METHOD rather than a
+    // remembered discipline (arch-review 92).
+    //
+    // A test cannot prove a call site does not exist, so this asserts the SHAPE the lanes must use: both
+    // registries carry it, so no lane has to hand-roll the resolution or omit it.
+    const agents = new InMemoryAgentRegistry();
+    expect(typeof agents.registerPreservingOwner, "the agent lane cannot preserve an owner").toBe("function");
+    const instances = new InMemoryHarnessInstanceRegistry(new InMemoryHarnessTemplateRegistry());
+    expect(typeof instances.registerPreservingOwner, "the harness lane cannot preserve an owner").toBe("function");
   });
 
   it("REACHES the registry surface the adoption actually calls", () => {

@@ -57,10 +57,14 @@ export class AgentService {
       const version = nextVersion(latest.version, new Set(own));
       const stamped: CapabilityOrigin = { ...origin, from: { type: "agent", id, version: latest.version } };
       // The bump stays with the team that owns the agent (review wave C): ownership is read off the newest
-      // version, so registering the successor with no team re-files the agent out of its team's list. The
-      // entity's team is the registry's own answer, read from the same list() every team-scoped read uses.
-      const teamId = (await this.deps.agents.list(tenant)).find((e) => e.id === id)?.teamId;
-      await this.deps.agents.register(tenant, { ...body, id, version }, subject, teamId, stamped);
+      // version, so registering the successor with no team re-files the agent out of its team's list.
+      //
+      // ⚠️ Resolved INSIDE the write (arch-review 92). The read-then-write spelling that used to be here —
+      // `list()` for the team, then `register(..., teamId)` — leaves a window an ownership transfer fits
+      // through, and the successor then lands under a team that no longer owns the entity. arch-review 77
+      // closed exactly this in the campaign adoption lane and did not look at its siblings, which is the
+      // one-lane-only shape this series keeps finding.
+      await this.deps.agents.registerPreservingOwner(tenant, { ...body, id, version }, subject, stamped);
       return { workspace: tenant, id, version, created: true };
     }
     const version = "1.0.0";
