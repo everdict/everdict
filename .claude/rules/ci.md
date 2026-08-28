@@ -23,7 +23,7 @@ See skill `ci`.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
-  **`pnpm language-policy`**, **`pnpm source-bytes`**, **`pnpm mutation-leak`**,
+  **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm mutation-leak`**,
   **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
@@ -149,6 +149,17 @@ See skill `ci`.
   ⚠️ **NEVER `import()` THIS SCRIPT TO SEE IF IT PARSES.** It is a script, not a module: importing it RUNS it,
   in whatever tree you are standing in. `node -e "import('./scripts/trust/protocol-mutations.mjs')"` started a
   full mutation run in a shared worktree. `node --check <file>` is the syntax check — it never executes.
+- **`pnpm guard-siblings` refuses a door whose neighbours guard something it does not** (arch-review 119).
+  One wave found the same shape three times: `PUT /agents/:id` gained a team gate and `PUT /models/:id` kept a
+  bare `models:write`; `create_judge` files a capability under a team and `create_rubric`/`create_model`/
+  `create_runtime`/`create_agent` wrote with none; `get_dataset` refuses a private team's dataset and
+  `diff_datasets` returned both versions of it. Reading for it works exactly once — the door written AFTER the
+  lesson is the door that never learned — so the rule is mechanical: within one resource, an entity-naming
+  door carries the guards its siblings carry. A RATCHET over a baseline (`--write` regenerates), because 21
+  deviations exist today and each is a door somebody has to look at; what is refused is a NEW one, or a door
+  losing a guard it had. A resource whose access model genuinely differs says so in `OTHER_MODEL` with the
+  model it uses instead — `capability` has its own `visibility` field, and the tracker's records are filing
+  and visibility only, which `docs/tracker.md` states by name.
 - **`pnpm mutation-leak` refuses a COMMIT that carries a neutralized protocol** (arch-review 112). The warning
   below covers a killed run; it does not cover the run that is alive and WORKING while you stage beside it. The
   gate's dirty-tree guard protects the GATE, not the author — between two rungs the tree is clean, and while a

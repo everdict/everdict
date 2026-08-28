@@ -55,6 +55,7 @@ jobs:
       - run: pnpm import-cycles
       - run: pnpm option-forwarding
       - run: pnpm language-policy
+      - run: pnpm guard-siblings
       - run: pnpm source-bytes
       - run: pnpm mutation-leak
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.

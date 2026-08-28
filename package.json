@@ -28,6 +28,7 @@
     "option-forwarding": "node scripts/check-option-forwarding.mjs",
     "ci:commits": "node scripts/ci-commits.mjs",
     "language-policy": "node scripts/check-language-policy.mjs",
+    "guard-siblings": "node scripts/check-guard-siblings.mjs",
     "source-bytes": "node scripts/check-source-bytes.mjs",
     "mutation-leak": "node scripts/check-mutation-leak.mjs",
     "ci:local": "node scripts/ci-local.mjs",
