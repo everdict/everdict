@@ -2746,6 +2746,94 @@ const MUTATIONS = [
     build: "@everdict/domain",
     suite: ["--root", "packages/domain", "src/knowledge/harvest-specs.test.ts"],
   },
+  {
+    // ── LONG-HORIZON TRACE READS (docs/architecture/long-horizon-trace-reads.md) ────────────────────
+    //
+    // R0. The run detail's cost badge is answered by a summary the WRITER derived, never by reading the
+    // trajectory. Making it touch the evidence store's expensive door is the defect verbatim: hundreds of
+    // megabytes through two full parses, in a process every workspace shares, for five numbers.
+    name: "OOM — the cost badge reads a body again",
+    file: "packages/application-control/src/run/run-service.ts",
+    from: "    const answer = await this.deps.trajectories.usage(record.tenant, record.id).catch(() => undefined);",
+    to: "    await this.deps.trajectories.events(record.tenant, record.id, {});\n    const answer = await this.deps.trajectories.usage(record.tenant, record.id).catch(() => undefined);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/run/trajectory-usage-without-body.counterexample.test.ts"],
+  },
+  {
+    // R2 prerequisite. `spansToEvents` reads `base` and `perCallTokens` off the WHOLE array, so a page
+    // projected on its own restarts the `t` axis and double-counts an aggregate span's tokens. Ignoring the
+    // plane's recorded facts is that defect, and it changes the llm_call COUNT — a number that reaches an
+    // invoice.
+    name: "OOM — the projection measures a page against itself",
+    file: "packages/domain/src/trace/spans-to-events.ts",
+    from: "  const { baseMs: base, perCallTokens } = opts.batch ?? spanBatchFacts(sorted);",
+    to: "  const { baseMs: base, perCallTokens } = spanBatchFacts(sorted);",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/trace/paged-projection.counterexample.test.ts"],
+  },
+  {
+    // …and the WIRING half of the same rule: the facts only reach a page because the seal records them. A
+    // pure test cannot see a store that stopped writing them.
+    name: "OOM — the seal stops recording the plane's batch facts",
+    file: "packages/application-control/src/ports/trajectory-store.ts",
+    from: "      batch: spanBatchFacts(spans),",
+    to: "      ...(false ? { batch: spanBatchFacts(spans) } : {}),",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/results/paged-read.counterexample.test.ts"],
+  },
+  {
+    // R2. A page that can come back EMPTY because its first event alone exceeds the byte budget is a stream
+    // that never advances — the caller asks again from the same cursor, forever. Bounding one event is the
+    // offload's job; the pager's job is to keep making progress.
+    name: "OOM — a byte budget is allowed to return an empty page",
+    file: "packages/application-control/src/ports/trajectory-store.ts",
+    from: "    if (slice.length > 0 && bytes + size > maxBytes) break;",
+    to: "    if (bytes + size > maxBytes) break;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/results/paged-read.counterexample.test.ts"],
+  },
+  {
+    // R2. A plane sealed before mig 0200 is one blob and a window of a blob costs the whole blob, so the
+    // store REFUSES above its ceiling. Serving it instead is the OOM; serving an empty page would be worse,
+    // because every reader takes that as a run that did nothing.
+    name: "OOM — an oversized legacy body is served instead of refused",
+    file: "packages/db/src/results/trajectory-store.ts",
+    from: "    if (storedBytes > MAX_LEGACY_BODY_BYTES)",
+    to: "    if (storedBytes > MAX_LEGACY_BODY_BYTES && false)",
+    build: "@everdict/db",
+    suite: ["--root", "packages/db", "src/results/paged-read.counterexample.test.ts"],
+  },
+  {
+    // R1. A page of a hundred events is only a bound if the events are bounded. Leaving every payload inline
+    // is the half windowing cannot do.
+    name: "OOM — an oversized payload is never moved out of the event",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "    if (value === undefined || value === null) return undefined;",
+    to: "    if (value === undefined || value === null) return undefined;\n    return undefined;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R1. A resolve was ASKED for, so a preview is not an acceptable answer to it — a judge handed an excerpt
+    // under the name of the whole scores different evidence and nothing downstream can tell.
+    name: "OOM — a missing offloaded payload degrades into the preview",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "    if (bytes === undefined)",
+    to: "    if (bytes === undefined) return undefined;\n    if (false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R1. A spans plane is projected from its attributes BY THE STORE, so resolving the record afterwards
+    // fixes the spans and leaves the stream every judge reads truncated. Silently. The resolve has to redo
+    // the projection from the resolved record.
+    name: "OOM — a resolved spans plane keeps the projection made from previews",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "          events: spansToEvents(spans, result.page.batch !== undefined ? { batch: result.page.batch } : {}),",
+    to: "          events: (void spansToEvents, result.page.events),",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/results/offloaded-spans-projection.counterexample.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
