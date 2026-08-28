@@ -52,6 +52,11 @@ const unusedStore: ScorecardStore = {
 };
 
 const unusedDatasets: DatasetRegistry = {
+  // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+  // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+  async teamOfVersion(): Promise<string | undefined> {
+    throw new Error("unused");
+  },
   async register() {
     throw new Error("unused");
   },
@@ -175,6 +180,11 @@ const scoreJudgeSpec: JudgeSpec = {
 // carries, not which document it resolves.
 function judgeRegistryFor(spec: JudgeSpec): JudgeRegistry {
   return {
+    // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+    // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+    async teamOfVersion(): Promise<string | undefined> {
+      throw new Error("unused");
+    },
     async register() {
       throw new Error("unused");
     },
@@ -284,6 +294,11 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
       tags: [],
     };
     const judges: JudgeRegistry = {
+      // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+      // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+      async teamOfVersion(): Promise<string | undefined> {
+        throw new Error("unused");
+      },
       async register() {
         throw new Error("unused");
       },
@@ -525,6 +540,11 @@ describe("ScorecardScoreService aggregate — a re-score rewrites scoring identi
       tags: [],
     });
     const registry: JudgeRegistry = {
+      // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+      // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+      async teamOfVersion(): Promise<string | undefined> {
+        throw new Error("unused");
+      },
       async register() {
         throw new Error("unused");
       },
@@ -1179,6 +1199,11 @@ describe("the scoring stage and EMBED-mode groups (no child runs)", () => {
     tags: [],
   };
   const judgeRegistry: JudgeRegistry = {
+    // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+    // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+    async teamOfVersion(): Promise<string | undefined> {
+      throw new Error("unused");
+    },
     async register() {
       throw new Error("unused");
     },
@@ -1547,6 +1572,11 @@ describe("ScorecardScoreService carrier selection — the receipt names the row,
     tags: [],
   };
   const judges: JudgeRegistry = {
+    // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+    // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+    async teamOfVersion(): Promise<string | undefined> {
+      throw new Error("unused");
+    },
     async register() {
       throw new Error("unused");
     },

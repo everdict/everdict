@@ -47,7 +47,13 @@ export interface DatasetRegistry {
   creatorOf(tenant: string, id: string, version: string): Promise<string | undefined>;
   // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (`_shared`/seeded),
   // which the gate lets through; it is NOT "everyone's".
-  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
+  // ── REQUIRED, BECAUSE EVERY IMPLEMENTATION HAS IT (arch-review 119) ────────────────────────────
+  //
+  // Declared optional, this is the permissive arm of an authorization read: `registry.teamOfVersion?.(…)`
+  // answers `undefined` for a registry that does not implement it, which every gate reads as "unowned" and
+  // lets through. Twenty implementations exist and not one is missing it, so the optionality bought nothing
+  // and cost the ability to write a gate that cannot be skipped (rule `protocol`).
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   // Ownership transfer — the ENTITY moves, so every version of it moves (see VersionedStore.moveToTeam for why
   // it is never per-version). Ownership is metadata beside createdBy, so a transfer mints no version and leaves
   // content immutability untouched. Tenant directly-owned only (a `_shared` benchmark is not a workspace's to

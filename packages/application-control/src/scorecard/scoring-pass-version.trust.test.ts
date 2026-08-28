@@ -122,6 +122,11 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       async versionTags() {
         return {};
       },
+      // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+      // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+      async teamOfVersion(): Promise<string | undefined> {
+        throw new Error("unused");
+      },
     } satisfies JudgeRegistry;
     // The v2 judge's runner — its verdict is DISTINGUISHABLE from v1's, so "re-judged" is observable.
     const judgeRunner: JudgeRunner = {
@@ -182,6 +187,11 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       },
       store,
       datasets: {
+        // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
+        // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
+        async teamOfVersion(): Promise<string | undefined> {
+          throw new Error("unused");
+        },
         async register() {
           throw new Error("unused");
         },

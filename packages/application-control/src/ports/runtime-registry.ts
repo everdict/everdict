@@ -27,7 +27,13 @@ export interface RuntimeRegistry {
     origin?: CapabilityOrigin,
   ): Promise<void>;
   // The owning team — the value the authz kernel's team axis reads (undefined = unowned).
-  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
+  // ── REQUIRED, BECAUSE EVERY IMPLEMENTATION HAS IT (arch-review 119) ────────────────────────────
+  //
+  // Declared optional, this is the permissive arm of an authorization read: `registry.teamOfVersion?.(…)`
+  // answers `undefined` for a registry that does not implement it, which every gate reads as "unowned" and
+  // lets through. Twenty implementations exist and not one is missing it, so the optionality bought nothing
+  // and cost the ability to write a gate that cannot be skipped (rule `protocol`).
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<RuntimeSpec>;
   versions(tenant: string, id: string): Promise<string[]>;

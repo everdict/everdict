@@ -32,6 +32,13 @@ export interface RubricRegistry {
     teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void>;
+  // ── THE OWNING TEAM, WHICH THE PORT NEVER DECLARED (arch-review 119) ──────────────────────────
+  //
+  // Both implementations answer this and the routes gate on it through `teamOfEntity`'s optional chain — so
+  // it worked at runtime while every consumer typed against THIS port could not read ownership at all. A
+  // capability the port omits is one no gate can be written against; a rubric's `register` has taken a
+  // `teamId` since migration 0106.
+  teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<RubricSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback
