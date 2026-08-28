@@ -235,6 +235,9 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
                   ...(ctx.agent?.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
                   ...(ctx.agent?.runId !== undefined ? { runId: ctx.agent.runId } : {}),
                 },
+                // The owner this gate was granted against, asserted where the successor is written — the
+                // store re-reads it otherwise (arch-review 117). Same wiring as the HTTP twin.
+                { expectedOwnerTeamId: owner.teamId },
               ),
             ),
           owner,

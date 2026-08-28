@@ -392,11 +392,11 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       // 기존 엔티티의 소유 팀으로 게이트 — 재핀은 남의 팀 하네스를 바꾸는 쓰기다.
-      gate(
-        principal,
-        "harnesses:register",
-        await teamOfEntity(deps.harnessInstances, principal.workspace, req.params.id),
-      ); // same gate as instance register (ungated viewer+; the CI role has it too)
+      // Read ONCE and carried: the service lets the store re-read the owner where it writes, so a transfer
+      // landing between the gate and the write files the successor under a team this caller was never
+      // cleared for (arch-review 117 — the sibling of 115's adoption lane).
+      const owner = await teamOfEntity(deps.harnessInstances, principal.workspace, req.params.id);
+      gate(principal, "harnesses:register", owner); // same gate as instance register (ungated viewer+; CI too)
       // The channel is the route's contribution to the origin; the merge base is the service's — only it
       // knows the base at the write (docs/architecture/evolution-lineage.md, Track A). The keyless GitHub
       // Actions federation authenticates as the `ci` role, which is what tells a headless re-pin apart here.
@@ -414,6 +414,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
           ...(agent?.conversationId !== undefined ? { conversationId: agent.conversationId } : {}),
           ...(agent?.runId !== undefined ? { runId: agent.runId } : {}),
         },
+        { expectedOwnerTeamId: owner.teamId },
       );
       return reply.code(result.unchanged ? 200 : 201).send(result);
     } catch (err) {

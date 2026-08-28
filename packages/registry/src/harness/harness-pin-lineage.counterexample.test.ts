@@ -126,3 +126,65 @@ describe("re-pin lineage — the ancestor is recorded by the write that knows it
     expect(await originsOf(instances, "1.0.0")).toBeUndefined();
   });
 });
+
+// ── [R117 COUNTEREXAMPLE] THE RE-PIN ASSERTS THE OWNER ITS GATE WAS GRANTED AGAINST ─────────────────
+//
+// Both transports read `teamOfEntity` to gate `harnesses:register`, and this service then lets the store
+// re-read the owner where it writes. arch-review 77 closed the WRITER's window; the AUTHORIZER's is the same
+// shape one frame out, so a transfer landing between the two files the successor under a team the caller may
+// not write to.
+//
+// arch-review 115 closed exactly this in the adoption lane, and its commit message called this lane
+// "unchanged by construction" — true, and not the same as safe: unchanged means the window is still here.
+// The one-lane-only shape, inside a sentence written while fixing the other lane.
+//
+// Seen RED without the precondition: the re-pin registered 1.0.1 under team-b for a caller cleared only for
+// team-a.
+describe("[R117 COUNTEREXAMPLE] a re-pin whose harness changed teams after the gate", () => {
+  it("REFUSES, and registers nothing", async () => {
+    const templates = new InMemoryHarnessTemplateRegistry();
+    const instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", template);
+    await instances.register("acme", instance("1.0.0", { planner: D("a"), browser: D("b") }), "alice", "team-a");
+    // The gate saw team-a; the entity moves before the write.
+    // AWAITED, and not optional-chained: `moveToTeam` is async and it exists. An optional call to a method
+    // whose existence is the test's premise is a silent no-op — this file's own R77 case says so.
+    await instances.moveToTeam("acme", "bu", "team-b");
+
+    await expect(
+      repinHarnessImages(
+        instances,
+        "acme",
+        "ci-bot",
+        "bu",
+        { pins: { planner: D("c") }, allowTags: false },
+        { via: "ci" },
+        { expectedOwnerTeamId: "team-a" },
+      ),
+      "an authorization for team-a re-pinned a team-b harness",
+    ).rejects.toThrow(/changed teams/);
+
+    expect(await instances.ownVersions("acme", "bu"), "the refused re-pin registered a version anyway").toEqual([
+      "1.0.0",
+    ]);
+  });
+
+  it("ALLOWS the owner the gate actually saw — the control", async () => {
+    const templates = new InMemoryHarnessTemplateRegistry();
+    const instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", template);
+    await instances.register("acme", instance("1.0.0", { planner: D("a"), browser: D("b") }), "alice", "team-a");
+
+    const r = await repinHarnessImages(
+      instances,
+      "acme",
+      "ci-bot",
+      "bu",
+      { pins: { planner: D("c") }, allowTags: false },
+      { via: "ci" },
+      { expectedOwnerTeamId: "team-a" },
+    );
+    expect(r.unchanged).toBe(false);
+    expect(await instances.teamOfVersion("acme", "bu", r.version)).toBe("team-a");
+  });
+});
