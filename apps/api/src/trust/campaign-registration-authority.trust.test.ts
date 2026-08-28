@@ -123,3 +123,102 @@ describe.skipIf(!TRUST_PG_ENABLED)(
     });
   },
 );
+
+// ── [R120] THE EXACT-VERSION LANE ASKS THE SAME QUESTION (arch-review 120) ──────────────────────────
+//
+// TRUST-187 above pins the INSERT: a version that does not exist yet is refused when the entity moved. The
+// commonest adoption is the other one — the proof approved an EXACT version, and by the time it is spent
+// that version already exists. `registerReturning`'s exact-row branch returned "registered" without
+// consulting `authority` at all, under a comment saying "nothing was written, and nothing about ownership
+// was contradicted". Both halves were false: that branch REVIVES a tombstone, FILLS a team and FILLS an
+// origin, and the caller was authorized against an owner that may have moved.
+//
+//     same identity   ≠   authority still valid
+//
+// The in-memory twin has always asked first, so every unit test of this refusal was green while the adapter
+// production runs waved the case through — the adapter-divergence law, with the divergence on the permissive
+// side.
+//
+// ⚠️ ONLY REAL POSTGRES CAN CERTIFY IT. The decision is now one data-modifying CTE: an `authorized` arm read
+// against the same snapshot as the revive and the two fills, so either all of them see an authorized world
+// or none of them runs. A fake client evaluates none of that.
+//
+// Seen RED before the fix: "an authorization for team-a revived a team-b version: expected 'registered' to
+// be 'owner_moved'".
+describe.skipIf(!TRUST_PG_ENABLED)("TRUST-189 — the exact version already exists, and the owner moved", () => {
+  let pg: TrustPg;
+  let agents: PgAgentRegistry;
+
+  beforeAll(async () => {
+    pg = await openTrustPg();
+    agents = new PgAgentRegistry(pg.client);
+  });
+  afterAll(async () => pg?.close());
+
+  const spec = (id: string, version: string): AgentSpec =>
+    ({ id, version, instructions: "x", mcpServers: [], capabilities: [] }) as unknown as AgentSpec;
+
+  it("REFUSES re-presenting the exact approved version after the entity changed teams", async () => {
+    const id = trustId("agt");
+    await agents.register("trust", spec(id, "1.0.0"), "alice", "team-a");
+    await agents.register("trust", spec(id, "1.1.0"), "alice", "team-a"); // the version the proof approved
+    await pg.client.query("UPDATE everdict_agents SET team_id = 'team-b' WHERE tenant = $1 AND id = $2", ["trust", id]);
+
+    const landed = await agents.registerPreservingOwner("trust", spec(id, "1.1.0"), "alice", undefined, {
+      expectedOwnerTeamId: "team-a",
+    });
+
+    expect(landed, "an authorization for team-a spent itself on a team-b version").toBe("owner_moved");
+    expect(await agents.teamOfVersion("trust", id, "1.1.0"), "the refused call moved the version").toBe("team-b");
+  });
+
+  it("REFUSES reviving a tombstoned exact version under a team the caller cannot write to", async () => {
+    // The loudest form: the same call does not merely record metadata, it brings a deleted version BACK.
+    const id = trustId("agt");
+    await agents.register("trust", spec(id, "1.0.0"), "alice", "team-a");
+    await agents.register("trust", spec(id, "1.1.0"), "alice", "team-a");
+    await agents.softDelete("trust", id, "1.1.0");
+    await pg.client.query("UPDATE everdict_agents SET team_id = 'team-b' WHERE tenant = $1 AND id = $2", ["trust", id]);
+
+    const landed = await agents.registerPreservingOwner("trust", spec(id, "1.1.0"), "alice", undefined, {
+      expectedOwnerTeamId: "team-a",
+    });
+
+    expect(landed, "an authorization for team-a revived a team-b version").toBe("owner_moved");
+    expect(
+      (await agents.ownVersions("trust", id)).includes("1.1.0"),
+      "the refused call revived the tombstone anyway",
+    ).toBe(false);
+  });
+
+  it("gives an exact UNOWNED version the team that authorized the write", async () => {
+    // The other half of `initialTeamId`: the version exists and belongs to nobody, so a private team's
+    // campaign adopting it must not leave it workspace-unowned — the state every team can write.
+    const id = trustId("agt");
+    await agents.register("trust", spec(id, "1.0.0"), "alice"); // local, unowned
+    expect(await agents.teamOfVersion("trust", id, "1.0.0")).toBeUndefined();
+
+    const landed = await agents.registerPreservingOwner("trust", spec(id, "1.0.0"), "alice", undefined, {
+      expectedOwnerTeamId: undefined,
+      initialTeamId: "team-a",
+    });
+
+    expect(landed).toBe("registered");
+    expect(
+      await agents.teamOfVersion("trust", id, "1.0.0"),
+      "a private team's campaign adopted an exact version and left it owned by nobody",
+    ).toBe("team-a");
+  });
+
+  it("ALLOWS the unchanged owner — the control, and it must stay idempotent", async () => {
+    const id = trustId("agt");
+    await agents.register("trust", spec(id, "1.0.0"), "alice", "team-a");
+
+    const landed = await agents.registerPreservingOwner("trust", spec(id, "1.0.0"), "alice", undefined, {
+      expectedOwnerTeamId: "team-a",
+    });
+
+    expect(landed, "the entity's own team was refused its own version").toBe("registered");
+    expect(await agents.ownVersions("trust", id)).toEqual(["1.0.0"]);
+  });
+});

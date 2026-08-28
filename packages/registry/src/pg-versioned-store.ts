@@ -204,38 +204,98 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
           `${this.label} ${item.id}@${item.version} is already registered with a different spec (versions are immutable).`,
         );
       }
-      // re-registering identical content = revive — content immutability is preserved (same pattern as dataset tombstones).
-      if (this.hasSoftDelete && row.deleted_at !== null) {
+      // ── THE EXACT-VERSION LANE ASKS THE SAME OWNER QUESTION AS THE INSERT (arch-review 120) ──────
+      //
+      // This branch used to return "registered" without consulting `authority` at all, under a comment
+      // saying "nothing was written, and nothing about ownership was contradicted". Both halves were false:
+      // the branch REVIVES a tombstone, FILLS a team and FILLS an origin, and the caller was authorized
+      // against an owner that may have moved since.
+      //
+      //     same identity   ≠   authority still valid
+      //
+      // The in-memory twin has always checked first — `registerPreservingOwner` asks before it registers —
+      // so every unit test of this refusal passed while the adapter that production runs waved the exact
+      // case through: re-present the version the proof approved, after the entity moved teams, and the
+      // adoption operation was spent against a team the caller cannot write to. A tombstoned exact version
+      // made it worse: the same call REVIVED somebody else's version.
+      //
+      // One statement, because two would put the window back. Postgres evaluates every arm of a CTE against
+      // one snapshot, so the owner is read once and the three effects either all see an authorized world or
+      // none of them run — the repository's own default for making writes atomic without a transaction.
+      const owner = `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`;
+      const localEntity = `EXISTS (SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live})`;
+      // ⚠️ Only what the statement REFERENCES. A parameter no arm mentions makes Postgres refuse the whole
+      // statement ("could not determine data type of parameter $n"), and the authority-only shape — refuse,
+      // with nothing to revive and nothing to fill — mentions neither the version nor a team.
+      const values: unknown[] = [tenant, item.id];
+      let versionIdx: number | undefined;
+      const version = () => {
+        if (versionIdx === undefined) versionIdx = values.push(item.version);
+        return `$${versionIdx}`;
+      };
+      // What the caller may fill an UNOWNED version with: the entity's own owner if it has one, else the
+      // authority that caused the write (`initialTeamId`), else what an ordinary register offered.
+      const fill = opts?.authority?.initialTeamId ?? teamId ?? null;
+      let authorized: string;
+      if (opts?.authority !== undefined && this.hasTeamId) {
+        values.push(opts.authority.expectedOwnerTeamId ?? null);
+        // `IS NOT DISTINCT FROM` so an expectation of "unowned" is a real claim rather than a NULL that
+        // compares to nothing — the same predicate the INSERT lane carries.
+        authorized = `NOT (${localEntity} AND ${owner} IS DISTINCT FROM $${values.length})`;
+      } else if (this.hasTeamId && teamId !== undefined) {
+        values.push(teamId);
+        // The ordinary lane's rule (arch-review 119): silence preserves, a DIFFERING team is a re-file and
+        // `moveToTeam` owns that act.
+        authorized = `(${owner} IS NULL OR $${values.length} IS NULL OR ${owner} = $${values.length})`;
+      } else {
+        authorized = "TRUE";
+      }
+      const parts = [`authorized AS (SELECT 1 WHERE ${authorized})`];
+      if (this.hasSoftDelete && row.deleted_at !== null)
         // A REVIVE is the shadow that leaves no trace in `created_at` — a workspace-local document coming
-        // back to life under a name a `_shared` document was answering. It advances the fence in the same
-        // statement that brings it back.
-        const revive = `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING 1`;
-        await this.client.query(
-          this.generationKind === undefined ? revive : this.fenced(revive, "SELECT 1 FROM mutation", 4),
-          this.generationKind === undefined
-            ? [tenant, item.id, item.version]
-            : [tenant, item.id, item.version, this.generationKind],
+        // back to life under a name a `_shared` document was answering.
+        parts.push(
+          `revived AS (UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = ${version()} AND EXISTS (SELECT 1 FROM authorized) RETURNING 1)`,
+        );
+      if (this.hasTeamId && fill !== null) {
+        values.push(fill);
+        // Fills an UNOWNED version and never moves an owned one — transferring ownership is its own act, and
+        // doing it as a side effect of re-registering identical content would move a resource out from under
+        // whoever could write it. `COALESCE` so the entity's own owner wins over what the caller offered.
+        parts.push(
+          `teamed AS (UPDATE ${this.table} SET team_id = COALESCE(${owner}, $${values.length}) WHERE tenant = $1 AND id = $2 AND version = ${version()} AND team_id IS NULL AND EXISTS (SELECT 1 FROM authorized) RETURNING 1)`,
         );
       }
-      // A revive may ADOPT an unowned version, but never moves an owned one to another team — transferring
-      // ownership is its own act, and doing it as a side effect of re-registering identical content would move a
-      // resource out from under whoever could write it (`team_id IS NULL` is the guard, not an UPDATE).
-      if (this.hasTeamId && teamId !== undefined)
-        await this.client.query(
-          `UPDATE ${this.table} SET team_id = $4 WHERE tenant = $1 AND id = $2 AND version = $3 AND team_id IS NULL`,
-          [tenant, item.id, item.version, teamId],
+      if (this.hasOrigin && origin !== undefined) {
+        values.push(JSON.stringify(origin));
+        // Provenance fills an unstamped version and never rewrites a stamped one: re-registering identical
+        // content is not a second birth, so the first answer to "where did this come from" stands.
+        parts.push(
+          `origined AS (UPDATE ${this.table} SET origin = $${values.length}::jsonb WHERE tenant = $1 AND id = $2 AND version = ${version()} AND origin IS NULL AND EXISTS (SELECT 1 FROM authorized) RETURNING 1)`,
         );
-      // Provenance fills an unstamped version and never rewrites a stamped one (`origin IS NULL` is the guard):
-      // re-registering identical content is not a second birth, so the first answer to "where did this come
-      // from" is the one that stands.
-      if (this.hasOrigin && origin !== undefined)
-        await this.client.query(
-          `UPDATE ${this.table} SET origin = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND origin IS NULL`,
-          [tenant, item.id, item.version, JSON.stringify(origin)],
-        );
-      // Idempotent re-register of the exact same version: nothing was written, and nothing about ownership
-      // was contradicted either — the caller's authorization still holds over a row that already existed.
-      return "registered";
+      }
+      // Nothing to assert and nothing to write — a table with no team_id, no tombstone to revive and no
+      // origin to fill. Issuing the statement anyway would send parameters no arm mentions, and Postgres
+      // refuses a statement it cannot type ("could not determine data type of parameter $1"). Found by
+      // taking a neutralized build's failure seriously instead of reading it as the guard working.
+      if (authorized === "TRUE" && parts.length === 1) return "registered";
+      const settle = `WITH ${parts.join(", ")} SELECT 1 FROM authorized`;
+      const settled = await this.client.query(
+        this.generationKind === undefined
+          ? settle
+          : this.fenced(settle, "SELECT 1 FROM authorized", values.push(this.generationKind)),
+        values,
+      );
+      if (settled.rows.length > 0) return "registered";
+      // Nothing ran, because the world is not the one the caller was authorized against. The two lanes
+      // answer differently for the same reason the INSERT does: an authority ASKED a question, while an
+      // ordinary register DECLARED a team over an entity that already has one.
+      if (opts?.authority !== undefined) return "owner_moved";
+      throw new ConflictError(
+        "CONFLICT",
+        { tenant, id: item.id, requested: teamId ?? null },
+        `${this.label} '${item.id}' belongs to another team — registering a version cannot move it. Transfer it first, then register.`,
+      );
     }
     const columns = ["tenant", "id", "version", this.column, "created_at"];
     const values: unknown[] = [tenant, item.id, item.version, JSON.stringify(item)];

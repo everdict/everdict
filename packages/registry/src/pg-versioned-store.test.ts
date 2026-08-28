@@ -59,6 +59,11 @@ function fake(rows: Row[]): { client: SqlClient; queries: string[]; calls: Array
       // `RETURNING 1` answers one row for an insert that landed. Answering `[]` was invisible while nothing
       // read the result, and reads as "the statement matched nothing" now that the store does (arch-review 119).
       if (text.startsWith("INSERT INTO")) return { rows: [{ one: 1 }] as R[] };
+      // `WITH authorized AS (…) SELECT 1 FROM authorized` — the exact-version lane's settle (arch-review 120).
+      // This double holds no team_id, so the authority arm it models is always satisfied and the statement
+      // returns its row. A double that answered `[]` here would report every idempotent re-register as a
+      // refusal, which is the always-succeeds-double law with the polarity flipped (rule `testing`).
+      if (/^WITH authorized AS /.test(text)) return { rows: [{ one: 1 }] as R[] };
       return { rows: [] as R[] };
     },
   };
