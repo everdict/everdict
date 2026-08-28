@@ -177,3 +177,73 @@ describe("[R115 COUNTEREXAMPLE] the effect asserts the owner its authorization w
     expect(landed, "an authorization over an unowned entity wrote into a team").toBe("owner_moved");
   });
 });
+
+// ── [R119 COUNTEREXAMPLE] A NEW VERSION MAY NOT RE-FILE THE ENTITY ──────────────────────────────────
+//
+// The wave above closed the window inside `registerPreservingOwner`. The ORDINARY `register` — the call every
+// explicit-version create door makes — still wrote whatever team the caller named, and ownership is read off
+// the newest version. So the takeover needed no race at all:
+//
+//     team-a owns helper@1.0.0 · a team-b member registers helper@2.0.0
+//     → teamOfEntity(helper) = team-b · team-a can no longer write their own agent
+//
+// Verified through the real `create_agent` MCP door before the fix: `isError: undefined`, owner `team-b`.
+// arch-review 118 closed exactly this at the SAVE door and left the CREATE door beside it, which is the
+// one-lane-only shape with the two lanes being two doors onto one registry.
+//
+// It is also the write that MADE the two ownership predicates disagree — the gate reads the newest version's
+// team, `registerPreservingOwner` resolves the oldest live one that has a team, and only a split entity can
+// tell them apart. Refusing the split is what keeps them one answer.
+//
+// Seen RED before the fix, all three:
+//   "a member of another team took the entity over: expected 'team-b' to be 'team-a'"
+//   "registering disowned the entity: expected undefined to be 'team-a'"
+//   the refusal case did not throw at all.
+describe("[R119 COUNTEREXAMPLE] register cannot move an entity between teams", () => {
+  const store = () => new VersionedStore<AgentSpec>("agent");
+  const spec = (version: string) => ({ id: "a1", version, instructions: "x" }) as unknown as AgentSpec;
+
+  it("REFUSES a version declaring a DIFFERENT team, and writes nothing", () => {
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice", "team-a");
+
+    expect(() => agents.register("acme", spec("2.0.0"), "mallory", "team-b")).toThrow(/belongs to another team/);
+
+    expect(agents.ownVersions("acme", "a1"), "the refused register wrote a version anyway").toEqual(["1.0.0"]);
+    expect(agents.teamOfVersion("acme", "a1", "1.0.0"), "a member of another team took the entity over").toBe("team-a");
+  });
+
+  it("PRESERVES the owner when the caller names no team — registering is not a way to disown", () => {
+    // The quieter half of the same takeover: an unowned newest version makes the entity unowned, which is
+    // writable by every team. Silence must not be able to say that.
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice", "team-a");
+
+    agents.register("acme", spec("2.0.0"), "alice");
+
+    expect(agents.teamOfVersion("acme", "a1", "2.0.0"), "registering disowned the entity").toBe("team-a");
+  });
+
+  it("ALLOWS the entity's own team, and still fills an unowned entity — the two controls", () => {
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice", "team-a");
+    agents.register("acme", spec("2.0.0"), "alice", "team-a"); // the owning team's own release
+    expect(agents.teamOfVersion("acme", "a1", "2.0.0")).toBe("team-a");
+
+    const fresh = store();
+    fresh.register("acme", spec("1.0.0"), "alice"); // born unowned
+    fresh.register("acme", spec("2.0.0"), "alice", "team-a"); // …a team may still claim it
+    expect(fresh.teamOfVersion("acme", "a1", "2.0.0"), "an unowned entity refused its first owner").toBe("team-a");
+  });
+
+  it("keeps the two ownership predicates ONE answer — no reachable split remains", () => {
+    // `teamOfEntity` reads the newest version; `registerPreservingOwner` resolves the oldest live one with a
+    // team. They can only differ over a split, and nothing can create one now.
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice", "team-a");
+    agents.register("acme", spec("2.0.0"), "alice");
+    const versions = agents.ownVersions("acme", "a1");
+    const teams = new Set(versions.map((v) => agents.teamOfVersion("acme", "a1", v)));
+    expect(teams.size, "an entity's live versions disagree about who owns it").toBe(1);
+  });
+});

@@ -4,7 +4,7 @@ import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
 
 // Rubric MCP tools — the MCP twin of rubric.routes.ts.
 // AuthZ reuses the judge actions (rubrics are the judging domain — no new action, mirroring how views reuse
@@ -99,10 +99,19 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
         annotations: { readOnlyHint: false },
         description:
           "Register a RubricSpec (JSON string) as owned by this workspace (referenced by judges as rubric:{id,version}; immutable; CONFLICT on collision)",
-        inputSchema: { rubric: z.string().describe("RubricSpec JSON") },
+        inputSchema: {
+          rubric: z.string().describe("RubricSpec JSON"),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
+        },
       },
-      ({ rubric }) =>
-        run(principal, "judges:write", async () => {
+      ({ rubric, team }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
+        runForTeam(ctx, "judges:write", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(rubric);
@@ -111,8 +120,8 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
           }
           const result = RubricSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await rubrics.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          await rubrics.register(ws, result.data, principal.subject, teamId); // creator stamp — HTTP parity
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
   }

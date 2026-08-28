@@ -12,18 +12,28 @@ import type { RuntimeListEntry, RuntimeRegistry } from "@everdict/application-co
 export class InMemoryRuntimeRegistry implements RuntimeRegistry {
   private readonly store = new VersionedStore<RuntimeSpec>("runtime");
 
-  // createdBy/teamId stay unthreaded (everdict_runtimes carries neither column) — the parameters exist only to keep
-  // the port's positional shape, so `origin` lands in the same 5th slot every other registry uses.
+  // ── THE OWNER IS THREADED, BECAUSE THE PG TWIN THREADS IT (arch-review 119) ─────────────────────
+  //
+  // This said "everdict_runtimes carries neither column", and migration 0106 gave the table `team_id`. The Pg
+  // twin was corrected — its comment records that dropping the owner "left a column that was always NULL and a
+  // gate that could never refuse" — and this sibling kept the old body under the old justification.
+  //
+  // A twin that ignores an argument the real store honours is a guard no unit test can see (rule `testing`):
+  // every unit assertion about a runtime's owning team was green against a store that could not hold one, and
+  // the `_` prefix was the tell. `createdBy` genuinely stays unthreaded — that column does not exist, so
+  // carrying it here would make the in-memory store MORE capable than production, which is the same divergence
+  // pointing the other way.
   async register(
     tenant: string,
     spec: RuntimeSpec,
     _createdBy?: string,
-    _teamId?: string,
+    teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void> {
-    this.store.register(tenant, spec, undefined, undefined, origin);
+    this.store.register(tenant, spec, undefined, teamId, origin);
   }
-  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
+  // The owning team — the value the authz kernel's team axis reads. Undefined = unowned (_shared/seed),
+  // which is NOT the same as "everyone's".
   teamOfVersion(tenant: string, id: string, version: string): string | undefined {
     return this.store.teamOfVersion(tenant, id, version);
   }

@@ -4,7 +4,7 @@ import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
 import { SaveModelBodySchema } from "./request/save-model.js";
 import { TestModelConnectionBodySchema } from "./request/test-connection.js";
 
@@ -85,10 +85,19 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
         annotations: { readOnlyHint: false },
         description:
           "Register a ModelSpec (JSON string) as owned by this workspace (provider + underlying model + baseUrl; immutable; CONFLICT on collision)",
-        inputSchema: { model: z.string().describe("ModelSpec JSON") },
+        inputSchema: {
+          model: z.string().describe("ModelSpec JSON"),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
+        },
       },
-      ({ model }) =>
-        run(principal, "models:write", async () => {
+      ({ model, team }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
+        runForTeam(ctx, "models:write", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(model);
@@ -97,8 +106,8 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
           }
           const result = ModelSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await models.register(ws, result.data, principal.subject); // creator = subject (delete permission)
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          await models.register(ws, result.data, principal.subject, teamId); // creator = subject (delete permission)
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
 

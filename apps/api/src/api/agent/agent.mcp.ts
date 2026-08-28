@@ -10,7 +10,7 @@ import {
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
 import { SaveAgentBodySchema } from "./request/save-agent.js";
 
 // Agent MCP tools — the MCP twin of agent.routes.ts (the workspace's conversational-agent configuration).
@@ -90,10 +90,19 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
         annotations: { readOnlyHint: false },
         description:
           "Register an AgentSpec (JSON string) as owned by this workspace (instructions + MCP tool servers + model; immutable; CONFLICT on collision)",
-        inputSchema: { agent: z.string().describe("AgentSpec JSON") },
+        inputSchema: {
+          agent: z.string().describe("AgentSpec JSON"),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
+        },
       },
-      ({ agent }) =>
-        run(principal, "agents:write", async () => {
+      ({ agent, team }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
+        runForTeam(ctx, "agents:write", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(agent);
@@ -102,8 +111,8 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           }
           const result = AgentSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await agents.register(ws, result.data, principal.subject); // creator = subject (delete permission)
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+          await agents.register(ws, result.data, principal.subject, teamId); // creator = subject (delete permission)
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
         }),
     );
 

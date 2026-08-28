@@ -68,6 +68,9 @@ export class AgentService {
       return { workspace: tenant, id, version, created: true };
     }
     const version = "1.0.0";
+    // The store refuses any register that would re-file the entity and preserves the owner on silence
+    // (arch-review 119), so a concurrent create landing between `ownVersions` and this write can no longer
+    // change whose agent this is.
     await this.deps.agents.register(tenant, { ...body, id, version }, subject, undefined, origin);
     return { workspace: tenant, id, version, created: true };
   }

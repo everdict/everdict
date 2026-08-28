@@ -5,7 +5,7 @@ import { ownedByVisibleTeam, runtimeSpecWithCapabilities } from "@everdict/domai
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
 
 // Runtime MCP tools — the MCP twin of runtime.routes.ts.
 // A private team's registered infra is that team's — the same ceiling the HTTP twin stays under.
@@ -99,10 +99,19 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
         annotations: { readOnlyHint: false },
         description:
           "Register a RuntimeSpec (JSON string) as owned by this workspace (immutable; CONFLICT on collision). Credentials live in the SecretStore",
-        inputSchema: { runtime: z.string().describe("RuntimeSpec JSON") },
+        inputSchema: {
+          runtime: z.string().describe("RuntimeSpec JSON"),
+          team: z
+            .string()
+            .optional()
+            .describe(
+              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
+            ),
+        },
       },
-      ({ runtime }) =>
-        run(principal, "runtimes:write", async () => {
+      ({ runtime, team }) =>
+        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
+        runForTeam(ctx, "runtimes:write", team, async (teamId) => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(runtime);
@@ -113,8 +122,9 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           // Fill capabilities server-side (declared ∪ auto-derived) — same SSOT as the HTTP route.
           const spec = runtimeSpecWithCapabilities(result.data);
-          await runtimes.register(ws, spec);
-          return ok({ workspace: ws, id: spec.id, version: spec.version });
+          // …and the creator stamp the HTTP twin writes: without it nobody owns the delete right (HTTP parity).
+          await runtimes.register(ws, spec, principal.subject, teamId);
+          return ok({ workspace: ws, id: spec.id, version: spec.version, ...(teamId ? { teamId } : {}) });
         }),
     );
   }

@@ -254,7 +254,10 @@ function fakePg(): SqlClient {
           created_by: (p[4] as string | null) ?? null,
           deleted_at: null,
         });
-        return { rows: [] };
+        // `RETURNING 1`: an insert that LANDED answers one row. This said `[]` — the double performed the
+        // write and reported that it had not, which was invisible only while nothing read the answer
+        // (arch-review 119).
+        return { rows: [{}] as R[] };
       }
       return { rows: [] };
     },

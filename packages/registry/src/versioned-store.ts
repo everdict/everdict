@@ -139,12 +139,37 @@ export class VersionedStore<T extends { id: string; version: string }> {
       if (existing.origin === undefined && origin !== undefined) existing.origin = origin;
       return;
     }
+    // ── A NEW VERSION MAY NOT RE-FILE THE ENTITY (arch-review 119) ─────────────────────────────────
+    //
+    // The revive path above already refuses to move an owned version as a side effect. The BIRTH path did
+    // not, and it is the one every create door reaches: ownership is read off an entity's newest version, so
+    // a member of another team registering `2.0.0` under their own team took the whole entity over —
+    // verified through the real `create_agent` door, no error, and the owning team could no longer write
+    // their own agent. arch-review 118 closed that at the SAVE door and left the CREATE door beside it open.
+    //
+    // The same write is what made the two ownership predicates disagree: the gate reads the newest version's
+    // team, `registerPreservingOwner` resolves the oldest live one that has a team, and only a SPLIT entity
+    // can tell them apart. Refusing the split here is what keeps them one answer, so neither reader has to be
+    // chosen over the other.
+    //
+    //   · a team that DIFFERS is a transfer — `moveToTeam` owns that act, and it moves every version at once;
+    //   · SILENCE preserves the owner rather than unowning the entity, which is the same takeover with no
+    //     name on it (an unowned entity is writable by every team). Registering is not a way to disown.
+    const owner = this.entityTeam(tenant, item.id);
+    if (owner !== undefined && teamId !== undefined && teamId !== owner) {
+      throw new ConflictError(
+        "CONFLICT",
+        { tenant, id: item.id, owner, requested: teamId },
+        `${this.label} '${item.id}' belongs to another team — registering a version cannot move it. Transfer it first, then register.`,
+      );
+    }
+    const effectiveTeamId = owner ?? teamId;
     versions.set(item.version, {
       item,
       seq: this.seq++,
       createdAt: new Date().toISOString(),
       ...(createdBy !== undefined ? { createdBy } : {}),
-      ...(teamId !== undefined ? { teamId } : {}),
+      ...(effectiveTeamId !== undefined ? { teamId: effectiveTeamId } : {}),
       ...(origin !== undefined ? { origin } : {}),
     });
   }

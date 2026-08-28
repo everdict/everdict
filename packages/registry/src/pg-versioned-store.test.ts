@@ -56,6 +56,9 @@ function fake(rows: Row[]): { client: SqlClient; queries: string[]; calls: Array
           })) as R[],
         };
       }
+      // `RETURNING 1` answers one row for an insert that landed. Answering `[]` was invisible while nothing
+      // read the result, and reads as "the statement matched nothing" now that the store does (arch-review 119).
+      if (text.startsWith("INSERT INTO")) return { rows: [{ one: 1 }] as R[] };
       return { rows: [] as R[] };
     },
   };
@@ -181,12 +184,44 @@ describe("PgVersionedStore.registerPreservingOwner — the owner is read where t
     expect(sql).toContain("deleted_at IS NULL");
   });
 
-  it("passes the team as a PARAMETER on the ordinary register — the two paths stay distinguishable", async () => {
-    // The control. If both spellings produced the same SQL, the first assertion above would be vacuous.
+  // ── THE ORDINARY REGISTER READS THE OWNER TOO, AND FOR A DIFFERENT REASON (arch-review 119) ───────
+  //
+  // This used to assert the two spellings were distinguishable BY the subquery: `registerPreservingOwner`
+  // resolved the owner and a plain `register` wrote the caller's team verbatim. That verbatim write is the
+  // takeover — a member of another team registering `2.0.0` moved the whole entity, because ownership is read
+  // off the newest version — so the plain path now reads the owner as well.
+  //
+  // What still distinguishes them is what they DO with the answer, which is the honest control:
+  //   · preserving  → COALESCE-free subquery as the value, and an authority claim it may answer `owner_moved` to;
+  //   · ordinary    → COALESCE(owner, $team) as the value, and a WHERE that refuses a DIFFERING team outright.
+  it("reads the owner on the ordinary register too — the caller's team may only fill, never re-file", async () => {
     const { client, calls } = fake([]);
     await store(client, true).register("acme", spec, "alice", "mobile");
     const [sql, params] = calls.find(([text]) => text.startsWith("INSERT INTO everdict_things")) ?? ["", []];
-    expect(sql).not.toContain("SELECT team_id FROM everdict_things");
-    expect(params).toContain("mobile");
+    // The caller's team still travels — it is what an unowned entity gets…
+    expect(params, "the caller's team never reached the statement").toContain("mobile");
+    // …but only through a COALESCE behind the entity's existing owner, so it can fill and cannot replace.
+    expect(sql, "the caller's team was written verbatim over the entity's owner").toContain(
+      "COALESCE((SELECT team_id FROM everdict_things",
+    );
+    // …and a team that DIFFERS is refused by the statement rather than written.
+    expect(sql, "a differing team was not refused by the write itself").toMatch(
+      /WHERE \(SELECT team_id FROM everdict_things.+ IS NULL OR \$\d+ IS NULL OR/,
+    );
+  });
+
+  it("REFUSES a version filed under a different team — zero rows is a conflict, not a silent no-op", async () => {
+    // The fake evaluates no WHERE clause, so the refusal is modelled the only way a double honestly can: the
+    // statement matched nothing. Real Postgres decides it in the `WHERE`; this pins what the store does with
+    // that answer (rule `testing` — a decision in the adapter is certified against the adapter, and the unit
+    // proves the shape).
+    const refusing: SqlClient = {
+      async query<R>(text: string): Promise<{ rows: R[] }> {
+        return { rows: (text.startsWith("INSERT INTO everdict_things") ? [] : []) as R[] };
+      },
+    };
+    await expect(store(refusing, true).register("acme", spec, "alice", "mobile")).rejects.toThrow(
+      /belongs to another team/,
+    );
   });
 });

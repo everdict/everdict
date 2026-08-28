@@ -240,6 +240,9 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     const columns = ["tenant", "id", "version", this.column, "created_at"];
     const values: unknown[] = [tenant, item.id, item.version, JSON.stringify(item)];
     const placeholders = ["$1", "$2", "$3", "$4", "now()"];
+    // Set when this INSERT writes a caller-supplied team; the refusal below reads the same parameter, so the
+    // value written and the claim asserted are one read of one thing (rule `protocol` L3).
+    let newVersionTeamIdx: number | undefined;
     if (this.hasCreatedBy) {
       columns.push("created_by");
       values.push(createdBy ?? null);
@@ -259,8 +262,18 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
           placeholders.push(owner);
         }
       } else {
+        // ── AN ORDINARY REGISTER MAY NOT RE-FILE THE ENTITY EITHER (arch-review 119) ──────────────
+        //
+        // This wrote the caller's team verbatim, so registering `2.0.0` of an id another team owns moved the
+        // whole entity: ownership is read off the newest version. The in-memory twin refuses that now, and a
+        // guard only one adapter has is a guard no deployment can rely on (rule `testing`).
+        //
+        // COALESCE, not the bare parameter: SILENCE preserves the owner instead of unowning the entity — an
+        // unowned capability is writable by every team, which is the same takeover without a name on it. A
+        // DIFFERING team is refused by `ownerUnchanged` below.
         values.push(teamId ?? null);
-        placeholders.push(`$${values.length}`);
+        newVersionTeamIdx = values.length;
+        placeholders.push(`COALESCE(${this.entityOwnerExpr}, $${values.length})`);
       }
     }
     if (this.hasOrigin) {
@@ -271,10 +284,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     // The authority precondition rides the INSERT itself — `SELECT … WHERE NOT EXISTS` rather than VALUES —
     // so "who owns this entity" is read once, for both the value written and the refusal.
     let insert = `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING 1`;
+    // What an empty result MEANS, decided where the statement is built rather than read off the row count.
+    // The two guarded forms are mutually exclusive and answer differently: the authority lane asked a
+    // question and gets `owner_moved`; the ordinary lane DECLARED a team over an entity that already has one,
+    // which is a conflict nobody asked about.
+    let refusedAs: "owner_moved" | "conflict" | undefined;
     if (opts?.authority !== undefined && this.hasTeamId) {
+      refusedAs = "owner_moved";
       values.push(opts.authority.expectedOwnerTeamId ?? null);
       const expected = `$${values.length}`;
-      const owner = `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`;
       // Refuse only when there IS a local entity whose resolved owner differs. A `_shared`-only or new id has
       // no claim to contradict, which is the case `initialTeamId` is for. `IS DISTINCT FROM` so that an
       // expectation of "unowned" is a real claim rather than a NULL that compares to nothing.
@@ -282,15 +300,38 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         `INSERT INTO ${this.table} (${columns.join(", ")}) ` +
         `SELECT ${placeholders.join(", ")} ` +
         `WHERE NOT (EXISTS (SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}) ` +
-        `AND ${owner} IS DISTINCT FROM ${expected}) RETURNING 1`;
+        `AND ${this.entityOwnerExpr} IS DISTINCT FROM ${expected}) RETURNING 1`;
+    } else if (newVersionTeamIdx !== undefined) {
+      // The re-file refusal rides the same INSERT, so the owner is read once — for the value written by the
+      // COALESCE above AND for this guard.
+      refusedAs = "conflict";
+      insert =
+        `INSERT INTO ${this.table} (${columns.join(", ")}) ` +
+        `SELECT ${placeholders.join(", ")} ` +
+        `WHERE ${this.entityOwnerExpr} IS NULL OR $${newVersionTeamIdx} IS NULL ` +
+        `OR ${this.entityOwnerExpr} = $${newVersionTeamIdx} RETURNING 1`;
     }
-    if (this.generationKind === undefined) {
-      const { rows } = await this.client.query(insert, values);
-      return rows.length > 0 || opts?.authority === undefined ? "registered" : "owner_moved";
-    }
-    values.push(this.generationKind);
-    const { rows } = await this.client.query(this.fenced(insert, "SELECT 1 FROM mutation", values.length), values);
-    return rows.length > 0 || opts?.authority === undefined ? "registered" : "owner_moved";
+    if (this.generationKind !== undefined) values.push(this.generationKind);
+    const statement =
+      this.generationKind === undefined ? insert : this.fenced(insert, "SELECT 1 FROM mutation", values.length);
+    const { rows } = await this.client.query(statement, values);
+    if (rows.length > 0 || refusedAs === undefined) return "registered";
+    if (refusedAs === "conflict") throw this.entityBelongsToAnotherTeam(tenant, item.id, teamId);
+    return "owner_moved";
+  }
+
+  // The entity's owner, resolved IN the statement that uses it: any live version with a team answers for all
+  // of them, because a transfer moves every version at once and a split is what this guard refuses to create.
+  private get entityOwnerExpr(): string {
+    return `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`;
+  }
+
+  private entityBelongsToAnotherTeam(tenant: string, id: string, requested?: string): ConflictError {
+    return new ConflictError(
+      "CONFLICT",
+      { tenant, id, requested: requested ?? null },
+      `${this.label} '${id}' belongs to another team — registering a version cannot move it. Transfer it first, then register.`,
+    );
   }
 
   // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned

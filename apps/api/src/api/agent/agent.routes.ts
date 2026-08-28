@@ -88,8 +88,11 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     // the ADOPT door and did not look at the ordinary save door, where the same action mints the same kind
     // of version. The harness twin gates on `teamOfEntity` at both of its write doors.
     //
-    // Read ONCE and carried into the write, for the reason arch-review 117 gives: the store re-resolves the
-    // owner where it writes, so a transfer between the gate and the write is a refusal, not a re-file.
+    // ⚠️ This said the owner was "read ONCE and carried into the write", and `saveAgent` had no parameter to
+    // carry it through — a claim about a component that did not do it (arch-review 119). The WINDOW behind
+    // this gate is closed one layer down instead: the registry refuses any register that would re-file an
+    // entity and preserves the owner on silence, so an `expectedOwnerTeamId` carried from here could never
+    // mismatch. A guard nobody can drive is worse than no guard; the gate is the whole fix at this door.
     let owner: Awaited<ReturnType<typeof teamOfEntity>>;
     try {
       owner = await teamOfEntity(deps.agentRegistry, principal.workspace, req.params.id);

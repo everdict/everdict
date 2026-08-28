@@ -78,7 +78,10 @@ function fakePg(): SqlClient {
           spec: JSON.parse(p[3] as string),
           tags: [], // migration 0047 default
         });
-        return { rows: [] };
+        // `RETURNING 1`: an insert that LANDED answers one row. This said `[]` — the double performed the
+        // write and reported that it had not, which was invisible only while nothing read the answer
+        // (arch-review 119).
+        return { rows: [{}] as R[] };
       }
       return { rows: [] };
     },
