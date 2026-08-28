@@ -52,6 +52,16 @@
           }
         }
       }
+    },
+    {
+      "include": ["scripts/**/*.mjs", "scripts/**/*.js"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUndeclaredVariables": "error"
+          }
+        }
+      }
     }
   ]
 }

@@ -3017,21 +3017,28 @@ const ORDERED = BUILD_ORDER.flatMap((target) => SELECTED.filter((m) => (m.build 
 // SIGKILL cannot be caught — that is what the marker above is for — but an ordinary interrupt can put the
 // tree right instead of leaving the next run to.
 let interrupted;
+// ⚠️ THIS HANDLER CALLED A FUNCTION THAT NO LONGER EXISTED (arch-review 120). `rebuild` was renamed to
+// `rebuildOrThrow` when builds started being CONSUMED (arch-review 115), and the two call sites in here were
+// not renamed with it. Nothing caught that: this is a `.mjs`, so no compiler reads it, `node --check` proves
+// only that it PARSES, and a handler that never runs in a green run is dead code until the day it matters.
+//
+// What it produced is the exact state the marker exists to prevent: SIGTERM → source restored → ReferenceError
+// → handler aborts before the rebuild and before the marker is written → a CLEAN source over a MUTATED dist,
+// with nothing recording the debt. Observed in this repository, and read as "the handler is still rebuilding".
+//
+// So the order is now: record the debt BEFORE paying it, pay every target, and clear the marker only when
+// every rebuild has succeeded. A handler that throws half-way leaves the marker, which is the next run's
+// instruction; a handler that clears first leaves nothing at all.
 const heal = () => {
-  // The rung in flight, if there is one: its source goes back and its package is compiled from that source.
-  if (interrupted !== undefined) {
-    writeFileSync(interrupted.file, interrupted.original);
-    if (interrupted.build) rebuild(interrupted.build);
-  }
-  // …AND the deferred boundary build, which is a SEPARATE debt. An interrupt landing between one rung's
-  // `finally` and the next rung's first write finds `interrupted` undefined while the marker still names a
-  // package whose dist holds the last mutation — so clearing the marker there would drop the only record of
-  // it. Read it, pay it, then clear it.
-  if (existsSync(STALE_MARK)) {
-    for (const target of readFileSync(STALE_MARK, "utf8").split("\n").filter(Boolean))
-      if (target !== interrupted?.build) rebuild(target);
-    rmSync(STALE_MARK, { force: true });
-  }
+  const owed = new Set(existsSync(STALE_MARK) ? readFileSync(STALE_MARK, "utf8").split("\n").filter(Boolean) : []);
+  if (interrupted?.build) owed.add(interrupted.build);
+  // The debt is durable BEFORE any rebuild runs — a rebuild that throws must not take the record with it.
+  if (owed.size > 0) writeFileSync(STALE_MARK, [...owed].join("\n"));
+  // The rung in flight, if there is one: its source goes back first, so whatever is rebuilt is HEAD's code.
+  if (interrupted !== undefined) writeFileSync(interrupted.file, interrupted.original);
+  for (const target of owed) rebuildOrThrow(target);
+  // Every target compiled from restored source — only now is there nothing left to tell the next run.
+  rmSync(STALE_MARK, { force: true });
 };
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -3059,7 +3066,56 @@ for (const target of [...new Set(SELECTED.map((m) => m.build).filter(Boolean))])
   }
 }
 
+// ── A PROCESS THAT EXITED NONZERO IS NOT AN ASSERTION THAT FAILED (arch-review 120) ────────────────
+//
+// The whole output of this gate is the claim "the suite went red BECAUSE the protocol was removed", and the
+// evidence for it was `vitest exit !== 0`. Everything else that exits nonzero was therefore counted as
+// enforcement: a suite path that moved, a config error, a collection failure, an unhandled setup throw, an
+// `npx` that could not spawn, a signal. "No test files found" exits nonzero and reads as a protocol caught.
+//
+// arch-review 115 already made the BUILD half of this honest. This is the run half: the outcome is a union,
+// and only `assertion_red` is enforcement. Read from vitest's own JSON reporter rather than from the exit
+// code, because the exit code is the one thing every failure mode agrees on.
+function runOutcome(suite, env) {
+  const run = spawnSync("npx", ["vitest", "run", "--reporter=json", ...suite], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
+  if (run.error !== undefined)
+    return { kind: "infrastructure_failed", why: `vitest could not be spawned: ${run.error.message}` };
+  if (run.signal !== null) return { kind: "signalled", why: `vitest was killed by ${run.signal}` };
+  // The reporter prints one JSON document; anything vitest wrote before it (a config throw, a resolver error)
+  // sits in front of it, so the parse starts at the first brace rather than at byte zero.
+  const raw = run.stdout ?? "";
+  const at = raw.indexOf("{");
+  let report;
+  if (at !== -1) {
+    try {
+      report = JSON.parse(raw.slice(at));
+    } catch {
+      report = undefined;
+    }
+  }
+  if (report === undefined)
+    return {
+      kind: "infrastructure_failed",
+      why: "vitest produced no JSON report — it did not get as far as running tests",
+    };
+  const total = report.numTotalTests ?? 0;
+  const failed = report.numFailedTests ?? 0;
+  const suitesFailed = report.numFailedTestSuites ?? 0;
+  // A suite that collected NOTHING has not answered the question — the commonest way for this to happen is a
+  // path that moved, which the old check read as the protocol being enforced.
+  if (total === 0) return { kind: "collection_failed", why: "the suite collected no tests" };
+  if (failed > 0) return { kind: "assertion_red", why: `${failed} assertion(s) failed` };
+  // Files that failed to LOAD are reported as failed suites with no failed tests: still not an assertion.
+  if (suitesFailed > 0) return { kind: "collection_failed", why: `${suitesFailed} suite(s) failed to load` };
+  return { kind: "green", why: "every test passed with the protocol removed" };
+}
+
 let holes = 0;
+// Runs that could not ANSWER — a moved suite, a config throw, a signal. Never enforcement, never a hole.
+let unusable = 0;
 let skipped = 0;
 let compilerCaught = 0;
 for (const mutation of ORDERED) {
@@ -3123,15 +3179,19 @@ for (const mutation of ORDERED) {
         continue; // the `finally` still restores the source and records the dist debt
       }
     }
-    const run = spawnSync("npx", ["vitest", "run", ...mutation.suite], {
-      stdio: "ignore",
-      env: { ...process.env, ...(mutation.env ?? {}) },
-    });
-    if (run.status === 0) {
+    const outcome = runOutcome(mutation.suite, mutation.env ?? {});
+    if (outcome.kind === "assertion_red") {
+      console.log(`✓ ${mutation.name} — the suite went red, as it must (${outcome.why})`);
+    } else if (outcome.kind === "green") {
       console.error(`✖ HOLE — ${mutation.name}: the suite stayed GREEN with the protocol removed.`);
       holes += 1;
     } else {
-      console.log(`✓ ${mutation.name} — the suite went red, as it must`);
+      // Not a verdict about the protocol at all. Counting it as one is how a moved suite path certified a
+      // protocol nobody tested, so it is a GATE failure with its own name.
+      console.error(`✖ UNUSABLE — ${mutation.name}: ${outcome.why} (${outcome.kind}).`);
+      console.error("  This says nothing about the protocol. Fix the suite reference or the environment;");
+      console.error("  a run that could not answer must never be recorded as one that did.");
+      unusable += 1;
     }
   } finally {
     writeFileSync(mutation.file, original);
@@ -3154,8 +3214,14 @@ if (holes > 0) {
   console.error(`\n✖ ${holes} protocol(s) are not actually enforced by the suite that claims to enforce them.`);
   process.exit(1);
 }
+if (unusable > 0) {
+  // A separate exit from a HOLE on purpose: a hole says the protocol is untested, this says the gate could
+  // not find out. Both are red, and conflating them is what let the second wear the first's certificate.
+  console.error(`\n✖ ${unusable} rung(s) produced no verdict at all — the gate could not answer for them.`);
+  process.exit(1);
+}
 console.log(
-  `\n✓ every protocol mutation was caught (${ORDERED.length - skipped} checked${
+  `\n✓ every protocol mutation was caught by an ASSERTION (${ORDERED.length - skipped} checked${
     compilerCaught > 0 ? `, ${compilerCaught} of them by the COMPILER rather than by a suite` : ""
   }${
     skipped > 0 ? `, ${skipped} SKIPPED for missing infrastructure — not the same as covered` : ""
