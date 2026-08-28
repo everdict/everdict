@@ -207,5 +207,40 @@ describeTrust(
         await pg.client.query("DELETE FROM everdict_runs WHERE tenant = $1", [otherTenant]);
       }
     });
+
+    // ── ONE STATEMENT, ONE DECISION (arch-review 104) ──────────────────────────────────────────────
+    //
+    // `releaseRuns` is one statement so the claim deletion and the counter decrement cannot come apart. They
+    // could still DISAGREE: the `gone` DELETE matched on `(request_id, envelope_id)` while the decrement also
+    // required `e.tenant = $3`, so a release the predicate refuses SPENT the claim and returned no capacity —
+    // `admitted_runs` keeping a grant no request row records, permanently, because the honest re-release then
+    // finds nothing to delete.
+    //
+    // The unit suite asserts the SQL TEXT carries the predicate. Rule `testing` is explicit that this is the
+    // weak half: a decision living in a conditional statement's WHERE clause is certified against the adapter,
+    // because nothing in a fake client proves Postgres agrees with what we think the text means. Both halves
+    // are read back here from the ledger.
+    it("TRUST-186: a release the tenant predicate refuses spends nothing, and the owner's still lands", async () => {
+      const envelope = trustId("env");
+      const request = trustId("req");
+      expect(await envelopes.tryAdmitRuns(envelope, tenant, request, 4, 100)).toBe(true);
+      expect((await envelopes.spend(envelope)).runs).toBe(4);
+
+      // A neighbour naming this envelope: the decrement was always refused. What must ALSO be refused is the
+      // claim deletion — otherwise the capacity is stranded and the real owner can never get it back.
+      await envelopes.releaseRuns(envelope, `${tenant}-neighbour`, request);
+      expect((await envelopes.spend(envelope)).runs, "another workspace released this claim").toBe(4);
+
+      // The proof that the refusal cost nothing: the owner's own release still finds its claim and lands.
+      await envelopes.releaseRuns(envelope, tenant, request);
+      expect((await envelopes.spend(envelope)).runs, "the refused release had already spent the claim").toBe(0);
+
+      // …and the conservation law the whole ledger rests on: no request row survives a completed release.
+      const rows = await pg.client.query<{ n: string | number }>(
+        "SELECT count(*) AS n FROM everdict_envelope_admissions WHERE request_id = $1",
+        [request],
+      );
+      expect(Number(rows.rows[0]?.n ?? -1), "the granted claim outlived its release").toBe(0);
+    });
   },
 );
