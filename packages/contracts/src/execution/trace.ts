@@ -24,6 +24,27 @@ const STRUCTURE = {
   at: z.string().optional(), // absolute wall-clock (ISO), when the emitter knows it
 };
 
+// ── AN OVERSIZED PAYLOAD IS MOVED, NOT LOST ──────────────────────────────────────────────────────────
+//
+// `artifact` has always been ref-only — `ref` is "a fetchable pointer, not the bytes". Nothing else was, and
+// the fields that actually grow without bound on a long-horizon run are these: a tool result holding a file
+// dump, a write_file call's arguments, an assistant message with a large code block, a captured stdout, and
+// the attribute bag an OTLP exporter copied verbatim (the GenAI convention puts prompt and completion
+// CONTENT in attributes). `offloadSnapshot` bounded an EnvSnapshot's screenshot and DOM years ago
+// (`DOM_INLINE_MAX`); this is that same law applied where the bytes actually arrive.
+//
+// The shape is exactly `dom`/`domRef`: when `<x>Ref` is present the sibling field holds a PREVIEW and the
+// full bytes are at the ref (`artifact://<key>`). A reader that only displays keeps the preview; a reader
+// that judges asks the store to resolve (`TrajectoryWindow.resolve`), and the store puts the bytes back
+// before anything projects or scores. Nothing is discarded — this is a move, and the record still contains
+// what the agent produced.
+//
+// DELIBERATELY NOT offloaded: `error.message` (both harness adapters already tail-cap it at 2000) and
+// `env_action.detail` (a small structured value). A ref costs a fetch; adding one to a field that does not
+// grow buys nothing and gives every consumer a second case to handle.
+const OFFLOAD_REF = (field: string) =>
+  z.string().optional().describe(`artifact:// ref to the full ${field}; when present, ${field} holds a preview`);
+
 // Normalized trace — every harness adapter converts its native output into "this".
 // Every metric (task success/trajectory/cost/latency) derives from this single stream.
 export const TraceEventSchema = z.discriminatedUnion("kind", [
@@ -32,6 +53,7 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("message"),
     role: z.enum(["user", "assistant"]),
     text: z.string(),
+    textRef: OFFLOAD_REF("text"),
     ...STRUCTURE,
   }),
   z.object({
@@ -48,6 +70,7 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     id: z.string(),
     name: z.string(),
     args: z.unknown(),
+    argsRef: OFFLOAD_REF("args"),
     ...STRUCTURE,
   }),
   z.object({
@@ -56,6 +79,7 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     id: z.string(),
     ok: z.boolean(),
     output: z.string(),
+    outputRef: OFFLOAD_REF("output"),
     ...STRUCTURE,
   }),
   z.object({
@@ -73,6 +97,7 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("log"),
     stream: z.enum(["stdout", "stderr"]),
     text: z.string(),
+    textRef: OFFLOAD_REF("text"),
     ...STRUCTURE,
   }),
   // A produced artifact (file/attachment the agent emitted) — `ref` is a fetchable pointer (URL/path), not the bytes.
@@ -96,6 +121,9 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("span"),
     name: z.string(),
     attributes: z.record(z.string(), z.unknown()).optional(),
+    // The WHOLE bag moves, not one key: a page cannot know which attribute a projection will read, and
+    // offloading them one at a time would leave the bag half-resolved with nothing saying so.
+    attributesRef: OFFLOAD_REF("attributes"),
     ...STRUCTURE, // `durationMs` lives here now — it was this kind's field first, and every kind needs it
   }),
   // The INFRA-plane record of the run's execution — the orchestrator's own account (job submission, blocked

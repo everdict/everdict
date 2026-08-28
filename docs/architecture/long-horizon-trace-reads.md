@@ -1,6 +1,6 @@
 # Long-horizon trace reads — the event is the unit
 
-> **Status: R0 and R2 landed (R3 merged into R2); R1 is what remains.** A long-horizon agent run is hundreds of turns over hours, and its
+> **Status: landed — R0, R2 (with R3 merged in) and R1.** A long-horizon agent run is hundreds of turns over hours, and its
 > trace carries what those turns produced: tool results holding file dumps, logs, span attributes copied
 > verbatim from a tenant's OTel exporter. Reading one of those traces exhausted the control plane's heap.
 > This document is why that happened, and the four changes that remove the cause rather than the symptom.
@@ -129,7 +129,7 @@ span is stored verbatim.
 concatenated projection equals the whole-plane projection event for event — RED without the stored batch
 facts, on `t` first and on `llm_call` count for the aggregate case.
 
-## R1 — the offload law applies to trace payloads *(next)*
+## R1 — the offload law applies to trace payloads *(landed)*
 
 `TraceEvent`'s `artifact` kind is already ref-only — `ref` is "a fetchable pointer, not the bytes". Nothing
 else is. `tool_result.output`, `log.text`, `tool_call.args` and `span.attributes` are unbounded, and
@@ -148,9 +148,30 @@ attribute and a status message. An offload that landed before the windowed read 
 would silently change what those projections produce — a re-score judging a preview and nothing downstream
 able to spot it. R2's per-page read is where resolution belongs, so R1 follows it.
 
-The judge's own truncation is what makes the preview safe: `model-judge.ts` renders the whole trace as
-`JSON.stringify(trace).slice(0, 6000)`, so a preview well above that cannot change a model judge's verdict.
-Code graders read `kind` and `cost`, not payloads.
+**Resolution is asked for, never automatic.** A read that always put the bytes back would undo the whole
+thing — the page would be as large as it ever was, one indirection later. So the default read serves the
+preview plus the ref (what a viewer wants), and a caller that SCORES the trace sets `TrajectoryWindow.resolve`
+and accepts the cost. Scorecard ingest does; the run-detail and sandbox-poll readers do not.
+
+A resolve is exact or it refuses. A missing object throws rather than degrading into the preview: a judge
+handed an excerpt under the name of the whole scores different evidence and nothing downstream can tell.
+A put that fails at seal keeps the payload INLINE — a ref naming bytes that do not exist is worse than a
+large event, because every later resolve refuses it and no reader can repair it.
+
+The preview keeps the SHAPE of a structured field: every key and every small value survives, and only the
+oversized string leaves become prefixes. Replacing an attribute bag with a marker would throw away what a
+reader is mostly looking at.
+
+### ⚠️ Resolving the record does not resolve the projection
+
+A spans plane IS the record, and the events a judge reads are projected out of its attributes BY THE STORE,
+before the offload decorator sees them. So an offloaded attribute bag is projected from the PREVIEW, and the
+resulting `tool_result` carries the excerpt with no ref of its own — a projected event is not what was
+stored. Patching the spans afterwards would hand back a correct record beside a truncated stream, and the
+stream is the half that gets scored.
+
+So a resolve on a spans plane resolves the RECORD first and redoes the projection from it, using the plane's
+batch facts (carried on the page for exactly this) so the re-projection is the whole-plane one.
 
 ## Deliberately not
 

@@ -433,6 +433,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
           format: plane.format,
           ...pageBodyOf(plane.format, legacy.slice, plane.batch),
           ...(legacy.nextAfter !== undefined ? { nextAfter: legacy.nextAfter } : {}),
+          ...(plane.batch !== undefined ? { batch: plane.batch } : {}),
           eventCount: plane.eventCount,
         },
       };
@@ -480,6 +481,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
           plane.batch,
         ),
         ...(lastSeq < plane.eventCount ? { nextAfter: lastSeq } : {}),
+        ...(plane.batch !== undefined ? { batch: plane.batch } : {}),
         eventCount: plane.eventCount,
       },
     };

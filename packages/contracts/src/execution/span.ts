@@ -74,6 +74,11 @@ export const TraceSpanSchema = z.object({
   startedAt: z.string(),
   endedAt: z.string(),
   attributes: z.record(z.string(), z.unknown()).default({}),
+  // `artifact://` ref to the full attribute bag when it was too large to keep inline; `attributes` then holds
+  // the same shape with its oversized string leaves truncated. See the offload note in execution/trace.ts —
+  // the record is the same value either way, and a caller that needs the bytes asks the trajectory store to
+  // resolve them.
+  attributesRef: z.string().optional(),
   events: z.array(SpanEventSchema).optional(),
   links: z.array(SpanLinkSchema).optional(),
   status: SpanStatusSchema.optional(),

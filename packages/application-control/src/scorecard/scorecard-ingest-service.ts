@@ -550,7 +550,9 @@ export class ScorecardIngestService {
       });
       // Read back what the LEDGER holds, not what we just offered: seals are first-write-wins, so a trial
       // that lost the race must be scored on the winner's evidence rather than on its own copy.
-      return await collectTrajectoryEvents(this.deps.trajectories, tenant, runId);
+      // `resolve` because this trace is about to be SCORED: an offloaded payload's preview is an excerpt,
+      // and judging an excerpt under the name of the whole is judging different evidence.
+      return await collectTrajectoryEvents(this.deps.trajectories, tenant, runId, { resolve: true });
     } catch {
       return events;
     }

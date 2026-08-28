@@ -190,6 +190,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
           plane.batch,
         ),
         ...(nextAfter !== undefined ? { nextAfter } : {}),
+        ...(plane.batch !== undefined ? { batch: plane.batch } : {}),
         eventCount: plane.eventCount,
       },
     };
@@ -517,6 +518,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         ),
         // seq is contiguous 1..eventCount (the seal writes it that way), so "is there more" needs no probe.
         ...(lastSeq !== undefined && Number(lastSeq) < plane.eventCount ? { nextAfter: Number(lastSeq) } : {}),
+        ...(plane.batch !== undefined ? { batch: plane.batch } : {}),
         eventCount: plane.eventCount,
       },
     };
@@ -562,6 +564,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         format: plane.format,
         ...pageBodyOf(plane.format, slice, plane.batch),
         ...(nextAfter !== undefined ? { nextAfter } : {}),
+        ...(plane.batch !== undefined ? { batch: plane.batch } : {}),
         eventCount: plane.eventCount,
       },
     };

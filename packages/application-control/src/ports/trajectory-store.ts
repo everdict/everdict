@@ -145,6 +145,16 @@ export interface TrajectoryWindow {
   // rather than served. Carried on the window because the refusal has to reach the read that returns bytes,
   // not only the one that lists planes.
   attemptId?: string;
+  // ── PUT THE OFFLOADED PAYLOADS BACK (R1) ──────────────────────────────────────────────────────────
+  //
+  // A payload too large to keep inline was moved to object storage at seal, and the event holds a preview
+  // plus an `artifact://` ref (see `OffloadingTrajectoryStore`). DEFAULT FALSE, and that is the point: a read
+  // that always resolved would make the page as large as it ever was, one indirection later.
+  //
+  // A viewer keeps the preview. A caller that SCORES the trace sets this, because scoring an excerpt is
+  // scoring different evidence — and it accepts the cost, which is one object fetch per offloaded field in
+  // the page and nothing at all for a page that has none.
+  resolve?: boolean;
 }
 
 export interface TrajectoryEventPage {
@@ -155,6 +165,11 @@ export interface TrajectoryEventPage {
   // The record itself, when this plane holds one. Absent for an `events` plane: a tree we never had is not a
   // tree we reconstruct at read time.
   spans?: TraceSpan[];
+  // The plane's batch facts, carried so a caller that has to RE-PROJECT this page (the payload offload's
+  // resolve path does, because a spans plane is projected from attributes that may themselves have been
+  // moved) reproduces the whole-plane projection rather than the page's. Absent for an `events` plane and
+  // for a plane sealed before mig 0200 — the same rows that are not split.
+  batch?: SpanBatchFacts;
   // Resume token for the next call. ABSENT means the plane is exhausted — the only signal a streaming reader
   // needs, and the one a `length < limit` heuristic gets wrong the moment a byte budget cuts a page short.
   nextAfter?: number;

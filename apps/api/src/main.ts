@@ -12,6 +12,7 @@ import {
   IssueService,
   KnowledgeEntryService,
   KnowledgeService,
+  OffloadingTrajectoryStore,
   ProductDiscovery,
   ProductService,
   ProductVersionSync,
@@ -320,10 +321,30 @@ async function main(): Promise<void> {
     "judge",
     lateEvents,
   );
+  // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
+  // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
+  // Constructed HERE rather than further down because the seal-time payload offload below needs it, and it
+  // depends on nothing but env.
+  const artifacts = await artifactStoreFromEnv();
+
+  // ── ONE EVENT IS BOUNDED (long-horizon trace reads, R1) ─────────────────────────────────────────
+  //
+  // The windowed read bounds how MANY events a page holds; this bounds how LARGE one is. A field over
+  // `EVENT_INLINE_MAX` is MOVED to object storage at seal and the event keeps a preview plus an
+  // `artifact://` ref — the law `offloadSnapshot` has applied to screenshots and DOM for years, now applied
+  // where the bytes actually arrive. Wrapped once, here, for the reason the naming decorator is: there are
+  // eight seal paths and only some of them would remember.
+  //
+  // WITHOUT an artifact store the payloads stay inline, which is exactly the trajectory this deployment
+  // wrote yesterday — the offload is a size optimization, never a correctness precondition, so a dev boot
+  // with no S3 loses nothing.
+  const offloaded =
+    artifacts !== undefined ? new OffloadingTrajectoryStore(rawTrajectoryStore, artifacts) : rawTrajectoryStore;
+
   // E4 perception (event-plumbing wave 4): every trajectory passes through seal, so the tenant's trace
   // thresholds are evaluated THERE — a crossing lands trace.threshold_crossed on the log and wakes whatever
   // subscribed (the continuous-operations loop's sensory half). Announce-once rides seal's `created`.
-  const trajectoryStore = withTracePerception(rawTrajectoryStore, {
+  const trajectoryStore = withTracePerception(offloaded, {
     thresholdsFor: async (tenant) => (await settingsStore.get(tenant))?.traceThresholds ?? [],
     events: lateEvents,
   });
@@ -463,9 +484,6 @@ async function main(): Promise<void> {
   startTopologyPoolAutoscaler({ backends, scheduler, leader });
   const { budget, usageMeter } = await buildBudgets({ budgetStore, usageStore });
 
-  // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
-  // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
-  const artifacts = await artifactStoreFromEnv();
   // ── AND WHAT THOSE INTERMEDIATE OBJECTS ARE OWED TO (arch-review 67 → 68) ─────────────────────────
   //
   // `IntermediateCleanupStore` shipped with a port, an implementation, application helpers and five
