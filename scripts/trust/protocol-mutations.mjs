@@ -2495,13 +2495,21 @@ const MUTATIONS = [
   {
     name: "wave C — a successor is registered without the team its entity is owned by",
     file: "packages/registry/src/versioned-store.ts",
-    // ⚠️ RE-AIMED (arch-review 119): arch-review 115 gave this write an `authority` precondition, so the
-    // resolution and the fallback moved onto one line with `initialTeamId`. Neutralizing the resolution is
-    // still the same question — a successor that forgets whose entity it is.
-    from: "    this.register(tenant, item, createdBy, current ?? authority?.initialTeamId, origin);",
-    to: "    this.register(tenant, item, createdBy, undefined, origin);",
+    // ⚠️ RE-AIMED TWICE, and the second time because THE PROTOCOL MOVED DOWN A LAYER (arch-review 119).
+    //
+    // 115 gave the write an `authority` precondition, so the resolution and its fallback moved onto one line
+    // and this rung followed them. Then `register` itself learned that silence PRESERVES an entity's owner —
+    // a successor can no longer be born detached even when its caller passes nothing — and neutralizing
+    // `registerPreservingOwner`'s spelling stopped changing the outcome. The gate said so: HOLE, the suite
+    // stayed green with the protocol removed.
+    //
+    // That is the fix working, not the rung failing. The question "can a successor forget whose entity it is"
+    // is now answered one layer down, so the rung asks it there. A rung left aimed at the old line would have
+    // gone on reporting a protocol nothing tests.
+    from: "    const effectiveTeamId = owner ?? teamId;",
+    to: "    const effectiveTeamId = teamId;",
     build: "@everdict/registry",
-    suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
+    suite: ["--root", "packages/registry", "src/owner-preserving-register.counterexample.test.ts"],
   },
   {
     // …and the agent bump rides the same resolution, on the transport an owner actually uses.
