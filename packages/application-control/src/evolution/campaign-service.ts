@@ -127,6 +127,17 @@ export interface CampaignServiceDeps {
 export interface NewCampaignInput {
   issueId: string;
   frame: CampaignFrame;
+  // ── THE TEAM THE TRANSPORT AUTHORIZED AGAINST (arch-review 115) ─────────────────────────────────
+  //
+  // The route reads the issue to gate `scorecards:run` on its team, and `open` below reads the SAME issue
+  // again to stamp the campaign's own team. Between the two, `POST /issues/:id/team` can move it — so a
+  // caller authorized for Team A files a Team B campaign, and every later gate on that campaign answers for
+  // a team this caller was never cleared for.
+  //
+  // Same law as the registry's `expectedOwnerTeamId`: an authorization and the effect it authorizes read the
+  // mutable fact ONCE. Absent means the caller stated no expectation (a headless or seeded open); present
+  // and different is a refusal, not a quiet re-file.
+  expectedIssueTeamId?: string;
 }
 
 export interface NewRoundInput {
@@ -148,6 +159,15 @@ export class CampaignService {
     // The issue is resolved BEFORE the campaign exists — a campaign journaling into a ghost would strand
     // its narrative; `get` throws NotFound and the open refuses with it.
     const issue = await this.deps.issues.get(tenant, input.issueId);
+    // …and it is still the issue the caller was authorized over. `expectedIssueTeamId === undefined` inside a
+    // declared expectation is a real claim ("it was unowned when I was cleared"), which is why the presence of
+    // the FIELD is what enables the check rather than the presence of a team.
+    if ("expectedIssueTeamId" in input && issue.teamId !== input.expectedIssueTeamId)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: input.issueId, authorized: input.expectedIssueTeamId ?? null, current: issue.teamId ?? null },
+        "this issue changed teams while the campaign was being opened — read it back and open again",
+      );
     const record: EvolutionCampaignRecord = {
       id: this.newId(),
       tenant,

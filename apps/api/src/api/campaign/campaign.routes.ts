@@ -46,7 +46,18 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       // permissive arm, reached for a reason that has nothing to do with the resource (arch-review 79).
       await assertTeamVisible(deps, principal, issue.teamId, "Issue");
       gate(principal, "scorecards:run", { teamId: issue.teamId });
-      return reply.code(201).send(await deps.campaignService.open(principal.workspace, body, principal.subject));
+      // …and the SERVICE re-reads this issue to stamp the campaign's team, so the team it stamps must be the
+      // one this gate cleared. `POST /issues/:id/team` between the two reads would otherwise file a Team B
+      // campaign for a caller authorized only for Team A (arch-review 115).
+      return reply
+        .code(201)
+        .send(
+          await deps.campaignService.open(
+            principal.workspace,
+            { ...body, expectedIssueTeamId: issue.teamId },
+            principal.subject,
+          ),
+        );
     } catch (err) {
       return sendError(reply, err); // unknown issue → 404
     }

@@ -40,7 +40,12 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         // while authz reads it as "no constraint" (arch-review 79).
         await assertTeamVisible(deps, principal, issue.teamId, "Issue");
         gate(principal, "scorecards:run", { teamId: issue.teamId });
-        return ok(await campaigns.open(ws, { issueId: issue_id, frame }, principal.subject));
+        // The team this gate cleared, carried into the write that stamps it — the service re-reads the issue,
+        // and a move between the two reads would file a campaign under a team this caller was never cleared
+        // for (arch-review 115). Same wiring as the HTTP twin.
+        return ok(
+          await campaigns.open(ws, { issueId: issue_id, frame, expectedIssueTeamId: issue.teamId }, principal.subject),
+        );
       }),
   );
 

@@ -374,6 +374,40 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     expect((await teamed.list("acme", ["team-zzz"])).map((c) => c.id)).toEqual(["camp-legacy-unowned"]);
   });
 
+  it("refuses an open whose issue moved after the caller was authorized (arch-review 115)", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    // ── THE TEAM THE TRANSPORT AUTHORIZED, ASSERTED WHERE IT IS STAMPED (arch-review 115) ─────────
+    //
+    // The route reads the issue to gate `scorecards:run` on its team and `open` reads the SAME issue again to
+    // stamp the campaign's. `POST /issues/:id/team` between the two files a Team B campaign for a caller
+    // cleared only for Team A — and every later gate on that campaign then answers for a team this caller was
+    // never authorized over. Same law as the registry's `expectedOwnerTeamId`: an authorization and the effect
+    // it authorizes read the mutable fact once.
+    //
+    // Seen RED without the check: the campaign was opened with `teamId: "team-b"`.
+    const moving = new CampaignService({
+      store,
+      operations: store,
+      issues: {
+        // The transport read team-a; by the time `open` reads it, the issue has moved.
+        async get(_t: string, ref: string) {
+          return { id: ref, teamId: "team-b" };
+        },
+      },
+      diffs,
+      newId: () => `camp_${Math.random().toString(36).slice(2, 8)}`,
+      now: () => "2026-08-27T02:00:00.000Z",
+    });
+    await expect(
+      moving.open("acme", { issueId: "iss_a", frame, expectedIssueTeamId: "team-a" }, "alice"),
+      "a caller cleared for team-a opened a team-b campaign",
+    ).rejects.toBeInstanceOf(ConflictError);
+    // …and a caller that stated no expectation is unaffected — headless and seeded opens still work.
+    await expect(moving.open("acme", { issueId: "iss_a", frame }, "alice")).resolves.toMatchObject({
+      teamId: "team-b",
+    });
+  });
+
   it("REFUSES to decide, log or settle on a frame that predates the current rules (arch-review 75)", async () => {
     // arch-review 72 split creation from storage so a legacy campaign stays READABLE. It left the other
     // half open: such a campaign is still `open`, and a fresh round logged after the upgrade builds a
