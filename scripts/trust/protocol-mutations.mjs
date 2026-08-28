@@ -2919,7 +2919,7 @@ const MUTATIONS = [
 // a question nobody asked. The tool said nothing, and nothing is not confirmation (rule `ci`, the same shape as
 // `biome check --write` exiting 0 over unapplied fixes). Anything not recognised here is now a refusal.
 const ARGS = process.argv.slice(2);
-const KNOWN_FLAGS = new Set(["--only"]);
+const KNOWN_FLAGS = new Set(["--only", "--shard"]);
 for (let i = 0; i < ARGS.length; i++) {
   const arg = ARGS[i];
   if (!arg.startsWith("--")) continue; // a flag's value
@@ -3026,6 +3026,66 @@ if (only !== undefined && SELECTED.length === 0) {
   process.exit(2);
 }
 
+// ── SHARDING, BECAUSE ONE JOB CANNOT HOLD THIS GATE (arch-review 120) ───────────────────────────────
+//
+// The full gate is ~90 minutes of real builds and real suites, and it was a STEP inside a job declared
+// `timeout-minutes: 30`. That job could never have reached the end of it — and everything after the step
+// (docs-check, constructed-casts, guarded-doubles, the rest) could never have run at all. The gate is
+// required, so a required check that cannot finish is a check nobody has ever seen pass.
+//
+// Shards are whole BUILD GROUPS, distributed longest-first onto the least-loaded shard. Splitting inside a
+// group would make each shard rebuild the same package, which is exactly the waste the grouping above
+// removed; splitting between groups preserves it — every shard still compiles each package once per group
+// and settles its own deferred rebuild at its own end.
+//
+// ⚠️ A GREEN SHARD IS NOT A GREEN GATE. Same discipline as `--only`: the summary says SHARD and says how
+// many of the whole it covered, so a log skimmed for the tick cannot be mistaken for full coverage. CI runs
+// every shard and a job that requires all of them.
+const shardArg = ARGS.includes("--shard") ? ARGS[ARGS.indexOf("--shard") + 1] : undefined;
+if (ARGS.includes("--shard") && (shardArg === undefined || shardArg.startsWith("--"))) {
+  console.error("✖ --shard needs <index>/<total>, 1-based (e.g. --shard 2/4).");
+  process.exit(2);
+}
+let SHARDED = SELECTED;
+let shardLabel;
+if (shardArg !== undefined) {
+  const match = /^(\d+)\/(\d+)$/.exec(shardArg);
+  if (match === null) {
+    console.error(`✖ --shard ${JSON.stringify(shardArg)} is not <index>/<total>, 1-based (e.g. --shard 2/4).`);
+    process.exit(2);
+  }
+  const index = Number(match[1]);
+  const total = Number(match[2]);
+  if (total < 1 || index < 1 || index > total) {
+    console.error(`✖ --shard ${shardArg}: index must be between 1 and total, and total at least 1.`);
+    process.exit(2);
+  }
+  // A rung with NO build target has no compile to amortize, so it is its own group and may land anywhere;
+  // only the build groups have to stay whole. Keeping the 126 build-free rungs bundled made a 4-way split
+  // [126, 74, 26, 26] — one shard doing half the gate for no reason.
+  const buildGroups = [...new Set(SELECTED.map((m) => m.build).filter((b) => b !== undefined))].map((target) =>
+    SELECTED.filter((m) => m.build === target),
+  );
+  const groups = [...buildGroups, ...SELECTED.filter((m) => m.build === undefined).map((m) => [m])].sort(
+    (a, b) => b.length - a.length,
+  );
+  const bins = Array.from({ length: total }, () => []);
+  for (const group of groups) {
+    let lightest = 0;
+    for (let i = 1; i < bins.length; i++) if ((bins[i]?.length ?? 0) < (bins[lightest]?.length ?? 0)) lightest = i;
+    bins[lightest]?.push(...group);
+  }
+  SHARDED = bins[index - 1] ?? [];
+  shardLabel = `${index}/${total}`;
+  // An empty shard is not a pass. More shards than build groups is a configuration error, and answering
+  // "0 checked, all green" to it is the vacuous certificate this gate exists to refuse.
+  if (SHARDED.length === 0) {
+    console.error(`✖ shard ${shardLabel} holds no rungs — there are only ${groups.length} build groups to spread.`);
+    console.error("  Lower the shard count; an empty shard reports success for work nobody did.");
+    process.exit(2);
+  }
+}
+
 // Every rung's file, not only the selected ones: a partial run still writes into the tree, and the same
 // "restore the exact original" promise has to hold for the file it touches.
 const files = [...new Set(MUTATIONS.map((m) => m.file))];
@@ -3056,8 +3116,8 @@ if (dirty !== "") {
 // this package's `dist`, and a stale one would run the PREVIOUS rung's mutation against a suite that never
 // asked for it. That is the stale-dist trap this repository has already paid for once (arch-review 76-92),
 // which is why the condition is "the next rung builds the same thing", never "the next rung has a build".
-const BUILD_ORDER = [...new Set(SELECTED.map((m) => m.build ?? ""))];
-const ORDERED = BUILD_ORDER.flatMap((target) => SELECTED.filter((m) => (m.build ?? "") === target));
+const BUILD_ORDER = [...new Set(SHARDED.map((m) => m.build ?? ""))];
+const ORDERED = BUILD_ORDER.flatMap((target) => SHARDED.filter((m) => (m.build ?? "") === target));
 
 // ⚠️ AND THE KILL PATH. `finally` restores the SOURCE but does not run on SIGKILL, and now a normal-looking
 // tree can hide a `dist` carrying the last mutation. `dist/` is gitignored, so unlike the old failure mode it
@@ -3274,5 +3334,7 @@ console.log(
     compilerCaught > 0 ? `, ${compilerCaught} of them by the COMPILER rather than by a suite` : ""
   }${
     skipped > 0 ? `, ${skipped} SKIPPED for missing infrastructure — not the same as covered` : ""
-  }${only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``})`,
+  }${only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``}${
+    shardLabel === undefined ? "" : ` of ${MUTATIONS.length} — SHARD ${shardLabel}, NOT the whole gate`
+  })`,
 );

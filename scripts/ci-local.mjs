@@ -65,6 +65,11 @@ run("pnpm convention-harness", "pnpm", ["convention-harness"]);
 // suite proves the tests pass; this proves they would fail if the protocol were removed — which is the
 // difference this program has twice paid for learning (a scanner draft that was green over the defect it was
 // written for, and a judgment fixture that certified a gap).
+//
+// In GitHub Actions this is its OWN job, split four ways (`mutations` in ci.yml) — it is ~90 minutes of real
+// builds and real suites and cannot live as a step beside lint/typecheck/test/build. Here it runs WHOLE and
+// sequentially, because one machine gains nothing from sharding and this gate's promise is coverage. Mirror
+// the coverage, not the parallelism.
 run("pnpm protocol-mutations", "pnpm", ["protocol-mutations"]);
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);

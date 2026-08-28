@@ -126,6 +126,17 @@ See skill `ci`.
   after a deferred build — so the run that reported "231 checked, 0 holes" did so with a mutated dist standing
   at five boundaries. The debt is explicit state settled before the next rung that builds something else,
   runnable or not, and after the loop whatever the exit path.
+  ⚠️ **IT DOES NOT FIT IN A STEP, AND FOR A LONG TIME IT WAS ONE** (arch-review 120). The gate is ~90
+  minutes of real builds and real suites and it sat inside `core`, a job declared `timeout-minutes: 30` — so
+  it could never have reached its own end, and the thirteen gates declared AFTER it (`docs-check`,
+  `constructed-casts`, `guarded-doubles`, `unwired-capabilities`, `authz-optional`, `import-cycles`,
+  `option-forwarding`, `language-policy`, `guard-siblings`, `source-bytes`, `mutation-leak`, the boot probe)
+  could never have run at all. It is its own job now — `mutations`, four shards, 60 minutes each — with
+  `mutations-complete` as the single check to require, because a green shard is not a green gate. Shards are
+  whole BUILD GROUPS (`--shard <i>/<n>`, packed longest-first), so each one keeps the
+  one-build-per-package-boundary optimization instead of every shard re-compiling the same package; an empty
+  shard is REFUSED rather than reported green. `pnpm ci:local` runs it whole and sequentially — one machine
+  gains nothing from sharding, and what the local gate mirrors is CI's coverage, not its parallelism.
   ⚠️ Its options are now REFUSED when unrecognised. `--filter <name>` — a plausible spelling of `--only`, and
   not a flag this script has — was accepted in silence, so one rung became the full suite: ninety minutes,
   files mutated while the author was editing them, and an answer to a question nobody asked. Same shape as
