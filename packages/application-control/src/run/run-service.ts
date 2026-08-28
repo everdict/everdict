@@ -1896,8 +1896,13 @@ export class RunService {
     tenant: string,
     runId: string,
     viewer: string,
-    // ONE PAGE. Required at the store and defaulted here only because this method already has three
-    // positional arguments and every transport passes one; the DEFAULT is still a bounded page, never "all".
+    // ONE PAGE. Required at the store; defaulted here only because this method already has three positional
+    // arguments, and the default is still a bounded page rather than "all".
+    //
+    // ⚠️ This comment used to claim "every transport passes one" and NEITHER DID — the route and the MCP tool
+    // both called the three-argument form, so the response carried a `nextAfter` no caller could act on and a
+    // long-horizon run read as its first page with nothing saying so. Written as a promise about another
+    // component, false the moment it was written (rule `protocol`). Both transports pass one now.
     window: Omit<TrajectoryWindow, "attemptId"> = {},
   ): Promise<
     | {

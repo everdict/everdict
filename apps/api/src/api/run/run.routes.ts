@@ -75,18 +75,32 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
 
   // The OWNED trajectory (P5 dual-read): the sealed copy from the trajectory store, falling back to the
   // run row's embed in the same shape — consumers never care which copy served.
-  app.get<{ Params: { id: string } }>("/runs/:id/trajectory", { schema: runDocs.trajectory }, async (req, reply) => {
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "runs:read");
-      const trajectory = await deps.service.trajectory(principal.workspace, req.params.id, principal.subject);
-      if (!trajectory) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
-      return reply.send(trajectory);
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  //
+  // ONE PAGE, and the caller can ask for the next. Without these three parameters the response carries a
+  // `nextAfter` nobody can act on: an agent reading a long-horizon run would take the first page for the
+  // whole trace and there would be no way to tell, which is the read this whole change exists to stop being.
+  app.get<{ Params: { id: string }; Querystring: { emitter?: string; after?: string; limit?: string } }>(
+    "/runs/:id/trajectory",
+    { schema: runDocs.trajectory },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "runs:read");
+        const after = req.query.after !== undefined ? Number.parseInt(req.query.after, 10) : undefined;
+        const limit = req.query.limit !== undefined ? Number.parseInt(req.query.limit, 10) : undefined;
+        const trajectory = await deps.service.trajectory(principal.workspace, req.params.id, principal.subject, {
+          ...(req.query.emitter !== undefined && req.query.emitter !== "" ? { emitter: req.query.emitter } : {}),
+          ...(after !== undefined && Number.isFinite(after) ? { after } : {}),
+          ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+        });
+        if (!trajectory) return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
+        return reply.send(trajectory);
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   app.get<{
     Querystring: { scorecardId?: string; scope?: string; runner?: string; limit?: string; offset?: string };

@@ -54,13 +54,23 @@ const docs = {
     },
   },
   trajectory: {
-    summary: "Get a run's owned trajectory",
+    summary: "Get ONE PAGE of a run's owned trajectory",
     description:
       "The sealed trajectory from the OWNED store (execution-model P5 — the copy every judgment stands on), " +
       "falling back to the run row's embed in the same shape during the dual-read window. meta.source says " +
-      "which copy served (run | otlp | import | embed). Workspace-scoped; requires runs:read.",
+      "which copy served (run | otlp | import | embed). Workspace-scoped; requires runs:read. " +
+      "`events` is ONE WINDOW of ONE plane — the execution's own unless `emitter` names another; `segments` " +
+      "lists every plane as a header. A long-horizon run's trace does not fit in one response: when " +
+      "`nextAfter` is present, pass it as `after` for the following page.",
     tags: ["run"],
     params: toJsonSchema(z.object({ id: z.string().describe("Run id") })),
+    querystring: toJsonSchema(
+      z.object({
+        emitter: z.string().optional().describe("which plane to read; default = the execution's own"),
+        after: z.string().optional().describe("resume after this seq (echo `nextAfter` from the last page)"),
+        limit: z.string().optional().describe("events per page; clamped by the store"),
+      }),
+    ),
     response: {
       200: {
         description: "The trajectory (meta + normalized TraceEvent[])",

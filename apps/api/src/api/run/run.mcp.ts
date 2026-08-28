@@ -21,14 +21,25 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
     {
       annotations: { readOnlyHint: true },
       description:
-        "A run's OWNED trajectory (the sealed copy every judgment stands on — P5): meta.source tells which " +
-        "copy served (run | otlp | import | embed) plus the normalized TraceEvent[]. Falls back to the run " +
-        "row's embed during the dual-read window.",
-      inputSchema: { id: z.string().describe("run id") },
+        "ONE PAGE of a run's OWNED trajectory (the sealed copy every judgment stands on — P5): meta.source " +
+        "tells which copy served (run | otlp | import | embed) plus a window of normalized TraceEvents. " +
+        "Falls back to the run row's embed during the dual-read window. A long-horizon run's trace does not " +
+        "fit in one answer: when `nextAfter` comes back, pass it as `after` and keep going until it is " +
+        "absent. `segments` lists the other planes; open one by passing its `emitter`.",
+      inputSchema: {
+        id: z.string().describe("run id"),
+        emitter: z.string().optional().describe("which plane to read; default = the execution's own"),
+        after: z.number().int().nonnegative().optional().describe("resume after this seq (from nextAfter)"),
+        limit: z.number().int().positive().optional().describe("events per page (clamped by the store)"),
+      },
     },
-    ({ id }: { id: string }) =>
+    ({ id, emitter, after, limit }: { id: string; emitter?: string; after?: number; limit?: number }) =>
       run(principal, "runs:read", async () => {
-        const trajectory = await deps.service.trajectory(ws, id, principal.subject);
+        const trajectory = await deps.service.trajectory(ws, id, principal.subject, {
+          ...(emitter !== undefined ? { emitter } : {}),
+          ...(after !== undefined ? { after } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        });
         if (!trajectory) return fail("NOT_FOUND: trajectory not found.");
         return ok(trajectory);
       }),

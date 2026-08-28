@@ -2834,6 +2834,17 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "packages/db", "src/results/offloaded-spans-projection.counterexample.test.ts"],
   },
+  {
+    // The windowed read is only delivered if the TRANSPORT passes a window. It shipped with neither of its
+    // two transports doing so — the response advertised a `nextAfter` no caller could act on, and the
+    // service's own comment claimed the opposite. Covers the HTTP lane, which the counterexample drives; the
+    // MCP twin is the same call one file over and BFF↔MCP parity is what keeps them together.
+    name: "OOM — the run-trajectory route drops the window it was given",
+    file: "apps/api/src/api/run/run.routes.ts",
+    from: "        const trajectory = await deps.service.trajectory(principal.workspace, req.params.id, principal.subject, {",
+    to: "        void after;\n        void limit;\n        const trajectory = await deps.service.trajectory(principal.workspace, req.params.id, principal.subject);\n        void ({",
+    suite: ["--root", "apps/api", "src/api/run/run-trajectory-paging.counterexample.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────
