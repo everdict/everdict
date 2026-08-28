@@ -1,4 +1,5 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
+import type { Principal } from "@everdict/auth";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -24,6 +25,28 @@ import { serveScorecard, serveScorecardListItem } from "./serve.js";
 // scorecards (dataset×harness batch eval → aggregated result): run/retry, push+pull trace ingest,
 // list/get, estimate, baseline↔candidate diff, leaderboard/trend, flexible analysis pivot (query) +
 // offloaded analysis bundle, model backfill.
+// ── WHOSE BATCH IS THIS (arch-review 119) ──────────────────────────────────────────────────────────
+//
+// The read door has always been ceilinged (`ownedByVisibleTeam`, 404) and every OPERATIONAL door gated a
+// bare `scorecards:run` — so a member of another team, answered 404 for the same id on GET, could stop a
+// running batch, RE-DRIVE it (a 202 and real compute spent on somebody else's evidence), rescore it, or
+// override its gate decision. Reading was narrower than writing, which is the inversion the axis exists to
+// prevent: docs/auth.md names results — "every result (scorecard · run) records a `teamId`".
+//
+// One resolver for all of them, so a door added later inherits the answer instead of re-deriving it. It
+// answers 404 rather than 403 for the same reason the read does: a private team must not be discoverable by
+// the shape of the error, and this id already reads as absent to this caller.
+async function scorecardOwner(
+  deps: ServerDeps,
+  principal: Principal,
+  id: string,
+): Promise<{ teamId?: string } | undefined> {
+  const record = await deps.scorecardService?.get(id);
+  if (!record || record.tenant !== principal.workspace) return undefined;
+  if (!ownedByVisibleTeam(record, await visibleTeamsFor(deps, principal))) return undefined;
+  return record.teamId === undefined ? {} : { teamId: record.teamId };
+}
+
 export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps): void {
   app.post("/scorecards", { schema: scorecardDocs.submit }, async (req, reply) => {
     if (!deps.scorecardService)
@@ -78,7 +101,14 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
+      // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
+      // the order `server.test.ts` pins by name ("gated before the service runs").
       gate(principal, "scorecards:run");
+      // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
+      // handed to the gate so an outsider cannot operate on it (arch-review 119).
+      const owner = await scorecardOwner(deps, principal, req.params.id);
+      if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+      gate(principal, "scorecards:run", owner);
       // Optional failure-class filter (?class=infra) — re-run only that class's casualties (agent FAILs stay carried).
       const cls = (req.query as { class?: string } | undefined)?.class;
       if (cls !== undefined && !["infra", "config", "harness", "agent"].includes(cls))
@@ -108,7 +138,14 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
       try {
+        // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
+        // the order `server.test.ts` pins by name ("gated before the service runs").
         gate(principal, "scorecards:run");
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
+        // handed to the gate so an outsider cannot operate on it (arch-review 119).
+        const owner = await scorecardOwner(deps, principal, req.params.id);
+        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+        gate(principal, "scorecards:run", owner);
         return reply.send(
           await deps.scorecardService.rescoreUnmeasured({
             tenant: principal.workspace,
@@ -133,7 +170,14 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
+      // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
+      // the order `server.test.ts` pins by name ("gated before the service runs").
       gate(principal, "scorecards:run");
+      // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
+      // handed to the gate so an outsider cannot operate on it (arch-review 119).
+      const owner = await scorecardOwner(deps, principal, req.params.id);
+      if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+      gate(principal, "scorecards:run", owner);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -170,7 +214,14 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
       try {
+        // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
+        // the order `server.test.ts` pins by name ("gated before the service runs").
         gate(principal, "scorecards:run");
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
+        // handed to the gate so an outsider cannot operate on it (arch-review 119).
+        const owner = await scorecardOwner(deps, principal, req.params.id);
+        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+        gate(principal, "scorecards:run", owner);
         const record = await deps.scorecardService.cancel({ tenant: principal.workspace, id: req.params.id });
         return reply.send(serveScorecard(record));
       } catch (err) {
@@ -389,7 +440,14 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       const body = OverrideGateBodySchema.safeParse(req.body ?? {});
       if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
       try {
+        // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
+        // the order `server.test.ts` pins by name ("gated before the service runs").
         gate(principal, "scorecards:run");
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
+        // handed to the gate so an outsider cannot operate on it (arch-review 119).
+        const owner = await scorecardOwner(deps, principal, req.params.id);
+        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+        gate(principal, "scorecards:run", owner);
         return reply.send(
           await deps.scorecardService.overrideGate({
             tenant: principal.workspace,
@@ -442,7 +500,12 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
       try {
+        // The ROLE first, then WHOSE batch it is — the same pair every other operational door here carries,
+        // and the MCP twin too (arch-review 119). Reading a manifest verification is reading the batch.
         gate(principal, "scorecards:read");
+        const owner = await scorecardOwner(deps, principal, req.params.id);
+        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+        gate(principal, "scorecards:read", owner);
         return reply.send(await deps.scorecardService.verifyManifest(principal.workspace, req.params.id));
       } catch (err) {
         return sendError(reply, err);

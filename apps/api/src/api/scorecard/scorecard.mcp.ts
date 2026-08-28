@@ -1,5 +1,6 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
-import { ownedByVisibleTeam } from "@everdict/domain";
+import { NotFoundError } from "@everdict/contracts";
+import { type Action, authorize, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
@@ -16,6 +17,30 @@ function teamIdIn(body: unknown): string | undefined {
 }
 
 // Scorecard resource MCP tools — the MCP twin of scorecard.routes.ts (same ScorecardService core, second transport).
+// ── WHOSE BATCH IS THIS — THE MCP HALF (arch-review 119) ───────────────────────────────────────────
+//
+// The HTTP twin's `scorecardOwner`, spelled here because the two transport files may not import each other.
+// Every OPERATIONAL tool gated a bare `scorecards:run` while `get_scorecard` was ceilinged, so an agent
+// acting for a member of another team — answered NOT_FOUND for the same id on read — could stop a running
+// batch, RE-DRIVE it (real compute on somebody else's evidence), rescore it, or override its gate decision.
+// Reading was narrower than writing, which is the inversion the axis exists to prevent; docs/auth.md names
+// results by name.
+//
+// ⚠️ Called INSIDE `run`, never before it. `run` authorizes the ACTION first, so a viewer is refused for the
+// reason that is true — the role — without this file reading a record. Resolving ownership ahead of that
+// answers NOT_FOUND to somebody whose actual problem is permission, and the HTTP twin's suite pins that
+// ordering by name ("gated before the service runs").
+//
+// `undefined` means "not this caller's to touch", answered NOT_FOUND — the same answer the read gives,
+// because a refusal that leaks existence is what team privacy is for.
+async function assertBatchReachable(ctx: McpToolContext, action: Action, id: string): Promise<void> {
+  const record = await ctx.deps.scorecardService?.get(id);
+  if (!record || record.tenant !== ctx.ws) throw new NotFoundError("NOT_FOUND", { id }, "scorecard not found.");
+  if (!ownedByVisibleTeam(record, await visibleTeamsFor(ctx.deps, ctx.principal)))
+    throw new NotFoundError("NOT_FOUND", { id }, "scorecard not found.");
+  authorize(ctx.principal, action, record.teamId === undefined ? {} : { teamId: record.teamId });
+}
+
 export function registerScorecardTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws, agent } = ctx;
 
@@ -213,16 +238,17 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ id, failure_class }) =>
-        run(principal, "scorecards:run", async () =>
-          ok(
+        run(principal, "scorecards:run", async () => {
+          await assertBatchReachable(ctx, "scorecards:run", id);
+          return ok(
             await scorecards.retryFailed({
               tenant: ws,
               id,
               submittedBy: principal.subject,
               ...(failure_class ? { failureClass: failure_class } : {}),
             }),
-          ),
-        ),
+          );
+        }),
     );
 
     server.registerTool(
@@ -271,8 +297,9 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ id, judges, runtime, concurrency, retries, cases }) =>
-        run(principal, "scorecards:run", async () =>
-          ok(
+        run(principal, "scorecards:run", async () => {
+          await assertBatchReachable(ctx, "scorecards:run", id);
+          return ok(
             await scorecards.rerun({
               tenant: ws,
               id,
@@ -283,8 +310,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               ...(retries !== undefined ? { retries } : {}),
               ...(cases ? { cases } : {}),
             }),
-          ),
-        ),
+          );
+        }),
     );
 
     server.registerTool(
@@ -296,7 +323,10 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         inputSchema: { id: z.string().describe("scorecard id to stop (must be queued/running)") },
       },
       ({ id }) =>
-        run(principal, "scorecards:run", async () => ok(serveScorecard(await scorecards.cancel({ tenant: ws, id })))),
+        run(principal, "scorecards:run", async () => {
+          await assertBatchReachable(ctx, "scorecards:run", id);
+          return ok(serveScorecard(await scorecards.cancel({ tenant: ws, id })));
+        }),
     );
 
     server.registerTool(
@@ -356,9 +386,10 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         inputSchema: { id: z.string().describe("the scorecard id whose retryable-unmeasured judge scores to recover") },
       },
       ({ id }) =>
-        run(principal, "scorecards:run", async () =>
-          ok(await scorecards.rescoreUnmeasured({ tenant: ws, id, submittedBy: principal.subject })),
-        ),
+        run(principal, "scorecards:run", async () => {
+          await assertBatchReachable(ctx, "scorecards:run", id);
+          return ok(await scorecards.rescoreUnmeasured({ tenant: ws, id, submittedBy: principal.subject }));
+        }),
     );
 
     server.registerTool(
@@ -583,8 +614,9 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ candidate, decision_id, reason }) =>
-        run(principal, "scorecards:run", async () =>
-          ok(
+        run(principal, "scorecards:run", async () => {
+          await assertBatchReachable(ctx, "scorecards:run", candidate);
+          return ok(
             await scorecards.overrideGate({
               tenant: ws,
               candidate,
@@ -592,8 +624,8 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               reason,
               by: principal.subject,
             }),
-          ),
-        ),
+          );
+        }),
     );
 
     server.registerTool(
@@ -627,7 +659,11 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           "Verify a scorecard's reproducibility manifest against the CURRENT registry state — per-subject digest checks (dataset/harness/judges/verdict policy): match | drifted | missing | unverifiable. Each check runs under the stamp's own algorithm: `sha256:` stamps are collision-resistant, pre-sha256 bare-hex FNV stamps are identity against honest data and never tamper-evidence (the caveat rides the response and says which). HTTP parity (POST /scorecards/:id/verify-manifest).",
         inputSchema: { id: z.string() },
       },
-      ({ id }) => run(principal, "scorecards:read", async () => ok(await scorecards.verifyManifest(ws, id))),
+      ({ id }) =>
+        run(principal, "scorecards:read", async () => {
+          await assertBatchReachable(ctx, "scorecards:read", id);
+          return ok(await scorecards.verifyManifest(ws, id));
+        }),
     );
 
     server.registerTool(

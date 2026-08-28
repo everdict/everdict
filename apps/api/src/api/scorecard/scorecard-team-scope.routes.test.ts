@@ -171,3 +171,143 @@ describe("a scorecard belongs to a team", () => {
     await app.close();
   });
 });
+
+// ── [R119 COUNTEREXAMPLE] AND THE OPERATIONAL DOORS, WHICH THE READ CEILING NEVER COVERED ───────────
+//
+// The cases above pin how a batch is BORN into a team and how reading it is ceilinged. Nothing pinned
+// WRITING one, and docs/auth.md §"The team axis" names results explicitly: "every result (scorecard · run)
+// records a `teamId`", and "WRITING another team's asset is refused".
+//
+// Every operational door gated a bare `scorecards:run`:
+//
+//     POST /scorecards/:id/cancel · /retry · /rerun · /rescore-unmeasured · /gate/override
+//
+// so a member of another team — one who is answered 404 for the same id on GET — could stop a running
+// batch, re-drive it, or override its gate decision. Reading was narrower than writing, which is the
+// wrong way round and the exact inversion the axis exists to prevent.
+//
+// `DELETE /scorecards/:id` is NOT here: its creator-or-admin rule is enforced in the service, which the
+// route's own comment says, and that rule is stricter than the team one.
+//
+// Seen RED before the fix: "an outsider cancelled a private team's batch: expected 200 to be 404".
+describe("[R119 COUNTEREXAMPLE] another team's batch cannot be operated on", () => {
+  async function privateBatch() {
+    const ctx = await build();
+    const secret = await ctx.teamService.create({
+      tenant: "acme",
+      key: "SEC",
+      name: "Secret",
+      createdBy: "system",
+      isPrivate: true,
+    });
+    await ctx.teamService.addMember("acme", secret.id, "u", { subject: "system" });
+    const insider = serverFor(ctx, [secret.id, ctx.web.id]);
+    const created = (
+      await insider.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: bearer,
+        payload: { ...body, teamId: secret.id },
+      })
+    ).json();
+    await insider.close();
+    return { ctx, id: created.id as string };
+  }
+
+  // Every operational door, driven by an outsider. 404 rather than 403, because the read answer for this id
+  // is already 404 and a refusal that leaks existence is the thing team privacy is for.
+  for (const door of ["cancel", "retry", "rerun", "rescore-unmeasured"]) {
+    it(`refuses POST /scorecards/:id/${door} from a team the batch does not belong to`, async () => {
+      const { ctx, id } = await privateBatch();
+      const outsider = serverFor(ctx, [ctx.mobile.id], "other");
+
+      const res = await outsider.inject({ method: "POST", url: `/scorecards/${id}/${door}`, headers: bearer });
+
+      expect(res.statusCode, `an outsider reached /${door} on a private team's batch`).toBe(404);
+      await outsider.close();
+    });
+  }
+
+  it("refuses the gate override — the door that changes what a batch DECIDED", async () => {
+    const { ctx, id } = await privateBatch();
+    const outsider = serverFor(ctx, [ctx.mobile.id], "other");
+
+    const res = await outsider.inject({
+      method: "POST",
+      url: `/scorecards/${id}/gate/override`,
+      headers: bearer,
+      payload: { decisionId: "dec-1", reason: "because I said so" }, // a VALID body: the refusal must be the gate's
+    });
+
+    expect(res.statusCode, "an outsider overrode a private team's gate decision").toBe(404);
+    await outsider.close();
+  });
+
+  it("ALLOWS the owning team — the control that keeps the gate from being a wall", async () => {
+    const { ctx, id } = await privateBatch();
+    const insider = serverFor(ctx, [
+      ctx.web.id,
+      (await ctx.teamService.list("acme")).find((t) => t.key === "SEC")?.id ?? "",
+    ]);
+
+    const res = await insider.inject({ method: "POST", url: `/scorecards/${id}/cancel`, headers: bearer });
+
+    expect(res.statusCode, "the batch's own team was refused its cancel").not.toBe(404);
+    await insider.close();
+  });
+});
+
+// ── …AND THE MCP TWINS, BECAUSE PARITY IS STRUCTURAL (arch-review 119) ─────────────────────────────
+//
+// A gate one transport carries and the other does not is the whole shape this wave keeps finding. The tools
+// take the same actions on the same records, so they answer the same NOT_FOUND.
+describe("[R119 COUNTEREXAMPLE] the MCP operational tools refuse another team's batch", () => {
+  it("cancel_scorecard, rerun_scorecard and retry_scorecard are all NOT_FOUND to an outsider", async () => {
+    const ctx = await build();
+    const secret = await ctx.teamService.create({
+      tenant: "acme",
+      key: "SEC",
+      name: "Secret",
+      createdBy: "system",
+      isPrivate: true,
+    });
+    await ctx.teamService.addMember("acme", secret.id, "u", { subject: "system" });
+    const insider = serverFor(ctx, [secret.id, ctx.web.id]);
+    const created = (
+      await insider.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: bearer,
+        payload: { ...body, teamId: secret.id },
+      })
+    ).json();
+    await insider.close();
+
+    const { buildMcpServer } = await import("../../mcp.js");
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { InMemoryTransport } = await import("@modelcontextprotocol/sdk/inMemory.js");
+    const outsider = {
+      subject: "other",
+      workspace: "acme",
+      roles: ["member"],
+      via: "oidc" as const,
+      teams: [ctx.mobile.id],
+    };
+    const server = buildMcpServer(
+      { scorecardService: ctx.scorecardService, teamService: ctx.teamService } as unknown as Parameters<
+        typeof buildMcpServer
+      >[0],
+      outsider as unknown as Parameters<typeof buildMcpServer>[1],
+    );
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await server.connect(serverT);
+    await client.connect(clientT);
+
+    for (const tool of ["cancel_scorecard", "rerun_scorecard", "retry_scorecard"]) {
+      const res = await client.callTool({ name: tool, arguments: { id: created.id } });
+      const text = ((res as { content?: { text?: string }[] }).content ?? []).map((c) => c.text ?? "").join("");
+      expect(text, `an agent reached ${tool} on a private team's batch`).toContain("NOT_FOUND");
+    }
+  });
+});
