@@ -97,7 +97,7 @@ to remove.
   the stream forever.
 - `TrajectoryEventsResult` has a `too_large` arm for legacy unsplit blobs: serving a window of a blob costs
   the whole blob, so the store refuses with the size and names the repair
-  (scripts/live/split-trajectory-bodies.mjs (R2, not yet in the repository)). It is never an empty page — "we could not serve this" and
+  (`scripts/live/split-trajectory-bodies.mjs`). It is never an empty page — "we could not serve this" and
   "the run did nothing" must not be the same value.
 - `streamTrajectoryEvents` / `collectTrajectoryEvents` over the windows serve the consumers that legitimately
   need every event (judges, sinks, ingest), so peak residency is a page and the Zod copy is a page's.

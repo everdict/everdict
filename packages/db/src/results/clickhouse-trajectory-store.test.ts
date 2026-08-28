@@ -1,3 +1,5 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
+import type { TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { ClickHouseTrajectoryStore } from "./clickhouse-trajectory-store.js";
 
@@ -15,19 +17,6 @@ function fakeClickHouse(handler: (sql: string, params: URLSearchParams, body: st
   }) as typeof fetch;
   return { calls, fetchImpl };
 }
-
-// One segment of a trajectory as the per-emitter read returns it (argMin-resolved, *_first aliases).
-const segmentLine = (over: Record<string, unknown> = {}) =>
-  `${JSON.stringify({
-    emitter: "otlp",
-    tenant_first: "acme",
-    source_first: "otlp",
-    event_count_first: 2,
-    body_first: JSON.stringify([{ t: 0, kind: "llm_call", model: "m" }]),
-    t0_first: "",
-    sealed_at_first: "2026-07-30T00:00:00.000Z",
-    ...over,
-  })}\n`;
 
 // One plane as the BODY-FREE read returns it. `seal` and `usage` both go through this shape: neither needs a
 // body, and the whole point of the read is that `body` never appears in the statement.
@@ -71,18 +60,9 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
             planeLine({ emitter: row.emitter, source_first: row.source, event_count_first: row.event_count }),
           )
           .join("");
-      if (sql.includes("GROUP BY emitter"))
-        return rows
-          .map((row) =>
-            segmentLine({
-              emitter: row.emitter,
-              source_first: row.source,
-              event_count_first: row.event_count,
-              body_first: row.body,
-            }),
-          )
-          .join("");
-      if (sql.startsWith("INSERT")) {
+      // The events INSERT is a multi-line JSONEachRow batch, not one plane row — parsing it as a plane is
+      // how a fake starts answering questions the real store never would.
+      if (sql.startsWith("INSERT INTO default.everdict_trajectories ")) {
         rows.push(JSON.parse(body) as Record<string, unknown>);
         return "";
       }
@@ -149,28 +129,41 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
   });
 
   it("reads resolve first-write-wins per emitter and stay tenant-scoped; values travel as bound params", async () => {
-    const { calls, fetchImpl } = fakeClickHouse((sql) =>
-      sql.includes("GROUP BY emitter")
-        ? segmentLine() +
-          segmentLine({
+    const { calls, fetchImpl } = fakeClickHouse((sql) => {
+      if (sql.includes("GROUP BY run_id, emitter"))
+        return (
+          planeLine({ event_count_first: 2 }) +
+          planeLine({
             emitter: "service:checkout",
             event_count_first: 1,
-            body_first: JSON.stringify([{ t: 0, kind: "span", name: "GET /cart" }]),
             sealed_at_first: "2026-07-30T00:00:05.000Z",
           })
-        : "",
-    );
+        );
+      // The events table: sizes first, then the bodies that survived the byte budget.
+      if (sql.includes("argMin(bytes, sealed_at)"))
+        return `${JSON.stringify({ seq: 1, bytes_first: 40 })}\n${JSON.stringify({ seq: 2, bytes_first: 40 })}\n`;
+      if (sql.includes("argMin(body, sealed_at)"))
+        return (
+          `${JSON.stringify({ seq: 1, body_first: JSON.stringify({ t: 0, kind: "llm_call", model: "m" }) })}\n` +
+          `${JSON.stringify({ seq: 2, body_first: JSON.stringify({ t: 1, kind: "message", role: "assistant", text: "x" }) })}\n`
+        );
+      return "";
+    });
     const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl);
 
-    const hit = await store.get("acme", "r1");
+    const hit = await whole(store, "acme", "r1");
     expect(hit?.meta).toMatchObject({ runId: "r1", source: "otlp", eventCount: 3 }); // every plane counted
     expect(hit?.segments.map((s) => s.emitter)).toEqual(["otlp", "service:checkout"]);
     expect(hit?.executionEmitter).toBe("otlp");
-    expect(hit?.events).toHaveLength(1); // the execution's own record, not the service's
-    expect(calls[0]?.sql).toMatch(/ORDER BY sealed_at_first ASC/); // the read-side half of first-write-wins
-    expect(calls[0]?.params.get("param_runId")).toBe("r1"); // bound, never concatenated
+    expect(hit?.events).toHaveLength(2); // the execution plane's page, not the service's
+    const planeRead = calls.find((c) => c.sql.includes("GROUP BY run_id, emitter"));
+    expect(planeRead?.sql).toMatch(/ORDER BY sealed_at_first ASC/); // the read-side half of first-write-wins
+    expect(planeRead?.params.get("param_runId")).toBe("r1"); // bound, never concatenated
+    // THE PROPERTY THIS RUNG EXISTS FOR: resolving a trajectory ships no evidence. `argMin(body, …)` over
+    // the plane table is what made a long-horizon read cost the whole trajectory twice.
+    expect(planeRead?.sql, "the plane read hauled bodies again").not.toMatch(/argMin\(body,/);
 
-    expect(await store.get("rival", "r1")).toBeUndefined(); // tenant check after the point read
+    expect(await whole(store, "rival", "r1")).toBeUndefined(); // tenant check after the point read
   });
 
   it("an identity read ranks the ASKED attempt above the clock, and drops the planes that name another", async () => {
@@ -178,22 +171,27 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
     // so a backdated duplicate wins argMin and serves the abandoned attempt's bytes. The identity read orders
     // by (rank, clock) instead and refuses rank 2 — a plane belonging to a different execution.
     const { calls, fetchImpl } = fakeClickHouse((sql) =>
-      sql.includes("GROUP BY emitter") ? segmentLine({ attempt_id_first: "exec-LATE#g2" }) : "",
+      sql.includes("GROUP BY run_id, emitter") ? planeLine({ attempt_id_first: "exec-LATE#g2" }) : "",
     );
     const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl);
 
-    const read = await store.get("acme", "r1", { attemptId: "exec-LATE#g2" });
+    const read = await whole(store, "acme", "r1", { attemptId: "exec-LATE#g2" });
     expect(read?.segments[0]?.attemptId).toBe("exec-LATE#g2");
     const sql = calls[0]?.sql ?? "";
     expect(sql).toMatch(/if\(attempt_id = \{attemptId:String\}, 0, if\(attempt_id = '', 1, 2\)\) AS attempt_rank/);
-    expect(sql).toMatch(/argMin\(body, \(attempt_rank, sealed_at\)\) AS body_first/); // identity first, clock within it
+    // identity first, clock within it — on the columns the plane read actually carries, which no longer
+    // include the body.
+    expect(sql).toMatch(/argMin\(attempt_id, \(attempt_rank, sealed_at\)\) AS attempt_id_first/);
+    expect(sql, "the identity read hauled bodies").not.toMatch(/argMin\(body,/);
     expect(sql).toMatch(/HAVING min\(attempt_rank\) < 2/); // another attempt's plane is dropped, never served
     expect(calls[0]?.params.get("param_attemptId")).toBe("exec-LATE#g2"); // bound, never concatenated
 
     // …and the clock-resolved read stays exactly what it was for callers holding no identity to ask by.
-    await store.get("acme", "r1");
-    expect(calls[1]?.sql).toMatch(/argMin\(body, sealed_at\) AS body_first/);
-    expect(calls[1]?.sql).not.toMatch(/attempt_rank/);
+    const before = calls.length;
+    await whole(store, "acme", "r1");
+    const clockRead = calls.slice(before).find((c) => c.sql.includes("GROUP BY run_id, emitter"));
+    expect(clockRead?.sql).toMatch(/argMin\(attempt_id, sealed_at\) AS attempt_id_first/); // clock alone
+    expect(clockRead?.sql).not.toMatch(/attempt_rank/);
   });
 
   it("list dedups per (run, emitter), pages by keyset cursor; meter and retention ride the same dedup", async () => {
@@ -221,7 +219,12 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
     expect(await store.ingestedSince("acme", "2026-07-30T00:00:00.000Z")).toEqual({ trajectories: 3, events: 9 });
 
     expect(await store.deleteOlderThan("2026-07-01T00:00:00.000Z")).toBe(2);
-    const deleteCall = calls.find((c) => c.sql.startsWith("DELETE"));
+    // Two deletes now, events first (the plane rows are what `expiredRunsSql` reads, so they go last).
+    const deletes = calls.filter((c) => c.sql.startsWith("DELETE"));
+    expect(deletes[0]?.sql, "the event rows were left behind by retention").toMatch(
+      /DELETE FROM default\.everdict_trajectory_events WHERE run_id IN \(/,
+    );
+    const deleteCall = deletes.find((c) => c.sql.includes("everdict_trajectories WHERE"));
     // Retention cuts by the TRAJECTORY's earliest seal — never orphaning a run's later plane.
     expect(deleteCall?.sql).toMatch(/DELETE FROM default.everdict_trajectories WHERE run_id IN \(/);
     expect(deleteCall?.sql).toMatch(/HAVING min\(sealed_at\) < \{cutoff:String\}/);
@@ -230,7 +233,7 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
   it("a ClickHouse failure is remapped to UPSTREAM_ERROR (never a raw fetch error across the boundary)", async () => {
     const { fetchImpl } = fakeClickHouse(() => undefined); // 500
     const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl);
-    await expect(store.get("acme", "r1")).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
+    await expect(whole(store, "acme", "r1")).rejects.toMatchObject({ code: "UPSTREAM_ERROR" });
   });
 });
 
@@ -241,10 +244,15 @@ describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the confi
     expect(calls[0]?.sql).toBe("CREATE DATABASE IF NOT EXISTS everdict");
     // Unqualified DDL lands in the connection's default database while every read says `everdict.…`: boot
     // reports success and the first seal fails with UNKNOWN_TABLE.
-    for (const { sql } of calls.slice(1)) expect(sql).toContain("everdict.everdict_trajectories");
+    // BOTH tables are qualified — the events table (mig 0200's rung-2 twin) is the second one that would
+    // otherwise land in the connection's default database while every read says `everdict.…`.
+    for (const { sql } of calls.slice(1)) expect(sql).toMatch(/everdict\.everdict_trajector(ies|y_events)/);
     expect(calls.some(({ sql }) => sql.startsWith("CREATE TABLE IF NOT EXISTS everdict.everdict_trajectories"))).toBe(
       true,
     );
+    expect(
+      calls.some(({ sql }) => sql.startsWith("CREATE TABLE IF NOT EXISTS everdict.everdict_trajectory_events")),
+    ).toBe(true);
     expect(calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).length).toBeGreaterThan(0);
   });
 
@@ -282,3 +290,17 @@ describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the confi
     await expect(store.ensureSchema()).rejects.toThrow(/not a plain identifier/);
   });
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}

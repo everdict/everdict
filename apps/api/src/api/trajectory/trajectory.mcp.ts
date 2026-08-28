@@ -45,24 +45,46 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
     {
       annotations: { readOnlyHint: true },
       description:
-        "Open ONE sealed trajectory from the owned ledger: its meta plus every normalized TraceEvent (the " +
-        "same evidence a judge reads). Keyed by the id it was sealed under (TrajectoryMeta.runId from " +
-        "list_trajectories) — this works for every source, whereas get_run_trajectory only opens evidence " +
-        "that has a run row (never an otlp arrival or a materialized import). `segments` lists every emitter " +
-        "that contributed to the run — the execution plus each service:<service.name> that pushed its own " +
-        "spans through the OTLP door — so you can read the whole SYSTEM (agent, placement, services), not " +
-        "just the agent. The one segment without `events` is the execution one: its stream is `events`.",
+        "Open ONE PAGE of one sealed trajectory from the owned ledger: its meta, its plane headers, and a " +
+        "window of normalized TraceEvents (the same evidence a judge reads). Keyed by the id it was sealed " +
+        "under (TrajectoryMeta.runId from list_trajectories) — this works for every source, whereas " +
+        "get_run_trajectory only opens evidence that has a run row (never an otlp arrival or a materialized " +
+        "import). `segments` lists every emitter that contributed — the execution plus each " +
+        "service:<service.name> that pushed its own spans through the OTLP door — so you can read the whole " +
+        "SYSTEM (agent, placement, services); the one flagged `execution: true` is the plane this response's " +
+        "events came from, and any other is opened by passing its `emitter`. A long-horizon run's trace does " +
+        "not fit in one answer and never did: when `nextAfter` comes back, pass it as `after` for the next " +
+        "page, and keep going until it is absent.",
       inputSchema: {
         runId: z.string().min(1).describe("the id the trajectory was sealed under (TrajectoryMeta.runId)"),
+        emitter: z.string().optional().describe("which plane to read; default = the execution's own"),
+        after: z.number().int().nonnegative().optional().describe("resume after this seq (from nextAfter)"),
+        limit: z.number().int().positive().optional().describe("events per page (clamped by the store)"),
       },
     },
-    ({ runId }: { runId: string }) =>
+    ({ runId, emitter, after, limit }: { runId: string; emitter?: string; after?: number; limit?: number }) =>
       run(principal, "runs:read", async () => {
-        const sealed = await store.get(ws, runId);
+        const sealed = await store.planes(ws, runId);
         if (!sealed || !trajectoryReadableBy(sealed.meta, principal.subject))
           return fail("NOT_FOUND: trajectory not found.");
+        const page = await store.events(ws, runId, {
+          ...(emitter !== undefined ? { emitter } : {}),
+          ...(after !== undefined ? { after } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        });
         const { tenant: _tenant, ...meta } = sealed.meta;
-        return ok({ meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) });
+        if (page.kind === "too_large")
+          // Never an empty page: an agent told "0 events" would conclude the run did nothing and act on it.
+          return fail(
+            `CONFLICT: trajectory '${runId}' plane '${page.emitter}' is a ${page.storedBytes}-byte body sealed before it was split into events, over the ${page.limitBytes}-byte read ceiling. An operator splits it with scripts/live/split-trajectory-bodies.mjs.`,
+          );
+        const events = page.kind === "page" ? page.page.events : [];
+        return ok({
+          meta,
+          events,
+          segments: trajectorySegmentsWire(sealed),
+          ...(page.kind === "page" && page.page.nextAfter !== undefined ? { nextAfter: page.page.nextAfter } : {}),
+        });
       }),
   );
 

@@ -28,20 +28,34 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
     },
   },
   get: {
-    summary: "Open one sealed trajectory (meta + every normalized TraceEvent, across every emitter)",
+    summary: "Open ONE PAGE of one sealed trajectory (meta + plane headers + a window of TraceEvents)",
     description:
       "The ledger's own detail read, keyed by the id the trajectory was sealed under (TrajectoryMeta.runId). " +
       "Works for every source — an otlp arrival or a materialized import has no run row, so the run-scoped " +
       "GET /runs/:id/trajectory cannot open it. Another workspace's (or an unknown) id is 404. " +
-      "`events` is the EXECUTION's own record (what judges score). `segments` describes every emitter that " +
-      "contributed to this run — the execution itself plus each `service:<service.name>` that pushed its own " +
-      "spans through the OTLP door — so a caller can read the whole system, not just the agent. Exactly one " +
-      "segment omits `events`: that is the execution one, whose stream is the top-level `events`.",
+      "`events` is ONE WINDOW of ONE plane — the execution's own record (what judges score) unless `emitter` " +
+      "names another. `segments` describes every emitter that contributed to this run — the execution itself " +
+      "plus each `service:<service.name>` that pushed its own spans through the OTLP door — as HEADERS with " +
+      "no events on them; the one flagged `execution: true` is the plane this response's events came from, " +
+      "and any other is opened by passing its `emitter`. When `nextAfter` is present there is more: pass it " +
+      "as `after`. A long-horizon run's trace does not fit in one response and never did — this route used " +
+      "to try, and the memory it took was the whole control plane's. " +
+      "409 when a plane was sealed before its events were split out and is too large to serve as one body: " +
+      "that is a refusal naming the size and the repair, never an empty page, because a reader handed zero " +
+      "events would conclude the run did nothing.",
     tags: ["runs"],
     params: {
       type: "object",
       properties: { id: { type: "string", description: "the id the trajectory was sealed under" } },
       required: ["id"],
+    },
+    querystring: {
+      type: "object",
+      properties: {
+        emitter: { type: "string", description: "which plane to read; default = the execution's own" },
+        after: { type: "string", description: "resume after this seq (echo `nextAfter` from the last page)" },
+        limit: { type: "string", description: "events per page; clamped by the store" },
+      },
     },
     response: {
       200: {

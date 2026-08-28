@@ -1,3 +1,4 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import {
   BadRequestError,
@@ -1276,7 +1277,7 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
 
     // The source platform loses the trace AFTER the pull — our sealed copy is unaffected.
     deleted = true;
-    const sealed = await trajectories.get("acme", `ingest:${created.id}:c1`);
+    const sealed = await whole(trajectories, "acme", `ingest:${created.id}:c1`);
     expect(sealed?.meta).toMatchObject({ source: "import", eventCount: 2 });
     expect(sealed?.events).toEqual(pulled);
     // The record embed and the sealed copy agree (one evidence, two carriers until refs-not-embeds).
@@ -1329,7 +1330,7 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
     expect(done.scorecard?.results[0]?.trace).toEqual(pulled); // judged from the sealed store copy
     expect(done.scorecard?.results[0]?.scores.some((s) => s.metric === "tool_calls")).toBe(true);
     // No ingest:* duplicate — the evidence already lives in the owned store under its own runId.
-    expect(await trajectories.get("acme", `ingest:${created.id}:c1`)).toBeUndefined();
+    expect(await whole(trajectories, "acme", `ingest:${created.id}:c1`)).toBeUndefined();
 
     // A runId with no sealed trajectory fails the batch loudly, never judges emptiness.
     const missing = await service.ingestPull({
@@ -1398,7 +1399,7 @@ describe("materialize-on-import — imported traces seal as OUR copy and are jud
     });
     const done = await waitTerminal(store, created.id);
     expect(done.status).toBe("succeeded");
-    expect((await trajectories.get("acme", `ingest:${created.id}:c1`))?.meta).toMatchObject({
+    expect((await whole(trajectories, "acme", `ingest:${created.id}:c1`))?.meta).toMatchObject({
       source: "import",
       eventCount: 2,
     });
@@ -6887,3 +6888,17 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
     await expect(service.analysisBundle("acme", record.id, undefined, 99)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}

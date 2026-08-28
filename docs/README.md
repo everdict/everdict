@@ -138,7 +138,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 
 ## Database migrations
 - [migration/README.md](migration/README.md) — migration discipline (expand → deploy → contract, preflight checks)
-- Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0023_connections_owner](migration/preflight/0023_connections_owner.md) *(superseded)*
+- Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0023_connections_owner](migration/preflight/0023_connections_owner.md) *(superseded)* · [0200_trajectory_events](migration/preflight/0200_trajectory_events.md)
 
 ## The public docs site
 - [architecture/docs-site.md](architecture/docs-site.md) — information architecture for the Docusaurus site published from this tree

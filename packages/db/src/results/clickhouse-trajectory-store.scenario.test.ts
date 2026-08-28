@@ -1,3 +1,5 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
+import type { TraceEvent } from "@everdict/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ClickHouseTrajectoryStore } from "./clickhouse-trajectory-store.js";
 
@@ -88,7 +90,7 @@ describeLive("ClickHouseTrajectoryStore against a live server", () => {
       // Then the read hands back the SAME attempt, not the empty default the pre-upgrade column would give.
       // An upgraded install that silently drops the identity is indistinguishable from a producer that never
       // declared one — and "the producer did not say" is the reading the store documents for ''.
-      const read = await ch.get("acme", "run-upgrade-1");
+      const read = await whole(ch, "acme", "run-upgrade-1");
       expect(read?.segments[0]?.attemptId).toBe("exec-7#g2");
     });
   });
@@ -154,7 +156,7 @@ describeLive("ClickHouseTrajectoryStore against a live server", () => {
       );
 
       // When a reader asks BY THE IDENTITY THE PG RECEIPT COMMITTED
-      const read = await ch.get("acme", "run-skew-1", { attemptId: "exec-LATE#g2" });
+      const read = await whole(ch, "acme", "run-skew-1", { attemptId: "exec-LATE#g2" });
 
       // Then it gets that attempt's bytes. A reader that asked for one execution's evidence and was handed
       // another's has no way to notice: both rows are well-formed evidence of the same run id.
@@ -163,12 +165,12 @@ describeLive("ClickHouseTrajectoryStore against a live server", () => {
 
       // …and the clock-resolved read still answers the OTHER question, unchanged — a caller with no identity
       // to ask by (browse, retention) keeps first-write-wins, now documented as the best-effort it is.
-      const byClock = await ch.get("acme", "run-skew-1");
+      const byClock = await whole(ch, "acme", "run-skew-1");
       expect(byClock?.segments[0]?.attemptId).toBe("exec-EARLY#g1");
 
       // An attempt NOTHING declares is refused rather than substituted: the run has evidence, but none of it
       // is this execution's, and serving the nearest row is exactly the join defect that was fixed.
-      expect(await ch.get("acme", "run-skew-1", { attemptId: "exec-NEVER#g9" })).toBeUndefined();
+      expect(await whole(ch, "acme", "run-skew-1", { attemptId: "exec-NEVER#g9" })).toBeUndefined();
     });
 
     it("keeps an undeclared plane beside the asked-for one — absent identity is not disagreement", async () => {
@@ -194,9 +196,23 @@ describeLive("ClickHouseTrajectoryStore against a live server", () => {
 
       // When the receipt's identity is asked for, both planes travel: dropping the undeclared one would decay
       // the record in the name of protecting it.
-      const read = await ch.get("acme", "run-mixed-1", { attemptId: "exec-9#g1" });
+      const read = await whole(ch, "acme", "run-mixed-1", { attemptId: "exec-9#g1" });
       expect(read?.segments.map((s) => s.emitter)).toEqual(["run", "judge:rubric"]);
       expect(read?.meta.eventCount).toBe(2);
     });
   });
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}

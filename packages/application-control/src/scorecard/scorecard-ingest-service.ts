@@ -34,7 +34,7 @@ import {
 } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { settleScorecard } from "../ports/settle.js";
-import { trajectoryReadableBy } from "../ports/trajectory-store.js";
+import { collectTrajectoryEvents, trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
@@ -195,7 +195,7 @@ export class ScorecardIngestService {
           throw new BadRequestError("BAD_REQUEST", {}, "The owned trace store is not configured.");
         const perCase: IngestScorecardBody["traces"] = [];
         for (const r of runs) {
-          const sealed = await this.deps.trajectories.get(tenant, r.runId);
+          const sealed = await this.deps.trajectories.planes(tenant, r.runId);
           // The audience rule reaches here too, and it has to: this path names run ids DIRECTLY, so without
           // the check a member could pull another member's agent-turn transcript into a scorecard and read it
           // there — the browse surfaces would be private and the evidence would walk out a third door. Same
@@ -206,7 +206,15 @@ export class ScorecardIngestService {
               { runId: r.runId },
               `No sealed trajectory '${r.runId}' in this workspace.`,
             );
-          perCase.push({ caseId: r.caseId, trace: sealed.events });
+          // This path genuinely needs every event — it is scoring the trace, not showing it — so it drains
+          // the windows rather than asking for a whole body that no longer exists. Peak residency is a page
+          // plus the accumulating array, which is the honest cost of a caller that must hold the stream.
+          // A `too_large` legacy plane THROWS out of the collector rather than yielding a short trace: a
+          // scorecard built on half a trajectory is a verdict about evidence nobody chose.
+          perCase.push({
+            caseId: r.caseId,
+            trace: await collectTrajectoryEvents(this.deps.trajectories, tenant, r.runId),
+          });
         }
         await this.finishIngest(
           id,
@@ -540,7 +548,9 @@ export class ScorecardIngestService {
         events,
         label: key.trial === undefined ? key.caseId : `${key.caseId} · trial ${key.trial}`,
       });
-      return (await this.deps.trajectories.get(tenant, runId))?.events ?? events;
+      // Read back what the LEDGER holds, not what we just offered: seals are first-write-wins, so a trial
+      // that lost the race must be scored on the winner's evidence rather than on its own copy.
+      return await collectTrajectoryEvents(this.deps.trajectories, tenant, runId);
     } catch {
       return events;
     }

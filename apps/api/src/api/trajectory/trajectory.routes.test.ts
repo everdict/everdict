@@ -177,7 +177,9 @@ describe("GET /trajectories/:id — opening one sealed trajectory", () => {
     expect(body.meta.eventCount).toBe(2); // every plane counted
     expect(body.events).toEqual([{ t: 0, kind: "llm_call", model: "m" }]); // the execution's own record
     expect(body.segments).toHaveLength(2);
-    // The execution segment omits `events` — its stream is the top-level one, never shipped twice.
+    // NO plane inlines its events any more — a system-level read used to ship (and first materialize) every
+    // byte of every plane at once, which is what made a long-horizon run's detail page take the process down.
+    // A header says how much is there and whether it is the plane this response's `events` came from.
     expect(body.segments[0]).toEqual({
       emitter: "run",
       source: "run",
@@ -186,13 +188,22 @@ describe("GET /trajectories/:id — opening one sealed trajectory", () => {
       // What this plane's body actually holds. Both of these were sealed as point-event streams; a reader
       // that wants to say "this is the OTel record" is told so here rather than inferring it (N6).
       format: "events",
+      execution: true,
     });
     expect(body.segments[1]).toMatchObject({
       emitter: "service:checkout",
       source: "otlp",
       t0: "2026-07-31T00:00:00.000Z",
-      events: [{ t: 12, kind: "span", name: "GET /cart", durationMs: 30 }],
+      execution: false,
     });
+    expect(body.segments[1].events, "a plane header shipped its events again").toBeUndefined();
+
+    // …and the service plane is OPENED by asking for it, which is the whole point of the header carrying an
+    // emitter rather than a payload.
+    const other = (
+      await app.inject({ method: "GET", url: "/trajectories/sys-1?emitter=service:checkout", headers: H })
+    ).json();
+    expect(other.events).toEqual([{ t: 12, kind: "span", name: "GET /cart", durationMs: 30 }]);
   });
 
   it("opens evidence that has NO run row — an otlp arrival and a materialized import", async () => {

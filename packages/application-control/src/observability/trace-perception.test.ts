@@ -2,7 +2,14 @@ import type { TraceEvent, TraceThreshold } from "@everdict/contracts";
 import { usageFromTrace } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { EmitPlatformEventInput, PlatformEventEmitter } from "../ports/platform-event-emitter.js";
-import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
+import {
+  type TrajectoryEventsResult,
+  type TrajectoryMeta,
+  type TrajectoryStore,
+  type TrajectoryWindow,
+  clampWindow,
+  pageOf,
+} from "../ports/trajectory-store.js";
 import { withTracePerception } from "./trace-perception.js";
 
 // A first-write-wins fake with the seal's `created` contract — the announce-once hinge.
@@ -22,11 +29,14 @@ function fakeStore(): TrajectoryStore {
       sealed.set(input.runId, { meta, events: input.events ?? [] });
       return { ...meta, created: true };
     },
-    async get(tenant, runId) {
+    // Paged with the SAME helpers production pages with, so this double cannot answer a window more
+    // permissively than the store it stands in for.
+    async planes(tenant: string, runId: string) {
       const hit = sealed.get(runId);
       if (!hit || hit.meta.tenant !== tenant) return undefined;
       return {
-        ...hit,
+        meta: hit.meta,
+        executionEmitter: hit.meta.source,
         segments: [
           {
             emitter: hit.meta.source,
@@ -34,9 +44,24 @@ function fakeStore(): TrajectoryStore {
             eventCount: hit.events.length,
             sealedAt: hit.meta.sealedAt,
             format: "events" as const,
-            events: hit.events,
           },
         ],
+      };
+    },
+    async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
+      const hit = sealed.get(runId);
+      if (!hit || hit.meta.tenant !== tenant) return { kind: "absent" as const };
+      const { limit, maxBytes, after } = clampWindow(window);
+      const { slice, nextAfter } = pageOf(hit.events, after, limit, maxBytes, (e) => JSON.stringify(e).length);
+      return {
+        kind: "page" as const,
+        page: {
+          emitter: hit.meta.source,
+          format: "events" as const,
+          events: slice,
+          ...(nextAfter !== undefined ? { nextAfter } : {}),
+          eventCount: hit.events.length,
+        },
       };
     },
     // Derived the way the real stores derive it, so this double is never more permissive than production.

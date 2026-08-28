@@ -44,12 +44,10 @@ function world(receipts: CaseCommitReceipt[], record: RunRecord = childRun()) {
   const store = new InMemoryCaseReceiptStore();
   const asked: Array<string | undefined> = [];
   const trajectories = {
-    async get(_tenant: string, runId: string, opts?: { attemptId: string }) {
+    async planes(_tenant: string, runId: string, opts?: { attemptId: string }) {
       asked.push(opts?.attemptId);
-      const events = [{ t: 0, kind: "message", role: "assistant", text: "done" }];
       return {
         meta: { runId, tenant: "acme", source: "run", eventCount: 1, sealedAt: "2026-08-16T00:00:02.000Z" },
-        events,
         executionEmitter: "run",
         segments: [
           {
@@ -57,10 +55,27 @@ function world(receipts: CaseCommitReceipt[], record: RunRecord = childRun()) {
             source: "run",
             eventCount: 1,
             sealedAt: "2026-08-16T00:00:02.000Z",
-            format: "everdict",
-            events,
+            format: "events",
           },
         ],
+      };
+    },
+    // ── AND THE IDENTITY HAS TO REACH THE READ THAT RETURNS BYTES ────────────────────────────────
+    //
+    // The plane list and the event window are two reads now. An attempt carried into the first and dropped
+    // from the second would list this attempt's planes and then serve another execution's events out of
+    // them — the substitution the identity read exists to refuse, reappearing at the only seam where it
+    // costs anything. Both calls push, and the assertions below count both.
+    async events(_tenant: string, _runId: string, window: { attemptId?: string }) {
+      asked.push(window.attemptId);
+      return {
+        kind: "page" as const,
+        page: {
+          emitter: "run",
+          format: "events" as const,
+          events: [{ t: 0, kind: "message" as const, role: "assistant" as const, text: "done" }],
+          eventCount: 1,
+        },
       };
     },
   };
@@ -87,7 +102,8 @@ describe("RunService.trajectory — the canonical attempt comes from the receipt
     const trajectory = await service.trajectory("acme", "child-1", "u");
 
     expect(trajectory).toBeDefined();
-    expect(asked).toEqual(["evd-sc-1-c1#g2"]); // the committed attempt, not "whatever sealed first"
+    // BOTH reads, not just the first: the plane list and the window that returns bytes.
+    expect(asked).toEqual(["evd-sc-1-c1#g2", "evd-sc-1-c1#g2"]); // the committed attempt, not "whatever sealed first"
   });
 
   it("a run with no receipt — standalone, legacy, or never committed — reads exactly as before", async () => {
@@ -96,7 +112,7 @@ describe("RunService.trajectory — the canonical attempt comes from the receipt
 
     await service.trajectory("acme", "solo-1", "u");
 
-    expect(asked).toEqual([undefined]); // no identity to ask with: the clock read, unchanged
+    expect(asked).toEqual([undefined, undefined]); // no identity to ask with: the clock read, unchanged
   });
 
   it("another child's receipt is not this run's — the identity is matched by child run id", async () => {
@@ -107,6 +123,6 @@ describe("RunService.trajectory — the canonical attempt comes from the receipt
 
     await service.trajectory("acme", "child-1", "u");
 
-    expect(asked).toEqual([undefined]); // no receipt for THIS child — never another case's attempt
+    expect(asked).toEqual([undefined, undefined]); // no receipt for THIS child — never another case's attempt
   });
 });

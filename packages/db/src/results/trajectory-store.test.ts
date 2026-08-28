@@ -1,3 +1,4 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import type { TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
@@ -24,7 +25,7 @@ describe("TrajectoryStore — a sealed plane names the attempt that produced it"
       attemptId: "evd-sc-1-c1#g1",
       events: [{ t: 1, kind: "llm_call", model: "m" }],
     });
-    const sealed = await store.get("acme", "child-1");
+    const sealed = await whole(store, "acme", "child-1");
     expect(sealed?.segments.map((s) => s.attemptId)).toEqual(["evd-sc-1-c1#g1", "evd-sc-1-c1#g1"]);
   });
 
@@ -36,7 +37,7 @@ describe("TrajectoryStore — a sealed plane names the attempt that produced it"
       source: "otlp",
       events: [{ t: 0, kind: "message", role: "assistant", text: "x" }],
     });
-    expect((await store.get("acme", "child-2"))?.segments[0]?.attemptId).toBeUndefined();
+    expect((await whole(store, "acme", "child-2"))?.segments[0]?.attemptId).toBeUndefined();
   });
 });
 
@@ -65,7 +66,7 @@ describe("TrajectoryStore — the exact-identity read serves the attempt the rec
 
     // When the receipt's identity is asked for, both travel: absence is not disagreement, and dropping the
     // undeclared plane would decay the record in the name of protecting it.
-    const read = await store.get("acme", "child-1", { attemptId: "exec-7#g2" });
+    const read = await whole(store, "acme", "child-1", { attemptId: "exec-7#g2" });
     expect(read?.segments.map((s) => s.emitter)).toEqual(["run", "judge:quality"]);
     expect(read?.meta.eventCount).toBe(2);
   });
@@ -77,10 +78,10 @@ describe("TrajectoryStore — the exact-identity read serves the attempt the rec
     await seal(store, "infra", "exec-EARLY#g1");
 
     // Then the committed attempt's evidence is honestly absent — never the nearest row wearing its name.
-    expect(await store.get("acme", "child-1", { attemptId: "exec-LATE#g2" })).toBeUndefined();
+    expect(await whole(store, "acme", "child-1", { attemptId: "exec-LATE#g2" })).toBeUndefined();
     // …while the identity that IS there reads back, and the clock read still answers its own question.
-    expect((await store.get("acme", "child-1", { attemptId: "exec-EARLY#g1" }))?.segments).toHaveLength(2);
-    expect((await store.get("acme", "child-1"))?.segments).toHaveLength(2);
+    expect((await whole(store, "acme", "child-1", { attemptId: "exec-EARLY#g1" }))?.segments).toHaveLength(2);
+    expect((await whole(store, "acme", "child-1"))?.segments).toHaveLength(2);
   });
 
   it("recounts the events over the planes it returned — a count nobody is holding describes nothing", async () => {
@@ -88,7 +89,7 @@ describe("TrajectoryStore — the exact-identity read serves the attempt the rec
     await seal(store, "run", "exec-7#g2");
     await seal(store, "service:checkout", "exec-OTHER#g1");
 
-    const read = await store.get("acme", "child-1", { attemptId: "exec-7#g2" });
+    const read = await whole(store, "acme", "child-1", { attemptId: "exec-7#g2" });
     expect(read?.segments.map((s) => s.emitter)).toEqual(["run"]);
     expect(read?.meta.eventCount).toBe(1); // not 2 — the service plane was refused, so it is not counted
   });
@@ -186,4 +187,18 @@ function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unkno
     },
   };
   return { client, calls };
+}
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
 }

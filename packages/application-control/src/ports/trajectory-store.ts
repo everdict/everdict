@@ -6,10 +6,19 @@ import {
   TRACE_PLANE,
   type TraceEvent,
   type TraceSpan,
+  UpstreamError,
   newSpanId,
   traceIdForRun,
 } from "@everdict/contracts";
-import { eventsToSpans, previewFromEvents, spansToEvents, usageFromTrace } from "@everdict/domain";
+import {
+  type SpanBatchFacts,
+  eventsToSpans,
+  previewFromEvents,
+  sortSpansForProjection,
+  spanBatchFacts,
+  spansToEvents,
+  usageFromTrace,
+} from "@everdict/domain";
 
 // The OWNED trajectory record (execution-model §6 / P5, native-observability rung 1): what happened, kept by
 // US — the copy every judgment stands on ("never judge what you don't retain"). Rung 1 collapses live-append
@@ -61,6 +70,12 @@ export interface TrajectoryMeta {
 // point stream could not be dated well enough to assemble.
 export type TrajectoryBodyFormat = "events" | "spans";
 
+// ── A PLANE'S HEADER CARRIES NO EVENTS (long-horizon OOM) ────────────────────────────────────────────
+//
+// This type used to hold `events` (and `spans`), so resolving a trajectory meant materializing every plane's
+// entire body — several full copies of the largest object in the system, in a SHARED process. See
+// `docs/architecture/long-horizon-trace-reads.md`. The header is what a reader needs to decide WHICH plane
+// to open and how much is in it; the events come a window at a time, from `TrajectoryStore.events`.
 export interface TrajectorySegment {
   // Who produced these events: `run` | `otlp` | `import` (the execution's own record, by arrival channel)
   // or `service:<service.name>` for a service under test that pushed its own spans through the door.
@@ -72,25 +87,31 @@ export interface TrajectorySegment {
   // rather than inventing an offset.
   t0?: string;
   sealedAt: string;
-  // ALWAYS present, whatever the body format — this is what makes spans-as-the-record cost judges nothing.
-  // For a `spans` body it is the versioned projection (`spansToEvents`), computed by the store on read.
-  events: TraceEvent[];
+  // What this plane's body HOLDS — `spans` when the record is the tree, `events` when it never was. Stated
+  // by the row, never sniffed from the bytes (otel-trace-model.md N6). A page from a `spans` plane carries
+  // both the record and the versioned projection every judge reads.
   format: TrajectoryBodyFormat;
-  // The record itself, when this segment holds one. Absent for an `events` body — a tree we never had is
-  // not a tree we reconstruct at read time.
-  spans?: TraceSpan[];
   // The physical attempt that sealed this plane (see SealInput.attemptId). Absent on evidence written before
   // attempts had an identity, and on any producer that does not declare one.
   attemptId?: string;
+  // ── WHAT THE PROJECTION NEEDS THAT A PAGE CANNOT SEE ──────────────────────────────────────────────
+  //
+  // `spansToEvents` measures every event's `t` from the earliest span in the batch, and decides whether an
+  // aggregate span's tokens are a double-count by asking whether ANY chat span in the batch reported its
+  // own. Both are properties of the PLANE, and a page projected on its own answers them from the page —
+  // restarting the clock at every boundary and double-counting spend on the page that holds the aggregate.
+  //
+  // So they are derived once, at seal, where the whole plane is in hand, and recorded here as the plane's
+  // own provenance (L3). Present only on a `spans` plane; an `events` plane has nothing to project.
+  batch?: SpanBatchFacts;
 }
 
-// What a trajectory read returns. `events` is the EXECUTION's own evidence (unchanged semantics — the
-// stream judges score and sinks export); `segments` is the whole system record, primary first.
-// `executionEmitter` names which segment `events` came from, so a reader never has to guess (or re-derive
-// the resolution order) to tell the execution's plane from a service's.
+// What a trajectory read returns BEFORE anybody asks for events: the whole system record's shape.
+// `executionEmitter` names the plane whose stream is the execution's own evidence — the one judges score and
+// sinks export — so a reader never has to guess (or re-derive the resolution order) to tell it from a
+// service's.
 export interface SealedTrajectory {
   meta: TrajectoryMeta;
-  events: TraceEvent[];
   executionEmitter?: string;
   segments: TrajectorySegment[];
   // How many of `segments` declare NO attempt, on a read that asked for one (arch-review 53, Wave B). Absent
@@ -99,6 +120,62 @@ export interface SealedTrajectory {
   // used to be returned silently. A decision-grade caller uses `trajectoryForDecision`, which refuses it.
   unattributedSegments?: number;
 }
+
+// ── ONE WINDOW OVER ONE PLANE ────────────────────────────────────────────────────────────────────────
+//
+// REQUIRED, not optional, and that is the whole design. An optional window is a request — some caller will
+// omit it, and on the one trajectory where it matters that caller takes the process down with it. A required
+// one is a protocol (rule `protocol` L1's shape, applied to a read).
+//
+// `after` is a plain seq rather than an opaque cursor, unlike `list`'s: this is a position inside ONE
+// append-only sealed plane, not a keyset over a mutable ordering, so an opaque token would hide a number the
+// caller can reason about and gain nothing.
+export interface TrajectoryWindow {
+  // Which plane. Absent = the execution's own (`executionEmitterOf`), which is what every judge, sink and
+  // viewer means by "the trace".
+  emitter?: string;
+  // Resume AFTER this seq (1-based, exclusive). Absent = from the beginning.
+  after?: number;
+  // Ceilings, both clamped by the store. `limit` bounds how MANY events a page materializes; `maxBytes`
+  // bounds how LARGE it gets, because a hundred events is only a bound if the events are bounded — and
+  // until the payload offload lands they are not.
+  limit?: number;
+  maxBytes?: number;
+  // The exact-identity read (see `TrajectoryStore.planes`): a plane declaring a DIFFERENT attempt is refused
+  // rather than served. Carried on the window because the refusal has to reach the read that returns bytes,
+  // not only the one that lists planes.
+  attemptId?: string;
+}
+
+export interface TrajectoryEventPage {
+  emitter: string;
+  format: TrajectoryBodyFormat;
+  // The projection every judge and grader reads — always present, whatever the plane's format.
+  events: TraceEvent[];
+  // The record itself, when this plane holds one. Absent for an `events` plane: a tree we never had is not a
+  // tree we reconstruct at read time.
+  spans?: TraceSpan[];
+  // Resume token for the next call. ABSENT means the plane is exhausted — the only signal a streaming reader
+  // needs, and the one a `length < limit` heuristic gets wrong the moment a byte budget cuts a page short.
+  nextAfter?: number;
+  // How many events the plane holds in total, so a viewer can show progress without draining it.
+  eventCount: number;
+}
+
+// ── …AND WHAT A PAGE CAN FAIL TO BE ──────────────────────────────────────────────────────────────────
+//
+// `too_large` is the honest answer for a LEGACY row: evidence sealed before mig 0200 lives as one jsonb blob,
+// and there is no way to serve a window of it without materializing the whole thing — which is the defect.
+// So the store refuses, names the size, and names the repair (`scripts/live/split-trajectory-bodies.mjs`).
+//
+// It is deliberately NOT an empty page. "We could not serve this" and "there is nothing here" are different
+// facts, and collapsing them would let a viewer, a judge and a sink each quietly conclude the run did
+// nothing — the strongest possible wrong answer, produced by a size limit (L2).
+export type TrajectoryEventsResult =
+  | { kind: "page"; page: TrajectoryEventPage }
+  // No such trajectory in this workspace, or no plane agreeing with the requested attempt.
+  | { kind: "absent" }
+  | { kind: "too_large"; storedBytes: number; limitBytes: number; emitter: string };
 
 // The emitter a seal defaults to when the caller names none — the arrival channel itself.
 export function defaultEmitter(source: TrajectoryMeta["source"]): string {
@@ -276,19 +353,22 @@ export function placementSpan(
   };
 }
 
-// One emitter's contribution as it goes over the wire. The EXECUTION segment omits `events` — its stream
-// is the response's top-level `events` (the one a judge reads), so a system-level read never ships the same
-// trace twice. Every other segment carries its own events: that IS the point of the multi-plane rung.
+// One emitter's contribution as it goes over the wire — a HEADER, with no events on it.
+//
+// It used to inline every non-execution plane's whole event array, which is why a system-level read of a
+// long-horizon run shipped (and first materialized) every byte of every plane at once. A plane is opened by
+// asking for it: `?emitter=<this>` on the same paged read the execution plane uses. `execution` says which
+// one the response's own first page came from, so a client knows which plane it already has.
 export interface TrajectorySegmentWire {
   emitter: string;
   source: TrajectoryMeta["source"];
   eventCount: number;
   t0?: string;
   sealedAt: string;
-  events?: TraceEvent[];
   // What this segment's body actually holds. A reader that wants to say "this is the record, not a
   // reconstruction of one" needs to be told; it cannot tell from the events, which look the same either way.
   format: TrajectoryBodyFormat;
+  execution: boolean;
 }
 
 // Shared by every surface that serves a trajectory — GET /trajectories/:id, GET /runs/:id/trajectory and
@@ -301,7 +381,7 @@ export function trajectorySegmentsWire(sealed: SealedTrajectory): TrajectorySegm
     ...(segment.t0 !== undefined ? { t0: segment.t0 } : {}),
     sealedAt: segment.sealedAt,
     format: segment.format,
-    ...(segment.emitter === sealed.executionEmitter ? {} : { events: segment.events }),
+    execution: segment.emitter === sealed.executionEmitter,
   }));
 }
 
@@ -347,7 +427,6 @@ export function trajectoryForAttempt(sealed: SealedTrajectory, attemptId: string
   const unattributed = segments.filter((segment) => segment.attemptId === undefined).length;
   return {
     meta: { ...sealed.meta, eventCount: segments.reduce((sum, s) => sum + s.eventCount, 0) },
-    events: execution?.events ?? [],
     ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
     ...(unattributed > 0 ? { unattributedSegments: unattributed } : {}),
     segments,
@@ -370,7 +449,6 @@ export function trajectoryForDecision(sealed: SealedTrajectory, attemptId: strin
   const execution = executionSegment(segments);
   return {
     meta: { ...sealed.meta, eventCount: segments.reduce((sum, s) => sum + s.eventCount, 0) },
-    events: execution?.events ?? [],
     ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
     segments,
   };
@@ -435,6 +513,10 @@ export function sealBody(input: SealInput): {
   // The execution economics of THIS body. Absent = the body could not be projected, which the ledger records
   // as unknown rather than as zero — see `usageOfBody`.
   usage?: RunUsageSummary;
+  // What a PAGE of this plane will need in order to project identically to the whole (see
+  // `TrajectorySegment.batch`). Derived here for the same reason usage is: this is the one moment the whole
+  // plane is in hand, and it is the writer's job to record what a later reader cannot re-derive.
+  batch?: SpanBatchFacts;
 } {
   if (input.spans !== undefined && input.events !== undefined)
     throw new BadRequestError(
@@ -444,7 +526,17 @@ export function sealBody(input: SealInput): {
     );
   if (input.spans !== undefined) {
     const usage = usageOfBody(input.spans);
-    return { format: "spans", events: [], spans: input.spans, ...(usage !== undefined ? { usage } : {}) };
+    // SORTED, because seq order has to BE projection order: the store pages by seq and `spansToEvents` sorts
+    // by `startedAt`, so storing arrival order would make page N's spans project in a different position than
+    // the whole plane puts them. This reorders ROWS, never bytes — every span is stored verbatim.
+    const spans = sortSpansForProjection(input.spans);
+    return {
+      format: "spans",
+      events: [],
+      spans,
+      batch: spanBatchFacts(spans),
+      ...(usage !== undefined ? { usage } : {}),
+    };
   }
   if (input.events !== undefined) {
     const usage = usageFromTrace(input.events);
@@ -500,7 +592,9 @@ export interface TrajectoryStore {
   // `created` says whether THIS call wrote something (false = a re-offer that lost to an earlier seal) —
   // the perception decorator announces only on true, so at-least-once callers never double-emit a fact.
   seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }>;
-  // A run's sealed evidence, workspace-scoped (a foreign run reads undefined — no existence leak).
+  // A run's sealed evidence — its SHAPE, workspace-scoped (a foreign run reads undefined — no existence
+  // leak). Meta plus one header per plane, and NO events: see `TrajectorySegment`. The events of a plane are
+  // asked for separately, a window at a time.
   //
   // WITHOUT `opts` the store resolves duplicate seals by the CLOCK — first-write-wins over `sealed_at`. That
   // is best-effort by construction and documented as such: the stamp is the writer's own, so the answer is
@@ -511,7 +605,16 @@ export interface TrajectoryStore {
   // receipt (or an fs revision) selected as canonical, and asks for THAT execution's evidence rather than for
   // whatever the clock elected. Planes declaring a different attempt are refused, not substituted, and a run
   // with nothing agreeing reads undefined — see `segmentDeclaresAttempt` for the rule every impl shares.
-  get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined>;
+  planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined>;
+  // ONE WINDOW of ONE plane's events. This is the only way to get bytes out of the store, and the window is
+  // a required argument for the reason `TrajectoryWindow` gives: a read that CAN return everything will,
+  // from some caller, and on a long-horizon run that ends the process.
+  //
+  // `too_large` is a real answer, not an error: a plane sealed before mig 0200 is one jsonb blob, and a
+  // window of a blob costs the whole blob. The store says so, with the size and the repair, rather than
+  // trying and dying — and never with an empty page, because "we could not serve this" and "the run did
+  // nothing" must not be the same value (L2).
+  events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult>;
   // Browse the workspace's sealed evidence, newest first (N1 "look inward" — Settings › Traces reads OUR
   // store). Metas only: a page never hauls bodies. `viewer` (the member asking) drops evidence owned by
   // someone else IN THE QUERY — filtering afterwards would hand the reader a short page and let one member's
@@ -536,4 +639,106 @@ export interface TrajectoryStore {
   // Retention (N3): delete trajectories sealed before the cutoff, across tenants (operator policy). Returns
   // how many rows went — the sweep logs it, never silently. No retention configured = keep forever.
   deleteOlderThan(cutoffIso: string): Promise<number>;
+}
+
+// ── THE PAGE CEILINGS, OWNED ONCE ────────────────────────────────────────────────────────────────────
+//
+// Every impl clamps through `clampWindow`, so a caller cannot widen a page past what the process can hold by
+// asking nicely, and the three stores cannot disagree about what "one page" means.
+export const DEFAULT_EVENT_PAGE = 500;
+export const MAX_EVENT_PAGE = 5_000;
+// 4 MiB of serialized events per page. Chosen so that the whole streaming pipeline — a page, its Zod
+// validation copy, and the JSON the transport writes — stays inside a few tens of megabytes per concurrent
+// reader, which is the number that matters: the heap is shared.
+export const DEFAULT_PAGE_BYTES = 4 * 1024 * 1024;
+export const MAX_PAGE_BYTES = 32 * 1024 * 1024;
+// The size at which a LEGACY (unsplit) body is refused rather than materialized. Above this the answer is
+// `too_large` and the repair is the split script — see `TrajectoryEventsResult`.
+export const MAX_LEGACY_BODY_BYTES = 32 * 1024 * 1024;
+
+export function clampWindow(window: TrajectoryWindow): { limit: number; maxBytes: number; after: number } {
+  const limit =
+    window.limit === undefined || !Number.isFinite(window.limit) || window.limit <= 0
+      ? DEFAULT_EVENT_PAGE
+      : Math.min(Math.floor(window.limit), MAX_EVENT_PAGE);
+  const maxBytes =
+    window.maxBytes === undefined || !Number.isFinite(window.maxBytes) || window.maxBytes <= 0
+      ? DEFAULT_PAGE_BYTES
+      : Math.min(Math.floor(window.maxBytes), MAX_PAGE_BYTES);
+  const after =
+    window.after === undefined || !Number.isFinite(window.after) || window.after < 0 ? 0 : Math.floor(window.after);
+  return { limit, maxBytes, after };
+}
+
+// Cut an already-materialized array to one page under both ceilings, using each item's serialized size.
+// Shared by the in-memory store and by the LEGACY blob path of the persistent ones, so a legacy plane and a
+// split one page identically — the swap is meant to be invisible to a reader, and a second slicing rule is
+// how it would stop being.
+//
+// ⚠️ ALWAYS RETURNS AT LEAST ONE ITEM when there is one. A page that can come back empty because its first
+// item alone exceeds the byte budget is a stream that never advances — the caller asks again from the same
+// cursor, forever. Bounding one event is the payload offload's job, not the pager's; the pager's job is to
+// keep making progress.
+export function pageOf<T>(
+  items: readonly T[],
+  after: number,
+  limit: number,
+  maxBytes: number,
+  sizeOf: (item: T) => number,
+): { slice: T[]; nextAfter?: number } {
+  const slice: T[] = [];
+  let bytes = 0;
+  let index = after;
+  for (; index < items.length && slice.length < limit; index += 1) {
+    const item = items[index];
+    if (item === undefined) break;
+    const size = sizeOf(item);
+    if (slice.length > 0 && bytes + size > maxBytes) break;
+    slice.push(item);
+    bytes += size;
+  }
+  return { slice, ...(index < items.length ? { nextAfter: index } : {}) };
+}
+
+// ── THE WHOLE STREAM, WITHOUT THE WHOLE STREAM IN MEMORY ─────────────────────────────────────────────
+//
+// Judges, `spansToEvents`, the sinks and the ingest path legitimately read every event of a plane. They get
+// them one page at a time, so peak residency is a page rather than a trajectory — and the Zod copy that used
+// to double the whole body is now a copy of a page that is released before the next one arrives.
+//
+// `too_large` THROWS here rather than ending the iteration, and that is deliberate: a consumer folding this
+// stream into a verdict must not be handed a silently short one. A caller that can tolerate partial evidence
+// calls `store.events` itself and names what it does with the refusal.
+export async function* streamTrajectoryEvents(
+  store: Pick<TrajectoryStore, "events">,
+  tenant: string,
+  runId: string,
+  window: Omit<TrajectoryWindow, "after"> = {},
+): AsyncGenerator<TraceEvent> {
+  let after: number | undefined = 0;
+  while (after !== undefined) {
+    const result: TrajectoryEventsResult = await store.events(tenant, runId, { ...window, after });
+    if (result.kind === "absent") return;
+    if (result.kind === "too_large")
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { runId, emitter: result.emitter, storedBytes: result.storedBytes },
+        `Trajectory '${runId}' plane '${result.emitter}' is a ${result.storedBytes}-byte legacy body, over the ${result.limitBytes}-byte read ceiling. Split it with scripts/live/split-trajectory-bodies.mjs.`,
+      );
+    for (const event of result.page.events) yield event;
+    after = result.page.nextAfter;
+  }
+}
+
+// The whole plane as an array, for the callers that genuinely need one — with the collection in ONE place
+// rather than re-spelled per consumer, so the memory question has a single owner to revisit.
+export async function collectTrajectoryEvents(
+  store: Pick<TrajectoryStore, "events">,
+  tenant: string,
+  runId: string,
+  window: Omit<TrajectoryWindow, "after"> = {},
+): Promise<TraceEvent[]> {
+  const events: TraceEvent[] = [];
+  for await (const event of streamTrajectoryEvents(store, tenant, runId, window)) events.push(event);
+  return events;
 }

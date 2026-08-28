@@ -1327,9 +1327,12 @@ export class SandboxSessionService {
     const record = await this.deps.store.get(taskRunId);
     if (!record || record.tenant !== actor.tenant || record.group?.id !== sessionRunId)
       throw new NotFoundError("NOT_FOUND", { run: taskRunId }, "No such test case in this session.");
-    const sealed = await this.deps.trajectories?.get(actor.tenant, taskRunId);
-    const all = sealed?.events ?? record.result?.trace ?? [];
-    const events = all.slice(since);
+    // This reader was already a pager — `since` is its cursor — and it used to get its page by pulling the
+    // WHOLE sealed trajectory and slicing. Now it asks for the window it wanted. `too_large` is left to
+    // throw from the collector rather than caught into an empty page: a caller polling a task's output must
+    // not be told "no more events" by a size limit.
+    const page = await this.deps.trajectories?.events(actor.tenant, taskRunId, { after: since });
+    const events = page?.kind === "page" ? page.page.events : (record.result?.trace ?? []).slice(since);
     return {
       status: record.status,
       events,

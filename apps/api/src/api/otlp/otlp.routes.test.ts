@@ -1,5 +1,7 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import type { TraceEvent } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryTrajectoryStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { OtlpIngestService } from "../../core/observability/otlp-ingest-service.js";
@@ -60,14 +62,16 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     const res = await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-otlp-1") });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({}); // OTLP-spec full success
-    const sealed = await trajectories.get("acme", "run-otlp-1");
+    const sealed = await whole(trajectories, "acme", "run-otlp-1");
     // The ledger counts SPANS now — that is the unit an OTLP door receives (N6). The export carried two.
     expect(sealed?.meta).toMatchObject({ source: "otlp", eventCount: 2 });
     // What a judge reads is unchanged: the two spans project to llm_call + the tool_call/tool_result pair.
     expect(sealed?.events).toHaveLength(3);
     // And the RECORD is what the tenant actually sent — the tree, not a flattening of it.
     expect(sealed?.segments[0]?.format).toBe("spans");
-    expect(sealed?.segments[0]?.spans).toHaveLength(2);
+    // The RECORD travels on the page beside the projection — a plane header carries neither.
+    const page = await trajectories.events("acme", "run-otlp-1", {});
+    expect(page.kind === "page" && page.page.spans).toHaveLength(2);
     expect(sealed?.events.some((e) => e.kind === "llm_call" && "model" in e && e.model === "claude-fable-5")).toBe(
       true,
     );
@@ -100,7 +104,7 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
       },
     });
     expect(res.json().partialSuccess.rejectedSpans).toBe(1);
-    expect(await trajectories.get("acme", "")).toBeUndefined();
+    expect(await whole(trajectories, "acme", "")).toBeUndefined();
   });
 
   it("the N3 admission lane: past the events/hour quota the door refuses at 429 and announces ONCE (cooldown)", async () => {
@@ -127,7 +131,7 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     const refused = await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q2") });
     expect(refused.statusCode).toBe(429);
     expect(refused.json()).toMatchObject({ code: "RATE_LIMITED", data: { usedLastHour: 2, limit: 2 } });
-    expect(await trajectories.get("acme", "run-q2")).toBeUndefined();
+    expect(await whole(trajectories, "acme", "run-q2")).toBeUndefined();
     // The retrying exporter keeps getting 429s but the LOG hears about it once (cooldown).
     await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-q3") });
     expect(emitted).toEqual(["trace.ingestion_throttled"]);
@@ -176,13 +180,14 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({}); // nothing rejected — a second service is not a duplicate
 
-    const sealed = await trajectories.get("acme", "run-sys-1");
+    const sealed = await whole(trajectories, "acme", "run-sys-1");
     expect(sealed?.segments.map((s) => s.emitter)).toEqual(["service:checkout", "service:payments"]);
     // Each plane carries its own absolute anchor, so a reader can lay them on one time axis.
     expect(sealed?.segments.every((s) => s.t0 !== undefined)).toBe(true);
     expect(sealed?.meta.eventCount).toBe(2);
     // A structural span keeps its own length — without it a service plane would draw as an instant.
-    expect(sealed?.segments[0]?.events[0]).toMatchObject({ kind: "span", durationMs: 500 });
+    const first = await trajectories.events("acme", "run-sys-1", { emitter: sealed?.segments[0]?.emitter ?? "" });
+    expect(first.kind === "page" && first.page.events[0]).toMatchObject({ kind: "span", durationMs: 500 });
   });
 
   it("a service's spans JOIN an already-sealed run instead of being rejected as a retry", async () => {
@@ -197,7 +202,7 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     expect(joined.statusCode).toBe(200);
     expect(joined.json()).toEqual({}); // admitted — the pre-multi-plane door rejected this span
 
-    const sealed = await trajectories.get("acme", "run-sys-2");
+    const sealed = await whole(trajectories, "acme", "run-sys-2");
     expect(sealed?.segments.map((s) => s.emitter)).toEqual(["otlp", "service:checkout"]);
     // The agent's own record still answers "what did the agent do" — a service never displaces it.
     expect(sealed?.executionEmitter).toBe("otlp");
@@ -207,7 +212,21 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
   it("traces seal into the CALLER's workspace — another tenant cannot read them", async () => {
     const { app, trajectories } = build();
     await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-otlp-3") });
-    expect(await trajectories.get("acme", "run-otlp-3")).toBeDefined();
-    expect(await trajectories.get("rival", "run-otlp-3")).toBeUndefined();
+    expect(await whole(trajectories, "acme", "run-otlp-3")).toBeDefined();
+    expect(await whole(trajectories, "rival", "run-otlp-3")).toBeUndefined();
   });
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}

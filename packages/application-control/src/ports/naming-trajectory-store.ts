@@ -3,10 +3,12 @@ import { previewFromEvents, spansToEvents } from "@everdict/domain";
 import type {
   SealInput,
   SealedTrajectory,
+  TrajectoryEventsResult,
   TrajectoryListResult,
   TrajectoryMeta,
   TrajectoryStore,
   TrajectoryUsage,
+  TrajectoryWindow,
 } from "./trajectory-store.js";
 
 // Every sealed trajectory gets a line naming what it was asked to do — derived ONCE, here.
@@ -36,8 +38,15 @@ export class NamingTrajectoryStore implements TrajectoryStore {
   // Forwarded with its options for the reason the list below states: a decorator that drops the identity
   // silently turns an exact-identity read back into the clock-resolved one, which is the defect, not a
   // degradation of it.
-  get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
-    return this.inner.get(tenant, runId, opts);
+  planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
+    return this.inner.planes(tenant, runId, opts);
+  }
+
+  // Forwarded WHOLE, never re-spelled field by field: the window carries the emitter, the cursor, both
+  // ceilings and the attempt, and a decorator that rebuilds it is an allowlist — the shape rule
+  // `option-forwarding` exists for, and the one that has already eaten two fields elsewhere in this repo.
+  events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
+    return this.inner.events(tenant, runId, window);
   }
 
   // Explicitly forwarded field by field rather than spread: the port's own comment says a decorator that

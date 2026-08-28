@@ -1,5 +1,7 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import { CURRENT_EVIDENCE_VERSION, type Scorecard } from "@everdict/contracts";
 import type { ScorecardRecord } from "@everdict/contracts";
+import type { TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryPlatformEventStore } from "../activity/platform-event-store.js";
 import type { SqlClient } from "../client.js";
@@ -461,8 +463,8 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     // Idempotent — evidence is never rewritten; `created:false` is how the perception decorator knows
     // a re-offer must not re-announce (E4 announce-once).
     expect(again).toEqual({ ...first, created: false });
-    expect((await store.get("acme", "r1"))?.events).toHaveLength(1);
-    expect(await store.get("rival", "r1")).toBeUndefined(); // tenant-scoped
+    expect((await whole(store, "acme", "r1"))?.events).toHaveLength(1);
+    expect(await whole(store, "rival", "r1")).toBeUndefined(); // tenant-scoped
   });
 
   it("a second EMITTER joins as its own plane instead of being mistaken for a retry", async () => {
@@ -479,7 +481,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(service.created).toBe(true);
     expect(service.eventCount).toBe(2); // the trajectory now holds BOTH planes
 
-    const sealed = await store.get("acme", "r1");
+    const sealed = await whole(store, "acme", "r1");
     expect(sealed?.segments.map((s) => s.emitter)).toEqual(["run", "service:checkout"]);
     expect(sealed?.segments[1]?.t0).toBe("2026-07-31T00:00:00.000Z"); // the plane's own alignment anchor
     // The EXECUTION's record stays what a judge reads — a service's spans never displace the agent's trace.
@@ -502,7 +504,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     const run = await store.seal({ runId: "r1", tenant: "acme", source: "run", events: events as never });
     expect(run.created).toBe(true);
 
-    const sealed = await store.get("acme", "r1");
+    const sealed = await whole(store, "acme", "r1");
     expect(sealed?.executionEmitter).toBe("run");
     expect(sealed?.events[0]).toMatchObject({ kind: "llm_call" });
     expect(sealed?.meta.source).toBe("otlp"); // how the trajectory FIRST arrived
@@ -524,7 +526,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect((await store.list("acme", { viewer: "bob" })).items.map((m) => m.runId)).toEqual(["eval-1"]);
     // An internal read (retention, metering) passes no viewer and still sees everything.
     expect((await store.list("acme")).items).toHaveLength(2);
-    expect((await store.get("acme", "turn-a"))?.meta.owner).toBe("alice");
+    expect((await whole(store, "acme", "turn-a"))?.meta.owner).toBe("alice");
   });
 
   it("Pg impl filters the owner IN the WHERE (a page filtered after LIMIT would be short)", async () => {
@@ -569,7 +571,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     ]);
     expect((await store.list("acme", { kind: "eval" })).items.map((m) => m.label)).toEqual(["swe-bench-7"]);
     expect((await store.list("acme")).items).toHaveLength(2); // no filter = the whole ledger
-    expect((await store.get("acme", "turn-a"))?.meta).toMatchObject({ kind: "agent", label: "sentinel" });
+    expect((await whole(store, "acme", "turn-a"))?.meta).toMatchObject({ kind: "agent", label: "sentinel" });
   });
 
   it("carries the line that tells two rows of the SAME producer apart (mig 0168)", async () => {
@@ -583,7 +585,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     const listed = await store.list("acme", { kind: "agent" });
     expect(listed.items.map((m) => m.preview)).toEqual(["draft the release notes", "analyze the failing payment logs"]);
     expect(new Set(listed.items.map((m) => m.label))).toEqual(new Set(["default"])); // the label still repeats
-    expect((await store.get("acme", "turn-a"))?.meta.preview).toBe("analyze the failing payment logs");
+    expect((await whole(store, "acme", "turn-a"))?.meta.preview).toBe("analyze the failing payment logs");
   });
 
   it("Pg impl round-trips the preview through the INSERT and the browse SELECT", async () => {
@@ -623,9 +625,14 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     });
     const listed = await store.list("acme");
     // Then the column is written and read back — a value that only lives in memory names nothing on reload
-    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_trajectories \([^)]*preview[^)]*\)/);
-    expect(calls[0]?.params?.[12]).toBe("analyze the failing payment logs");
-    expect(calls[1]?.text).toMatch(/label, preview FROM everdict_trajectories/);
+    const planeInsert = calls.find((c) => c.text.startsWith("INSERT INTO everdict_trajectories"));
+    expect(planeInsert?.text).toMatch(/INSERT INTO everdict_trajectories \([^)]*preview[^)]*\)/);
+    expect(planeInsert?.params?.[12]).toBe("analyze the failing payment logs");
+    // …and the events go to their own table in the same seal (mig 0200).
+    expect(calls.some((c) => c.text.startsWith("INSERT INTO everdict_trajectory_events"))).toBe(true);
+    expect(calls.find((c) => c.text.includes("FROM everdict_trajectories\n"))?.text).toMatch(
+      /label, preview FROM everdict_trajectories/,
+    );
     expect(listed.items[0]?.preview).toBe("analyze the failing payment logs");
   });
 
@@ -649,7 +656,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
 
     // Retention: a future cutoff removes today's rows; the sweep reports the count.
     expect(await store.deleteOlderThan(future)).toBe(1);
-    expect(await store.get("acme", "old")).toBeUndefined();
+    expect(await whole(store, "acme", "old")).toBeUndefined();
     expect(await store.deleteOlderThan(future)).toBe(0); // idempotent on an empty store
   });
 
@@ -677,6 +684,28 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     const client: SqlClient = {
       async query(text: string, params?: unknown[]) {
         calls.push({ text, params });
+        // The body-free plane read is a UNION over both tables — it MENTIONS the segments table, so a
+        // double that dispatches on that substring answers it "no planes" and every read below reads as a
+        // trajectory that does not exist.
+        if (text.includes("UNION ALL"))
+          return {
+            rows: [
+              {
+                emitter: "run",
+                source: "run",
+                event_count: 1,
+                t0: null,
+                sealed_at: "2026-07-30T00:00:00.000Z",
+                body_format: null,
+                attempt_id: null,
+                body_split: false,
+                batch: null,
+                tenant: "acme",
+                header: true,
+                usage: null,
+              },
+            ],
+          } as never;
         if (text.includes("FROM everdict_trajectory_segments")) return { rows: [] } as never;
         if (text.startsWith("SELECT"))
           return {
@@ -691,6 +720,13 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
                 body: events,
                 t0: null,
                 sealed_at: "2026-07-30T00:00:00.000Z",
+                // The body-free plane read's own columns: which row is the trajectory's own, and whether its
+                // events were split out (mig 0200). A double that omits `header` answers "no such trajectory".
+                header: true,
+                body_split: false,
+                batch: null,
+                body_format: null,
+                attempt_id: null,
               },
             ],
           } as never;
@@ -703,7 +739,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(calls[0]?.text).toMatch(/ON CONFLICT \(run_id\) DO NOTHING/);
     expect(meta.source).toBe("run"); // read back — a lost race returns the FIRST seal's meta
     expect(meta.created).toBe(false); // same emitter: a retry writes nothing
-    expect((await store.get("acme", "r1"))?.meta.eventCount).toBe(1);
+    expect((await whole(store, "acme", "r1"))?.meta.eventCount).toBe(1);
   });
 
   it("Pg impl keeps a LOSING seal from another emitter as its own segment row", async () => {
@@ -783,3 +819,17 @@ describe("ScorecardStore update guard — the append-only ledgers are append-onl
     expect(calls[0]?.params?.slice(-2)).toEqual([2, 1]);
   });
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}

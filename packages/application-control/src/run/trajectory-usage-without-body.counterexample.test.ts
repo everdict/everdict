@@ -2,7 +2,12 @@ import type { RunRecord, RunUsageSummary } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { RunStore } from "../ports/run-store.js";
-import type { SealedTrajectory, TrajectoryStore, TrajectoryUsage } from "../ports/trajectory-store.js";
+import type {
+  SealedTrajectory,
+  TrajectoryEventsResult,
+  TrajectoryStore,
+  TrajectoryUsage,
+} from "../ports/trajectory-store.js";
 import { RunService } from "./run-service.js";
 
 // ── THE COST BADGE READ THE WHOLE TRAJECTORY (long-horizon OOM) ─────────────────────────────────────
@@ -96,9 +101,15 @@ function ledger(answer: TrajectoryUsage): { store: TrajectoryStore; bodyReads: s
       async seal() {
         throw new Error("not under test");
       },
-      async get(_tenant: string, runId: string): Promise<SealedTrajectory | undefined> {
-        bodyReads.push(runId);
+      async planes(): Promise<SealedTrajectory | undefined> {
+        // Cheap by construction — headers only. Not the tripwire.
         return undefined;
+      },
+      // THE EXPENSIVE DOOR. Every byte of evidence leaves the store through here, so a usage read that
+      // touches it is the defect this file exists to refuse — whatever shape the read has today.
+      async events(_tenant: string, runId: string): Promise<TrajectoryEventsResult> {
+        bodyReads.push(runId);
+        return { kind: "absent" };
       },
       async usage() {
         return answer;

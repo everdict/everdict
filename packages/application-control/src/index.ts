@@ -27,18 +27,29 @@ export type { EnvelopeSpend, EnvelopeStore } from "./ports/envelope-store.js";
 export { admitCausedWork } from "./admission/admission.js";
 export type { EventConsumerStateStore } from "./ports/event-consumer-store.js";
 export {
+  clampWindow,
+  collectTrajectoryEvents,
+  DEFAULT_EVENT_PAGE,
+  DEFAULT_PAGE_BYTES,
   defaultEmitter,
   EXECUTION_EMITTERS,
   executionEmitterOf,
   executionSegment,
   INFRA_EMITTER,
+  MAX_EVENT_PAGE,
+  MAX_LEGACY_BODY_BYTES,
+  MAX_PAGE_BYTES,
+  pageOf,
   placementSpan,
   sealBody,
   sealExecutionPlanes,
   type SealedTrajectory,
   type SealInput,
   segmentDeclaresAttempt,
+  streamTrajectoryEvents,
   type TrajectoryBodyFormat,
+  type TrajectoryEventPage,
+  type TrajectoryEventsResult,
   trajectoryForAttempt,
   trajectoryForDecision,
   type TrajectoryListResult,
@@ -49,6 +60,7 @@ export {
   type TrajectorySegmentWire,
   type TrajectoryStore,
   type TrajectoryUsage,
+  type TrajectoryWindow,
 } from "./ports/trajectory-store.js";
 // The seal-time naming choke point — every sealed trajectory gets the line that tells it from its siblings.
 export { NamingTrajectoryStore } from "./ports/naming-trajectory-store.js";

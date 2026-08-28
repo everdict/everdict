@@ -1,3 +1,4 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import {
   type DriverAuthority,
   InMemoryCaseReceiptStore,
@@ -5,6 +6,7 @@ import {
   ScorecardService,
   recoverInterrupted,
 } from "@everdict/application-control";
+import type { TraceEvent } from "@everdict/contracts";
 import { storedExecutionId } from "@everdict/contracts";
 import type { CaseJob, CaseResult, RunRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
@@ -254,7 +256,7 @@ describeTrust("TRUST-148 — a settlement that lost publishes no evidence", () =
     expect(row?.result).toBeUndefined();
     // …and it published NO evidence. Pre-fix the seal ran regardless, and because the first seal wins it
     // would have been the permanent trajectory of a run whose outcome somebody else decides.
-    expect(await trajectories.get("acme", record.id)).toBeUndefined();
+    expect(await whole(trajectories, "acme", record.id)).toBeUndefined();
   }, 20_000);
 });
 
@@ -583,7 +585,7 @@ describeTrust("TRUST-152 — a driver displaced mid-case publishes no evidence f
     // No child of this batch carries a trajectory: the displaced driver published nothing, so the seal its
     // successor's re-drive makes will be the first one — and therefore the one that stays.
     const children = await runStore.list("acme", { scorecardId: record.id });
-    for (const child of children) expect(await trajectories.get("acme", child.id)).toBeUndefined();
+    for (const child of children) expect(await whole(trajectories, "acme", child.id)).toBeUndefined();
     // …and the child is not terminal either, so the batch its successor drives still has the case to run.
     for (const child of children) expect(["queued", "running"]).toContain(child.status);
   }, 20_000);
@@ -1168,3 +1170,17 @@ describeTrust("TRUST-160 — a sealed recording cannot be appended to, and a sea
     expect((await recordings.get("evd-run-again", 0))?.tracks.logs?.map((l) => l.text)).toEqual(["a"]);
   }, 20_000);
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}

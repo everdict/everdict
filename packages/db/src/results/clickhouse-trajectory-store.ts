@@ -1,18 +1,25 @@
 import {
+  MAX_LEGACY_BODY_BYTES,
   type SealInput,
   type SealedTrajectory,
+  type TrajectoryEventsResult,
   type TrajectoryListResult,
   type TrajectoryMeta,
   type TrajectorySegment,
   type TrajectoryStore,
   type TrajectoryUsage,
+  type TrajectoryWindow,
+  clampWindow,
   defaultEmitter,
   executionEmitterOf,
   executionSegment,
+  pageOf,
   sealBody,
 } from "@everdict/application-control";
 import { RunUsageSummarySchema, UpstreamError } from "@everdict/contracts";
-import { bodyOf, formatOf } from "./trajectory-body.js";
+import type { SpanBatchFacts } from "@everdict/domain";
+import { bodyOf, formatOf, pageBodyOf } from "./trajectory-body.js";
+import { type SizedItem, planeFor, sizedItems } from "./trajectory-store.js";
 
 // The ops-scale trajectory store (native-observability N-O1 rung 2): the SAME TrajectoryStore port over
 // ClickHouse — the swap is a composition-root env var (EVERDICT_CLICKHOUSE_URL), invisible to every
@@ -99,7 +106,37 @@ const TRAJECTORY_COLUMNS: readonly ColumnSpec[] = [
   // '' = not derived. No backfill: '' reads as UNKNOWN, never as zero, because a row whose cost nobody
   // computed is not a row that cost nothing and this number ends up on an invoice.
   { name: "usage", type: "String", default: "''" },
+  // Whether this plane's events live in the events table rather than in `body` (mig 0200's rung-2 twin).
+  // 0 on every row written before the split, which is what those rows ARE — never inferred from "does the
+  // events table have rows", which is a sniff, costs a query, and answers wrong for a plane that legitimately
+  // sealed nothing.
+  { name: "body_split", type: "UInt8", default: "0" },
+  // What a PAGE of a spans plane needs to project like the whole one — JSON text, '' = none (an events
+  // plane, or a row from before the split). See SpanBatchFacts: without it a page's relative `t` restarts at
+  // every boundary and the page holding an aggregate span double-counts its tokens.
+  { name: "batch", type: "String", default: "''" },
 ];
+
+// ── ONE ROW PER EVENT (mig 0200's rung-2 twin) ───────────────────────────────────────────────────────
+//
+// The reason this rung exists at all is scale, and it inherited the defect anyway: a plane was one `body`
+// String, `argMin(body, sealed_at)` aggregated it server-side, and `res.text()` buffered the whole response
+// into one JS string before parsing it twice. Same unit as Postgres, one tier down.
+//
+// A separate table ordered by (run_id, emitter, seq) makes the window a range scan, which is what this engine
+// is for. `bytes` is the writer's measurement, so a page can be budgeted without reading the bodies it is
+// deciding about.
+const EVENT_COLUMNS: readonly ColumnSpec[] = [
+  { name: "run_id", type: "String" },
+  { name: "emitter", type: "String" },
+  { name: "seq", type: "UInt32" },
+  { name: "body", type: "String" },
+  { name: "bytes", type: "UInt32" },
+  // The seal's own stamp, so a duplicate seal (this engine has no unique key — see the header) resolves to
+  // the FIRST writer per (run_id, emitter, seq), exactly as the plane rows do.
+  { name: "sealed_at", type: "String" },
+];
+const EVENT_ORDER_BY = "(run_id, emitter, seq)";
 
 // Skipping indexes: a data-skipping index is part of the CREATE and has no ADD COLUMN twin, so it is listed
 // beside the columns rather than inside them (`ALTER … ADD INDEX` on an existing table only affects new
@@ -115,6 +152,11 @@ const schemaSql = (table: string): string =>
     ",\n  ",
   )}\n) ENGINE = MergeTree ORDER BY ${TRAJECTORY_ORDER_BY}`;
 
+const eventsSchemaSql = (table: string): string =>
+  `CREATE TABLE IF NOT EXISTS ${table} (\n  ${EVENT_COLUMNS.map(columnDdl).join(
+    ",\n  ",
+  )}\n) ENGINE = MergeTree ORDER BY ${EVENT_ORDER_BY}`;
+
 // Additive DDL for installs created before a column existed — idempotent, like the CREATE above, and derived
 // from the same descriptor so the two can never disagree.
 const alterSql = (table: string, column: ColumnSpec): string =>
@@ -123,24 +165,9 @@ const alterSql = (table: string, column: ColumnSpec): string =>
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
 
-// One emitter's plane as the per-emitter aggregate returns it. The *_first aliases are not decoration: a
+// One plane as the BODY-FREE read returns it (see `planes`). The *_first aliases are not decoration: a
 // ClickHouse alias shadows its column EVERYWHERE in the SELECT, so `argMin(tenant, …) AS tenant` would make
 // every later reference resolve to the aggregate itself.
-interface SegmentRow {
-  emitter: string;
-  tenant_first: string;
-  source_first: string;
-  event_count_first: number | string;
-  body_first: string;
-  body_format_first: string;
-  t0_first: string;
-  sealed_at_first: string;
-  owner_first: string;
-  attempt_id_first: string;
-}
-
-// One plane as the BODY-FREE read returns it (see `planes`). Same aggregate as `SegmentRow`, same *_first
-// aliasing rule, minus the one column that makes the read expensive.
 interface PlaneRow {
   run_id: string;
   emitter: string;
@@ -151,7 +178,12 @@ interface PlaneRow {
   kind_first: string;
   label_first: string;
   preview_first: string;
+  t0_first: string;
   usage_first: string;
+  body_split_first: number;
+  batch_first: string;
+  body_format_first: string;
+  attempt_id_first: string;
   sealed_at_first: string;
 }
 
@@ -159,6 +191,21 @@ interface PlaneRow {
 // `get` maps them. Written once so a plane cannot be named one way by the read and another by the seal.
 function planeEmitter(row: PlaneRow): string {
   return row.emitter === "" ? row.source_first : row.emitter;
+}
+
+// One plane's header, from the body-free row. The same mapping the Postgres twin does, so the two rungs
+// cannot describe a plane differently.
+function planeOf(row: PlaneRow): TrajectorySegment {
+  return {
+    emitter: planeEmitter(row),
+    source: row.source_first as TrajectoryMeta["source"],
+    eventCount: Number(row.event_count_first),
+    ...(row.t0_first !== undefined && row.t0_first !== "" ? { t0: row.t0_first } : {}),
+    sealedAt: row.sealed_at_first,
+    format: formatOf(row.body_format_first),
+    ...(row.attempt_id_first ? { attemptId: row.attempt_id_first } : {}),
+    ...(row.batch_first ? { batch: JSON.parse(row.batch_first) as SpanBatchFacts } : {}),
+  };
 }
 
 // The header a body-free read can answer, in the SHAPE `get` answers it — deliberately including `get`'s
@@ -238,6 +285,11 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     await this.command(`CREATE DATABASE IF NOT EXISTS ${this.database()}`, {});
     await this.command(schemaSql(table), {});
     for (const column of TRAJECTORY_COLUMNS) await this.command(alterSql(table, column), {});
+    // The events table gets the same treatment for the same reason: one descriptor drives both the CREATE and
+    // the additive ALTERs, so a fresh install and an upgraded one cannot end up running different schemas.
+    const events = this.eventsTable();
+    await this.command(eventsSchemaSql(events), {});
+    for (const column of EVENT_COLUMNS) await this.command(alterSql(events, column), {});
   }
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -247,7 +299,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     const count = body.spans?.length ?? body.events.length;
     // Body-free: this call decides a set membership and a tenant, and both are answerable without a single
     // event travelling. See `planes`.
-    const planes = await this.planes(input.runId);
+    const planes = await this.planeRows(input.runId);
     const headerPlane = planes[0];
     const existing =
       headerPlane !== undefined && headerPlane.tenant_first === input.tenant
@@ -273,13 +325,16 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       // established this — the separate existence probe it used to need is gone.
       return { ...fallback, created: false };
     }
+    const items = sizedItems(body);
     const row = {
       run_id: input.runId,
       tenant: input.tenant,
       source: input.source,
       emitter,
       event_count: count,
-      body: JSON.stringify(body.spans ?? body.events),
+      // EMPTY on a split plane — the events are rows in the events table now (mig 0200's rung-2 twin). Kept
+      // rather than dropped so a replica on the previous release reads "renders empty" instead of failing.
+      body: "[]",
       body_format: body.format,
       t0: input.t0 ?? "",
       sealed_at: sealedAt,
@@ -291,7 +346,15 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       // Derived from the body in the row beside it, by the one function every impl seals through — '' when
       // the body would not project, which the read reports as unknown rather than as zero.
       usage: body.usage !== undefined ? JSON.stringify(body.usage) : "",
+      body_split: 1,
+      // What a PAGE of this plane needs to project like the whole one — '' for an events plane.
+      batch: body.batch !== undefined ? JSON.stringify(body.batch) : "",
     };
+    // The events FIRST, then the plane row that claims them. A crash between the two leaves event rows no
+    // plane points at — invisible, and swept with the run by retention — where the other order would leave a
+    // plane claiming `body_split` over rows that do not exist yet, which every read would serve as an empty
+    // trajectory. Neither is a transaction (this engine has none); the order decides which failure you get.
+    await this.writeEvents(input.runId, emitter, sealedAt, items);
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
     if (!existing) return { ...fallback, created: true };
     return {
@@ -301,76 +364,16 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     };
   }
 
-  async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
-    const rows =
-      opts === undefined
-        ? // Earliest row per emitter wins (see the header) — the read-side half of first-write-wins, and
-          // BEST-EFFORT by construction: the winner is decided by a clock each writer stamped for itself.
-          await this.select<SegmentRow>(
-            `SELECT emitter,
-              argMin(tenant, sealed_at) AS tenant_first,
-              argMin(source, sealed_at) AS source_first,
-              argMin(event_count, sealed_at) AS event_count_first,
-              argMin(body, sealed_at) AS body_first,
-              argMin(body_format, sealed_at) AS body_format_first,
-              argMin(t0, sealed_at) AS t0_first,
-              argMin(owner, sealed_at) AS owner_first,
-              argMin(attempt_id, sealed_at) AS attempt_id_first,
-              min(sealed_at) AS sealed_at_first
-       FROM ${this.table()}
-       WHERE run_id = {runId:String}
-       GROUP BY emitter
-       ORDER BY sealed_at_first ASC, emitter ASC`,
-            { runId },
-          )
-        : // ── THE EXACT-IDENTITY READ (arch-review 52, wave 7) ─────────────────────────────────────
-          //
-          // The caller holds the attempt a Postgres receipt made canonical and asks for THAT execution's
-          // evidence. The clock cannot answer it: this engine has no unique key, the seal is check-then-
-          // insert, and a duplicate carrying a backdated `sealed_at` — ordinary replica skew, validated by
-          // nothing — wins `argMin(col, sealed_at)` and serves the abandoned attempt's bytes under the run
-          // the receipt named.
-          //
-          // So the tie-break is the IDENTITY first and the clock only within it (`attempt_rank` is
-          // `segmentDeclaresAttempt`, stated in SQL because here the duplicates are rows and they collapse
-          // before any caller could filter them):
-          //   0 — the plane declares the attempt asked for            → this is the evidence
-          //   1 — the plane declares none ('' — the producer did not say, which is not disagreement)
-          //   2 — the plane declares a DIFFERENT attempt              → another execution's bytes
-          // and rank 2 is DROPPED by the HAVING rather than served, so an emitter whose only rows belong to
-          // other attempts contributes nothing and a run with no agreeing plane reads undefined.
-          await this.select<SegmentRow>(
-            `SELECT emitter,
-              argMin(tenant, (attempt_rank, sealed_at)) AS tenant_first,
-              argMin(source, (attempt_rank, sealed_at)) AS source_first,
-              argMin(event_count, (attempt_rank, sealed_at)) AS event_count_first,
-              argMin(body, (attempt_rank, sealed_at)) AS body_first,
-              argMin(body_format, (attempt_rank, sealed_at)) AS body_format_first,
-              argMin(t0, (attempt_rank, sealed_at)) AS t0_first,
-              argMin(owner, (attempt_rank, sealed_at)) AS owner_first,
-              argMin(attempt_id, (attempt_rank, sealed_at)) AS attempt_id_first,
-              argMin(sealed_at, (attempt_rank, sealed_at)) AS sealed_at_first
-       FROM (SELECT *, if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2)) AS attempt_rank
-             FROM ${this.table()} WHERE run_id = {runId:String})
-       GROUP BY emitter
-       HAVING min(attempt_rank) < 2
-       ORDER BY sealed_at_first ASC, emitter ASC`,
-            { runId, attemptId: opts.attemptId },
-          );
+  async planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
+    const rows = await this.planeRows(runId, opts?.attemptId);
     const header = rows[0];
     if (!header || header.tenant_first !== tenant) return undefined;
-    const segments: TrajectorySegment[] = rows.map((row) => ({
-      // Rows written before the multi-plane rung carry no emitter — they read as their arrival channel.
-      emitter: row.emitter === "" ? row.source_first : row.emitter,
-      source: row.source_first as TrajectoryMeta["source"],
-      eventCount: Number(row.event_count_first),
-      ...(row.t0_first !== "" ? { t0: row.t0_first } : {}),
-      sealedAt: row.sealed_at_first,
-      format: formatOf(row.body_format_first),
-      ...(row.attempt_id_first ? { attemptId: row.attempt_id_first } : {}),
-      ...bodyOf(formatOf(row.body_format_first), JSON.parse(row.body_first)),
-    }));
+    const segments = rows.map(planeOf);
     const execution = executionSegment(segments);
+    // A plane declaring a DIFFERENT attempt is dropped in SQL (see `planeRows`), so what survives is either
+    // this attempt's evidence or evidence nobody attributed — and the count says how much of the second kind
+    // came back, exactly as the Postgres twin's `trajectoryForAttempt` does.
+    const unattributed = opts === undefined ? 0 : segments.filter((s) => s.attemptId === undefined).length;
     return {
       meta: {
         runId,
@@ -380,16 +383,131 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
         sealedAt: header.sealed_at_first,
         ...(header.owner_first ? { owner: header.owner_first } : {}),
       },
-      events: execution?.events ?? [],
       ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
+      ...(unattributed > 0 ? { unattributedSegments: unattributed } : {}),
       segments,
     };
+  }
+
+  async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
+    const rows = await this.planeRows(runId, window.attemptId);
+    const header = rows[0];
+    if (!header || header.tenant_first !== tenant) return { kind: "absent" };
+    const row = planeFor(
+      rows.map((r) => ({ row: r, emitter: planeEmitter(r) })),
+      window.emitter,
+    );
+    if (row === undefined) return { kind: "absent" };
+    const plane = planeOf(row.row);
+    const { limit, maxBytes, after } = clampWindow(window);
+    const params = { runId, emitter: row.emitter };
+
+    if (row.row.body_split_first === 0) {
+      // ── A PLANE SEALED BEFORE THE SPLIT ───────────────────────────────────────────────────────────
+      //
+      // One String, and no window of it costs less than all of it. `length(body)` answers "how big" without
+      // shipping it, so the refusal is decided server-side; above the ceiling the honest answer names the
+      // size and the repair rather than trying and dying.
+      const sized = await this.select<{ stored: number | string }>(
+        `SELECT argMin(length(body), sealed_at) AS stored FROM ${this.table()}
+          WHERE run_id = {runId:String} AND (emitter = {emitter:String} OR (emitter = '' AND source = {emitter:String}))
+          GROUP BY emitter`,
+        params,
+      );
+      const storedBytes = Number(sized[0]?.stored ?? 0);
+      if (storedBytes > MAX_LEGACY_BODY_BYTES)
+        return { kind: "too_large", storedBytes, limitBytes: MAX_LEGACY_BODY_BYTES, emitter: plane.emitter };
+      const read = await this.select<{ body_first: string }>(
+        `SELECT argMin(body, sealed_at) AS body_first FROM ${this.table()}
+          WHERE run_id = {runId:String} AND (emitter = {emitter:String} OR (emitter = '' AND source = {emitter:String}))
+          GROUP BY emitter`,
+        params,
+      );
+      const whole = bodyOf(plane.format, JSON.parse(read[0]?.body_first ?? "[]"));
+      const units: unknown[] = whole.spans ?? whole.events;
+      const legacy = pageOf(units, after, limit, maxBytes, (item) => JSON.stringify(item).length);
+      return {
+        kind: "page",
+        page: {
+          emitter: plane.emitter,
+          format: plane.format,
+          ...pageBodyOf(plane.format, legacy.slice, plane.batch),
+          ...(legacy.nextAfter !== undefined ? { nextAfter: legacy.nextAfter } : {}),
+          eventCount: plane.eventCount,
+        },
+      };
+    }
+
+    // ── THE SPLIT PLANE, IN TWO STEPS ───────────────────────────────────────────────────────────────
+    //
+    // Sizes first, bodies second, and both bounded by a contiguous seq RANGE rather than by a LIMIT after a
+    // GROUP BY — this engine would otherwise aggregate the whole plane before the limit could shorten it,
+    // which is the defect one tier up. seq is contiguous 1..eventCount (the seal writes it that way), so
+    // `after < seq <= after + limit` IS the page's candidate set.
+    //
+    // The `argMin(…, sealed_at)` is the same first-write-wins resolution the plane rows use: MergeTree has no
+    // unique key, so a duplicate seal is a duplicate ROW and every read has to collapse it the same way.
+    const sizes = await this.select<{ seq: number | string; bytes_first: number | string }>(
+      `SELECT seq, argMin(bytes, sealed_at) AS bytes_first FROM ${this.eventsTable()}
+        WHERE run_id = {runId:String} AND emitter = {emitter:String}
+          AND seq > {after:UInt32} AND seq <= {upper:UInt32}
+        GROUP BY seq ORDER BY seq`,
+      { ...params, after: String(after), upper: String(after + limit) },
+    );
+    const budgeted = pageOf(sizes, 0, limit, maxBytes, (s) => Number(s.bytes_first));
+    const cut = budgeted.slice[budgeted.slice.length - 1]?.seq;
+    if (cut === undefined)
+      return {
+        kind: "page",
+        page: { emitter: plane.emitter, format: plane.format, events: [], eventCount: plane.eventCount },
+      };
+    const bodies = await this.select<{ seq: number | string; body_first: string }>(
+      `SELECT seq, argMin(body, sealed_at) AS body_first FROM ${this.eventsTable()}
+        WHERE run_id = {runId:String} AND emitter = {emitter:String}
+          AND seq > {after:UInt32} AND seq <= {cut:UInt32}
+        GROUP BY seq ORDER BY seq`,
+      { ...params, after: String(after), cut: String(Number(cut)) },
+    );
+    const lastSeq = Number(cut);
+    return {
+      kind: "page",
+      page: {
+        emitter: plane.emitter,
+        format: plane.format,
+        ...pageBodyOf(
+          plane.format,
+          bodies.map((b) => JSON.parse(b.body_first)),
+          plane.batch,
+        ),
+        ...(lastSeq < plane.eventCount ? { nextAfter: lastSeq } : {}),
+        eventCount: plane.eventCount,
+      },
+    };
+  }
+
+  // One row per event, seq 1..N in PAGING order, as a single JSONEachRow batch — a per-event round trip would
+  // make sealing a long-horizon run O(N) HTTP requests.
+  private async writeEvents(runId: string, emitter: string, sealedAt: string, items: SizedItem[]): Promise<void> {
+    if (items.length === 0) return;
+    const body = items
+      .map((item, index) =>
+        JSON.stringify({
+          run_id: runId,
+          emitter,
+          seq: index + 1,
+          body: JSON.stringify(item.body),
+          bytes: item.bytes,
+          sealed_at: sealedAt,
+        }),
+      )
+      .join("\n");
+    await this.command(`INSERT INTO ${this.eventsTable()} FORMAT JSONEachRow`, {}, body);
   }
 
   // The Postgres twin, over the body-free plane read: emitters and summaries, no `argMin(body, …)` anywhere
   // in the statement. That absence IS the feature — see `TrajectoryUsage`.
   async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
-    const planes = await this.planes(runId);
+    const planes = await this.planeRows(runId);
     const header = planes[0];
     if (!header || header.tenant_first !== tenant) return { kind: "absent" };
     // The same plane `get().events` would have come from, resolved by the shared predicate rather than by a
@@ -462,10 +580,18 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       { cutoff: cutoffIso },
     );
     const removed = Number(counted[0]?.trajectories ?? 0);
-    if (removed > 0)
+    if (removed > 0) {
+      // The events FIRST, then the planes that name them. This engine has no foreign key and no transaction,
+      // so retention has to sweep both by hand — and in this order, because the second statement is what
+      // computes `expiredRunsSql`. Deleting the planes first would leave the events unreachable AND
+      // un-expirable: nothing would answer "which runs are past the cutoff" for them ever again.
+      await this.command(`DELETE FROM ${this.eventsTable()} WHERE run_id IN (${this.expiredRunsSql()})`, {
+        cutoff: cutoffIso,
+      });
       await this.command(`DELETE FROM ${this.table()} WHERE run_id IN (${this.expiredRunsSql()})`, {
         cutoff: cutoffIso,
       });
+    }
     return removed;
   }
 
@@ -479,9 +605,41 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(kind, sealed_at) AS kind_first,
               argMin(label, sealed_at) AS label_first,
               argMin(preview, sealed_at) AS preview_first,
+              argMin(t0, sealed_at) AS t0_first,
               argMin(usage, sealed_at) AS usage_first,
+              argMin(body_split, sealed_at) AS body_split_first,
+              argMin(batch, sealed_at) AS batch_first,
+              argMin(body_format, sealed_at) AS body_format_first,
+              argMin(attempt_id, sealed_at) AS attempt_id_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()} WHERE ${where} GROUP BY run_id, emitter`;
+  }
+
+  // The identity-ranked twin of `perEmitterSql`. Same columns, same *_first aliasing rule; the ORDER inside
+  // every argMin is `(attempt_rank, sealed_at)` instead of `sealed_at` alone, and rank 2 never survives.
+  private perEmitterRankedSql(): string {
+    const cols = [
+      "tenant",
+      "source",
+      "event_count",
+      "owner",
+      "kind",
+      "label",
+      "preview",
+      "t0",
+      "usage",
+      "body_split",
+      "batch",
+      "body_format",
+      "attempt_id",
+    ];
+    return `SELECT run_id, emitter,
+              ${cols.map((c) => `argMin(${c}, (attempt_rank, sealed_at)) AS ${c}_first`).join(",\n              ")},
+              argMin(sealed_at, (attempt_rank, sealed_at)) AS sealed_at_first
+       FROM (SELECT *, if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2)) AS attempt_rank
+             FROM ${this.table()} WHERE run_id = {runId:String})
+       GROUP BY run_id, emitter
+       HAVING min(attempt_rank) < 2`;
   }
 
   // The planes of ONE trajectory without their bodies — emitters, counters, and the summaries derived at
@@ -490,10 +648,35 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // ENTIRE trajectory, first into ClickHouse's memory and then into ours, to decide a set membership. Two
   // callers now share one body-free read, and it answers the cross-tenant probe as well — so the extra
   // `SELECT run_id … LIMIT 1` that used to follow it is gone with the read that needed it.
-  private planes(runId: string): Promise<PlaneRow[]> {
+  // ── THE EXACT-IDENTITY READ (arch-review 52, wave 7), NOW ON THE BODY-FREE PATH ─────────────────
+  //
+  // Without an attempt the winner per emitter is decided by the CLOCK — best-effort by construction, since
+  // the stamp is each writer's own. With one, the tie-break is the IDENTITY first and the clock only within
+  // it (`attempt_rank` is `segmentDeclaresAttempt`, stated in SQL because here the duplicates are rows and
+  // they collapse before any caller could filter them):
+  //   0 — the plane declares the attempt asked for            → this is the evidence
+  //   1 — the plane declares none ('' — the producer did not say, which is not disagreement)
+  //   2 — the plane declares a DIFFERENT attempt              → another execution's bytes
+  // and rank 2 is DROPPED by the HAVING rather than served, so an emitter whose only rows belong to other
+  // attempts contributes nothing and a run with no agreeing plane reads as absent.
+  private planeRows(runId: string, attemptId?: string): Promise<PlaneRow[]> {
+    if (attemptId !== undefined)
+      return this.select<PlaneRow>(
+        `SELECT run_id, emitter, tenant_first, source_first, event_count_first, owner_first, kind_first,
+                label_first, preview_first, t0_first, usage_first, body_split_first, batch_first,
+                body_format_first, attempt_id_first, sealed_at_first
+         FROM (${this.perEmitterRankedSql()})
+         ORDER BY sealed_at_first ASC, emitter ASC`,
+        { runId, attemptId },
+      );
+    return this.planeRowsByClock(runId);
+  }
+
+  private planeRowsByClock(runId: string): Promise<PlaneRow[]> {
     return this.select<PlaneRow>(
       `SELECT run_id, emitter, tenant_first, source_first, event_count_first, owner_first, kind_first,
-              label_first, preview_first, usage_first, sealed_at_first
+              label_first, preview_first, t0_first, usage_first, body_split_first, batch_first,
+              body_format_first, attempt_id_first, sealed_at_first
        FROM (${this.perEmitterSql("run_id = {runId:String}")})
        ORDER BY sealed_at_first ASC, emitter ASC`,
       { runId },
@@ -506,6 +689,10 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
 
   private table(): string {
     return `${this.database()}.everdict_trajectories`;
+  }
+
+  private eventsTable(): string {
+    return `${this.database()}.everdict_trajectory_events`;
   }
 
   // A database name reaches SQL as an IDENTIFIER — it cannot ride the `param_` binding every value uses. So

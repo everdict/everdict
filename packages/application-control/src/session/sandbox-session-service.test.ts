@@ -4,7 +4,14 @@ import { NotFoundError } from "@everdict/contracts";
 import { usageFromTrace } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { LiveSessionQuery, OutboxEvent, RunStore } from "../ports/run-store.js";
-import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
+import {
+  type TrajectoryEventsResult,
+  type TrajectoryMeta,
+  type TrajectoryStore,
+  type TrajectoryWindow,
+  clampWindow,
+  pageOf,
+} from "../ports/trajectory-store.js";
 import { SandboxSessionService, type SandboxSessionServiceDeps } from "./sandbox-session-service.js";
 
 // Local fakes — application-control cannot depend on @everdict/db (layer direction), so the store doubles
@@ -86,11 +93,14 @@ function fakeTrajectories() {
       if (kept === undefined) throw new Error("unreachable");
       return { ...kept.meta, created };
     },
-    async get(tenant, runId) {
+    // Paged with the SAME helpers production pages with, so this double cannot answer a window more
+    // permissively than the store it stands in for.
+    async planes(tenant: string, runId: string) {
       const hit = sealed.get(runId);
       if (!hit || hit.meta.tenant !== tenant) return undefined;
       return {
-        ...hit,
+        meta: hit.meta,
+        executionEmitter: hit.meta.source,
         segments: [
           {
             emitter: hit.meta.source,
@@ -98,13 +108,28 @@ function fakeTrajectories() {
             eventCount: hit.events.length,
             sealedAt: hit.meta.sealedAt,
             format: "events" as const,
-            events: hit.events,
           },
         ],
       };
     },
+    async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
+      const hit = sealed.get(runId);
+      if (!hit || hit.meta.tenant !== tenant) return { kind: "absent" as const };
+      const { limit, maxBytes, after } = clampWindow(window);
+      const page = pageOf(hit.events, after, limit, maxBytes, (e) => JSON.stringify(e).length);
+      return {
+        kind: "page" as const,
+        page: {
+          emitter: hit.meta.source,
+          format: "events" as const,
+          events: page.slice,
+          ...(page.nextAfter !== undefined ? { nextAfter: page.nextAfter } : {}),
+          eventCount: hit.events.length,
+        },
+      };
+    },
     // Derived the way the real stores derive it, so this double is never more permissive than production.
-    async usage(tenant, runId) {
+    async usage(tenant: string, runId: string) {
       const hit = sealed.get(runId);
       if (!hit || hit.meta.tenant !== tenant) return { kind: "absent" as const };
       return { kind: "derived" as const, usage: usageFromTrace(hit.events) };
@@ -302,9 +327,10 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
     expect(driver.disposed).toEqual(["c-1"]);
     expect(runStore.events.at(-1)).toMatchObject({ op: "update", kinds: ["run.completed"] });
 
-    const sealed = await trajectories.store.get("acme", record.id);
+    const sealed = await trajectories.store.planes("acme", record.id);
+    const page = await trajectories.store.events("acme", record.id, {});
     expect(sealed?.meta).toMatchObject({ source: "run", eventCount: 7 }); // infra(provisioned) + start + 2×(call+result) + close
-    expect(sealed?.events.map((e) => e.kind)).toEqual([
+    expect(page.kind === "page" && page.page.events.map((e) => e.kind)).toEqual([
       "infra", // M3 — the container identity leads the trajectory (WHERE the session physically ran)
       "env_action",
       "tool_call",
@@ -313,7 +339,8 @@ describe("SandboxSessionService — session runs on the universal ledger (P6)", 
       "tool_result",
       "env_action",
     ]);
-    expect(sealed?.events.some((e) => e.kind === "tool_result" && !e.ok)).toBe(true); // the failed exec is evidence too
+    // the failed exec is evidence too
+    expect(page.kind === "page" && page.page.events.some((e) => e.kind === "tool_result" && !e.ok)).toBe(true);
 
     // Idempotent over an already-settled session; the dead handle 404s on exec.
     await expect(service.close(creator, record.id)).resolves.toMatchObject({ status: "succeeded" });
@@ -888,8 +915,11 @@ describe("SandboxSessionService — agent worlds (W1: snapshot, hibernate, touch
     });
     const closed = await ctx.service.close(creator, record.id);
     expect(closed).toMatchObject({ status: "succeeded", session: { closedReason: "closed" } });
-    const sealed = await ctx.trajectories.store.get("acme", record.id);
-    expect(sealed?.events.some((e) => e.kind === "env_action" && e.action === "session.snapshot_failed")).toBe(true);
+    const page = await ctx.trajectories.store.events("acme", record.id, {});
+    expect(
+      page.kind === "page" &&
+        page.page.events.some((e) => e.kind === "env_action" && e.action === "session.snapshot_failed"),
+    ).toBe(true);
   });
 
   it("touch extends the deadline in memory, on the row, and on the durable reaper — and never shortens", async () => {
@@ -1063,8 +1093,11 @@ describe("SandboxSessionService — agent worlds (W2: a repository in, commits o
     expect(push).not.toContain("write-token");
     // The evidence names what left the session — never the credential.
     await ctx.service.close(creator, record.id);
-    const sealed = await ctx.trajectories.store.get("acme", record.id);
-    const pushEvent = sealed?.events.find((e) => e.kind === "env_action" && e.action === "git.push");
+    const page = await ctx.trajectories.store.events("acme", record.id, {});
+    const pushEvent =
+      page.kind === "page"
+        ? page.page.events.find((e) => e.kind === "env_action" && e.action === "git.push")
+        : undefined;
     expect(JSON.stringify(pushEvent)).not.toContain("write-token");
     expect(pushEvent).toBeDefined();
   });
@@ -1459,8 +1492,11 @@ describe("SandboxSessionService — hibernation on a daemonless placement", () =
     const closed = await ctx.service.close(creator, record.id);
     expect(ctx.published).toEqual(["v1"]); // the capture ran AFTER the map delete and still had its compute
     expect(closed?.session?.snapshots?.map((s) => s.version)).toEqual(["1.0.0"]);
-    const sealed = await ctx.trajectories.store.get("acme", record.id);
-    expect(sealed?.events.some((e) => e.kind === "env_action" && e.action === "session.snapshot_failed")).toBe(false);
+    const page = await ctx.trajectories.store.events("acme", record.id, {});
+    expect(
+      page.kind === "page" &&
+        page.page.events.some((e) => e.kind === "env_action" && e.action === "session.snapshot_failed"),
+    ).toBe(false);
   });
 
   it("expiry hibernates the same way (the sweep tears down through the same path)", async () => {

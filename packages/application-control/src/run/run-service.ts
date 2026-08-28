@@ -92,6 +92,9 @@ import { settleRun } from "../ports/settle.js";
 import {
   type TrajectorySegmentWire,
   type TrajectoryStore,
+  type TrajectoryWindow,
+  clampWindow,
+  pageOf,
   sealExecutionPlanes,
   trajectorySegmentsWire,
 } from "../ports/trajectory-store.js";
@@ -1893,11 +1896,15 @@ export class RunService {
     tenant: string,
     runId: string,
     viewer: string,
+    // ONE PAGE. Required at the store and defaulted here only because this method already has three
+    // positional arguments and every transport passes one; the DEFAULT is still a bounded page, never "all".
+    window: Omit<TrajectoryWindow, "attemptId"> = {},
   ): Promise<
     | {
         meta: { source: string; eventCount: number; sealedAt: string };
         events: unknown[];
         segments: TrajectorySegmentWire[];
+        nextAfter?: number;
       }
     | undefined
   > {
@@ -1929,23 +1936,49 @@ export class RunService {
       receipts.kind === "read"
         ? receipts.value.find((receipt) => receipt.childRunId === record.id)?.attemptId
         : undefined;
-    const sealed = await this.deps.trajectories?.get(
+    const identity = canonicalAttemptId !== undefined ? { attemptId: canonicalAttemptId } : {};
+    const sealed = await this.deps.trajectories?.planes(
       tenant,
       runId,
       canonicalAttemptId !== undefined ? { attemptId: canonicalAttemptId } : undefined,
     );
-    if (sealed) {
+    if (sealed && this.deps.trajectories) {
       const { runId: _r, tenant: _t, ...meta } = sealed.meta;
       // The run page reads the whole SYSTEM, not just the agent: every emitter that contributed (the
       // execution plus each service that pushed its own spans) travels in the same shape the ledger's
-      // own detail read serves.
-      return { meta, events: sealed.events, segments: trajectorySegmentsWire(sealed) };
+      // own detail read serves. The events are ONE PAGE of ONE plane — the execution's unless the caller
+      // named another — because a long-horizon run's whole trajectory is not a thing this process can hold.
+      const page = await this.deps.trajectories.events(tenant, runId, { ...window, ...identity });
+      switch (page.kind) {
+        case "absent":
+          // The planes read answered and the events read did not: the plane the window named is not this
+          // attempt's. Honest as an empty page WITH the segment list, so a viewer can pick another plane.
+          return { meta, events: [], segments: trajectorySegmentsWire(sealed) };
+        case "too_large":
+          // Never an empty page: a viewer told "0 events" would read it as a run that did nothing. The
+          // refusal names the size and the plane, and the transport turns it into a 409.
+          throw new ConflictError(
+            "CONFLICT",
+            { run: runId, emitter: page.emitter, storedBytes: page.storedBytes, limitBytes: page.limitBytes },
+            `Trajectory '${runId}' plane '${page.emitter}' is a ${page.storedBytes}-byte body sealed before it was split into events, over the ${page.limitBytes}-byte read ceiling. Split it with scripts/live/split-trajectory-bodies.mjs.`,
+          );
+        case "page":
+          return {
+            meta,
+            events: page.page.events,
+            segments: trajectorySegmentsWire(sealed),
+            ...(page.page.nextAfter !== undefined ? { nextAfter: page.page.nextAfter } : {}),
+          };
+      }
     }
     // Dual-read fallback: the pre-P5 embed — served in the same shape so consumers never care which copy.
-    if (record.result && record.result.trace.length > 0)
+    if (record.result && record.result.trace.length > 0) {
+      const { limit, maxBytes, after } = clampWindow(window);
+      const embed = pageOf(record.result.trace, after, limit, maxBytes, (e) => JSON.stringify(e).length);
       return {
         meta: { source: "embed", eventCount: record.result.trace.length, sealedAt: record.updatedAt },
-        events: record.result.trace,
+        events: embed.slice,
+        ...(embed.nextAfter !== undefined ? { nextAfter: embed.nextAfter } : {}),
         segments: [
           {
             emitter: "embed",
@@ -1954,9 +1987,11 @@ export class RunService {
             sealedAt: record.updatedAt,
             // The pre-ledger embed is a point-event stream by construction — it predates the record.
             format: "events",
+            execution: true,
           },
         ],
       };
+    }
     return undefined;
   }
 

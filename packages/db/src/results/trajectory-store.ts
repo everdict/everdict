@@ -1,21 +1,27 @@
 import {
+  MAX_LEGACY_BODY_BYTES,
   type SealInput,
   type SealedTrajectory,
+  type TrajectoryEventsResult,
   type TrajectoryListResult,
   type TrajectoryMeta,
   type TrajectorySegment,
   type TrajectoryStore,
   type TrajectoryUsage,
+  type TrajectoryWindow,
+  clampWindow,
   defaultEmitter,
   executionEmitterOf,
   executionSegment,
+  pageOf,
   sealBody,
+  segmentDeclaresAttempt,
   trajectoryForAttempt,
 } from "@everdict/application-control";
 import { type RunUsageSummary, RunUsageSummarySchema } from "@everdict/contracts";
-import { spansToEvents } from "@everdict/domain";
+import type { SpanBatchFacts } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
-import { bodyOf, formatOf } from "./trajectory-body.js";
+import { bodyOf, formatOf, pageBodyOf } from "./trajectory-body.js";
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -41,8 +47,33 @@ function isoOf(value: string | Date): string {
   return typeof value === "string" ? value : value.toISOString();
 }
 
+// One sealed item and the size the WRITER measured, because the reader must be able to budget a page without
+// first materializing the thing it is budgeting (mig 0200).
+export interface SizedItem {
+  body: unknown;
+  bytes: number;
+}
+
+// The items of a plane, in the order the plane is paged in — projection order for a spans plane (the seal
+// sorted it), arrival order for an events one.
+export function sizedItems(body: {
+  format: string;
+  events: readonly unknown[];
+  spans?: readonly unknown[];
+}): SizedItem[] {
+  const items = body.spans ?? body.events;
+  return items.map((item) => ({ body: item, bytes: JSON.stringify(item).length }));
+}
+
+// Which plane a window means, from the planes the caller is allowed to see. Shared by every impl so a window
+// naming no emitter resolves the same everywhere.
+export function planeFor<T extends { emitter: string }>(planes: T[], emitter: string | undefined): T | undefined {
+  const wanted = emitter ?? executionEmitterOf(planes.map((p) => p.emitter));
+  return wanted === undefined ? undefined : planes.find((p) => p.emitter === wanted);
+}
+
 export class InMemoryTrajectoryStore implements TrajectoryStore {
-  // One entry per run: the header (how it first arrived) plus one segment per emitter, insertion-ordered.
+  // One entry per run: the header (how it first arrived) plus one plane per emitter, insertion-ordered.
   private readonly rows = new Map<
     string,
     {
@@ -58,6 +89,10 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       // them: `TrajectorySegment` is what a read hands out, and a field no consumer declares would ride along
       // unreadable — the excess-property shape rule `typescript` warns about.
       usage: Map<string, RunUsageSummary>;
+      // …and the bodies, SPLIT the way the persistent stores split them (mig 0200). The twin pages the same
+      // way for the same reason it validates the same way: a double that materializes what production pages
+      // cannot see a paging defect.
+      items: Map<string, SizedItem[]>;
     }
   >();
 
@@ -76,9 +111,8 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       format: body.format,
       // WHOSE evidence this plane is (mig 0176) — several physical executions can seal under one run id.
       ...(input.attemptId !== undefined ? { attemptId: input.attemptId } : {}),
-      // Held as sealed; the projection is recomputed on read so it can never drift from the record.
-      events: body.spans !== undefined ? spansToEvents(body.spans) : body.events,
-      ...(body.spans !== undefined ? { spans: body.spans } : {}),
+      // …and what a PAGE of it will need in order to project like the whole (mig 0200).
+      ...(body.batch !== undefined ? { batch: body.batch } : {}),
     };
     const existing = this.rows.get(input.runId);
     if (!existing) {
@@ -92,6 +126,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
         ...(input.preview !== undefined ? { preview: input.preview } : {}),
         segments: [segment],
         usage: new Map(body.usage !== undefined ? [[emitter, body.usage]] : []),
+        items: new Map([[emitter, sizedItems(body)]]),
       });
       return { ...this.metaOf(input.runId), created: true };
     }
@@ -109,34 +144,65 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     // First seal per emitter wins — a retried settle re-offers the same evidence and changes nothing.
     if (existing.segments.some((s) => s.emitter === emitter)) return { ...this.metaOf(input.runId), created: false };
     existing.segments.push(segment);
+    existing.items.set(emitter, sizedItems(body));
     if (body.usage !== undefined) existing.usage.set(emitter, body.usage);
     return { ...this.metaOf(input.runId), created: true };
   }
 
-  async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
-    const row = this.rows.get(runId);
-    if (!row || row.tenant !== tenant) return { kind: "absent" };
-    // The SAME resolution `get` uses for `events`, over the emitter names alone — so the cost this reports
-    // and the stream a judge reads are always about one plane.
-    const emitter = executionEmitterOf(row.segments.map((s) => s.emitter));
-    const usage = emitter === undefined ? undefined : row.usage.get(emitter);
-    return usage === undefined ? { kind: "unknown", reason: "sealed_before_derivation" } : { kind: "derived", usage };
-  }
-
-  async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
+  async planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
     const row = this.rows.get(runId);
     if (!row || row.tenant !== tenant) return undefined;
     const segments = row.segments.map((s) => ({ ...s }));
     const execution = executionSegment(segments);
     const sealed: SealedTrajectory = {
       meta: this.metaOf(runId),
-      events: execution?.events ?? [],
       ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
       segments,
     };
     // One plane per emitter here (the Map is keyed that way), so the exact-identity read is the shared rule
     // applied to the resolved trajectory — see trajectoryForAttempt.
     return opts === undefined ? sealed : trajectoryForAttempt(sealed, opts.attemptId);
+  }
+
+  async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
+    const row = this.rows.get(runId);
+    if (!row || row.tenant !== tenant) return { kind: "absent" };
+    // The identity filter travels with the WINDOW, not only with the plane list: a caller holding a receipt
+    // asks for that attempt's bytes, and serving another execution's from a read that merely returns events
+    // would be the substitution the identity read exists to refuse.
+    const visible =
+      window.attemptId === undefined
+        ? row.segments
+        : row.segments.filter((s) => segmentDeclaresAttempt(s, window.attemptId as string));
+    const plane = planeFor(visible, window.emitter);
+    if (plane === undefined) return { kind: "absent" };
+    const items = row.items.get(plane.emitter) ?? [];
+    const { limit, maxBytes, after } = clampWindow(window);
+    const { slice, nextAfter } = pageOf(items, after, limit, maxBytes, (item) => item.bytes);
+    return {
+      kind: "page",
+      page: {
+        emitter: plane.emitter,
+        format: plane.format,
+        ...pageBodyOf(
+          plane.format,
+          slice.map((item) => item.body),
+          plane.batch,
+        ),
+        ...(nextAfter !== undefined ? { nextAfter } : {}),
+        eventCount: plane.eventCount,
+      },
+    };
+  }
+
+  async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
+    const row = this.rows.get(runId);
+    if (!row || row.tenant !== tenant) return { kind: "absent" };
+    // The SAME resolution `events` uses for its default plane, over the emitter names alone — so the cost
+    // this reports and the stream a judge reads are always about one plane.
+    const emitter = executionEmitterOf(row.segments.map((s) => s.emitter));
+    const usage = emitter === undefined ? undefined : row.usage.get(emitter);
+    return usage === undefined ? { kind: "unknown", reason: "sealed_before_derivation" } : { kind: "derived", usage };
   }
 
   async list(
@@ -227,9 +293,38 @@ interface PrimaryRow {
   attempt_id?: string | null; // mig 0176 — WHICH physical attempt sealed it; NULL = the producer did not say
 }
 
-// Postgres-backed trajectory store (mig 0098 + 0104) — the header row carries the FIRST emitter's body;
-// every later emitter lands in everdict_trajectory_segments. ON CONFLICT DO NOTHING makes both writes
-// first-write-wins, per emitter.
+// One plane as the body-free read returns it, whichever table it lives in (mig 0200).
+interface PlaneRow {
+  emitter: string;
+  source: string;
+  event_count: number;
+  t0: string | Date | null;
+  sealed_at: string | Date;
+  body_format: string | null;
+  attempt_id: string | null;
+  body_split: boolean;
+  batch: unknown;
+  tenant: string;
+  header: boolean;
+}
+
+function planeOf(row: PlaneRow): TrajectorySegment {
+  return {
+    emitter: row.emitter,
+    source: row.source as TrajectoryMeta["source"],
+    eventCount: Number(row.event_count),
+    ...(row.t0 !== null ? { t0: isoOf(row.t0) } : {}),
+    sealedAt: isoOf(row.sealed_at),
+    format: formatOf(row.body_format),
+    ...(row.attempt_id ? { attemptId: row.attempt_id } : {}),
+    ...(row.batch !== null && row.batch !== undefined ? { batch: row.batch as SpanBatchFacts } : {}),
+  };
+}
+
+// Postgres-backed trajectory store (mig 0098 + 0104 + 0200) — the header row carries the FIRST emitter's
+// plane; every later emitter lands in everdict_trajectory_segments; both keep their EVENTS in
+// everdict_trajectory_events, one row each. ON CONFLICT DO NOTHING makes the plane writes first-write-wins,
+// per emitter.
 export class PgTrajectoryStore implements TrajectoryStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -238,11 +333,19 @@ export class PgTrajectoryStore implements TrajectoryStore {
     const sealedAt = new Date().toISOString();
     const body = sealBody(input);
     const count = body.spans?.length ?? body.events.length;
-    const bytes = JSON.stringify(body.spans ?? body.events);
+    const items = sizedItems(body);
+    const usage = body.usage !== undefined ? JSON.stringify(body.usage) : null;
+    const batch = body.batch !== undefined ? JSON.stringify(body.batch) : null;
+    // ── THE BODY COLUMN STAYS, EMPTY, ON A SPLIT PLANE ────────────────────────────────────────────
+    //
+    // `body` is NOT NULL and mig 0200 deliberately does not relax that: during a rolling deploy a replica on
+    // the previous release still reads it, and `[]` degrades that replica to "renders empty" where a NULL
+    // would crash its schema parse. The bytes are in everdict_trajectory_events throughout.
+    const EMPTY = "[]";
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id, usage)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13, $14, $15)
+      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id, usage, body_split, batch)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13, $14, $15, true, $16)
        ON CONFLICT (run_id) DO NOTHING
        RETURNING run_id`,
       [
@@ -251,7 +354,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.source,
         emitter,
         count,
-        bytes,
+        EMPTY,
         body.format,
         input.t0 ?? null,
         sealedAt,
@@ -263,10 +366,12 @@ export class PgTrajectoryStore implements TrajectoryStore {
         // Derived from the body this statement is writing, in the same statement — so a row can never hold
         // evidence whose cost was computed from something else. NULL when the body would not project: the
         // read reports that as unknown, never as zero (mig 0199).
-        body.usage !== undefined ? JSON.stringify(body.usage) : null,
+        usage,
+        batch,
       ],
     );
     if (inserted.rows.length > 0) {
+      await this.writeEvents(input.runId, emitter, items);
       return {
         runId: input.runId,
         tenant: input.tenant,
@@ -295,8 +400,8 @@ export class PgTrajectoryStore implements TrajectoryStore {
     }
     if ((primary.emitter ?? primary.source) === emitter) return { ...metaOf(primary), created: false };
     const appended = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id, usage)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11)
+      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id, usage, body_split, batch)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, true, $12)
        ON CONFLICT (run_id, emitter) DO NOTHING
        RETURNING run_id`,
       [
@@ -305,16 +410,18 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.tenant,
         input.source,
         count,
-        bytes,
+        EMPTY,
         body.format,
         input.t0 ?? null,
         sealedAt,
         input.attemptId ?? null,
-        body.usage !== undefined ? JSON.stringify(body.usage) : null,
+        usage,
+        batch,
       ],
     );
     const created = appended.rows.length > 0;
     if (created) {
+      await this.writeEvents(input.runId, emitter, items);
       await this.client.query(
         "UPDATE everdict_trajectories SET segment_event_count = segment_event_count + $1 WHERE run_id = $2",
         [count, input.runId],
@@ -324,54 +431,31 @@ export class PgTrajectoryStore implements TrajectoryStore {
     return { ...metaOf(refreshed ?? primary), created };
   }
 
-  async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
-    const res = await this.client.query<PrimaryRow & { body: unknown }>(
-      `SELECT run_id, tenant, source, emitter, event_count, segment_event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id
-       FROM everdict_trajectories WHERE run_id = $1`,
-      [runId],
+  // One row per event, seq 1..N in PAGING order. Written AFTER the plane row wins its ON CONFLICT, so two
+  // concurrent seals of the same emitter cannot interleave rows: the loser never reaches this.
+  private async writeEvents(runId: string, emitter: string, items: SizedItem[]): Promise<void> {
+    if (items.length === 0) return;
+    // One statement, unnested — a per-event round trip would make sealing a long-horizon run O(N) round trips.
+    await this.client.query(
+      `INSERT INTO everdict_trajectory_events (run_id, emitter, seq, body, bytes)
+       SELECT $1, $2, ordinality, value, (bytes_in.value)::int
+         FROM unnest($3::jsonb[]) WITH ORDINALITY AS body_in(value, ordinality)
+         JOIN unnest($4::int[]) WITH ORDINALITY AS bytes_in(value, ordinality) USING (ordinality)
+       ON CONFLICT (run_id, emitter, seq) DO NOTHING`,
+      [runId, emitter, items.map((item) => JSON.stringify(item.body)), items.map((item) => item.bytes)],
     );
-    const row = res.rows[0];
-    if (!row || row.tenant !== tenant) return undefined;
-    const sides = await this.client.query<{
-      emitter: string;
-      source: string;
-      event_count: number;
-      body: unknown;
-      body_format: string | null;
-      t0: string | Date | null;
-      sealed_at: string | Date;
-      attempt_id: string | null;
-    }>(
-      `SELECT emitter, source, event_count, body, body_format, t0, sealed_at, attempt_id FROM everdict_trajectory_segments
-       WHERE run_id = $1 ORDER BY sealed_at ASC, emitter ASC`,
-      [runId],
-    );
-    const segments: TrajectorySegment[] = [
-      {
-        emitter: row.emitter ?? row.source,
-        source: row.source as TrajectoryMeta["source"],
-        eventCount: Number(row.event_count),
-        ...(row.t0 !== null ? { t0: isoOf(row.t0) } : {}),
-        sealedAt: isoOf(row.sealed_at),
-        format: formatOf(row.body_format),
-        ...(row.attempt_id ? { attemptId: row.attempt_id } : {}),
-        ...bodyOf(formatOf(row.body_format), row.body),
-      },
-      ...sides.rows.map((side) => ({
-        emitter: side.emitter,
-        source: side.source as TrajectoryMeta["source"],
-        eventCount: Number(side.event_count),
-        ...(side.t0 !== null ? { t0: isoOf(side.t0) } : {}),
-        sealedAt: isoOf(side.sealed_at),
-        format: formatOf(side.body_format),
-        ...(side.attempt_id ? { attemptId: side.attempt_id } : {}),
-        ...bodyOf(formatOf(side.body_format), side.body),
-      })),
-    ];
+  }
+
+  async planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
+    const rows = await this.planeRows(runId);
+    const header = rows.find((r) => r.header);
+    if (!header || header.tenant !== tenant) return undefined;
+    const primary = await this.primary(runId);
+    if (!primary) return undefined;
+    const segments = rows.map(planeOf);
     const execution = executionSegment(segments);
     const sealed: SealedTrajectory = {
-      meta: metaOf(row),
-      events: execution?.events ?? [],
+      meta: metaOf(primary),
       ...(execution !== undefined ? { executionEmitter: execution.emitter } : {}),
       segments,
     };
@@ -379,6 +463,108 @@ export class PgTrajectoryStore implements TrajectoryStore {
     // rows for one plane and the identity read is a filter, not a tie-break — the same rule ClickHouse has to
     // state in SQL because there the duplicates are rows.
     return opts === undefined ? sealed : trajectoryForAttempt(sealed, opts.attemptId);
+  }
+
+  async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
+    const rows = await this.planeRows(runId);
+    const header = rows.find((r) => r.header);
+    if (!header || header.tenant !== tenant) return { kind: "absent" };
+    const visible =
+      window.attemptId === undefined
+        ? rows
+        : rows.filter((r) => segmentDeclaresAttempt(planeOf(r), window.attemptId as string));
+    const row = planeFor(visible, window.emitter);
+    if (row === undefined) return { kind: "absent" };
+    const plane = planeOf(row);
+    const { limit, maxBytes, after } = clampWindow(window);
+    if (!row.body_split) return this.legacyPage(runId, row, plane, { limit, maxBytes, after });
+
+    // ── THE WINDOW, IN SQL ────────────────────────────────────────────────────────────────────────
+    //
+    // Two levels on purpose. The inner LIMIT bounds how many rows are considered WITHOUT selecting `body`,
+    // so the byte budget is decided over sizes alone; only the rows that survive it are joined back for
+    // their bodies. Selecting `body` in the limited scan would haul a full page before the budget could
+    // shorten it, which is the defect one layer down.
+    //
+    // `rn = 1 OR` keeps the first row unconditionally: a page that comes back empty because its first event
+    // alone exceeds the budget is a stream that never advances.
+    const page = await this.client.query<{ seq: number; body: unknown }>(
+      `WITH win AS (
+         SELECT seq,
+                sum(bytes) OVER (ORDER BY seq) AS running,
+                row_number() OVER (ORDER BY seq) AS rn
+           FROM (SELECT seq, bytes FROM everdict_trajectory_events
+                  WHERE run_id = $1 AND emitter = $2 AND seq > $3
+                  ORDER BY seq LIMIT $4) lim
+       )
+       SELECT e.seq, e.body
+         FROM everdict_trajectory_events e
+         JOIN win ON win.seq = e.seq
+        WHERE e.run_id = $1 AND e.emitter = $2 AND (win.rn = 1 OR win.running <= $5)
+        ORDER BY e.seq`,
+      [runId, row.emitter, after, limit, maxBytes],
+    );
+    const lastSeq = page.rows[page.rows.length - 1]?.seq;
+    return {
+      kind: "page",
+      page: {
+        emitter: plane.emitter,
+        format: plane.format,
+        ...pageBodyOf(
+          plane.format,
+          page.rows.map((r) => r.body),
+          plane.batch,
+        ),
+        // seq is contiguous 1..eventCount (the seal writes it that way), so "is there more" needs no probe.
+        ...(lastSeq !== undefined && Number(lastSeq) < plane.eventCount ? { nextAfter: Number(lastSeq) } : {}),
+        eventCount: plane.eventCount,
+      },
+    };
+  }
+
+  // A plane sealed before mig 0200 is one jsonb blob, and there is no window of a blob that does not cost the
+  // whole blob. Above the ceiling the honest answer is a refusal naming the size and the repair — never an
+  // empty page, which every reader would take as "the run did nothing".
+  private async legacyPage(
+    runId: string,
+    row: PlaneRow,
+    plane: TrajectorySegment,
+    page: { limit: number; maxBytes: number; after: number },
+  ): Promise<TrajectoryEventsResult> {
+    const table = row.header ? "everdict_trajectories" : "everdict_trajectory_segments";
+    const where = row.header ? "run_id = $1" : "run_id = $1 AND emitter = $2";
+    const params = row.header ? [runId] : [runId, row.emitter];
+    // pg_column_size reads the STORED (toasted, compressed) size — no detoast, which is the only way to ask
+    // "is this too big to read" without reading it.
+    const sized = await this.client.query<{ stored: number }>(
+      `SELECT pg_column_size(body) AS stored FROM ${table} WHERE ${where}`,
+      params,
+    );
+    const storedBytes = Number(sized.rows[0]?.stored ?? 0);
+    if (storedBytes > MAX_LEGACY_BODY_BYTES)
+      return { kind: "too_large", storedBytes, limitBytes: MAX_LEGACY_BODY_BYTES, emitter: plane.emitter };
+    const read = await this.client.query<{ body: unknown }>(`SELECT body FROM ${table} WHERE ${where}`, params);
+    const whole = bodyOf(plane.format, read.rows[0]?.body ?? []);
+    // Page the RECORD (spans when there are spans), so a legacy plane and a split one page over the same unit
+    // and `nextAfter` means the same thing on both.
+    const units: unknown[] = whole.spans ?? whole.events;
+    const { slice, nextAfter } = pageOf(
+      units,
+      page.after,
+      page.limit,
+      page.maxBytes,
+      (item) => JSON.stringify(item).length,
+    );
+    return {
+      kind: "page",
+      page: {
+        emitter: plane.emitter,
+        format: plane.format,
+        ...pageBodyOf(plane.format, slice, plane.batch),
+        ...(nextAfter !== undefined ? { nextAfter } : {}),
+        eventCount: plane.eventCount,
+      },
+    };
   }
 
   // Emitters and summaries ONLY — the `body` column is deliberately absent from this statement, because
@@ -397,9 +583,9 @@ export class PgTrajectoryStore implements TrajectoryStore {
          FROM everdict_trajectory_segments WHERE run_id = $1`,
       [runId],
     );
-    // Workspace scoping is decided by the HEADER row, exactly as `get` decides it — a foreign run answers
-    // `absent`, which is the same answer a nonexistent one gets, so this read leaks no existence `get`
-    // does not already leak.
+    // Workspace scoping is decided by the HEADER row, exactly as `planes` decides it — a foreign run answers
+    // `absent`, which is the same answer a nonexistent one gets, so this read leaks no existence the plane
+    // read does not already leak.
     const header = res.rows.find((r) => r.header);
     if (!header || header.tenant !== tenant) return { kind: "absent" };
     const emitter = executionEmitterOf(res.rows.map((r) => r.emitter));
@@ -460,12 +646,29 @@ export class PgTrajectoryStore implements TrajectoryStore {
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {
-    // Side segments go with the header (ON DELETE CASCADE) — never orphaned evidence.
+    // Side segments AND every event row go with the header (ON DELETE CASCADE) — never orphaned evidence.
     const res = await this.client.query<{ run_id: string }>(
       "DELETE FROM everdict_trajectories WHERE sealed_at < $1::timestamptz RETURNING run_id",
       [cutoffIso],
     );
     return res.rows.length;
+  }
+
+  // Every plane of one trajectory, WITHOUT bodies — the read `planes`, `events` and the seal's tenant check
+  // all start from. `header` says which row is the trajectory's own, because that row decides the workspace.
+  private async planeRows(runId: string): Promise<PlaneRow[]> {
+    const res = await this.client.query<PlaneRow>(
+      `SELECT COALESCE(emitter, source) AS emitter, source, event_count, t0, sealed_at, body_format, attempt_id,
+              body_split, batch, tenant, true AS header
+         FROM everdict_trajectories WHERE run_id = $1
+       UNION ALL
+       SELECT COALESCE(emitter, source) AS emitter, source, event_count, t0, sealed_at, body_format, attempt_id,
+              body_split, batch, tenant, false AS header
+         FROM everdict_trajectory_segments WHERE run_id = $1
+       ORDER BY header DESC, sealed_at ASC, emitter ASC`,
+      [runId],
+    );
+    return res.rows;
   }
 
   private async primary(runId: string): Promise<PrimaryRow | undefined> {

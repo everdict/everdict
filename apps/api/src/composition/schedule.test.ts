@@ -72,8 +72,11 @@ describe("wireScheduleService — the reserved 'everdict' source windows the OWN
       async seal(): Promise<never> {
         throw new Error("unused");
       },
-      async get() {
+      async planes() {
         return undefined;
+      },
+      async events() {
+        return { kind: "absent" as const };
       },
       // The cost read the ledger answers without touching a body (`d60e5285`). This double holds no
       // trajectory, so `absent` is its only honest answer — never `derived` with zeros, which is the

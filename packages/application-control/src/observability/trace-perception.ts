@@ -26,7 +26,9 @@ export function withTracePerception(
     },
     // Options forwarded, never re-spelled: dropping `attemptId` here would silently turn an exact-identity
     // read back into the clock-resolved one, which is the very substitution that read exists to refuse.
-    get: (tenant, runId, opts) => store.get(tenant, runId, opts),
+    planes: (tenant, runId, opts) => store.planes(tenant, runId, opts),
+    // The window travels whole — see NamingTrajectoryStore for why it is never destructured here.
+    events: (tenant, runId, window) => store.events(tenant, runId, window),
     usage: (tenant, runId) => store.usage(tenant, runId),
     list: (tenant, opts) => store.list(tenant, opts),
     ingestedSince: (tenant, sinceIso) => store.ingestedSince(tenant, sinceIso),

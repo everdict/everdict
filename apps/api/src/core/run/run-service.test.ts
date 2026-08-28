@@ -398,8 +398,11 @@ describe("RunService", () => {
             created: true,
           };
         },
-        async get() {
+        async planes() {
           return undefined;
+        },
+        async events() {
+          return { kind: "absent" as const };
         },
         // The cost read the ledger answers without touching a body (`d60e5285`). This double seals bodies but
         // holds no derivation, so `absent` is its only honest answer — `derived` with zeros would be the
@@ -1133,7 +1136,9 @@ describe("RunService.get — usage for runs whose evidence is the sealed traject
     const svc = new RunService({ dispatcher: okDispatcher, store, trajectories, newId: ids });
     const rec = await svc.submit({ tenant: "acme", harness: { id: "scripted", version: "0" }, case: CASE });
     await flush();
-    const spy = vi.spyOn(trajectories, "get");
+    // THE EXPENSIVE DOOR. Every byte of evidence leaves the store through `events`; a cost read that touches
+    // it is the defect, whatever the read is called this month.
+    const spy = vi.spyOn(trajectories, "events");
 
     await svc.get(rec.id);
     expect(spy).not.toHaveBeenCalled();

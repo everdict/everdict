@@ -1,5 +1,7 @@
+import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import { NotificationService, PlatformEventService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import type { TraceEvent } from "@everdict/contracts";
 import { PaymentRequiredError, storedExecutionId } from "@everdict/contracts";
 import {
   InMemoryNotificationStore,
@@ -364,7 +366,7 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
       payload: report({ kind: "agent.run.completed", message: "run completed", trace }),
     });
     expect(done.statusCode).toBe(200);
-    const sealed = await trajectories.get("acme", "run-a1");
+    const sealed = await whole(trajectories, "acme", "run-a1");
     expect(sealed?.meta).toMatchObject({ source: "run", eventCount: 3 });
     expect(sealed?.events).toEqual(trace);
 
@@ -379,7 +381,7 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
         trace: [{ t: 0, kind: "message", role: "assistant", text: "rewritten" }],
       }),
     });
-    expect((await trajectories.get("acme", "run-a1"))?.events).toHaveLength(3);
+    expect((await whole(trajectories, "acme", "run-a1"))?.events).toHaveLength(3);
 
     // A malformed trace is a 400 at the boundary — never a silent partial seal.
     const bad = await app.inject({
@@ -422,7 +424,7 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
         ],
       }),
     });
-    const sealed = await trajectories.get("acme", "run-a1");
+    const sealed = await whole(trajectories, "acme", "run-a1");
     const [priced, verbatim] = sealed?.events ?? [];
     expect(priced).toMatchObject({ kind: "llm_call" });
     expect(priced?.kind === "llm_call" && priced.cost?.usd).toBeGreaterThan(0);
@@ -475,7 +477,7 @@ describe("POST /internal/agent-run-events — the agent-run ledger bridge (P3)",
       ).statusCode,
     ).toBe(200);
     expect((await runStore.get("run-chat-1"))?.status).toBe("succeeded");
-    expect((await trajectories.get("acme", "run-chat-1"))?.events).toEqual(trace);
+    expect((await whole(trajectories, "acme", "run-chat-1"))?.events).toEqual(trace);
 
     // Human typing volume must not drown the event log — the conversation is already visible as itself.
     expect(await eventStore.list(storedExecutionId("acme"))).toEqual([]);
@@ -617,3 +619,17 @@ describe("POST /internal/activations/admit — the §5.1 activation gate bridge"
     ).toBe(404);
   });
 });
+
+// A TEST convenience over fixtures of known, small size: the plane headers plus every event, assembled from
+// the two production reads. Deliberately NOT a production shape — `collectTrajectoryEvents` is how a caller
+// that genuinely needs the whole stream gets it, and what bounds it here is the fixture.
+async function whole(
+  store: TrajectoryStore,
+  tenant: string,
+  runId: string,
+  opts?: { attemptId: string },
+): Promise<(SealedTrajectory & { events: TraceEvent[] }) | undefined> {
+  const planes = await store.planes(tenant, runId, opts);
+  if (!planes) return undefined;
+  return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
+}
