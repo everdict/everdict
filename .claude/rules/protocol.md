@@ -131,6 +131,12 @@ it described what some OTHER function would do next — and that function did no
   else's.
 - *"an ingest judges the pushed plane ONCE, so the pass id alone is the invocation"* — the judging site passed
   no pass id at all, so the evidence sealed under a different name than the receipt.
+- *"connected-but-busy runners keep it fresh via their heartbeat, exactly like the in-memory hub"* — the store
+  lane's idle timeout reads a per-JOB `activity_at`, and the only two statements that wrote it were keyed by
+  `job_id`. Nothing refreshed a job still QUEUED, so a self-hosted job behind a long-running one was rejected
+  "the runner is not connected, is idle/dead" while its runner was connected and working. The promised
+  component here was an UPDATE statement, and the tell was one lane taking the argument as `_capabilities`
+  while its twin used it (arch-review 119).
 
 The shape is always the same: **the half that was implemented is the refusal, and the half that was written
 down is the recovery.** A refusal is local and easy to verify; what the refusal BECOMES is three frames away
@@ -533,6 +539,33 @@ own fix one branch up (arch-review 75 P1-medium). Third occurrence of this shape
   the requirement was written for.
 - The tell in review: a policy field read INSIDE a `if (value !== undefined)` guard. The policy did not ask
   about the value's presence; it asked for a level.
+
+## AN ENTITY HAS ONE OWNER, OR THE GATE AND THE WRITE ARE ABOUT DIFFERENT THINGS
+arch-review 118 gave the agent SAVE door a `teamOfEntity` gate. The CREATE door beside it — the same
+registry, one file away — still called `teamForNew`, which answers "where does a NEW asset land". So:
+
+    team-a owns helper@1.0.0 · a team-b member calls create_agent(helper@2.0.0)
+    → no error · teamOfEntity(helper) = team-b · team-a can no longer write their own agent
+
+Ownership is read off an entity's NEWEST version, so registering a successor under your own team takes the
+whole entity over. Verified through the real MCP door before the fix (arch-review 119).
+
+The same write is what let two ownership predicates diverge: the gate reads the newest version's team,
+`registerPreservingOwner` resolves the OLDEST live one that has a team, and only a split entity can tell
+them apart — so a caller authorized against team-b had its version filed under team-a, deterministically,
+with no race at all.
+
+- **Close it at the STORE, not at every door.** Sixteen transports had to be right and one of them was
+  written after the lesson; the write itself has to be the seam. A `register` that would change an entity's
+  owner is refused (a transfer is `moveToTeam`'s act, and it moves every version at once), and SILENCE
+  preserves the owner rather than unowning the entity — an unowned capability is writable by every team,
+  which is the same takeover with no name on it. Registering is not a way to disown.
+- **Two readers of one fact is one reader too many.** Do not pick the "right" one; make the state that
+  distinguishes them unreachable, and then neither reader can be wrong.
+- **A guard you cannot drive is worse than no guard.** The first repair here threaded an
+  `expectedOwnerTeamId` from the gate into the service — and once the store refused every re-file, and with
+  no transfer surface on that entity, the precondition could never mismatch. It was removed and the route
+  says why. An unreachable refusal is a claim that a window is closed, with nothing able to test it.
 
 ## A LANE THAT DID NOT EXIST WHEN THE LESSON WAS PAID FOR STILL HAS TO LEARN IT
 The one-lane-only law says: after changing a guarded write's contract, grep every OTHER caller and count

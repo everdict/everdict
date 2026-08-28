@@ -57,6 +57,18 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   passed a second workspace (arch-review 74). When a method takes an argument it does not use, the
   underscore is the tell: either the twin is wrong, or the parameter is. Add the second-workspace case —
   the one that asserts the OTHER tenant is answered nothing — beside the ordinary one.
+- **A DOUBLE THAT PERFORMS A WRITE AND REPORTS THAT IT DID NOT IS THE SAME LIE, INVERTED.** Seven fake
+  `SqlClient`s pushed the row for an `INSERT … RETURNING 1` and answered `{ rows: [] }`. Harmless for as long
+  as nothing read the answer — and the moment a store started deciding on it, every one of those tests said
+  "the statement matched nothing". The always-succeeds double returns the success value it cannot have
+  earned; this one withholds evidence of a write it DID perform. Both are a double that does not answer the
+  way the real one would (arch-review 119). If the statement has a `RETURNING`, the double returns a row.
+- **An `_` prefix on a parameter is a claim that deserves a second reading.** `InMemoryRuntimeRegistry` took
+  `_teamId` and passed `undefined` under a comment saying the table has no such column; migration 0106 gave
+  it one and the Pg twin was corrected, while this sibling kept the old body under the old justification. Every
+  unit assertion about a runtime's owning team was green against a store that could not hold one. When a
+  method ignores an argument its twin honours, either the twin is wrong or the parameter is — and the comment
+  explaining why is the thing most likely to be out of date.
 - **A parity test compares the two PRODUCTION entry points.** The durability file compared
   `recoverStagedVerdict` against `recoverVerifiedCase` — two helpers, both missing what the real normal path
   (`withVerifierPass`) adds — so a field present on one path and absent on the other stayed green. Parity is

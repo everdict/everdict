@@ -130,6 +130,25 @@ See skill `ci`.
   not a flag this script has — was accepted in silence, so one rung became the full suite: ninety minutes,
   files mutated while the author was editing them, and an answer to a question nobody asked. Same shape as
   `biome check --write` exiting 0 over fixes it did not apply.
+  ⚠️ **A MUTATED TREE THAT DOES NOT COMPILE IS TWO DIFFERENT ANSWERS, AND ONLY ONE OF THEM IS EVIDENCE**
+  (arch-review 119). Once uncompilable rungs stopped being ignored, 29 of them surfaced at once — every one a
+  rung whose suite had NEVER run, because the build failure used to be discarded and the suite then ran against
+  the previous rung's `dist`. Reading each one's actual `tsc` error splits them cleanly, and the split is the
+  decision:
+  · **The type system refuses** — the neutralization defeats a narrowing (`.reason` on a `ReadResult`, `.state`
+    on `never`), drops a `| undefined` guard (TS18048/TS2345), or makes a comparison provably empty. The
+    consumer below stops compiling, which is enforcement STRONGER than a red suite. Declare
+    `compilerEnforced: true` and say so in the rung.
+  · **The compiler objects to the SHAPE of the mutation** — `noUnusedLocals` on a symbol the removed line was
+    the last reader of (TS6133/TS6138), an implicit `any[]` from an untyped `= []`, or a `to:` naming a
+    property the type never had. None of that is the protocol being protected: a refactorer removing the guard
+    removes the import with it. **Rewrite the `to:` so it builds** — `void <symbol>;`, `(void <symbol>, expr)`,
+    a typed empty (`xs.slice(0, 0)`) — so the SUITE is what refuses. 18 of the 29 were this.
+  Declaring the second kind is the worse error of the two: it records a named certificate of enforcement for a
+  protocol nothing ever tested.
+  ⚠️ **NEVER `import()` THIS SCRIPT TO SEE IF IT PARSES.** It is a script, not a module: importing it RUNS it,
+  in whatever tree you are standing in. `node -e "import('./scripts/trust/protocol-mutations.mjs')"` started a
+  full mutation run in a shared worktree. `node --check <file>` is the syntax check — it never executes.
 - **`pnpm mutation-leak` refuses a COMMIT that carries a neutralized protocol** (arch-review 112). The warning
   below covers a killed run; it does not cover the run that is alive and WORKING while you stage beside it. The
   gate's dirty-tree guard protects the GATE, not the author — between two rungs the tree is clean, and while a
