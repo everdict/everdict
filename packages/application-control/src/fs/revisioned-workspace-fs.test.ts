@@ -253,7 +253,8 @@ describe("RevisionedWorkspaceFs", () => {
       actor: memberActor("user-a"),
       baseRevision: 0,
     });
-    // Then we are told, rather than overwriting the rival's publish
+    // Then we are told. (This comment used to end "rather than overwriting the rival's publish" — a claim the
+    // test did not check and the code did not honour until arch-review 114; the two cases below check it.)
     await expect(write).rejects.toBeInstanceOf(ConflictError);
   });
 
@@ -264,6 +265,77 @@ describe("RevisionedWorkspaceFs", () => {
     // Then the write still lands — as revision 2, on top of the rival's
     expect(entry.revision).toBe(2);
     expect(await ledger.list("acme", "log.md")).toHaveLength(2);
+  });
+
+  // ── THE REFUSAL CAME AFTER THE BYTES (arch-review 114) ──────────────────────────────────────────
+  //
+  // The two tests above assert that a lost race is REPORTED — "we are told, rather than overwriting the
+  // rival's publish". The second half of that sentence was never checked, and it was false: the blob was
+  // written at the computed revision BEFORE `revisions.append` decided who owns that number, so the loser had
+  // already overwritten the winner's bytes by the time it was told. `writeRevisionBlob` is a plain put at
+  // `(path, revision)` — a key two racing writers compute identically — and the port calls its result "the
+  // immutable per-revision copy".
+  //
+  // The result is worse than losing a write: the ledger row for that revision names the WINNER (their hash,
+  // their actor, their message) while the bytes behind it are the LOSER's. A history a member opens a year
+  // later attributes one person's content to another, and the winner's content is gone.
+  //
+  // This is rule `protocol`'s named law — a refusal after an irreversible write is not a refusal — so the
+  // assertion is about the WORLD, not about the throw: what does that revision actually hold afterwards.
+  it("does not leave its bytes at a revision another writer won", async () => {
+    // Given a rival that claims revision 1 between our head read and our append
+    ledger.claimNext = 1;
+    const write = fs.write("acme", "new.md", utf8("mine"), undefined, {
+      actor: memberActor("user-a"),
+      baseRevision: 0,
+    });
+    await expect(write).rejects.toBeInstanceOf(ConflictError);
+
+    // Then revision 1 belongs to the rival — row AND bytes. Before the fix the row said "rival" and the blob
+    // said "mine", which is the misattribution this asserts against.
+    const row = await ledger.get("acme", "new.md", 1);
+    expect(row?.actor).toMatchObject({ kind: "member", subject: "rival" });
+    const blob = await inner.readRevisionBlob("acme", "new.md", 1);
+    expect(
+      blob === undefined ? undefined : new TextDecoder().decode(blob.data),
+      "the refused write left its bytes under the rival's revision",
+    ).not.toBe("mine");
+  });
+
+  // The same law on the blind path, where the loser does not even learn it lost: it takes the next number and
+  // reports success, so nothing anywhere would ever surface that it had trampled the rival's revision.
+  it("does not leave its bytes at a revision it lost, even when it silently retries", async () => {
+    ledger.claimNext = 1;
+    const entry = await fs.write("acme", "log.md", utf8("mine"), undefined, { actor: memberActor("user-a") });
+    expect(entry.revision).toBe(2); // the blind writer took the next number, as before
+
+    const first = await inner.readRevisionBlob("acme", "log.md", 1);
+    expect(
+      first === undefined ? undefined : new TextDecoder().decode(first.data),
+      "the retrying writer left its bytes under the revision the rival published",
+    ).not.toBe("mine");
+    // …and its own revision holds its own bytes.
+    const second = await inner.readRevisionBlob("acme", "log.md", 2);
+    expect(new TextDecoder().decode(second?.data ?? new Uint8Array())).toBe("mine");
+  });
+
+  // The failure mode the reordering CREATES, stated rather than discovered later: a blob write that fails
+  // after the number is claimed leaves a revision the ledger lists and cannot serve. That is the trade — an
+  // absent revision is visible and the caller's write fails, where the old order served the WRONG bytes and
+  // told nobody. Rule `protocol` asks for the replaced failure to be named when a change swaps one for
+  // another, so it is named here and pinned.
+  it("fails the write, rather than reporting success, when the bytes cannot be stored", async () => {
+    const stubborn = new FakeFs();
+    stubborn.writeRevisionBlob = async () => {
+      throw new Error("object store unreachable");
+    };
+    const guarded = new RevisionedWorkspaceFs(stubborn, ledger, () => "2026-07-29T00:00:00.000Z");
+    await expect(
+      guarded.write("acme", "notes.md", utf8("v1"), undefined, { actor: memberActor("user-a") }),
+    ).rejects.toThrow(/unreachable/);
+    // The head content was never published either — a file whose bytes could not be stored must not appear
+    // to have changed.
+    expect(stubborn.files.get("acme notes.md")).toBeUndefined();
   });
 
   it("carries a file's history along when it is moved", async () => {

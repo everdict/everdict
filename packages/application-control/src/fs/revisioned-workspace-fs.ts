@@ -98,7 +98,6 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
         );
       }
       const revision = current + 1;
-      await this.inner.writeRevisionBlob(tenant, path, revision, data, type);
       const record: FsRevision = {
         tenant,
         path,
@@ -124,6 +123,23 @@ export class RevisionedWorkspaceFs implements WorkspaceFs {
         }
         continue; // a blind writer simply takes the next number
       }
+      // ── THE NUMBER IS CLAIMED BEFORE THE BYTES ARE WRITTEN (arch-review 114) ────────────────────
+      //
+      // This `put` used to run BEFORE the append above, and `writeRevisionBlob` is a plain write at
+      // `(path, revision)` — a key two racing writers compute identically. So the loser had already
+      // overwritten the winner's bytes by the time the ledger told it who owned the number, and the row for
+      // that revision then named the winner (their hash, their actor, their message) over the LOSER's
+      // content. Worse than a lost write: a history that attributes one member's file to another.
+      //
+      // Both paths were affected, including the one the decorator exists for — a `baseRevision` write is
+      // refused with a 409 that arrives after the overwrite, which is rule `protocol`'s named law: a refusal
+      // after an irreversible write is not a refusal.
+      //
+      // L1's ordering closes it: the append is the CAS that decides who owns `revision`, so nothing external
+      // happens until it has returned proof. A blob write that fails after the claim leaves a revision the
+      // ledger lists and cannot serve — visible, and the caller's write fails — where the old order left one
+      // that serves the wrong bytes silently.
+      await this.inner.writeRevisionBlob(tenant, path, revision, data, type);
       const entry = await this.inner.write(tenant, path, data, type, opts);
       // The publish fact — emitted only once the revision is durably claimed AND the head caught up. An
       // agent-authored publish stamps causedBy with the loop guard's key, so an agent watching a folder
