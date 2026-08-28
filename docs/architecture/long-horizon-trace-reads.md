@@ -1,6 +1,6 @@
 # Long-horizon trace reads — the event is the unit
 
-> **Status: R0 landed; R2 (with R3 merged into it) is next, then R1.** A long-horizon agent run is hundreds of turns over hours, and its
+> **Status: R0 and R2 landed (R3 merged into R2); R1 is what remains.** A long-horizon agent run is hundreds of turns over hours, and its
 > trace carries what those turns produced: tool results holding file dumps, logs, span attributes copied
 > verbatim from a tenant's OTel exporter. Reading one of those traces exhausted the control plane's heap.
 > This document is why that happened, and the four changes that remove the cause rather than the symptom.
@@ -79,7 +79,7 @@ already diverged. `scripts/live/backfill-trajectory-usage.mjs` repays them throu
 smallest row first, refusing any body over `--max-bytes` and **naming** the rows it skipped; those keep
 answering `unknown`, which is true.
 
-## R2 — the event is the addressable unit, and whole-stream consumers stream *(next)*
+## R2 — the event is the addressable unit, and whole-stream consumers stream *(landed)*
 
 **One rung, not two.** Deleting the unbounded read forces every whole-stream consumer onto the iterator in
 the same change, which is what rule `protocol`'s definition of done requires: the escape hatch goes with the
@@ -89,7 +89,7 @@ to remove.
 - `everdict_trajectory_events (run_id, emitter, seq, body, bytes)` on Postgres and its ClickHouse twin ordered
   by `(tenant, run_id, emitter, seq)`. `body_split` on the parent row SAYS which form a plane is in — never
   sniffed, the same rule `body_format` already follows.
-- The port loses `get` and gains `planes()` (meta + plane headers, **no events**) and
+- The port lost `get` and gained `planes()` (meta + plane headers, **no events**) and
   `events(tenant, runId, window)` with a **required** window. An optional window is a request; a required one
   is a protocol.
 - The window is bounded by COUNT and by BYTES, because a hundred events is only a bound if events are — and
@@ -129,7 +129,7 @@ span is stored verbatim.
 concatenated projection equals the whole-plane projection event for event — RED without the stored batch
 facts, on `t` first and on `llm_call` count for the aggregate case.
 
-## R1 — the offload law applies to trace payloads *(after R2)*
+## R1 — the offload law applies to trace payloads *(next)*
 
 `TraceEvent`'s `artifact` kind is already ref-only — `ref` is "a fetchable pointer, not the bytes". Nothing
 else is. `tool_result.output`, `log.text`, `tool_call.args` and `span.attributes` are unbounded, and
