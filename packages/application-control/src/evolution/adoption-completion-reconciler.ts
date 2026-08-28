@@ -1,4 +1,5 @@
 import type { AdoptionOperation } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
@@ -52,6 +53,17 @@ export interface AdoptionCompletionSweep {
   open: number;
   // Could not find out. The operation stays on the worklist; this is the escalation count, never a terminal.
   unknown: number;
+  // ── AND THE ONE THAT WILL NEVER CONVERGE (arch-review 116, self-review) ─────────────────────────
+  //
+  // The first version of this sweep caught every throw as `unknown`, and `IssueService.get` throws
+  // `NotFoundError` for an issue that no longer exists. `DELETE /issues/:id` is a real route, so an adoption
+  // whose issue was deleted sat on the worklist being re-examined every five minutes forever and reported as
+  // "unreadable" — which reads as a transient outage an operator should wait out.
+  //
+  // Absent and unreadable are the two states L2 exists to keep apart, and here they differ in what an
+  // operator must DO: one resolves itself, the other never will. Counted separately so the difference is
+  // visible rather than buried in a number that only grows.
+  orphaned: number;
 }
 
 export class AdoptionCompletionReconciler {
@@ -61,7 +73,7 @@ export class AdoptionCompletionReconciler {
     const now = this.deps.now?.() ?? new Date().toISOString();
     const olderThan = new Date(Date.parse(now) - (this.deps.minAgeMs ?? 60_000)).toISOString();
     const due = await this.deps.operations.registeredOlderThan(olderThan, this.deps.limit ?? 100);
-    const out: AdoptionCompletionSweep = { examined: due.length, completed: 0, open: 0, unknown: 0 };
+    const out: AdoptionCompletionSweep = { examined: due.length, completed: 0, open: 0, unknown: 0, orphaned: 0 };
     for (const operation of due) {
       const outcome = await this.settle(operation, now);
       out[outcome] += 1;
@@ -69,15 +81,19 @@ export class AdoptionCompletionReconciler {
     return out;
   }
 
-  private async settle(operation: AdoptionOperation, now: string): Promise<"completed" | "open" | "unknown"> {
+  private async settle(
+    operation: AdoptionOperation,
+    now: string,
+  ): Promise<"completed" | "open" | "unknown" | "orphaned"> {
     let issue: { status: string; resolution?: { scorecardId?: string } };
     try {
       issue = await this.deps.issues.get(operation.tenant, operation.proof.issueId);
-    } catch {
-      // Absent and unreadable are both "we could not decide from here". Neither may complete the operation,
-      // and neither may remove it from the worklist — the next sweep asks again, and THIS sweep is the
-      // component that comment names (rule `protocol`, comment-is-a-claim).
-      return "unknown";
+    } catch (err) {
+      // Neither answer may complete the operation or remove it from the worklist — but they are not the same
+      // answer. An issue that is GONE can never discharge this intent, so re-examining it every sweep and
+      // reporting "unreadable" tells an operator to wait for something that will not happen. A read that
+      // FAILED is the third value this sweep exists to keep owed (L2).
+      return err instanceof NotFoundError ? "orphaned" : "unknown";
     }
     // The SAME predicate the watcher and the inline path consume — imported, never re-spelled: an issue
     // closed on other evidence is not this adoption discharging its intent (L3).

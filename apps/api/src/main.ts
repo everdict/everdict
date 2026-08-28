@@ -1324,9 +1324,11 @@ async function main(): Promise<void> {
       void new AdoptionCompletionReconciler({ operations: adoptionOperationStore, issues: issueService })
         .sweep()
         .then((r) => {
-          if (r.completed > 0 || r.unknown > 0)
+          // `orphaned` is reported even when nothing else happened: it is the count that will not shrink on
+          // its own, and burying it inside "unreadable" told an operator to wait (arch-review 116).
+          if (r.completed > 0 || r.unknown > 0 || r.orphaned > 0)
             console.log(
-              `[adoption-sweep] examined ${r.examined} · completed ${r.completed} · still open ${r.open} · unreadable ${r.unknown}`,
+              `[adoption-sweep] examined ${r.examined} · completed ${r.completed} · still open ${r.open} · unreadable ${r.unknown} · issue gone ${r.orphaned}`,
             );
         })
         .catch((err: unknown) => {

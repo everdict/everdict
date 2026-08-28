@@ -2676,7 +2676,11 @@ for (let i = 0; i < ARGS.length; i++) {
   }
   i++; // skip the value belonging to this flag
 }
-const STALE_MARK = `${process.cwd()}/.git/everdict-mutation-stale-dist`;
+// ⚠️ `.git` IS A FILE IN A WORKTREE (arch-review 116). Hardcoding `${cwd}/.git/…` writes fine in the primary
+// checkout and fails ENOTDIR in every `git worktree` — which is exactly where this gate deserves to run, since
+// a throwaway worktree built from HEAD alone is the only way to see what a fresh checkout compiles to.
+// `--absolute-git-dir` is what `ci-commits.mjs` already uses for the same reason.
+const STALE_MARK = `${execFileSync("git", ["rev-parse", "--absolute-git-dir"], { encoding: "utf8" }).trim()}/everdict-mutation-stale-dist`;
 
 // ── A BUILD THAT FAILED IS NOT A BUILD (arch-review 115) ────────────────────────────────────────────
 //

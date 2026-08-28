@@ -1,4 +1,5 @@
 import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
@@ -137,6 +138,34 @@ describe("AdoptionCompletionReconciler", () => {
       now: () => NOW,
     }).sweep();
     expect(again).toMatchObject({ completed: 1 });
+  });
+
+  // ── AN ISSUE THAT IS GONE IS NOT AN ISSUE WE COULD NOT READ (arch-review 116, self-review) ──────
+  //
+  // The first version of the sweep caught every throw as `unknown`, and `IssueService.get` throws
+  // `NotFoundError` for a deleted issue — `DELETE /issues/:id` is a real route. So an adoption whose issue
+  // was deleted sat on the worklist forever, re-examined every five minutes and reported as "unreadable",
+  // which tells an operator to wait for something that will never happen.
+  //
+  // Seen RED with the two folded back together: "a deleted issue was reported as merely unreadable:
+  // expected 1 to be 0".
+  it("counts a DELETED issue apart from an unreadable one", async () => {
+    const s = store([registered()]);
+    const sweep = await new AdoptionCompletionReconciler({
+      operations: s.impl,
+      issues: {
+        async get() {
+          throw new NotFoundError("NOT_FOUND", { id: "iss-1" }, "issue 'iss-1' not found.");
+        },
+      },
+      now: () => NOW,
+    }).sweep();
+
+    expect(sweep.orphaned, "a deleted issue was not distinguished").toBe(1);
+    expect(sweep.unknown, "a deleted issue was reported as merely unreadable").toBe(0);
+    // Neither answer completes it — the intent was never discharged, and saying otherwise would be the
+    // annotation failure this whole family is about.
+    expect(s.state.get("camp-1")?.state).toBe("registered");
   });
 
   it("does not touch an operation younger than the grace age — the adopt call may still be inside it", async () => {
