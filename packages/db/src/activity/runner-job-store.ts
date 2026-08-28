@@ -164,6 +164,32 @@ export class InMemoryRunnerJobStore implements RunnerJobStore {
   // cancel on the heartbeat reply (that is how the runner learns to abort and free the runtime). What it
   // stops getting is the extension — activity_at freezes, so a runner that ignores the signal is reclaimed by
   // the idle-timeout path instead of holding the job alive forever with a compliant-looking heartbeat.
+  // The runner is alive, so every job it could still TAKE stays alive with it — own queue and owner pool,
+  // capability-scoped (arch-review 119). The in-memory hub's `rearmWaiting`, expressed on the row the store
+  // path enforces the idle timeout off.
+  async touchWaiting(input: {
+    owner: string;
+    runnerId: string;
+    advertisedCaps?: string[];
+    now: number;
+  }): Promise<number> {
+    let refreshed = 0;
+    for (const e of this.jobs.values()) {
+      if (e.owner !== input.owner || e.status !== "queued" || e.cancelRequested) continue;
+      if (e.runnerId !== input.runnerId && e.runnerId !== POOL_RUNNER) continue;
+      // A job this runner could not claim is not kept alive by it — otherwise a job whose only capable
+      // runner died never times out.
+      if (input.advertisedCaps && e.requiredCaps.some((c) => !input.advertisedCaps?.includes(c))) continue;
+      // Monotonic, and the Pg twin says the same in its WHERE: several replicas write this column and their
+      // clocks are not one clock, so a lagging one must not pull a job's liveness BACKWARDS into the timeout.
+      // It also keeps a poll that changes nothing from being a write at all.
+      if (e.activityAt >= input.now) continue;
+      e.activityAt = input.now;
+      refreshed += 1;
+    }
+    return refreshed;
+  }
+
   async touch(
     jobId: string,
     runnerId: string,
@@ -442,6 +468,30 @@ export class PgRunnerJobStore implements RunnerJobStore {
   // THIS runner's CURRENT lease. `status = 'leased'` (never 'queued') — a requeued job's previous holder has
   // no further right to end it, extend it, or overwrite who held it; and the epoch pins which lease of this
   // runner's it was (a re-lease of the same job to the same runner mints a new epoch).
+  // The Pg half of the same rule: one statement, the same predicate the CLAIM filters on (own queue or the
+  // owner pool, not cancelled, `required_caps <@ advertised`), so a runner refreshes exactly the jobs it
+  // could have taken instead (arch-review 119).
+  async touchWaiting(input: {
+    owner: string;
+    runnerId: string;
+    advertisedCaps?: string[];
+    now: number;
+  }): Promise<number> {
+    const res = await this.client.query<{ job_id: string }>(
+      `UPDATE everdict_runner_jobs SET activity_at = to_timestamp($4 / 1000.0)
+        WHERE owner = $1 AND status = 'queued' AND NOT cancel_requested
+          AND (runner_id = $2 OR runner_id = $3)
+          AND ($5::text[] IS NULL OR required_caps <@ $5::text[])
+          -- Monotonic: several replicas write this column and their clocks are not one clock, so a lagging
+          -- one must not pull a job's liveness BACKWARDS into the timeout. It also turns a poll that would
+          -- change nothing into no write at all, which is what keeps this cheap at the claim's poll rate.
+          AND activity_at < to_timestamp($4 / 1000.0)
+        RETURNING job_id`,
+      [input.owner, input.runnerId, POOL_RUNNER, input.now, input.advertisedCaps ?? null],
+    );
+    return res.rows.length;
+  }
+
   async touch(
     jobId: string,
     runnerId: string,

@@ -53,8 +53,10 @@ export interface StoreRunnerHubDeps {
 // leaseWait / heartbeat / complete / fail / requestCancel / pending), but every op goes through a shared RunnerJobStore
 // so a job parked on one control-plane replica is leased + completed from another. The methods are async; callers await
 // them (which also works unchanged against the sync in-memory hub — await on a plain value is a no-op). The parking
-// replica enforces the idle timeout itself by polling the row's activity_at (kept fresh cross-replica by lease/heartbeat),
-// mirroring the per-job timer the in-memory hub kept locally. Design: docs/architecture/self-hosted-runner.md.
+// replica enforces the idle timeout itself by polling the row's activity_at (kept fresh cross-replica by lease/heartbeat
+// of that job, AND by `touchWaiting` for the jobs this runner could still take — arch-review 119, without which a job
+// queued behind a long-running one aged out while its runner was connected), mirroring the per-job timer plus the
+// `touchByRunner` refresh the in-memory hub keeps locally. Design: docs/architecture/self-hosted-runner.md.
 export class StoreRunnerHub {
   private readonly queueTimeoutMs: number;
   private readonly leaseTtlMs: number;
@@ -184,6 +186,15 @@ export class StoreRunnerHub {
       leaseTtlMs: this.leaseTtlMs,
       now: this.now(),
     };
+    // Taking a job proves the runner is alive, so the rest of what it could take is kept alive too — the same
+    // pairing the in-memory hub makes (`touchByRunner` on lease AND on heartbeat, arch-review 119). Before the
+    // claim: a claim that finds nothing is exactly the poll where a busy runner's queue most needs refreshing.
+    await this.store.touchWaiting({
+      owner: key.owner,
+      runnerId: key.runnerId,
+      ...(capabilities !== undefined ? { advertisedCaps: capabilities } : {}),
+      now: input.now,
+    });
     const open = this.openLeaseAttempt;
     if (this.store.claimAttempt && open) return this.store.claimAttempt(input, this.claimWithAttempt(open));
     const claimed = await this.store.claim(input);
@@ -282,14 +293,33 @@ export class StoreRunnerHub {
   // Liveness + the control plane's cancel decision (carried back to the runner's next heartbeat), same as the
   // in-memory hub. The token rides down to the store's WHERE clause — a stale holder's heartbeat must not renew
   // the successor's lease, so the fence is the row's, not this process's. `capabilities` is accepted for
-  // signature parity with the in-memory hub and unused: the store path has no per-process timers to rearm
-  // (each parking replica enforces the idle timeout off the shared activity clock).
-  heartbeat(
+  // ── A HEARTBEAT KEEPS THIS RUNNER'S WHOLE QUEUE ALIVE (arch-review 119) ─────────────────────────
+  //
+  // `capabilities` used to arrive as `_capabilities`, under a comment about per-process timers — which
+  // explains why nothing is REARMED here and says nothing about what the argument is for. It scopes which
+  // WAITING jobs this runner's liveness keeps alive, and dropping it meant nothing kept them alive at all:
+  // `store.touch` refreshes one row by `job_id`, so a job queued behind a long-running one aged out into
+  // `no_runner` — "the runner is not connected, is idle/dead" — while that runner was connected and working.
+  //
+  // This class's own header promised the opposite ("connected-but-busy runners keep it fresh via their
+  // heartbeat, exactly like the in-memory hub"). Nothing performed it; that sentence is now this call.
+  //
+  // Best-effort ordering, and deliberately so: the lease extension is the answer the runner is waiting for,
+  // and a queue refresh that failed costs at worst the timeout it was always subject to. It is awaited (not
+  // fired and forgotten) so a store outage surfaces here rather than as jobs quietly ageing out.
+  async heartbeat(
     key: SelfHostedKey,
     token: AttemptToken,
-    _capabilities?: string[],
+    capabilities?: string[],
   ): Promise<{ extended: boolean; cancelled: boolean }> {
-    return this.store.touch(token.jobId, key.runnerId, token.leaseEpoch, this.now());
+    const extended = await this.store.touch(token.jobId, key.runnerId, token.leaseEpoch, this.now());
+    await this.store.touchWaiting({
+      owner: key.owner,
+      runnerId: key.runnerId,
+      ...(capabilities !== undefined ? { advertisedCaps: capabilities } : {}),
+      now: this.now(),
+    });
+    return extended;
   }
 
   complete(key: SelfHostedKey, token: AttemptToken, result: CaseResult): Promise<boolean> {

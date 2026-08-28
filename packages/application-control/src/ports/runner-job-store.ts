@@ -138,6 +138,32 @@ export interface RunnerJobStore {
     leaseEpoch: number,
     now: number,
   ): Promise<{ extended: boolean; cancelled: boolean }>;
+  // ── A RUNNER'S LIVENESS KEEPS ITS QUEUE ALIVE, NOT ONLY THE JOB IT HOLDS (arch-review 119) ────────
+  //
+  // `touch` above refreshes ONE row, keyed by `job_id`. The idle timeout, though, is enforced per job off the
+  // same `activity_at` — so a job QUEUED behind a long-running one was never refreshed by anything and was
+  // rejected `no_runner` ("the runner is not connected, is idle/dead") five minutes in, while its runner was
+  // connected, capable and busy with the job ahead of it.
+  //
+  // The in-memory hub has always had this: `touchByRunner` → `rearmWaiting`, whose comment says exactly why
+  // ("a maxConcurrent=1 runner heartbeats only the job it is running; the jobs queued behind it must not
+  // expire meanwhile"). The store lane dropped the capability argument with an `_` and its own comment
+  // claimed the behaviour anyway — "connected-but-busy runners keep it fresh via their heartbeat, exactly
+  // like the in-memory hub" — which no statement performed.
+  //
+  // Capability-scoped for the reason `rearmWaiting` gives, and it is the half that is NOT merely liveness: a
+  // job whose only capable runner died must stop being refreshed by surviving-but-incapable ones, or it
+  // pends for ever instead of failing with a reason. `advertisedCaps` undefined = a pre-capability runner,
+  // which refreshes everything it could take (the old behaviour, no false mass timeouts).
+  //
+  // Returns HOW MANY rows it refreshed: a liveness write a caller may reason about answers with evidence,
+  // never `Promise<void>` (rule `protocol` L1).
+  touchWaiting(input: {
+    owner: string;
+    runnerId: string;
+    advertisedCaps?: string[];
+    now: number;
+  }): Promise<number>;
   // Is this token the CURRENT lease, held by this runner? Returns the job it authorizes (so the caller reads the
   // run id from the lease instead of accepting one from the request), or null. Durable and therefore
   // cross-replica: the evidence a runner pushes is authorized by the same row every replica claims through.
