@@ -1,6 +1,7 @@
 import type { ComputeHandle, ComputeSpec, Driver, RegistryAuth, RunRecord, TraceEvent } from "@everdict/contracts";
 import { NO_IMAGE } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
+import { usageFromTrace } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { LiveSessionQuery, OutboxEvent, RunStore } from "../ports/run-store.js";
 import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
@@ -101,6 +102,12 @@ function fakeTrajectories() {
           },
         ],
       };
+    },
+    // Derived the way the real stores derive it, so this double is never more permissive than production.
+    async usage(tenant, runId) {
+      const hit = sealed.get(runId);
+      if (!hit || hit.meta.tenant !== tenant) return { kind: "absent" as const };
+      return { kind: "derived" as const, usage: usageFromTrace(hit.events) };
     },
     async list(tenant) {
       return { items: [...sealed.values()].map((r) => r.meta).filter((m) => m.tenant === tenant) };

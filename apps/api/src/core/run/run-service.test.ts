@@ -401,6 +401,12 @@ describe("RunService", () => {
         async get() {
           return undefined;
         },
+        // The cost read the ledger answers without touching a body (`d60e5285`). This double seals bodies but
+        // holds no derivation, so `absent` is its only honest answer — `derived` with zeros would be the
+        // collapse that union exists to prevent.
+        async usage() {
+          return { kind: "absent" as const };
+        },
         async list() {
           return { items: [] };
         },

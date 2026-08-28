@@ -22,6 +22,11 @@ function recorder(): { seals: SealInput[]; store: TrajectoryStore } {
     async get() {
       return undefined;
     },
+    // This recorder holds nothing back, so "absent" is what the real store would answer for every id — a
+    // double that invented a summary here would be more permissive than production.
+    async usage() {
+      return { kind: "absent" as const };
+    },
     async list(): Promise<TrajectoryListResult> {
       return { items: [] as TrajectoryMeta[] };
     },

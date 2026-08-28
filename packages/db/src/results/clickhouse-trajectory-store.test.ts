@@ -29,6 +29,24 @@ const segmentLine = (over: Record<string, unknown> = {}) =>
     ...over,
   })}\n`;
 
+// One plane as the BODY-FREE read returns it. `seal` and `usage` both go through this shape: neither needs a
+// body, and the whole point of the read is that `body` never appears in the statement.
+const planeLine = (over: Record<string, unknown> = {}) =>
+  `${JSON.stringify({
+    run_id: "r1",
+    emitter: "otlp",
+    tenant_first: "acme",
+    source_first: "otlp",
+    event_count_first: 2,
+    owner_first: "",
+    kind_first: "",
+    label_first: "",
+    preview_first: "",
+    usage_first: "",
+    sealed_at_first: "2026-07-30T00:00:00.000Z",
+    ...over,
+  })}\n`;
+
 const listLine = (over: Record<string, unknown> = {}) =>
   `${JSON.stringify({
     run_id: "r1",
@@ -41,20 +59,31 @@ const listLine = (over: Record<string, unknown> = {}) =>
 
 describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port (N3)", () => {
   it("seals once per emitter: a new emitter INSERTs a plane, a re-offer of the same one writes nothing", async () => {
-    const rows: string[] = [];
+    const rows: Array<Record<string, unknown>> = [];
     const { calls, fetchImpl } = fakeClickHouse((sql, _params, body) => {
-      if (sql.includes("GROUP BY emitter")) return rows.join("");
-      if (sql.includes("SELECT run_id FROM")) return rows.length > 0 ? `${JSON.stringify({ run_id: "r1" })}\n` : "";
+      // The BODY-FREE plane read `seal` now uses to decide "has this emitter sealed already?". It used to
+      // call `get`, which aggregates `argMin(body, …)` over every plane — so appending one segment re-read
+      // the entire trajectory. The two statements are told apart by this ORDER BY, and the assertion below
+      // pins the property that matters: no body travels.
+      if (sql.includes("GROUP BY run_id, emitter"))
+        return rows
+          .map((row) =>
+            planeLine({ emitter: row.emitter, source_first: row.source, event_count_first: row.event_count }),
+          )
+          .join("");
+      if (sql.includes("GROUP BY emitter"))
+        return rows
+          .map((row) =>
+            segmentLine({
+              emitter: row.emitter,
+              source_first: row.source,
+              event_count_first: row.event_count,
+              body_first: row.body,
+            }),
+          )
+          .join("");
       if (sql.startsWith("INSERT")) {
-        const row = JSON.parse(body) as Record<string, unknown>;
-        rows.push(
-          segmentLine({
-            emitter: row.emitter,
-            source_first: row.source,
-            event_count_first: row.event_count,
-            body_first: row.body,
-          }),
-        );
+        rows.push(JSON.parse(body) as Record<string, unknown>);
         return "";
       }
       return "";
@@ -84,6 +113,39 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
       events: [{ t: 0, kind: "span", name: "GET /cart", durationMs: 4 }],
     });
     expect(service.created).toBe(true);
+
+    // …and the read that decided all of this never asked for a body. `seal` used to answer a set membership
+    // by hauling every plane's events through ClickHouse's memory and then ours, which on a long-horizon run
+    // is the OOM on the WRITE side.
+    const planeReads = calls.filter((c) => c.sql.includes("GROUP BY run_id, emitter"));
+    expect(planeReads.length, "seal stopped reading the planes at all").toBeGreaterThan(0);
+    for (const read of planeReads)
+      expect(read.sql, "seal read a body to decide a set membership").not.toMatch(/\bbody\b/);
+  });
+
+  it("refuses to seal under an id another workspace owns — one read answers both questions", async () => {
+    // The cross-tenant guard used to need a SECOND statement (`SELECT run_id … LIMIT 1`) because the first
+    // one was tenant-scoped through `get`. The plane read is not, so rows-exist-but-header-is-theirs is
+    // answerable from the same round trip — and this is the test that keeps the guard once its second
+    // statement is gone.
+    const { calls, fetchImpl } = fakeClickHouse((sql) => {
+      if (sql.includes("GROUP BY run_id, emitter")) return planeLine({ tenant_first: "rival" });
+      return "";
+    });
+    const store = new ClickHouseTrajectoryStore({ url: "http://ch:8123" }, fetchImpl);
+
+    const sealed = await store.seal({
+      runId: "r1",
+      tenant: "acme",
+      source: "otlp",
+      events: [{ t: 0, kind: "llm_call", model: "m" }],
+    });
+
+    expect(sealed.created, "a second workspace wrote a row under another tenant's run id").toBe(false);
+    expect(
+      calls.some((c) => c.sql.startsWith("INSERT")),
+      "the INSERT went out anyway",
+    ).toBe(false);
   });
 
   it("reads resolve first-write-wins per emitter and stay tenant-scoped; values travel as bound params", async () => {

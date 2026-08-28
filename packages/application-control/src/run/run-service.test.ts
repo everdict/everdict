@@ -416,6 +416,12 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
               async get() {
                 return undefined;
               },
+              // This double seals and never reads back, so `absent` is what a real store would answer. The
+              // `as never` below means the compiler cannot enumerate this port's methods here — an omission
+              // would surface as "usage is not a function" the first time a detail read ran.
+              async usage() {
+                return { kind: "absent" as const };
+              },
               async list() {
                 return { items: [] };
               },

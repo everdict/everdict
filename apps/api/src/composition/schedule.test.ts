@@ -75,6 +75,12 @@ describe("wireScheduleService — the reserved 'everdict' source windows the OWN
       async get() {
         return undefined;
       },
+      // The cost read the ledger answers without touching a body (`d60e5285`). This double holds no
+      // trajectory, so `absent` is its only honest answer — never `derived` with zeros, which is the
+      // collapse that union exists to prevent.
+      async usage() {
+        return { kind: "absent" as const };
+      },
       async ingestedSince() {
         return { trajectories: 0, events: 0 };
       },

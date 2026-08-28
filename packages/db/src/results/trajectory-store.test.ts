@@ -1,5 +1,7 @@
+import type { TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { InMemoryTrajectoryStore } from "./trajectory-store.js";
+import type { SqlClient } from "../client.js";
+import { InMemoryTrajectoryStore, PgTrajectoryStore } from "./trajectory-store.js";
 
 // ── WHOSE EVIDENCE THIS IS (review 39 P1) ────────────────────────────────────────────────────────────
 describe("TrajectoryStore — a sealed plane names the attempt that produced it", () => {
@@ -91,3 +93,97 @@ describe("TrajectoryStore — the exact-identity read serves the attempt the rec
     expect(read?.meta.eventCount).toBe(1); // not 2 — the service plane was refused, so it is not counted
   });
 });
+
+// ── WHAT IT COST, WITHOUT WHAT IT DID (long-horizon OOM) ─────────────────────────────────────────────
+//
+// The run detail page's cost badge used to be answered by reading the whole trajectory and folding
+// `usageFromTrace` over it. On a long-horizon run that is hundreds of megabytes through two full parses for
+// five numbers, in a SHARED process. The derivation moved to the writer (rule `protocol` L3) and this is the
+// read that replaces it — the tests below pin both halves: the answer, and the absence of the body.
+describe("TrajectoryStore — usage is derived at seal and read back without a body", () => {
+  const TURN: TraceEvent[] = [
+    { t: 0, kind: "message", role: "user", text: "go" },
+    { t: 1, kind: "llm_call", model: "opus", cost: { inputTokens: 900, outputTokens: 100, usd: 0.5 } },
+    { t: 2, kind: "llm_call", model: "opus", cost: { inputTokens: 100, outputTokens: 10, usd: 0.05 } },
+  ];
+
+  it("answers the execution plane's economics", async () => {
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({ runId: "r1", tenant: "acme", source: "run", events: TURN });
+
+    expect(await store.usage("acme", "r1")).toEqual({
+      kind: "derived",
+      usage: { promptTokens: 1000, completionTokens: 110, totalTokens: 1110, usd: 0.55, calls: 2 },
+    });
+  });
+
+  it("answers for the EXECUTION plane even when a service plane sealed first", async () => {
+    // The multi-plane case, and the reason `executionEmitterOf` is shared rather than re-spelled here: a
+    // topology run's services push their spans before the agent settles, so the header row is the service's.
+    // Reporting the header's economics would bill a checkout service's LLM calls as the agent's.
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({
+      runId: "r2",
+      tenant: "acme",
+      source: "otlp",
+      emitter: "service:checkout",
+      events: [{ t: 0, kind: "llm_call", model: "cheap", cost: { inputTokens: 1, outputTokens: 1, usd: 999 } }],
+    });
+    await store.seal({ runId: "r2", tenant: "acme", source: "run", emitter: "run", events: TURN });
+
+    const answer = await store.usage("acme", "r2");
+    expect(answer.kind === "derived" && answer.usage.usd).toBe(0.55); // the agent's, not the service's 999
+  });
+
+  it("is absent for another workspace's run — the same answer a nonexistent one gets", async () => {
+    const store = new InMemoryTrajectoryStore();
+    await store.seal({ runId: "r3", tenant: "acme", source: "run", events: TURN });
+
+    expect(await store.usage("other", "r3")).toEqual({ kind: "absent" });
+    expect(await store.usage("acme", "nope")).toEqual({ kind: "absent" });
+  });
+
+  it("Pg: the statement selects no body, and a row sealed before the column is UNKNOWN — never zero", async () => {
+    // The whole point of the read, asserted structurally: `body` in this statement would reinstate the OOM
+    // while every behavioral test above still passed.
+    const { client, calls } = fakeClient(() => ({
+      rows: [{ emitter: "run", tenant: "acme", usage: null, header: true }],
+    }));
+
+    const answer = await new PgTrajectoryStore(client).usage("acme", "r4");
+
+    expect(calls[0]?.text).not.toMatch(/\bbody\b/);
+    // A legacy row's cost is UNKNOWN. Answering `derived` with zeros here would invent a billing-adjacent
+    // number in the one place a reader would never think to doubt it.
+    expect(answer).toEqual({ kind: "unknown", reason: "sealed_before_derivation" });
+  });
+
+  it("Pg: a derived row is validated at the boundary like every other jsonb column", async () => {
+    const usage = { promptTokens: 1, completionTokens: 2, totalTokens: 3, usd: 0.1, calls: 1 };
+    const { client } = fakeClient(() => ({ rows: [{ emitter: "run", tenant: "acme", usage, header: true }] }));
+
+    expect(await new PgTrajectoryStore(client).usage("acme", "r5")).toEqual({ kind: "derived", usage });
+  });
+
+  it("Pg: a foreign workspace's header answers absent, so the read leaks no existence", async () => {
+    const { client } = fakeClient(() => ({ rows: [{ emitter: "run", tenant: "other", usage: null, header: true }] }));
+
+    expect(await new PgTrajectoryStore(client).usage("acme", "r6")).toEqual({ kind: "absent" });
+  });
+});
+
+// The house fake SqlClient (the `scorecard-store.test.ts` precedent): assert the parameterized SQL text and
+// the row → record mapping, never a live database.
+function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
+  client: SqlClient;
+  calls: Array<{ text: string; params?: unknown[] }>;
+} {
+  const calls: Array<{ text: string; params?: unknown[] }> = [];
+  const client: SqlClient = {
+    async query(text, params) {
+      calls.push({ text, params });
+      return handler(text, params) as { rows: never[] };
+    },
+  };
+  return { client, calls };
+}

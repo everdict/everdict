@@ -5,11 +5,14 @@ import {
   type TrajectoryMeta,
   type TrajectorySegment,
   type TrajectoryStore,
+  type TrajectoryUsage,
   defaultEmitter,
+  executionEmitterOf,
   executionSegment,
   sealBody,
   trajectoryForAttempt,
 } from "@everdict/application-control";
+import { type RunUsageSummary, RunUsageSummarySchema } from "@everdict/contracts";
 import { spansToEvents } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { bodyOf, formatOf } from "./trajectory-body.js";
@@ -51,6 +54,10 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       label?: string;
       preview?: string;
       segments: TrajectorySegment[];
+      // Per-emitter economics, derived at seal (see TrajectoryUsage). Kept BESIDE the segments rather than on
+      // them: `TrajectorySegment` is what a read hands out, and a field no consumer declares would ride along
+      // unreadable — the excess-property shape rule `typescript` warns about.
+      usage: Map<string, RunUsageSummary>;
     }
   >();
 
@@ -84,6 +91,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
         ...(input.label !== undefined ? { label: input.label } : {}),
         ...(input.preview !== undefined ? { preview: input.preview } : {}),
         segments: [segment],
+        usage: new Map(body.usage !== undefined ? [[emitter, body.usage]] : []),
       });
       return { ...this.metaOf(input.runId), created: true };
     }
@@ -101,7 +109,18 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     // First seal per emitter wins — a retried settle re-offers the same evidence and changes nothing.
     if (existing.segments.some((s) => s.emitter === emitter)) return { ...this.metaOf(input.runId), created: false };
     existing.segments.push(segment);
+    if (body.usage !== undefined) existing.usage.set(emitter, body.usage);
     return { ...this.metaOf(input.runId), created: true };
+  }
+
+  async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
+    const row = this.rows.get(runId);
+    if (!row || row.tenant !== tenant) return { kind: "absent" };
+    // The SAME resolution `get` uses for `events`, over the emitter names alone — so the cost this reports
+    // and the stream a judge reads are always about one plane.
+    const emitter = executionEmitterOf(row.segments.map((s) => s.emitter));
+    const usage = emitter === undefined ? undefined : row.usage.get(emitter);
+    return usage === undefined ? { kind: "unknown", reason: "sealed_before_derivation" } : { kind: "derived", usage };
   }
 
   async get(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
@@ -222,8 +241,8 @@ export class PgTrajectoryStore implements TrajectoryStore {
     const bytes = JSON.stringify(body.spans ?? body.events);
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13, $14)
+      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id, usage)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13, $14, $15)
        ON CONFLICT (run_id) DO NOTHING
        RETURNING run_id`,
       [
@@ -241,6 +260,10 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.label ?? null,
         input.preview ?? null,
         input.attemptId ?? null,
+        // Derived from the body this statement is writing, in the same statement — so a row can never hold
+        // evidence whose cost was computed from something else. NULL when the body would not project: the
+        // read reports that as unknown, never as zero (mig 0199).
+        body.usage !== undefined ? JSON.stringify(body.usage) : null,
       ],
     );
     if (inserted.rows.length > 0) {
@@ -272,8 +295,8 @@ export class PgTrajectoryStore implements TrajectoryStore {
     }
     if ((primary.emitter ?? primary.source) === emitter) return { ...metaOf(primary), created: false };
     const appended = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10)
+      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id, usage)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11)
        ON CONFLICT (run_id, emitter) DO NOTHING
        RETURNING run_id`,
       [
@@ -287,6 +310,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.t0 ?? null,
         sealedAt,
         input.attemptId ?? null,
+        body.usage !== undefined ? JSON.stringify(body.usage) : null,
       ],
     );
     const created = appended.rows.length > 0;
@@ -355,6 +379,36 @@ export class PgTrajectoryStore implements TrajectoryStore {
     // rows for one plane and the identity read is a filter, not a tie-break — the same rule ClickHouse has to
     // state in SQL because there the duplicates are rows.
     return opts === undefined ? sealed : trajectoryForAttempt(sealed, opts.attemptId);
+  }
+
+  // Emitters and summaries ONLY — the `body` column is deliberately absent from this statement, because
+  // hauling it is the entire defect this read exists to close. One round trip, both planes, no detoast.
+  async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
+    const res = await this.client.query<{
+      emitter: string;
+      tenant: string;
+      usage: unknown;
+      header: boolean;
+    }>(
+      `SELECT COALESCE(emitter, source) AS emitter, tenant, usage, true AS header
+         FROM everdict_trajectories WHERE run_id = $1
+       UNION ALL
+       SELECT COALESCE(emitter, source) AS emitter, tenant, usage, false AS header
+         FROM everdict_trajectory_segments WHERE run_id = $1`,
+      [runId],
+    );
+    // Workspace scoping is decided by the HEADER row, exactly as `get` decides it — a foreign run answers
+    // `absent`, which is the same answer a nonexistent one gets, so this read leaks no existence `get`
+    // does not already leak.
+    const header = res.rows.find((r) => r.header);
+    if (!header || header.tenant !== tenant) return { kind: "absent" };
+    const emitter = executionEmitterOf(res.rows.map((r) => r.emitter));
+    const row = res.rows.find((r) => r.emitter === emitter);
+    if (!row || row.usage === null || row.usage === undefined)
+      return { kind: "unknown", reason: "sealed_before_derivation" };
+    // Validated at the boundary like every other jsonb column: a hand-edited row is a bad request, not a
+    // NaN that rides into an invoice.
+    return { kind: "derived", usage: RunUsageSummarySchema.parse(row.usage) };
   }
 
   async list(

@@ -1,4 +1,5 @@
 import type { TraceEvent, TraceThreshold } from "@everdict/contracts";
+import { usageFromTrace } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { EmitPlatformEventInput, PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { TrajectoryMeta, TrajectoryStore } from "../ports/trajectory-store.js";
@@ -37,6 +38,12 @@ function fakeStore(): TrajectoryStore {
           },
         ],
       };
+    },
+    // Derived the way the real stores derive it, so this double is never more permissive than production.
+    async usage(tenant, runId) {
+      const hit = sealed.get(runId);
+      if (!hit || hit.meta.tenant !== tenant) return { kind: "absent" as const };
+      return { kind: "derived" as const, usage: usageFromTrace(hit.events) };
     },
     async list() {
       return { items: [] };

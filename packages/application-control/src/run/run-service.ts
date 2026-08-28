@@ -61,7 +61,6 @@ import {
   resolveHarnessSecrets,
   runAudience,
   runEvidenceIdentity,
-  usageFromTrace,
   validRepoPath,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -572,15 +571,38 @@ export class RunService {
   // Usage for the runs whose evidence is NOT a row embed. The store derives usage from `result.trace`, which
   // an eval run has and an agent turn never does (its transcript is sealed in the trajectory store, per O10 —
   // new runs write refs, not embeds). The result was that the executions which actually spend money reported
-  // no cost on their own detail, while the invoice knew. So when a record has no result, fall back to the
-  // sealed trajectory — the same derivation over the same events, one extra read on the DETAIL path only
-  // (the list keeps its single query; a per-row trajectory read would be N+1).
+  // no cost on their own detail, while the invoice knew. So when a record has no result, ask the sealed
+  // trajectory — one extra read on the DETAIL path only (the list keeps its single query; a per-row
+  // trajectory read would be N+1).
+  //
+  // ── AND IT ASKS FOR THE ANSWER, NOT FOR THE EVIDENCE ──────────────────────────────────────────────
+  //
+  // This used to be `trajectories.get(...)` followed by `usageFromTrace(sealed.events)`. For a long-horizon
+  // run that fetched hundreds of megabytes of jsonb, parsed it twice (pg's `JSON.parse`, then Zod's array
+  // schema — a second complete copy), folded five numbers out of it and dropped the rest. The heap it took
+  // belonged to a SHARED process, so one workspace's long trace ended every other workspace's in-flight
+  // request. The derivation now happens at seal, where the events are in hand anyway (L3), and this reads a
+  // summary column. See `TrajectoryUsage`.
   private async withTrajectoryUsage(record: RunRecord): Promise<RunRecord> {
     if (record.result || record.usage || !this.deps.trajectories) return record;
-    const sealed = await this.deps.trajectories.get(record.tenant, record.id).catch(() => undefined);
-    if (!sealed || sealed.events.length === 0) return record;
-    const usage = usageFromTrace(sealed.events);
-    return usage.calls > 0 ? { ...record, usage } : record;
+    // A store OUTAGE is not one of the three answers — it is the read failing — and this is the site that
+    // decides what that costs (rule `protocol`: the swallow belongs where the loss is priced, never inside
+    // the reader). A run's detail page is not worth failing over a cost badge, so an unreadable evidence
+    // store degrades to the same "no usage shown" the honest answers render as. Stated here rather than
+    // spelled as a bare fallback three frames away.
+    const answer = await this.deps.trajectories.usage(record.tenant, record.id).catch(() => undefined);
+    if (answer === undefined) return record;
+    switch (answer.kind) {
+      case "derived":
+        // `calls > 0` is the pre-existing rule and it stays: a trajectory with no llm_call carries no
+        // economics to show, which is different from one whose economics nobody derived.
+        return answer.usage.calls > 0 ? { ...record, usage: answer.usage } : record;
+      case "absent":
+      // A run with no sealed trajectory has nothing to report — fall through to the same shape as unknown,
+      // because the DISPLAY is the same and only the reason differs.
+      case "unknown":
+        return record;
+    }
   }
 
   // Live trace deep-link (observability ③, derived — never stored): while the run is still active AND its

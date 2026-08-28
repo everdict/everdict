@@ -6,6 +6,7 @@ import type {
   TrajectoryListResult,
   TrajectoryMeta,
   TrajectoryStore,
+  TrajectoryUsage,
 } from "./trajectory-store.js";
 
 // Every sealed trajectory gets a line naming what it was asked to do — derived ONCE, here.
@@ -47,6 +48,10 @@ export class NamingTrajectoryStore implements TrajectoryStore {
     opts?: { limit?: number; cursor?: string; viewer?: string; kind?: string },
   ): Promise<TrajectoryListResult> {
     return this.inner.list(tenant, opts);
+  }
+
+  usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
+    return this.inner.usage(tenant, runId);
   }
 
   ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {

@@ -5,11 +5,13 @@ import {
   type TrajectoryMeta,
   type TrajectorySegment,
   type TrajectoryStore,
+  type TrajectoryUsage,
   defaultEmitter,
+  executionEmitterOf,
   executionSegment,
   sealBody,
 } from "@everdict/application-control";
-import { UpstreamError } from "@everdict/contracts";
+import { RunUsageSummarySchema, UpstreamError } from "@everdict/contracts";
 import { bodyOf, formatOf } from "./trajectory-body.js";
 
 // The ops-scale trajectory store (native-observability N-O1 rung 2): the SAME TrajectoryStore port over
@@ -93,6 +95,10 @@ const TRAJECTORY_COLUMNS: readonly ColumnSpec[] = [
   // WHICH physical attempt sealed it (mig 0176's rung-2 twin). '' = the producer did not say — never
   // agreement with whatever attempt a reader has in hand. No backfill: sealed evidence is not rewritten.
   { name: "attempt_id", type: "String", default: "''" },
+  // This plane's economics, derived at seal from the body being written (mig 0199's rung-2 twin) — JSON text,
+  // '' = not derived. No backfill: '' reads as UNKNOWN, never as zero, because a row whose cost nobody
+  // computed is not a row that cost nothing and this number ends up on an invoice.
+  { name: "usage", type: "String", default: "''" },
 ];
 
 // Skipping indexes: a data-skipping index is part of the CREATE and has no ADD COLUMN twin, so it is listed
@@ -131,6 +137,41 @@ interface SegmentRow {
   sealed_at_first: string;
   owner_first: string;
   attempt_id_first: string;
+}
+
+// One plane as the BODY-FREE read returns it (see `planes`). Same aggregate as `SegmentRow`, same *_first
+// aliasing rule, minus the one column that makes the read expensive.
+interface PlaneRow {
+  run_id: string;
+  emitter: string;
+  tenant_first: string;
+  source_first: string;
+  event_count_first: number | string;
+  owner_first: string;
+  kind_first: string;
+  label_first: string;
+  preview_first: string;
+  usage_first: string;
+  sealed_at_first: string;
+}
+
+// Rows written before the multi-plane rung carry no emitter — they read as their arrival channel, exactly as
+// `get` maps them. Written once so a plane cannot be named one way by the read and another by the seal.
+function planeEmitter(row: PlaneRow): string {
+  return row.emitter === "" ? row.source_first : row.emitter;
+}
+
+// The header a body-free read can answer, in the SHAPE `get` answers it — deliberately including `get`'s
+// omission of kind/label/preview, so swapping the seal's source of truth changes what it returns by nothing.
+function metaOfPlanes(runId: string, tenant: string, header: PlaneRow, planes: PlaneRow[]): TrajectoryMeta {
+  return {
+    runId,
+    tenant,
+    source: header.source_first as TrajectoryMeta["source"],
+    eventCount: planes.reduce((sum, p) => sum + Number(p.event_count_first), 0),
+    sealedAt: header.sealed_at_first,
+    ...(header.owner_first ? { owner: header.owner_first } : {}),
+  };
 }
 
 interface RunRow {
@@ -204,7 +245,14 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     const sealedAt = new Date().toISOString();
     const body = sealBody(input);
     const count = body.spans?.length ?? body.events.length;
-    const existing = await this.get(input.tenant, input.runId);
+    // Body-free: this call decides a set membership and a tenant, and both are answerable without a single
+    // event travelling. See `planes`.
+    const planes = await this.planes(input.runId);
+    const headerPlane = planes[0];
+    const existing =
+      headerPlane !== undefined && headerPlane.tenant_first === input.tenant
+        ? { planes, meta: metaOfPlanes(input.runId, input.tenant, headerPlane, planes) }
+        : undefined;
     const fallback = {
       runId: input.runId,
       tenant: input.tenant,
@@ -218,15 +266,12 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     };
     if (existing) {
       // First seal per emitter wins — evidence is never rewritten; a new emitter is a new plane.
-      if (existing.segments.some((s) => s.emitter === emitter)) return { ...existing.meta, created: false };
-    } else {
-      // No trajectory OR another workspace owns the id: a cross-tenant read returns undefined, so probe the
-      // id itself before claiming it — never write a second tenant's row under the same run.
-      const owned = await this.select<{ run_id: string }>(
-        `SELECT run_id FROM ${this.table()} WHERE run_id = {runId:String} LIMIT 1`,
-        { runId: input.runId },
-      );
-      if (owned.length > 0) return { ...fallback, created: false };
+      if (existing.planes.some((p) => planeEmitter(p) === emitter)) return { ...existing.meta, created: false };
+    } else if (headerPlane !== undefined) {
+      // Rows exist under this id but the header is another workspace's: a cross-tenant read answers
+      // undefined, so never write a second tenant's row under the same run. The one read above already
+      // established this — the separate existence probe it used to need is gone.
+      return { ...fallback, created: false };
     }
     const row = {
       run_id: input.runId,
@@ -243,6 +288,9 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       label: input.label ?? "",
       preview: input.preview ?? "",
       attempt_id: input.attemptId ?? "",
+      // Derived from the body in the row beside it, by the one function every impl seals through — '' when
+      // the body would not project, which the read reports as unknown rather than as zero.
+      usage: body.usage !== undefined ? JSON.stringify(body.usage) : "",
     };
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
     if (!existing) return { ...fallback, created: true };
@@ -338,6 +386,20 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     };
   }
 
+  // The Postgres twin, over the body-free plane read: emitters and summaries, no `argMin(body, …)` anywhere
+  // in the statement. That absence IS the feature — see `TrajectoryUsage`.
+  async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
+    const planes = await this.planes(runId);
+    const header = planes[0];
+    if (!header || header.tenant_first !== tenant) return { kind: "absent" };
+    // The same plane `get().events` would have come from, resolved by the shared predicate rather than by a
+    // second spelling of the order (L3).
+    const emitter = executionEmitterOf(planes.map(planeEmitter));
+    const plane = planes.find((p) => planeEmitter(p) === emitter);
+    if (!plane || plane.usage_first === "") return { kind: "unknown", reason: "sealed_before_derivation" };
+    return { kind: "derived", usage: RunUsageSummarySchema.parse(JSON.parse(plane.usage_first)) };
+  }
+
   async list(
     tenant: string,
     opts?: { limit?: number; cursor?: string; viewer?: string; kind?: string },
@@ -417,8 +479,25 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(kind, sealed_at) AS kind_first,
               argMin(label, sealed_at) AS label_first,
               argMin(preview, sealed_at) AS preview_first,
+              argMin(usage, sealed_at) AS usage_first,
               min(sealed_at) AS sealed_at_first
        FROM ${this.table()} WHERE ${where} GROUP BY run_id, emitter`;
+  }
+
+  // The planes of ONE trajectory without their bodies — emitters, counters, and the summaries derived at
+  // seal. `seal` used to answer "has this emitter sealed already?" by calling `get`, which aggregates
+  // `argMin(body, sealed_at)` over every plane: appending one segment to a long-horizon run re-read the
+  // ENTIRE trajectory, first into ClickHouse's memory and then into ours, to decide a set membership. Two
+  // callers now share one body-free read, and it answers the cross-tenant probe as well — so the extra
+  // `SELECT run_id … LIMIT 1` that used to follow it is gone with the read that needed it.
+  private planes(runId: string): Promise<PlaneRow[]> {
+    return this.select<PlaneRow>(
+      `SELECT run_id, emitter, tenant_first, source_first, event_count_first, owner_first, kind_first,
+              label_first, preview_first, usage_first, sealed_at_first
+       FROM (${this.perEmitterSql("run_id = {runId:String}")})
+       ORDER BY sealed_at_first ASC, emitter ASC`,
+      { runId },
+    );
   }
 
   private expiredRunsSql(): string {

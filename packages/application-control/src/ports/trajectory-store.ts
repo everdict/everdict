@@ -2,13 +2,14 @@ import {
   BadRequestError,
   EVERDICT_ATTR,
   OTEL_RESOURCE,
+  type RunUsageSummary,
   TRACE_PLANE,
   type TraceEvent,
   type TraceSpan,
   newSpanId,
   traceIdForRun,
 } from "@everdict/contracts";
-import { eventsToSpans, previewFromEvents } from "@everdict/domain";
+import { eventsToSpans, previewFromEvents, spansToEvents, usageFromTrace } from "@everdict/domain";
 
 // The OWNED trajectory record (execution-model §6 / P5, native-observability rung 1): what happened, kept by
 // US — the copy every judgment stands on ("never judge what you don't retain"). Rung 1 collapses live-append
@@ -109,15 +110,23 @@ export function defaultEmitter(source: TrajectoryMeta["source"]): string {
 // agent's trace as what a judge reads.
 export const EXECUTION_EMITTERS: readonly string[] = ["run", "import", "otlp"];
 
-// The execution's own record among the segments — the source of `SealedTrajectory.events`. Shared by every
-// store impl so "what a judge reads" cannot drift between Postgres, ClickHouse and in-memory. Falls back to
-// the header segment: a trajectory made only of service planes still reads as something.
-export function executionSegment(segments: TrajectorySegment[]): TrajectorySegment | undefined {
+// WHICH emitter carries the execution's own evidence, decided from the emitter NAMES alone — the half of
+// `executionSegment` that a caller holding no bodies still needs. `usage()` has to answer for exactly the
+// plane `get().events` would have come from, and it must do that without reading a body; spelling the
+// resolution order a second time there would have diverged the moment either list grew (L3).
+// Falls back to the first emitter offered: a trajectory made only of service planes still reads as something.
+export function executionEmitterOf(emitters: readonly string[]): string | undefined {
   for (const emitter of EXECUTION_EMITTERS) {
-    const segment = segments.find((s) => s.emitter === emitter);
-    if (segment) return segment;
+    if (emitters.includes(emitter)) return emitter;
   }
-  return segments[0];
+  return emitters[0];
+}
+
+// The execution's own record among the segments — the source of `SealedTrajectory.events`. Shared by every
+// store impl so "what a judge reads" cannot drift between Postgres, ClickHouse and in-memory.
+export function executionSegment(segments: TrajectorySegment[]): TrajectorySegment | undefined {
+  const emitter = executionEmitterOf(segments.map((s) => s.emitter));
+  return emitter === undefined ? undefined : segments.find((s) => s.emitter === emitter);
 }
 
 // The orchestrator's account of WHERE the execution ran — a plane of its own, deliberately NOT in
@@ -415,10 +424,17 @@ export interface SealInput {
 
 // The one place the body rule is enforced, so every store impl agrees on what it was handed. Throws rather
 // than picking a winner: a caller that offers both has a bug the ledger must not paper over.
+//
+// It also DERIVES the body's usage, here, because this is the one function every impl already routes through
+// and the events are in hand exactly once — at the write. See `TrajectoryUsage` for why the reader may not
+// do this itself.
 export function sealBody(input: SealInput): {
   format: TrajectoryBodyFormat;
   events: TraceEvent[];
   spans?: TraceSpan[];
+  // The execution economics of THIS body. Absent = the body could not be projected, which the ledger records
+  // as unknown rather than as zero — see `usageOfBody`.
+  usage?: RunUsageSummary;
 } {
   if (input.spans !== undefined && input.events !== undefined)
     throw new BadRequestError(
@@ -426,10 +442,55 @@ export function sealBody(input: SealInput): {
       { runId: input.runId },
       "a trajectory seal carries events or spans, never both",
     );
-  if (input.spans !== undefined) return { format: "spans", events: [], spans: input.spans };
-  if (input.events !== undefined) return { format: "events", events: input.events };
+  if (input.spans !== undefined) {
+    const usage = usageOfBody(input.spans);
+    return { format: "spans", events: [], spans: input.spans, ...(usage !== undefined ? { usage } : {}) };
+  }
+  if (input.events !== undefined) {
+    const usage = usageFromTrace(input.events);
+    return { format: "events", events: input.events, usage };
+  }
   throw new BadRequestError("BAD_REQUEST", { runId: input.runId }, "a trajectory seal carries a body");
 }
+
+// A spans body is metered over the same projection a judge reads, so a span-sealed trajectory and its
+// event-sealed twin report the same cost. A body that will not project yields UNDEFINED, never zero: the
+// naming decorator states the rule this follows — a malformed body must not fail a seal, because evidence
+// retention is the contract and metering is a courtesy to the reader. Zero would be worse than silence here;
+// it is a billing-adjacent number, and "we could not derive it" has to stay distinguishable from "it cost
+// nothing" all the way to the surface (L2).
+function usageOfBody(spans: TraceSpan[]): RunUsageSummary | undefined {
+  try {
+    return usageFromTrace(spansToEvents(spans));
+  } catch {
+    return undefined;
+  }
+}
+
+// ── WHAT A TRAJECTORY COST, ANSWERED WITHOUT READING IT ──────────────────────────────────────────────
+//
+// The run DETAIL path used to fetch the WHOLE sealed trajectory and fold `usageFromTrace` over it to produce
+// five numbers. For a long-horizon run that is hundreds of megabytes of jsonb through pg's `JSON.parse` and
+// then through Zod's array parse — a second complete copy — so that a browser could render a cost badge. The
+// heap it took was not the tenant's to spend: the OOM killed the shared API process and with it every other
+// workspace's in-flight request.
+//
+// So the WRITER derives it, once, where the events are already in hand (L3), and the reader asks for the
+// answer instead of for the evidence.
+//
+// THREE ANSWERS, because a row sealed before this existed is not a row that cost nothing (L2). Writing a zero
+// into those rows would be the "an absence is not a clean bill of health" defect applied to a billing-adjacent
+// number — invented evidence, in the one place a reader would never think to doubt it.
+// `scripts/live/backfill-trajectory-usage.mjs` repays them through the SAME derivation, one bounded row at a
+// time; until it has, they say plainly that nobody knows.
+export type TrajectoryUsage =
+  | { kind: "derived"; usage: RunUsageSummary }
+  // No trajectory with this id in this workspace — the same answer a foreign tenant's id gets, so the union
+  // leaks no more existence than `get` does.
+  | { kind: "absent" }
+  // Sealed before the derivation existed, or from a body that would not project. Never folded into `derived`
+  // with zeros, and never into `absent`: the evidence IS here, and what it cost is what we cannot say.
+  | { kind: "unknown"; reason: "sealed_before_derivation" };
 
 export interface TrajectoryStore {
   // Seal one emitter's contribution to a run's trajectory. IDEMPOTENT by (runId, emitter) — the first seal
@@ -463,6 +524,12 @@ export interface TrajectoryStore {
     tenant: string,
     opts?: { limit?: number; cursor?: string; viewer?: string; kind?: string },
   ): Promise<TrajectoryListResult>;
+  // The EXECUTION plane's economics, derived at seal and read back WITHOUT a body — see `TrajectoryUsage`
+  // for why the alternative was an availability defect. Every impl resolves which plane that is with
+  // `executionEmitterOf` over the emitter NAMES, so this answer and `get().events` can never be about
+  // different segments. Declared on the port, not left to the impls: a decorator that forgot to forward it
+  // would report every trajectory as costing nothing.
+  usage(tenant: string, runId: string): Promise<TrajectoryUsage>;
   // Ingestion accounting (N3's admission lane): what this workspace sealed since `sinceIso`. The STORE is
   // the meter — no separate counter to drift or lose on restart; the door's quota check reads this.
   ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }>;

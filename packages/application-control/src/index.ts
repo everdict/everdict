@@ -29,6 +29,7 @@ export type { EventConsumerStateStore } from "./ports/event-consumer-store.js";
 export {
   defaultEmitter,
   EXECUTION_EMITTERS,
+  executionEmitterOf,
   executionSegment,
   INFRA_EMITTER,
   placementSpan,
@@ -47,6 +48,7 @@ export {
   trajectorySegmentsWire,
   type TrajectorySegmentWire,
   type TrajectoryStore,
+  type TrajectoryUsage,
 } from "./ports/trajectory-store.js";
 // The seal-time naming choke point — every sealed trajectory gets the line that tells it from its siblings.
 export { NamingTrajectoryStore } from "./ports/naming-trajectory-store.js";

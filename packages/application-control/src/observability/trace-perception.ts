@@ -27,6 +27,7 @@ export function withTracePerception(
     // Options forwarded, never re-spelled: dropping `attemptId` here would silently turn an exact-identity
     // read back into the clock-resolved one, which is the very substitution that read exists to refuse.
     get: (tenant, runId, opts) => store.get(tenant, runId, opts),
+    usage: (tenant, runId) => store.usage(tenant, runId),
     list: (tenant, opts) => store.list(tenant, opts),
     ingestedSince: (tenant, sinceIso) => store.ingestedSince(tenant, sinceIso),
     deleteOlderThan: (cutoffIso) => store.deleteOlderThan(cutoffIso),
