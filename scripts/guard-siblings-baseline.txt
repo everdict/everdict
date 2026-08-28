@@ -2,23 +2,4 @@
 # does NOT carry a guard its siblings in the same resource do: <resource>	<transport>	<door>	<missing,…>
 # Every line is a door somebody has to look at. New lines are refused; removed ones must be regenerated here
 # in the same change, so the number never drifts from what the tree carries.
-agent	HTTP	DELETE /agents/:id	ownership
-api-key	HTTP	DELETE /keys/:id	ownership
-browser-profile	HTTP	DELETE /browser-profiles/:id	ownership
-browser-profile	HTTP	PATCH /browser-profiles/:id	ownership
-browser-profile	HTTP	POST /browser-profiles/:id/capture	ownership
-browser-profile	HTTP	POST /browser-profiles/:id/restore	ownership
-browser-session	HTTP	DELETE /browser-sessions/:id	ownership
-browser-session	HTTP	POST /browser-sessions/:id/ticket	ownership
-comment	HTTP	DELETE /comments/:id	ownership
-dataset	HTTP	DELETE /datasets/:id	ownership
-dataset	HTTP	POST /datasets/:id/versions/:version/attest	ownership
-model	HTTP	DELETE /models/:id	ownership
-runner	HTTP	DELETE /runners/:id	ownership
-runner	HTTP	DELETE /workspace/runners/:id	ownership
-runner	MCP	revoke_workspace_runner	ownership
-runtime	HTTP	POST /runtimes/:id/versions/:version/control	ownership
-scorecard	HTTP	DELETE /scorecards/:id	ownership
-team	HTTP	GET /teams/:id	visibility
-team	HTTP	GET /teams/:id/members	visibility
-team	MCP	get_team	visibility
+

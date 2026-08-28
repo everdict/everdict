@@ -42,20 +42,25 @@ const GUARDS = {
   // TYPE reference kept the door looking guarded. A guard nobody saw fail is a comment (rule `testing`), and
   // this repository has shipped two scanner drafts green over the defect they were written for.
   visibility: [
-    /(assertEntityVisible|assertTeamVisible|keepVisible|visibleTeamsFor|ownedByVisibleTeam|scorecardOwner|assertBatchReachable)\s*\(/,
+    /(assertEntityVisible|assertTeamVisible|keepVisible|visibleTeamsFor|ownedByVisibleTeam|scorecardOwner|assertBatchReachable|canSeeTeam)\s*\(/,
   ],
   // A door may carry the answer itself (`teamOfEntity(...)`, `runForTeam(...)`) or delegate to a core that
   // authorizes inside — the delete cores are creator-or-admin, which is STRICTER than the team rule, and the
   // version-tag and move cores resolve the owner themselves. Both count: the rule asks that the door not
   // decide without asking, not that it ask in one particular place.
   ownership: [
-    /(teamOfEntity|teamOfVersion|runForTeam|teamForNew|setVersionTags|moveCapabilityToTeam|scorecardOwner|assertBatchReachable|plain|delete[A-Z]\w*Version|creatorOf)\s*\(/,
+    /(teamOfEntity|teamOfVersion|runForTeam|teamForNew|setVersionTags|moveCapabilityToTeam|scorecardOwner|assertBatchReachable|plain|delete[A-Z]\w*Versions?|creatorOf)\s*\(/,
     // …or the scope handed DIRECTLY: `gate(principal, "x:write", owner)` / `authorize(principal, "x", scope)`
     // / `run(principal, "x", fn, owner)`. A door that resolved the owner itself is guarded just as much as one
     // that called a helper, and counting only helpers would flag `POST /campaigns/:id/settle`, which does it
     // inline.
     /\b(gate|authorize)\(\s*principal\s*,\s*"[a-z:_]+"\s*,/,
     /\brun\(\s*\n?\s*principal\s*,[\s\S]{0,400}?,\s*owner\s*,?\s*\)/,
+    // …or the door HANDED the principal to a core that decides — `attestDatasetConstitution(deps, principal,
+    // …)` is admin-gated inside the action so both transports inherit one rule, and `scorecards.delete({
+    // principal, id })` is creator-or-admin in the service, which the route's own comment states. Delegation
+    // is asking; what the rule refuses is deciding WITHOUT asking.
+    /\battestDatasetConstitution\s*\(|\.\w+\(\s*\{\s*principal\b/,
   ],
 };
 
@@ -67,7 +72,54 @@ const OTHER_MODEL = new Map([
   ["project", "same as issue — not roster-gated on write"],
   ["initiative", "same as issue — not roster-gated on write"],
   ["cycle", "belongs to a team by construction; its routes resolve the team from the cycle"],
+  ["api-key", "self-scoped: each user issues and revokes only their OWN subject's keys"],
+  ["browser-session", "personal / self-scoped (owner = subject, like connected accounts)"],
+  [
+    "browser-profile",
+    "dual-scoped private|workspace, gated per visibility INSIDE the service (private = creator-only 404, workspace = creator-or-admin 403)",
+  ],
+  ["comment", "author-or-admin on delete; a comment belongs to the resource it is on, not to a team"],
+  ["runner", "a paired DEVICE, workspace-scoped — it carries no teamId at all"],
 ]);
+
+// ── AN ADMIN-ONLY ACTION IS ITS OWN, STRONGER RULE ─────────────────────────────────────────────────
+//
+// `docs/auth.md`: "An ADMIN reaches every team (one they are not on would otherwise be un-administrable)."
+// So a door gated on an admin-only action does not owe a team scope — the role already answers a strictly
+// harder question. `POST /runtimes/:id/versions/:version/control` is the case that taught this: its
+// vocabulary is `stopWorkload` / `reclaimIdle` / `cordonNode`, it looked like the wave's other findings, and
+// it is not one.
+//
+// READ from the matrix, never copied: a second spelling of who-may-do-what diverges the first time somebody
+// edits one of them (rule `protocol` L3). The parse is deliberately narrow — the admin arm of
+// `ROLE_PERMISSIONS` minus everything viewer/member also hold — and it FAILS LOUDLY if the file's shape
+// changes, because a silently empty set would quietly widen this whole check.
+function adminOnlyActions() {
+  const file = path.join(root, "packages", "domain", "src", "auth", "authz.ts");
+  const src = readFileSync(file, "utf8");
+  const arm = (role) => {
+    const m = src.match(new RegExp(String.raw`\n  ${role}: new Set<Action>\(\[([\s\S]*?)\n  \]\)`));
+    if (!m)
+      throw new Error(
+        `check-guard-siblings: cannot read the ${role} arm of ROLE_PERMISSIONS — the role matrix moved, and guessing would widen this check`,
+      );
+    return new Set([...m[1].matchAll(/"([a-z_]+:[a-z_]+)"/g)].map((x) => x[1]));
+  };
+  const admin = arm("admin");
+  for (const lower of [arm("viewer"), arm("member")]) for (const a of lower) admin.delete(a);
+  if (admin.size === 0)
+    throw new Error(
+      "check-guard-siblings: the admin-only set came out empty — refusing to run over a matrix I cannot read",
+    );
+  return admin;
+}
+const ADMIN_ONLY = adminOnlyActions();
+
+// The actions a door gates on, in either transport's spelling.
+const actionsOf = (body) =>
+  [...body.matchAll(/(?:gate|authorize|run|runForTeam)\(\s*\n?\s*(?:principal|ctx)\s*,\s*"([a-z_]+:[a-z_]+)"/g)].map(
+    (m) => m[1],
+  );
 
 const files = [];
 (function walk(dir) {
@@ -135,8 +187,12 @@ for (const [resource, doors] of byResource) {
     const carries = (d) => GUARDS[kind].some((re) => re.test(d.body));
     const carrying = reads.filter(carries);
     if (carrying.length === 0) continue; // this resource does not use this guard — not a deviation
-    for (const door of reads)
+    for (const door of reads) {
+      // An admin-only action already governs every team; asking for a scope on top would be asking for less.
+      const gated = actionsOf(door.body);
+      if (gated.length > 0 && gated.every((a) => ADMIN_ONLY.has(a))) continue;
       if (!carries(door)) observed.push(`${resource}\t${door.transport}\t${door.name}\t${kind}`);
+    }
   }
 }
 observed.sort();

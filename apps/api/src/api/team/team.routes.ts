@@ -255,6 +255,19 @@ export function registerTeamRoutes(app: FastifyInstance, deps: ServerDeps): void
     if (!principal) return reply;
     try {
       gate(principal, "teams:read");
+      // A private team's ROSTER is the thing being hidden, one field over: `GET /teams/:id` already answers
+      // ABSENT to a non-member, and this door said 200 with the names on it (arch-review 119). Same answer,
+      // same reason — a 403 would confirm the team exists.
+      const team = await deps.teamService.get(principal.workspace, req.params.id);
+      if (
+        !(await deps.teamService.canSeeTeam(
+          principal.workspace,
+          team.id,
+          principal.subject,
+          principal.roles.includes("admin"),
+        ))
+      )
+        return reply.code(404).send({ code: "NOT_FOUND", message: "Team not found." });
       return reply.send(await deps.teamService.listMembers(principal.workspace, req.params.id));
     } catch (err) {
       return sendError(reply, err);

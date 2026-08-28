@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, ok, run } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 
 // MCP twin of the team routes (BFF↔MCP parity). An agent triaging the tracker needs to know which team owns
 // what before it files anything — `list_teams` is how it finds the prefix its issue will be named under.
@@ -47,6 +47,10 @@ export function registerTeamTools(server: McpServer, ctx: McpToolContext): void 
     (a) =>
       run(principal, "teams:read", async () => {
         const team = await teams.get(ws, a.id);
+        // The guard the HTTP twin carries: a private team a non-member asks for reads as ABSENT, never as
+        // forbidden. BFF↔MCP parity is structural, and this door had none (arch-review 119).
+        if (!(await teams.canSeeTeam(ws, team.id, principal.subject, principal.roles.includes("admin"))))
+          return fail("NOT_FOUND: Team not found.");
         return ok({ ...team, summary: await teams.summary(ws, team.id) });
       }),
   );

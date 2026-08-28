@@ -173,6 +173,12 @@ describe("[R119 COUNTEREXAMPLE] a private team's asset is not readable through t
     expect(res.statusCode, "a private team's runtime was inspected over HTTP").toBe(404);
   });
 
+  // ⚠️ `POST /runtimes/:id/versions/:version/control` LOOKS like one of these and is not. Its vocabulary is
+  // `stopWorkload` / `reclaimIdle` / `cordonNode` — a live cluster drain — and it is gated on
+  // `runtimes:control`, which the role matrix makes ADMIN-ONLY. An admin reaches every team by design
+  // (docs/auth.md), so the role already answers a strictly harder question and a team scope on top would be
+  // asking for less. Two cases here asserted it refused a member and were removed: the member never reaches
+  // it, so what they measured was the role gate wearing this file's name.
   it("GET /harness-templates/:id refuses — its per-version sibling already does", async () => {
     const { templates } = await world();
     const res = await http({ harnessTemplates: templates }).inject({
