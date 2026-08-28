@@ -111,6 +111,21 @@ See skill `ci`.
   KILLED run can leave a clean tree over a mutated `dist`; `dist/` is gitignored so it cannot be committed
   (unlike the old failure mode), and the debt is recorded in `.git/everdict-mutation-stale-dist`, paid by
   SIGINT/SIGTERM handlers and, failing that, by the next run before it does anything else.
+  ⚠️ **A RED TEST PROCESS IS NOT A RED ASSERTION** (arch-review 115). This runner's whole output is the claim
+  "the suite went red BECAUSE the protocol was removed", and `vitest exit != 0` is the only evidence it has —
+  so every other way a suite can go red is counted as enforcement. Three of them were live: a pre-test build
+  that failed (nothing compiled, so of course it is red), a restore-build that failed while the marker was
+  cleared anyway (the NEXT rung's suite loads the previous rung's mutated `dist`), and a `pnpm -F <renamed>
+  build` that matches no package and **exits 0** (nothing is rebuilt and the silence reads as success). Builds
+  are consumed now — `rebuildOrThrow` — a failure is a GATE failure rather than a mutation result, the marker
+  survives it, and every rung's build target is checked against the real workspace at startup.
+  ⚠️ **AND THE DEFERRED REBUILD IS OWED BY A PACKAGE, NOT BY AN ARRAY INDEX.** The first version of the
+  build-count optimization decided the group boundary from the next DECLARED rung; a rung that skips for
+  missing infrastructure, or whose target line is gone, returns from above the `try` and never settles the
+  debt. Five rungs skip in the core CI job, and simulating the real ordering put every one of them directly
+  after a deferred build — so the run that reported "231 checked, 0 holes" did so with a mutated dist standing
+  at five boundaries. The debt is explicit state settled before the next rung that builds something else,
+  runnable or not, and after the loop whatever the exit path.
   ⚠️ Its options are now REFUSED when unrecognised. `--filter <name>` — a plausible spelling of `--only`, and
   not a flag this script has — was accepted in silence, so one rung became the full suite: ninety minutes,
   files mutated while the author was editing them, and an answer to a question nobody asked. Same shape as

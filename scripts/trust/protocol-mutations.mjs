@@ -429,6 +429,9 @@ const MUTATIONS = [
     file: "packages/application-control/src/run/run-service.ts",
     from: '    if (worksRead.kind === "unknown") {',
     to: '    if (false && worksRead.kind === "unknown") {',
+    // Defeating the narrowing makes `worksRead.reason` a type error, so the TYPE SYSTEM refuses to let this
+    // guard be removed — enforcement stronger than a red suite, and it has to be declared because an
+    // uncompilable replacement otherwise reads as a rung that tests nothing (arch-review 115).
     suite: ["--root", "apps/api", "src/core/run/unknown-propagation.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -2674,11 +2677,83 @@ for (let i = 0; i < ARGS.length; i++) {
   i++; // skip the value belonging to this flag
 }
 const STALE_MARK = `${process.cwd()}/.git/everdict-mutation-stale-dist`;
-const rebuild = (target) => spawnSync("pnpm", ["-F", target, "build"], { stdio: "ignore" });
+
+// ── A BUILD THAT FAILED IS NOT A BUILD (arch-review 115) ────────────────────────────────────────────
+//
+// `spawnSync` returns an outcome and the first version of this discarded it at all five call sites. That is
+// `Promise<void>` in shell form, and it corrupts the ONE thing this gate produces: if a restore-build fails,
+// the marker is cleared anyway, the next rung's suite loads the previous rung's mutated `dist`, it goes red,
+// and the runner records that rung's protocol as ENFORCED. A pre-test build that fails does the same — vitest
+// exits nonzero because nothing compiled, and nonzero is the only thing this loop reads.
+//
+//     the test process was red   ≠   the protocol assertion made it red
+//
+// So every build is consumed, and a failure is an INFRASTRUCTURE failure that stops the run — never a
+// mutation result. This gate is a required CI step; a certificate it cannot justify is worse than no gate.
+// ⚠️ AND THE TARGET HAS TO EXIST. `pnpm -F @everdict/typo build` matches no package and exits **0** — so a
+// renamed package would leave every rung that names the old one running its suite against a dist nobody
+// rebuilt, while `rebuildOrThrow` accepted the silence as success. Same class as the failure above, one level
+// down, and it cannot be seen from the exit code, so the names are checked once against the real workspace.
+const WORKSPACE_PACKAGES = new Set(
+  execFileSync("bash", ["-c", "cat packages/*/package.json apps/*/package.json 2>/dev/null"], { encoding: "utf8" })
+    .split("\n")
+    .map((line) => /^\s*"name":\s*"([^"]+)"/.exec(line)?.[1])
+    .filter((name) => name !== undefined),
+);
+const unknownTargets = [...new Set(MUTATIONS.map((m) => m.build).filter(Boolean))].filter(
+  (target) => !WORKSPACE_PACKAGES.has(target),
+);
+if (unknownTargets.length > 0) {
+  console.error(`✖ ${unknownTargets.length} rung(s) name a build target no workspace package has:`);
+  for (const target of unknownTargets) console.error(`  ${target}`);
+  console.error("  `pnpm -F <unmatched> build` exits 0, so these would run their suites against a stale dist.");
+  process.exit(2);
+}
+
+function rebuildOrThrow(target) {
+  const result = spawnSync("pnpm", ["-F", target, "build"], { stdio: "ignore" });
+  if (result.error !== undefined || result.signal !== null || result.status !== 0) {
+    throw new Error(
+      `rebuilding ${target} failed (${result.error?.message ?? `signal ${result.signal ?? "-"} / status ${result.status ?? "-"}`}).
+  This is a GATE FAILURE, not a mutation result: every suite after this point would load a stale dist.
+  The stale-dist marker is kept, so the next run rebuilds before it does anything else.`,
+    );
+  }
+}
+
+// ── THE DEFERRED REBUILD IS OWED BY A PACKAGE, NOT BY AN ARRAY INDEX (arch-review 115) ──────────────
+//
+// The first version decided the group boundary from `ORDERED[index + 1]?.build` — the next DECLARED rung.
+// A rung that SKIPS for missing infrastructure, or whose target line is gone, `continue`s from above the
+// `try`, so it never reaches the `finally` that would settle the debt, and it is not a boundary either. Five
+// rungs skip in the core CI job today, and a simulation over the real ordering put every one of them
+// directly after a deferred build: `@everdict/application-control`, `@everdict/db` ×3, `@everdict/storage`.
+// So the run that reported "231 checked, 0 holes" did so with a mutated dist standing at five boundaries.
+//
+// The debt belongs to the PACKAGE whose dist is dirty. It is settled before the next rung that builds
+// something else — runnable or not — and after the loop, whatever the exit path.
+let pendingRestore;
+function settlePending(nextTarget) {
+  if (pendingRestore === undefined || pendingRestore === nextTarget) return;
+  rebuildOrThrow(pendingRestore); // throws → the marker below is NOT cleared → the next run heals first
+  pendingRestore = undefined;
+  rmSync(STALE_MARK, { force: true });
+}
+
 if (existsSync(STALE_MARK)) {
   const stale = readFileSync(STALE_MARK, "utf8").split("\n").filter(Boolean);
   console.log(`↻ healing ${stale.length} package(s) whose dist a killed run left mutated: ${stale.join(", ")}`);
-  for (const target of stale) rebuild(target);
+  // A heal that fails keeps the marker and stops the run: mutating on top of somebody else's stale dist is
+  // exactly the state this marker exists to prevent. A marker naming a package that no longer EXISTS is the
+  // same hazard wearing the pnpm-exits-0 disguise — the dist is still dirty and nothing would rebuild it.
+  const unknownStale = stale.filter((target) => !WORKSPACE_PACKAGES.has(target));
+  if (unknownStale.length > 0) {
+    console.error(`✖ the stale-dist marker names ${unknownStale.join(", ")}, which no workspace package has.`);
+    console.error("  That dist cannot be rebuilt by name, so nothing here may run. Rebuild by hand and remove");
+    console.error(`  ${STALE_MARK}.`);
+    process.exit(2);
+  }
+  for (const target of stale) rebuildOrThrow(target);
   rmSync(STALE_MARK, { force: true });
 }
 
@@ -2756,9 +2831,29 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
+// ── AND THE TREE MUST COMPILE BEFORE ANY OF THIS MEANS ANYTHING (arch-review 115) ──────────────────
+//
+// A rung declaring `compilerEnforced` says "removing this protocol is a type error". That reading is only
+// available if the tree compiled BEFORE the mutation — otherwise an unrelated break (a port that grew a
+// method its test doubles have not learned, say) reports every rung in that package as either a compiler
+// catch or a hole, and both are lies about the protocol. Seen exactly that way: a port change of mine put
+// 13 rungs into "does not compile" in one run.
+//
+// So the baseline is established once, and a tree that does not build stops the gate here — where the
+// message is about the tree, not about somebody's protocol.
+for (const target of [...new Set(SELECTED.map((m) => m.build).filter(Boolean))]) {
+  const baseline = spawnSync("pnpm", ["-F", target, "build"], { stdio: "ignore" });
+  if (baseline.status !== 0 || baseline.error !== undefined || baseline.signal !== null) {
+    console.error(`✖ ${target} does not build BEFORE any mutation — fix the tree first.`);
+    console.error("  Every rung in that package would otherwise report a compile failure as its own result.");
+    process.exit(2);
+  }
+}
+
 let holes = 0;
 let skipped = 0;
-for (const [index, mutation] of ORDERED.entries()) {
+let compilerCaught = 0;
+for (const mutation of ORDERED) {
   // ── A RUNG WHOSE SUITE NEEDS REAL INFRASTRUCTURE (arch-review 66) ───────────────────────────────
   //
   // Some protocols live in the ADAPTER — a SQL join, a constraint, a conditional UPDATE's WHERE clause — and
@@ -2770,6 +2865,9 @@ for (const [index, mutation] of ORDERED.entries()) {
   // is not the same as covered, and the summary says so rather than letting the total imply it. The required
   // `trust fast (real Postgres)` check runs the scenario itself on every push; what is deferred here is the
   // neutralization, not the assertion.
+  // BEFORE anything this rung does, including deciding not to run: a rung that skips or has no target still
+  // moves the run past the package whose dist is dirty, and the suite after it must not load that dist.
+  settlePending(mutation.build);
   const missing = (mutation.requiresEnv ?? []).filter((k) => !process.env[k]);
   if (missing.length > 0) {
     console.log(`○ SKIPPED — ${mutation.name}: needs ${missing.join(", ")}`);
@@ -2786,7 +2884,36 @@ for (const [index, mutation] of ORDERED.entries()) {
   try {
     interrupted = { file: mutation.file, original, build: mutation.build };
     writeFileSync(mutation.file, original.replace(mutation.from, mutation.to));
-    if (mutation.build) rebuild(mutation.build);
+    // ── A MUTATED TREE THAT DOES NOT COMPILE IS A THIRD OUTCOME (arch-review 115) ──────────────
+    //
+    // A cross-package rung's suite imports this package from `dist` (`exports` points there; no vitest
+    // alias to src), so the build is load-bearing — and some neutralizations cannot compile at all.
+    // `if (false && worksRead.kind === "unknown")` defeats the narrowing the block below relies on, which
+    // is the type system REFUSING to let that guard be removed: enforcement, and stronger than a red suite.
+    //
+    // Ignoring the failure — as this did before — runs the suite against whatever `dist` still holds. In
+    // the optimized ordering that is the PREVIOUS rung's mutation, so the suite goes red for somebody
+    // else's reason and this rung is recorded as enforced. That false certificate is not hypothetical: it
+    // is what the 28-minute run reporting "231 checked, 0 holes" produced for this very rung.
+    //
+    // So the outcome is named, and a rung must DECLARE that its neutralization is type-enforced. Undeclared
+    // and uncompilable is a HOLE: a replacement nobody can build tests no suite, and the author has to say
+    // which of the two it is.
+    if (mutation.build) {
+      const built = spawnSync("pnpm", ["-F", mutation.build, "build"], { stdio: "ignore" });
+      if (built.status !== 0 || built.error !== undefined || built.signal !== null) {
+        if (mutation.compilerEnforced === true) {
+          console.log(`✓ ${mutation.name} — the mutated tree does not COMPILE, as it must`);
+          compilerCaught += 1;
+        } else {
+          console.error(`✖ ${mutation.name}: the mutated tree does not compile, so its suite never ran.`);
+          console.error("  Rewrite the replacement so it builds, or declare `compilerEnforced: true` if the");
+          console.error("  type system is what refuses to let this protocol be removed.");
+          holes += 1;
+        }
+        continue; // the `finally` still restores the source and records the dist debt
+      }
+    }
     const run = spawnSync("npx", ["vitest", "run", ...mutation.suite], {
       stdio: "ignore",
       env: { ...process.env, ...(mutation.env ?? {}) },
@@ -2800,17 +2927,19 @@ for (const [index, mutation] of ORDERED.entries()) {
   } finally {
     writeFileSync(mutation.file, original);
     interrupted = undefined;
-    // Only at the boundary: the next rung in this group compiles the same package from its own mutated source
-    // before its suite runs, so rebuilding here would be discarded unread.
-    const nextBuild = ORDERED[index + 1]?.build;
-    if (mutation.build && nextBuild !== mutation.build) {
-      rebuild(mutation.build);
-      rmSync(STALE_MARK, { force: true });
-    } else if (mutation.build) {
+    // The source is back; the DIST still holds this rung's mutation. Record the debt unconditionally and let
+    // `settlePending` decide when to pay it — deriving the boundary here from the next declared rung is what
+    // let a skip swallow it (arch-review 115).
+    if (mutation.build) {
+      pendingRestore = mutation.build;
       writeFileSync(STALE_MARK, mutation.build);
     }
   }
 }
+
+// Whatever the exit path, the last group's dist goes back. `settlePending(undefined)` is the same transition
+// the loop makes — there is simply no next rung to compare against.
+settlePending(undefined);
 
 if (holes > 0) {
   console.error(`\n✖ ${holes} protocol(s) are not actually enforced by the suite that claims to enforce them.`);
@@ -2818,6 +2947,8 @@ if (holes > 0) {
 }
 console.log(
   `\n✓ every protocol mutation was caught (${ORDERED.length - skipped} checked${
+    compilerCaught > 0 ? `, ${compilerCaught} of them by the COMPILER rather than by a suite` : ""
+  }${
     skipped > 0 ? `, ${skipped} SKIPPED for missing infrastructure — not the same as covered` : ""
   }${only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``})`,
 );
