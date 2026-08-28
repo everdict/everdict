@@ -47,6 +47,19 @@ Non-default rules — see skill `foundation` for rationale.
   compile-time assertion is EXPORTED (`export type XDriftGuard = [AssertAssignable<…>, …]`) so the guard and
   the check coexist. ⚠️ After changing a compiler option, `pnpm typecheck` may pass from turbo's cache —
   confirm with `npx tsc --noEmit` in the package.
+- **A CONSUMER TYPECHECKS AGAINST `dist/*.d.ts`, SO A STALE `dist` IS YESTERDAY'S CONTRACT.** Every package
+  resolves its workspace deps through `exports` → `dist`, and `typecheck` only `dependsOn: ["^build"]`, which
+  turbo happily satisfies from cache. So adding a REQUIRED method to a port compiles fine in the port's own
+  package while every hand-written double in ANOTHER package still typechecks against the old declaration.
+  It cuts both ways: a `dist` built from a LATER commit makes a checkout report errors for code it does not
+  contain, which is how a bisect gets blamed on the wrong commit.
+  This happened twice in one session — `AgentRegistry.registerPreservingOwner` broke two `apps/agent` doubles,
+  `TrajectoryStore.usage` broke two `apps/api` doubles — and both times the working tree said green. Nine
+  ports currently carry hand-written doubles in more than one package, so it is the default hazard of
+  touching one rather than a rarity.
+  What answers the question is a build from CLEAN: `pnpm ci:commits` (a throwaway worktree per commit) or
+  `rm -rf packages/*/dist apps/*/dist && pnpm build`. An incremental `pnpm typecheck` in a long-lived working
+  tree is evidence about the contract that was BUILT, not the one in the file.
 - **Model a decision as a discriminated union, never `{ value?: T; ok: boolean }`.** A caller can read the
   value and never look at the flag — and will. Exhaustive `switch` on `kind` is the shape that cannot be
   half-consumed. See rule `protocol` L2.
