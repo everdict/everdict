@@ -309,6 +309,59 @@ describe("[R115 COUNTEREXAMPLE] adopting a candidate that lives only in _shared"
   });
 });
 
+// ── [R115] A REFUSED OWNER LEAVES THE AUTHORIZATION UNSPENT ────────────────────────────────────────
+//
+// `owner_moved` is a refusal, and a refusal that spent the authorization would be worse than no check: the
+// campaign could never be adopted again, by anybody, because the operation is single-use. The effect runs
+// BEFORE `markRegistered` for exactly this reason (arch-review 72), so the assertion is about the WORLD —
+// the operation is still `decided` and the honest retry, once the caller re-reads the owner, still works.
+describe("[R115 COUNTEREXAMPLE] a refused adoption can still be adopted", () => {
+  it("leaves the operation DECIDED and lets the corrected retry through", async () => {
+    const proof = proofFor(await measuredDigest());
+    const { store, current } = operations(proof);
+    const agents = new InMemoryAgentRegistry();
+    // The entity is team-b's NOW. The caller's gate saw team-a — which is the whole point: the two reads
+    // disagree, and only the write can tell.
+    //
+    // ⚠️ Registered directly under team-b rather than "moved": `AgentRegistry` has no `moveToTeam`, which is
+    // exactly what R77's own counterexample says (an optional call to a method that does not exist is a
+    // silent no-op, so it drives the transfer through the store instead). A fixture calling one here would
+    // have thrown rather than measured.
+    await agents.register("acme", { ...SPEC, version: "1.0.0" } as never, "alice", "team-b");
+
+    const service = buildCampaignAdoption({
+      operations: store,
+      agents,
+      harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
+    });
+    const request = {
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof,
+      candidate: candidateOf(proof),
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    };
+
+    // A CONFLICT naming the transfer — not whatever the next step happens to fail with. Without the
+    // refusal the store still writes nothing (that is the registry's guarantee), so the caller instead hits
+    // the read-back and gets `Harness a1@1.1.0 not found` from version resolution: a real failure, about the
+    // wrong thing, that reads as a broken adoption rather than a stale authorization. The registry keeps the
+    // WRITE honest; this keeps the ANSWER honest.
+    await expect(
+      service.adopt({ ...request, expectedOwnerTeamId: "team-a" }),
+      "a stale authorization was accepted",
+    ).rejects.toThrow(/changed teams/);
+    expect(current()?.state, "a refused adoption spent its authorization").toBe("decided");
+
+    // …and the caller, having re-read the owner, adopts.
+    expect((await service.adopt({ ...request, expectedOwnerTeamId: "team-b" })).kind).toBe("adopted");
+  });
+});
+
 // The harness lane is not exercised here: a harness instance resolves through a TEMPLATE, so a fixture for
 // it would have to seed a taxonomy — and a double that skipped that would be testing a resolution the
 // production registry does not perform. The agent lane drives the same closure, the same read-back and the
