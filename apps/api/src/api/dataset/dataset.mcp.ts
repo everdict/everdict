@@ -80,6 +80,9 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, base, candidate }) =>
         run(principal, "datasets:read", async () => {
+          // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
+          // already carries, on the door that returns the same bytes (arch-review 119).
+          await assertEntityVisible(ctx.deps, principal, datasets, ws, id, "dataset");
           const [baseDs, candidateDs] = await Promise.all([
             datasets.get(ws, id, base),
             datasets.get(ws, id, candidate),

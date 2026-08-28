@@ -74,6 +74,9 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, base, candidate }) =>
         run(principal, "judges:read", async () => {
+          // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
+          // already carries, on the door that returns the same bytes (arch-review 119).
+          await assertEntityVisible(ctx.deps, principal, judges, ws, id, "judge");
           const [baseSpec, candidateSpec] = await Promise.all([
             judges.get(ws, id, base),
             judges.get(ws, id, candidate),

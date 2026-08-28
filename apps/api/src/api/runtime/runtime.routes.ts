@@ -139,6 +139,9 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "runtimes:read");
+        // A private team's runtime reads as one that does not exist — the guard `GET /runtimes/:id/versions`
+        // already carries, on the door that resolves the same spec (arch-review 119).
+        await assertEntityVisible(deps, principal, deps.runtimeRegistry, principal.workspace, req.params.id, "runtime");
         // get() 404s a non-owned / missing runtime (no existence leak) before any live I/O.
         const spec = await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version);
         return reply.send(await deps.inspectRuntime(principal.workspace, spec));

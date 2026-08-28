@@ -97,6 +97,16 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
         gate(principal, "harnesses:read");
         const versions = await deps.harnessTemplates.versions(principal.workspace, req.params.id);
         if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "template not found." });
+        // A private team's template reads as one that does not exist — the guard the per-VERSION door beside
+        // this one already carries, and the instance twin (`GET /harnesses/:id`) carries too (arch-review 119).
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.harnessTemplates,
+          principal.workspace,
+          req.params.id,
+          "harness template",
+        );
         return reply.send({ id: req.params.id, versions });
       } catch (err) {
         return sendError(reply, err);

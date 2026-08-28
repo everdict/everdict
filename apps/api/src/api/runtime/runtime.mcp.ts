@@ -167,6 +167,9 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "runtimes:read", async () => {
+          // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
+          // already carries, on the door that returns the same bytes (arch-review 119).
+          await assertEntityVisible(ctx.deps, principal, runtimes, ws, id, "runtime");
           // get() resolves the registered spec (NOT_FOUND on non-owned/missing) before any live I/O.
           const spec = await runtimes.get(ws, id, version ?? "latest");
           return ok(await inspectRuntime(ws, spec));
