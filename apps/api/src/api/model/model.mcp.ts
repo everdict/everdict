@@ -3,7 +3,7 @@ import { ModelSpecSchema } from "@everdict/contracts";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
 import { SaveModelBodySchema } from "./request/save-model.js";
 import { TestModelConnectionBodySchema } from "./request/test-connection.js";
@@ -182,18 +182,29 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
           model: z.string().describe("ModelSpec JSON minus id/version"),
         },
       },
-      ({ id, model }) =>
-        run(principal, "models:write", async () => {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(model);
-          } catch {
-            return fail("BAD_REQUEST: not a valid model JSON.");
-          }
-          const result = SaveModelBodySchema.safeParse(parsed);
-          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await modelService.saveConnection(ws, principal.subject, id, result.data));
-        }),
+      async ({ id, model }) => {
+        // The same gate the HTTP twin carries (arch-review 119): saving over a model is a WRITE to somebody's
+        // model, and the service preserves the owner — so an unscoped `models:write` mints a Team-A-owned
+        // version for a caller who is not on Team A. `run` takes the scope, so the entity is resolved before
+        // the action rather than inside it. BFF↔MCP parity is structural (rule `api-layer`).
+        const owner = await teamOfEntity(deps.modelRegistry, ws, id);
+        return run(
+          principal,
+          "models:write",
+          async () => {
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(model);
+            } catch {
+              return fail("BAD_REQUEST: not a valid model JSON.");
+            }
+            const result = SaveModelBodySchema.safeParse(parsed);
+            if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+            return ok(await modelService.saveConnection(ws, principal.subject, id, result.data));
+          },
+          owner,
+        );
+      },
     );
   }
 }

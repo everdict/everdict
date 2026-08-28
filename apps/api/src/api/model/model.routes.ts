@@ -2,7 +2,7 @@ import { deleteModelVersion, deleteModelVersions } from "@everdict/application-c
 import { ModelSpecSchema } from "@everdict/contracts";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
 import { modelDocs } from "./model.docs.js";
 import { DeleteModelVersionsBodySchema } from "./request/delete-model-versions.js";
@@ -100,8 +100,17 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!deps.modelService) return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // ── SAVING A MODEL IS A WRITE TO SOMEBODY'S MODEL (arch-review 119) ──────────────────────────
+    //
+    // A bare `models:write` with no resource scope, while the service PRESERVES the owner — so a member of
+    // another team saving over Team A's model mints a new immutable Team-A-owned version they were never
+    // authorized to write. arch-review 118 wrote that sentence about the AGENT save door and closed only
+    // that one; there are three upsert doors and the capability one is covered by its service
+    // (creator-or-admin), which left this the last unguarded.
+    let owner: Awaited<ReturnType<typeof teamOfEntity>>;
     try {
-      gate(principal, "models:write");
+      owner = await teamOfEntity(deps.modelRegistry, principal.workspace, req.params.id);
+      gate(principal, "models:write", owner);
     } catch (err) {
       return sendError(reply, err);
     }

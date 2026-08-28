@@ -565,3 +565,90 @@ describe("[R118 COUNTEREXAMPLE] another team's agent cannot be saved over", () =
     expect(res.json().created).toBe(true);
   });
 });
+
+// ── [R119 COUNTEREXAMPLE] AND THE MODEL SAVE DOOR, WHICH THE SAME WAVE DID NOT LOOK AT ──────────────
+//
+// R118 above closed the AGENT upsert. There are three version-free upsert doors — agent, model, capability
+// — and it looked at one. The capability door is covered by its own service (creator-or-admin, refused
+// before any write); the MODEL door had nothing: `ModelService.saveConnection` runs no authorization at all
+// and both transports gated a bare `models:write` (member+). The one-lane-only shape, one wave later, in the
+// door whose comment header is a near copy of the agent one.
+//
+// ⚠️ Its SHAPE changed mid-wave rather than appearing. Before the registry learned to preserve an entity's
+// owner (arch-review 119), this door registered the successor with no team at all, which re-filed the model
+// out of Team A — the quieter takeover. The store fix turned that into "a version minted inside a team the
+// caller cannot write to". Both are wrong, and only the gate answers either.
+//
+// Same `requireAuth` + MEMBER authenticator, for the same reason: the dev-header fallback is an admin, and an
+// admin governs every team by design.
+describe("[R119 COUNTEREXAMPLE] another team's model cannot be saved over", () => {
+  const MODEL_BODY = { provider: "anthropic", model: "claude-opus-4-8" };
+
+  async function memberOf(teams: string[]) {
+    const { InMemoryModelRegistry } = await import("@everdict/registry");
+    const { ModelService } = await import("../core/model/model-service.js");
+    const models = new InMemoryModelRegistry();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      modelRegistry: models,
+      modelService: new ModelService({ models, scopedSecretsFor: async () => ({ workspace: {}, user: {} }) }),
+      teamService: {
+        async list() {
+          return teams.map((id) => ({ id }));
+        },
+        async defaultTeam() {
+          return undefined;
+        },
+        async visibleTeamIds() {
+          return undefined;
+        },
+        async canSeeTeam() {
+          return true;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "u-b", workspace: "acme", roles: ["member"], teams, via: "oidc" as const };
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
+    });
+    return { app, models };
+  }
+
+  const seed = async (models: { register: (...a: never[]) => Promise<void> }) =>
+    models.register(
+      ...(["acme", { ...MODEL_BODY, id: "opus", version: "1.0.0" }, "u-a", "team-a"] as unknown as never[]),
+    );
+
+  it("REFUSES a save over a model owned by a team the caller is not on, and writes nothing", async () => {
+    const { app, models } = await memberOf(["team-b"]);
+    await seed(models);
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/models/opus",
+      headers: { authorization: "Bearer t" },
+      payload: { ...MODEL_BODY, model: "claude-sonnet-5" },
+    });
+
+    expect(res.statusCode, "another team's model gained a version").toBe(403);
+    expect(await models.ownVersions("acme", "opus"), "the refused save registered a version anyway").toEqual(["1.0.0"]);
+  });
+
+  it("ALLOWS the owning team — the control", async () => {
+    const { app, models } = await memberOf(["team-a"]);
+    await seed(models);
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/models/opus",
+      headers: { authorization: "Bearer t" },
+      payload: { ...MODEL_BODY, model: "claude-sonnet-5" },
+    });
+
+    expect(res.statusCode, "the model's own team was refused its edit").toBe(200);
+    expect(res.json().created).toBe(true);
+    expect(models.teamOfVersion("acme", "opus", "1.0.1"), "the successor left its team").toBe("team-a");
+  });
+});
