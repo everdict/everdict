@@ -126,4 +126,24 @@ export interface AdoptionOperationStore {
   // three times inside one delivery and then DEAD-LETTERS, advancing the cursor — so an outage outlasting
   // three immediate attempts loses the join. The consumer buys latency; this buys convergence.
   registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]>;
+  // ── …AND A TURN FOR EACH OF THEM (arch-review 120) ───────────────────────────────────────────────
+  //
+  // The worklist above is oldest-first, and nothing the reconciler does to a row it CANNOT complete moves
+  // its age. So a hundred operations whose issue is still open — or whose issue was deleted, which never
+  // resolves — hold the head of that list on every sweep and a newer completable one is never read.
+  //
+  //     a periodic owner exists   ≠   every debt receives a turn
+  //
+  // This is what an examination that could not finish writes back: when to look again, and why it is
+  // waiting. `orphaned` is pushed far out rather than terminalized — "cannot find out" is an escalation
+  // field, never a terminal that removes the debt from view (L5).
+  //
+  // Returns whether a row was moved: a scheduler that cannot say it rescheduled is one that can starve
+  // silently, which is the defect this exists for.
+  deferCompletion(input: {
+    tenant: string;
+    campaignId: string;
+    outcome: "open" | "unknown" | "orphaned";
+    nextAttemptAt: string;
+  }): Promise<boolean>;
 }

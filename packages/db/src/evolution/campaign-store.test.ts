@@ -687,6 +687,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       forIssue: store.forIssue.bind(store),
       markCompleted: store.markCompleted.bind(store),
       registeredOlderThan: store.registeredOlderThan.bind(store),
+      // The real store's own answer, not `true`: `deferCompletion` is a conditional write (rule `testing`).
+      deferCompletion: store.deferCompletion.bind(store),
     };
     const svc2 = new CampaignService({
       store: raced,

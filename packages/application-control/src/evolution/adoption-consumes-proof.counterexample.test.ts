@@ -1,6 +1,9 @@
 import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
+
+// What the sweep rescheduled, so a test can assert a turn was GIVEN rather than merely asked for.
+const deferred: string[] = [];
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
 import { type CampaignAdoptionDeps, CampaignAdoptionService } from "./campaign-adoption-service.js";
 
@@ -66,6 +69,12 @@ function operations(over: Partial<AdoptionOperation> = {}) {
     // make a guard that refuses every real call read as a green test (rule `testing`).
     async forIssue(_t, issueId) {
       return op !== undefined && op.proof.issueId === issueId ? [op] : [];
+    },
+    // The scheduling write the sweep makes for a row it could not finish (arch-review 120). Recorded rather
+    // than ignored: a double that swallows it cannot tell a reconciler that reschedules from one that starves.
+    async deferCompletion(input: { tenant: string; campaignId: string; outcome: string; nextAttemptAt: string }) {
+      deferred.push(`${input.campaignId}:${input.outcome}`);
+      return true;
     },
     async markCompleted(_t, _c, proofDigest) {
       if (op === undefined) return "no_such_operation";
@@ -245,6 +254,12 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       },
       async forIssue() {
         return [];
+      },
+      // The scheduling write the sweep makes for a row it could not finish (arch-review 120). Recorded rather
+      // than ignored: a double that swallows it cannot tell a reconciler that reschedules from one that starves.
+      async deferCompletion(input: { tenant: string; campaignId: string; outcome: string; nextAttemptAt: string }) {
+        deferred.push(`${input.campaignId}:${input.outcome}`);
+        return true;
       },
       async markCompleted() {
         return "no_such_operation";

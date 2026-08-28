@@ -2,6 +2,9 @@ import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contrac
 import { NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
+
+// What the sweep rescheduled, so a test can assert a turn was GIVEN rather than merely asked for.
+const deferred: string[] = [];
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import { AdoptionCompletionReconciler } from "./adoption-completion-reconciler.js";
@@ -60,6 +63,12 @@ function store(rows: AdoptionOperation[]) {
     },
     async registeredOlderThan(olderThan, limit) {
       return [...state.values()].filter((r) => r.state === "registered" && r.updatedAt < olderThan).slice(0, limit);
+    },
+    // The scheduling write the sweep makes for a row it could not finish (arch-review 120). Recorded rather
+    // than ignored: a double that swallows it cannot tell a reconciler that reschedules from one that starves.
+    async deferCompletion(input: { tenant: string; campaignId: string; outcome: string; nextAttemptAt: string }) {
+      deferred.push(`${input.campaignId}:${input.outcome}`);
+      return true;
     },
     async markCompleted(_t, campaignId, proofDigest, events) {
       const row = state.get(campaignId);
@@ -203,5 +212,144 @@ describe("AdoptionCompletionReconciler", () => {
       now: () => NOW,
     }).sweep();
     expect(sweep, "a race the sweep lost was not counted as settled").toMatchObject({ completed: 1 });
+  });
+});
+
+// ── [R120 COUNTEREXAMPLE] EVERY DEBT RECEIVES A TURN ────────────────────────────────────────────────
+//
+// The worklist was `state = 'registered' AND updated_at < cutoff ORDER BY updated_at ASC LIMIT 100`, and
+// nothing the sweep does to a row it CANNOT complete moves `updated_at`. So the hundred oldest operations —
+// an issue still open, or an issue DELETED and therefore never resolvable — held the head of that list on
+// every sweep, and a newer operation whose issue IS done on its exact proving scorecard was never read.
+//
+//     a periodic owner exists   ≠   every debt receives a turn
+//
+// The reconciler ran on schedule, reported honest numbers, and converged nothing. That is worse than an
+// absent owner, because the numbers say somebody is working on it.
+//
+// Seen RED before the scheduling fields: the newer operation was still `registered` after ten sweeps, and
+// `examined` was 100 every time — the same hundred rows.
+describe("[R120 COUNTEREXAMPLE] a blocked worklist does not starve a completable operation", () => {
+  const AT = (n: number) => new Date(Date.parse("2026-08-28T00:00:00.000Z") + n).toISOString();
+
+  // One store holding many blockers and one completable operation, with the DUE-first semantics the Pg twin
+  // has — the ordering under test, not a convenience.
+  function crowded(blockers: number) {
+    const rows = new Map<string, AdoptionOperation>();
+    const nextAt = new Map<string, string>();
+    for (let i = 0; i < blockers; i++) {
+      const id = `blocked-${i}`;
+      rows.set(
+        id,
+        registered({
+          operationId: `op/${id}`,
+          proof: { ...PROOF, campaignId: id, issueId: `iss-${id}` },
+          updatedAt: AT(i),
+        }),
+      );
+    }
+    // …filed LAST, so oldest-first would never reach it.
+    rows.set(
+      "ready",
+      registered({
+        operationId: "op/ready",
+        proof: { ...PROOF, campaignId: "ready", issueId: "iss-ready" },
+        updatedAt: AT(blockers + 1),
+      }),
+    );
+    const impl: AdoptionOperationStore = {
+      async forCampaign(_t, id) {
+        return rows.get(id);
+      },
+      async forIssue() {
+        return [];
+      },
+      async markRegistered() {
+        return "no_such_operation";
+      },
+      async registeredOlderThan(olderThan, limit) {
+        return [...rows.values()]
+          .filter(
+            (r) =>
+              r.state === "registered" &&
+              r.updatedAt < olderThan &&
+              (nextAt.get(r.proof.campaignId) ?? "") <= olderThan,
+          )
+          .sort(
+            (a, b) =>
+              (nextAt.get(a.proof.campaignId) ?? "").localeCompare(nextAt.get(b.proof.campaignId) ?? "") ||
+              a.updatedAt.localeCompare(b.updatedAt),
+          )
+          .slice(0, limit);
+      },
+      async deferCompletion(input) {
+        nextAt.set(input.campaignId, input.nextAttemptAt);
+        return true;
+      },
+      async markCompleted(_t, campaignId) {
+        const row = rows.get(campaignId);
+        if (!row) return "no_such_operation";
+        rows.set(campaignId, { ...row, state: "completed" });
+        return "completed";
+      },
+    };
+    return { impl, rows };
+  }
+
+  it("reaches the newer completable operation despite a full page of blockers", async () => {
+    const { impl, rows } = crowded(100);
+    // Every blocker's issue is OPEN; the newer one's is done on its exact proving scorecard.
+    const issues = {
+      async get(_t: string, ref: string) {
+        return ref === "iss-ready"
+          ? { status: "done", resolution: { scorecardId: "sc-cand" } }
+          : { status: "in_progress" };
+      },
+    };
+    // A page of 100 and 101 owed rows: without a turn, the same hundred are read for ever.
+    let clock = Date.parse("2026-08-28T02:00:00.000Z");
+    for (let sweep = 0; sweep < 5 && rows.get("ready")?.state !== "completed"; sweep++) {
+      await new AdoptionCompletionReconciler({
+        operations: impl,
+        issues,
+        limit: 100,
+        now: () => new Date(clock).toISOString(),
+      }).sweep();
+      clock += 10 * 60_000; // the next scheduled sweep
+    }
+
+    expect(rows.get("ready")?.state, "a completable operation was starved by older blockers").toBe("completed");
+  });
+
+  it("keeps an ORPHANED operation owed while getting it out of the way", async () => {
+    // An issue that is GONE never resolves, so re-reading it every sweep buys nothing and costs the turn of
+    // a row that could finish. It stays `registered` — the debt is not discharged by being unreachable.
+    const { impl, rows } = crowded(1);
+    const issues = {
+      async get() {
+        throw new NotFoundError("NOT_FOUND", {}, "issue not found");
+      },
+    };
+    const first = await new AdoptionCompletionReconciler({
+      operations: impl,
+      issues,
+      limit: 100,
+      now: () => "2026-08-28T02:00:00.000Z",
+    }).sweep();
+    // BOTH rows are orphaned here: this fixture's issue store answers NotFound for every ref, which is the
+    // world a deleted issue leaves behind. Asserting 1 was my own miscount, and it is the kind that reads as
+    // a code failure — the number the subject reported was right.
+    expect(first.orphaned).toBe(2);
+
+    // The next ordinary sweep does not see them again…
+    const second = await new AdoptionCompletionReconciler({
+      operations: impl,
+      issues,
+      limit: 100,
+      now: () => "2026-08-28T02:10:00.000Z",
+    }).sweep();
+    expect(second.examined, "an orphaned row kept its place at the head of the worklist").toBe(0);
+    // …and it is still owed, because "cannot find out" is an escalation, never a terminal.
+    expect(rows.get("blocked-0")?.state).toBe("registered");
   });
 });

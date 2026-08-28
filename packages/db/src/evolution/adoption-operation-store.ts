@@ -122,14 +122,42 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
   // `updated_at` is the age, not `created_at`: the row was updated when it became `registered`, which is the
   // moment the debt started.
   async registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]> {
+    // ── DUE-FIRST, NOT OLDEST-FIRST (arch-review 120) ──────────────────────────────────────────────
+    //
+    // Oldest-first with no scheduling state starves: nothing this reconciler does to a row it cannot
+    // complete moves `updated_at`, so a hundred operations whose issue is still open — or whose issue was
+    // deleted, which never resolves — hold the head of the list on every sweep and a newer completable one
+    // is never read at all.
+    //
+    // `next_attempt_at` is the turn (migration 0201). A row examined and deferred moves out of the way; a
+    // row nobody has looked at is due immediately, because its default is `now()`. The age cutoff stays: an
+    // operation the adopt call may still be inside is not this sweep's to touch.
     const { rows } = await this.client.query<OperationRow>(
       `SELECT * FROM everdict_adoption_operations
-        WHERE state = 'registered' AND updated_at < $1::timestamptz
-        ORDER BY updated_at ASC
+        WHERE state = 'registered' AND updated_at < $1::timestamptz AND next_attempt_at <= $1::timestamptz
+        ORDER BY next_attempt_at ASC, updated_at ASC
         LIMIT $2`,
       [olderThan, limit],
     );
     return rows.map(toOperation);
+  }
+
+  // What an examination that could not complete the operation writes back. `updated_at` is deliberately NOT
+  // touched: it records when the DEBT started, and moving it would make an old unfinishable row look young.
+  async deferCompletion(input: {
+    tenant: string;
+    campaignId: string;
+    outcome: "open" | "unknown" | "orphaned";
+    nextAttemptAt: string;
+  }): Promise<boolean> {
+    const { rows } = await this.client.query<{ operation_id: string }>(
+      `UPDATE everdict_adoption_operations
+          SET next_attempt_at = $3::timestamptz, attempts = attempts + 1, last_outcome = $4
+        WHERE tenant = $1 AND campaign_id = $2 AND state = 'registered'
+        RETURNING operation_id`,
+      [input.tenant, input.campaignId, input.nextAttemptAt, input.outcome],
+    );
+    return rows.length > 0;
   }
 
   // Discharging the INTENT, guarded the same way spending it is: the proof compared here (our canonical-JSON

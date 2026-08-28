@@ -102,6 +102,12 @@ function operations(proof: CampaignAdoptionProof) {
     async forIssue(_t, issueId) {
       return op !== undefined && op.proof.issueId === issueId ? [op] : [];
     },
+    // The scheduling write a sweep makes for a row it could not finish (arch-review 120). This test
+    // drives the ADOPT path, which never sweeps — it is here because the port requires it, and a
+    // double that lied about it would be answering a question this test does not ask.
+    async deferCompletion() {
+      throw new Error("the adopt path never reschedules a sweep");
+    },
     async markCompleted(_t, _c, proofDigest) {
       if (op === undefined) return "no_such_operation";
       if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";

@@ -41,6 +41,10 @@ export interface AdoptionCompletionReconcilerDeps {
   // completes within one call, and sweeping a row the adopt call is still inside would race it for no gain.
   minAgeMs?: number;
   limit?: number;
+  // How long an operation whose ISSUE IS GONE waits before it is examined again. Long by default: no sweep
+  // can change its answer, so re-reading it every five minutes is work that produces one number an operator
+  // already has. Not infinite, because an issue can be restored and the debt is still owed.
+  orphanBackoffMs?: number;
 }
 
 export interface AdoptionCompletionSweep {
@@ -77,8 +81,46 @@ export class AdoptionCompletionReconciler {
     for (const operation of due) {
       const outcome = await this.settle(operation, now);
       out[outcome] += 1;
+      // ── AND THE ROW GETS OUT OF THE WAY (arch-review 120) ────────────────────────────────────────
+      //
+      // Nothing this sweep does to a row it could not complete moved its position in the worklist, and the
+      // worklist was oldest-first — so a hundred operations whose issue is still open, or whose issue was
+      // DELETED and never will be, held the head of the list on every sweep while a newer completable one
+      // was never read. The reconciler ran, reported, and converged nothing.
+      //
+      //     a periodic owner exists   ≠   every debt receives a turn
+      //
+      // A row that could not finish says WHEN to look again, and the interval says WHY:
+      //   open      the issue is simply not done — ask again next sweep
+      //   unknown   the read failed — back off, because a store that just refused will likely refuse again
+      //   orphaned  the issue is GONE and no sweep can change that — far out, so it stops crowding the head
+      //             while staying visible as the escalation it is (L5: never a terminal that hides the debt)
+      if (outcome !== "completed") await this.defer(operation, outcome, now);
     }
     return out;
+  }
+
+  // How far out each unfinished outcome goes. Deliberately plain arithmetic rather than a policy object: the
+  // only property that matters is that an unfinishable row cannot hold the head of the list, and a number a
+  // reader can check beats a knob nobody sets.
+  private async defer(
+    operation: AdoptionOperation,
+    outcome: "open" | "unknown" | "orphaned",
+    now: string,
+  ): Promise<void> {
+    const base = this.deps.minAgeMs ?? 60_000;
+    const wait =
+      outcome === "orphaned"
+        ? (this.deps.orphanBackoffMs ?? 24 * 60 * 60_000) // a day: visible, and out of the working set
+        : outcome === "unknown"
+          ? base * 4 // a read that failed will likely fail again in the next few seconds
+          : base; // the issue is open — nothing is wrong, ask again on the ordinary cadence
+    await this.deps.operations.deferCompletion({
+      tenant: operation.tenant,
+      campaignId: operation.proof.campaignId,
+      outcome,
+      nextAttemptAt: new Date(Date.parse(now) + wait).toISOString(),
+    });
   }
 
   private async settle(

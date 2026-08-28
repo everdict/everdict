@@ -100,18 +100,51 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     return "registered";
   }
 
+  // Scheduling lives beside the operation rather than inside it, because it is not a thing the adoption did
+  // — the lifecycle vocabulary stays `decided | registered | completed` (migration 0201 says why).
+  private readonly nextAttemptAt = new Map<string, string>();
+  private readonly lastOutcome = new Map<string, string>();
+
   async forIssue(tenant: string, issueId: string): Promise<AdoptionOperation[]> {
     return [...this.adoptions.values()].filter((op) => op.tenant === tenant && op.proof.issueId === issueId);
   }
 
-  // The sweep's worklist, deployment-wide and oldest-first — the Pg twin's semantics exactly, including that
-  // it is deliberately NOT tenant-scoped (the reconciler owns the debt for the process, and each row carries
-  // its own tenant for the write it drives).
+  // The sweep's worklist, deployment-wide and DUE-first — the Pg twin's semantics exactly, including that it
+  // is deliberately NOT tenant-scoped (the reconciler owns the debt for the process, and each row carries its
+  // own tenant for the write it drives).
+  //
+  // Due-first rather than oldest-first, for the reason migration 0201 gives: nothing the reconciler does to a
+  // row it cannot complete moves its age, so oldest-first lets a hundred unfinishable rows hold the head of
+  // the list for ever while a newer completable one is never read.
   async registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]> {
     return [...this.adoptions.values()]
-      .filter((op) => op.state === "registered" && op.updatedAt < olderThan)
-      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .filter(
+        (op) =>
+          op.state === "registered" &&
+          op.updatedAt < olderThan &&
+          (this.nextAttemptAt.get(op.operationId) ?? "") <= olderThan,
+      )
+      .sort(
+        (a, b) =>
+          (this.nextAttemptAt.get(a.operationId) ?? "").localeCompare(this.nextAttemptAt.get(b.operationId) ?? "") ||
+          a.updatedAt.localeCompare(b.updatedAt),
+      )
       .slice(0, limit);
+  }
+
+  // What an examination that could not complete writes back. `updatedAt` is deliberately untouched: it
+  // records when the DEBT started, and moving it would make an old unfinishable row look young.
+  async deferCompletion(input: {
+    tenant: string;
+    campaignId: string;
+    outcome: "open" | "unknown" | "orphaned";
+    nextAttemptAt: string;
+  }): Promise<boolean> {
+    const op = await this.forCampaign(input.tenant, input.campaignId);
+    if (op === undefined || op.state !== "registered") return false;
+    this.nextAttemptAt.set(op.operationId, input.nextAttemptAt);
+    this.lastOutcome.set(op.operationId, input.outcome);
+    return true;
   }
 
   async markCompleted(
