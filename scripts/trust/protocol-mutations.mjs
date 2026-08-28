@@ -2402,9 +2402,47 @@ const MUTATIONS = [
     // them (a mutation whose target is gone FAILS, which is the check working). The protocol is now one
     // mechanism, so it gets one rung on that mechanism — neutralize the resolution and every lane that
     // depends on it must go red.
+    // ── THE THREE DOORS THAT MINT A VERSION ALL ASK WHOSE ENTITY IT IS (arch-review 117-118) ────────
+    //
+    // `registerPreservingOwner` preserves an owner; being ALLOWED to write to that owner is a different
+    // question, and three doors mint versions through it. arch-review 76 gated the adoption door and did not
+    // look at its siblings — the re-pin gated the action without a resource, the agent save gated neither
+    // transport. A gate that exists on one door and not the others is the one-lane-only shape this whole
+    // series is about, so each door gets its own rung.
+    name: "R118 — the agent save door mints a version without asking whose agent it is",
+    file: "apps/api/src/api/agent/agent.routes.ts",
+    from: '      gate(principal, "agents:write", owner);',
+    to: '      gate(principal, "agents:write");',
+    suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
+  },
+  {
+    // …and the MCP twin, because BFF↔MCP parity is structural (rule `api-layer`) and a gate one transport
+    // carries and the other does not is exactly how this defect reached production.
+    name: "R118 — the MCP save door mints a version without asking whose agent it is",
+    file: "apps/api/src/api/agent/agent.mcp.ts",
+    // ⚠️ The formatter split `}, owner);` across lines, so the rung names the ARGUMENT — the thing whose
+    // absence is the defect — rather than a punctuation shape a formatter owns.
+    from: "          owner,",
+    to: "",
+    suite: ["--root", "apps/api", "src/api/agent/agent-save.mcp.test.ts"],
+  },
+  {
+    // The re-pin door's half: the service forwards what the transport gated on, and dropping the forward
+    // silently restores the window (arch-review 117).
+    name: "R117 — the re-pin drops the owner its authorization was granted against",
+    file: "packages/application-control/src/harness/harness-pin-service.ts",
+    from: "    ...(authority !== undefined ? ([authority] as const) : ([] as const)),",
+    to: "",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
+  },
+  {
     name: "wave C — a successor is registered without the team its entity is owned by",
     file: "packages/registry/src/versioned-store.ts",
-    from: "    this.register(tenant, item, createdBy, this.entityTeam(tenant, item.id), origin);",
+    // ⚠️ RE-AIMED (arch-review 119): arch-review 115 gave this write an `authority` precondition, so the
+    // resolution and the fallback moved onto one line with `initialTeamId`. Neutralizing the resolution is
+    // still the same question — a successor that forgets whose entity it is.
+    from: "    this.register(tenant, item, createdBy, current ?? authority?.initialTeamId, origin);",
     to: "    this.register(tenant, item, createdBy, undefined, origin);",
     build: "@everdict/registry",
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
@@ -2619,8 +2657,12 @@ const MUTATIONS = [
     // split `teamOfVersion` was made required to prevent.
     name: "R77 — a successor is filed under a team the caller read earlier",
     file: "packages/registry/src/versioned-store.ts",
-    from: "    this.register(tenant, item, createdBy, this.entityTeam(tenant, item.id), origin);",
-    to: "    this.register(tenant, item, createdBy, undefined, origin);",
+    // ⚠️ RE-AIMED (arch-review 119). R77 closed the WRITER's window by resolving the owner here; 115 closed
+    // the AUTHORIZER's by asserting the owner the gate was granted against. Both rungs pointed at the same
+    // vanished line, which made them one test wearing two names — so this one now neutralizes the
+    // PRECONDITION and the sibling above neutralizes the resolution. Two windows, two rungs.
+    from: "      current !== authority.expectedOwnerTeamId",
+    to: "      false",
     build: "@everdict/registry",
     suite: ["--root", "packages/registry", "src/owner-preserving-register.counterexample.test.ts"],
   },
