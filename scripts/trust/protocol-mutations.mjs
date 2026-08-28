@@ -227,8 +227,15 @@ const MUTATIONS = [
     // RE-AIMED (arch-review 63): the predicate grew the judged execution, so the resolved-provenance clause
     // sits two lines lower. The protocol is unchanged — call unresolved provenance complete and the one
     // signal for "this verdict is not fully attributed" says yes for the case it exists to flag.
+    //
+    // ⚠️ THIS RUNG HAD NEVER RUN (arch-review 120). The clause it replaces is the LAST operand of the `&&`
+    // chain, and the replacement kept a trailing `&&` — so the file did not parse, vitest collected nothing,
+    // and for as long as an uncompilable tree was discarded the rung read as covered. It is the shape rule
+    // `ci` names: the compiler objecting to the mutation's SYNTAX is not the protocol being protected. The
+    // replacement is a clause line 74 already implies, so the chain still compiles and only the provenance
+    // requirement is gone — which makes the SUITE the thing that refuses.
     from: '      invocation.imageProvenance?.kind === "resolved",',
-    to: "      invocation.work !== undefined &&",
+    to: "      invocation.work !== undefined,",
     suite: ["--root", "packages/domain", "src/execution/verifier-receipt-completeness.counterexample.test.ts"],
   },
   {
