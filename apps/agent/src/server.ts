@@ -179,17 +179,33 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
   // Fine-grained "always allow / deny this tool" rules (per session) that short-circuit the HITL prompt.
   const rules = new PermissionRules();
   // Standing-rule durability (LESSON 059 P4): the in-memory map is the hot path; the session record is the
-  // truth across restarts. Hydrate at most once per process per session; persist (best-effort) on every change.
-  const hydrateRules = async (workspace: string, subject: string, sessionId: string): Promise<void> => {
-    if (rules.has(workspace, sessionId)) return;
-    const stored = await deps.sessions.getVisibleSession(workspace, subject, sessionId).catch(() => undefined);
-    rules.hydrate(workspace, sessionId, stored?.permissionRules ?? {});
+  // truth across restarts. Hydrate at most once per process per session; persist on every change.
+  //
+  // ── THE RULES COME FROM THE SESSION THE CALLER ALREADY READ (arch-review 113) ────────────────────
+  //
+  // This used to be its own `getVisibleSession` ending `.catch(() => undefined)`, hydrating
+  // `stored?.permissionRules ?? {}`. Two things were wrong and only one of them was the swallow.
+  //
+  // The swallow made a store blip indistinguishable from a session with no standing rules — and then marked
+  // the session HYDRATED, so `rules.has` answered true and nothing re-read it for the life of the process.
+  // The non-streaming permit hook's base is `() => "allow"`, so a member's explicit "always deny" became a
+  // permanent auto-allow, in silence: L2's first forbidden collapse, a guard that widens because it read
+  // nothing.
+  //
+  // But the read should not have been there at all. Its ONE caller — the chat route — loads the very same row
+  // eleven lines earlier and fails the request loudly if that read fails. A second read of a row you are
+  // holding cannot be more current, and it can be more WRONG: it is the only place the answer could degrade
+  // without anybody noticing. So the caller passes what it read, the failure mode has one owner instead of
+  // two, and `unknown` stops being a state this path can be in.
+  const hydrateRules = (workspace: string, sessionId: string, stored: Record<string, PermissionDecision>): void => {
+    rules.hydrate(workspace, sessionId, stored);
   };
-  const persistRules = (workspace: string, sessionId: string): void => {
-    void deps.sessions
-      .setSessionPermissionRules(workspace, sessionId, rules.list(workspace, sessionId), deps.now())
-      .catch(() => {});
-  };
+  // The write half of the same decision. The RETURNED promise is what a caller answering an HTTP request must
+  // await: `POST /rules` used to reply 200 with the member's rules echoed back while this swallowed the write,
+  // so a rule they were told was saved lived only in this process (L1 — a decision may not be reported
+  // durable before a store said it is). The in-turn caller keeps its fire-and-forget deliberately and says why.
+  const persistRules = (workspace: string, sessionId: string): Promise<void> =>
+    deps.sessions.setSessionPermissionRules(workspace, sessionId, rules.list(workspace, sessionId), deps.now());
   // Live chat turns keyed by session: a turn OUTLIVES the request that started it (SSE responses are just
   // subscribers, a disconnect only detaches), GET /stream re-attaches, POST /stop is the explicit abort, and a
   // concurrent /chat on the same session 409s. See live-turns.ts.
@@ -646,7 +662,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         .map(([id, t]) => ({ id, name: t.name, watch: [...t.watch] }));
     // A fine-grained rule (allow/deny for a tool in this session) short-circuits the human prompt. Hydrated
     // from the session record first, so "always allow" answered before a restart still holds (LESSON 059 P4).
-    await hydrateRules(principal.workspace, principal.subject, id);
+    // Seeded from `session` above — the row this request already read and already refuses to continue without.
+    // `base` on the non-streaming path is `() => "allow"`, so the standing rules are the only thing that can
+    // deny there; taking them from a second, separately-failing read is what made a store blip able to
+    // overrule a member's "always deny" (arch-review 113).
+    hydrateRules(principal.workspace, id, session?.permissionRules ?? {});
     const withRules =
       (base: PermissionHook): PermissionHook =>
       (request) => {
@@ -789,7 +809,13 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
             if (isGuardedAction(tool)) continue;
             rules.set(principal.workspace, id, tool, "allow");
           }
-          persistRules(principal.workspace, id);
+          // Deliberately NOT awaited, unlike the two rule routes. These are `allow` rules minted by a human
+          // approving a plan mid-turn: losing one costs an extra prompt later, and blocking an approved turn on
+          // a session-store write would trade a safe failure for an unsafe one. The DIRECTION is what makes
+          // best-effort honest here — and the failure is now visible rather than swallowed (arch-review 113).
+          void persistRules(principal.workspace, id).catch((err) => {
+            console.error(`[agent] plan-approval rules not persisted for ${principal.workspace}/${id}:`, err);
+          });
         }
         // Plan durability (LESSON 059 P6): approval promotes the plan to standing session state — it keeps
         // steering after the memory fold and across a restart; a newer approval replaces it. Best-effort:
@@ -1625,7 +1651,11 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     // Hydrate BEFORE mutating, so the write-through below persists the stored rules PLUS this one — not just this one.
     rules.hydrate(principal.workspace, id, session.permissionRules ?? {});
     rules.set(principal.workspace, id, parsed.data.tool, parsed.data.decision);
-    persistRules(principal.workspace, id);
+    // AWAITED. The reply below echoes the member's rules back as saved; before arch-review 113 the write was
+    // fire-and-forget with a swallowed failure, so a `deny` they were told was stored could live only in this
+    // process and be gone at the next restart. A failed write is an error now — a member can retry a refusal,
+    // they cannot retry a lie.
+    await persistRules(principal.workspace, id);
     return reply.send({ rules: rules.list(principal.workspace, id) });
   });
 
@@ -1637,7 +1667,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!session) return reply.code(404).send({ code: "NOT_FOUND", message: "Conversation not found." });
     rules.hydrate(principal.workspace, params.id, session.permissionRules ?? {});
     rules.clear(principal.workspace, params.id, params.tool);
-    persistRules(principal.workspace, params.id);
+    // Same reason, mirrored direction: a REVOKED "always allow" whose delete was swallowed comes back at the
+    // next restart, so the member's withdrawal of a standing permission would silently resurrect.
+    await persistRules(principal.workspace, params.id);
     return reply.code(204).send();
   });
 

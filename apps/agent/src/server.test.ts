@@ -933,6 +933,93 @@ describe("agent server", () => {
       await after.close();
     });
 
+    // ── A STANDING DENY SURVIVES A STORE THAT CANNOT ANSWER (arch-review 113) ───────────────────────
+    //
+    // The tests above cover the happy path and the restart. What none drove is the DEGRADED read rule
+    // `testing` asks for — and that is where this decided wrongly. `hydrateRules` ended `.catch(() => undefined)`
+    // and hydrated `stored?.permissionRules ?? {}`, so a store blip was indistinguishable from a session with
+    // no rules AND marked the session hydrated, which `rules.has` then answered true for the life of the
+    // process. The non-streaming permit hook's base is `() => "allow"`, so the member's explicit "always deny"
+    // became a permanent auto-allow, in silence.
+    //
+    // ⚠️ THE FIRST VERSION OF THIS TEST PROVED NOTHING. It asserted on `GET /rules`, which reads
+    // `getSession(...).permissionRules` directly and never calls `hydrateRules` at all — 57 green with the fix
+    // neutralized. The only path that runs the defect is a CHAT TURN, so this drives one and asks the question
+    // that matters: did the denied tool run?
+    //
+    // Seen RED with the catch restored to `stored = undefined`: "a store blip auto-allowed a tool the member
+    // had denied".
+    // ── A STANDING DENY IS READ FROM THE ROW THE TURN ALREADY LOADED (arch-review 113) ──────────────
+    //
+    // The restart test above proves a stored rule is honoured; what it cannot show is WHERE the turn gets it.
+    // It used to come from a SECOND `getVisibleSession` inside `hydrateRules`, ending `.catch(() => undefined)`
+    // and hydrating `{}` on failure — then marking the session hydrated, so `rules.has` answered true for the
+    // life of the process. The non-streaming permit hook's base is `() => "allow"`, so one store blip turned a
+    // member's explicit "always deny" into a permanent auto-allow, in silence.
+    //
+    // ⚠️ TWO EARLIER VERSIONS OF THIS TEST PROVED NOTHING, in different ways, and both were 57-green.
+    // The first asserted on `GET /rules`, which reads the session directly and never calls `hydrateRules`.
+    // The second made `getVisibleSession` throw — which kills the chat turn eleven lines EARLIER, at the load
+    // the route already does, so the tool never ran for a reason that had nothing to do with permissions.
+    // That second failure is what showed the read was redundant, and deleting it is the actual fix: the rules
+    // now come from the row the turn already holds, so there is no second read left to degrade.
+    //
+    // What this drives is the surviving claim — a rule stored in a PREVIOUS process is applied by a turn in a
+    // new one, through the route's own session load. Seen RED with `session?.permissionRules ?? {}` replaced
+    // by `{}`: "a rule the member stored before the restart did not reach the turn".
+    it("applies a rule stored before a restart, from the session the turn already read", async () => {
+      const sessions = new InMemoryAgentSessionStore();
+      const writeCall = vi.fn(async () => ({ content: "wrote", isError: false }));
+      const before = buildServer(makeDeps({ ...writeToolDeps(writeCall), sessions }));
+      const s = (await before.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      await before.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/rules`,
+        headers: auth,
+        payload: { tool: "do_write", decision: "deny" },
+      });
+      await before.close(); // the in-memory rule map dies with the process
+
+      const after = buildServer(makeDeps({ ...writeToolDeps(writeCall), sessions }));
+      await after.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/chat`,
+        headers: auth,
+        payload: { message: "write it" },
+      });
+      expect(writeCall, "a rule the member stored before the restart did not reach the turn").not.toHaveBeenCalled();
+      await after.close();
+    });
+
+    // The write half. `POST /rules` replied 200 with the member's rules echoed back while the store write was
+    // fire-and-forget with a swallowed failure — so a `deny` they were told was saved could live only in that
+    // process. A member can retry a refusal; they cannot retry a lie.
+    it("answers a FAILURE when the standing rule could not be stored", async () => {
+      const backing = new InMemoryAgentSessionStore();
+      const sessions: typeof backing = Object.create(backing);
+      sessions.setSessionPermissionRules = async () => {
+        throw new Error("session store is unreachable");
+      };
+      const app = buildServer(makeDeps({ sessions }));
+      const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
+      const added = await app.inject({
+        method: "POST",
+        url: `/agent/sessions/${s.id}/rules`,
+        headers: auth,
+        payload: { tool: "do_write", decision: "deny" },
+      });
+      expect(added.statusCode, "a rule that was never stored was reported saved").not.toBe(200);
+
+      // …and the mirror: a REVOKED allow whose delete never landed would come back at the next restart.
+      const removed = await app.inject({
+        method: "DELETE",
+        url: `/agent/sessions/${s.id}/rules/do_write`,
+        headers: auth,
+      });
+      expect(removed.statusCode, "a revocation that was never stored was reported done").not.toBe(204);
+      await app.close();
+    });
+
     it("manages rules over their CRUD endpoints", async () => {
       const app = buildServer(makeDeps());
       const s = (await app.inject({ method: "POST", url: "/agent/sessions", headers: auth, payload: {} })).json();
