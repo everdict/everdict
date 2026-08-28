@@ -355,6 +355,22 @@ export const EvolutionCampaignRecordSchema = z.object({
   // OPTIONAL AT REST, because rows written before this existed have none. Absent means UNOWNED, which the
   // authz kernel lets through — never "everyone's" (rule `api-layer`). Not backfilled: guessing which team
   // an old campaign belonged to would invent an authority nobody granted.
+  //
+  // ── FROZEN, AND IT CAN DIVERGE FROM THE ISSUE'S (arch-review 114) ───────────────────────────────
+  //
+  // Taken from the issue's team at open and never refreshed. `POST /issues/:id/team` moves the issue and
+  // nothing re-teams its campaigns, so after a move this names the team that OPENED the campaign, not the
+  // team that now owns the issue. Migration 0198 says the two "cannot belong to different teams without one
+  // of them being a lie"; that sentence predates nothing and is simply wrong, and the migration cannot be
+  // edited (rule `db`), so the correction lives here — where a reader looks up what the field means.
+  //
+  // Divergence is SAFE by construction, and deliberately so: the adopt route gates on this frozen authority
+  // AND on `teamOfEntity` — the live owner of the entity being written — either of which refuses. A move
+  // therefore cannot widen what an adoption may do, which is the property that matters.
+  //
+  // What it does leave is a campaign the issue's new team can neither write to nor, when the old team is
+  // private, see. That is the over-restrictive direction, and it is a consequence of freezing rather than a
+  // defect — written down instead of denied.
   teamId: z.string().min(1).optional(),
   frame: StoredCampaignFrameSchema,
   // contentDigest of the frame at open — what an adoption references, and what makes a frame edit

@@ -639,3 +639,175 @@ describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team ca
     await app.close();
   });
 });
+
+// ── THE SECOND GATE ON ADOPT, SEEN REFUSING (arch-review 114) ────────────────────────────────────────
+//
+// `POST /campaigns/:id/adopt` gates TWICE, and the two answer different questions: the campaign's team,
+// frozen at open, says who may spend this authorization; `teamOfEntity` says who owns the agent about to gain
+// a version. The frozen half is what lets the record comment promise that a later `POST /issues/:id/team`
+// cannot WIDEN what an adoption may do — the entity's live owner still has to say yes.
+//
+// Nothing had ever seen that second gate refuse. The `build()` harness does not pass `agentRegistry` to
+// `buildServer`, so `teamOfEntity(undefined, …)` returned `{}` — no team constraint, the permissive arm — in
+// every adopt test in this file. A promise resting on a guard nobody has watched refuse is a comment
+// (rule `testing`), which is the whole reason this exists.
+//
+// ⚠️ `requireAuth` + a MEMBER authenticator, because the dev-header fallback hands out `roles: ["admin"]` and
+// an admin governs every team by design — an admin fixture would "pass" by bypassing the gate.
+describe("[arch-review 114] adopting an agent owned by another team is refused", () => {
+  // A REAL spec whose REAL digest the snapshot seals. Two earlier drafts of this fixture were wrong in ways
+  // that look identical from outside — a malformed spec, then a missing one — and both surfaced as a 500 that
+  // a `not.toBe(403)` control happily accepted. A control that passes on an error proves nothing about the
+  // gate it is the control for.
+  const agentSpec = (id: string, version: string) => ({
+    id,
+    version,
+    description: "the agent under evolution",
+    instructions: "be brief",
+    mcpServers: [],
+    capabilities: [],
+    tags: [],
+    disabledDefaults: [],
+    toolSecretBindings: {},
+    triggers: [],
+    enabled: true,
+  });
+  const candidateSpec = agentSpec("everdict", "1.0.1");
+  // The campaign must have MEASURED these bytes, or the adoption is refused for a digest mismatch long before
+  // — and after — the gate, which would hide whichever answer we are asking about.
+  const sealed: CampaignSnapshot = {
+    ...winning,
+    candidate: {
+      record: {
+        harness: { id: "agent:everdict", version: "1.0.1" },
+        manifest: { harness: { specDigest: contentDigest(candidateSpec) } },
+      },
+    },
+  } as CampaignSnapshot;
+
+  function ownedElsewhere(callerTeams: string[]) {
+    const store = new InMemoryEvolutionCampaignStore();
+    const campaignService = new CampaignService({
+      store,
+      operations: store,
+      issues: {
+        async get(_t: string, ref: string) {
+          if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
+          return { id: "iss_1" }; // unowned issue → the campaign's own team never refuses here
+        },
+      },
+      diffs: { diffSnapshot: async () => sealed },
+      newId: () => "evc_owned",
+      now: () => "2026-08-28T03:00:00.000Z",
+    });
+    const agents = new InMemoryAgentRegistry();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      campaignService,
+      issueService: {
+        async get(_t: string, ref: string) {
+          return ref === "iss_1" ? { id: "iss_1" } : undefined;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+      // WIRED, unlike `build()` — without this the gate below has no resource to ask about.
+      agentRegistry: agents,
+      campaignAdoption: buildCampaignAdoption({
+        operations: store,
+        agents,
+        harnesses: unusedHarnesses(),
+        templates: unusedTemplates(),
+        issues: openIssue(),
+      }),
+      teamService: {
+        async list() {
+          return callerTeams.map((id) => ({ id }));
+        },
+        async defaultTeam() {
+          return undefined;
+        },
+        async visibleTeamIds() {
+          return undefined; // nothing hidden — this is about WRITING, not seeing
+        },
+        async canSeeTeam() {
+          return true;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "u-b", workspace: "acme", roles: ["member"], teams: callerTeams, via: "oidc" as const };
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
+    });
+    return { app, agents, store };
+  }
+
+  async function settledCampaign(app: ReturnType<typeof ownedElsewhere>["app"]) {
+    const A = { authorization: "Bearer t" };
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: A,
+      payload: { issueId: "iss_1", frame },
+    });
+    expect(opened.statusCode, "the fixture could not open a campaign, so it measures nothing").toBe(201);
+    const { id } = opened.json() as { id: string };
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: A,
+      payload: {
+        hypothesis: "structure over phrasing",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    const settled = await app.inject({ method: "POST", url: `/campaigns/${id}/settle`, headers: A });
+    expect(settled.statusCode, "the fixture did not reach an adoption, so it measures nothing").toBe(200);
+    expect((settled.json() as { record: { state: string } }).record.state).toBe("adopted");
+    // The authorization is its OWN read — `operation: null` there is the answer "this campaign authorized
+    // nothing", which is exactly the state that would make the gate below untested.
+    const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: A });
+    const operation = (read.json() as { operation: { proof: unknown } | null }).operation;
+    return { id, proof: operation?.proof };
+  }
+
+  it("REFUSES when the candidate agent belongs to a team the caller is not on", async () => {
+    const { app, agents } = ownedElsewhere(["team-b"]);
+    // The agent under evolution is team-a's. The caller is on team-b only.
+    // ⚠️ Registered as `everdict`, not `agent:everdict`: the proof's candidate id is the harness id with the
+    // `agent:` prefix stripped, and the first draft registered the prefixed spelling — so `ownVersions` found
+    // nothing, `teamOfEntity` answered `{}` (the permissive arm) and the gate never even looked at a team.
+    // A fixture that misses the resource proves the guard is absent, not present.
+    await agents.register("acme", agentSpec("everdict", "1.0.0") as never, "u-a", "team-a");
+    const { id, proof } = await settledCampaign(app);
+    expect(proof, "the settle authorized nothing, so the gate below is untested").toBeDefined();
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: { authorization: "Bearer t" },
+      payload: { proof, spec: candidateSpec },
+    });
+    expect(res.statusCode, "another team's agent gained a version").toBe(403);
+    await app.close();
+  });
+
+  it("ALLOWS the owning team — the control that keeps the gate from being a wall", async () => {
+    const { app, agents } = ownedElsewhere(["team-a"]);
+    await agents.register("acme", agentSpec("everdict", "1.0.0") as never, "u-a", "team-a");
+    const { id, proof } = await settledCampaign(app);
+    const res = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: { authorization: "Bearer t" },
+      payload: { proof, spec: candidateSpec },
+    });
+    // A REAL adoption, not merely "not 403". Two drafts of this control passed on a 500, which is how a
+    // fixture that never reaches the effect certifies a gate it never exercised.
+    expect(res.statusCode, "the agent's own team was refused its adoption").toBe(200);
+    expect((res.json() as { kind: string }).kind).toBe("adopted");
+    await app.close();
+  });
+});
