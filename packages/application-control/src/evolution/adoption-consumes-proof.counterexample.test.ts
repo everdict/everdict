@@ -599,3 +599,63 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     expect(current()?.state, "a failed registration spent its authorization anyway").toBe("decided");
   });
 });
+
+// ── [R115 COUNTEREXAMPLE] A RETRY RE-ATTEMPTS THE JOIN IT MAY HAVE LOST ─────────────────────────────
+//
+// `adopt` returned `already_adopted` the moment the operation was anything but `decided`, so an operation
+// stuck at `registered` — registry write landed, issue read failed, issue ALREADY closed so no future
+// `issue.status_changed` is coming — could be re-driven by its caller forever without the completion ever
+// being re-attempted. Three ways to reach that state: a transient issue read failure, a caller retry, and a
+// concurrent adopter whose winner crashed after `markRegistered`.
+//
+// Seen RED before the retry consulted the join: "a retry left the adoption registered forever: expected
+// 'registered' to be 'completed'".
+describe("[R115 COUNTEREXAMPLE] an at-least-once retry finishes an adoption whose join was lost", () => {
+  it("COMPLETES a registered operation whose issue is already done on its own evidence", async () => {
+    const { store, current } = operations({ state: "registered", registeredVersion: "1.0.1" });
+    const service = new CampaignAdoptionService({
+      operations: store,
+      // The issue closed on THIS adoption's evidence while the join was lost.
+      issues: { get: async () => ({ status: "done", resolution: { scorecardId: PROOF.provingScorecardId } }) },
+      register: async () => {
+        throw new Error("the effect must not run again on a spent authorization");
+      },
+    });
+
+    const outcome = await service.adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    });
+
+    expect(outcome.kind, "a retry of a spent adoption re-registered").toBe("already_adopted");
+    expect(current()?.state, "a retry left the adoption registered forever").toBe("completed");
+  });
+
+  it("leaves it registered when the issue closed on somebody else's evidence", async () => {
+    const { store, current } = operations({ state: "registered", registeredVersion: "1.0.1" });
+    const service = new CampaignAdoptionService({
+      operations: store,
+      issues: { get: async () => ({ status: "done", resolution: { scorecardId: "sc-somebody-else" } }) },
+      register: async () => {
+        throw new Error("the effect must not run again on a spent authorization");
+      },
+    });
+
+    await service.adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof: PROOF,
+      candidate: CANDIDATE,
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+    });
+
+    expect(current()?.state, "a retry discharged an adoption on evidence that was not its own").toBe("registered");
+  });
+});

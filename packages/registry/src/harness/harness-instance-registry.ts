@@ -120,8 +120,9 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
     instance: HarnessInstanceSpec,
     createdBy?: string,
     origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.registerPreservingOwner(tenant, instance, createdBy, origin);
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved"> {
+    return this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);

@@ -59,10 +59,11 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     instance: HarnessInstanceSpec,
     createdBy?: string,
     origin?: CapabilityOrigin,
-  ): Promise<void> {
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved"> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
     assertPortable(resolveHarnessInstance(template, instance));
-    await this.store.registerPreservingOwner(tenant, instance, createdBy, origin);
+    return await this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);

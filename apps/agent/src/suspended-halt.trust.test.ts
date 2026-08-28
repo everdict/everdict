@@ -37,7 +37,7 @@ const registry: AgentRegistry = {
   register: async () => {},
   // The owner-preserving successor path (arch-review 77) — this double registers nothing, so it
   // answers the same way its `register` does.
-  registerPreservingOwner: async () => {},
+  registerPreservingOwner: async () => "registered" as const,
   has: async () => true,
   get: async () => spec(),
   versions: async () => ["1.0.0"],

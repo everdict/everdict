@@ -51,13 +51,17 @@ export interface HarnessInstanceRegistry {
     teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void>;
-  // See `AgentRegistry.registerPreservingOwner` — the same window, closed the same way (arch-review 77).
+  // See `AgentRegistry.registerPreservingOwner` — the same window, closed the same way (arch-review 77), and
+  // the same `authority` precondition for the AUTHORIZER's window plus the `_shared`-only initial owner
+  // (arch-review 115). One shape, two registries: a lane that carried the guarantee and a lane that did not
+  // is how this axis has come apart every time.
   registerPreservingOwner(
     tenant: string,
     instance: HarnessInstanceSpec,
     createdBy?: string,
     origin?: CapabilityOrigin,
-  ): Promise<void>;
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved">;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>; // resolved (template + pins)

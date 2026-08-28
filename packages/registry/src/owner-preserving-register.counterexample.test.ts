@@ -104,3 +104,76 @@ describe("[R77 COUNTEREXAMPLE] a successor is filed under the owner at the momen
     expect(typeof registry.registerPreservingOwner).toBe("function");
   });
 });
+
+// ── [R115 COUNTEREXAMPLE] THE OWNER THE CALLER WAS AUTHORIZED AGAINST ───────────────────────────────
+//
+// R77 closed the WRITER's window: the team is resolved where the write happens. The AUTHORIZER's window is
+// the same shape one frame out — the route reads `teamOfEntity` to gate and the store re-reads it to write —
+// and R77's own case above is the proof, read the other way round: it ASSERTS that the successor lands under
+// the team the entity has now, which is exactly what a caller authorized against the old team must not be
+// allowed to cause.
+//
+//     the current owner was preserved   ≠   the caller was authorized against that current owner
+//
+// Seen RED without the precondition: the transfer case below registered 1.1.0 under team-b for a caller the
+// gate had cleared only for team-a.
+describe("[R115 COUNTEREXAMPLE] the effect asserts the owner its authorization was granted against", () => {
+  it("REFUSES when the entity changed teams after the gate read it", () => {
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice", "team-a");
+    // The gate saw team-a…
+    const authorized = agents.teamOfVersion("acme", "a1", "1.0.0");
+    expect(authorized).toBe("team-a");
+    // …and the entity moved before the write.
+    agents.moveToTeam("acme", "a1", "team-b");
+
+    const landed = agents.registerPreservingOwner("acme", spec("1.1.0"), "alice", undefined, {
+      expectedOwnerTeamId: authorized,
+    });
+
+    expect(landed, "an authorization for team-a wrote a team-b version").toBe("owner_moved");
+    expect(agents.versions("acme", "a1"), "the refused write registered a version anyway").toEqual(["1.0.0"]);
+  });
+
+  it("ALLOWS the unchanged owner — the control that keeps the precondition from being a wall", () => {
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice", "team-a");
+    const landed = agents.registerPreservingOwner("acme", spec("1.1.0"), "alice", undefined, {
+      expectedOwnerTeamId: "team-a",
+    });
+    expect(landed).toBe("registered");
+    expect(agents.teamOfVersion("acme", "a1", "1.1.0")).toBe("team-a");
+  });
+
+  // The other half of the same asymmetry: `ownerOf` falls back to `_shared`, the owner lookup does not. So a
+  // candidate that exists only in `_shared` had NO local owner to preserve and its first workspace version
+  // was born unowned — a private team's campaign minting a capability every other team can see and write.
+  it("gives a candidate with no LOCAL owner the team that authorized the write", () => {
+    const agents = store();
+    agents.register("_shared", spec("1.0.0"), "platform"); // shared, unowned, no local version
+    expect(agents.versions("acme", "a1"), "the fixture has no shared version to shadow").toEqual(["1.0.0"]);
+
+    const landed = agents.registerPreservingOwner("acme", spec("1.1.0"), "alice", undefined, {
+      expectedOwnerTeamId: undefined, // the gate authorized an entity with no local owner
+      initialTeamId: "team-a", // …and the campaign that caused the write belongs to team-a
+    });
+
+    expect(landed).toBe("registered");
+    expect(
+      agents.teamOfVersion("acme", "a1", "1.1.0"),
+      "a private team's campaign minted a capability owned by nobody",
+    ).toBe("team-a");
+  });
+
+  // …and the expectation of "unowned" is a real claim, not an absence of one.
+  it("REFUSES an unowned expectation when the entity has since acquired a team", () => {
+    const agents = store();
+    agents.register("acme", spec("1.0.0"), "alice"); // local, unowned
+    agents.moveToTeam("acme", "a1", "team-b");
+    const landed = agents.registerPreservingOwner("acme", spec("1.1.0"), "alice", undefined, {
+      expectedOwnerTeamId: undefined,
+      initialTeamId: "team-a",
+    });
+    expect(landed, "an authorization over an unowned entity wrote into a team").toBe("owner_moved");
+  });
+});

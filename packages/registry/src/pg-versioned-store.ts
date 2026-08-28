@@ -131,8 +131,26 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   // value is not carried at all: the owner is read INSIDE the statement that writes. Ownership moves the
   // ENTITY (`moveToTeam` re-files every version), so any live version answers for all of them — which is
   // what makes a single scalar subquery a faithful reading rather than a guess about ordering.
-  async registerPreservingOwner(tenant: string, item: T, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
-    await this.register(tenant, item, createdBy, undefined, origin, { preserveEntityOwner: true });
+  // ── …AND THE OWNER THE CALLER WAS AUTHORIZED AGAINST (arch-review 115) ──────────────────────────
+  //
+  // Same statement, one more assertion. The route reads `teamOfEntity` to gate and this re-reads it to write;
+  // a transfer between them lands the successor under a team the caller may not write to. `expectedOwnerTeamId`
+  // is what the gate saw, checked WHERE the current owner is resolved — so the pair is decided together or
+  // not at all — and a mismatch inserts nothing and answers `owner_moved`.
+  //
+  // `initialTeamId` covers the entity with no LOCAL owner: `ownerOf` falls back to `_shared`, this subquery
+  // does not, so a `_shared`-only candidate's first workspace version used to be born unowned.
+  async registerPreservingOwner(
+    tenant: string,
+    item: T,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved"> {
+    return await this.registerReturning(tenant, item, createdBy, undefined, origin, {
+      preserveEntityOwner: true,
+      ...(authority !== undefined ? { authority } : {}),
+    });
   }
 
   async register(
@@ -141,8 +159,27 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     createdBy?: string,
     teamId?: string,
     origin?: CapabilityOrigin,
-    opts?: { preserveEntityOwner?: boolean },
+    opts?: {
+      preserveEntityOwner?: boolean;
+      authority?: { expectedOwnerTeamId?: string; initialTeamId?: string };
+    },
   ): Promise<void> {
+    await this.registerReturning(tenant, item, createdBy, teamId, origin, opts);
+  }
+
+  // The same write, with its ANSWER — `register` keeps `Promise<void>` because every other registry wrapper
+  // forwards it and none of them authorizes anything (arch-review 115).
+  private async registerReturning(
+    tenant: string,
+    item: T,
+    createdBy?: string,
+    teamId?: string,
+    origin?: CapabilityOrigin,
+    opts?: {
+      preserveEntityOwner?: boolean;
+      authority?: { expectedOwnerTeamId?: string; initialTeamId?: string };
+    },
+  ): Promise<"registered" | "owner_moved"> {
     // Non-empty version invariant (parity with VersionedStore) — a blank version sorts to the tail as non-semver and
     // silently becomes `latest`. Reject it before the write.
     if (item.version.trim().length === 0) {
@@ -196,7 +233,9 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
           `UPDATE ${this.table} SET origin = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND origin IS NULL`,
           [tenant, item.id, item.version, JSON.stringify(origin)],
         );
-      return;
+      // Idempotent re-register of the exact same version: nothing was written, and nothing about ownership
+      // was contradicted either — the caller's authorization still holds over a row that already existed.
+      return "registered";
     }
     const columns = ["tenant", "id", "version", this.column, "created_at"];
     const values: unknown[] = [tenant, item.id, item.version, JSON.stringify(item)];
@@ -210,9 +249,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       columns.push("team_id");
       if (opts?.preserveEntityOwner === true) {
         // Resolved in the INSERT, so no transfer can land between reading the owner and writing the row.
-        placeholders.push(
-          `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`,
-        );
+        const owner = `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`;
+        if (opts.authority !== undefined) {
+          values.push(opts.authority.initialTeamId ?? null);
+          // COALESCE, not a second statement: an entity with no local owner takes the authority that caused
+          // the write, decided in the same place the existing owner is read.
+          placeholders.push(`COALESCE(${owner}, $${values.length})`);
+        } else {
+          placeholders.push(owner);
+        }
       } else {
         values.push(teamId ?? null);
         placeholders.push(`$${values.length}`);
@@ -223,13 +268,29 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       values.push(origin === undefined ? null : JSON.stringify(origin));
       placeholders.push(`$${values.length}::jsonb`);
     }
-    const insert = `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING 1`;
+    // The authority precondition rides the INSERT itself — `SELECT … WHERE NOT EXISTS` rather than VALUES —
+    // so "who owns this entity" is read once, for both the value written and the refusal.
+    let insert = `INSERT INTO ${this.table} (${columns.join(", ")}) VALUES (${placeholders.join(", ")}) RETURNING 1`;
+    if (opts?.authority !== undefined && this.hasTeamId) {
+      values.push(opts.authority.expectedOwnerTeamId ?? null);
+      const expected = `$${values.length}`;
+      const owner = `(SELECT team_id FROM ${this.table} WHERE tenant = $1 AND id = $2 AND team_id IS NOT NULL${this.live} LIMIT 1)`;
+      // Refuse only when there IS a local entity whose resolved owner differs. A `_shared`-only or new id has
+      // no claim to contradict, which is the case `initialTeamId` is for. `IS DISTINCT FROM` so that an
+      // expectation of "unowned" is a real claim rather than a NULL that compares to nothing.
+      insert =
+        `INSERT INTO ${this.table} (${columns.join(", ")}) ` +
+        `SELECT ${placeholders.join(", ")} ` +
+        `WHERE NOT (EXISTS (SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2${this.live}) ` +
+        `AND ${owner} IS DISTINCT FROM ${expected}) RETURNING 1`;
+    }
     if (this.generationKind === undefined) {
-      await this.client.query(insert, values);
-      return;
+      const { rows } = await this.client.query(insert, values);
+      return rows.length > 0 || opts?.authority === undefined ? "registered" : "owner_moved";
     }
     values.push(this.generationKind);
-    await this.client.query(this.fenced(insert, "SELECT 1 FROM mutation", values.length), values);
+    const { rows } = await this.client.query(this.fenced(insert, "SELECT 1 FROM mutation", values.length), values);
+    return rows.length > 0 || opts?.authority === undefined ? "registered" : "owner_moved";
   }
 
   // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned

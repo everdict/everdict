@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lookup as lookupDnsCb } from "node:dns";
 import { promisify } from "node:util";
 import {
+  AdoptionCompletionReconciler,
   CampaignService,
   CycleService,
   GithubIssueSync,
@@ -1308,6 +1309,32 @@ async function main(): Promise<void> {
   // that one reopens the issue when the evidence stops holding. A regression leaves the operation
   // `completed`, because it was — history is not rewritten by what happened next.
   eventConsumers.register(adoptionCompletionWatch({ operations: adoptionOperationStore }));
+  // ── …AND THE DURABLE OWNER OF THE ONES NEITHER PATH JOINED (arch-review 115) ─────────────────────
+  //
+  // The watch above and the adopt call's inline read are the two happy orderings. Neither owns the debt when
+  // a read fails: the inline one swallows (correctly — the registry effect already landed), and a later
+  // event only exists if the issue has not ALREADY closed. An operation can therefore sit `registered` with
+  // its issue done on the exact proving scorecard and nothing coming.
+  //
+  // An E1 consumer would not fix it either: `EventConsumerRunner.deliver` retries a throwing handler three
+  // times inside ONE delivery and then dead-letters, advancing the cursor. Convergence needs a worklist the
+  // store can re-offer, which is this.
+  setInterval(
+    whenLeader(leader, () => {
+      void new AdoptionCompletionReconciler({ operations: adoptionOperationStore, issues: issueService })
+        .sweep()
+        .then((r) => {
+          if (r.completed > 0 || r.unknown > 0)
+            console.log(
+              `[adoption-sweep] examined ${r.examined} · completed ${r.completed} · still open ${r.open} · unreadable ${r.unknown}`,
+            );
+        })
+        .catch((err: unknown) => {
+          console.error(`[adoption-sweep] failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+    }),
+    5 * 60_000,
+  ).unref();
   eventConsumers.register(
     regressionWatch({
       issues: issueStore,

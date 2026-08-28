@@ -36,7 +36,7 @@ function codeCapability(over: Partial<CapabilityRecord> & Pick<CapabilityRecord,
 function fakeRegistry(spec: AgentSpec | undefined): AgentRegistry {
   return {
     register: async () => {},
-    registerPreservingOwner: async () => {},
+    registerPreservingOwner: async () => "registered" as const,
     has: async () => spec !== undefined,
     get: async () => {
       if (!spec) throw new NotFoundError("NOT_FOUND", undefined, "no agent");

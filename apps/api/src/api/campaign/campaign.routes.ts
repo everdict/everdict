@@ -216,6 +216,9 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     //
     // The team model is explicit that READ is decided by team privacy and WRITE by team membership; a write
     // gated without `{ teamId }` has asked neither question about the resource it is about to change.
+    //
+    // Declared out here so the EFFECT below can assert the same owner this block authorized against.
+    let authorizedOwner: string | undefined;
     try {
       // ⚠️ NOT `deps.campaignService?.get(...)` (arch-review 78). The optional call made the campaign's team
       // check vanish whenever the settlement service was absent — `undefined` reads as UNOWNED, which is
@@ -237,6 +240,11 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
           ? await teamOfEntity(deps.agentRegistry, principal.workspace, candidate.id)
           : await teamOfEntity(deps.harnessInstances, principal.workspace, candidate.id);
       gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+      // …and the EFFECT is told what this gate was granted against. Reading the owner here to authorize and
+      // letting the registry re-read it to write leaves a window an ownership transfer fits through: the
+      // successor lands under a team the caller may not write to, and owner preservation "succeeded"
+      // (arch-review 115). Carried, not re-derived — only this frame knows what it actually gated on.
+      authorizedOwner = owner.teamId;
     } catch (err) {
       return sendError(reply, err);
     }
@@ -264,6 +272,7 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
           spec: body.spec,
           by: principal.subject,
           via: "web",
+          ...(authorizedOwner !== undefined ? { expectedOwnerTeamId: authorizedOwner } : {}),
           // The agent that acted, from the same attribution headers every other write reads — an agent
           // drives this door over HTTP too, and a fact without the loop guard's key wakes its own author
           // (arch-review 85). Read ONCE: two calls are two reads of the same request (L1).

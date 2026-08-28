@@ -52,8 +52,42 @@ export class VersionedStore<T extends { id: string; version: string }> {
   // Detecting that afterwards is the write-then-verify shape this repository just spent a wave removing. So
   // the value is not carried at all: the store resolves the current owner where the write happens. Ownership
   // moves the ENTITY (`moveToTeam` re-files every version), so any live version answers for all of them.
-  registerPreservingOwner(tenant: string, item: T, createdBy?: string, origin?: CapabilityOrigin): void {
-    this.register(tenant, item, createdBy, this.entityTeam(tenant, item.id), origin);
+  // ── …AND THE OWNER THE CALLER WAS AUTHORIZED AGAINST (arch-review 115) ──────────────────────────
+  //
+  // Resolving the owner here closed the WRITER's window. The AUTHORIZER's is the same shape one frame out:
+  // the route reads `teamOfEntity` to gate and this re-reads it to write, so a transfer landing between them
+  // files the successor under a team the caller may not write to. `authority.expectedOwnerTeamId` is what the
+  // gate saw — asserted here, where the current owner is read — and a mismatch writes NOTHING.
+  //
+  // `initialTeamId` is the other half. `ownerOf` falls back to `_shared`; `entityTeam` is tenant-local by
+  // construction. So a candidate living only in `_shared` has no local owner and its first workspace version
+  // was born UNOWNED — visible to every team, writable without a team gate — even when a private team's
+  // campaign is what caused it. Where there is nothing to preserve, the authority that caused the write owns
+  // what it made.
+  registerPreservingOwner(
+    tenant: string,
+    item: T,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): "registered" | "owner_moved" {
+    const current = this.entityTeam(tenant, item.id);
+    // Only a LOCAL entity has an owner to have moved. A `_shared`-only or brand-new id has no claim to check,
+    // which is exactly when `initialTeamId` applies.
+    if (
+      authority !== undefined &&
+      this.hasLiveLocalVersion(tenant, item.id) &&
+      current !== authority.expectedOwnerTeamId
+    )
+      return "owner_moved";
+    this.register(tenant, item, createdBy, current ?? authority?.initialTeamId, origin);
+    return "registered";
+  }
+
+  private hasLiveLocalVersion(tenant: string, id: string): boolean {
+    for (const entry of this.byOwner.get(tenant)?.get(id)?.values() ?? [])
+      if (entry.deletedAt === undefined) return true;
+    return false;
   }
 
   // The entity's owning team, read from its live versions. Undefined = unowned, which is the workspace's —

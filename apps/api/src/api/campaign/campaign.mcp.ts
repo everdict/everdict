@@ -204,6 +204,12 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
             spec: parsedSpec,
             by: principal.subject,
             via: "mcp",
+            // The owner this gate was granted against, asserted again where the successor is written — the
+            // registry re-reads it otherwise, and a transfer landing in between files the version under a
+            // team this caller may not write to (arch-review 115). Same wiring as the HTTP twin, because a
+            // guarantee one transport carries and the other does not is the parity failure rule `api-layer`
+            // exists to prevent.
+            ...(owner.teamId !== undefined ? { expectedOwnerTeamId: owner.teamId } : {}),
             // The agent that acted, so the fact this write emits carries the loop guard's key — without it
             // the agent that adopted a candidate is woken by its own adoption (arch-review 85).
             ...(ctx.agent !== undefined ? { agent: ctx.agent } : {}),

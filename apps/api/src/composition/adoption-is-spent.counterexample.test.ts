@@ -79,6 +79,7 @@ function operations(proof: CampaignAdoptionProof) {
     createdAt: "t",
     updatedAt: "t",
   };
+  const registeredFacts: { message?: string; payload?: unknown; kind?: string }[] = [];
   const store: AdoptionOperationStore = {
     async forCampaign() {
       return op;
@@ -88,11 +89,12 @@ function operations(proof: CampaignAdoptionProof) {
     async registeredOlderThan() {
       return [];
     },
-    async markRegistered(_t, _c, proofDigest, registeredVersion) {
+    async markRegistered(_t, _c, proofDigest, registeredVersion, events) {
       if (op === undefined) return "no_such_operation";
       if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
       if (op.state !== "decided") return "already_registered";
       op = { ...op, state: "registered", registeredVersion };
+      for (const e of events ?? []) registeredFacts.push(e);
       return "registered";
     },
     // The completion half, answering the way the real store does — a double whose refusals are missing
@@ -109,7 +111,7 @@ function operations(proof: CampaignAdoptionProof) {
       return "completed";
     },
   };
-  return { store, current: () => op };
+  return { store, registeredFacts, current: () => op };
 }
 
 const candidateOf = (proof: CampaignAdoptionProof) => ({
@@ -248,6 +250,62 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
     expect((await service.adopt(request)).kind, "a second consumer was granted its own adoption").toBe(
       "already_adopted",
     );
+  });
+});
+
+// ── [R115] A `_shared` SHADOW IS A BIRTH, AND IT BELONGS TO THE CAMPAIGN'S TEAM ────────────────────
+//
+// `VersionedStore.has()` resolves through the `_shared` fallback, so a candidate that exists only there
+// answered TRUE while this closure went on to create the workspace's FIRST local version — the fact said
+// `created: false` about a version being born. The harness lane already used `ownVersions` (tenant-local,
+// "no fallback — for conflict checks"): one fact, two lanes, two meanings.
+//
+// The same asymmetry decided OWNERSHIP. The owner lookup is tenant-local, so a `_shared`-only candidate had
+// no owner to preserve and its first local version was born UNOWNED — a private team's campaign minting a
+// capability every other team can see and write.
+//
+// Seen RED on the previous closure: `existed` was true (created: false) and `teamOfVersion` was undefined.
+describe("[R115 COUNTEREXAMPLE] adopting a candidate that lives only in _shared", () => {
+  it("reports the workspace version as CREATED and files it under the campaign's team", async () => {
+    const proof = { ...proofFor(await measuredDigest()), teamId: "team-a" };
+    const { store, registeredFacts } = operations(proof);
+    const agents = new InMemoryAgentRegistry();
+    // The candidate exists in `_shared` only — `has()` answers true for it, `ownVersions` does not.
+    await agents.register("_shared", SPEC as never, "platform");
+    expect(await agents.has("acme", proof.candidate.id, proof.candidate.version)).toBe(true);
+    expect(await agents.ownVersions("acme", proof.candidate.id)).toEqual([]);
+
+    const outcome = await buildCampaignAdoption({
+      operations: store,
+      agents,
+      harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
+    }).adopt({
+      tenant: "acme",
+      campaignId: "camp-1",
+      proof,
+      candidate: candidateOf(proof),
+      spec: SPEC,
+      by: "alice",
+      via: "web" as const,
+      // The gate authorized an entity with no LOCAL owner, which is a claim, not an absence of one.
+      expectedOwnerTeamId: undefined,
+    });
+
+    expect(outcome.kind).toBe("adopted");
+    expect(
+      await agents.teamOfVersion("acme", proof.candidate.id, proof.candidate.version),
+      "a private team's campaign minted a capability owned by nobody",
+    ).toBe("team-a");
+    // …and the fact says a version was BORN, because one was. `has()` would have reported it as merely
+    // proved, which is what an operator's audit reads.
+    const born = registeredFacts.find((f) => f.kind === "campaign.adoption_registered");
+    expect(born, "the registration emitted no fact to check").toBeDefined();
+    expect(
+      (born?.payload as { created?: boolean } | undefined)?.created,
+      "a workspace version was created and reported as already existing",
+    ).toBe(true);
   });
 });
 
