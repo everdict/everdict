@@ -70,6 +70,13 @@ export class NamingTrajectoryStore implements TrajectoryStore {
   deleteOlderThan(cutoffIso: string): Promise<number> {
     return this.inner.deleteOlderThan(cutoffIso);
   }
+
+  // The retention sweep's other half, and the reason the port declares it REQUIRED: this decorator sits
+  // BETWEEN the offloading store and the concrete one, so a method it does not forward is a capability that
+  // exists in `@everdict/db` and never reaches the caller that decides (arch-review 120).
+  payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
+    return this.inner.payloadRefsOlderThan(cutoffIso, limit);
+  }
 }
 
 // The events to read the line from. A `spans` body is the record (N6) — project it the same way the store

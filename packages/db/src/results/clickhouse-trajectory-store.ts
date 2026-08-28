@@ -15,6 +15,7 @@ import {
   executionSegment,
   pageOf,
   sealBody,
+  serializedBytes,
 } from "@everdict/application-control";
 import { RunUsageSummarySchema, UpstreamError } from "@everdict/contracts";
 import type { SpanBatchFacts } from "@everdict/domain";
@@ -425,7 +426,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       );
       const whole = bodyOf(plane.format, JSON.parse(read[0]?.body_first ?? "[]"));
       const units: unknown[] = whole.spans ?? whole.events;
-      const legacy = pageOf(units, after, limit, maxBytes, (item) => JSON.stringify(item).length);
+      const legacy = pageOf(units, after, limit, maxBytes, serializedBytes);
       return {
         kind: "page",
         page: {
@@ -572,6 +573,26 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     );
     const row = rows[0];
     return { trajectories: Number(row?.trajectories ?? 0), events: Number(row?.events ?? 0) };
+  }
+
+  // ── WHAT RETENTION IS ABOUT TO DESTROY THE ONLY POINTER TO (arch-review 120) ─────────────────────
+  //
+  // The rung-2 twin of the Postgres reader. A body here is JSON TEXT rather than jsonb, so the refs are
+  // matched over the text — the ceiling on a ref is the `"` that ends its JSON string, and `extractAll`
+  // walks both tables' bodies the same way regardless of where in the bag the ref sits.
+  async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
+    const runs = this.expiredRunsSql();
+    const rows = await this.select<{ ref: string }>(
+      `SELECT DISTINCT ref FROM (
+         SELECT arrayJoin(extractAll(body, 'artifact://[^"]+')) AS ref
+           FROM ${this.eventsTable()} WHERE run_id IN (${runs})
+         UNION ALL
+         SELECT arrayJoin(extractAll(body, 'artifact://[^"]+')) AS ref
+           FROM ${this.table()} WHERE run_id IN (${runs})
+       ) LIMIT {limit:UInt32}`,
+      { cutoff: cutoffIso, limit: String(limit) },
+    );
+    return rows.map((r) => r.ref);
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {

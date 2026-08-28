@@ -35,11 +35,34 @@ import type {
 // Nothing is discarded either way. This is a MOVE — the record still contains what the agent produced, and
 // `resolve` returns exactly the value that was sealed.
 
-// How much of one field stays inline. Chosen against the two truncations that already exist downstream: the
-// model judge renders the whole trace as `JSON.stringify(trace).slice(0, 6000)`, and the command harness
-// tail-caps its own stdout at 32_000 — so a preview at this size cannot change a judge's verdict, and it is
-// the size a harness already decided was enough to be worth keeping.
+// How much of one field stays inline, IN BYTES and for the field AS A WHOLE. Chosen against the two
+// truncations that already exist downstream: the model judge renders the whole trace as
+// `JSON.stringify(trace).slice(0, 6000)`, and the command harness tail-caps its own stdout at 32_000 — so a
+// preview at this size cannot change a judge's verdict, and it is the size a harness already decided was
+// enough to be worth keeping.
+//
+// ⚠️ TWO THINGS ABOUT THAT SENTENCE WERE FALSE UNTIL arch-review 120, and both made the ceiling porous:
+//
+//   · IN BYTES. It was `value.length`, which counts UTF-16 code units, so a Korean tool result kept 32,000
+//     characters = ~96,000 bytes inline and an emoji-heavy one ~64,000. The bound the whole design rests on
+//     was 3× looser for exactly the tenants whose traces are not English.
+//   · AS A WHOLE. It was applied PER STRING LEAF, so a `tool_call` bag with two hundred 31 KB leaves had no
+//     leaf over the ceiling, was reported untruncated, and stayed inline at 6 MB. One event then defeats
+//     every page bound downstream — which is the failure this store exists to prevent, arriving through the
+//     shape it did not measure.
 export const EVENT_INLINE_MAX = 32_000;
+
+// Cut a string to a byte budget WITHOUT splitting a UTF-8 sequence. `Buffer.subarray().toString()` would
+// happily hand back a trailing U+FFFD, and a preview whose last character is a replacement glyph reads as
+// corrupted evidence rather than as a truncation.
+function truncateToBytes(value: string, maxBytes: number): string {
+  const buf = Buffer.from(value, "utf8");
+  if (buf.length <= maxBytes) return value;
+  let end = maxBytes;
+  // Continuation bytes are 10xxxxxx: walk back to the start of the sequence the cut landed inside.
+  while (end > 0 && ((buf[end] ?? 0) & 0b1100_0000) === 0b1000_0000) end -= 1;
+  return buf.subarray(0, end).toString("utf8");
+}
 
 // The keyspace. TENANT-scoped and content-addressed: a retried seal writes the same bytes to the same key
 // (idempotent by construction, no orphan per attempt), and two workspaces holding identical bytes still get
@@ -55,17 +78,28 @@ function offloadKey(tenant: string, runId: string, emitter: string, field: strin
 // away the keys and the small values, which are most of what a reader is looking at.
 //
 // So the preview keeps the SHAPE and truncates the leaves: every key survives, every small value survives,
-// and only the oversized strings become prefixes. For a plain string field the same rule is ordinary
-// prefix truncation. One traversal, one rule, and the ref always names the original whole value.
-function previewOf(value: unknown): { preview: unknown; truncated: boolean } {
-  if (typeof value === "string")
-    return value.length > EVENT_INLINE_MAX
-      ? { preview: value.slice(0, EVENT_INLINE_MAX), truncated: true }
-      : { preview: value, truncated: false };
+// and only what does not fit becomes a prefix. For a plain string field the same rule is ordinary prefix
+// truncation. One traversal, one rule, and the ref always names the original whole value.
+//
+// The budget is CARRIED and spent as the walk proceeds, which is the aggregate half of the ceiling above: a
+// bag of two hundred medium leaves fills the field's budget just as a single huge leaf does, and the leaves
+// past it are cut to what remains. Every key still survives — the shape is what makes a preview readable —
+// so an exhausted budget renders its values as empty strings rather than dropping them.
+function previewOf(value: unknown, budget: { left: number }): { preview: unknown; truncated: boolean } {
+  if (typeof value === "string") {
+    const bytes = Buffer.byteLength(value, "utf8");
+    if (bytes <= budget.left) {
+      budget.left -= bytes;
+      return { preview: value, truncated: false };
+    }
+    const kept = truncateToBytes(value, budget.left);
+    budget.left = 0;
+    return { preview: kept, truncated: true };
+  }
   if (Array.isArray(value)) {
     let truncated = false;
     const preview = value.map((item) => {
-      const inner = previewOf(item);
+      const inner = previewOf(item, budget);
       truncated ||= inner.truncated;
       return inner.preview;
     });
@@ -75,7 +109,7 @@ function previewOf(value: unknown): { preview: unknown; truncated: boolean } {
     let truncated = false;
     const preview: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      const inner = previewOf(item);
+      const inner = previewOf(item, budget);
       truncated ||= inner.truncated;
       preview[key] = inner.preview;
     }
@@ -104,10 +138,36 @@ function fieldsFor(kind: string): OffloadField[] {
   return OFFLOADABLE.filter((f) => f.kind === kind);
 }
 
+// ── THE ONE OWNER THAT ENDS THESE BYTES (arch-review 120) ──────────────────────────────────────────
+//
+// `ArtifactStore` deliberately has no `remove`: almost everything it holds is EVIDENCE, and a delete on the
+// shared port would be a capability forty callers have and nobody should use. Both concrete stores implement
+// one anyway, and `AgentHalfStore` is the precedent for asking narrowly.
+//
+// Retention is the second owner. A trajectory past its retention window is deleted from the database, and
+// until now its offloaded payloads were not deleted from anywhere — the rows that named the keys went away
+// and the bytes stayed, with nothing left to enumerate them.
+//
+//     trajectory retention applied   ≠   tenant payload erased
+//
+// That is a privacy question rather than a storage-cost one, which is why this port exists at all.
+// How many payload objects one retention sweep accounts for. The sweep is periodic, so a bound here is a
+// pace rather than a cap — the rows it could not account for are simply deleted by a later pass.
+export const PAYLOAD_SWEEP_LIMIT = 5_000;
+
+export interface TrajectoryPayloadArtifacts extends ArtifactStore {
+  // Retention needs an artifact store that can DELETE, which the shared `ArtifactStore` port deliberately
+  // does not declare (only two owners want it, and both hold a concrete store). An outage THROWS — an
+  // outage is not an absence, and swallowing it here is how the bytes became unfindable in the first place.
+  remove(key: string): Promise<void>;
+}
+
 export class OffloadingTrajectoryStore implements TrajectoryStore {
   constructor(
     private readonly inner: TrajectoryStore,
-    private readonly artifacts: ArtifactStore,
+    // The NARROW port, not the shared one: this decorator is the owner that ends these bytes, so it is the
+    // one place that asks for a delete (arch-review 120).
+    private readonly artifacts: TrajectoryPayloadArtifacts,
   ) {}
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -164,7 +224,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     value: unknown,
   ): Promise<{ preview: unknown; ref: string } | undefined> {
     if (value === undefined || value === null) return undefined;
-    const { preview, truncated } = previewOf(value);
+    const { preview, truncated } = previewOf(value, { left: EVENT_INLINE_MAX });
     if (!truncated) return undefined;
     const key = offloadKey(input.tenant, input.runId, emitter, field, value);
     try {
@@ -262,7 +322,41 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     return this.inner.ingestedSince(tenant, sinceIso);
   }
 
-  deleteOlderThan(cutoffIso: string): Promise<number> {
+  // ── RETENTION DELETES THE BYTES, NOT ONLY THE ROWS (arch-review 120) ────────────────────────────
+  //
+  // This forwarded straight through, so a retention sweep removed the DATABASE rows and left every offloaded
+  // payload in object storage — permanently, and undiscoverably, because the rows were the only thing that
+  // named the keys. A tenant asking for their evidence to be deleted got a successful answer and kept bytes.
+  //
+  // ⚠️ OBJECTS FIRST, THEN ROWS, and the order is the whole design. Deleting rows first is what produced an
+  // INVISIBLE orphan: an object nothing points at cannot be found by any later sweep. Deleting objects first
+  // leaves the mirror image for one sweep — a row whose payload is gone — and that one is VISIBLE and
+  // self-healing: a resolve fails closed (loud, and correct: retention removed the evidence), and the next
+  // sweep deletes the row. A window in which expired evidence reads as unresolvable is the honest cost.
+  //
+  // The enumeration is REQUIRED on the port, not optional, and that is this change's other half: the first
+  // draft asked `this.inner.payloadRefsOlderThan === undefined` and fell back to the plain delete — and
+  // `NamingTrajectoryStore` sits between this decorator and the concrete store, so the fallback is the arm
+  // every production deployment would have taken (L2 — a read that did not happen is not an empty answer).
+  async deleteOlderThan(cutoffIso: string): Promise<number> {
+    // Bounded per sweep for the same reason every other worklist here is: a retention pass that tries to hold
+    // every ref in a decade of trajectories is a pass that never finishes.
+    const refs = await this.inner.payloadRefsOlderThan(cutoffIso, PAYLOAD_SWEEP_LIMIT);
+    for (const ref of refs) {
+      const key = artifactKeyOf(ref);
+      // A ref this store did not mint is not ours to delete — and it is not an error either: an event may
+      // carry a handle to somebody else's object store entirely.
+      if (key === undefined) continue;
+      // Not swallowed. An outage here must stop the sweep before it deletes the rows that name these keys,
+      // because a swallowed failure is precisely how the bytes became unfindable in the first place.
+      await this.artifacts.remove(key);
+    }
     return this.inner.deleteOlderThan(cutoffIso);
+  }
+
+  // Forwarded verbatim: the refs are the INNER store's rows to enumerate, and this decorator's only business
+  // with them is deleting what they name.
+  payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
+    return this.inner.payloadRefsOlderThan(cutoffIso, limit);
   }
 }

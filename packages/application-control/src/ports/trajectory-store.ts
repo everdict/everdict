@@ -654,6 +654,25 @@ export interface TrajectoryStore {
   // Retention (N3): delete trajectories sealed before the cutoff, across tenants (operator policy). Returns
   // how many rows went — the sweep logs it, never silently. No retention configured = keep forever.
   deleteOlderThan(cutoffIso: string): Promise<number>;
+  // ── WHAT RETENTION IS ABOUT TO DESTROY THE ONLY POINTER TO (arch-review 120) ─────────────────────
+  //
+  // An offloaded payload lives in object storage and is named ONLY by the event row that carries its ref. So
+  // `deleteOlderThan` removing the rows removes the last enumeration of those objects — the database reports
+  // a successful retention and the tenant's evidence bytes stay, with nothing left that could find them.
+  //
+  //     the rows are gone   ≠   the bytes are gone
+  //
+  // This is the read that keeps them findable: every payload ref held by the trajectories this cutoff would
+  // delete. The offloading decorator drives it BEFORE the delete, because after it there is nothing to ask.
+  //
+  // REQUIRED, and the first draft of it was optional — which is how it was found. `NamingTrajectoryStore`
+  // sits between the offloading decorator and the concrete store, so an optional method it does not forward
+  // is `undefined` at the seam that decides, the sweep takes its no-offload arm, and every deployment
+  // deletes rows while the bytes stay. That is rule `protocol`'s optional-dependency law exactly: a
+  // capability a protocol depends on is required at the seam that decides, or its absence is a named
+  // outcome — never a silent `?.` that reads as success. Required, the compiler asks both decorators and
+  // all three stores, which is the only reader that cannot forget.
+  payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]>;
 }
 
 // ── THE PAGE CEILINGS, OWNED ONCE ────────────────────────────────────────────────────────────────────
@@ -683,6 +702,30 @@ export function clampWindow(window: TrajectoryWindow): { limit: number; maxBytes
   const after =
     window.after === undefined || !Number.isFinite(window.after) || window.after < 0 ? 0 : Math.floor(window.after);
   return { limit, maxBytes, after };
+}
+
+// ── ONE OWNER FOR "HOW BIG IS THIS", AND IT COUNTS BYTES (arch-review 120) ───────────────────────────
+//
+// Every ceiling in this file is denominated in BYTES — `MAX_PAGE_BYTES`, the events table's `bytes` column,
+// the offload's inline budget. The four places that measured an item all spelled it `JSON.stringify(x).length`,
+// which counts UTF-16 CODE UNITS. For ASCII the two agree, which is why it survived; for the traces this
+// product is actually sold into they do not:
+//
+//     a CJK/Hangul character   1 code unit  → 3 bytes      (x3)
+//     an emoji                 2 code units → 4 bytes      (x2)
+//
+// So a 4 MiB page ceiling admitted up to 12 MiB of Korean, and every downstream bound derived from it — the
+// HTTP response, the Zod copy, the judge's context — was sized against a number that was not the number of
+// bytes. A ceiling that under-counts by 3× on one tenant's data and not another's is worse than a wrong
+// ceiling: it is a different product per language.
+//
+// Exported and consumed by all four sizing sites, because a predicate written twice has already diverged
+// (rule `protocol` L3) — and this one had been written four times.
+export function serializedBytes(item: unknown): number {
+  const text = JSON.stringify(item);
+  // `undefined` is not JSON. Nothing sized here should be it, and a thrown TypeError from a caller measuring
+  // a page is a worse answer than zero.
+  return text === undefined ? 0 : Buffer.byteLength(text, "utf8");
 }
 
 // Cut an already-materialized array to one page under both ceilings, using each item's serialized size.

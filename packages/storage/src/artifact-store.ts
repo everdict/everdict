@@ -13,8 +13,8 @@ export class InMemoryArtifactStore implements ArtifactStore {
     return this.objects.get(key)?.data;
   }
 
-  // See the S3 twin for why this is on the class and not on the port: the store holds evidence, and evidence
-  // is kept — the staged agent half is the one intermediate artifact with an owner that ends it.
+  // See the S3 twin for why this is on the class and not on the shared port. Two owners ask for it now: the
+  // staged agent half, and trajectory RETENTION (arch-review 120).
   async remove(key: string): Promise<void> {
     this.objects.delete(key);
   }

@@ -16,6 +16,7 @@ import {
   pageOf,
   sealBody,
   segmentDeclaresAttempt,
+  serializedBytes,
   trajectoryForAttempt,
 } from "@everdict/application-control";
 import { type RunUsageSummary, RunUsageSummarySchema } from "@everdict/contracts";
@@ -62,7 +63,7 @@ export function sizedItems(body: {
   spans?: readonly unknown[];
 }): SizedItem[] {
   const items = body.spans ?? body.events;
-  return items.map((item) => ({ body: item, bytes: JSON.stringify(item).length }));
+  return items.map((item) => ({ body: item, bytes: serializedBytes(item) }));
 }
 
 // Which plane a window means, from the planes the caller is allowed to see. Shared by every impl so a window
@@ -246,6 +247,25 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       events += this.metaOf(runId).eventCount;
     }
     return { trajectories, events };
+  }
+
+  // The twin of the Pg reader (arch-review 120): every payload ref the doomed rows hold, so the decorator can
+  // delete the bytes before the rows that name them are gone.
+  async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
+    const refs = new Set<string>();
+    const walk = (value: unknown): void => {
+      if (typeof value === "string") {
+        if (value.startsWith("artifact://")) refs.add(value);
+        return;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) walk(item);
+        return;
+      }
+      if (value !== null && typeof value === "object") for (const item of Object.values(value)) walk(item);
+    };
+    for (const row of this.rows.values()) if (row.sealedAt < cutoffIso) walk(row);
+    return [...refs].slice(0, limit);
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {
@@ -550,13 +570,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
     // Page the RECORD (spans when there are spans), so a legacy plane and a split one page over the same unit
     // and `nextAfter` means the same thing on both.
     const units: unknown[] = whole.spans ?? whole.events;
-    const { slice, nextAfter } = pageOf(
-      units,
-      page.after,
-      page.limit,
-      page.maxBytes,
-      (item) => JSON.stringify(item).length,
-    );
+    const { slice, nextAfter } = pageOf(units, page.after, page.limit, page.maxBytes, serializedBytes);
     return {
       kind: "page",
       page: {
@@ -646,6 +660,34 @@ export class PgTrajectoryStore implements TrajectoryStore {
     );
     const row = res.rows[0];
     return { trajectories: Number(row?.trajectories ?? 0), events: Number(row?.events ?? 0) };
+  }
+
+  // ── WHAT RETENTION IS ABOUT TO DESTROY THE ONLY POINTER TO (arch-review 120) ────────────────────
+  //
+  // An offloaded payload is named ONLY by the event row carrying its ref, so deleting the rows removes the
+  // last enumeration of those objects. This is the read the offloading decorator makes BEFORE the delete —
+  // after it there is nothing left to ask.
+  //
+  // Both split and unsplit planes: a legacy single-blob body holds its events inside one jsonb document, and
+  // its refs are just as real. `jsonb_path_query` walks either shape, and `DISTINCT` collapses the many
+  // events that share one digest-addressed payload.
+  async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
+    const res = await this.client.query<{ ref: string }>(
+      `SELECT DISTINCT ref FROM (
+         SELECT jsonb_path_query(e.body, '$.**{0 to 6}.*ref')  #>> '{}' AS ref
+           FROM everdict_trajectory_events e
+           JOIN everdict_trajectories t ON t.run_id = e.run_id
+          WHERE t.sealed_at < $1::timestamptz
+         UNION ALL
+         SELECT jsonb_path_query(t.body, '$.**{0 to 8}.*ref') #>> '{}' AS ref
+           FROM everdict_trajectories t
+          WHERE t.sealed_at < $1::timestamptz AND t.body IS NOT NULL
+       ) refs
+       WHERE ref LIKE 'artifact://%'
+       LIMIT $2`,
+      [cutoffIso, limit],
+    );
+    return res.rows.map((r) => r.ref);
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {

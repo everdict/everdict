@@ -96,6 +96,7 @@ import {
   clampWindow,
   pageOf,
   sealExecutionPlanes,
+  serializedBytes,
   trajectorySegmentsWire,
 } from "../ports/trajectory-store.js";
 import { dispatchManifest, foldEnvDeltas } from "../recording-manifest.js";
@@ -1979,7 +1980,7 @@ export class RunService {
     // Dual-read fallback: the pre-P5 embed — served in the same shape so consumers never care which copy.
     if (record.result && record.result.trace.length > 0) {
       const { limit, maxBytes, after } = clampWindow(window);
-      const embed = pageOf(record.result.trace, after, limit, maxBytes, (e) => JSON.stringify(e).length);
+      const embed = pageOf(record.result.trace, after, limit, maxBytes, serializedBytes);
       return {
         meta: { source: "embed", eventCount: record.result.trace.length, sealedAt: record.updatedAt },
         events: embed.slice,

@@ -1,7 +1,10 @@
 import type { TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import type { ArtifactStore } from "./artifact-store.js";
-import { EVENT_INLINE_MAX, OffloadingTrajectoryStore } from "./offloading-trajectory-store.js";
+import {
+  EVENT_INLINE_MAX,
+  OffloadingTrajectoryStore,
+  type TrajectoryPayloadArtifacts,
+} from "./offloading-trajectory-store.js";
 import {
   type SealInput,
   type TrajectoryEventsResult,
@@ -9,6 +12,7 @@ import {
   type TrajectoryWindow,
   clampWindow,
   pageOf,
+  serializedBytes,
 } from "./trajectory-store.js";
 
 // ── A PAGE OF A HUNDRED EVENTS IS ONLY A BOUND IF THE EVENTS ARE BOUNDED (R1) ───────────────────────
@@ -85,13 +89,40 @@ function inner(): TrajectoryStore & { sealedEvents: () => TraceEvent[] } {
     async ingestedSince() {
       return { trajectories: 0, events: 0 };
     },
+    // A RETENTION SWEEP, not a stub: it holds the sealed events, so it can both enumerate their payload refs
+    // and forget them. A double that answered `0`/`[]` here would make the retention counterexample below
+    // green over a store that never deleted anything (rule `testing`).
     async deleteOlderThan() {
-      return 0;
+      const gone = held.length === 0 ? 0 : 1;
+      held = [];
+      return gone;
+    },
+    async payloadRefsOlderThan() {
+      return refsOf(held);
     },
   };
 }
 
-function artifactStore(opts: { failPut?: boolean; loseObjects?: boolean } = {}): ArtifactStore & {
+// Every `artifact://` ref the held events carry, wherever it sits in the bag — the same walk the concrete
+// stores do in SQL, so the double answers what production would.
+function refsOf(events: TraceEvent[]): string[] {
+  const refs = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") {
+      if (value.startsWith("artifact://")) refs.add(value);
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) walk(item);
+      return;
+    }
+    if (value !== null && typeof value === "object") for (const item of Object.values(value)) walk(item);
+  };
+  walk(events);
+  return [...refs];
+}
+
+function artifactStore(opts: { failPut?: boolean; loseObjects?: boolean } = {}): TrajectoryPayloadArtifacts & {
   keys: () => string[];
 } {
   const objects = new Map<string, Uint8Array>();
@@ -107,6 +138,11 @@ function artifactStore(opts: { failPut?: boolean; loseObjects?: boolean } = {}):
     },
     async publicUrlFor() {
       return undefined;
+    },
+    // Retention's delete (arch-review 120): it ANSWERS, so a caller settling a debt can tell "already gone"
+    // from "I removed it".
+    async remove(key: string) {
+      objects.delete(key);
     },
   };
 }
@@ -149,7 +185,14 @@ describe("[R1 COUNTEREXAMPLE] an oversized payload is moved, and only a caller t
     const call = (await page(store)).find((e) => e.kind === "tool_call");
     const args = call?.kind === "tool_call" ? (call.args as { path: string; content: string }) : undefined;
     expect(args?.path, "the small sibling key was thrown away with the big one").toBe("out.txt");
-    expect(args?.content).toHaveLength(EVENT_INLINE_MAX);
+    // The budget is the FIELD's, not each leaf's (arch-review 120), so `path` spends its 7 bytes first and
+    // `content` is cut to what remains. Asserting the SUM is the aggregate law itself; asserting
+    // `content.length === EVENT_INLINE_MAX` would be asserting the per-leaf rule that let a bag of two
+    // hundred medium leaves stay inline at 6 MB.
+    expect(
+      Buffer.byteLength(args?.path ?? "", "utf8") + Buffer.byteLength(args?.content ?? "", "utf8"),
+      "the field's preview was not bounded as a whole",
+    ).toBe(EVENT_INLINE_MAX);
     expect(call?.kind === "tool_call" && call.argsRef).toEqual(expect.any(String));
   });
 
@@ -214,5 +257,135 @@ describe("[R1 COUNTEREXAMPLE] an oversized payload is moved, and only a caller t
 
     expect(artifacts.keys(), "a small event was offloaded anyway").toEqual([]);
     expect(await page(store, { resolve: true })).toEqual(small);
+  });
+});
+
+// ── [R120 COUNTEREXAMPLE] RETENTION DELETES THE BYTES, NOT ONLY THE ROWS ────────────────────────────
+//
+// The offload moves an oversized payload to object storage and leaves a ref behind. That ref, in the event
+// row, is the ONLY thing that names the object — no listing, no index, no second pointer. So a retention
+// sweep that deleted the rows reported a successful deletion and left the tenant's evidence bytes in the
+// bucket, findable by nobody and deletable by nothing:
+//
+//     the rows are gone   ≠   the bytes are gone
+//
+// A workspace asking for a 30-day retention got 30 days of rows and forever of payloads, and the older the
+// deployment the larger the share of its bytes that was unreachable — offload only ever moves the BIG ones.
+//
+// The order matters as much as the act, and it is the fix's actual design. Deleting rows first produces an
+// INVISIBLE orphan: nothing points at the object, so no later sweep can ever find it. Deleting objects
+// first leaves the mirror image for exactly one sweep — a row whose payload is gone — and that state is
+// VISIBLE and self-healing: a resolve fails closed (correctly: retention removed the evidence) and the next
+// sweep removes the row.
+//
+// Seen RED with the production `deleteOlderThan` forwarding straight to the inner store:
+//   "retention deleted the rows and left the payload bytes: expected [ …(2) ] to deeply equal []"
+//   "promise resolved "1" instead of rejecting"  ← the fail-closed half
+describe("[R120 COUNTEREXAMPLE] retention removes the payload objects its rows were the only pointer to", () => {
+  it("sweeps the offloaded bytes before the rows that name them", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    await seal(store, bigEvents());
+    // The premise: this trajectory HAS offloaded bytes. Without it the assertion below is satisfied by a
+    // store that never offloaded anything, which is the vacuous shape rule `testing` names.
+    expect(artifacts.keys().length, "nothing was offloaded, so this proves nothing about retention").toBe(2);
+
+    const removed = await store.deleteOlderThan("2999-01-01T00:00:00.000Z");
+
+    expect(removed, "the rows were not swept").toBe(1);
+    expect(artifacts.keys(), "retention deleted the rows and left the payload bytes").toEqual([]);
+  });
+
+  it("stops before the rows when the object store refuses — an unaccounted ref is not swept past", async () => {
+    // The fail-closed half. If the delete cannot be performed we must not delete the rows either: doing so
+    // converts a retryable failure into a permanently unreachable object. Loud and owed beats quiet and lost.
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, {
+      ...artifacts,
+      async remove() {
+        throw new Error("object store down");
+      },
+    });
+
+    await seal(store, bigEvents());
+    await expect(store.deleteOlderThan("2999-01-01T00:00:00.000Z")).rejects.toThrow(/object store down/);
+    // The rows survived, so the refs still name the objects and the next sweep can try again.
+    expect((await base.events("acme", "r1", {})).kind, "the rows were swept over an unfinished delete").toBe("page");
+    expect(base.sealedEvents().length, "the rows were swept over an unfinished delete").toBe(3);
+  });
+});
+
+// ── [R120 COUNTEREXAMPLE] THE CEILING IS DENOMINATED IN BYTES, AND IT BOUNDS THE FIELD ─────────────
+//
+// Every ceiling downstream of this store is in bytes — the page budget, the HTTP response, the events
+// table's `bytes` column. The offload measured its own in `String.length`, which counts UTF-16 code units,
+// and it applied that number to each string LEAF rather than to the field. Two independent leaks:
+//
+//   · a Korean tool result kept 32,000 characters = ~96,000 bytes inline. The bound the design rests on was
+//     3× looser for exactly the tenants whose traces are not English — a different product per language.
+//   · a `tool_call` bag of two hundred 31 KB leaves had no leaf over the ceiling, was reported UNTRUNCATED,
+//     and stayed inline at ~6 MB. One event then defeats every page bound downstream, which is the failure
+//     this whole store exists to prevent, arriving through the axis it did not measure.
+//
+// Seen RED by neutralizing each half in the production file:
+//   measure in code units →  "the payload was never moved: expected undefined to deeply equal Any<String>"
+//                            (60,000 bytes stayed inline because 20,000 code units are under the ceiling)
+//   slice by code units   →  "the preview was measured in code units, not bytes: expected 60000 to be less
+//                            than or equal to 32000"
+//   a per-leaf budget     →  "a bag of medium leaves was never bounded: expected undefined to deeply equal
+//                            Any<String>"
+describe("[R120 COUNTEREXAMPLE] the inline ceiling is bytes, and it bounds the whole field", () => {
+  it("bounds a multibyte payload by BYTES — a Korean trace is not a 3x larger budget", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    // U+2603 is 3 bytes in UTF-8 and 1 code unit in UTF-16 — the same ratio as Hangul or CJK, written as an
+    // escape so this English-only source stays ASCII. The COUNT is chosen to sit BETWEEN the two ceilings:
+    // 20,000 code units is under 32,000, so the old rule reported this field untruncated and left all 60,000
+    // bytes inline with no ref at all. A longer string would have tripped the code-unit ceiling too and
+    // proved nothing about which unit is being counted.
+    const multibyte = "\u2603".repeat(20_000);
+    await seal(store, [{ t: 0, kind: "tool_result", id: "c1", ok: true, output: multibyte }]);
+
+    const result = (await page(store)).find((e) => e.kind === "tool_result");
+    expect(result?.kind === "tool_result" && result.outputRef, "the payload was never moved").toEqual(
+      expect.any(String),
+    );
+    const preview = result?.kind === "tool_result" && typeof result.output === "string" ? result.output : "";
+    expect(Buffer.byteLength(preview, "utf8"), "the preview was measured in code units, not bytes").toBeLessThanOrEqual(
+      EVENT_INLINE_MAX,
+    );
+    // …and the cut landed on a character boundary. A preview ending in U+FFFD reads as corrupted evidence
+    // rather than as a truncation, and it is the default outcome of slicing a Buffer.
+    expect(preview.includes("\uFFFD"), "the cut split a UTF-8 sequence").toBe(false);
+    // The resolve still returns the WHOLE value: this is a move, and a tighter preview must not narrow it.
+    const resolved = (await page(store, { resolve: true })).find((e) => e.kind === "tool_result");
+    expect(resolved?.kind === "tool_result" && resolved.output, "the sealed bytes did not survive").toBe(multibyte);
+  });
+
+  it("bounds a bag of MANY MEDIUM leaves — no single leaf over the ceiling is not 'small'", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    // 200 leaves × 20 KB = 4 MB, and not one of them is over a 32 KB per-leaf ceiling.
+    const bag = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, "y".repeat(20_000)]));
+    await seal(store, [{ t: 0, kind: "tool_call", id: "c1", name: "write_file", args: bag }]);
+
+    const call = (await page(store)).find((e) => e.kind === "tool_call");
+    expect(call?.kind === "tool_call" && call.argsRef, "a bag of medium leaves was never bounded").toEqual(
+      expect.any(String),
+    );
+    expect(
+      serializedBytes(call?.kind === "tool_call" ? call.args : undefined),
+      "the field's preview is still megabytes",
+    ).toBeLessThanOrEqual(EVENT_INLINE_MAX * 2);
+    // Every key survives — the shape is what makes a preview readable at all.
+    const args = call?.kind === "tool_call" ? (call.args as Record<string, unknown>) : {};
+    expect(Object.keys(args), "keys were dropped instead of their values being cut").toHaveLength(200);
   });
 });

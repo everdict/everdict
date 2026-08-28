@@ -2849,6 +2849,38 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
   },
   {
+    // R120. Every ceiling downstream of this store is in BYTES; the offload measured its own in UTF-16 code
+    // units, so a Korean trace kept 3x the intended payload inline and a field under the code-unit ceiling
+    // was never moved at all.
+    name: "the inline ceiling is measured in code units, not bytes",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: '    const bytes = Buffer.byteLength(value, "utf8");',
+    to: "    const bytes = value.length;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R120. The budget is the FIELD's and it is CARRIED: a bag of two hundred medium leaves has no leaf over
+    // the ceiling, and stayed inline at megabytes — one event defeating every page bound downstream.
+    name: "the inline budget is per leaf instead of per field",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "      const inner = previewOf(item, budget);\n      truncated ||= inner.truncated;\n      preview[key] = inner.preview;",
+    to: "      const inner = previewOf(item, { left: EVENT_INLINE_MAX });\n      truncated ||= inner.truncated;\n      preview[key] = inner.preview;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R120. The event row's ref is the ONLY pointer to an offloaded payload, so a retention sweep that
+    // deletes rows first leaves bytes nothing can ever name again. Objects first, then the rows — and if the
+    // object store refuses, the rows stay so the next sweep can still find what it owes.
+    name: "retention deletes the rows and leaves the payload bytes",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "    const refs = await this.inner.payloadRefsOlderThan(cutoffIso, PAYLOAD_SWEEP_LIMIT);",
+    to: "    const refs = (void PAYLOAD_SWEEP_LIMIT, [] as string[]);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
     // R1. A spans plane is projected from its attributes BY THE STORE, so resolving the record afterwards
     // fixes the spans and leaves the stream every judge reads truncated. Silently. The resolve has to redo
     // the projection from the resolved record.

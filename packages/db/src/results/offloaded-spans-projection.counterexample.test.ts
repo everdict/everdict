@@ -1,4 +1,8 @@
-import { type ArtifactStore, OffloadingTrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
+import {
+  OffloadingTrajectoryStore,
+  type TrajectoryPayloadArtifacts,
+  collectTrajectoryEvents,
+} from "@everdict/application-control";
 import { EVERDICT_ATTR, GEN_AI, GEN_AI_OPERATION, type TraceSpan } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryTrajectoryStore } from "./trajectory-store.js";
@@ -40,7 +44,7 @@ const TOOL_SPAN: TraceSpan = {
   },
 };
 
-function artifactStore(): ArtifactStore {
+function artifactStore(): TrajectoryPayloadArtifacts {
   const objects = new Map<string, Uint8Array>();
   return {
     async put(key: string, data: Uint8Array) {
@@ -52,6 +56,9 @@ function artifactStore(): ArtifactStore {
     },
     async publicUrlFor() {
       return undefined;
+    },
+    async remove(key: string) {
+      objects.delete(key);
     },
   };
 }

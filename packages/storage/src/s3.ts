@@ -171,11 +171,15 @@ export class S3ArtifactStore implements ArtifactStore {
   // exception (it exists only between a case's two halves), so the capability lives on the concrete store and
   // the narrow `AgentHalfStore` port is the only thing that asks for it.
   //
-  // An absent object is a no-op, like every delete in this repo: the half may have been reclaimed already by
-  // the path that raced this one.
+  // An absent object is not a failure — the half may have been reclaimed by the path that raced this one, or
+  // retention may be re-running over a sweep that already finished. It is deliberately NOT reported as a
+  // distinct answer: S3 DELETE is idempotent and does not say whether anything was there, so a
+  // `deleted | absent` union would have one arm the adapter can almost never reach, and no caller reads it.
+  // What matters to every caller is that a FAILURE throws (arch-review 120).
   async remove(key: string): Promise<void> {
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.opts.bucket, Key: key }));
+      return;
     } catch (err) {
       if (isNotFound(err)) return;
       throw new UpstreamError(

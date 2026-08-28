@@ -41,6 +41,7 @@ export {
   MAX_LEGACY_BODY_BYTES,
   MAX_PAGE_BYTES,
   pageOf,
+  serializedBytes,
   placementSpan,
   sealBody,
   sealExecutionPlanes,
@@ -66,7 +67,12 @@ export {
 // The seal-time naming choke point — every sealed trajectory gets the line that tells it from its siblings.
 export { NamingTrajectoryStore } from "./ports/naming-trajectory-store.js";
 // …and the seal-time payload choke point — an oversized field is MOVED to object storage, never dropped.
-export { EVENT_INLINE_MAX, OffloadingTrajectoryStore } from "./ports/offloading-trajectory-store.js";
+export {
+  EVENT_INLINE_MAX,
+  OffloadingTrajectoryStore,
+  PAYLOAD_SWEEP_LIMIT,
+  type TrajectoryPayloadArtifacts,
+} from "./ports/offloading-trajectory-store.js";
 export {
   EventConsumerRunner,
   type PlatformEventConsumer,
