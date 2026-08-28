@@ -104,6 +104,16 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     return [...this.adoptions.values()].filter((op) => op.tenant === tenant && op.proof.issueId === issueId);
   }
 
+  // The sweep's worklist, deployment-wide and oldest-first — the Pg twin's semantics exactly, including that
+  // it is deliberately NOT tenant-scoped (the reconciler owns the debt for the process, and each row carries
+  // its own tenant for the write it drives).
+  async registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]> {
+    return [...this.adoptions.values()]
+      .filter((op) => op.state === "registered" && op.updatedAt < olderThan)
+      .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
+      .slice(0, limit);
+  }
+
   async markCompleted(
     tenant: string,
     campaignId: string,

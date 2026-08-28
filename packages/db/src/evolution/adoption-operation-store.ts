@@ -113,6 +113,25 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     return rows.map(toOperation);
   }
 
+  // ── THE SWEEP'S WORKLIST (arch-review 115) ────────────────────────────────────────────────────────
+  //
+  // Deployment-wide and oldest-first: an operation stuck at `registered` belongs to no tenant's request any
+  // more, so this is the one read here that is deliberately not tenant-scoped — the reconciler that owns the
+  // debt runs for the process, and every row it returns still carries its own tenant for the write.
+  //
+  // `updated_at` is the age, not `created_at`: the row was updated when it became `registered`, which is the
+  // moment the debt started.
+  async registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]> {
+    const { rows } = await this.client.query<OperationRow>(
+      `SELECT * FROM everdict_adoption_operations
+        WHERE state = 'registered' AND updated_at < $1::timestamptz
+        ORDER BY updated_at ASC
+        LIMIT $2`,
+      [olderThan, limit],
+    );
+    return rows.map(toOperation);
+  }
+
   // Discharging the INTENT, guarded the same way spending it is: the proof compared here (our canonical-JSON
   // digest, which Postgres cannot compute) and the state condition in the statement, where atomicity is what
   // is actually needed. `registered` only — an adoption whose registry write never landed has no intent to

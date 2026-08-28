@@ -396,6 +396,37 @@ returns. The fix for the leak was inert on every deployment with a real Postgres
   over a production path it never entered. That is the adapter-divergence law below, hit while fixing
   something else. A double that lacks the method under test proves the other branch.
 
+## AN AUTHORIZATION AND ITS EFFECT MUST READ THE OWNER ONCE
+arch-review 77 closed a read-then-write window inside the WRITER: `registerPreservingOwner` stopped carrying a
+team the caller had read and let the store resolve the current owner where the write happens. That is right,
+and it moved the window rather than closing it, because the AUTHORIZER still reads the same mutable fact:
+
+    route:     owner = teamOfEntity(registry, tenant, id)   → gate(principal, "agents:write", owner)
+    …transfer: the entity moves from Team A to Team B
+    effect:    registerPreservingOwner → resolves Team B → successor registered under Team B
+
+The caller was authorized against Team A and the effect landed under Team B, which the caller may not write to
+at all. Owner preservation succeeded; authorization is what did not.
+
+    the current owner was preserved   ≠   the caller was authorized against that current owner
+
+- **The effect carries the owner the authorization was granted against, as a PRECONDITION.** Not as the value
+  to write (that is the read-then-write this replaced) — as an `expectedOwnerTeamId` the write asserts in the
+  same statement that resolves the current one. A mismatch is a refusal, and the caller retries against what
+  it can see now.
+- **The same shape appears whenever a transport reads a fact to gate and a service re-reads it to act.**
+  `POST /campaigns` reads the issue's team to authorize, then `CampaignService.open` reads the issue again to
+  stamp the campaign's team; between them `POST /issues/:id/team` can move it, so a caller authorized for
+  Team A files a Team B campaign. Pass what was read, and make the write conditional on it.
+- **An entity with no TENANT-LOCAL owner is not an unowned entity.** `ownerOf` falls back to `_shared`, so
+  `has()` answers true for a shared-only capability while `entityTeam` — tenant-local by construction —
+  answers `undefined`. A campaign belonging to a private team then adopts a `_shared` candidate and mints a
+  workspace-local version owned by NOBODY, visible to every other team. Where no local owner exists, the
+  initial owner is the AUTHORITY that caused the write (the campaign's team), never silence.
+- **Resolve-existence and local existence are two questions.** `has()` answers "does this name resolve here",
+  which includes `_shared`; a workspace-local INSERT is a different fact. Reporting `created: false` from the
+  first while performing the second tells an operator a version was proved when it was born.
+
 ## A REFUSAL AFTER AN IRREVERSIBLE WRITE IS NOT A REFUSAL
 The adoption effect registered the candidate, read the document back, digested it, and threw on a mismatch.
 Every one of those steps is right and the ORDER makes them worthless: registry versions are immutable, so

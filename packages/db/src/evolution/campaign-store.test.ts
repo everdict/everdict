@@ -652,6 +652,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       markRegistered: store.markRegistered.bind(store),
       forIssue: store.forIssue.bind(store),
       markCompleted: store.markCompleted.bind(store),
+      registeredOlderThan: store.registeredOlderThan.bind(store),
     };
     const svc2 = new CampaignService({
       store: raced,

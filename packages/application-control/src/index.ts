@@ -436,6 +436,11 @@ export {
   type RegistrationOutcome,
 } from "./evolution/campaign-adoption-service.js";
 export { adoptionCompletionWatch, type AdoptionCompletionWatchDeps } from "./evolution/adoption-completion-watch.js";
+export {
+  AdoptionCompletionReconciler,
+  type AdoptionCompletionReconcilerDeps,
+  type AdoptionCompletionSweep,
+} from "./evolution/adoption-completion-reconciler.js";
 export { completionFact, issueSettledThisAdoption } from "./evolution/adoption-completion.js";
 export type {
   AdoptionOperationStore,

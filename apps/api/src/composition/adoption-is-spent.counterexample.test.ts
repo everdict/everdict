@@ -83,6 +83,11 @@ function operations(proof: CampaignAdoptionProof) {
     async forCampaign() {
       return op;
     },
+    // The reconciler's worklist (arch-review 115). This double owns one operation and these cases drive the
+    // adopt path directly, so it offers nothing to sweep.
+    async registeredOlderThan() {
+      return [];
+    },
     async markRegistered(_t, _c, proofDigest, registeredVersion) {
       if (op === undefined) return "no_such_operation";
       if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";

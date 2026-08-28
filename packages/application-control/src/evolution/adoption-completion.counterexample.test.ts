@@ -45,6 +45,11 @@ function operations(state: "decided" | "registered" | "completed", proof: Campai
     async markRegistered() {
       return "already_registered";
     },
+    // The sweep's worklist (arch-review 115). This double owns no rows, so it offers none — the cases here
+    // are about the inline/watch joins, not about the reconciler.
+    async registeredOlderThan() {
+      return [];
+    },
     async forIssue(_t, issueId) {
       return op.proof.issueId === issueId ? [op] : [];
     },
@@ -151,6 +156,11 @@ describe("[R73 COUNTEREXAMPLE] an adoption completes when its own evidence close
       },
       async markRegistered() {
         return "no_such_operation";
+      },
+      // The sweep's worklist (arch-review 115). This double owns no rows, so it offers none — the cases here
+      // are about the inline/watch joins, not about the reconciler.
+      async registeredOlderThan() {
+        return [];
       },
       async forIssue() {
         return [

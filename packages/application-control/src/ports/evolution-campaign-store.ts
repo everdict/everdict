@@ -107,4 +107,23 @@ export interface AdoptionOperationStore {
     proofDigest: string,
     events?: OutboxEvent[],
   ): Promise<"completed" | "already_completed" | "not_registered" | "no_such_operation" | "proof_mismatch">;
+  // ── THE WORKLIST FOR AN ADOPTION THAT REGISTERED AND NEVER DISCHARGED (arch-review 115) ───────────
+  //
+  // Two happy paths join registration to the issue's resolution — the issue event when the issue settles
+  // last, an inline read when it settled first — and neither of them OWNS the debt when something goes
+  // wrong. The inline read swallows a failure under a comment saying the operation "stays owed, which the
+  // reconciler and any later issue event both still converge on"; there was no reconciler, and a later
+  // event only exists if the issue has not already closed. `adopt` retried on a `registered` operation
+  // returns `already_adopted` without re-attempting the join, and a concurrent adopter that wins the
+  // registration and dies before the join leaves the same state behind.
+  //
+  // So an operation can sit `registered` forever with its issue done on the exact proving scorecard. The
+  // durable owner is a sweep, and this is its worklist — deployment-wide, oldest first, offering candidates
+  // only. Nothing here decides anything: the reconciler re-reads the issue and `markCompleted` remains the
+  // conditional write that answers (rule `protocol` L5 — a debt owns its worklist).
+  //
+  // ⚠️ An E1 consumer is NOT that owner on its own. This deployment's runner retries a throwing handler
+  // three times inside one delivery and then DEAD-LETTERS, advancing the cursor — so an outage outlasting
+  // three immediate attempts loses the join. The consumer buys latency; this buys convergence.
+  registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]>;
 }

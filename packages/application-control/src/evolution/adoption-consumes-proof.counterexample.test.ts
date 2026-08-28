@@ -57,6 +57,11 @@ function operations(over: Partial<AdoptionOperation> = {}) {
       op = { ...op, state: "registered", registeredVersion };
       return "registered";
     },
+    // The sweep's worklist (arch-review 115). This double owns no rows, so it offers none — the cases here
+    // are about the inline/watch joins, not about the reconciler.
+    async registeredOlderThan() {
+      return [];
+    },
     // The completion half, answering the way the real store does — a double that always succeeded would
     // make a guard that refuses every real call read as a green test (rule `testing`).
     async forIssue(_t, issueId) {
@@ -92,6 +97,11 @@ function operationsWithFacts() {
     async markRegistered(t, c, digest, version, events) {
       for (const e of events ?? []) seen.push(e as unknown as { kind: string; actor: string; causedBy?: string });
       return built.store.markRegistered(t, c, digest, version);
+    },
+    // The sweep's worklist (arch-review 115). This double owns no rows, so it offers none — the cases here
+    // are about the inline/watch joins, not about the reconciler.
+    async registeredOlderThan() {
+      return [];
     },
   };
   return { store, facts: () => seen, current: built.current };
@@ -227,6 +237,11 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       },
       async markRegistered() {
         return "no_such_operation";
+      },
+      // The sweep's worklist (arch-review 115). This double owns no rows, so it offers none — the cases here
+      // are about the inline/watch joins, not about the reconciler.
+      async registeredOlderThan() {
+        return [];
       },
       async forIssue() {
         return [];
