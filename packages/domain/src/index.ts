@@ -544,6 +544,9 @@ export { usageFromTrace } from "./trace/usage-from-trace.js";
 export {
   DEFAULT_SPAN_ATTR_KEYS,
   SPANS_TO_EVENTS_VERSION,
+  type SpanBatchFacts,
+  sortSpansForProjection,
+  spanBatchFacts,
   type SpansToEventsOptions,
   spansToEvents,
 } from "./trace/spans-to-events.js";

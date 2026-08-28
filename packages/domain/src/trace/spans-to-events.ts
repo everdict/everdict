@@ -120,9 +120,66 @@ function readable(span: TraceSpan): Attrs {
   return { ...(span.resource ?? {}), ...span.attributes };
 }
 
+// ── THE TWO FACTS THIS PROJECTION READS OFF THE WHOLE BATCH ──────────────────────────────────────────
+//
+// `spansToEvents` is not a per-span map. Two of its answers are properties of the ARRAY it was handed, and
+// both change when the array is a slice of the plane rather than the plane:
+//
+//   baseMs         the earliest startedAt — every projected event's relative `t` is measured from it
+//   perCallTokens  whether ANY chat span carries token counts — decides whether an `invoke_agent`
+//                  aggregate projects as an llm_call or is suppressed as a double-count
+//
+// So a paged reader that projects each page independently produces different `t` values and, for a plane
+// with an aggregate span, a different NUMBER of llm_call events than a reader that projects the plane whole.
+// The same sealed evidence would read two ways depending on page size, and a judge and a cost fold would
+// disagree because of pagination.
+//
+// Making them an explicit, computable value is the repair: the trajectory store derives them ONCE at seal —
+// where the whole plane is legitimately in hand — records them as the plane's provenance, and passes them
+// back in on every page. Absent, they are derived from whatever batch is here, which is exactly the old
+// behaviour and the right one for a caller that genuinely holds the whole plane.
+// See docs/architecture/long-horizon-trace-reads.md.
+export interface SpanBatchFacts {
+  baseMs: number;
+  perCallTokens: boolean;
+}
+
+// The order this projection reads spans in. Exported because the trajectory store has to STORE a spans plane
+// in exactly this order: it pages by row position, so if the stored order and the projection's order differ,
+// page 1 holds spans the whole-plane projection places elsewhere and the concatenated pages come out
+// permuted. One comparator, three callers (the projection, the batch facts, the seal) — spelled a second
+// time it would already have diverged on the undatable-span case (L3).
+export function sortSpansForProjection(spans: readonly TraceSpan[]): TraceSpan[] {
+  return [...spans].sort((a, b) => (msOf(a.startedAt) ?? 0) - (msOf(b.startedAt) ?? 0));
+}
+
+// The one owner of that derivation, so the seal that records the facts and the projection that consumes them
+// cannot compute them differently (rule `protocol` L3 — a predicate written twice has already diverged).
+export function spanBatchFacts(spans: readonly TraceSpan[]): SpanBatchFacts {
+  const sorted = sortSpansForProjection(spans);
+  return {
+    baseMs: sorted.length > 0 ? (msOf(sorted[0]?.startedAt ?? "") ?? 0) : 0,
+    // Whether any chat span in this batch carries its own token counts. Decides how an `invoke_agent` span's
+    // aggregate tokens project: per-call tokens present → the aggregate is a duplicate a cost-summing reader
+    // must not see twice; absent (a record sealed before the recorder stamped per-call usage) → the aggregate
+    // is the only token evidence there is and still projects as the one llm_call.
+    perCallTokens: sorted.some((s) => {
+      const sa = readable(s);
+      return (
+        str(sa[GEN_AI.operationName]) === GEN_AI_OPERATION.chat &&
+        (pickNum(sa, DEFAULT_SPAN_ATTR_KEYS.inputTokens) !== undefined ||
+          pickNum(sa, DEFAULT_SPAN_ATTR_KEYS.outputTokens) !== undefined)
+      );
+    }),
+  };
+}
+
 export interface SpansToEventsOptions {
   // A per-harness attribute mapping (the wizard-authored overlay). Tried before every default dialect.
   mapping?: SpanAttrMapping;
+  // The plane's own batch facts, when the caller is projecting a PAGE of a plane rather than a whole one.
+  // See `SpanBatchFacts`: without them a page's projection is measured against the page.
+  batch?: SpanBatchFacts;
 }
 
 export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {}): TraceEvent[] {
@@ -139,22 +196,11 @@ export function spansToEvents(spans: TraceSpan[], opts: SpansToEventsOptions = {
     messageText: [...(mapping?.messageText ?? []), ...DEFAULT_SPAN_ATTR_KEYS.messageText],
   };
 
-  const sorted = [...spans].sort((a, b) => (msOf(a.startedAt) ?? 0) - (msOf(b.startedAt) ?? 0));
-  const base = sorted.length > 0 ? (msOf(sorted[0]?.startedAt ?? "") ?? 0) : 0;
+  const sorted = sortSpansForProjection(spans);
+  // The plane's facts when the caller holds the plane, this page's when it does not and said so. Never
+  // silently the page's: see `SpanBatchFacts` for what that costs.
+  const { baseMs: base, perCallTokens } = opts.batch ?? spanBatchFacts(sorted);
   const out: TraceEvent[] = [];
-
-  // Whether any chat span in this batch carries its own token counts. Decides how an `invoke_agent` span's
-  // aggregate tokens project: per-call tokens present → the aggregate is a duplicate a cost-summing reader
-  // must not see twice; absent (a record sealed before the recorder stamped per-call usage) → the aggregate
-  // is the only token evidence there is and still projects as the one llm_call.
-  const perCallTokens = sorted.some((s) => {
-    const sa = readable(s);
-    return (
-      str(sa[GEN_AI.operationName]) === GEN_AI_OPERATION.chat &&
-      (pickNum(sa, DEFAULT_SPAN_ATTR_KEYS.inputTokens) !== undefined ||
-        pickNum(sa, DEFAULT_SPAN_ATTR_KEYS.outputTokens) !== undefined)
-    );
-  });
 
   for (const span of sorted) {
     const startMs = msOf(span.startedAt);
