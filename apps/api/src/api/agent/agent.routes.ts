@@ -2,7 +2,7 @@ import { deleteAgentVersion, deleteAgentVersions, firstPartyDefaults } from "@ev
 import { AgentSpecSchema } from "@everdict/contracts";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
@@ -79,8 +79,21 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!deps.agentService) return reply.code(404).send({ code: "NOT_FOUND", message: "agent service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // ── SAVING AN AGENT IS A WRITE TO SOMEBODY'S AGENT (arch-review 118) ──────────────────────────
+    //
+    // This gated a bare `agents:write` with no resource scope while the service PRESERVES the owner — so a
+    // member of another team saving over Team A's agent minted a new immutable Team-A-owned version they
+    // were never authorized to write. Preserving an owner and being allowed to write to it are different
+    // questions, which is the sentence the campaign adopt route already carries; arch-review 76 closed it at
+    // the ADOPT door and did not look at the ordinary save door, where the same action mints the same kind
+    // of version. The harness twin gates on `teamOfEntity` at both of its write doors.
+    //
+    // Read ONCE and carried into the write, for the reason arch-review 117 gives: the store re-resolves the
+    // owner where it writes, so a transfer between the gate and the write is a refusal, not a re-file.
+    let owner: Awaited<ReturnType<typeof teamOfEntity>>;
     try {
-      gate(principal, "agents:write");
+      owner = await teamOfEntity(deps.agentRegistry, principal.workspace, req.params.id);
+      gate(principal, "agents:write", owner);
     } catch (err) {
       return sendError(reply, err);
     }

@@ -3,7 +3,7 @@ import { AgentSpecSchema } from "@everdict/contracts";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
@@ -153,28 +153,39 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           originNote: z.string().optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ id, agent, fromIssue, originNote }) =>
-        run(principal, "agents:write", async () => {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(agent);
-          } catch {
-            return fail("BAD_REQUEST: not a valid agent JSON.");
-          }
-          const result = SaveAgentBodySchema.safeParse(parsed);
-          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          // The declared issue applies to a FIRST version (born_from intent); a bump's `from` is the base
-          // the service resolves — it knows the ancestor, the caller may not restate it (Track A).
-          const origin = await capabilityOriginFor(
-            deps,
-            ws,
-            "mcp",
-            ctx.agent,
-            declaredOriginFromIssue(fromIssue, originNote),
-            { type: "agent", id },
-          );
-          return ok(await agentService.saveAgent(ws, principal.subject, id, result.data, origin));
-        }),
+      async ({ id, agent, fromIssue, originNote }) => {
+        // The same gate the HTTP twin now carries (arch-review 118): saving over an agent is a WRITE to
+        // somebody's agent, and the service preserves the owner — so an unscoped `agents:write` mints a
+        // Team-A-owned version for a caller who is not on Team A. `run` takes the scope, so the entity is
+        // resolved before the action rather than inside it.
+        const owner = await teamOfEntity(deps.agentRegistry, ws, id);
+        return run(
+          principal,
+          "agents:write",
+          async () => {
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(agent);
+            } catch {
+              return fail("BAD_REQUEST: not a valid agent JSON.");
+            }
+            const result = SaveAgentBodySchema.safeParse(parsed);
+            if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+            // The declared issue applies to a FIRST version (born_from intent); a bump's `from` is the base
+            // the service resolves — it knows the ancestor, the caller may not restate it (Track A).
+            const origin = await capabilityOriginFor(
+              deps,
+              ws,
+              "mcp",
+              ctx.agent,
+              declaredOriginFromIssue(fromIssue, originNote),
+              { type: "agent", id },
+            );
+            return ok(await agentService.saveAgent(ws, principal.subject, id, result.data, origin));
+          },
+          owner,
+        );
+      },
     );
   }
 

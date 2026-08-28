@@ -47,8 +47,14 @@ function makeDeps(): { deps: McpDeps; agents: InMemoryAgentRegistry; issues: Iss
   return { deps, agents, issues };
 }
 
-async function connect(deps: McpDeps): Promise<Client> {
-  const principal: Principal = { subject: "user-a", workspace: "acme", roles: ["member"], via: "oidc" };
+async function connect(deps: McpDeps, teams?: string[]): Promise<Client> {
+  const principal: Principal = {
+    subject: "user-a",
+    workspace: "acme",
+    roles: ["member"],
+    via: "oidc",
+    ...(teams !== undefined ? { teams } : {}),
+  };
   const server = buildMcpServer(deps, principal);
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0" });
@@ -94,5 +100,80 @@ describe("save_agent origin — the MCP save records the declared issue, and a b
       via: "mcp",
       from: { type: "agent", id: "helper", version: "1.0.0" },
     });
+  });
+});
+
+// ── [R118 COUNTEREXAMPLE] THE MCP SAVE DOOR GATES ON THE AGENT'S TEAM TOO ───────────────────────────
+//
+// `save_agent` ran a bare `agents:write` with no resource scope while `saveAgent` PRESERVES the owner — so
+// an agent on team-b could save over team-a's agent and mint a team-a-owned version. BFF↔MCP parity is
+// structural (rule `api-layer`): a gate one transport carries and the other does not is the whole shape.
+//
+// Seen RED with the scope removed: "another team's agent gained a version through MCP".
+describe("[R118 COUNTEREXAMPLE] save_agent refuses another team's agent", () => {
+  it("REFUSES, and registers nothing", async () => {
+    const { deps, agents } = makeDeps();
+    await agents.register(
+      "acme",
+      {
+        id: "helper",
+        version: "1.0.0",
+        description: "d",
+        instructions: "be brief",
+        mcpServers: [],
+        capabilities: [],
+        tags: [],
+        disabledDefaults: [],
+        toolSecretBindings: {},
+        triggers: [],
+        enabled: true,
+      } as never,
+      "u-a",
+      "team-a",
+    );
+    const client = await connect(deps, ["team-b"]);
+
+    const res = await client.callTool({
+      name: "save_agent",
+      arguments: { id: "helper", agent: JSON.stringify({ instructions: "something else", mcpServers: [] }) },
+    });
+
+    expect(textOf(res), "another team's agent gained a version through MCP").toMatch(
+      /FORBIDDEN|not on the team|permission/i,
+    );
+    expect(await agents.ownVersions("acme", "helper"), "the refused save registered a version anyway").toEqual([
+      "1.0.0",
+    ]);
+  });
+
+  it("ALLOWS the owning team — the control", async () => {
+    const { deps, agents } = makeDeps();
+    await agents.register(
+      "acme",
+      {
+        id: "helper",
+        version: "1.0.0",
+        description: "d",
+        instructions: "be brief",
+        mcpServers: [],
+        capabilities: [],
+        tags: [],
+        disabledDefaults: [],
+        toolSecretBindings: {},
+        triggers: [],
+        enabled: true,
+      } as never,
+      "u-a",
+      "team-a",
+    );
+    const client = await connect(deps, ["team-a"]);
+
+    const res = await client.callTool({
+      name: "save_agent",
+      arguments: { id: "helper", agent: JSON.stringify({ instructions: "something else", mcpServers: [] }) },
+    });
+
+    expect(textOf(res), "the agent's own team was refused its edit").not.toMatch(/FORBIDDEN/i);
+    expect((await agents.ownVersions("acme", "helper")).length).toBe(2);
   });
 });

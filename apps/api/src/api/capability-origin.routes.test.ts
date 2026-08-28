@@ -449,3 +449,119 @@ describe("agent save origin — the upsert records why the version exists, and w
     expect(entry?.teamId).toBe("team-eng");
   });
 });
+
+// ── [R118 COUNTEREXAMPLE] SAVING AN AGENT IS A WRITE TO SOMEBODY'S AGENT ────────────────────────────
+//
+// `PUT /agents/:id` gates a bare `agents:write` with NO resource scope, on both transports. The service then
+// PRESERVES the owner — correctly — so a member of another team saving over Team A's agent mints a new
+// immutable Team-A-owned version they were never authorized to write. Preserving an owner and being allowed
+// to write to it are different questions, which is the sentence the campaign adopt route already carries:
+//
+//   "a member of Team B holding `agents:write` could adopt a candidate owned by Team A and mint a
+//    Team-A-owned successor"
+//
+// arch-review 76 closed that for the ADOPT door and did not look at the ordinary save door, where the same
+// `agents:write` mints the same kind of version. The harness twin gates on `teamOfEntity` at both its write
+// doors (register and re-pin); the agent lane gates on it at neither.
+//
+// ⚠️ `requireAuth` + a MEMBER authenticator: the dev-header fallback hands out `roles: ["admin"]`, and an
+// admin governs every team BY DESIGN — an admin fixture "passes" this by bypassing the gate.
+describe("[R118 COUNTEREXAMPLE] another team's agent cannot be saved over", () => {
+  const AGENT_BODY = {
+    description: "workspace assistant",
+    instructions: "be brief",
+    mcpServers: [],
+    capabilities: [],
+    tags: [],
+  };
+
+  async function memberOf(teams: string[]) {
+    const { InMemoryAgentRegistry } = await import("@everdict/registry");
+    const { AgentService } = await import("../core/agent/agent-service.js");
+    const agents = new InMemoryAgentRegistry();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      agentRegistry: agents,
+      agentService: new AgentService({ agents }),
+      teamService: {
+        async list() {
+          return teams.map((id) => ({ id }));
+        },
+        async defaultTeam() {
+          return undefined;
+        },
+        async visibleTeamIds() {
+          return undefined; // nothing hidden — this is about WRITING, not seeing
+        },
+        async canSeeTeam() {
+          return true;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "u-b", workspace: "acme", roles: ["member"], teams, via: "oidc" as const };
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
+    });
+    return { app, agents };
+  }
+
+  it("REFUSES a save over an agent owned by a team the caller is not on", async () => {
+    const { app, agents } = await memberOf(["team-b"]);
+    await agents.register(
+      "acme",
+      {
+        ...AGENT_BODY,
+        id: "helper",
+        version: "1.0.0",
+        disabledDefaults: [],
+        toolSecretBindings: {},
+        triggers: [],
+        enabled: true,
+      } as never,
+      "u-a",
+      "team-a",
+    );
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/agents/helper",
+      headers: { authorization: "Bearer t" },
+      payload: { ...AGENT_BODY, instructions: "do something else entirely" },
+    });
+
+    expect(res.statusCode, "another team's agent gained a version").toBe(403);
+    expect(await agents.ownVersions("acme", "helper"), "the refused save registered a version anyway").toEqual([
+      "1.0.0",
+    ]);
+  });
+
+  it("ALLOWS the owning team — the control that keeps the gate from being a wall", async () => {
+    const { app, agents } = await memberOf(["team-a"]);
+    await agents.register(
+      "acme",
+      {
+        ...AGENT_BODY,
+        id: "helper",
+        version: "1.0.0",
+        disabledDefaults: [],
+        toolSecretBindings: {},
+        triggers: [],
+        enabled: true,
+      } as never,
+      "u-a",
+      "team-a",
+    );
+
+    const res = await app.inject({
+      method: "PUT",
+      url: "/agents/helper",
+      headers: { authorization: "Bearer t" },
+      payload: { ...AGENT_BODY, instructions: "do something else entirely" },
+    });
+
+    expect(res.statusCode, "the agent's own team was refused its edit").toBe(200);
+    expect(res.json().created).toBe(true);
+  });
+});
