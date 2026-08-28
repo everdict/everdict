@@ -122,7 +122,18 @@ export async function teamForNew(
   }
   const own = principal.teams?.[0];
   if (own !== undefined) return { teamId: own, gate: {} };
-  const all = (await deps.teamService?.list(principal.workspace).catch(() => [])) ?? [];
+  // ── A ROSTER WE COULD NOT READ IS NOT AN EMPTY ROSTER (arch-review 119) ─────────────────────────
+  //
+  // This was `.catch(() => [])`, and the fallback below turns an empty list into "no owner" — so a roster
+  // read that FAILED born the asset unowned, which is writable by every team and hidden from none. That is
+  // L2's "a teardown that widens because it read nothing", with the widening being an ownership boundary.
+  //
+  // The absence that legitimately means "no team axis here" is `teamService` being undefined — a composition
+  // fact, known without a read. A read that threw is the third value, and refusing is its fail-closed side:
+  // both transports call this inside a try that answers the caller, so nothing is created and nothing is
+  // silently shared.
+  if (!deps.teamService) return { gate: {} };
+  const all = await deps.teamService.list(principal.workspace);
   const preferred = all.find((team) => team.isDefault) ?? all[0];
   return preferred ? { teamId: preferred.id, gate: {} } : { gate: {} };
 }
