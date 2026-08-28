@@ -94,7 +94,22 @@ export async function teamOfEntity(
   tenant: string,
   id: string,
 ): Promise<ResourceScope> {
-  const versions = (await registry?.ownVersions?.(tenant, id)) ?? [];
+  // ── AN ABSENT REGISTRY IS NOT AN UNOWNED ENTITY (arch-review 119) ────────────────────────────────
+  //
+  // This answered `{}` — the PERMISSIVE arm — when `registry` was undefined, so a composition that wired a
+  // service without its registry turned every write gate into a workspace-level one. `pnpm authz-optional`
+  // cannot see it: that scanner reads the ARGUMENTS of an authz call, and the widening happens one frame
+  // out, in the value the call is later handed. Its own header names the limitation.
+  //
+  // Production wires them together (`new AgentService({ agents: agentRegistry })`), so this refusal changes
+  // nothing there. What it changes is a FIXTURE that omits the registry: it now fails loudly instead of
+  // taking the weak branch silently, which is the drift this repository has already paid for.
+  //
+  // Refusing is the scanner's own first prescription for an absent capability, and 404 is the shape every
+  // sibling route already answers with when a dependency is not configured.
+  if (registry === undefined)
+    throw new NotFoundError("NOT_FOUND", { id }, "this resource's registry is not configured.");
+  const versions = (await registry.ownVersions?.(tenant, id)) ?? [];
   const newest = versions[versions.length - 1];
   return newest === undefined ? {} : teamOfVersion(registry, tenant, id, newest);
 }

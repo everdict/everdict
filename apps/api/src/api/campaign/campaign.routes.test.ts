@@ -68,6 +68,11 @@ function build(snapshot: CampaignSnapshot) {
         return ref === "iss_1" ? { id: "iss_1" } : undefined;
       },
     } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+    // …and the SAME registry the adoption writes through is what the route's second gate reads (arch-review
+    // 119). It was absent here, so `teamOfEntity(undefined, …)` answered `{}` — the permissive arm — and the
+    // gate could not refuse in any test in this file. The registry is empty, which is the unowned shape these
+    // cases mean; the difference is that it is now a fact the fixture states rather than one it omits.
+    agentRegistry: agents,
     campaignAdoption: buildCampaignAdoption({
       operations: store,
       agents,
@@ -709,7 +714,9 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
           return ref === "iss_1" ? { id: "iss_1" } : undefined;
         },
       } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
-      // WIRED, unlike `build()` — without this the gate below has no resource to ask about.
+      // WIRED, unlike `build()` used to be — without this the gate below has no resource to ask about, which
+      // is why this describe exists at all. `build()` now wires it too (arch-review 119), so the weak branch
+      // that made this block necessary no longer exists anywhere in the file.
       agentRegistry: agents,
       campaignAdoption: buildCampaignAdoption({
         operations: store,
