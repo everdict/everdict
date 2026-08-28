@@ -168,7 +168,12 @@ export function RegisterDatasetForm({
       </div>
       <VersionField existing={existing} value={version} onChange={setVersion} />
 
-      <TeamPicker id="dataset-team" teams={teams} value={teamId} onChange={setTeamId} />
+      {/* A new VERSION keeps its owner — the rule this file's `teams` prop already states, applied to the
+          case where the typed id turns out to exist. The control plane refuses a register that would move an
+          entity between teams, so offering the choice here would offer something that cannot be chosen. */}
+      {existing.length === 0 && (
+        <TeamPicker id="dataset-team" teams={teams} value={teamId} onChange={setTeamId} />
+      )}
 
       <div className="space-y-1.5">
         <Label htmlFor="description">{t('descriptionLabel')}</Label>

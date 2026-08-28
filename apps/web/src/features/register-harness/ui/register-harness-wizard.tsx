@@ -407,7 +407,11 @@ export function TemplateForm({
         placeholder="1"
       />
 
-      <TeamPicker id="tteam" teams={teams} value={teamId} onChange={setTeamId} />
+      {/* A new VERSION keeps its owner: the control plane refuses a register that would move an entity
+          between teams, so an id that already exists has nothing to choose here. */}
+      {(existingVersions ?? []).length === 0 && (
+        <TeamPicker id="tteam" teams={teams} value={teamId} onChange={setTeamId} />
+      )}
 
       {mode === 'form' && s.kind === 'service' && (
         <div className="space-y-6">
@@ -1005,7 +1009,11 @@ export function InstanceForm({
         placeholder="pr-123-sha-abc"
       />
 
-      <TeamPicker id="iteam" teams={teams} value={teamId} onChange={setTeamId} />
+      {/* A new VERSION keeps its owner: the control plane refuses a register that would move an entity
+          between teams, so an id that already exists has nothing to choose here. */}
+      {(existingVersions ?? []).length === 0 && (
+        <TeamPicker id="iteam" teams={teams} value={teamId} onChange={setTeamId} />
+      )}
 
       <div className="space-y-1.5">
         <FieldLabel htmlFor="idesc" tip={t('descriptionTip')}>
