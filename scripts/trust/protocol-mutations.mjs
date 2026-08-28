@@ -432,6 +432,7 @@ const MUTATIONS = [
     // Defeating the narrowing makes `worksRead.reason` a type error, so the TYPE SYSTEM refuses to let this
     // guard be removed — enforcement stronger than a red suite, and it has to be declared because an
     // uncompilable replacement otherwise reads as a rung that tests nothing (arch-review 115).
+    compilerEnforced: true,
     suite: ["--root", "apps/api", "src/core/run/unknown-propagation.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -495,7 +496,7 @@ const MUTATIONS = [
     name: "Wave 3 — the cancellation worklist comes from the rows again",
     file: "packages/application-control/src/scorecard/scorecard-service.ts",
     from: '    const placed = placedRead.kind === "read" ? placedRead.value : [];',
-    to: "    const placed = [];",
+    to: '    const placed = placedRead.kind === "read" ? placedRead.value.slice(0, 0) : [];',
     suite: ["--root", "apps/api", "src/core/scorecard/cancellation-work-debt.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -505,6 +506,11 @@ const MUTATIONS = [
     file: "packages/application-control/src/scorecard/scorecard-service.ts",
     from: '    if (placedRead.kind === "unknown")',
     to: "    if (false)",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["--root", "apps/api", "src/core/scorecard/cancellation-work-debt.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -684,7 +690,7 @@ const MUTATIONS = [
     name: "R56 Wave G — an accepted stop converges without an observed absence",
     file: "packages/application-control/src/scorecard/scorecard-service.ts",
     from: '      if (outcome?.status === "stopped" && this.deps.probeWork) {',
-    to: "      if (false && this.deps.probeWork) {",
+    to: '      void outcome;\n      if (this.deps.probeWork && item.work.externalJobId === "not-a-job") {',
     suite: ["--root", "apps/api", "src/core/scorecard/cancellation-verified-absence.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -971,7 +977,7 @@ const MUTATIONS = [
     name: "activation lease — an abandoned authorization is waited on forever",
     file: "packages/application-control/src/scorecard/scorecard-service.ts",
     from: "      const abandoned = activeBirths.filter((a) => at - Date.parse(a.updatedAt) >= ACTIVATION_LEASE_MS);",
-    to: "      const abandoned: typeof activeBirths = [];",
+    to: "      void at;\n      const abandoned: typeof activeBirths = [];",
     suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -981,7 +987,7 @@ const MUTATIONS = [
     name: "activation lease — a live submitter is revoked inside its own window",
     file: "packages/application-control/src/scorecard/scorecard-service.ts",
     from: "at - Date.parse(a.updatedAt) >= ACTIVATION_LEASE_MS",
-    to: "true",
+    to: "(void at, true)",
     suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
     build: "@everdict/application-control",
   },
@@ -1230,6 +1236,11 @@ const MUTATIONS = [
     from: '      if (phase.kind === "read" && phase.value === 0) {',
     to: "      if (false) {",
     build: "@everdict/backends",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["packages/backends/src/orchestrators/inert-recovery.counterexample.test.ts"],
   },
   {
@@ -1270,6 +1281,11 @@ const MUTATIONS = [
     from: "      for (const { attemptId } of rowsRead.value.filter((a) => !isTerminalAttemptState(a.state)))",
     to: "      for (const { attemptId } of [].filter((a) => !isTerminalAttemptState(a.state)))",
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["packages/application-control/src/run/revocation-coordinate.counterexample.test.ts"],
   },
   {
@@ -1301,7 +1317,7 @@ const MUTATIONS = [
     name: "scheduling config — a fractional count is accepted for a whole-number ledger",
     file: "packages/application-control/src/ops/scheduling-config.ts",
     from: '      (kind === "weight" || (Number.isInteger(value) && value <= PG_INT_MAX));',
-    to: "      true;",
+    to: "      (void PG_INT_MAX, true);",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/ops/quota-grammar.counterexample.test.ts"],
   },
@@ -1315,6 +1331,11 @@ const MUTATIONS = [
     from: '    if (to === "committed") {',
     to: "    if (false) {",
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["packages/application-control/src/execution/committed-means-settled.counterexample.test.ts"],
   },
   {
@@ -1385,6 +1406,11 @@ const MUTATIONS = [
     from: '            if (decision?.kind === "adopted" && decision.adopted.stage === "verifier") {',
     to: "            if (false) {",
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["packages/application-control/src/execution/one-recovery-protocol.counterexample.test.ts"],
   },
   {
@@ -1435,7 +1461,7 @@ const MUTATIONS = [
     name: "nomad dispatch — a failure between birth and start leaves its object behind",
     file: "packages/backends/src/orchestrators/nomad.ts",
     from: "      const reclaimed = await reclaimInert();",
-    to: '      const reclaimed = "reclaimed";',
+    to: '      void reclaimInert;\n      const reclaimed = "reclaimed";',
     build: "@everdict/backends",
     suite: ["packages/backends/src/orchestrators/nomad-birth-cleanup.counterexample.test.ts"],
   },
@@ -1706,7 +1732,7 @@ const MUTATIONS = [
     name: "batch recovery — an adopted case is judged without being completed",
     file: "packages/application-control/src/scorecard/recovery-planner.ts",
     from: "            if (evalCase !== undefined) adoptable = await collectDeferredTrace(this.deps, tenant, evalCase, adoptable);",
-    to: "            void evalCase;",
+    to: "            void evalCase;\n            void collectDeferredTrace;",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/scorecard/batch-completion-parity.counterexample.test.ts"],
   },
@@ -1751,6 +1777,11 @@ const MUTATIONS = [
     from: '    return { kind: "absent", reason: store ? "this job staged no agent half to key a verdict by" : "no verdict store" };',
     to: '    return { kind: "absent", reason: "neutralized" };\n  if (true)\n    return { kind: "absent", reason: "neutralized" };',
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["--root", "packages/application-control", "src/execution/verdict-durability.counterexample.test.ts"],
   },
   {
@@ -1764,6 +1795,11 @@ const MUTATIONS = [
     from: "                        if (contributing.agent !== undefined)\n                          requireAdopted(",
     to: "                        if (false)\n                          requireAdopted(",
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["packages/application-control/src/scorecard/adopted-attempt-settlement.counterexample.test.ts"],
   },
   {
@@ -1798,7 +1834,7 @@ const MUTATIONS = [
     name: "teardown convergence — a failed dispatch retries before its work is confirmed gone",
     file: "packages/backends/src/orchestrators/nomad.ts",
     from: '      const converged =\n        stopped !== undefined && stopped.status < 300 ? await this.reclaimConverged(jobId, ns) : "failed";',
-    to: '      const converged = "reclaimed";',
+    to: '      void stopped;\n      void this.reclaimConverged;\n      const converged = "reclaimed";',
     build: "@everdict/backends",
     suite: ["--root", "packages/backends", "src/orchestrators/teardown-convergence.counterexample.test.ts"],
   },
@@ -1819,7 +1855,7 @@ const MUTATIONS = [
     name: "transient refusal — a capacity blip settles the case permanently unjudged",
     file: "packages/application-control/src/execution/verifier-pass.ts",
     from: '    if (invocation instanceof AppError && invocation.code === "RATE_LIMITED") throw invocation;',
-    to: "    void invocation;",
+    to: "    void invocation;\n    void AppError;",
     build: "@everdict/application-control",
     suite: ["packages/application-control/src/execution/transient-refusal.counterexample.test.ts"],
   },
@@ -1830,7 +1866,7 @@ const MUTATIONS = [
     name: "verifier credentials — the enriched job is computed and the original is dispatched",
     file: "apps/api/src/composition/runtime-access.ts",
     from: "          dispatched,\n          (j, hooks) => backend.dispatchVerifier(j, hooks),",
-    to: "          job,\n          (j, hooks) => backend.dispatchVerifier(j, hooks),",
+    to: "          (void dispatched, job),\n          (j, hooks) => backend.dispatchVerifier(j, hooks),",
     build: "@everdict/api",
     suite: ["--root", "apps/api", "src/composition/verifier-credentials.counterexample.test.ts"],
   },
@@ -1866,7 +1902,7 @@ const MUTATIONS = [
     name: "verdict recovery — staged bytes are merged without checking the handle",
     file: "packages/application-control/src/execution/agent-half.ts",
     from: "  if (mismatch)",
-    to: "  if (false)",
+    to: "  void mismatch;\n  if (false)",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/execution/verdict-key-identity.counterexample.test.ts"],
   },
@@ -1945,7 +1981,7 @@ const MUTATIONS = [
     name: "verdict handover — the verdict becomes durable only after its container is gone",
     file: "packages/application-control/src/execution/verifier-operation.ts",
     from: "      acknowledge: async (raw) => {",
-    to: "      acknowledgeDisabled: async (raw) => {",
+    to: '      acknowledge: async (raw) => {\n        if (attemptId !== "never-an-attempt") return canonicalize(raw);',
     build: "@everdict/application-control",
     suite: [
       "--root",
@@ -2012,6 +2048,11 @@ const MUTATIONS = [
     from: "  if (failures.length > 0) {",
     to: "  if (false) {",
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: [
       "--root",
       "packages/application-control",
@@ -2065,6 +2106,11 @@ const MUTATIONS = [
     from: "      if (opts?.immutable !== true || status !== 412) throw err;",
     to: "      if (opts?.immutable !== true || status !== 412) throw err;\n      return await this.signedUrl(this.client, key);",
     build: "@everdict/storage",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["--root", "packages/storage", "src/immutable-conflict.counterexample.test.ts"],
   },
   {
@@ -2085,7 +2131,7 @@ const MUTATIONS = [
     name: "settlement adoption — a cancelled parent is treated as one still driving",
     file: "packages/application-control/src/ports/execution-attempt-store.ts",
     from: "        if (!parent || !(OPEN_SCORECARD_STATUSES as readonly string[]).includes(parent.status)) return undefined;",
-    to: "        if (!parent) return undefined;",
+    to: "        void OPEN_SCORECARD_STATUSES;\n        if (!parent) return undefined;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/scorecard/normal-settlement-adopts.counterexample.test.ts"],
   },
@@ -2107,6 +2153,11 @@ const MUTATIONS = [
     from: "    const state = await evaluateRef(ref, deps.probe);",
     to: '    const state = "written" as const;\n    void evaluateRef;',
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["--root", "packages/application-control", "src/ops/artifact-write-convergence.counterexample.test.ts"],
   },
   {
@@ -2134,7 +2185,7 @@ const MUTATIONS = [
     name: "settlement release — the debt is freed in a second commit",
     file: "packages/db/src/results/pg-run-store.ts",
     from: "      if (release !== undefined) await release.apply(new PgIntermediateCleanupStore(tx));",
-    to: "      void release;",
+    to: "      void release;\n      void PgIntermediateCleanupStore;",
     build: "@everdict/db",
     suite: ["--root", "apps/api", "src/trust/settlement-release-atomicity.trust.test.ts"],
     env: { EVERDICT_TRUST_SUITE: "1" },
@@ -2229,7 +2280,7 @@ const MUTATIONS = [
     name: "cleanup wiring — the dispatcher drops the ledger on its way to the pass",
     file: "apps/api/src/core/execution/verifier-aware-dispatcher.ts",
     from: "      ...(this.cleanup ? { cleanup: this.cleanup } : {}),",
-    to: "",
+    to: "      ...(this.cleanup ? {} : {}),",
     build: "@everdict/api",
     suite: ["--root", "apps/api", "src/composition/cleanup-is-wired.counterexample.test.ts"],
   },
@@ -2295,6 +2346,11 @@ const MUTATIONS = [
     from: '            if (adoption.kind === "unknown") {',
     to: '            if (adoption.kind === "unknown" && false) {',
     build: "@everdict/application-control",
+    // The mutated tree does not compile: removing this guard is a TYPE error at its consumer, which is
+    // the type system refusing to let the protocol go — enforcement stronger than a red suite, and
+    // declared because an uncompilable replacement otherwise reads as a rung that tests nothing
+    // (arch-review 115, classified in 119).
+    compilerEnforced: true,
     suite: ["--root", "packages/application-control", "src/scorecard/ambiguous-commit.counterexample.test.ts"],
   },
   {
@@ -2368,7 +2424,7 @@ const MUTATIONS = [
     name: "Track C — the observation channel is no longer sealed into the trace",
     file: "packages/application-execution/src/run-case.ts",
     from: "    trace.push(...observationTraceEvents(observationsOf()));",
-    to: "",
+    to: "    void observationTraceEvents;",
     build: "@everdict/application-execution",
     suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
   },
@@ -2593,7 +2649,7 @@ const MUTATIONS = [
     // ⚠️ RE-AIMED (arch-review 106): arch-review 84 moved this comparison into `adoption-completion.ts` —
     // the module both writers import so neither imports the other — and the inline spelling is gone.
     from: "        if (!issueSettledThisAdoption(settled, operation.proof)) continue;",
-    to: "        if (false) continue;",
+    to: "        void issueSettledThisAdoption;\n        if (false) continue;",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/evolution/adoption-completion.counterexample.test.ts"],
   },
@@ -2615,7 +2671,7 @@ const MUTATIONS = [
     name: "R75 — a legacy frame is allowed to produce new adoption evidence",
     file: "packages/application-control/src/evolution/campaign-service.ts",
     from: "    const defects = campaignFrameDefects(record.frame);",
-    to: "    const defects = [];",
+    to: "    const defects = campaignFrameDefects(record.frame).slice(0, 0);",
     build: "@everdict/application-control",
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
