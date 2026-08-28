@@ -34,7 +34,7 @@ import {
 } from "@everdict/domain";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { settleScorecard } from "../ports/settle.js";
-import { collectTrajectoryEvents, trajectoryReadableBy } from "../ports/trajectory-store.js";
+import { collectExactTrajectoryEvents, trajectoryReadableBy } from "../ports/trajectory-store.js";
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
@@ -211,9 +211,15 @@ export class ScorecardIngestService {
           // plus the accumulating array, which is the honest cost of a caller that must hold the stream.
           // A `too_large` legacy plane THROWS out of the collector rather than yielding a short trace: a
           // scorecard built on half a trajectory is a verdict about evidence nobody chose.
+          //
+          // ⚠️ EXACT, not the plain collector (arch-review 120). This comment said "it is scoring the trace"
+          // and the call under it read previews: an offloaded payload came back as an excerpt plus a ref, and
+          // the graders and judges below scored the excerpt. The re-score path six hundred lines down already
+          // resolved, with a comment explaining why — same file, same law, one lane. A missing payload object
+          // now fails this ingest instead of shortening the evidence.
           perCase.push({
             caseId: r.caseId,
-            trace: await collectTrajectoryEvents(this.deps.trajectories, tenant, r.runId),
+            trace: await collectExactTrajectoryEvents(this.deps.trajectories, tenant, r.runId),
           });
         }
         await this.finishIngest(
@@ -552,7 +558,7 @@ export class ScorecardIngestService {
       // that lost the race must be scored on the winner's evidence rather than on its own copy.
       // `resolve` because this trace is about to be SCORED: an offloaded payload's preview is an excerpt,
       // and judging an excerpt under the name of the whole is judging different evidence.
-      return await collectTrajectoryEvents(this.deps.trajectories, tenant, runId, { resolve: true });
+      return await collectExactTrajectoryEvents(this.deps.trajectories, tenant, runId);
     } catch {
       return events;
     }

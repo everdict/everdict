@@ -28,6 +28,7 @@ export { admitCausedWork } from "./admission/admission.js";
 export type { EventConsumerStateStore } from "./ports/event-consumer-store.js";
 export {
   clampWindow,
+  collectExactTrajectoryEvents,
   collectTrajectoryEvents,
   DEFAULT_EVENT_PAGE,
   DEFAULT_PAGE_BYTES,

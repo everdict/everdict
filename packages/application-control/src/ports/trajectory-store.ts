@@ -747,6 +747,11 @@ export async function* streamTrajectoryEvents(
 
 // The whole plane as an array, for the callers that genuinely need one — with the collection in ONE place
 // rather than re-spelled per consumer, so the memory question has a single owner to revisit.
+//
+// ⚠️ THIS RETURNS WHAT THE STORE HOLDS, WHICH FOR AN OFFLOADED PAYLOAD IS A PREVIEW. That is right for a
+// display: a Files page or a browse row wants the excerpt and the ref. It is wrong for anything that
+// DECIDES, and the two used to be one call with an optional flag between them — see
+// `collectExactTrajectoryEvents` below, which is what a scorer calls.
 export async function collectTrajectoryEvents(
   store: Pick<TrajectoryStore, "events">,
   tenant: string,
@@ -756,4 +761,31 @@ export async function collectTrajectoryEvents(
   const events: TraceEvent[] = [];
   for await (const event of streamTrajectoryEvents(store, tenant, runId, window)) events.push(event);
   return events;
+}
+
+// ── THE SCORER'S COLLECTOR: EXACT BYTES OR A REFUSAL (arch-review 120) ─────────────────────────────
+//
+// An offloaded payload's preview is an EXCERPT — `previewOf` keeps a head and drops the rest — so a judge
+// handed one under the name of the whole scores different evidence and nothing downstream can tell. The
+// offloading store already resolves on demand and already fails closed when the object is missing; what was
+// missing is that asking for it was OPTIONAL, spelled `{ resolve: true }`, and one of the two scoring call
+// sites did not.
+//
+// It did not for the reason optional flags always produce: the call reads identically either way. The file
+// that owns the offload says "judges, re-scores and ingest are that caller"; the re-score passed the flag
+// with a comment saying why, and the owned-trace ingest — six lines under a comment saying "it is scoring
+// the trace, not showing it" — did not. Same file, same law, one lane.
+//
+//     the payload was preserved   ≠   the verdict read the payload
+//
+// So the guarantee is in the NAME rather than in an argument a caller has to remember. A scoring path calls
+// this; if it calls the plain collector instead, that is now visible at the call site rather than absent
+// from it.
+export async function collectExactTrajectoryEvents(
+  store: Pick<TrajectoryStore, "events">,
+  tenant: string,
+  runId: string,
+  window: Omit<TrajectoryWindow, "after" | "resolve"> = {},
+): Promise<TraceEvent[]> {
+  return collectTrajectoryEvents(store, tenant, runId, { ...window, resolve: true });
 }

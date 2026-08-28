@@ -2493,6 +2493,23 @@ const MUTATIONS = [
     suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
   },
   {
+    // ── A VERDICT READS THE PAYLOAD, NOT ITS PREVIEW (arch-review 120) ────────────────────────────
+    //
+    // The offload leaves an EXCERPT plus a ref where an oversized value was. Asking for the bytes back was
+    // OPTIONAL, and the owned-trace ingest did not ask — six lines under a comment saying "it is scoring the
+    // trace, not showing it", while the re-score path in the same file passed the flag with a comment saying
+    // why. Neutralizing the exact collector back to the plain one is that defect exactly.
+    // Aimed at the DEFINITION rather than the call site: neutralizing the call would leave an unused import
+    // and the tree would not build, which says nothing about the protocol (rule `ci`, the uncompilable-rung
+    // split). Here the removal is exactly "stop asking for the bytes", and it compiles.
+    name: "payload offload — the owned-trace scorecard judges the preview",
+    file: "packages/application-control/src/ports/trajectory-store.ts",
+    from: "  return collectTrajectoryEvents(store, tenant, runId, { ...window, resolve: true });",
+    to: "  return collectTrajectoryEvents(store, tenant, runId, { ...window });",
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/core/scorecard/exact-offloaded-scoring.counterexample.test.ts"],
+  },
+  {
     name: "wave C — a successor is registered without the team its entity is owned by",
     file: "packages/registry/src/versioned-store.ts",
     // ⚠️ RE-AIMED TWICE, and the second time because THE PROTOCOL MOVED DOWN A LAYER (arch-review 119).
