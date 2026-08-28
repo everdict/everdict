@@ -102,6 +102,15 @@ See skill `ci`.
   repo has paid for twice (a scanner draft green over the defect it was written for, a judgment fixture that
   certified a gap). A new protocol adds its mutation there; a mutation whose target line is gone FAILS rather
   than silently testing nothing.
+  It is SLOW on purpose — 236 rungs, each a real build and a real suite — but half of that was waste: every
+  rung ran mutate → build → test → restore → **build**, and the restore-build was discarded by the next rung's
+  own build. Rungs are grouped by build target now and the restore-build runs only at the boundary where the
+  target changes: **226 package builds → 122**, ~15 minutes off the gate with nothing checked less. The
+  boundary rebuild is not optional — a rung in another package may load this one's `dist`, and a stale one
+  would run the previous rung's mutation against a suite that never asked for it. ⚠️ The deferral means a
+  KILLED run can leave a clean tree over a mutated `dist`; `dist/` is gitignored so it cannot be committed
+  (unlike the old failure mode), and the debt is recorded in `.git/everdict-mutation-stale-dist`, paid by
+  SIGINT/SIGTERM handlers and, failing that, by the next run before it does anything else.
   ⚠️ Its options are now REFUSED when unrecognised. `--filter <name>` — a plausible spelling of `--only`, and
   not a flag this script has — was accepted in silence, so one rung became the full suite: ninety minutes,
   files mutated while the author was editing them, and an answer to a question nobody asked. Same shape as

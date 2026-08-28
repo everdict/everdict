@@ -13,7 +13,7 @@
 // Every mutation is reverted in a `finally`, and the script refuses to start on a dirty worktree for those
 // files — an interrupted run must never leave a neutered guard behind.
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
   {
@@ -2673,6 +2673,15 @@ for (let i = 0; i < ARGS.length; i++) {
   }
   i++; // skip the value belonging to this flag
 }
+const STALE_MARK = `${process.cwd()}/.git/everdict-mutation-stale-dist`;
+const rebuild = (target) => spawnSync("pnpm", ["-F", target, "build"], { stdio: "ignore" });
+if (existsSync(STALE_MARK)) {
+  const stale = readFileSync(STALE_MARK, "utf8").split("\n").filter(Boolean);
+  console.log(`↻ healing ${stale.length} package(s) whose dist a killed run left mutated: ${stale.join(", ")}`);
+  for (const target of stale) rebuild(target);
+  rmSync(STALE_MARK, { force: true });
+}
+
 const only = ARGS.includes("--only") ? ARGS[ARGS.indexOf("--only") + 1] : undefined;
 if (ARGS.includes("--only") && (only === undefined || only.startsWith("--"))) {
   console.error("✖ --only needs a substring of a mutation's name.");
@@ -2698,9 +2707,58 @@ if (dirty !== "") {
   process.exit(2);
 }
 
+// ── ONE BUILD PER PACKAGE BOUNDARY, NOT TWO PER RUNG ───────────────────────────────────────────────
+//
+// Each rung used to run mutate → build → test → restore → build, and 113 of the 236 declare a `build`. That
+// is 226 full package compiles, and `@everdict/application-control` alone — 63 rungs — costs ~9.8s each, so
+// well over half the gate's wall clock was spent rebuilding a package the NEXT rung was about to rebuild
+// anyway. The restore-build is thrown away every time except at the boundary where the target changes.
+//
+// So the rungs are GROUPED by build target (stable within a group, so a group still reads in the order it was
+// written), and the restore-build runs only when the next rung builds something else. Nothing about what is
+// checked changes: within a group, every rung still compiles the package from its own mutated source before
+// its suite runs, because the rung's own pre-test build does that.
+//
+// The boundary rebuild is not optional. A rung with no `build` — or one in a different package — may load
+// this package's `dist`, and a stale one would run the PREVIOUS rung's mutation against a suite that never
+// asked for it. That is the stale-dist trap this repository has already paid for once (arch-review 76-92),
+// which is why the condition is "the next rung builds the same thing", never "the next rung has a build".
+const BUILD_ORDER = [...new Set(SELECTED.map((m) => m.build ?? ""))];
+const ORDERED = BUILD_ORDER.flatMap((target) => SELECTED.filter((m) => (m.build ?? "") === target));
+
+// ⚠️ AND THE KILL PATH. `finally` restores the SOURCE but does not run on SIGKILL, and now a normal-looking
+// tree can hide a `dist` carrying the last mutation. `dist/` is gitignored, so unlike the old failure mode it
+// cannot be committed — but it can silently poison a test run in this shared tree. So a package whose
+// restore-build is deferred is recorded here first, and the next run compiles it before doing anything else.
+// SIGKILL cannot be caught — that is what the marker above is for — but an ordinary interrupt can put the
+// tree right instead of leaving the next run to.
+let interrupted;
+const heal = () => {
+  // The rung in flight, if there is one: its source goes back and its package is compiled from that source.
+  if (interrupted !== undefined) {
+    writeFileSync(interrupted.file, interrupted.original);
+    if (interrupted.build) rebuild(interrupted.build);
+  }
+  // …AND the deferred boundary build, which is a SEPARATE debt. An interrupt landing between one rung's
+  // `finally` and the next rung's first write finds `interrupted` undefined while the marker still names a
+  // package whose dist holds the last mutation — so clearing the marker there would drop the only record of
+  // it. Read it, pay it, then clear it.
+  if (existsSync(STALE_MARK)) {
+    for (const target of readFileSync(STALE_MARK, "utf8").split("\n").filter(Boolean))
+      if (target !== interrupted?.build) rebuild(target);
+    rmSync(STALE_MARK, { force: true });
+  }
+};
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    heal();
+    process.exit(130);
+  });
+}
+
 let holes = 0;
 let skipped = 0;
-for (const mutation of SELECTED) {
+for (const [index, mutation] of ORDERED.entries()) {
   // ── A RUNG WHOSE SUITE NEEDS REAL INFRASTRUCTURE (arch-review 66) ───────────────────────────────
   //
   // Some protocols live in the ADAPTER — a SQL join, a constraint, a conditional UPDATE's WHERE clause — and
@@ -2726,8 +2784,9 @@ for (const mutation of SELECTED) {
     continue;
   }
   try {
+    interrupted = { file: mutation.file, original, build: mutation.build };
     writeFileSync(mutation.file, original.replace(mutation.from, mutation.to));
-    if (mutation.build) spawnSync("pnpm", ["-F", mutation.build, "build"], { stdio: "ignore" });
+    if (mutation.build) rebuild(mutation.build);
     const run = spawnSync("npx", ["vitest", "run", ...mutation.suite], {
       stdio: "ignore",
       env: { ...process.env, ...(mutation.env ?? {}) },
@@ -2740,7 +2799,16 @@ for (const mutation of SELECTED) {
     }
   } finally {
     writeFileSync(mutation.file, original);
-    if (mutation.build) spawnSync("pnpm", ["-F", mutation.build, "build"], { stdio: "ignore" });
+    interrupted = undefined;
+    // Only at the boundary: the next rung in this group compiles the same package from its own mutated source
+    // before its suite runs, so rebuilding here would be discarded unread.
+    const nextBuild = ORDERED[index + 1]?.build;
+    if (mutation.build && nextBuild !== mutation.build) {
+      rebuild(mutation.build);
+      rmSync(STALE_MARK, { force: true });
+    } else if (mutation.build) {
+      writeFileSync(STALE_MARK, mutation.build);
+    }
   }
 }
 
@@ -2749,7 +2817,7 @@ if (holes > 0) {
   process.exit(1);
 }
 console.log(
-  `\n✓ every protocol mutation was caught (${SELECTED.length - skipped} checked${
+  `\n✓ every protocol mutation was caught (${ORDERED.length - skipped} checked${
     skipped > 0 ? `, ${skipped} SKIPPED for missing infrastructure — not the same as covered` : ""
   }${only === undefined ? "" : ` of ${MUTATIONS.length} — SUBSET, \`--only ${only}\``})`,
 );
