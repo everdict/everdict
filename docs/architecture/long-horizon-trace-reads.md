@@ -1,6 +1,6 @@
 # Long-horizon trace reads — the event is the unit
 
-> **Status: R0 landed, R1–R3 in flight.** A long-horizon agent run is hundreds of turns over hours, and its
+> **Status: R0 landed; R2 (with R3 merged into it) is next, then R1.** A long-horizon agent run is hundreds of turns over hours, and its
 > trace carries what those turns produced: tool results holding file dumps, logs, span attributes copied
 > verbatim from a tenant's OTel exporter. Reading one of those traces exhausted the control plane's heap.
 > This document is why that happened, and the four changes that remove the cause rather than the symptom.
@@ -79,32 +79,78 @@ already diverged. `scripts/live/backfill-trajectory-usage.mjs` repays them throu
 smallest row first, refusing any body over `--max-bytes` and **naming** the rows it skipped; those keep
 answering `unknown`, which is true.
 
-## R1 — the offload law applies to trace payloads *(in flight)*
+## R2 — the event is the addressable unit, and whole-stream consumers stream *(next)*
+
+**One rung, not two.** Deleting the unbounded read forces every whole-stream consumer onto the iterator in
+the same change, which is what rule `protocol`'s definition of done requires: the escape hatch goes with the
+change that replaces it. Leaving `get` alive for a commit would be leaving exactly the shape the rung exists
+to remove.
+
+- `everdict_trajectory_events (run_id, emitter, seq, body, bytes)` on Postgres and its ClickHouse twin ordered
+  by `(tenant, run_id, emitter, seq)`. `body_split` on the parent row SAYS which form a plane is in — never
+  sniffed, the same rule `body_format` already follows.
+- The port loses `get` and gains `planes()` (meta + plane headers, **no events**) and
+  `events(tenant, runId, window)` with a **required** window. An optional window is a request; a required one
+  is a protocol.
+- The window is bounded by COUNT and by BYTES, because a hundred events is only a bound if events are — and
+  until R1 lands they are not. A page always returns at least one event, or a single oversized event stalls
+  the stream forever.
+- `TrajectoryEventsResult` has a `too_large` arm for legacy unsplit blobs: serving a window of a blob costs
+  the whole blob, so the store refuses with the size and names the repair
+  (scripts/live/split-trajectory-bodies.mjs (R2, not yet in the repository)). It is never an empty page — "we could not serve this" and
+  "the run did nothing" must not be the same value.
+- `streamTrajectoryEvents` / `collectTrajectoryEvents` over the windows serve the consumers that legitimately
+  need every event (judges, sinks, ingest), so peak residency is a page and the Zod copy is a page's.
+
+### ⚠️ A spans plane cannot be projected page by page — the projection is batch-relative
+
+`spansToEvents` has two whole-array dependencies, and both silently change the answer when the array is a
+slice:
+
+    const base = earliest startedAt in the batch      → every event's relative `t`
+    const perCallTokens = any chat span has tokens    → whether an aggregate span projects as an llm_call
+
+So paging spans and projecting each page produces different `t` values, and can produce a DIFFERENT NUMBER of
+`llm_call` events, than projecting the plane whole. A judge or a cost fold reading the paged stream would
+disagree with one reading the sealed plane — the same evidence, two answers, decided by page size.
+
+The repair is not to store the projection beside the record (`otel-trace-model.md` N6 is explicit that a
+spans row projects on READ — one copy of the truth). It is to make those two batch facts **plane provenance
+derived at the source**: the seal computes `{ baseMs, perCallTokens }` over the whole plane it is holding
+anyway, stores them on the plane row, and the paged read passes them into `spansToEvents` instead of letting
+it re-derive them from a slice. The projection then becomes page-local AND exactly equal to the whole-plane
+projection — which is a strengthening, not a compromise: today the same plane read twice with different
+slicing would already have disagreed.
+
+Spans are stored in `startedAt` order so seq order is projection order. That reorders ROWS, never bytes; each
+span is stored verbatim.
+
+**Verification.** The counterexample is a spans plane paged at every page size from 1 to N, asserting the
+concatenated projection equals the whole-plane projection event for event — RED without the stored batch
+facts, on `t` first and on `llm_call` count for the aggregate case.
+
+## R1 — the offload law applies to trace payloads *(after R2)*
 
 `TraceEvent`'s `artifact` kind is already ref-only — `ref` is "a fetchable pointer, not the bytes". Nothing
-else is. `tool_result.output`, `log.text` and `span.attributes` are unbounded, and `offloadSnapshot` covers
-only an `EnvSnapshot`'s screenshot and DOM. So `DOM_INLINE_MAX = 8192` exists as a law with no counterpart
-on the side where the bytes actually arrive.
+else is. `tool_result.output`, `log.text`, `tool_call.args` and `span.attributes` are unbounded, and
+`offloadSnapshot` covers only an `EnvSnapshot`'s screenshot and DOM. So `DOM_INLINE_MAX = 8192` exists as a
+law with no counterpart on the side where the bytes actually arrive.
 
 The repair is that law made universal at the seal choke point (the `NamingTrajectoryStore` precedent — one
 decorator, wrapped once at the composition root, so no seal path has to remember): an oversized event payload
 is put to the `ArtifactStore` and replaced by an `artifact://` ref plus an inline preview, exactly as the DOM
-is. This is what bounds ONE event, which windowing cannot.
+is. This bounds ONE event, which windowing cannot.
 
-## R2 — the event is the addressable unit *(in flight)*
+**Why it comes second.** Offloading a payload is only safe where the ref can be RESOLVED, and the payload
+fields are read structurally, not just displayed: `spansToEvents` derives a tool result from
+`span.attributes[gen_ai.output.messages]`, and `eventsToSpans` reads `tool_result.output` back into a span
+attribute and a status message. An offload that landed before the windowed read had nowhere to resolve refs
+would silently change what those projections produce — a re-score judging a preview and nothing downstream
+able to spot it. R2's per-page read is where resolution belongs, so R1 follows it.
 
-`everdict_trajectory_events (run_id, emitter, seq, …)` on Postgres and its ClickHouse twin ordered by
-`(tenant, run_id, emitter, seq)`. `get` takes a **required** window and returns a cursor in the house
-pagination shape; there is deliberately no `getAll`, because an optional window is a request and a required
-one is a protocol. Legacy blob rows project into the same window so they keep reading, and a blob row too
-large to project answers a named refusal rather than an OOM — R0's ceiling stays as the floor for exactly
-those rows.
-
-## R3 — streaming for the consumers that genuinely need everything *(in flight)*
-
-Judges, `spansToEvents`, the trace sinks and `usageFromTrace` legitimately read every event. They get an
-`AsyncIterable<TraceEvent>` over the windows, so peak residency is a window rather than a trace — and the
-Zod double-copy disappears with it, since each event is validated and then let go.
+The judge's own truncation is what makes the preview safe: `model-judge.ts` renders the whole trace as
+`JSON.stringify(trace).slice(0, 6000)`, so a preview well above that cannot change a model judge's verdict.
+Code graders read `kind` and `cost`, not payloads.
 
 ## Deliberately not
 
