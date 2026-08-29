@@ -1,5 +1,5 @@
 import { UpstreamError } from "./errors.js";
-import { type CaseResult, CaseResultSchema } from "./execution/eval-case.js";
+import { type CaseResult, UntrustedCaseResultSchema } from "./execution/eval-case.js";
 import { type TraceEvent, TraceEventSchema } from "./execution/trace.js";
 
 // The one-line stdout wire format for a CaseResult crossing the agent → backend process boundary. The agent
@@ -25,7 +25,10 @@ export function parseResult(stdout: string): CaseResult {
   const idx = stdout.lastIndexOf(RESULT_SENTINEL);
   if (idx < 0) throw new UpstreamError("UPSTREAM_ERROR", undefined, "could not find the agent result (sentinel).");
   const line = stdout.slice(idx + RESULT_SENTINEL.length).split("\n")[0] ?? "";
-  return CaseResultSchema.parse(JSON.parse(line));
+  // UNTRUSTED: this is a dispatched job's stdout, and a workspace pins the image that prints it. A producer
+  // may not hand us an `artifact://` coordinate — the snapshot pair is re-signed into a browser-facing URL on
+  // the way out (arch-review 121).
+  return UntrustedCaseResultSchema.parse(JSON.parse(line)) as CaseResult;
 }
 
 // The live-log view with the machine payloads removed — Observable.logs() returns human-readable progress text

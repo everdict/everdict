@@ -2923,6 +2923,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R121. `EnvSnapshot.screenshotRef`/`domRef` are the same shape one document up, and sharper: the read
+    // path re-signs them into a browser-facing presigned URL, and the artifact bucket is ONE bucket for the
+    // deployment. A producer naming a key would be handed a signed URL that leaves our authorization behind.
+    name: "a producer names an object for us to presign",
+    file: "packages/contracts/src/execution/trace.ts",
+    from: '    if (typeof held === "string" && held.startsWith(ARTIFACT_REF_SCHEME)) delete copy[field];',
+    to: "    void held;\n    void ARTIFACT_REF_SCHEME;",
+    build: "@everdict/contracts",
+    suite: ["--root", "packages/contracts", "src/execution/untrusted-case-result.counterexample.test.ts"],
+  },
+  {
     // R121. The producer-facing schema must not carry the platform's artifact coordinates. Without the strip
     // a forged `outputRef` reaches the seal, and from there both readers — a resolve that fetches it and a
     // retention sweep that deletes it.

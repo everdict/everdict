@@ -7,7 +7,7 @@ import { ImageProvenanceSchema } from "./image-provenance.js";
 import { ProvisionedWorldProofSchema } from "./provisioned-world.js";
 import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
-import { TraceEventSchema } from "./trace.js";
+import { TraceEventSchema, stripPlatformAuthoredFields } from "./trace.js";
 import { MetricAuthoritySchema } from "./verdict-policy.js";
 import { VerifierReceiptSchema } from "./verifier-receipt-record.js";
 
@@ -348,6 +348,19 @@ export const CaseResultSchema = z.object({
   envDeltas: z.array(EnvDeltaSchema).optional(),
 });
 export type CaseResult = z.infer<typeof CaseResultSchema>;
+
+// What every door that receives a `CaseResult` FROM A PRODUCER parses with — a self-hosted runner's
+// `submit_job_result`, and the `__EVERDICT_RESULT__` sentinel a dispatched job prints on stdout.
+//
+// The document carries two kinds of platform coordinate: the trace's `…Ref` fields, and the snapshot's
+// `screenshotRef`/`domRef`. The snapshot pair is the sharper one — the read path re-signs them into a
+// browser-facing presigned URL (`refreshSnapshotRefs` → `publicUrlFor`), and the artifact bucket is ONE
+// bucket for the deployment, so a producer naming a key would receive a signed URL that leaves our
+// authorization behind entirely rather than merely bypassing one check.
+//
+// Same rule as `UntrustedTraceEventSchema`, same reason: `artifact://` is our scheme, and a producer may not
+// author one. See `stripPlatformAuthoredFields` for why a local path survives.
+export const UntrustedCaseResultSchema = z.preprocess(stripPlatformAuthoredFields, CaseResultSchema);
 
 export const ScorecardSchema = z.object({
   suiteId: z.string(),

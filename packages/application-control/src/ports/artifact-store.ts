@@ -1,3 +1,4 @@
+import { ARTIFACT_REF_SCHEME } from "@everdict/contracts";
 import type { EnvSnapshot } from "@everdict/contracts";
 
 // Abstraction for storing artifacts (binaries such as screenshots). put returns a fetchable ref (URL) — a presigned GET URL or a permanent URL.
@@ -12,7 +13,9 @@ import type { EnvSnapshot } from "@everdict/contracts";
 // offloaded, which is noise a receipt's resultDigest exists to make impossible. What a record stores is the
 // stable `artifact://<key>` handle; every browser-facing URL is minted AT READ (`publicUrlFor`), and legacy
 // rows holding old presigned URLs keep re-minting exactly as before.
-export const ARTIFACT_REF_SCHEME = "artifact://";
+// Re-exported, not re-declared: the scheme itself lives at the dependency root now, because `contracts`
+// refuses a producer-authored one (arch-review 121). Consumers keep importing it from here.
+export { ARTIFACT_REF_SCHEME };
 export function artifactRefOf(key: string): string {
   return `${ARTIFACT_REF_SCHEME}${key}`;
 }

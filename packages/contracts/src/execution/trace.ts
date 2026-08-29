@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ARTIFACT_REF_SCHEME } from "../artifact-ref.js";
 
 // Cost/tokens — values the harness reports in its own trace (e.g. Claude's total_cost_usd).
 export const CostSchema = z.object({
@@ -169,13 +170,34 @@ export type TraceEvent = z.infer<typeof TraceEventSchema>;
 // the preview, or the whole payload for anything that was never offloaded — exactly as sent.
 //
 // The stripped names are derived from nothing: they are listed once, here, beside the fields they name.
-const PLATFORM_AUTHORED_EVENT_FIELDS = ["textRef", "argsRef", "outputRef", "attributesRef"] as const;
+// The coordinate fields, listed once beside the fields they name. `screenshotRef`/`domRef` are the same shape
+// one document up: `EnvSnapshot` carries them, the platform mints them in `offloadSnapshot`, and the read
+// path re-signs them into a browser-facing presigned URL — so a producer naming a key would be handed a
+// signed URL for it, and the artifact bucket is ONE bucket for the deployment (arch-review 121).
+const PLATFORM_AUTHORED_REF_FIELDS = [
+  "textRef",
+  "argsRef",
+  "outputRef",
+  "attributesRef",
+  "screenshotRef",
+  "domRef",
+] as const;
 
+// ⚠️ THE RULE IS THE SCHEME, NOT THE FIELD NAME. `artifact://` is OUR handle over OUR object store, and that
+// is the only thing a producer may not author. `os-use` legitimately reports where it captured a screenshot
+// INSIDE the compute (`/tmp/shot.png`), which names nothing of ours — `publicUrlFor` already ignores it, and
+// deleting it would throw away a producer's own report to fix a problem it is not part of.
 export function stripPlatformAuthoredFields(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripPlatformAuthoredFields);
   if (value === null || typeof value !== "object") return value;
   const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
-  for (const field of PLATFORM_AUTHORED_EVENT_FIELDS) delete copy[field];
+  for (const field of PLATFORM_AUTHORED_REF_FIELDS) {
+    const held = copy[field];
+    if (typeof held === "string" && held.startsWith(ARTIFACT_REF_SCHEME)) delete copy[field];
+  }
+  // Nested: `CaseResult` carries a snapshot and a whole trace, so the walk has to reach them.
+  for (const [key, item] of Object.entries(copy))
+    if (item !== null && typeof item === "object") copy[key] = stripPlatformAuthoredFields(item);
   return copy;
 }
 

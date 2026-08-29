@@ -1,8 +1,8 @@
 import { type SelfHostedKey, runnerUpdateRequired } from "@everdict/application-control";
 import {
-  CaseResultSchema,
   RUNNER_PROTOCOL_VERSION,
   TrackEntrySchema,
+  UntrustedCaseResultSchema,
   UntrustedTraceEventSchema,
 } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -116,7 +116,7 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
       {
         description:
           "Report the leased job's result (CaseResult) → completes the control plane's pending dispatch. Requires the lease's attempt token (leaseEpoch); a token that is not the current lease is refused (accepted:false).",
-        inputSchema: { jobId: z.string(), leaseEpoch: z.number().int().min(1), result: CaseResultSchema },
+        inputSchema: { jobId: z.string(), leaseEpoch: z.number().int().min(1), result: UntrustedCaseResultSchema },
       },
       ({ jobId, leaseEpoch, result }) =>
         plain(async () => {

@@ -25,6 +25,7 @@ export {
   ProvisionedWorldProofSchema,
   worldProofCovers,
 } from "./execution/provisioned-world.js";
+export * from "./artifact-ref.js";
 export * from "./execution/trace.js";
 export * from "./execution/span.js";
 export * from "./execution/semconv.js";
