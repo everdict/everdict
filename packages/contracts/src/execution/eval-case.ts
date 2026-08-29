@@ -360,7 +360,41 @@ export type CaseResult = z.infer<typeof CaseResultSchema>;
 //
 // Same rule as `UntrustedTraceEventSchema`, same reason: `artifact://` is our scheme, and a producer may not
 // author one. See `stripPlatformAuthoredFields` for why a local path survives.
-export const UntrustedCaseResultSchema = z.preprocess(stripPlatformAuthoredFields, CaseResultSchema);
+// ── AND THE PLATFORM'S OWN STATEMENTS ABOUT THE MEASUREMENT (arch-review 122) ────────────────────────
+//
+// `CaseResult` is what the AGENT did. Two of its fields are what the CONTROL PLANE says about that, and both
+// were arriving on the producer's document:
+//
+//   provenance   "stamped by the control plane at dispatch" — and it decides WHO PAYS. A forged
+//                `{ranOn: "self-hosted", by: <not ws:>}` makes `billingTenant` answer `undefined`, so the
+//                case is never charged, never metered and consumes no budget; `by: "ws:<victim>"` charges a
+//                workspace that did not run it and drains its enforcement budget.
+//   verifier     "Sealed by `verifierReceiptOf` at the invocation" — the private verifier's receipt, which is
+//                constitutional evidence and carries the attempt ids a settlement joins on. The verifier has
+//                its OWN sentinel (`VERIFIER_RESULT_SENTINEL`); the agent half never authors one.
+//
+// The self-hosted lane already overwrote provenance (`{...result, provenance: {…}}`), so that door was safe
+// by accident of ORDER. The managed lane never touches it — `placement-image` rewrites `execution` and
+// nothing else — and a workspace supplies the job-runner image that prints the sentinel
+// (`RuntimeSpec.image`, "job-runner image (tenant registry)"). One lane learned, its sibling did not.
+//
+// ⚠️ THE LAW IS ALREADY IN THIS FILE, twenty lines above `verifier`: the arch-review 66 comment explaining
+// why the cleanup coordinate was REMOVED from this schema, whose second bullet is verbatim the mechanism
+// here. Absence is also the CORRECT default — `billingTenant` bills the dispatching tenant when provenance
+// is absent, and a managed run "usually carries NO provenance at all" by the field's own comment.
+//
+// `traceSealed`/`judgmentsSealed` deliberately stay: `traceSealed`'s comment says the distinction exists
+// "unless the PRODUCER says so", which makes it a vouch rather than a stamp. This is a trust boundary, not a
+// field sweep.
+const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier"] as const;
+
+export const UntrustedCaseResultSchema = z.preprocess((value) => {
+  const stripped = stripPlatformAuthoredFields(value);
+  if (stripped === null || typeof stripped !== "object" || Array.isArray(stripped)) return stripped;
+  const copy: Record<string, unknown> = { ...(stripped as Record<string, unknown>) };
+  for (const field of PLATFORM_STAMPED_RESULT_FIELDS) delete copy[field];
+  return copy;
+}, CaseResultSchema);
 
 export const ScorecardSchema = z.object({
   suiteId: z.string(),

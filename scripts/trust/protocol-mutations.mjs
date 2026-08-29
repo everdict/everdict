@@ -2923,6 +2923,19 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R122. `CaseResult` is the MEASUREMENT and two of its fields are the CONTROL PLANE's statements about
+    // it. `provenance` decides who pays — a forged one bills nobody, or bills a victim workspace and drains
+    // its budget — and `verifier` is the private verifier's receipt. The self-hosted lane overwrote
+    // provenance by accident of order; the managed lane never touched it, and a workspace supplies the
+    // job-runner image that prints the sentinel.
+    name: "a producer stamps the control plane's own facts on the measurement",
+    file: "packages/contracts/src/execution/eval-case.ts",
+    from: "  for (const field of PLATFORM_STAMPED_RESULT_FIELDS) delete copy[field];",
+    to: "  void PLATFORM_STAMPED_RESULT_FIELDS;",
+    build: "@everdict/contracts",
+    suite: ["--root", "packages/contracts", "src/execution/untrusted-case-stamps.counterexample.test.ts"],
+  },
+  {
     // R121. `EnvSnapshot.screenshotRef`/`domRef` are the same shape one document up, and sharper: the read
     // path re-signs them into a browser-facing presigned URL, and the artifact bucket is ONE bucket for the
     // deployment. A producer naming a key would be handed a signed URL that leaves our authorization behind.
