@@ -15,6 +15,21 @@ export const WorkspaceCiLinkSchema = z.object({
   slots: z.record(z.object({ path: z.string().optional() })).default({}),
   createdBy: z.string(), // for audit (unrelated to fire auth)
   disabled: z.boolean().optional(),
+  // ── WHICH REFS OF THAT REPOSITORY THIS WORKSPACE TRUSTS (arch-review 122) ────────────────────────
+  //
+  // The link used to pin the REPOSITORY and nothing else, while the OIDC token's `ref` was parsed into
+  // `GithubActionsClaims` and consulted by nobody. The `ci` role carries `harnesses:register` — the
+  // merge-time re-pin that mints a new immutable instance version — and `scorecards:run`, so anyone who
+  // could push a BRANCH to the linked repo could register a harness version and spend the workspace's
+  // budget. Push access is routinely wider than merge access.
+  //
+  //     the token is from the linked repo   ≠   it is from a ref this workspace trusts
+  //
+  // Exact `ref` values (`refs/heads/main`), because a pattern language is a second thing to get wrong.
+  // ABSENT = any ref, which is what every link written before this field meant; it is the permissive arm, so
+  // it is disclosed rather than silent — `GET /workspace/ci/links` reports it and the setup-PR generator
+  // pins the default branch on new links.
+  refs: z.array(z.string().min(1)).optional(),
   // Placement is always self-hosted (design D6) — the two fields are a narrowing override. Unset = runs-on "[self-hosted]" + the "self:ws" runtime pool.
   runsOn: z.string().optional(), // workflow runs-on value (e.g. "[self-hosted, everdict-<id>]"). The runner label from github-install.
   runtime: z.string().optional(), // run-eval runtime input (e.g. "self:ws:<id>"). A personal runner (self…) is a 400 on upsert.

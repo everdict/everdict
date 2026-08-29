@@ -642,6 +642,7 @@ export {
   EVERDICT_ROLES,
   type EverdictRole,
 } from "./auth/authz.js";
+export { type CiTokenClaims, ciLinkTrusting } from "./auth/ci-trust.js";
 export type { AuthContext, Principal } from "./auth/principal.js";
 
 // billing — cost attribution + enforcement budget + metered usage (from @everdict/billing)

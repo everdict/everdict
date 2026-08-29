@@ -2923,6 +2923,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R122. The CI trust policy decided on repository alone while the token's `ref` was parsed and discarded,
+    // and `ci` carries `harnesses:register` (the merge-time re-pin) plus `scorecards:run` — so branch-push
+    // access to the linked repo was register-and-spend access on the workspace.
+    name: "the CI trust policy ignores the ref the token was minted on",
+    file: "packages/domain/src/auth/ci-trust.ts",
+    from: "      (link.refs === undefined || link.refs.length === 0\n        ? true\n        : claims.ref !== undefined && link.refs.includes(claims.ref)),",
+    to: "      (void link.refs, void claims.ref, true),",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/auth/ci-ref-authority.counterexample.test.ts"],
+  },
+  {
     // R122. `run_id` is the PK of the trajectories table and `(run_id, emitter)` of the segments — neither key
     // carries the workspace. The read checked the HEADER's tenant and returned every row it found, so the
     // isolation of the READ lived in the WRITE path's guard.

@@ -8,6 +8,7 @@ import {
   runnerAuthenticator,
 } from "@everdict/auth";
 import type { RunnerStore, TenantKeyStore, WorkspaceSettingsStore } from "@everdict/db";
+import { ciLinkTrusting } from "@everdict/domain";
 
 // Auth owned by the control plane: KEYCLOAK_ISSUER → OIDC(JWT) + always API keys. Both resolve to a workspace.
 export function buildAuthenticator(
@@ -21,17 +22,14 @@ export function buildAuthenticator(
   // Trust = a repo-link match (WorkspaceSettings.ci.links) in the named workspace (x-everdict-workspace) → roles=["ci"].
   // GHES supported too: only dynamically trust the issuer (https://<host>/_services/token) of a host that has a GHE link (fail-closed);
   // link matching is (host, repository) — a github.com token cannot pass a same-named GHE link (or vice versa).
-  const normHost = (h?: string): string | undefined => h?.replace(/\/$/, "").toLowerCase();
   authers.push(
     githubActionsAuthenticator({
+      // The policy is `ciLinkTrusting` (@everdict/domain), not a closure here: it decides on the token's REF
+      // as well as its repository, and a decision living in a composition root is one no test can drive —
+      // which is how the ref stayed parsed-and-unused (arch-review 122).
       resolveTrust: async (claims, workspaceHint) => {
         const settings = await settingsStore.get(workspaceHint);
-        const link = settings?.ci?.links.find(
-          (l) =>
-            !l.disabled &&
-            normHost(l.host) === normHost(claims.host) &&
-            l.repository.toLowerCase() === claims.repository.toLowerCase(),
-        );
+        const link = ciLinkTrusting(settings?.ci?.links ?? [], claims);
         return link ? { workspace: workspaceHint, roles: ["ci"] } : undefined;
       },
       enterprise: {
