@@ -557,3 +557,101 @@ describe("[R121 COUNTEREXAMPLE] retention accounts for every ref before deleting
     expect(artifacts.keys().length, "an object was orphaned by its own retention sweep").toBe(0);
   });
 });
+
+// ── [R121 COUNTEREXAMPLE] THE CEILING IS ON THE EVENT, NOT ON ITS STRINGS ───────────────────────────
+//
+// The preview budget measures STRING leaves and allocates between them. A structure whose size comes from
+// somewhere else — hundreds of thousands of numbers, or a bag of long keys with tiny values — has no string
+// leaf over any share, is reported UNTRUNCATED, and stays inline whole. So the bound that the windowed read
+// depends on ("a page of N events is only a bound if the events are bounded") is not a bound at all for the
+// shapes that do not happen to be text.
+//
+//     no string leaf exceeded its share   ≠   the event is within the ceiling
+//
+// Seen RED before the fix:
+//   "a structure with no string leaves was never bounded: expected 3400074 to be less than or equal to 64000"
+describe("[R121 COUNTEREXAMPLE] a non-string structure is bounded too", () => {
+  it("bounds an args bag of hundreds of thousands of NUMBERS", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    // Not one string leaf anywhere — the size is entirely elements and separators.
+    const numbers = Array.from({ length: 400_000 }, (_, i) => i);
+    await seal(store, [{ t: 0, kind: "tool_call", id: "c1", name: "n", args: { numbers } }]);
+
+    const call = (await page(store)).find((e) => e.kind === "tool_call");
+    const stored = serializedBytes(call?.kind === "tool_call" ? call.args : undefined);
+    expect(stored, "a structure with no string leaves was never bounded").toBeLessThanOrEqual(EVENT_INLINE_MAX * 2);
+    // …and it is a MOVE, so the whole value comes back when a caller asks for it.
+    const resolved = (await page(store, { resolve: true })).find((e) => e.kind === "tool_call");
+    const args = resolved?.kind === "tool_call" ? (resolved.args as { numbers: number[] }) : undefined;
+    expect(args?.numbers, "the sealed value did not survive the bound").toHaveLength(400_000);
+  });
+
+  it("bounds a bag whose size is in its KEYS", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    // 20,000 long keys, each with a one-character value: the strings are all tiny, the object is not.
+    const bag = Object.fromEntries(Array.from({ length: 20_000 }, (_, i) => [`k${"x".repeat(40)}${i}`, 1]));
+    await seal(store, [{ t: 0, kind: "tool_call", id: "c1", name: "n", args: bag }]);
+
+    const call = (await page(store)).find((e) => e.kind === "tool_call");
+    expect(
+      serializedBytes(call?.kind === "tool_call" ? call.args : undefined),
+      "a bag whose bytes are in its keys was never bounded",
+    ).toBeLessThanOrEqual(EVENT_INLINE_MAX * 2);
+  });
+});
+
+// ── [R121 COUNTEREXAMPLE] A RESOLVED PAGE IS BOUNDED IN BYTES, NOT ONLY IN EVENTS ───────────────────
+//
+// `MAX_RESOLVED_EVENT_PAGE` clamps a resolving read to 50 events. That bounds the COUNT, and the stored
+// size of an offloaded event is its preview — which says nothing about what resolving it will materialize.
+// Fifty events whose payloads are 10 MB each is 500 MB in one shared process, through a read any member
+// with `runs:read` can ask for.
+//
+//     the page is bounded in events   ≠   the page is bounded in bytes
+//
+// Progress is preserved: a page always returns at least one event, so a single payload larger than the whole
+// budget is served alone rather than making the stream stall.
+//
+// Seen RED before the fix: "a resolved page materialized without a byte budget: expected 8 to be less than 8".
+describe("[R121 COUNTEREXAMPLE] a resolved page stops on bytes", () => {
+  it("returns fewer events than asked for, and a cursor, when the payloads are large", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    // The shape that matters: each STORED event is a 32 KB preview, so eight of them sit comfortably inside
+    // the stored-byte budget — and each resolves to 1.3 MB. A test that let the stored budget do the cutting
+    // would pass without a resolved budget existing at all, which is the vacuous version of this case.
+    // Each payload is 6 MB, so eight of them are 48 MB — over the resolved budget, while the eight PREVIEWS
+    // are 32 KB each and sit far inside every stored-byte ceiling.
+    const big = "q".repeat(6 * 1024 * 1024);
+    await seal(
+      store,
+      Array.from({ length: 8 }, (_, i) => ({
+        t: i,
+        kind: "tool_result" as const,
+        id: `c${i}`,
+        ok: true,
+        output: `${big}#${i}`,
+      })),
+    );
+    const bounded = await store.events("acme", "r1", {});
+    if (bounded.kind !== "page") throw new Error("expected a page");
+    expect(
+      bounded.page.events,
+      "the stored page was already cut — the resolved budget is not what is tested",
+    ).toHaveLength(8);
+
+    const result = await store.events("acme", "r1", { resolve: true });
+    if (result.kind !== "page") throw new Error(`expected a page, got ${result.kind}`);
+    expect(result.page.events.length, "a resolved page materialized without a byte budget").toBeLessThan(8);
+    expect(result.page.events.length, "the page made no progress at all").toBeGreaterThan(0);
+    expect(result.page.nextAfter, "the reader was left with no way to continue").toBeDefined();
+  });
+});

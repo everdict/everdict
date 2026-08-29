@@ -2,6 +2,7 @@ import { type TraceEvent, type TraceSpan, UpstreamError } from "@everdict/contra
 import { contentDigest, spansToEvents } from "@everdict/domain";
 import { type ArtifactStore, artifactKeyOf, artifactRefOf } from "./artifact-store.js";
 import {
+  MAX_RESOLVED_PAGE_BYTES,
   type SealInput,
   type SealedTrajectory,
   type TrajectoryEventsResult,
@@ -11,7 +12,9 @@ import {
   type TrajectoryStore,
   type TrajectoryUsage,
   type TrajectoryWindow,
+  clampWindow,
   ownsPayloadKey,
+  serializedBytes,
 } from "./trajectory-store.js";
 
 // ── ONE EVENT IS BOUNDED, TOO (docs/architecture/long-horizon-trace-reads.md, R1) ────────────────────
@@ -53,6 +56,61 @@ import {
 //     every page bound downstream — which is the failure this store exists to prevent, arriving through the
 //     shape it did not measure.
 export const EVENT_INLINE_MAX = 32_000;
+
+// ── AND THE BYTES THAT ARE NOT IN ANY STRING (arch-review 121) ──────────────────────────────────────
+//
+// The budget above measures string LEAVES and shares them fairly, which bounds a field whose size is text.
+// It bounds nothing when the size is somewhere else: four hundred thousand numbers, or twenty thousand long
+// KEYS with one-character values, contain no leaf over any share — so the walk reported the field untruncated
+// and it stayed inline whole, at megabytes. The windowed read's whole premise is that one event is bounded,
+// and for every shape that is not text it was not.
+//
+//     no string leaf exceeded its share   ≠   the event is within the ceiling
+//
+// So the preview is measured after the string pass and, if it is still over, its CONTAINERS are capped: the
+// first `keep` entries of every array and object survive and the remainder becomes one `__elided__` count.
+// Shape first (a reader is looking at the keys), then depth, then nothing — the cap shrinks until the whole
+// preview fits, and 0 is a legal answer for a structure that cannot be described inside the budget at all.
+// The ref still names the entire original, so this narrows the preview and never the evidence.
+const CONTAINER_CAPS = [512, 128, 32, 8, 2, 1, 0] as const;
+
+function capContainers(value: unknown, keep: number): unknown {
+  if (Array.isArray(value)) {
+    const kept = value.slice(0, keep).map((item) => capContainers(item, keep));
+    return value.length > keep ? [...kept, { __elided__: value.length - keep }] : kept;
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value);
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of entries.slice(0, keep)) out[key] = capContainers(item, keep);
+    if (entries.length > keep) out.__elided__ = entries.length - keep;
+    return out;
+  }
+  return value;
+}
+
+// The structural ceiling is the inline one with headroom, and the headroom is not a fudge: the string pass
+// allocates CONTENT bytes, while this measures the SERIALIZED field — quotes, braces, commas and every key.
+// A field the string pass bounded correctly is a few percent over its own budget once written out, and
+// capping it here would throw away keys the first pass deliberately kept. Two ceilings, one relationship,
+// stated: a preview is never larger than twice the inline ceiling, which is a hard bound where there was
+// none at all.
+const STRUCTURE_INLINE_MAX = EVENT_INLINE_MAX * 2;
+
+function boundStructure(value: unknown, maxBytes: number): { preview: unknown; truncated: boolean } {
+  // A scalar is whatever the string pass already made it. There is no container to cap, and replacing it
+  // would discard a preview that is bounded — the first version did exactly that and emptied every plain
+  // string field.
+  if (value === null || typeof value !== "object") return { preview: value, truncated: false };
+  if (serializedBytes(value) <= maxBytes) return { preview: value, truncated: false };
+  for (const keep of CONTAINER_CAPS) {
+    const capped = capContainers(value, keep);
+    if (serializedBytes(capped) <= maxBytes) return { preview: capped, truncated: true };
+  }
+  // `keep = 0` renders any container as a single count, so this is unreachable for one — it is the total
+  // answer for a shape no cap can describe, and it is still a bound.
+  return { preview: { __elided__: 1 }, truncated: true };
+}
 
 // Cut a string to a byte budget WITHOUT splitting a UTF-8 sequence. `Buffer.subarray().toString()` would
 // happily hand back a trailing U+FFFD, and a preview whose last character is a replacement glyph reads as
@@ -293,8 +351,12 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     value: unknown,
   ): Promise<{ preview: unknown; ref: string } | undefined> {
     if (value === undefined || value === null) return undefined;
-    const { preview, truncated } = previewOf(value, EVENT_INLINE_MAX);
-    if (!truncated) return undefined;
+    const strings = previewOf(value, EVENT_INLINE_MAX);
+    // Two passes, because they bound different things: the first shares the budget between string leaves,
+    // the second caps the containers when the bytes were never in the strings at all.
+    const structure = boundStructure(strings.preview, STRUCTURE_INLINE_MAX);
+    const preview = structure.preview;
+    if (!strings.truncated && !structure.truncated) return undefined;
     const key = offloadKey(input.tenant, input.runId, emitter, field, value);
     try {
       await this.artifacts.put(key, Buffer.from(JSON.stringify(value), "utf8"), "application/json");
@@ -328,13 +390,33 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
         },
       };
     }
-    return {
-      kind: "page",
-      page: {
-        ...result.page,
-        events: await Promise.all(result.page.events.map((event) => this.resolveEvent(event, tenant, runId))),
-      },
-    };
+    // ── A RESOLVED PAGE IS BOUNDED IN BYTES, NOT ONLY IN EVENTS (arch-review 121) ──────────────────
+    //
+    // `MAX_RESOLVED_EVENT_PAGE` clamps the COUNT, and an offloaded event's stored size is its preview —
+    // which predicts nothing about what resolving it materializes. Fifty events whose payloads are 10 MB
+    // each is 500 MB in one shared process, through a read any member with `runs:read` can ask for. So the
+    // budget is spent as the page is built and the page stops before the event that would exceed it.
+    //
+    // Resolved SEQUENTIALLY rather than with `Promise.all`, deliberately: the point is to stop before
+    // materializing the rest, and a parallel map has already fetched everything by the time anyone counts.
+    //
+    // At least one event always comes back. A payload larger than the whole budget is served alone — a page
+    // that can come back empty is a stream that never advances, which is the pager's own law one layer up.
+    const start = clampWindow(window).after;
+    const resolved: TraceEvent[] = [];
+    let spent = 0;
+    for (const event of result.page.events) {
+      const one = await this.resolveEvent(event, tenant, runId);
+      const size = serializedBytes(one);
+      if (resolved.length > 0 && spent + size > MAX_RESOLVED_PAGE_BYTES)
+        // The cursor is the ABSOLUTE index of the first event we did not include, which is where the inner
+        // page began plus what we kept — the same coordinate `pageOf` hands back, so a caller pages on
+        // without knowing a budget stopped it.
+        return { kind: "page", page: { ...result.page, events: resolved, nextAfter: start + resolved.length } };
+      resolved.push(one);
+      spent += size;
+    }
+    return { kind: "page", page: { ...result.page, events: resolved } };
   }
 
   private async resolveEvent(event: TraceEvent, tenant: string, runId: string): Promise<TraceEvent> {

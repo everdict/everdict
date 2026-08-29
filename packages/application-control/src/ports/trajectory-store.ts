@@ -737,6 +737,14 @@ export const MAX_LEGACY_BODY_BYTES = 32 * 1024 * 1024;
 // of "what one page means" — a ceiling enforced per caller is a ceiling the next caller widens by asking.
 export const MAX_RESOLVED_EVENT_PAGE = 50;
 
+// …and the count is only half of it (arch-review 121). An offloaded event's STORED size is its preview, so
+// fifty of them clear every stored-byte budget and can still materialize hundreds of megabytes once the
+// objects are fetched. This is the ceiling on what one resolved page may hold in memory; the resolve spends
+// it as it builds the page and stops before the event that would exceed it, handing back a cursor. Generous
+// on purpose — a judge reading a long trace should page rarely — and finite, which is the property that was
+// missing.
+export const MAX_RESOLVED_PAGE_BYTES = 32 * 1024 * 1024;
+
 export function clampWindow(window: TrajectoryWindow): { limit: number; maxBytes: number; after: number } {
   const ceiling = window.resolve === true ? MAX_RESOLVED_EVENT_PAGE : MAX_EVENT_PAGE;
   const limit =

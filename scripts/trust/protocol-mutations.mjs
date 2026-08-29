@@ -2934,6 +2934,27 @@ const MUTATIONS = [
     suite: ["--root", "packages/contracts", "src/execution/untrusted-trace.counterexample.test.ts"],
   },
   {
+    // R121. The string-leaf budget bounds text and nothing else: four hundred thousand numbers, or twenty
+    // thousand long keys, have no leaf over any share and stayed inline whole. The windowed read's premise
+    // is that ONE event is bounded, and for every shape that is not text it was not.
+    name: "a structure whose bytes are not in strings is left unbounded",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "    const structure = boundStructure(strings.preview, STRUCTURE_INLINE_MAX);",
+    to: "    const structure = (void boundStructure, void STRUCTURE_INLINE_MAX, { preview: strings.preview, truncated: false });",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R121. A resolved page was bounded in EVENTS only, and an offloaded event's stored size is its preview
+    // — so fifty of them clear every stored-byte ceiling and still materialize hundreds of megabytes.
+    name: "a resolved page is bounded in events but not in bytes",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "      if (resolved.length > 0 && spent + size > MAX_RESOLVED_PAGE_BYTES)",
+    to: "      if (resolved.length > 0 && (void MAX_RESOLVED_PAGE_BYTES, void spent, void size, false))",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
     // R121. `TraceEvent` is the schema a producer's submission is validated by, so a caller can author
     // `outputRef` itself. Reading whatever key it names is evidence substitution when the bytes are somebody
     // else's, and disclosure when the caller only wanted to see them.
