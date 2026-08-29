@@ -2923,6 +2923,16 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R122. A ref pin the record can HOLD but no API call can SET is a policy nobody can adopt — the
+    // capability-declared-and-undeliverable shape, one layer above what `unwired-capabilities` scans for.
+    name: "the ci link upsert drops the ref pin",
+    file: "packages/application-control/src/ci-link/ci-link-service.ts",
+    from: "      ...(body.refs !== undefined ? { refs: body.refs } : {}),",
+    to: "      ...(body.refs !== undefined ? {} : {}),",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ci-link/ci-ref-roundtrip.counterexample.test.ts"],
+  },
+  {
     // R122. The CI trust policy decided on repository alone while the token's `ref` was parsed and discarded,
     // and `ci` carries `harnesses:register` (the merge-time re-pin) plus `scorecards:run` — so branch-push
     // access to the linked repo was register-and-spend access on the workspace.

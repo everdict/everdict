@@ -18,6 +18,11 @@ export const UpsertCiLinkBodySchema = z.object({
   runsOn: z.string().min(1).optional(), // narrowing override — workflow runs-on (default "[self-hosted]", e.g. "[self-hosted, everdict-<id>]")
   runtime: z.string().min(1).optional(), // narrowing override — run-eval runtime (default "self:ws" pool, e.g. "self:ws:<id>")
   trigger: z.enum(["auto", "comment", "both"]).optional(), // how PR evals fire (absent = both) — see WorkspaceCiLinkSchema
+  // Which refs of that repository this workspace trusts (arch-review 122). Absent/empty = ANY ref, which is
+  // what every link written before the field meant. Without this the field would exist on the record and be
+  // unsettable through the API — a capability nobody can deliver, which is the shape `unwired-capabilities`
+  // exists to refuse one layer down.
+  refs: z.array(z.string().min(1)).optional(),
 });
 export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;
 
@@ -97,6 +102,7 @@ export class CiLinkService {
       ...(body.runsOn !== undefined ? { runsOn: body.runsOn } : {}),
       ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
       ...(body.trigger !== undefined ? { trigger: body.trigger } : {}),
+      ...(body.refs !== undefined ? { refs: body.refs } : {}),
     };
     const rest = current.filter((l) => !sameLinkKey(l, body.repository, body.host));
     await this.deps.settings.set(workspace, { ci: { links: [...rest, next] } });
