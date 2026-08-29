@@ -13,7 +13,7 @@
 //
 // Run: node scripts/check-docs.mjs
 
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -162,6 +162,47 @@ for (const doc of docs) {
     ["UpdateXBodySchema", "a naming TEMPLATE — the X stands for the resource (api-layer recipe)"],
   ]);
 
+  // ── `git grep` EXITS 1 WHEN IT FINDS NOTHING, AND THAT IS NOT A CRASH (arch-review 120) ─────────────
+  //
+  // `execSync` throws on any non-zero exit, and "no matches" is git's ordinary way of saying zero. So this
+  // check died with a Node stack trace — `Error: Command failed: git grep …`, empty stdout, no diagnostic —
+  // instead of reporting anything a reader could act on. It is the shape rule `ci` already records for madge
+  // and `import-cycles`: a tool whose exit code IS its answer must have that answer consumed, not thrown.
+  //
+  // And the empty case is worse than a crash would suggest. If the corpus is genuinely empty, every symbol a
+  // rule names resolves against nothing and the check would pass over a repository it never read — a vacuous
+  // green, which this file exists to refuse. So zero matches is an explicit FAILURE with its own message,
+  // never an exception and never silence.
+  //
+  // (Seen in the wild: a stray `GIT_INDEX_FILE` pointing at a near-empty index made `git grep` enumerate no
+  // tracked files at all. The tree was fine; the checker was not.)
+  function symbolsMatching(pathspec) {
+    const result = spawnSync("git", ["grep", "-h", "-o", "-E", "\\b[A-Z][A-Za-z0-9]{3,}\\b", "--", ...pathspec], {
+      cwd: ROOT,
+      maxBuffer: 512 * 1024 * 1024,
+      encoding: "utf8",
+    });
+    if (result.error !== undefined) {
+      console.error(`docs check FAILED — could not run git grep: ${result.error.message}`);
+      process.exit(1);
+    }
+    // 0 = matches, 1 = no matches, anything else = git itself failed.
+    if (result.status !== 0 && result.status !== 1) {
+      console.error(`docs check FAILED — git grep exited ${result.status}: ${(result.stderr ?? "").trim()}`);
+      process.exit(1);
+    }
+    const symbols = (result.stdout ?? "").split("\n").filter(Boolean);
+    if (symbols.length === 0) {
+      console.error(
+        `docs check FAILED — git grep matched NOTHING under ${pathspec.join(" ")}. Every symbol a rule names
+  would resolve against an empty corpus, so this check would pass without reading the repository.
+  Check for a stray GIT_INDEX_FILE or a checkout with no tracked files there.`,
+      );
+      process.exit(1);
+    }
+    return symbols;
+  }
+
   // Test files are EXCLUDED from what counts as live. A deleted interface keeps being named by the ratchet
   // that keeps it deleted — `Recoverable` survives in `legacy-case-addressing-guard.test.ts` precisely
   // BECAUSE it is gone — so counting tests makes this check green over the one defect it was written for.
@@ -170,32 +211,12 @@ for (const doc of docs) {
   // `scripts/**` is excluded for the same reason one level up: this very file explains the check by NAMING
   // `Recoverable`, and while scripts counted, that sentence was enough to make the mutation pass. A guard
   // whose own prose satisfies it is the failure mode this repo has now shipped three times.
-  const live = new Set(
-    execSync(
-      'git grep -h -o -E "\\b[A-Z][A-Za-z0-9]{3,}\\b" -- packages apps ' +
-        '":(exclude)*.test.ts" ":(exclude)*.test.tsx"',
-      {
-        cwd: ROOT,
-        maxBuffer: 512 * 1024 * 1024,
-      },
-    )
-      .toString()
-      .split("\n")
-      .filter(Boolean),
-  );
+  const live = new Set(symbolsMatching(["packages", "apps", ":(exclude)*.test.ts", ":(exclude)*.test.tsx"]));
 
   // The testing rule and skill are ABOUT tests, so test files are their live surface: `ControlledBackend` and
   // `InMemoryTransport` are fixtures that exist nowhere else and are exactly what those documents teach.
   // Nothing else may resolve against a test — see the comment on `live`.
-  const testOnly = new Set(
-    execSync('git grep -h -o -E "\\b[A-Z][A-Za-z0-9]{3,}\\b" -- "*.test.ts" "*.test.tsx"', {
-      cwd: ROOT,
-      maxBuffer: 512 * 1024 * 1024,
-    })
-      .toString()
-      .split("\n")
-      .filter(Boolean),
-  );
+  const testOnly = new Set(symbolsMatching(["*.test.ts", "*.test.tsx"]));
   const aboutTests = (doc) => doc === ".claude/rules/testing.md" || doc.startsWith(".claude/skills/testing/");
 
   for (const doc of conventions) {

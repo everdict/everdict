@@ -153,6 +153,28 @@ thing — the page would be as large as it ever was, one indirection later. So t
 preview plus the ref (what a viewer wants), and a caller that SCORES the trace sets `TrajectoryWindow.resolve`
 and accepts the cost. Scorecard ingest does; the run-detail and sandbox-poll readers do not.
 
+**…and the owner may ask too** *(arch-review 120)*. The first version of this design had only two kinds of
+caller — a viewer wanting the preview and a scorer wanting the bytes — and so `resolve` lived entirely
+inside the process. Neither transport forwarded it and nothing dereferences a trajectory payload ref, which
+left a third kind of caller with no answer at all: the OWNER auditing the evidence a verdict was reached on.
+That is not a nice-to-have here. Everdict sells a defensible verdict; a verdict can hinge on bytes past the
+preview boundary (that is the whole reason the exact-scoring counterexample exists), and retention now
+DELETES those bytes on a schedule. Evidence that is unreadable while it exists and then erased is an
+assertion, not evidence.
+
+So `GET /trajectories/:id?resolve=true` and the MCP `get_trajectory` `resolve` argument expose it, opt-in on
+both transports. Authorization is deliberately unchanged — the same `runs:read` and the same
+`trajectoryReadableBy` that already decided this caller may read this trajectory. Resolving withholds for
+SIZE, never for authority, so there is nothing for a new action to gate.
+
+Which is the trap in exposing it: **stored size does not predict resolved size.** Every other ceiling here is
+computed from what is on disk, and an offloaded field is a preview of at most `EVENT_INLINE_MAX` there and
+the whole original in memory — so a 500-event page that clears the 4 MiB budget can materialize gigabytes,
+re-entering the OOM this design exists to prevent through the flag that undoes it. `MAX_RESOLVED_EVENT_PAGE`
+clamps a resolving page inside `clampWindow`, the one owner of what a page means, so no caller widens it by
+asking. Nothing is withheld: every resolved reader pages to exhaustion, so a smaller page costs round trips
+and never events.
+
 A resolve is exact or it refuses. A missing object throws rather than degrading into the preview: a judge
 handed an excerpt under the name of the whole scores different evidence and nothing downstream can tell.
 A put that fails at seal keeps the payload INLINE — a ref naming bytes that do not exist is worse than a
@@ -161,6 +183,28 @@ large event, because every later resolve refuses it and no reader can repair it.
 The preview keeps the SHAPE of a structured field: every key and every small value survives, and only the
 oversized string leaves become prefixes. Replacing an attribute bag with a marker would throw away what a
 reader is mostly looking at.
+
+**The budget is the FIELD's, and it is shared FAIRLY** *(arch-review 120)*. A per-leaf ceiling is not a
+bound: a `tool_call` bag of two hundred 31 KB leaves has no leaf over the line and stays inline at ~6 MB, so
+one event defeats every page bound downstream. The ceiling therefore applies to the field as a whole — and
+it is denominated in BYTES, not UTF-16 code units, or a CJK trace keeps three times the intended payload and
+a field under the code-unit ceiling is never moved at all.
+
+Spending that budget in traversal order would satisfy the bound and break the invariant above: the first
+leaf takes what it wants and a small sibling that happens to come second becomes `""`, so the same bag
+previews differently depending on JSON key order. The allocation is max-min fair instead — every leaf is
+entitled to an equal share, a leaf under its share takes only what it needs and donates the remainder, and
+the ones still over the line split what is left. A small value survives wherever it sits, and two hundred
+medium leaves each keep an equal prefix rather than one keeping everything.
+
+**Retention deletes the bytes, not only the rows** *(arch-review 120)*. An offloaded payload is named ONLY by
+the event row carrying its ref — no listing, no index, no second pointer — so a sweep that deleted rows
+first left the objects permanently unreachable, and a workspace on a 30-day retention kept its payloads
+forever. `deleteOlderThan` enumerates the refs the doomed rows hold (`payloadRefsOlderThan`, REQUIRED on the
+port so the decorator chain cannot silently drop it) and removes the objects BEFORE the rows. The order is
+the design: rows-first makes an invisible orphan, objects-first leaves a visible, self-healing state for one
+sweep — a resolve fails closed, correctly, and the next pass removes the row. An object store that refuses
+stops the sweep before the rows go, so the refs still name what is owed.
 
 ### ⚠️ Resolving the record does not resolve the projection
 

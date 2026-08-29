@@ -389,3 +389,57 @@ describe("[R120 COUNTEREXAMPLE] the inline ceiling is bytes, and it bounds the w
     expect(Object.keys(args), "keys were dropped instead of their values being cut").toHaveLength(200);
   });
 });
+
+// ── [R120 COUNTEREXAMPLE] THE PREVIEW DOES NOT DEPEND ON JSON KEY ORDER ─────────────────────────────
+//
+// `docs/architecture/long-horizon-trace-reads.md` R1 states the invariant this preview exists for: "every
+// key and every small value survives, and only the oversized string leaves become prefixes". The first
+// aggregate budget spent itself in `Object.entries` order, so the first leaf took what it wanted:
+//
+//     { path: "out.txt", content: <100 KB> }   → path survives                ✔
+//     { content: <100 KB>, path: "out.txt" }   → path becomes ""              ✘
+//
+// Same bag, different key order, different evidence — and the doc's invariant was the one that was right.
+// Max-min fair allocation restores it: a leaf under its equal share always survives whole, wherever it sits.
+//
+// Seen RED on the greedy version:
+//   "a small value was emptied because a big sibling came first: expected '' to be 'out.txt'"
+//   "the preview depends on key order" (the two orderings disagreed)
+describe("[R120 COUNTEREXAMPLE] every small value survives, whatever order the keys are in", () => {
+  const previewArgs = async (args: Record<string, unknown>) => {
+    const store = new OffloadingTrajectoryStore(inner(), artifactStore());
+    await seal(store, [{ t: 0, kind: "tool_call", id: "c1", name: "write_file", args }]);
+    const call = (await page(store)).find((e) => e.kind === "tool_call");
+    return call?.kind === "tool_call" ? (call.args as Record<string, unknown>) : {};
+  };
+
+  it("keeps a small sibling whole even when the oversized leaf comes FIRST", async () => {
+    const args = await previewArgs({ content: BIG, path: "out.txt" });
+    expect(args.path, "a small value was emptied because a big sibling came first").toBe("out.txt");
+  });
+
+  it("produces the same preview for both key orders", async () => {
+    const first = await previewArgs({ path: "out.txt", content: BIG });
+    const second = await previewArgs({ content: BIG, path: "out.txt" });
+    expect(first.path, "the preview depends on key order").toBe(second.path);
+    expect(Buffer.byteLength(String(first.content), "utf8"), "the preview depends on key order").toBe(
+      Buffer.byteLength(String(second.content), "utf8"),
+    );
+  });
+
+  it("gives every leaf of a many-medium-leaf bag a share, instead of one leaf taking it all", async () => {
+    // 200 x 20 KB: no leaf is over the per-field ceiling, and the whole bag is far over it. Greedily the
+    // first leaf keeps 32 KB and 199 keep nothing; fairly, each keeps an equal prefix.
+    const bag = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, "y".repeat(20_000)]));
+    const args = await previewArgs(bag);
+    const kept = Object.values(args).map((v) => Buffer.byteLength(String(v), "utf8"));
+    expect(kept, "keys were dropped rather than shortened").toHaveLength(200);
+    expect(Math.min(...kept), "a leaf was emptied while its siblings kept bytes").toBeGreaterThan(0);
+    // Equal shares: the largest and smallest surviving prefix differ by at most a rounding byte.
+    expect(Math.max(...kept) - Math.min(...kept), "the share was not equal across leaves").toBeLessThanOrEqual(1);
+    expect(
+      kept.reduce((a, b) => a + b, 0),
+      "the field's preview broke its budget",
+    ).toBeLessThanOrEqual(EVENT_INLINE_MAX);
+  });
+});

@@ -2869,10 +2869,24 @@ const MUTATIONS = [
   {
     // R120. The budget is the FIELD's and it is CARRIED: a bag of two hundred medium leaves has no leaf over
     // the ceiling, and stayed inline at megabytes — one event defeating every page bound downstream.
+    // RE-AIMED (design review): the greedy budget was replaced by max-min fair allocation, so the old target
+    // line no longer exists. Giving each field's walk a FRESH whole budget is the same neutralization in the
+    // new spelling — the per-field ceiling stops bounding the field.
     name: "the inline budget is per leaf instead of per field",
     file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
-    from: "      const inner = previewOf(item, budget);\n      truncated ||= inner.truncated;\n      preview[key] = inner.preview;",
-    to: "      const inner = previewOf(item, { left: EVENT_INLINE_MAX });\n      truncated ||= inner.truncated;\n      preview[key] = inner.preview;",
+    from: "  const share = fairShare(sizes, totalBudget);",
+    to: "  const share = (void fairShare, void totalBudget, EVENT_INLINE_MAX);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R120 design review. The doc's invariant — "every key and every small value survives" — is the one that
+    // was right: a greedy budget lets the first leaf take everything, so the same bag previews differently
+    // depending on JSON key order and a small sibling becomes "".
+    name: "the preview budget is spent first-come, so key order decides",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "  const cursor = { index: 0 };\n  return applyPreview(value, share, cursor);",
+    to: "  const cursor = { index: 0 };\n  return applyPreview(value, share === 0 ? 0 : totalBudget, cursor);",
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
   },

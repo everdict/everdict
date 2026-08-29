@@ -5,6 +5,27 @@ import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from ".
 import { trajectoryDocs } from "./trajectory.docs.js";
 
 // PUT body — mirrors WorkspaceSettings.traceThresholds (full replacement, like every settings list).
+// ── A FLAG THAT SILENTLY MEANS "NO" IS THE WRONG DIRECTION FOR THIS ONE (design review) ─────────────
+//
+// `resolve` was parsed as `=== "true" || === "1"`, copied from the notification route. This repo has two
+// spellings for a boolean query param and the other one — `z.enum(["true","false"])`, used by cycle, team
+// and fs — is what rule `api-layer` prescribes: validate, then 400. The difference matters more here than
+// for a list filter: a caller asking `?resolve=yes` because they are AUDITING the evidence a verdict was
+// reached on would silently receive the excerpt, which is the one answer this flag exists to let them
+// avoid. Refused with a 400 naming the field.
+const TrajectoryEventsQuerySchema = z.object({
+  emitter: z.string().optional(),
+  after: z
+    .string()
+    .regex(/^\d{1,9}$/)
+    .optional(),
+  limit: z
+    .string()
+    .regex(/^\d{1,9}$/)
+    .optional(),
+  resolve: z.enum(["true", "false"]).optional(),
+});
+
 const TraceThresholdsBodySchema = z.object({
   thresholds: z
     .array(
@@ -72,8 +93,11 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
       // ONE PAGE of ONE plane. This route used to answer the whole trajectory with no way to ask for less,
       // which is what made opening a long-horizon run exhaust the shared process — see
       // docs/architecture/long-horizon-trace-reads.md.
-      const after = req.query.after !== undefined ? Number.parseInt(req.query.after, 10) : undefined;
-      const limit = req.query.limit !== undefined ? Number.parseInt(req.query.limit, 10) : undefined;
+      const query = TrajectoryEventsQuerySchema.safeParse(req.query);
+      if (!query.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "invalid query", data: zodIssues(query.error) });
+      const after = query.data.after !== undefined ? Number.parseInt(query.data.after, 10) : undefined;
+      const limit = query.data.limit !== undefined ? Number.parseInt(query.data.limit, 10) : undefined;
       // ── AND THE SEALED BYTES, IF THE CALLER ASKS FOR THEM (arch-review 120) ─────────────────
       //
       // An oversized payload is MOVED to object storage and the event keeps a preview plus an
@@ -88,9 +112,9 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
       // resolved size. Authorization is unchanged: the same `runs:read` and the same
       // `trajectoryReadableBy` above already decided this caller may read this trajectory, and resolving
       // reveals nothing the preview was hiding for authorization reasons.
-      const resolve = req.query.resolve === "true" || req.query.resolve === "1";
+      const resolve = query.data.resolve === "true";
       const page = await store.events(principal.workspace, req.params.id, {
-        ...(req.query.emitter !== undefined && req.query.emitter !== "" ? { emitter: req.query.emitter } : {}),
+        ...(query.data.emitter !== undefined && query.data.emitter !== "" ? { emitter: query.data.emitter } : {}),
         ...(after !== undefined && Number.isFinite(after) ? { after } : {}),
         ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
         ...(resolve ? { resolve: true } : {}),

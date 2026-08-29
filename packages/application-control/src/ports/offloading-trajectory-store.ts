@@ -81,25 +81,88 @@ function offloadKey(tenant: string, runId: string, emitter: string, field: strin
 // and only what does not fit becomes a prefix. For a plain string field the same rule is ordinary prefix
 // truncation. One traversal, one rule, and the ref always names the original whole value.
 //
-// The budget is CARRIED and spent as the walk proceeds, which is the aggregate half of the ceiling above: a
-// bag of two hundred medium leaves fills the field's budget just as a single huge leaf does, and the leaves
-// past it are cut to what remains. Every key still survives — the shape is what makes a preview readable —
-// so an exhausted budget renders its values as empty strings rather than dropping them.
-function previewOf(value: unknown, budget: { left: number }): { preview: unknown; truncated: boolean } {
+// ── THE BUDGET IS SHARED FAIRLY, NOT FIRST-COME (arch-review 120, design review) ────────────────────
+//
+// The first version of the aggregate budget spent it in `Object.entries` order, and that quietly broke the
+// invariant this whole preview exists for — `docs/architecture/long-horizon-trace-reads.md` R1: "every key
+// and every small value survives, and only the oversized string leaves become prefixes". Greedily, the
+// first leaf takes what it wants and the rest get nothing:
+//
+//     { path: "out.txt", content: <100 KB> }   → path survives, content truncated       ✔
+//     { content: <100 KB>, path: "out.txt" }   → content takes it all, path becomes ""  ✘
+//
+// Same bag, different key order, different preview. The doc's invariant was RIGHT and the implementation
+// was wrong — a reader is mostly looking at the keys and the small values, and JSON key order is not
+// something the design should depend on. (My own fixture used the surviving order, which is why it looked
+// fine: a fixture drifted onto the weak branch, the exact vacuous shape rule `testing` names.)
+//
+// So the budget is allocated MAX-MIN FAIR (water-filling): every leaf is entitled to an equal share, a leaf
+// smaller than its share takes only what it needs and donates the remainder, and the leaves that are still
+// over the line split what is left — repeat until nothing changes. Consequences, both wanted:
+//   · a leaf under the fair share ALWAYS survives whole, whatever its position;
+//   · 200 leaves of 20 KB each keep a 160-byte prefix apiece rather than one keeping 32 KB and 199 keeping
+//     nothing;
+//   · `{path, content}` and `{content, path}` produce the same preview.
+function previewOf(value: unknown, totalBudget: number): { preview: unknown; truncated: boolean } {
+  const sizes: number[] = [];
+  collectLeafSizes(value, sizes);
+  const share = fairShare(sizes, totalBudget);
+  const cursor = { index: 0 };
+  return applyPreview(value, share, cursor);
+}
+
+// Every string leaf's byte size, in traversal order — the same order `applyPreview` walks, so the two agree
+// leaf for leaf without threading a key path through either.
+function collectLeafSizes(value: unknown, out: number[]): void {
   if (typeof value === "string") {
+    out.push(Buffer.byteLength(value, "utf8"));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectLeafSizes(item, out);
+    return;
+  }
+  if (typeof value === "object" && value !== null) for (const item of Object.values(value)) collectLeafSizes(item, out);
+}
+
+// Max-min fair share: the largest per-leaf allowance under which the total fits. Leaves under the allowance
+// keep everything and donate the rest, which raises the allowance for those still over it — so the answer is
+// found by repeating until the set of over-the-line leaves stops shrinking.
+function fairShare(sizes: readonly number[], totalBudget: number): number {
+  let pool = [...sizes];
+  let remaining = totalBudget;
+  let contenders = pool.length;
+  if (contenders === 0) return 0;
+  for (;;) {
+    const share = Math.floor(remaining / contenders);
+    const settled = pool.filter((size) => size <= share && size > 0);
+    // Nobody new fits entirely inside the share — everyone still over the line splits what is left.
+    if (settled.length === 0 || settled.length === contenders) return share;
+    const donated = settled.reduce((sum, size) => sum + size, 0);
+    remaining -= donated;
+    contenders -= settled.length;
+    if (contenders === 0) return share;
+    pool = pool.filter((size) => size > share || size === 0);
+  }
+}
+
+// The second pass. `cursor` walks the leaves in the SAME order `collectLeafSizes` did, so each leaf is
+// measured against its own entitlement rather than against whatever the previous leaves left behind.
+function applyPreview(
+  value: unknown,
+  share: number,
+  cursor: { index: number },
+): { preview: unknown; truncated: boolean } {
+  if (typeof value === "string") {
+    cursor.index += 1;
     const bytes = Buffer.byteLength(value, "utf8");
-    if (bytes <= budget.left) {
-      budget.left -= bytes;
-      return { preview: value, truncated: false };
-    }
-    const kept = truncateToBytes(value, budget.left);
-    budget.left = 0;
-    return { preview: kept, truncated: true };
+    if (bytes <= share) return { preview: value, truncated: false };
+    return { preview: truncateToBytes(value, share), truncated: true };
   }
   if (Array.isArray(value)) {
     let truncated = false;
     const preview = value.map((item) => {
-      const inner = previewOf(item, budget);
+      const inner = applyPreview(item, share, cursor);
       truncated ||= inner.truncated;
       return inner.preview;
     });
@@ -109,7 +172,7 @@ function previewOf(value: unknown, budget: { left: number }): { preview: unknown
     let truncated = false;
     const preview: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      const inner = previewOf(item, budget);
+      const inner = applyPreview(item, share, cursor);
       truncated ||= inner.truncated;
       preview[key] = inner.preview;
     }
@@ -224,7 +287,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     value: unknown,
   ): Promise<{ preview: unknown; ref: string } | undefined> {
     if (value === undefined || value === null) return undefined;
-    const { preview, truncated } = previewOf(value, { left: EVENT_INLINE_MAX });
+    const { preview, truncated } = previewOf(value, EVENT_INLINE_MAX);
     if (!truncated) return undefined;
     const key = offloadKey(input.tenant, input.runId, emitter, field, value);
     try {

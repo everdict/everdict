@@ -244,7 +244,18 @@ machinery extended to cover them.
 > `completed` is written too: the join between a spent adoption and the issue resolution that closes its
 > intent is SYMMETRIC — an E1 consumer over `issue.status_changed` and the registration path itself both
 > perform it, so whichever fact lands second completes the operation and neither ordering is privileged. The
-> join is the SCORECARD the proof names, never that a resolution happened nearby. The campaign carries its
+> join is the SCORECARD the proof names, never that a resolution happened nearby. **And a reconciler owns the
+case where NEITHER side lands** (arch-review 115/120): both happy paths are one-shot, so a transient issue
+read, a retried `adopt` answering `already_adopted`, or a racing adopter that dies after registering all
+leave the same world — registry version present, issue done on the proving scorecard, operation `registered`,
+no future event coming. `AdoptionCompletionReconciler` sweeps the worklist the store can re-offer, because an
+E1 consumer retries three times inside one delivery and then dead-letters with the cursor advanced, which
+buys latency and not convergence. The worklist is DUE-FIRST rather than oldest-first (mig 0201): an operation
+it cannot finish says when to look again — the ordinary cadence for an issue that is simply still open, a
+longer back-off for a read that failed, a day for one whose issue was DELETED and which no sweep can ever
+change — so a hundred unfinishable rows stop holding the head of the list while newer completable ones are
+never read. The deferral is itself a conditional write and its answer is CONSUMED: a row the statement did
+not move is counted (`undeferred`), because a deferral that never landed reads exactly like one that did. The campaign carries its
 > own `teamId` (frozen at open from the issue it journals into, mig 0198), every read is team-filtered and
 > every mutation is team-gated on both transports. Still open on this track: an ingested scorecard resolves
 > no registry document, so a loop running on ingested traces needs `allowLabelOnlyAdoption` on the frame —

@@ -17,6 +17,13 @@
 //
 // One owner rather than a closure per sweep, for the sibling-lane reason: two sweeps written alike, one
 // taught and one not, is how this repository's most common defect starts.
+// ⚠️ WHY THIS IS NOT `ReadResult<number>` (design review). `@everdict/contracts` already owns the
+// three-valued "it happened / it is not there / I could not find out", with `readOk`/`readUnknown`, and a
+// second spelling of a kernel concept has to justify itself or it is drift (rule `protocol` L3). Two
+// reasons it stays separate: a sweep is an EFFECT, so `kind: "read"` carrying "removed 42 rows" misnames
+// what happened at the one place a reader looks; and `absent` has no meaning for a delete that always has a
+// count. What is borrowed is the part that matters — the failure arm is a KIND, and `reason` is an operator
+// diagnostic that no control flow may pattern-match on.
 export type RetentionSweepOutcome =
   // The store answered. `removed` may legitimately be 0 — nothing was old enough.
   | { kind: "swept"; removed: number }
