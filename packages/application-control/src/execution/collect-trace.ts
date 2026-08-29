@@ -32,6 +32,21 @@ import { traceAuthorizationCredential } from "../trace-source/authorization-cred
 export interface CollectTraceDeps {
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // re-resolve traceRef.authSecret (SecretStore)
+  // ── THE REGISTERED POOL IS THE AUTHORITY, NOT THE PRODUCER'S WORD (arch-review 122) ──────────────
+  //
+  // `traceRef` arrives on `CaseResult`, which is parsed from producer surfaces — `submit_job_result`, and the
+  // `__EVERDICT_RESULT__` sentinel printed by a job-runner image the workspace SUPPLIES. Acting on its
+  // `endpoint` + `authSecret` meant anyone who could register a runtime or a harness could have the control
+  // plane resolve ANY workspace secret and send it to a URL of their choosing, with no `settings:write` — and
+  // on a managed dispatch the control plane is the sender, so the same lever reaches internal endpoints.
+  //
+  // The platform already knows the answer: the workspace registers its sources in Settings › Observability,
+  // and the job built this ref FROM the harness source the control plane dispatched. The result echoes it
+  // back and this read was consuming the echo — rule `protocol` L3.
+  //
+  // Absent = no registration can be checked, so no credential is sent (fail-closed). An unauthenticated ref
+  // is unaffected either way: there is nothing to leak and nothing to verify.
+  registeredTraceSources?: (tenant: string) => Promise<readonly { endpoint: string; authSecretName?: string }[]>;
   sleep?: (ms: number) => Promise<void>; // retry backoff (test injection, default setTimeout)
   // Grader factory injected by the caller (apps/api, which may import @everdict/graders) — reconstruct a case's
   // deferred (non-needsCompute) graders for control-plane-mode scoring. The application layer never imports the
@@ -88,6 +103,19 @@ export async function collectDeferredTrace(
       // carries the scheme verbatim; a bare offline_token access token is Bearer-wrapped (see traceAuthorizationCredential).
       let headers: Record<string, string> | undefined;
       if (ref.authSecret) {
+        // The pair must be one the WORKSPACE registered: this endpoint, declaring this secret. A producer
+        // that names either half on its own gets no credential and no request — the secret is not even
+        // resolved, so a refusal cannot leak it through timing or an error string.
+        const registered = deps.registeredTraceSources ? await deps.registeredTraceSources(tenant ?? "") : [];
+        const declares = registered.some(
+          (source) => source.endpoint === ref.endpoint && source.authSecretName === ref.authSecret,
+        );
+        if (!declares)
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { endpoint: ref.endpoint, authSecret: ref.authSecret },
+            `Deferred collection refused: no registered trace source declares secret '${ref.authSecret}' for '${ref.endpoint}'. A result may not choose which credential the control plane sends, or where.`,
+          );
         const secrets = tenant && deps.secretsFor ? await deps.secretsFor(tenant) : {};
         const auth = secrets[ref.authSecret];
         if (auth === undefined)

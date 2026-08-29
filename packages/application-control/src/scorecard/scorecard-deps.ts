@@ -218,6 +218,10 @@ export interface ScorecardServiceDeps {
   // Resolve a REGISTERED workspace trace source by name → a usable TraceSourceConfig (auth resolved). Powers pull-ingest
   // "by name" (register once in the pool, then pull by name) — bound to TraceSourceService.resolveByName. Unknown name → 400.
   resolveTraceSourceByName?: (tenant: string, name: string) => Promise<TraceSourceConfig>;
+  // The workspace's REGISTERED observability sources — the authority for what a deferred collection may send
+  // and where. `CaseResult.traceRef` arrives from a producer, so its `endpoint`/`authSecret` are that
+  // producer's word; this is the platform's own registration to check it against (arch-review 122).
+  registeredTraceSources?: (tenant: string) => Promise<readonly { endpoint: string; authSecretName?: string }[]>;
   // Per-harness span-attribute mapping overlay (the conversion layer authored in the judge wizard, WorkspaceSettings
   // .spanAttrMappingByHarness) — applied to the pull-eval trace source so production traces normalize the way the
   // harness/judge expect. Absent = no overlay (span→TraceEvent uses the source config / OTel GenAI defaults).
@@ -363,6 +367,7 @@ export type ScorecardBatchDeps = Pick<
   | "secretsFor"
   | "makeGraders"
   | "buildTraceSource"
+  | "registeredTraceSources"
   | "installationTokenFor"
   | "repoTokenFor"
   | "registryAuthsFor"

@@ -1006,7 +1006,21 @@ async function main(): Promise<void> {
     // the adopted result straight to the settle, so a crash changed what had been measured rather than when.
     // The same function, the same capabilities the run lane is given.
     completeRecovered: (tenant: string, caseSpec: EvalCase, result: CaseResult) =>
-      collectDeferredTrace({ buildTraceSource, makeGraders, secretsFor: runtimeSecretsFor }, tenant, caseSpec, result),
+      collectDeferredTrace(
+        {
+          buildTraceSource,
+          makeGraders,
+          secretsFor: runtimeSecretsFor,
+          // The registered pool decides what a producer-supplied `traceRef` may send and where — absent
+          // means no credential travels at all, which is the fail-closed direction (arch-review 122).
+          ...(traceSourceService
+            ? { registeredTraceSources: async (t: string) => (await traceSourceService.list(t)).sources }
+            : {}),
+        },
+        tenant,
+        caseSpec,
+        result,
+      ),
   };
   const owedRecovery = await runStartupRecovery(recoveryDeps);
   // ── THE SWEEP THE DEFERRAL ASSUMED (arch-review 56, Wave C) ──────────────────────────────────────

@@ -415,6 +415,12 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
         dispatcher: dispatcherOf(authedRef),
         secretsFor: async (tenant): Promise<Record<string, string>> =>
           tenant === "acme" ? { MLFLOW_AUTH: "Basic abc" } : {},
+        // The workspace's REGISTERED pool now decides what a producer-supplied `traceRef` may send and where
+        // (arch-review 122). This case is the LEGITIMATE one — the ref names an endpoint the workspace
+        // registered, with the credential that registration declares — so the auth still travels. Without a
+        // registration the same ref is refused, which is what `traceref-authority.counterexample.test.ts`
+        // drives; this test would have kept passing over that hole, so it carries the registration now.
+        registeredTraceSources: async () => [{ endpoint: "http://m", authSecretName: "MLFLOW_AUTH" }],
         buildTraceSource: (cfg) => {
           seenCfg = cfg;
           return {

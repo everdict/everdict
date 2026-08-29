@@ -2923,6 +2923,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R122. `traceRef` arrives on a producer's document, and the control plane resolved ITS named secret and
+    // sent it to ITS named endpoint — arbitrary workspace-secret exfiltration, and SSRF from the control
+    // plane, for anyone who can register a runtime or a harness. The registered pool is the authority.
+    name: "a producer names the secret and the endpoint for deferred collection",
+    file: "packages/application-control/src/execution/collect-trace.ts",
+    from: "        if (!declares)",
+    to: "        if (void declares, false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/execution/traceref-authority.counterexample.test.ts"],
+  },
+  {
     // R122. `CaseResult` is the MEASUREMENT and two of its fields are the CONTROL PLANE's statements about
     // it. `provenance` decides who pays — a forged one bills nobody, or bills a victim workspace and drains
     // its budget — and `verifier` is the private verifier's receipt. The self-hosted lane overwrote

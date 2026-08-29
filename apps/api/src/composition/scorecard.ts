@@ -351,6 +351,9 @@ export function buildScorecard(deps: {
     buildTraceSource,
     // "Register once, pull by name" — a pull-ingest source given as { name } resolves against the workspace pool.
     resolveTraceSourceByName: (tenant, name) => traceSourcesForIngest.resolveByName(tenant, name),
+    // The registered pool, as the AUTHORITY over a producer-supplied `traceRef` (arch-review 122): a result
+    // may not choose which workspace secret the control plane sends, or where.
+    registeredTraceSources: async (tenant) => (await traceSourcesForIngest.list(tenant)).sources,
     // Per-harness span-attribute mapping overlay (judge-wizard-authored) — applied to the pull-eval trace source so
     // production traces normalize the way this harness/judge expect (WorkspaceSettings.spanAttrMappingByHarness).
     spanMappingFor: async (tenant, harnessId) =>
