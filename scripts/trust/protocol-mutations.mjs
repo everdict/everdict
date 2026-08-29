@@ -2923,6 +2923,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R122. `run_id` is the PK of the trajectories table and `(run_id, emitter)` of the segments — neither key
+    // carries the workspace. The read checked the HEADER's tenant and returned every row it found, so the
+    // isolation of the READ lived in the WRITE path's guard.
+    name: "the plane read filters the header's workspace but not the rows'",
+    file: "packages/db/src/results/trajectory-store.ts",
+    from: "         FROM everdict_trajectory_segments WHERE run_id = $1 AND tenant = $2",
+    to: "         FROM everdict_trajectory_segments WHERE run_id = $1",
+    build: "@everdict/db",
+    suite: ["--root", "packages/db", "src/results/plane-tenant-scope.counterexample.test.ts"],
+  },
+  {
     // R122. The runner's deep-track door took the WHOLE track union, which carries `frames` — and a frame is
     // a ref the run-detail read re-signs into a browser-facing presigned URL, over one bucket shared by the
     // whole deployment. The door's own description already named the right set; the schema did not agree.

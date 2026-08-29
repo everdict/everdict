@@ -488,7 +488,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
   }
 
   async planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
-    const rows = await this.planeRows(runId);
+    const rows = await this.planeRows(tenant, runId);
     const header = rows.find((r) => r.header);
     if (!header || header.tenant !== tenant) return undefined;
     const primary = await this.primary(runId);
@@ -507,7 +507,7 @@ export class PgTrajectoryStore implements TrajectoryStore {
   }
 
   async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
-    const rows = await this.planeRows(runId);
+    const rows = await this.planeRows(tenant, runId);
     const header = rows.find((r) => r.header);
     if (!header || header.tenant !== tenant) return { kind: "absent" };
     const visible =
@@ -737,17 +737,24 @@ export class PgTrajectoryStore implements TrajectoryStore {
 
   // Every plane of one trajectory, WITHOUT bodies — the read `planes`, `events` and the seal's tenant check
   // all start from. `header` says which row is the trajectory's own, because that row decides the workspace.
-  private async planeRows(runId: string): Promise<PlaneRow[]> {
+  // ⚠️ THE TENANT IS A ROW FILTER, NOT ONLY A HEADER CHECK (arch-review 122). `run_id` is the PRIMARY KEY of
+  // `everdict_trajectories` and `(run_id, emitter)` of the segments — neither carries the workspace — and this
+  // read used to select `WHERE run_id = $1` alone, check the HEADER's tenant, and then return every row it
+  // found. The seal refuses a foreign tenant's append (`primary.tenant !== input.tenant`), so no foreign
+  // segment exists today and nothing was leaking; the isolation simply lived in the WRITE path while the read
+  // trusted it. A backfill, a migration or a second writer would end that silently, and the same rows feed
+  // retention. A workspace filter costs one predicate and does not depend on anyone else's guard.
+  private async planeRows(tenant: string, runId: string): Promise<PlaneRow[]> {
     const res = await this.client.query<PlaneRow>(
       `SELECT COALESCE(emitter, source) AS emitter, source, event_count, t0, sealed_at, body_format, attempt_id,
               body_split, batch, tenant, true AS header
-         FROM everdict_trajectories WHERE run_id = $1
+         FROM everdict_trajectories WHERE run_id = $1 AND tenant = $2
        UNION ALL
        SELECT COALESCE(emitter, source) AS emitter, source, event_count, t0, sealed_at, body_format, attempt_id,
               body_split, batch, tenant, false AS header
-         FROM everdict_trajectory_segments WHERE run_id = $1
+         FROM everdict_trajectory_segments WHERE run_id = $1 AND tenant = $2
        ORDER BY header DESC, sealed_at ASC, emitter ASC`,
-      [runId],
+      [runId, tenant],
     );
     return res.rows;
   }
