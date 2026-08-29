@@ -590,11 +590,21 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     // that says which trajectory holds it, and a ref alone is a string a producer can author. `ORDER BY ref`
     // plus `after` makes the enumeration drainable, so no row is deleted before every ref it carries has
     // been accounted for (arch-review 121).
+    //
+    // ⚠️ THE TENANT COMES FROM THE PLANE ROW, BECAUSE THE EVENTS TABLE HAS NO SUCH COLUMN (arch-review 122).
+    // The first version selected `e.tenant` and ClickHouse answered `Code: 47 — Identifier 'e.tenant' cannot
+    // be resolved`, on every call. Since the offloading decorator awaits this read BEFORE deleting anything,
+    // that made the whole retention sweep throw on ClickHouse deployments — the same failure the Postgres
+    // jsonpath had, reintroduced in the sibling adapter by the change that fixed it. The events table is
+    // `(run_id, emitter, seq, body, bytes, sealed_at)`; the plane row is the one that names the workspace.
+    // Verified against a live server, which is the only thing that could have said so.
     const rows = await this.select<{ tenant: string; run_id: string; ref: string }>(
       `SELECT DISTINCT tenant, run_id, ref FROM (
-         SELECT e.tenant AS tenant, e.run_id AS run_id,
+         SELECT t.tenant AS tenant, e.run_id AS run_id,
                 arrayJoin(extractAll(e.body, '"(artifact://[^"]*)"')) AS ref
-           FROM ${this.eventsTable()} e WHERE e.run_id IN (${runs})
+           FROM ${this.eventsTable()} e
+           INNER JOIN ${this.table()} t ON t.run_id = e.run_id
+          WHERE e.run_id IN (${runs})
          UNION ALL
          SELECT t.tenant AS tenant, t.run_id AS run_id,
                 arrayJoin(extractAll(t.body, '"(artifact://[^"]*)"')) AS ref

@@ -216,3 +216,53 @@ async function whole(
   if (!planes) return undefined;
   return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
 }
+
+// ── [R122] THE RETENTION ENUMERATION, EXECUTED BY THE ENGINE ────────────────────────────────────────
+//
+// `payloadRefsOlderThan` answers `{tenant, runId, ref}` so the sweep can join a ref against the key it names
+// before deleting the bytes. Its first version selected `e.tenant` — and the EVENTS table is
+// `(run_id, emitter, seq, body, bytes, sealed_at)`, with no tenant at all. ClickHouse answered
+//
+//     Code: 47. Identifier 'e.tenant' cannot be resolved from table with name e
+//
+// on every call, and because the offloading decorator awaits this read BEFORE deleting anything, the whole
+// retention sweep threw on every ClickHouse deployment. That is the Postgres jsonpath failure exactly,
+// reintroduced in the sibling adapter by the change that fixed it — and invisible to every unit test,
+// because the fake HTTP client asserts on SQL TEXT and answers happily to a statement no engine can plan.
+//
+// Which is why this scenario exists: an adapter's SQL is certified by an engine or by nothing.
+describeLive("ClickHouseTrajectoryStore — retention enumeration against a live server", () => {
+  it("answers the trajectory's own payload refs WITH the tenant that owns them", async () => {
+    const s = store();
+    await s.ensureSchema();
+    const runId = `r-refs-${Date.now().toString(36)}`;
+    await s.seal({
+      runId,
+      tenant: "acme",
+      source: "run",
+      events: [
+        {
+          t: 0,
+          kind: "tool_result",
+          id: "c1",
+          ok: true,
+          output: `artifact://trajectory-payloads/acme/${runId}/run/abc.output`,
+        },
+        // A ref MENTIONED inside prose is not this trajectory's to name — the pattern anchors on the quote.
+        { t: 1, kind: "message", role: "assistant", text: "saved it, see artifact://someone-elses-key" },
+      ],
+    });
+
+    const refs = await s.payloadRefsOlderThan("2999-01-01T00:00:00.000Z", 5_000);
+
+    expect(refs.map((r) => r.ref)).toContain(`artifact://trajectory-payloads/acme/${runId}/run/abc.output`);
+    expect(
+      refs.every((r) => r.tenant === "acme"),
+      "the enumeration answered a ref without the tenant that owns it",
+    ).toBe(true);
+    expect(
+      refs.some((r) => r.ref.includes("someone-elses-key")),
+      "a ref merely mentioned in the trace was claimed as this trajectory's own",
+    ).toBe(false);
+  });
+});
