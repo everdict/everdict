@@ -1,5 +1,10 @@
 import { type SelfHostedKey, runnerUpdateRequired } from "@everdict/application-control";
-import { CaseResultSchema, RUNNER_PROTOCOL_VERSION, TraceEventSchema, TrackEntrySchema } from "@everdict/contracts";
+import {
+  CaseResultSchema,
+  RUNNER_PROTOCOL_VERSION,
+  TrackEntrySchema,
+  UntrustedTraceEventSchema,
+} from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, fail, ok, plain } from "../mcp-context.js";
@@ -242,7 +247,7 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
           description:
             "Push a batch of drained TraceEvents for the case this attempt token holds — the run detail page shows the trajectory accumulating live (the run is read from the lease, never from the request). Only meaningful for a self-hosted runner (managed jobs print event-sentinel stdout lines instead); best-effort (drop failures).",
           inputSchema: {
-            events: z.array(TraceEventSchema).min(1).max(500),
+            events: z.array(UntrustedTraceEventSchema).min(1).max(500),
             ...attemptFields,
           },
         },

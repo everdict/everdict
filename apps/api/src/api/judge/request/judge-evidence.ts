@@ -1,4 +1,9 @@
-import { EnvSnapshotSchema, JudgeSpecSchema, TraceEventSchema, TraceEvidenceSchema } from "@everdict/contracts";
+import {
+  EnvSnapshotSchema,
+  JudgeSpecSchema,
+  TraceEvidenceSchema,
+  UntrustedTraceEventSchema,
+} from "@everdict/contracts";
 import { z } from "zod";
 
 // The sample evidence a preview/dry-run judges over. All variants resolve to ONE GradeContext (case+trace+snapshot).
@@ -8,7 +13,7 @@ export const JudgeEvidenceSchema = z.discriminatedUnion("source", [
   // Source B — the user provides a trace directly (pasted, or pulled out of their platform). No run needed.
   z.object({
     source: z.literal("trace"),
-    trace: z.array(TraceEventSchema),
+    trace: z.array(UntrustedTraceEventSchema),
     task: z.string().optional(), // the task the agent was given (evidence context); defaults to a placeholder
     expected: z.string().optional(), // reference output, if any
     snapshot: EnvSnapshotSchema.optional(), // defaults to an empty prompt snapshot (environment-free)

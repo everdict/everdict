@@ -148,6 +148,41 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
+// ── THE PRODUCER-FACING SCHEMA IS NOT THE STORED ONE (arch-review 121) ───────────────────────────────
+//
+// The `…Ref` fields above are an artifact COORDINATE: the platform mints them when it offloads an oversized
+// payload, and both readers act on them — a resolve fetches that key from object storage, retention deletes
+// it. They are therefore a capability, and `TraceEventSchema` is also what every producer's submission is
+// validated by: a job result posted by a runner, a leased runner's event batch, trace JSON handed to a judge
+// tool, a scorecard ingest, the front door's inline trace, and the output of the very harness under
+// evaluation.
+//
+// So a producer could author a coordinate the platform would then act on — reading bytes it does not own into
+// its own evidence, and having them deleted when its trajectory expired. Rule `protocol` already states the
+// shape from `CaseResult`'s GC coordinate one review earlier: **the untrusted execution surface, the
+// canonical measurement, and the platform's private lifecycle state are three schemas.** This is the second
+// time that law has been paid for, and the first time it is expressed as a type.
+//
+// STRIP rather than reject, deliberately. Reading a trajectory back and feeding it to a judge is a real
+// workflow, and those events legitimately carry the refs WE wrote; refusing them would break a caller for
+// echoing our own output. Dropping the field is total, needs no error path, and leaves the value itself —
+// the preview, or the whole payload for anything that was never offloaded — exactly as sent.
+//
+// The stripped names are derived from nothing: they are listed once, here, beside the fields they name.
+const PLATFORM_AUTHORED_EVENT_FIELDS = ["textRef", "argsRef", "outputRef", "attributesRef"] as const;
+
+export function stripPlatformAuthoredFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripPlatformAuthoredFields);
+  if (value === null || typeof value !== "object") return value;
+  const copy: Record<string, unknown> = { ...(value as Record<string, unknown>) };
+  for (const field of PLATFORM_AUTHORED_EVENT_FIELDS) delete copy[field];
+  return copy;
+}
+
+// What every UNTRUSTED door parses with. Same events, same validation — the platform's coordinates removed
+// before they are read, so a producer cannot hand us one.
+export const UntrustedTraceEventSchema = z.preprocess(stripPlatformAuthoredFields, TraceEventSchema);
+
 // When an event happened, stamped BOTH ways — what every emitter of this stream owes a reader.
 //
 // `t` stays exactly what it always was: the emitter's own scalar, whose unit only that emitter knows (a step

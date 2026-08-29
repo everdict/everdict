@@ -1,4 +1,4 @@
-import { InternalError, type TraceEvent, TraceEventSchema } from "@everdict/contracts";
+import { InternalError, type TraceEvent, UntrustedTraceEventSchema } from "@everdict/contracts";
 import { getField } from "./front-door-driver.js";
 
 // The inline-trace channel — the trace sibling of the sentinel observation (observation-source.ts). When a service
@@ -23,7 +23,7 @@ export function extractInlineTrace(response: unknown, path: string | undefined):
   }
   const events: TraceEvent[] = [];
   for (let idx = 0; idx < raw.length; idx++) {
-    const parsed = TraceEventSchema.safeParse(raw[idx]);
+    const parsed = UntrustedTraceEventSchema.safeParse(raw[idx]);
     if (!parsed.success) {
       throw new InternalError(
         "HARNESS_RUN_FAILED",

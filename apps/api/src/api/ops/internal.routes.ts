@@ -1,4 +1,4 @@
-import { TraceEventSchema, TraceSpanSchema } from "@everdict/contracts";
+import { UntrustedTraceEventSchema, UntrustedTraceSpanSchema } from "@everdict/contracts";
 import { issueKey } from "@everdict/db";
 import { priceUsd } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
@@ -253,9 +253,9 @@ export function registerInternalRoutes(app: FastifyInstance, deps: ServerDeps): 
         budgetUsd: z.number().positive().optional(),
         // O2 (transcripts are traces): a terminal report may carry the turn's transcript projected as
         // TraceEvent[] — sealed as the run's own trajectory (source "run", first write wins).
-        trace: z.array(TraceEventSchema).optional(),
+        trace: z.array(UntrustedTraceEventSchema).optional(),
         // The turn's own spans when the agent recorded them live (N6) — preferred over `trace`.
-        spans: z.array(TraceSpanSchema).optional(),
+        spans: z.array(UntrustedTraceSpanSchema).optional(),
       })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });

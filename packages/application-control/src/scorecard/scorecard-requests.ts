@@ -6,8 +6,8 @@ import {
   type JudgeRunConfig,
   ScoreSchema,
   type ScorecardOrigin,
-  TraceEventSchema,
   TraceEvidenceSchema,
+  UntrustedTraceEventSchema,
 } from "@everdict/contracts";
 import { z } from "zod";
 
@@ -26,7 +26,7 @@ export const IngestScorecardBodySchema = z.object({
     .array(
       z.object({
         caseId: z.string(),
-        trace: z.array(TraceEventSchema),
+        trace: z.array(UntrustedTraceEventSchema),
         snapshot: EnvSnapshotSchema.optional(),
         evidence: TraceEvidenceSchema.optional(), // pulled-trace evidence (mapping slots) — carries custom judge slots
         scores: z.array(ScoreSchema).optional(),

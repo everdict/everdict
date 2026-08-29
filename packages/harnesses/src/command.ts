@@ -7,7 +7,7 @@ import {
   type RunContext,
   TRACEPARENT_ENV,
   type TraceEvent,
-  TraceEventSchema,
+  UntrustedTraceEventSchema,
   formatTraceparent,
   isPulledCommandTrace,
   newSpanId,
@@ -139,7 +139,7 @@ export class CommandHarness implements EvaluableHarness {
     }
     const events: TraceEvent[] = [];
     for (const candidate of candidates) {
-      const parsed = TraceEventSchema.safeParse(candidate);
+      const parsed = UntrustedTraceEventSchema.safeParse(candidate);
       if (parsed.success) events.push(parsed.data);
     }
     return events;

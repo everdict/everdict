@@ -1,6 +1,6 @@
 import { deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
-import { JudgeSpecSchema, TraceEventSchema } from "@everdict/contracts";
+import { JudgeSpecSchema, UntrustedTraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -229,7 +229,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           }
           const spec = JudgeSpecSchema.safeParse(specJson);
           if (!spec.success) return fail(`BAD_REQUEST: ${spec.error.message}`);
-          const events = TraceEventSchema.array().safeParse(traceJson);
+          const events = UntrustedTraceEventSchema.array().safeParse(traceJson);
           if (!events.success) return fail(`BAD_REQUEST: ${events.error.message}`);
           return ok(
             await preview.preview({
@@ -289,7 +289,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           } catch {
             return fail("BAD_REQUEST: trace must be valid JSON.");
           }
-          const events = TraceEventSchema.array().safeParse(traceJson);
+          const events = UntrustedTraceEventSchema.array().safeParse(traceJson);
           if (!events.success) return fail(`BAD_REQUEST: ${events.error.message}`);
           return ok(
             await preview.try({

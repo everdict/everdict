@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { stripPlatformAuthoredFields } from "./trace.js";
 
 // The RECORD of what happened — OTel's upper layer, which this codebase spent five rungs without.
 //
@@ -86,6 +87,10 @@ export const TraceSpanSchema = z.object({
   scope: SpanScopeSchema.optional(),
 });
 export type TraceSpan = z.infer<typeof TraceSpanSchema>;
+
+// The span half of the producer-facing split — see `UntrustedTraceEventSchema` in `trace.ts` for why a
+// platform-authored artifact coordinate may not arrive from a producer.
+export const UntrustedTraceSpanSchema = z.preprocess(stripPlatformAuthoredFields, TraceSpanSchema);
 
 // --- Identity ------------------------------------------------------------------------------------------
 

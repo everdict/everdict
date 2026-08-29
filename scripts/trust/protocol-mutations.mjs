@@ -2923,6 +2923,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R121. The producer-facing schema must not carry the platform's artifact coordinates. Without the strip
+    // a forged `outputRef` reaches the seal, and from there both readers — a resolve that fetches it and a
+    // retention sweep that deletes it.
+    name: "the untrusted door accepts a platform-authored artifact coordinate",
+    file: "packages/contracts/src/execution/trace.ts",
+    from: "  for (const field of PLATFORM_AUTHORED_EVENT_FIELDS) delete copy[field];",
+    to: "  void PLATFORM_AUTHORED_EVENT_FIELDS;",
+    build: "@everdict/contracts",
+    suite: ["--root", "packages/contracts", "src/execution/untrusted-trace.counterexample.test.ts"],
+  },
+  {
     // R121. `TraceEvent` is the schema a producer's submission is validated by, so a caller can author
     // `outputRef` itself. Reading whatever key it names is evidence substitution when the bytes are somebody
     // else's, and disclosure when the caller only wanted to see them.
