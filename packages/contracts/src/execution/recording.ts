@@ -81,8 +81,22 @@ export const CustomEntrySchema = z.object({
 export type CustomEntry = z.infer<typeof CustomEntrySchema>;
 
 // A single append into the recording, tagged by its track — the unit the RecordingSink carries.
-export const TrackEntrySchema = z.discriminatedUnion("track", [
-  z.object({ track: z.literal("frames"), entry: FrameEntrySchema }),
+// ── WHAT A PRODUCER MAY APPEND, AND WHAT ONLY WE MAY (arch-review 122) ──────────────────────────────
+//
+// Every track below is one a producer legitimately prepares — a browser CDP recorder's network and DOM
+// batches, a runtime sampler's samples. `frames` is not: a frame entry is a `ref`, the read re-signs it into
+// a browser-facing presigned URL (`publicUrlFor`), and the artifact store is ONE bucket for the deployment.
+// So a producer that could push a frames entry could name any object in it and be handed a fetchable link —
+// a disclosure that does not bypass `runs:read` so much as leave our authorization behind entirely.
+//
+// Frames were never meant to arrive that way: `recordFrame` takes BASE64 BYTES and the PLATFORM mints the
+// ref, which is what "Frames still go through recordFrame" means beside `recordTrack`. The producer-facing
+// door had the whole union anyway, and its own description already named the right set without the schema
+// agreeing — the comment was right and the type is what runs.
+//
+// ONE LIST, both unions built from it: a second spelling of "which tracks are there" would drift the moment
+// a track is added (rule `protocol` L3).
+const PRODUCER_TRACKS = [
   z.object({ track: z.literal("domEvents"), entry: DomEventSchema }),
   z.object({ track: z.literal("network"), entry: NetEntrySchema }),
   z.object({ track: z.literal("console"), entry: ConsoleEntrySchema }),
@@ -91,8 +105,15 @@ export const TrackEntrySchema = z.discriminatedUnion("track", [
   z.object({ track: z.literal("logs"), entry: RecordingLogEntrySchema }),
   z.object({ track: z.literal("runtime"), entry: RuntimeSampleSchema }),
   z.object({ track: z.literal("custom"), entry: CustomEntrySchema }),
-]);
+] as const;
+
+const FRAMES_TRACK = z.object({ track: z.literal("frames"), entry: FrameEntrySchema });
+
+export const TrackEntrySchema = z.discriminatedUnion("track", [FRAMES_TRACK, ...PRODUCER_TRACKS]);
 export type TrackEntry = z.infer<typeof TrackEntrySchema>;
+
+// What a producer-facing door parses with — the same tracks its description already named.
+export const ProducerTrackEntrySchema = z.discriminatedUnion("track", PRODUCER_TRACKS);
 
 // The resolved spec/model/seed/env a run was actually dispatched with — sealed into the recording so a run is
 // self-describing for audit (extends origin/provenance; the pipeline widens it as it fills). docs/architecture/replay.md.

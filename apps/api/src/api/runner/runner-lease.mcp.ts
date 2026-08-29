@@ -1,7 +1,7 @@
 import { type SelfHostedKey, runnerUpdateRequired } from "@everdict/application-control";
 import {
+  ProducerTrackEntrySchema,
   RUNNER_PROTOCOL_VERSION,
-  TrackEntrySchema,
   UntrustedCaseResultSchema,
   UntrustedTraceEventSchema,
 } from "@everdict/contracts";
@@ -276,7 +276,7 @@ export function registerRunnerLeaseTools(server: McpServer, ctx: McpToolContext)
         {
           description:
             "Push one prepared replay track entry (network/console/nav/dom/runtime/custom — byte-heavy entries carry an offloaded ref) for the case this attempt token holds (the run is read from the lease, never from the request). The deep-capture twin of report_case_screen/report_case_log; best-effort.",
-          inputSchema: { item: TrackEntrySchema, ...attemptFields },
+          inputSchema: { item: ProducerTrackEntrySchema, ...attemptFields },
         },
         ({ item, jobId, leaseEpoch }) =>
           plain(async () => {

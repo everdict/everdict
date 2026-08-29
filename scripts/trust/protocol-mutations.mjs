@@ -2923,6 +2923,17 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R122. The runner's deep-track door took the WHOLE track union, which carries `frames` — and a frame is
+    // a ref the run-detail read re-signs into a browser-facing presigned URL, over one bucket shared by the
+    // whole deployment. The door's own description already named the right set; the schema did not agree.
+    name: "the producer track door accepts a frame coordinate",
+    file: "packages/contracts/src/execution/recording.ts",
+    from: 'export const ProducerTrackEntrySchema = z.discriminatedUnion("track", PRODUCER_TRACKS);',
+    to: 'export const ProducerTrackEntrySchema = z.discriminatedUnion("track", [FRAMES_TRACK, ...PRODUCER_TRACKS]);',
+    build: "@everdict/contracts",
+    suite: ["--root", "packages/contracts", "src/execution/producer-track.counterexample.test.ts"],
+  },
+  {
     // R122. `traceRef` arrives on a producer's document, and the control plane resolved ITS named secret and
     // sent it to ITS named endpoint — arbitrary workspace-secret exfiltration, and SSRF from the control
     // plane, for anyone who can register a runtime or a harness. The registered pool is the authority.
