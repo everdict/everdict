@@ -108,7 +108,7 @@ where the next effect begins. The five laws, in full with case law, in skill `pr
    reconciler; "cannot find out" is an escalation field, never a terminal state.
 
 **Definition of done for a protocol change**: counterexample seen RED *for the stated reason* → the change →
-`pnpm protocol-mutations` red under neutralization → **the escape hatch deleted in the same change**. A test
+`pnpm protocol-mutations --only <rung>` red under neutralization (author-run; no longer a gate) → **the escape hatch deleted in the same change**. A test
 that stays green after its subject is deleted is a lost test (rule `testing`, vacuous-pass rules).
 
 ## Critical rules (the non-default ones — see `.claude/rules/`)

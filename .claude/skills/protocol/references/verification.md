@@ -12,7 +12,8 @@ discipline that closes the gap, written from three suites that were green over t
    helper threw proves nothing about the invariant. If the message does not describe the defect, the fixture
    is wrong — fix the fixture, not the assertion.
 3. **Make the change.** Un-skip / flip the counterexample to green.
-4. **Neutralize the protocol and require RED.** `pnpm protocol-mutations` — it edits one production file to
+4. **Neutralize the protocol and require RED.** `pnpm protocol-mutations --only <rung>` (author-run; it was
+   removed from `ci:local` and CI on 2026-08-29 for cost, so nothing checks that you did) — it edits one production file to
    remove the protocol, runs the owning suite, requires red, and reverts in a `finally`. Add the mutation for
    your new protocol in the same change. A mutation whose target line no longer exists **fails**, so a deleted
    subject can never silently stop being tested.

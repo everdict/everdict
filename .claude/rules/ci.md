@@ -24,7 +24,6 @@ See skill `ci`.
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm mutation-leak`**,
-  **`pnpm protocol-mutations`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - **`pnpm convention-harness` keeps the conventions reachable**: every `.claude/rules/*.md` declares a
@@ -95,7 +94,14 @@ See skill `ci`.
   to name every field. ⚠️ Its first draft also flagged three HTTP proxy dispatchers, which use undici's
   unrelated `Dispatcher.DispatchOptions` — eighteen healthy lines, which is how a scanner teaches people to
   skip its output. Narrow before wiring: a check nobody reads is worse than none.
-- **`pnpm protocol-mutations` is the "does the suite actually catch this" check** (arch-review 53, Wave F):
+- **`pnpm protocol-mutations` is ON DEMAND, not a gate** (removed from `ci:local` and from CI on 2026-08-29,
+  by the maintainer's decision — it cost ~90 minutes of real builds and real suites and dominated every
+  iteration). Everything below still describes what it does and how it fails; what changed is WHEN it runs.
+  Run it beside the change that adds or moves a rung — `--only <substring>` is seconds, `--shard i/n` splits
+  a full pass — and treat a full run as a periodic audit rather than a push blocker. `pnpm mutation-leak`
+  STAYS in the gate precisely because the script still exists: a manual run killed mid-rung leaves a
+  neutralized production file in the tree, and no commit may carry one.
+  It is the "does the suite actually catch this" check (arch-review 53, Wave F):
   it neutralizes one protocol at a time in a production file and requires the suite that claims to enforce it
   to go RED, reverting in a `finally`. It refuses to start on a dirty worktree for the files it mutates. A
   green suite proves the tests pass; this proves they would fail without the protocol — a distinction this
@@ -122,7 +128,7 @@ See skill `ci`.
   ⚠️ **AND THE DEFERRED REBUILD IS OWED BY A PACKAGE, NOT BY AN ARRAY INDEX.** The first version of the
   build-count optimization decided the group boundary from the next DECLARED rung; a rung that skips for
   missing infrastructure, or whose target line is gone, returns from above the `try` and never settles the
-  debt. Five rungs skip in the core CI job, and simulating the real ordering put every one of them directly
+  debt. Five rungs skip for missing infrastructure, and simulating the real ordering put every one of them directly
   after a deferred build — so the run that reported "231 checked, 0 holes" did so with a mutated dist standing
   at five boundaries. The debt is explicit state settled before the next rung that builds something else,
   runnable or not, and after the loop whatever the exit path.
@@ -131,12 +137,12 @@ See skill `ci`.
   it could never have reached its own end, and the thirteen gates declared AFTER it (`docs-check`,
   `constructed-casts`, `guarded-doubles`, `unwired-capabilities`, `authz-optional`, `import-cycles`,
   `option-forwarding`, `language-policy`, `guard-siblings`, `source-bytes`, `mutation-leak`, the boot probe)
-  could never have run at all. It is its own job now — `mutations`, four shards, 60 minutes each — with
-  `mutations-complete` as the single check to require, because a green shard is not a green gate. Shards are
-  whole BUILD GROUPS (`--shard <i>/<n>`, packed longest-first), so each one keeps the
-  one-build-per-package-boundary optimization instead of every shard re-compiling the same package; an empty
-  shard is REFUSED rather than reported green. `pnpm ci:local` runs it whole and sequentially — one machine
-  gains nothing from sharding, and what the local gate mirrors is CI's coverage, not its parallelism.
+  could never have run at all. It was moved to its own four-shard job, and then out of CI ENTIRELY on
+  2026-08-29 (see the head of this bullet): an hour of compute on every push is a cost the maintainer chose
+  not to pay. `--shard <i>/<n>` survives for a manual full pass and still packs whole BUILD GROUPS
+  longest-first, so a shard keeps the one-build-per-package-boundary optimization instead of re-compiling the
+  same package; an empty shard is REFUSED rather than reported green. Neither `ci:local` nor `ci.yml`
+  references it any more — if you re-add it, re-add it as a job, never as a step.
   ⚠️ Its options are now REFUSED when unrecognised. `--filter <name>` — a plausible spelling of `--only`, and
   not a flag this script has — was accepted in silence, so one rung became the full suite: ninety minutes,
   files mutated while the author was editing them, and an answer to a question nobody asked. Same shape as

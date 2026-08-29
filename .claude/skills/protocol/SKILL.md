@@ -58,7 +58,8 @@ a TODO.
 
 ## Verification protocol
 Details in `references/verification.md`. The short form: a counterexample seen RED for the stated reason →
-the change → `pnpm protocol-mutations` (neutralize the protocol, the suite MUST go red) → escape hatch deleted.
+the change → `pnpm protocol-mutations --only <rung>` (neutralize the protocol, the suite MUST go red;
+AUTHOR-run since 2026-08-29 — no gate checks it) → escape hatch deleted.
 `pnpm ci:local` before any push; `trust fast (real Postgres)` is required and the local gate does not cover it.
 
 ## Topic map

@@ -1111,8 +1111,12 @@ exactly what it was staged to survive.
 
 ## Definition of done for a protocol change
 1. The counterexample exists and was seen RED **for the stated reason** (see rule `testing`).
-2. `pnpm protocol-mutations` neutralizes the new protocol in the production file and the owning suite goes RED.
-   A mutation whose target line no longer exists FAILS — a deleted subject never silently stops being tested.
+2. `pnpm protocol-mutations --only <the rung>` neutralizes the new protocol in the production file and the
+   owning suite goes RED. A mutation whose target line no longer exists FAILS — a deleted subject never
+   silently stops being tested. ⚠️ This is no longer enforced by a gate (removed from `ci:local` and CI on
+   2026-08-29 — a full pass is ~90 minutes and it dominated every iteration), so it is the AUTHOR who runs
+   it. `--only` takes seconds; nothing checks that you did. A rung added without ever being driven is the
+   vacuous certificate this whole file exists to refuse, and it is now cheap to avoid and easy to skip.
 3. The escape hatch is deleted in the same change: the optional hook, the `void` writer, the boolean+optional
    pair, the allowlist entry. A migration that leaves both shapes alive asks every future caller to pick, and
    the call site never shows which one is safe.

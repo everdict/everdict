@@ -38,9 +38,12 @@ jobs:
       # Convention-harness guard — every .claude rule must still match live paths (a rule pointed at moved
       # code never fires, and it fails silently) and every skill must stay selectable.
       - run: pnpm convention-harness
-      # ⚠️ `pnpm protocol-mutations` IS NOT HERE — it is the `mutations` job below. It is ~90 minutes of real
-      # builds and real suites, and it sat as a step inside this 30-minute job, so it could never have
-      # reached its own end and every gate declared after it could never have run at all (arch-review 120).
+      # ⚠️ `pnpm protocol-mutations` IS NOT IN CI AT ALL (2026-08-29, by decision). It is ~90 minutes of real
+      # builds and real suites — it could never fit here (it once sat as a step inside this 30-minute job, so
+      # it never reached its own end and every gate declared after it never ran), and as its own sharded job
+      # it still made every push wait on an hour of compute. It is ON DEMAND: `pnpm protocol-mutations
+      # [--only <name>] [--shard i/n]`. What that costs is stated in rule `ci`; what it buys — the evidence
+      # that a counterexample would fail without its protocol — is now bought per change, not per push.
       # Plugin-manifest guard — this repo is a marketplace for two clients, and only Claude Code expands
       # ${VAR} in a plugin's .mcp.json; Codex must be pointed away from it or it registers the literal string.
       - run: pnpm plugin-manifests
@@ -61,46 +64,6 @@ jobs:
       - run: pnpm mutation-leak
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.
       - run: node scripts/live/empty-env-boot.mjs
-
-  # ── THE MUTATION GATE, IN ITS OWN JOB AND SHARDED ─────────────────────────────────────────────────
-  #
-  # 252 rungs, each a real package build and a real suite. It does not fit in a step beside lint/typecheck/
-  # test/build, and pretending it did meant nothing after it in `core` ever ran. Shards are whole BUILD
-  # GROUPS (the script packs them longest-first), so every shard keeps the one-build-per-package-boundary
-  # optimization instead of each re-compiling the same package.
-  mutations:
-    name: protocol mutations (shard ${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false # every shard's answer is wanted: a second failing shard is a second lost test.
-      matrix:
-        shard: [1, 2, 3, 4]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm protocol-mutations --shard ${{ matrix.shard }}/4
-
-  # A green shard is not a green gate. This is the single check to require: it is red unless EVERY shard
-  # passed, including the ones that were skipped or cancelled.
-  mutations-complete:
-    name: protocol mutations (all shards)
-    runs-on: ubuntu-latest
-    needs: mutations
-    if: always()
-    steps:
-      - run: |
-          if [ "${{ needs.mutations.result }}" != "success" ]; then
-            echo "protocol mutations: at least one shard did not pass (${{ needs.mutations.result }})"
-            exit 1
-          fi
-          echo "every protocol-mutation shard passed"
 
   web:
     name: web (self-contained lint · build)

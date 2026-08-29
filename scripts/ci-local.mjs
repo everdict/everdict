@@ -60,17 +60,13 @@ run("pnpm artifact-frame", "pnpm", ["artifact-frame"]);
 // `packages/suite`, `workspace-integrations.md` at six files the api-layer refactor relocated), both holding
 // invariants later reviews found broken.
 run("pnpm convention-harness", "pnpm", ["convention-harness"]);
-// ── DOES THE SUITE ACTUALLY CATCH THIS? (arch-review 53, Wave F) ──────────────────────────────────
-// Neutralize each protocol one at a time and require the suite that claims to enforce it to go RED. A green
-// suite proves the tests pass; this proves they would fail if the protocol were removed — which is the
-// difference this program has twice paid for learning (a scanner draft that was green over the defect it was
-// written for, and a judgment fixture that certified a gap).
-//
-// In GitHub Actions this is its OWN job, split four ways (`mutations` in ci.yml) — it is ~90 minutes of real
-// builds and real suites and cannot live as a step beside lint/typecheck/test/build. Here it runs WHOLE and
-// sequentially, because one machine gains nothing from sharding and this gate's promise is coverage. Mirror
-// the coverage, not the parallelism.
-run("pnpm protocol-mutations", "pnpm", ["protocol-mutations"]);
+// ⚠️ `pnpm protocol-mutations` IS NOT PART OF THIS GATE (2026-08-29, by decision). It neutralizes each
+// protocol in turn and requires the owning suite to go RED — the only evidence that a counterexample would
+// fail without the protocol it claims to pin — and it costs ~90 minutes of real builds and real suites,
+// which dominated every iteration. It is ON DEMAND now: `pnpm protocol-mutations [--only <name>] [--shard
+// i/n]`, and `--only` is fast enough to run beside the change that adds a rung. `pnpm mutation-leak` stays
+// in this gate precisely because the script still exists: a manual run that is killed mid-rung can leave a
+// neutralized production file in the tree, and a commit must never carry one.
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);

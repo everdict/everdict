@@ -26,7 +26,8 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   properties. `expect(receipts).toBeDefined()` is not a claim — `[]` is defined. `toHaveLength(n)` is.
 - **A deleted or refactored subject re-proves its tests by MUTATION, not by staying green.** An assertion like
   "X was not called" becomes vacuously true the moment X stops existing. After any deletion, run
-  `pnpm protocol-mutations`; a protocol that stays green under its own neutralization has lost its test.
+  `pnpm protocol-mutations --only <the rung>`; a protocol that stays green under its own neutralization has
+  lost its test. No gate runs this any more (see rule `ci`) — the author does, and `--only` takes seconds.
 - **An empty `describe(...)` FAILS the suite** ("No test found in suite") — and only in a full run, not when
   you run the file alone. Delete the block; never leave a shell where tests were removed.
 - **A guard/scanner is reverted once to confirm it goes RED** over the defect it was written for. Two scanner
