@@ -60,9 +60,25 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
         emitter: z.string().optional().describe("which plane to read; default = the execution's own"),
         after: z.number().int().nonnegative().optional().describe("resume after this seq (from nextAfter)"),
         limit: z.number().int().positive().optional().describe("events per page (clamped by the store)"),
+        // BFF parity with `GET /trajectories/:id?resolve=true` — one capability, two transports.
+        resolve: z
+          .boolean()
+          .optional()
+          .describe(
+            "return the SEALED payload instead of the preview for events whose oversized field was moved to " +
+              "object storage (they carry a `…Ref`). Off by default because it costs one fetch per moved " +
+              "field; pages are much smaller when on, so keep following `nextAfter`. Ask for it when you are " +
+              "JUDGING or auditing the evidence — an excerpt is different evidence.",
+          ),
       },
     },
-    ({ runId, emitter, after, limit }: { runId: string; emitter?: string; after?: number; limit?: number }) =>
+    ({
+      runId,
+      emitter,
+      after,
+      limit,
+      resolve,
+    }: { runId: string; emitter?: string; after?: number; limit?: number; resolve?: boolean }) =>
       run(principal, "runs:read", async () => {
         const sealed = await store.planes(ws, runId);
         if (!sealed || !trajectoryReadableBy(sealed.meta, principal.subject))
@@ -71,6 +87,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
           ...(emitter !== undefined ? { emitter } : {}),
           ...(after !== undefined ? { after } : {}),
           ...(limit !== undefined ? { limit } : {}),
+          ...(resolve === true ? { resolve: true } : {}),
         });
         const { tenant: _tenant, ...meta } = sealed.meta;
         if (page.kind === "too_large")

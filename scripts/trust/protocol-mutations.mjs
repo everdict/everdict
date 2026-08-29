@@ -2877,6 +2877,38 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
   },
   {
+    // R120 self-review. `.catch(() => 0)` made an outage observationally identical to a quiet hour, in the
+    // one sweep that now throws on purpose so the rows naming payload objects survive for the next pass.
+    name: "a retention outage is reported as a clean sweep",
+    file: "packages/application-control/src/ops/retention-sweep.ts",
+    from: '    return { kind: "swept", removed: await deleteOlderThan(cutoffIso) };',
+    to: '    return { kind: "swept", removed: await deleteOlderThan(cutoffIso).catch(() => 0) };',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ops/retention-sweep.counterexample.test.ts"],
+  },
+  {
+    // R120 self-review. `deferCompletion` is a conditional write that exists to answer `false`, and its only
+    // caller discarded the boolean — so a deferral that never landed read as one that did, and the rows the
+    // backoff was written for kept the head of the worklist forever with nothing to see.
+    name: "the deferral's answer is discarded by its only caller",
+    file: "packages/application-control/src/evolution/adoption-completion-reconciler.ts",
+    from: '      if (outcome !== "completed" && !(await this.defer(operation, outcome, now))) out.undeferred += 1;',
+    to: '      if (outcome !== "completed") void (await this.defer(operation, outcome, now));',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/deferral-answer-consumed.counterexample.test.ts"],
+  },
+  {
+    // R120 self-review. The offloaded payload tier was reachable only by internal scoring: neither transport
+    // forwarded `resolve` and no route dereferences a trajectory payload ref, so "show me the evidence the
+    // judge read" was unanswerable for exactly the payloads big enough to have been moved.
+    name: "the transport cannot ask for the sealed payload",
+    file: "apps/api/src/api/trajectory/trajectory.routes.ts",
+    from: "        ...(resolve ? { resolve: true } : {}),",
+    to: "        ...(resolve ? {} : {}),",
+    build: "@everdict/api",
+    suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
+  },
+  {
     // R120. The event row's ref is the ONLY pointer to an offloaded payload, so a retention sweep that
     // deletes rows first leaves bytes nothing can ever name again. Objects first, then the rows — and if the
     // object store refuses, the rows stay so the next sweep can still find what it owes.

@@ -690,11 +690,26 @@ export const MAX_PAGE_BYTES = 32 * 1024 * 1024;
 // `too_large` and the repair is the split script — see `TrajectoryEventsResult`.
 export const MAX_LEGACY_BODY_BYTES = 32 * 1024 * 1024;
 
+// ── A RESOLVED PAGE IS A DIFFERENT SIZE OF PAGE (arch-review 120) ───────────────────────────────────
+//
+// Every other ceiling here is computed from the STORED bytes, and a resolved read is precisely the read
+// whose stored size does not predict its cost: each offloaded field is a preview of at most
+// `EVENT_INLINE_MAX` on disk and the whole original in memory. So a 500-event page that clears the 4 MiB
+// budget on stored size can materialize gigabytes once resolved — the exact OOM the offload exists to stop,
+// re-entered through the flag that undoes it.
+//
+// Resolving therefore pages in much smaller steps. Nothing is withheld: every reader of resolved events
+// (`streamTrajectoryEvents` and the two scoring collectors above it) pages until the cursor is exhausted, so
+// a smaller page costs round trips and never events. It lives in `clampWindow` because that is the one owner
+// of "what one page means" — a ceiling enforced per caller is a ceiling the next caller widens by asking.
+export const MAX_RESOLVED_EVENT_PAGE = 50;
+
 export function clampWindow(window: TrajectoryWindow): { limit: number; maxBytes: number; after: number } {
+  const ceiling = window.resolve === true ? MAX_RESOLVED_EVENT_PAGE : MAX_EVENT_PAGE;
   const limit =
     window.limit === undefined || !Number.isFinite(window.limit) || window.limit <= 0
-      ? DEFAULT_EVENT_PAGE
-      : Math.min(Math.floor(window.limit), MAX_EVENT_PAGE);
+      ? Math.min(DEFAULT_EVENT_PAGE, ceiling)
+      : Math.min(Math.floor(window.limit), ceiling);
   const maxBytes =
     window.maxBytes === undefined || !Number.isFinite(window.maxBytes) || window.maxBytes <= 0
       ? DEFAULT_PAGE_BYTES

@@ -68,6 +68,19 @@ export interface AdoptionCompletionSweep {
   // operator must DO: one resolves itself, the other never will. Counted separately so the difference is
   // visible rather than buried in a number that only grows.
   orphaned: number;
+  // ── AND THE ROWS THE DEFERRAL DID NOT MOVE (arch-review 120, self-review) ───────────────────────
+  //
+  // `deferCompletion` is a CONDITIONAL write — `WHERE … state = 'registered' RETURNING operation_id` — and
+  // its boolean was discarded by this file, its only caller. A `false` has two readings and they are not
+  // alike: the row legitimately left `registered` between the read and the write (another replica finished
+  // it — benign), or the statement matched nothing it should have matched, in which case NO deferral ever
+  // lands, the backoff this sweep was written for never applies, and the same rows hold the head of the
+  // worklist forever with nothing to see. That is the always-succeeds double's mirror image, at the caller:
+  // a store that answers honestly and a caller that does not look (rule `protocol`).
+  //
+  // Counted, not thrown: one un-deferred row is ordinary, and a number that climbs sweep after sweep is the
+  // signal. It rides on the struct the sweep already returns for exactly this reason.
+  undeferred: number;
 }
 
 export class AdoptionCompletionReconciler {
@@ -77,7 +90,14 @@ export class AdoptionCompletionReconciler {
     const now = this.deps.now?.() ?? new Date().toISOString();
     const olderThan = new Date(Date.parse(now) - (this.deps.minAgeMs ?? 60_000)).toISOString();
     const due = await this.deps.operations.registeredOlderThan(olderThan, this.deps.limit ?? 100);
-    const out: AdoptionCompletionSweep = { examined: due.length, completed: 0, open: 0, unknown: 0, orphaned: 0 };
+    const out: AdoptionCompletionSweep = {
+      examined: due.length,
+      completed: 0,
+      open: 0,
+      unknown: 0,
+      orphaned: 0,
+      undeferred: 0,
+    };
     for (const operation of due) {
       const outcome = await this.settle(operation, now);
       out[outcome] += 1;
@@ -95,7 +115,8 @@ export class AdoptionCompletionReconciler {
       //   unknown   the read failed — back off, because a store that just refused will likely refuse again
       //   orphaned  the issue is GONE and no sweep can change that — far out, so it stops crowding the head
       //             while staying visible as the escalation it is (L5: never a terminal that hides the debt)
-      if (outcome !== "completed") await this.defer(operation, outcome, now);
+      // The deferral's own answer is CONSUMED: a write that did not land must not read as one that did.
+      if (outcome !== "completed" && !(await this.defer(operation, outcome, now))) out.undeferred += 1;
     }
     return out;
   }
@@ -107,7 +128,7 @@ export class AdoptionCompletionReconciler {
     operation: AdoptionOperation,
     outcome: "open" | "unknown" | "orphaned",
     now: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const base = this.deps.minAgeMs ?? 60_000;
     const wait =
       outcome === "orphaned"
@@ -115,7 +136,7 @@ export class AdoptionCompletionReconciler {
         : outcome === "unknown"
           ? base * 4 // a read that failed will likely fail again in the next few seconds
           : base; // the issue is open — nothing is wrong, ask again on the ordinary cadence
-    await this.deps.operations.deferCompletion({
+    return await this.deps.operations.deferCompletion({
       tenant: operation.tenant,
       campaignId: operation.proof.campaignId,
       outcome,

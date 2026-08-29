@@ -38,6 +38,7 @@ export {
   executionSegment,
   INFRA_EMITTER,
   MAX_EVENT_PAGE,
+  MAX_RESOLVED_EVENT_PAGE,
   MAX_LEGACY_BODY_BYTES,
   MAX_PAGE_BYTES,
   pageOf,
@@ -156,6 +157,7 @@ export { type CaseReceiptStore, type CaseSettleOutcome, InMemoryCaseReceiptStore
 export { attemptParentAuthority, requireAdopted } from "./ports/execution-attempt-store.js";
 export { type CommitReadback, commitReadback } from "./scorecard/commit-readback.js";
 export { type RecoveryTarget, retryDeferredRecovery } from "./ops/startup-recovery.js";
+export { type RetentionSweepOutcome, runRetentionSweep } from "./ops/retention-sweep.js";
 export {
   type AdoptAttemptOutcome,
   type AttemptAdoption,

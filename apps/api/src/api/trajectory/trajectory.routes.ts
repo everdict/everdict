@@ -54,51 +54,66 @@ export function registerTrajectoryRoutes(app: FastifyInstance, deps: ServerDeps)
   // an otlp arrival keyed by the exporter's everdict.run_id, a materialized import keyed
   // ingest:<scorecardId>:<caseId> — could be listed but never opened. This route is the ledger's own
   // read: workspace-scoped, so another tenant's trajectory is 404 (no existence leak).
-  app.get<{ Params: { id: string }; Querystring: { emitter?: string; after?: string; limit?: string } }>(
-    "/trajectories/:id",
-    { schema: trajectoryDocs.get },
-    async (req, reply) => {
-      if (!deps.trajectoryStore)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory store not configured" });
-      const principal = await resolvePrincipal(req, reply, deps);
-      if (!principal) return reply;
-      try {
-        gate(principal, "runs:read");
-        const store = deps.trajectoryStore;
-        const sealed = await store.planes(principal.workspace, req.params.id);
-        // Another member's personal evidence answers exactly like a foreign workspace's — 404, no existence leak.
-        if (!sealed || !trajectoryReadableBy(sealed.meta, principal.subject))
-          return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
-        // ONE PAGE of ONE plane. This route used to answer the whole trajectory with no way to ask for less,
-        // which is what made opening a long-horizon run exhaust the shared process — see
-        // docs/architecture/long-horizon-trace-reads.md.
-        const after = req.query.after !== undefined ? Number.parseInt(req.query.after, 10) : undefined;
-        const limit = req.query.limit !== undefined ? Number.parseInt(req.query.limit, 10) : undefined;
-        const page = await store.events(principal.workspace, req.params.id, {
-          ...(req.query.emitter !== undefined && req.query.emitter !== "" ? { emitter: req.query.emitter } : {}),
-          ...(after !== undefined && Number.isFinite(after) ? { after } : {}),
-          ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+  app.get<{
+    Params: { id: string };
+    Querystring: { emitter?: string; after?: string; limit?: string; resolve?: string };
+  }>("/trajectories/:id", { schema: trajectoryDocs.get }, async (req, reply) => {
+    if (!deps.trajectoryStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory store not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      const store = deps.trajectoryStore;
+      const sealed = await store.planes(principal.workspace, req.params.id);
+      // Another member's personal evidence answers exactly like a foreign workspace's — 404, no existence leak.
+      if (!sealed || !trajectoryReadableBy(sealed.meta, principal.subject))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "trajectory not found." });
+      // ONE PAGE of ONE plane. This route used to answer the whole trajectory with no way to ask for less,
+      // which is what made opening a long-horizon run exhaust the shared process — see
+      // docs/architecture/long-horizon-trace-reads.md.
+      const after = req.query.after !== undefined ? Number.parseInt(req.query.after, 10) : undefined;
+      const limit = req.query.limit !== undefined ? Number.parseInt(req.query.limit, 10) : undefined;
+      // ── AND THE SEALED BYTES, IF THE CALLER ASKS FOR THEM (arch-review 120) ─────────────────
+      //
+      // An oversized payload is MOVED to object storage and the event keeps a preview plus an
+      // `artifact://` ref. Until now no transport could dereference that ref and neither transport
+      // forwarded `resolve`, so the whole offloaded tier was reachable only by internal scoring: a member
+      // auditing the evidence a verdict was reached on saw a 32 KB excerpt and a ref string that resolved
+      // to nothing. For a product whose deliverable is a defensible verdict, "show me what the judge read"
+      // has to be answerable.
+      //
+      // Opt-in, never the default — a read that always resolved would undo the offload — and the store
+      // clamps a resolving page to `MAX_RESOLVED_EVENT_PAGE`, because stored size does not predict
+      // resolved size. Authorization is unchanged: the same `runs:read` and the same
+      // `trajectoryReadableBy` above already decided this caller may read this trajectory, and resolving
+      // reveals nothing the preview was hiding for authorization reasons.
+      const resolve = req.query.resolve === "true" || req.query.resolve === "1";
+      const page = await store.events(principal.workspace, req.params.id, {
+        ...(req.query.emitter !== undefined && req.query.emitter !== "" ? { emitter: req.query.emitter } : {}),
+        ...(after !== undefined && Number.isFinite(after) ? { after } : {}),
+        ...(limit !== undefined && Number.isFinite(limit) ? { limit } : {}),
+        ...(resolve ? { resolve: true } : {}),
+      });
+      if (page.kind === "too_large")
+        // 409, never an empty page: a viewer handed "0 events" reads it as a run that did nothing, and that
+        // is the strongest possible wrong answer to produce from a size limit.
+        return reply.code(409).send({
+          code: "CONFLICT",
+          message: `Trajectory plane '${page.emitter}' is a ${page.storedBytes}-byte body sealed before it was split into events, over the ${page.limitBytes}-byte read ceiling. An operator splits it with scripts/live/split-trajectory-bodies.mjs.`,
+          data: { emitter: page.emitter, storedBytes: page.storedBytes, limitBytes: page.limitBytes },
         });
-        if (page.kind === "too_large")
-          // 409, never an empty page: a viewer handed "0 events" reads it as a run that did nothing, and that
-          // is the strongest possible wrong answer to produce from a size limit.
-          return reply.code(409).send({
-            code: "CONFLICT",
-            message: `Trajectory plane '${page.emitter}' is a ${page.storedBytes}-byte body sealed before it was split into events, over the ${page.limitBytes}-byte read ceiling. An operator splits it with scripts/live/split-trajectory-bodies.mjs.`,
-            data: { emitter: page.emitter, storedBytes: page.storedBytes, limitBytes: page.limitBytes },
-          });
-        const { tenant: _tenant, ...meta } = sealed.meta; // the tenant is the caller's own — never echoed
-        return reply.send({
-          meta,
-          events: page.kind === "page" ? page.page.events : [],
-          segments: trajectorySegmentsWire(sealed),
-          ...(page.kind === "page" && page.page.nextAfter !== undefined ? { nextAfter: page.page.nextAfter } : {}),
-        });
-      } catch (err) {
-        return sendError(reply, err);
-      }
-    },
-  );
+      const { tenant: _tenant, ...meta } = sealed.meta; // the tenant is the caller's own — never echoed
+      return reply.send({
+        meta,
+        events: page.kind === "page" ? page.page.events : [],
+        segments: trajectorySegmentsWire(sealed),
+        ...(page.kind === "page" && page.page.nextAfter !== undefined ? { nextAfter: page.page.nextAfter } : {}),
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   // Trace thresholds (E4 perception config): evaluated over every trajectory at seal time — a crossing
   // lands trace.threshold_crossed on the log. Envelope-free settings CRUD (the secrets precedent).

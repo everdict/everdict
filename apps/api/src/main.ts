@@ -46,8 +46,10 @@ import {
 import { ProxyService } from "@everdict/application-control";
 import {
   FsService,
+  type RetentionSweepOutcome,
   RevisionedWorkspaceFs,
   SkillService,
+  runRetentionSweep,
   withOriginBacklink,
   withRegisteredFact,
   withTracePerception,
@@ -1665,15 +1667,36 @@ async function main(): Promise<void> {
           console.error(`[browser-orphans] boot sweep failed: ${err instanceof Error ? err.message : String(err)}`);
         });
   }
+  // ── A SWEEP THAT COULD NOT RUN IS NOT A SWEEP THAT REMOVED NOTHING (arch-review 120, self-review) ──
+  //
+  // Both retention sweeps read `.catch(() => 0)`, and `if (removed > 0)` then made the zero silent — so a
+  // database or object-store outage was indistinguishable from "nothing was old enough", every hour,
+  // forever. The comment below claimed "logged — evidence never leaves silently"; what left silently was the
+  // FAILURE. `.catch(() => 0)` is the collapse rule `protocol` L2 bans by name.
+  //
+  // It matters more since trajectory retention started deleting payload OBJECTS before the rows that name
+  // them: that sweep now THROWS on an object-store refusal, deliberately, so the rows survive and the next
+  // pass can still enumerate what it owes. A caller that swallows the throw turns that fail-closed design
+  // back into the silent orphan it was written to prevent — a fix closing the louder half.
+  //
+  // Not rethrown: the interval IS the retry, and an unhandled rejection would take the process down. Loud
+  // and owed, never counted as a successful zero. `runRetentionSweep` (@everdict/application-control) owns
+  // the union so both lanes answer alike and the decision is testable outside this composition root.
+  const reportSweep = (label: string, cutoff: string, outcome: RetentionSweepOutcome, noun: string): void => {
+    if (outcome.kind === "failed")
+      console.error(
+        `✖ ${label}: the sweep FAILED and removed nothing — the debt stays owed and the next pass retries: ${outcome.reason}`,
+      );
+    else if (outcome.removed > 0) console.log(`▶ ${label}: removed ${outcome.removed} ${noun} older than ${cutoff}`);
+  };
   // N3 retention: operator-configured TTL over the owned trajectory store (unset = keep forever). Hourly
   // sweep, logged — evidence never leaves silently.
   const retentionDays = positiveIntEnv(process.env.EVERDICT_TRAJECTORY_RETENTION_DAYS);
   if (retentionDays !== undefined) {
     const sweepTrajectories = async (): Promise<void> => {
       const cutoff = new Date(Date.now() - retentionDays * 24 * 3_600_000).toISOString();
-      const removed = await trajectoryStore.deleteOlderThan(cutoff).catch(() => 0);
-      if (removed > 0)
-        console.log(`▶ trajectory retention: removed ${removed} sealed trajectories older than ${cutoff}`);
+      const outcome = await runRetentionSweep(cutoff, (c) => trajectoryStore.deleteOlderThan(c));
+      reportSweep("trajectory retention", cutoff, outcome, "sealed trajectories");
     };
     // Not leader-gated: one `DELETE … WHERE sealed_at < cutoff` is atomic and idempotent, so a second replica's
     // pass finds nothing left to remove (docs/architecture/multi-replica.md).
@@ -1686,8 +1709,10 @@ async function main(): Promise<void> {
   if (eventRetentionDays !== undefined) {
     const sweepEvents = async (): Promise<void> => {
       const cutoff = new Date(Date.now() - eventRetentionDays * 24 * 3_600_000).toISOString();
-      const removed = await platformEventStore.deleteOlderThan(cutoff).catch(() => 0);
-      if (removed > 0) console.log(`▶ event-log retention: removed ${removed} facts older than ${cutoff}`);
+      // The SIBLING LANE, and it gets the same treatment in the same change: two sweeps written alike, one
+      // taught and one not, is how this repository's most common defect starts (rule `protocol`).
+      const outcome = await runRetentionSweep(cutoff, (c) => platformEventStore.deleteOlderThan(c));
+      reportSweep("event-log retention", cutoff, outcome, "facts");
     };
     setInterval(() => void sweepEvents(), 3_600_000).unref(); // atomic bulk delete, same as the trajectory twin
   }

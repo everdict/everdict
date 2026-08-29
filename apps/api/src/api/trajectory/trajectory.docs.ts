@@ -55,6 +55,14 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
         emitter: { type: "string", description: "which plane to read; default = the execution's own" },
         after: { type: "string", description: "resume after this seq (echo `nextAfter` from the last page)" },
         limit: { type: "string", description: "events per page; clamped by the store" },
+        resolve: {
+          type: "string",
+          description:
+            "`true` returns the SEALED payload for events whose oversized field was moved to object storage " +
+            "(they carry a `…Ref`); the default returns the bounded preview. Costs one object fetch per moved " +
+            "field, so a resolving page is clamped much smaller — keep following `nextAfter`. Ask for it when " +
+            "auditing the evidence a verdict was reached on: an excerpt is different evidence.",
+        },
       },
     },
     response: {
