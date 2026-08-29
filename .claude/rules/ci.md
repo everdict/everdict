@@ -23,7 +23,7 @@ See skill `ci`.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
-  **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm mutation-leak`**,
+  **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - **`pnpm convention-harness` keeps the conventions reachable**: every `.claude/rules/*.md` declares a
@@ -177,6 +177,18 @@ See skill `ci`.
   losing a guard it had. A resource whose access model genuinely differs says so in `OTHER_MODEL` with the
   model it uses instead — `capability` has its own `visibility` field, and the tracker's records are filing
   and visibility only, which `docs/tracker.md` states by name.
+- **`pnpm untrusted-ingress` is the AUTHORSHIP law, enforced instead of stated** (arch-review 122). A field the
+  PLATFORM authors — an `artifact://` coordinate, a billing provenance, a verifier receipt, a judgment seal —
+  riding on a document a PRODUCER submits, and then acted on. Three P0s in three reviews, all that shape:
+  the `CaseResult` GC coordinate (66) let a runner name objects a settlement would delete; `outputRef` and
+  `screenshotRef` (121) let one read and delete objects it does not own, and be handed a presigned URL for
+  them; `provenance` (122) let one decide WHO PAYS and bill a workspace that never ran the case. Each was
+  closed by splitting the schema — `TraceEventSchema` for what WE stored, `UntrustedTraceEventSchema` for
+  what a producer sends — and each closing change had to hunt the doors by hand, which is why the door
+  written AFTER the lesson is the one that never learned it. The check refuses a bare producer-document
+  schema anywhere outside its declaration; every allowlist entry states why that site is not a door, and the
+  honest reasons are "it decodes bytes WE wrote" and "it IS the declaration". An entry whose site stopped
+  naming the schema FAILS — a reason that outlived its subject reads as permission for a door nobody opened.
 - **`pnpm mutation-leak` refuses a COMMIT that carries a neutralized protocol** (arch-review 112). The warning
   below covers a killed run; it does not cover the run that is alive and WORKING while you stage beside it. The
   gate's dirty-tree guard protects the GATE, not the author — between two rungs the tree is clean, and while a

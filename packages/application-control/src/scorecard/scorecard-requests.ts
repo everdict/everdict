@@ -18,7 +18,8 @@ import { z } from "zod";
 // Trace-ingest body — upload traces already produced externally without running the harness (edge-normalized: TraceEvent[] upload).
 // dataset/harness are OPTIONAL labels/refs: with a dataset each trace aligns to a case (expected/graders + diff alignment);
 // WITHOUT one, every uploaded trace becomes its own case and judges score it directly (the "evaluate traces" path — the
-// scorecard is stamped with the TRACE_EVAL_REF sentinel dataset/harness). Validated at the boundary with TraceEventSchema.
+// scorecard is stamped with the TRACE_EVAL_REF sentinel dataset/harness). Validated at the boundary with
+// UntrustedTraceEventSchema — a pushed trace is a PRODUCER document and may not carry platform coordinates.
 export const IngestScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }).optional(),

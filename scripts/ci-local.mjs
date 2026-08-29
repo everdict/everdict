@@ -78,6 +78,10 @@ run("pnpm option-forwarding", "pnpm", ["option-forwarding"]);
 run("pnpm language-policy", "pnpm", ["language-policy"]);
 run("pnpm guard-siblings", "pnpm", ["guard-siblings"]);
 run("pnpm source-bytes", "pnpm", ["source-bytes"]);
+// The authorship law, enforced instead of stated. It has failed three times as prose (arch-review 66, 121,
+// 122), each time as a platform coordinate riding on a document a producer submits, and each time the door
+// written AFTER the lesson was the one that never learned it.
+run("pnpm untrusted-ingress", "pnpm", ["untrusted-ingress"]);
 run("pnpm mutation-leak", "pnpm", ["mutation-leak"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
 

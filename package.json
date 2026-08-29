@@ -30,6 +30,7 @@
     "language-policy": "node scripts/check-language-policy.mjs",
     "guard-siblings": "node scripts/check-guard-siblings.mjs",
     "source-bytes": "node scripts/check-source-bytes.mjs",
+    "untrusted-ingress": "node scripts/check-untrusted-ingress.mjs",
     "mutation-leak": "node scripts/check-mutation-leak.mjs",
     "ci:local": "node scripts/ci-local.mjs",
     "everdict": "node --env-file-if-exists=.env apps/cli/dist/main.js",

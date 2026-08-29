@@ -96,7 +96,12 @@ coverage, and that silently became the review's stopping condition.
 ## What should become a scanner
 
 This repository's discipline is that a prose law which fails once becomes a machine check. The authorship law
-has now failed **twice** — the GC coordinate, and the offload refs. The check is expressible: *a schema
-reachable from an untrusted ingress may not declare a field the platform consumes as a key, coordinate or
-join id.* Until that scanner exists, pass 1 is a reminder that has already failed once, which is exactly the
-status rule `protocol` assigns to an unenforced law.
+failed **three times** — the `CaseResult` GC coordinate (66), the offload refs (121), and the billing
+provenance (122), the last of which decided who pays. It is a scanner now: **`pnpm untrusted-ingress`**
+refuses a bare producer-document schema anywhere outside its own declaration, so a door added later cannot
+quietly parse `CaseResultSchema` instead of `UntrustedCaseResultSchema`.
+
+What the scanner does NOT do is the rest of pass 1. It knows the three documents it was taught; it cannot
+tell you that some OTHER value is a capability. `traceRef` was found by reading — the control plane resolved
+a secret the producer named and sent it where the producer said — and no check would have asked that
+question. The scanner closes the regression, and the pass still has to be run.
