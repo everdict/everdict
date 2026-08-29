@@ -11,6 +11,16 @@ Always read the relevant skill in `.claude/skills/` **before** writing code. No 
 Read the matching `<area>/SKILL.md` first, then pull `references/*.md` on demand.
 `.claude/` is the **single source of truth** for how we build.
 
+## 🚨 Review-first — load skill `code-review` before reviewing anything
+ANY review — a diff, a branch, a PR, a batch before push, or a self-review of what you just wrote — starts by
+loading skill `code-review` and running its six passes. No exceptions, and **especially not for a self-review**:
+that is the case it was written for. Three self-review rounds over one batch found real defects and missed
+three P0s an outside review found immediately, using no information the author did not have — because every
+round reviewed the CHANGE and none asked who can author the values it made load-bearing. Reading the diff is
+the last pass, not the first. A review that stops at "the gates are green" has reported the gates' opinion:
+no gate here can see a forged capability, a bound composed with an unbounded neighbour, or SQL no engine has
+planned.
+
 ## Language policy (public repo — English-only source)
 - Everything in the repo is **English**: docs, code comments, log/error messages, OpenAPI summaries,
   test descriptions, commit messages, PR titles/bodies.

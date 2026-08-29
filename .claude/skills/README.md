@@ -75,8 +75,11 @@ two reviews after it was deleted). A name that is gone may still be written — 
 
 ---
 
-## PULL — the 16 skills, by what they answer
+## PULL — the 17 skills, by what they answer
 
+- `code-review/` — **how to review**: the six passes a diff cannot do (authorship / blast radius / composition of
+  bounds / adversarial counterexample / adapter certification / stop-on-passes), the measured failure that
+  produced them, and the report shape. Fires on any review request.
 - `protocol/` — **effects and authority**: the five laws in full, the design checklist to run BEFORE writing
   an effect path, the **case law** (every recurring defect with file, line, and the wrong reasoning verbatim),
   and the verification protocol (mutation-first, non-vacuous fixtures, when a scanner is legitimate).
