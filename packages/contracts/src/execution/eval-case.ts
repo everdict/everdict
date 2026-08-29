@@ -383,10 +383,18 @@ export type CaseResult = z.infer<typeof CaseResultSchema>;
 // here. Absence is also the CORRECT default — `billingTenant` bills the dispatching tenant when provenance
 // is absent, and a managed run "usually carries NO provenance at all" by the field's own comment.
 //
-// `traceSealed`/`judgmentsSealed` deliberately stay: `traceSealed`'s comment says the distinction exists
-// "unless the PRODUCER says so", which makes it a vouch rather than a stamp. This is a trust boundary, not a
-// field sweep.
-const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier"] as const;
+//   judgmentsSealed  set ONLY by `ScoringService` (@everdict/application-control — the control plane), and
+//                    only `if (specs.length > 0)`. Its own comment says why: "a blanket `true` would turn
+//                    silence into evidence". So the platform refuses to claim it for a case no judge ran —
+//                    and then accepted a producer claiming it, which `evidenceStatusOf` reads as `complete`.
+//                    The stamp exists precisely to be unclaimable by silence; a producer sending it is that
+//                    silence, wearing the claim.
+//
+// `traceSealed` deliberately STAYS. Its comment says the distinction exists "unless the PRODUCER says so",
+// and `evidenceVersion` beside it exists to tell a producer that cannot vouch from a legacy row — that is a
+// vouch by design, not a stamp. This is a trust boundary, not a field sweep, and the counterexample asserts
+// the surviving field so it cannot decay into one.
+const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier", "judgmentsSealed"] as const;
 
 export const UntrustedCaseResultSchema = z.preprocess((value) => {
   const stripped = stripPlatformAuthoredFields(value);

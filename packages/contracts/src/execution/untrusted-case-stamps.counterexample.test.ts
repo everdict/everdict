@@ -43,6 +43,7 @@ const forged = () => ({
   trace: [],
   scores: [],
   traceSealed: true,
+  judgmentsSealed: true,
   provenance: { ranOn: "self-hosted", by: "ws:victim-workspace", attestation: "managed" },
   verifier: {
     planDigest: "sha256:p",
@@ -68,6 +69,17 @@ describe("[R122 COUNTEREXAMPLE] the untrusted case result drops the platform's o
     expect(
       parsed.success ? parsed.data.verifier : "unparsed",
       "a producer minted the private verifier's own receipt",
+    ).toBeUndefined();
+  });
+
+  it("strips a producer-claimed judgment seal — silence may not wear the claim", () => {
+    // `ScoringService` sets this only when judges actually ran, because "a blanket `true` would turn silence
+    // into evidence" — its own words. A producer sending it IS that silence, and `evidenceStatusOf` reads it
+    // as `complete`.
+    const parsed = UntrustedCaseResultSchema.safeParse(forged());
+    expect(
+      parsed.success ? parsed.data.judgmentsSealed : "unparsed",
+      "a producer claimed its judgments were sealed",
     ).toBeUndefined();
   });
 
