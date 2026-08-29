@@ -270,6 +270,16 @@ function decodeCursor(cursor: string): { sealedAt: string; runId: string } | und
   return { sealedAt: raw.slice(0, split), runId: raw.slice(split + 1) };
 }
 
+// ── ONE SPELLING OF "WHICH ATTEMPT DID YOU ASK FOR" (arch-review 122) ───────────────────────────────
+//
+// The asked attempt ranks first, an UNATTRIBUTED row second (it may be this execution's — it simply does not
+// say), and another attempt's row last, where a `HAVING` drops it. This expression was written once for the
+// plane HEADER and the legacy BODY read used a plain `argMin(body, sealed_at)` instead — a second spelling of
+// one question, and the two disagreed: a reader asking by attempt got that attempt's metadata over the
+// CLOCK-selected bytes. Mislabelled evidence is worse than either consistent answer, because both rows are
+// well-formed evidence of the same run and nothing downstream can notice (rule `protocol` L3).
+const ATTEMPT_RANK = "if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2))";
+
 export class ClickHouseTrajectoryStore implements TrajectoryStore {
   private readonly fetchImpl: typeof fetch;
 
@@ -419,11 +429,19 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
       const storedBytes = Number(sized[0]?.stored ?? 0);
       if (storedBytes > MAX_LEGACY_BODY_BYTES)
         return { kind: "too_large", storedBytes, limitBytes: MAX_LEGACY_BODY_BYTES, emitter: plane.emitter };
+      // The SAME branch `planeRows` took. Asking by attempt and then reading the body by clock is how the
+      // header came to name one execution over another's bytes (arch-review 122).
       const read = await this.select<{ body_first: string }>(
-        `SELECT argMin(body, sealed_at) AS body_first FROM ${this.table()}
-          WHERE run_id = {runId:String} AND (emitter = {emitter:String} OR (emitter = '' AND source = {emitter:String}))
-          GROUP BY emitter`,
-        params,
+        window.attemptId !== undefined
+          ? `SELECT argMin(body, (attempt_rank, sealed_at)) AS body_first
+               FROM (SELECT *, ${ATTEMPT_RANK} AS attempt_rank
+                     FROM ${this.table()} WHERE run_id = {runId:String})
+              WHERE emitter = {emitter:String} OR (emitter = '' AND source = {emitter:String})
+              GROUP BY emitter`
+          : `SELECT argMin(body, sealed_at) AS body_first FROM ${this.table()}
+              WHERE run_id = {runId:String} AND (emitter = {emitter:String} OR (emitter = '' AND source = {emitter:String}))
+              GROUP BY emitter`,
+        window.attemptId !== undefined ? { ...params, attemptId: window.attemptId } : params,
       );
       const whole = bodyOf(plane.format, JSON.parse(read[0]?.body_first ?? "[]"));
       const units: unknown[] = whole.spans ?? whole.events;
@@ -682,7 +700,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     return `SELECT run_id, emitter,
               ${cols.map((c) => `argMin(${c}, (attempt_rank, sealed_at)) AS ${c}_first`).join(",\n              ")},
               argMin(sealed_at, (attempt_rank, sealed_at)) AS sealed_at_first
-       FROM (SELECT *, if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2)) AS attempt_rank
+       FROM (SELECT *, ${ATTEMPT_RANK} AS attempt_rank
              FROM ${this.table()} WHERE run_id = {runId:String})
        GROUP BY run_id, emitter
        HAVING min(attempt_rank) < 2`;
