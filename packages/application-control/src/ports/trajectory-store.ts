@@ -851,14 +851,48 @@ export async function* streamTrajectoryEvents(
 // display: a Files page or a browse row wants the excerpt and the ref. It is wrong for anything that
 // DECIDES, and the two used to be one call with an optional flag between them — see
 // `collectExactTrajectoryEvents` below, which is what a scorer calls.
+// ── AND THE COLLECTOR IS BOUNDED TOO, OR IT REFUSES (arch-review 121) ────────────────────────────────
+//
+// Every other ceiling on this path became real in this wave: one event is bounded, a stored page is bounded,
+// a RESOLVED page is bounded in bytes. This function — the one scoring actually calls — was bounded by
+// nothing. It pages politely and pushes every event into one array, so peak heap is the whole trace:
+//
+//     the read is paged   ≠   the caller holds one page at a time
+//
+// The pages bound the DATABASE response, never the process. A long-horizon run scored inside the shared
+// control plane takes the control plane with it, which is every tenant's outage caused by one case's trace.
+//
+// Refusing is the honest close, and the alternative is not "score it anyway" — it is "die". One of those is
+// attributable to a case and diagnosable; the other is a process nobody can blame. The ceiling is generous
+// on purpose: it exists to stop a pathological trace, not to shape ordinary ones.
+//
+// `streamTrajectoryEvents` above is unchanged and remains the answer for a consumer that folds incrementally.
+// The bound belongs on the convenience that MATERIALIZES, not on the stream — which is also why this is not
+// an interface change to every grader.
+export const MAX_COLLECTED_TRACE_BYTES = 256 * 1024 * 1024;
+
 export async function collectTrajectoryEvents(
   store: Pick<TrajectoryStore, "events">,
   tenant: string,
   runId: string,
   window: Omit<TrajectoryWindow, "after"> = {},
+  // Injected only so the counterexample can drive `limit + 1` without materializing a quarter of a gigabyte.
+  // A test that must allocate the real ceiling to prove the ceiling exists does not prove it by ASSERTION —
+  // it proves it by dying, which is the outcome this bound was added to replace.
+  limitBytes: number = MAX_COLLECTED_TRACE_BYTES,
 ): Promise<TraceEvent[]> {
   const events: TraceEvent[] = [];
-  for await (const event of streamTrajectoryEvents(store, tenant, runId, window)) events.push(event);
+  let held = 0;
+  for await (const event of streamTrajectoryEvents(store, tenant, runId, window)) {
+    held += serializedBytes(event);
+    if (held > limitBytes)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { runId, limitBytes },
+        `Trajectory '${runId}' is too large to score in one pass: it exceeds the ${limitBytes}-byte collected-trace ceiling. Read it with streamTrajectoryEvents and fold it, or narrow the window.`,
+      );
+    events.push(event);
+  }
   return events;
 }
 
@@ -885,6 +919,7 @@ export async function collectExactTrajectoryEvents(
   tenant: string,
   runId: string,
   window: Omit<TrajectoryWindow, "after" | "resolve"> = {},
+  limitBytes: number = MAX_COLLECTED_TRACE_BYTES,
 ): Promise<TraceEvent[]> {
-  return collectTrajectoryEvents(store, tenant, runId, { ...window, resolve: true });
+  return collectTrajectoryEvents(store, tenant, runId, { ...window, resolve: true }, limitBytes);
 }

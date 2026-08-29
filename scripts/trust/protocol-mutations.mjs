@@ -2945,6 +2945,17 @@ const MUTATIONS = [
     suite: ["--root", "packages/contracts", "src/execution/untrusted-trace.counterexample.test.ts"],
   },
   {
+    // R121. Every other ceiling on this path became real in this wave; the collector scoring actually calls
+    // was bounded by nothing — it pages politely and pushes every event into one array, so peak heap is the
+    // whole trace and one case's long-horizon run takes the shared control plane down with it.
+    name: "the collected trace is unbounded in memory",
+    file: "packages/application-control/src/ports/trajectory-store.ts",
+    from: "    if (held > limitBytes)",
+    to: "    if (void held, void limitBytes, false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/collected-trace-bound.counterexample.test.ts"],
+  },
+  {
     // R121. The string-leaf budget bounds text and nothing else: four hundred thousand numbers, or twenty
     // thousand long keys, have no leaf over any share and stayed inline whole. The windowed read's premise
     // is that ONE event is bounded, and for every shape that is not text it was not.
