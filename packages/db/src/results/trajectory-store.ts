@@ -614,15 +614,17 @@ export class PgTrajectoryStore implements TrajectoryStore {
       header: boolean;
     }>(
       `SELECT COALESCE(emitter, source) AS emitter, tenant, usage, true AS header
-         FROM everdict_trajectories WHERE run_id = $1
+         FROM everdict_trajectories WHERE run_id = $1 AND tenant = $2
        UNION ALL
        SELECT COALESCE(emitter, source) AS emitter, tenant, usage, false AS header
-         FROM everdict_trajectory_segments WHERE run_id = $1`,
-      [runId],
+         FROM everdict_trajectory_segments WHERE run_id = $1 AND tenant = $2`,
+      [runId, tenant],
     );
-    // Workspace scoping is decided by the HEADER row, exactly as `planes` decides it — a foreign run answers
-    // `absent`, which is the same answer a nonexistent one gets, so this read leaks no existence the plane
-    // read does not already leak.
+    // Workspace-scoped in SQL, the same way `planes` is — and this comment used to say the opposite, that
+    // scoping "is decided by the HEADER row, exactly as `planes` decides it". That was true of both until the
+    // plane read was scoped one commit earlier and this sibling was not, which is the one-lane-only shape at
+    // its shortest distance yet: two queries over the same two tables, in one file, and a comment citing the
+    // lane that had just stopped working that way (arch-review 122).
     const header = res.rows.find((r) => r.header);
     if (!header || header.tenant !== tenant) return { kind: "absent" };
     const emitter = executionEmitterOf(res.rows.map((r) => r.emitter));

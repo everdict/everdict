@@ -60,6 +60,16 @@ describe("[R122 COUNTEREXAMPLE] a plane read is scoped to the asking workspace i
     expect(params[texts.indexOf(read ?? "")], "the workspace never reached the statement").toContain("acme");
   });
 
+  it("the USAGE read is scoped too — the sibling one commit missed", async () => {
+    // `usage` reads the same two tables and its comment said scoping "is decided by the HEADER row, exactly
+    // as `planes` decides it" — true of both until `planes` was scoped and this was not. Two queries, one
+    // file, and a comment citing the lane that had just stopped working that way.
+    const { client, texts } = capturing();
+    await new PgTrajectoryStore(client).usage("acme", "r1");
+    const read = texts.find((t) => t.includes("everdict_trajectory_segments"));
+    expect(read?.includes("tenant = $2"), "the usage lane reads planes unscoped").toBe(true);
+  });
+
   it("the events read uses the same scoped rows — one door is not a guard", async () => {
     const { client, texts } = capturing();
     await new PgTrajectoryStore(client).events("acme", "r1", {});

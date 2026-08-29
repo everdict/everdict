@@ -2928,8 +2928,13 @@ const MUTATIONS = [
     // isolation of the READ lived in the WRITE path's guard.
     name: "the plane read filters the header's workspace but not the rows'",
     file: "packages/db/src/results/trajectory-store.ts",
+    // ⚠️ The `to:` is a DISTINCTIVE full line, not a prefix of the real one. Dropping the clause outright
+    // leaves `… WHERE run_id = $1`, which is a prefix of the fixed line AND of a sibling query — so
+    // `pnpm mutation-leak` matched a clean commit and reported a leak that was not there. A neutralization is
+    // also a FINGERPRINT: it has to be text no legitimate line contains. `$2 = $2` defeats the filter, keeps
+    // the parameter bound, and cannot occur by accident.
     from: "         FROM everdict_trajectory_segments WHERE run_id = $1 AND tenant = $2",
-    to: "         FROM everdict_trajectory_segments WHERE run_id = $1",
+    to: "         FROM everdict_trajectory_segments WHERE run_id = $1 AND $2 = $2",
     build: "@everdict/db",
     suite: ["--root", "packages/db", "src/results/plane-tenant-scope.counterexample.test.ts"],
   },
