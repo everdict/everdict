@@ -5,6 +5,7 @@ import {
   type TrajectoryEventsResult,
   type TrajectoryListResult,
   type TrajectoryMeta,
+  type TrajectoryPayloadRef,
   type TrajectorySegment,
   type TrajectoryStore,
   type TrajectoryUsage,
@@ -251,21 +252,33 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
 
   // The twin of the Pg reader (arch-review 120): every payload ref the doomed rows hold, so the decorator can
   // delete the bytes before the rows that name them are gone.
-  async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
-    const refs = new Set<string>();
-    const walk = (value: unknown): void => {
+  async payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+    const found: TrajectoryPayloadRef[] = [];
+    const seen = new Set<string>();
+    const walk = (value: unknown, tenant: string, runId: string): void => {
       if (typeof value === "string") {
-        if (value.startsWith("artifact://")) refs.add(value);
+        // The owner travels WITH the ref: the row it was read from is the only thing that says which
+        // trajectory holds it, and a ref alone is a string a producer can author (arch-review 121).
+        if (value.startsWith("artifact://") && !seen.has(value)) {
+          seen.add(value);
+          found.push({ tenant, runId, ref: value });
+        }
         return;
       }
       if (Array.isArray(value)) {
-        for (const item of value) walk(item);
+        for (const item of value) walk(item, tenant, runId);
         return;
       }
-      if (value !== null && typeof value === "object") for (const item of Object.values(value)) walk(item);
+      if (value !== null && typeof value === "object")
+        for (const item of Object.values(value)) walk(item, tenant, runId);
     };
-    for (const row of this.rows.values()) if (row.sealedAt < cutoffIso) walk(row);
-    return [...refs].slice(0, limit);
+    for (const [runId, row] of this.rows.entries()) if (row.sealedAt < cutoffIso) walk(row, row.tenant, runId);
+    // Ordered by ref so `after` is a stable cursor — the twin pages the way the adapters do, or the sweep's
+    // drain is a property no unit test can see.
+    return found
+      .sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0))
+      .filter((r) => after === undefined || r.ref > after)
+      .slice(0, limit);
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {
@@ -693,23 +706,24 @@ export class PgTrajectoryStore implements TrajectoryStore {
   // Matching is by VALUE, never by key name: a whole string that STARTS WITH the scheme. A key-name rule
   // would miss a ref stored under any other name, and a substring rule would match an agent's own output
   // quoting somebody else's ref — and retention deletes what it matches.
-  async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
-    const res = await this.client.query<{ ref: string }>(
-      `SELECT DISTINCT ref FROM (
-         SELECT jsonb_path_query(e.body, '$.**') #>> '{}' AS ref
+  async payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+    const res = await this.client.query<{ tenant: string; run_id: string; ref: string }>(
+      `SELECT DISTINCT tenant, run_id, ref FROM (
+         SELECT t.tenant, t.run_id, jsonb_path_query(e.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectory_events e
            JOIN everdict_trajectories t ON t.run_id = e.run_id
           WHERE t.sealed_at < $1::timestamptz
          UNION ALL
-         SELECT jsonb_path_query(t.body, '$.**') #>> '{}' AS ref
+         SELECT t.tenant, t.run_id, jsonb_path_query(t.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectories t
           WHERE t.sealed_at < $1::timestamptz AND t.body IS NOT NULL
        ) refs
-       WHERE ref LIKE 'artifact://%'
+       WHERE ref LIKE 'artifact://%' AND ($3::text IS NULL OR ref > $3)
+       ORDER BY ref
        LIMIT $2`,
-      [cutoffIso, limit],
+      [cutoffIso, limit, after ?? null],
     );
-    return res.rows.map((r) => r.ref);
+    return res.rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {

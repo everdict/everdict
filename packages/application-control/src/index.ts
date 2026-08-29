@@ -43,6 +43,8 @@ export {
   MAX_PAGE_BYTES,
   pageOf,
   serializedBytes,
+  type TrajectoryPayloadRef,
+  ownsPayloadKey,
   placementSpan,
   sealBody,
   sealExecutionPlanes,

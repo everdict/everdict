@@ -672,7 +672,40 @@ export interface TrajectoryStore {
   // capability a protocol depends on is required at the seam that decides, or its absence is a named
   // outcome — never a silent `?.` that reads as success. Required, the compiler asks both decorators and
   // all three stores, which is the only reader that cannot forget.
-  payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]>;
+  // ⚠️ IT ANSWERS WITH THE OWNER, AND IT PAGES (arch-review 121). Two defects made both necessary:
+  //
+  //   · a bare `string[]` let the SWEEP treat any `artifact://…` it found as authority to delete that key —
+  //     and a producer can put one in its own trace, because `TraceEvent` is the schema its submissions are
+  //     validated by. The row knows which trajectory holds it; answering with `{tenant, runId}` makes
+  //     ownership a JOIN the caller can perform (`ownsPayloadKey`) instead of a fact it assumes.
+  //   · a single bounded call let the caller delete every expired ROW after accounting for only the first
+  //     `limit` REFS, orphaning the rest permanently. `after` is a cursor over `ref` (the rows are ordered by
+  //     it), so a sweep drains the enumeration before it deletes anything that names it.
+  payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]>;
+}
+
+// One offloaded payload reference, WITH the trajectory that holds it. The pair is the point: a ref alone is
+// a string a producer can author, and only the row it was read from says which trajectory it belongs to.
+export interface TrajectoryPayloadRef {
+  tenant: string;
+  runId: string;
+  ref: string;
+}
+
+// ── WHO OWNS THE BYTES A REF NAMES (arch-review 121) ─────────────────────────────────────────────────
+//
+// The offload key is `trajectory-payloads/<tenant>/<runId>/<emitter>/<digest>.<field>`, so the object's
+// owner is written into its address and no second table is needed to answer this. Both readers ask before
+// they act — the resolve before it fetches, the sweep before it deletes — because a forged ref that survives
+// one of them is reachable through the other.
+//
+//     the ref is schema-valid    ≠   the platform minted it
+//     the ref is in this record  ≠   this record owns the object
+//
+// A key that is not ours at all (a handle into somebody else's store entirely) answers false here too, which
+// is the fail-closed direction: we neither read it nor delete it.
+export function ownsPayloadKey(key: string, tenant: string, runId: string): boolean {
+  return key.startsWith(`trajectory-payloads/${tenant}/${runId}/`);
 }
 
 // ── THE PAGE CEILINGS, OWNED ONCE ────────────────────────────────────────────────────────────────────

@@ -1,15 +1,17 @@
 import { type TraceEvent, type TraceSpan, UpstreamError } from "@everdict/contracts";
 import { contentDigest, spansToEvents } from "@everdict/domain";
 import { type ArtifactStore, artifactKeyOf, artifactRefOf } from "./artifact-store.js";
-import type {
-  SealInput,
-  SealedTrajectory,
-  TrajectoryEventsResult,
-  TrajectoryListResult,
-  TrajectoryMeta,
-  TrajectoryStore,
-  TrajectoryUsage,
-  TrajectoryWindow,
+import {
+  type SealInput,
+  type SealedTrajectory,
+  type TrajectoryEventsResult,
+  type TrajectoryListResult,
+  type TrajectoryMeta,
+  type TrajectoryPayloadRef,
+  type TrajectoryStore,
+  type TrajectoryUsage,
+  type TrajectoryWindow,
+  ownsPayloadKey,
 } from "./trajectory-store.js";
 
 // ── ONE EVENT IS BOUNDED, TOO (docs/architecture/long-horizon-trace-reads.md, R1) ────────────────────
@@ -231,6 +233,10 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // The NARROW port, not the shared one: this decorator is the owner that ends these bytes, so it is the
     // one place that asks for a delete (arch-review 120).
     private readonly artifacts: TrajectoryPayloadArtifacts,
+    // How many refs one enumeration returns. Production takes the default; a counterexample lowers it so the
+    // `limit + 1` case is three payloads rather than five thousand — the property is the composition, not
+    // the size, and a test that needs 160 MB of fixture is a test nobody runs.
+    private readonly sweepLimit: number = PAYLOAD_SWEEP_LIMIT,
   ) {}
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -312,7 +318,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // So the record is resolved first and the projection is redone from it, with the plane's own batch facts
     // (carried on the page for exactly this) so the re-projection is the whole-plane one and not the page's.
     if (result.page.spans !== undefined) {
-      const spans = await Promise.all(result.page.spans.map((span) => this.resolveSpan(span)));
+      const spans = await Promise.all(result.page.spans.map((span) => this.resolveSpan(span, tenant, runId)));
       return {
         kind: "page",
         page: {
@@ -326,25 +332,25 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
       kind: "page",
       page: {
         ...result.page,
-        events: await Promise.all(result.page.events.map((event) => this.resolveEvent(event))),
+        events: await Promise.all(result.page.events.map((event) => this.resolveEvent(event, tenant, runId))),
       },
     };
   }
 
-  private async resolveEvent(event: TraceEvent): Promise<TraceEvent> {
+  private async resolveEvent(event: TraceEvent, tenant: string, runId: string): Promise<TraceEvent> {
     let next: Record<string, unknown> = { ...event };
     for (const spec of fieldsFor(event.kind)) {
       const ref = next[spec.ref];
       if (typeof ref !== "string") continue;
-      next = { ...next, [spec.field]: await this.fetch(ref), [spec.ref]: undefined };
+      next = { ...next, [spec.field]: await this.fetch(ref, tenant, runId), [spec.ref]: undefined };
     }
     return next as TraceEvent;
   }
 
-  private async resolveSpan(span: TraceSpan): Promise<TraceSpan> {
+  private async resolveSpan(span: TraceSpan, tenant: string, runId: string): Promise<TraceSpan> {
     const ref = (span as { attributesRef?: unknown }).attributesRef;
     if (typeof ref !== "string") return span;
-    const attributes = (await this.fetch(ref)) as Record<string, unknown>;
+    const attributes = (await this.fetch(ref, tenant, runId)) as Record<string, unknown>;
     return { ...span, attributes, attributesRef: undefined } as TraceSpan;
   }
 
@@ -352,10 +358,20 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
   // the name of the whole scores different evidence and nothing downstream can tell. Both failures throw —
   // an unreadable store is an outage, and a MISSING object is worse than an outage (the record points at
   // bytes that are gone), so neither may degrade quietly into "here is what we still had".
-  private async fetch(ref: string): Promise<unknown> {
+  private async fetch(ref: string, tenant: string, runId: string): Promise<unknown> {
     const key = artifactKeyOf(ref);
     if (key === undefined)
       throw new UpstreamError("UPSTREAM_ERROR", { ref }, `Trace payload ref '${ref}' is not an artifact handle.`);
+    // ⚠️ AND IT MUST BE THIS TRAJECTORY'S OBJECT (arch-review 121). `TraceEvent` is the schema a producer's
+    // submission is validated by, so a caller can author `outputRef` itself — and this read used to hand
+    // back whatever key it was given, which is evidence substitution when the bytes are somebody else's and
+    // disclosure when the caller only wanted to see them. The key carries its owner; they must agree.
+    if (!ownsPayloadKey(key, tenant, runId))
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { ref, runId },
+        `Trace payload ref '${ref}' names an object this trajectory does not own — a ref is not authority over what it points at.`,
+      );
     const bytes = await this.artifacts.get(key);
     if (bytes === undefined)
       throw new UpstreamError(
@@ -404,22 +420,40 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
   async deleteOlderThan(cutoffIso: string): Promise<number> {
     // Bounded per sweep for the same reason every other worklist here is: a retention pass that tries to hold
     // every ref in a decade of trajectories is a pass that never finishes.
-    const refs = await this.inner.payloadRefsOlderThan(cutoffIso, PAYLOAD_SWEEP_LIMIT);
-    for (const ref of refs) {
-      const key = artifactKeyOf(ref);
-      // A ref this store did not mint is not ours to delete — and it is not an error either: an event may
-      // carry a handle to somebody else's object store entirely.
-      if (key === undefined) continue;
-      // Not swallowed. An outage here must stop the sweep before it deletes the rows that name these keys,
-      // because a swallowed failure is precisely how the bytes became unfindable in the first place.
-      await this.artifacts.remove(key);
+    // ⚠️ DRAINED, NOT SAMPLED (arch-review 121). This read used to be a single bounded call followed by
+    // `deleteOlderThan(cutoff)`, which deletes EVERY expired row — so at `limit + 1` distinct refs the last
+    // object was orphaned permanently, named by nothing any later pass could find. Both lines were right
+    // alone. The cursor pages until the enumeration is exhausted, so no row is deleted until every ref it
+    // carries has been accounted for.
+    const page = this.sweepLimit;
+    let after: string | undefined;
+    for (;;) {
+      const refs: TrajectoryPayloadRef[] = await this.inner.payloadRefsOlderThan(cutoffIso, page, after);
+      if (refs.length === 0) break;
+      for (const owned of refs) {
+        const key = artifactKeyOf(owned.ref);
+        // A ref this store did not mint is not ours to delete — and it is not an error either: an event may
+        // carry a handle to somebody else's object store entirely.
+        if (key === undefined) continue;
+        // …and neither is a ref that names ANOTHER trajectory's object. `TraceEvent` is the schema a
+        // producer's submission is validated by, so a caller can write `outputRef` into its own trace; the
+        // row says which trajectory holds this ref, and the key says which one owns the bytes. They must
+        // agree or the delete is somebody else's evidence (arch-review 121).
+        if (!ownsPayloadKey(key, owned.tenant, owned.runId)) continue;
+        // Not swallowed. An outage here must stop the sweep before it deletes the rows that name these keys,
+        // because a swallowed failure is precisely how the bytes became unfindable in the first place.
+        await this.artifacts.remove(key);
+      }
+      if (refs.length < page) break;
+      after = refs[refs.length - 1]?.ref;
+      if (after === undefined) break;
     }
     return this.inner.deleteOlderThan(cutoffIso);
   }
 
   // Forwarded verbatim: the refs are the INNER store's rows to enumerate, and this decorator's only business
   // with them is deleting what they name.
-  payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
-    return this.inner.payloadRefsOlderThan(cutoffIso, limit);
+  payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+    return this.inner.payloadRefsOlderThan(cutoffIso, limit, after);
   }
 }

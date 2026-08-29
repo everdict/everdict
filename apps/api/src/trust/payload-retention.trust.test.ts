@@ -74,9 +74,17 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-190 — retention enumerates and delet
 
     // The enumeration itself, executed by Postgres. Before the fix this THREW.
     const refs = await raw.payloadRefsOlderThan("2999-01-01T00:00:00.000Z", 5_000);
-    expect(refs, "the enumeration did not find the trajectory's own payload").toContain(`artifact://${owned}`);
     expect(
-      refs.some((r) => r.includes("someone-elses-key")),
+      refs.map((r) => r.ref),
+      "the enumeration did not find the trajectory's own payload",
+    ).toContain(`artifact://${owned}`);
+    // The owner travels with the ref, so the sweep can join it against the key rather than assuming it.
+    expect(
+      refs.every((r) => r.tenant === tenant && r.runId === runId),
+      "the enumeration answered a ref without saying which trajectory holds it",
+    ).toBe(true);
+    expect(
+      refs.some((r) => r.ref.includes("someone-elses-key")),
       "a ref merely MENTIONED in the trace was claimed as this trajectory's own",
     ).toBe(false);
 

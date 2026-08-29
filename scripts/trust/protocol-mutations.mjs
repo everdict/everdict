@@ -2923,6 +2923,37 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/trajectory/offloaded-payload-is-reachable.counterexample.test.ts"],
   },
   {
+    // R121. `TraceEvent` is the schema a producer's submission is validated by, so a caller can author
+    // `outputRef` itself. Reading whatever key it names is evidence substitution when the bytes are somebody
+    // else's, and disclosure when the caller only wanted to see them.
+    name: "a forged ref reads another trajectory's object",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "    if (!ownsPayloadKey(key, tenant, runId))",
+    to: "    if (!(void ownsPayloadKey, void tenant, void runId, false))",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R121. The same forged ref on the deletion side — retention took any `artifact://…` it found in an
+    // expiring trajectory as authority to remove that key, which is another run's evidence destroyed.
+    name: "retention deletes an object the trajectory does not own",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "        if (!ownsPayloadKey(key, owned.tenant, owned.runId)) continue;",
+    to: "        if (!(void ownsPayloadKey, void owned, true)) continue;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
+    // R121. A bounded enumeration composed with an unbounded delete: at `limit + 1` distinct refs the last
+    // object is named by nothing, because the rows that named it are gone and no later pass can find it.
+    name: "the sweep deletes rows after accounting for only one page of refs",
+    file: "packages/application-control/src/ports/offloading-trajectory-store.ts",
+    from: "      if (refs.length < page) break;",
+    to: "      if (refs.length <= page) break;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/ports/payload-offload.counterexample.test.ts"],
+  },
+  {
     // R120. The event row's ref is the ONLY pointer to an offloaded payload, so a retention sweep that
     // deletes rows first leaves bytes nothing can ever name again. Objects first, then the rows — and if the
     // object store refuses, the rows stay so the next sweep can still find what it owes.

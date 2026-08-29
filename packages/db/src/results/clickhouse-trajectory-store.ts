@@ -5,6 +5,7 @@ import {
   type TrajectoryEventsResult,
   type TrajectoryListResult,
   type TrajectoryMeta,
+  type TrajectoryPayloadRef,
   type TrajectorySegment,
   type TrajectoryStore,
   type TrajectoryUsage,
@@ -583,19 +584,28 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // output ("I saved it, see artifact://k9"), and retention deletes what this returns. One run quoting
   // another run's ref would have destroyed that run's evidence. The three impls answer the same question
   // now: a complete string value that STARTS WITH the scheme.
-  async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
+  async payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
     const runs = this.expiredRunsSql();
-    const rows = await this.select<{ ref: string }>(
-      `SELECT DISTINCT ref FROM (
-         SELECT arrayJoin(extractAll(body, '"(artifact://[^"]*)"')) AS ref
-           FROM ${this.eventsTable()} WHERE run_id IN (${runs})
+    // Tenant and run travel WITH the ref for the reason the Postgres twin gives: the row is the only thing
+    // that says which trajectory holds it, and a ref alone is a string a producer can author. `ORDER BY ref`
+    // plus `after` makes the enumeration drainable, so no row is deleted before every ref it carries has
+    // been accounted for (arch-review 121).
+    const rows = await this.select<{ tenant: string; run_id: string; ref: string }>(
+      `SELECT DISTINCT tenant, run_id, ref FROM (
+         SELECT e.tenant AS tenant, e.run_id AS run_id,
+                arrayJoin(extractAll(e.body, '"(artifact://[^"]*)"')) AS ref
+           FROM ${this.eventsTable()} e WHERE e.run_id IN (${runs})
          UNION ALL
-         SELECT arrayJoin(extractAll(body, '"(artifact://[^"]*)"')) AS ref
-           FROM ${this.table()} WHERE run_id IN (${runs})
-       ) LIMIT {limit:UInt32}`,
-      { cutoff: cutoffIso, limit: String(limit) },
+         SELECT t.tenant AS tenant, t.run_id AS run_id,
+                arrayJoin(extractAll(t.body, '"(artifact://[^"]*)"')) AS ref
+           FROM ${this.table()} t WHERE t.run_id IN (${runs})
+       )
+       WHERE {after:String} = '' OR ref > {after:String}
+       ORDER BY ref
+       LIMIT {limit:UInt32}`,
+      { cutoff: cutoffIso, limit: String(limit), after: after ?? "" },
     );
-    return rows.map((r) => r.ref);
+    return rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {

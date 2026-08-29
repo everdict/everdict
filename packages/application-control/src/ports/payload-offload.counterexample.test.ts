@@ -97,8 +97,15 @@ function inner(): TrajectoryStore & { sealedEvents: () => TraceEvent[] } {
       held = [];
       return gone;
     },
-    async payloadRefsOlderThan() {
-      return refsOf(held);
+    // Honours BOTH the limit and the cursor, because the real stores do (arch-review 121). The first version
+    // took the arguments and ignored them, which made the `limit + 1` counterexample below pass over a defect
+    // that was live — a twin that ignores an argument its adapter filters on is a guard no unit test can see.
+    async payloadRefsOlderThan(_cutoffIso: string, limit: number, after?: string) {
+      return refsOf(held)
+        .sort()
+        .filter((ref) => after === undefined || ref > after)
+        .slice(0, limit)
+        .map((ref) => ({ tenant: "acme", runId: "r1", ref }));
     },
   };
 }
@@ -441,5 +448,112 @@ describe("[R120 COUNTEREXAMPLE] every small value survives, whatever order the k
       kept.reduce((a, b) => a + b, 0),
       "the field's preview broke its budget",
     ).toBeLessThanOrEqual(EVENT_INLINE_MAX);
+  });
+});
+
+// ── [R121 COUNTEREXAMPLE] A REF IN A TRACE IS NOT A CAPABILITY OVER THE OBJECT IT NAMES ─────────────
+//
+// `TraceEvent` carries `outputRef`/`argsRef`/`textRef`/`attributesRef`, and the SAME `TraceEventSchema`
+// validates producer submissions — a job result posted by a runner, trace JSON handed to a judge tool. No
+// ingress strips those fields, the seal copies the event with `{ ...event }` and only overwrites a ref when
+// IT offloads, and both readers then take the string at face value:
+//
+//     resolve    artifactKeyOf(ref) → artifacts.get(key)      ← reads whatever key it is handed
+//     retention  artifactKeyOf(ref) → artifacts.remove(key)   ← DELETES whatever key it is handed
+//
+// So a producer that writes a foreign key into its own trace can read bytes it does not own, attach them to
+// its own evidence, and have them deleted when its trajectory expires.
+//
+//     the ref is schema-valid      ≠   the platform minted it
+//     the ref is in this record    ≠   this record owns the object
+//
+// The key already says who owns it — `trajectory-payloads/<tenant>/<runId>/<emitter>/<digest>.<field>` — so
+// ownership is a JOIN this store can perform, not a fact it needs a new table for. Both readers must perform
+// it, because a forged ref that survives one reader is reachable from the other.
+//
+// Seen RED before the fix:
+//   "a foreign object was read through a forged ref: expected 'SECRET-BYTES-OF-ANOTHER-RUN' to be undefined"
+//   "retention deleted an object this trajectory does not own: expected [] to include 'other/key'"
+const FOREIGN_KEY = "trajectory-payloads/rival/run-999/run/deadbeef.output";
+const FOREIGN_REF = `artifact://${FOREIGN_KEY}`;
+
+describe("[R121 COUNTEREXAMPLE] a producer-supplied ref is not authority over the object", () => {
+  it("REFUSES to resolve a ref that names another trajectory's object", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    // The victim's bytes, sitting in the shared store under another run's key.
+    await artifacts.put(
+      FOREIGN_KEY,
+      Buffer.from(JSON.stringify("SECRET-BYTES-OF-ANOTHER-RUN"), "utf8"),
+      "application/json",
+    );
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    // A producer's event: a harmless preview, and a ref it was never entitled to author.
+    await seal(store, [
+      { t: 0, kind: "tool_result", id: "c1", ok: true, output: "harmless", outputRef: FOREIGN_REF } as TraceEvent,
+    ]);
+
+    // The resolve must not hand back the foreign bytes. Refusing outright is also acceptable — what is not
+    // acceptable is substituting evidence this run never produced.
+    let read: unknown;
+    try {
+      const events = await page(store, { resolve: true });
+      const result = events.find((e) => e.kind === "tool_result");
+      read = result?.kind === "tool_result" ? result.output : undefined;
+    } catch {
+      read = undefined; // a refusal is a pass
+    }
+    expect(read, "a foreign object was read through a forged ref").not.toBe("SECRET-BYTES-OF-ANOTHER-RUN");
+  });
+
+  it("does NOT delete an object the trajectory does not own, when retention sweeps it", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    await artifacts.put(FOREIGN_KEY, Buffer.from("victim", "utf8"), "application/octet-stream");
+    const store = new OffloadingTrajectoryStore(base, artifacts);
+
+    await seal(store, [
+      { t: 0, kind: "tool_result", id: "c1", ok: true, output: "harmless", outputRef: FOREIGN_REF } as TraceEvent,
+    ]);
+
+    await store.deleteOlderThan("2999-01-01T00:00:00.000Z");
+
+    expect(artifacts.keys(), "retention deleted an object this trajectory does not own").toContain(FOREIGN_KEY);
+  });
+});
+
+// ── [R121 COUNTEREXAMPLE] EVERY REF IS ACCOUNTED FOR BEFORE THE ROWS NAMING IT ARE DELETED ──────────
+//
+// The sweep enumerates at most `PAYLOAD_SWEEP_LIMIT` refs and then deletes EVERY expired row. Both lines are
+// right alone; together they are a permanent leak, because the rows are the only thing that names the
+// objects. At limit + 1 distinct refs the last object is orphaned by construction, and the comment promising
+// that "a later pass" collects it describes a pass that can no longer see it.
+//
+// Seen RED before the fix: "an object was orphaned by its own retention sweep: expected 1 to be 0".
+describe("[R121 COUNTEREXAMPLE] retention accounts for every ref before deleting the rows", () => {
+  it("leaves no object behind when the expired rows hold more refs than one page", async () => {
+    const base = inner();
+    const artifacts = artifactStore();
+    // The page size is INJECTED so this is `limit + 1` with three payloads rather than five thousand. The
+    // property under test is the composition — a bounded enumeration followed by an unbounded delete — and
+    // the size is incidental; a fixture that needs 160 MB is a fixture nobody runs.
+    const PAGE = 2;
+    const store = new OffloadingTrajectoryStore(base, artifacts, PAGE);
+
+    // One event per payload, each distinct so each mints its own key: PAGE + 1 of them.
+    const many: TraceEvent[] = Array.from({ length: PAGE + 1 }, (_, i) => ({
+      t: i,
+      kind: "tool_result",
+      id: `c${i}`,
+      ok: true,
+      output: `${"z".repeat(EVENT_INLINE_MAX + 1)}#${i}`,
+    }));
+    await seal(store, many);
+    expect(artifacts.keys().length, "the fixture did not offload one object per event").toBe(PAGE + 1);
+
+    await store.deleteOlderThan("2999-01-01T00:00:00.000Z");
+
+    expect(artifacts.keys().length, "an object was orphaned by its own retention sweep").toBe(0);
   });
 });
