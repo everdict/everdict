@@ -457,9 +457,16 @@ export class PgTrajectoryStore implements TrajectoryStore {
   private async writeEvents(runId: string, emitter: string, items: SizedItem[]): Promise<void> {
     if (items.length === 0) return;
     // One statement, unnested — a per-event round trip would make sealing a long-horizon run O(N) round trips.
+    //
+    // ⚠️ `body_in.value` IS QUALIFIED, AND THE UNQUALIFIED VERSION SHIPPED (design review). Both `unnest`
+    // aliases expose a column called `value`, so a bare `value` here is `column reference "value" is
+    // ambiguous` — every split-plane seal failed against real Postgres from the moment this statement was
+    // written. Nothing caught it: `InMemoryTrajectoryStore` keeps its rows in a Map and the fake `SqlClient`
+    // asserts on the SQL TEXT, so both answer happily to a statement Postgres refuses to plan. It was found
+    // by TRUST-190, the first scenario to execute this path against an engine.
     await this.client.query(
       `INSERT INTO everdict_trajectory_events (run_id, emitter, seq, body, bytes)
-       SELECT $1, $2, ordinality, value, (bytes_in.value)::int
+       SELECT $1, $2, ordinality, body_in.value, (bytes_in.value)::int
          FROM unnest($3::jsonb[]) WITH ORDINALITY AS body_in(value, ordinality)
          JOIN unnest($4::int[]) WITH ORDINALITY AS bytes_in(value, ordinality) USING (ordinality)
        ON CONFLICT (run_id, emitter, seq) DO NOTHING`,
@@ -669,17 +676,32 @@ export class PgTrajectoryStore implements TrajectoryStore {
   // after it there is nothing left to ask.
   //
   // Both split and unsplit planes: a legacy single-blob body holds its events inside one jsonb document, and
-  // its refs are just as real. `jsonb_path_query` walks either shape, and `DISTINCT` collapses the many
+  // its refs are just as real. `$.**` walks either shape at any depth, and `DISTINCT` collapses the many
   // events that share one digest-addressed payload.
+  //
+  // ⚠️ THE FIRST VERSION OF THIS QUERY WAS A SYNTAX ERROR, AND NOTHING COULD SEE IT (design review).
+  // It read `'$.**{0 to 6}.*ref'`, trying to say "any key ending in ref" — which SQL/JSON path cannot
+  // express, so Postgres answered `syntax error at end of jsonpath input` on EVERY call. Because the
+  // decorator awaits this read before deleting anything, that made the whole trajectory retention sweep
+  // throw in every Postgres deployment: not just the object cleanup, the row deletion too.
+  //
+  // Nothing caught it because the in-memory twin has its own JavaScript walk, so every unit test passed
+  // against an implementation that is not the one production runs. That is rule `testing`'s law verbatim —
+  // a decision that lives in the ADAPTER is certified by a real-Postgres scenario or by nothing — and the
+  // fix ships with `payload-retention.trust.test.ts` so this query is executed by an engine, not by a fake.
+  //
+  // Matching is by VALUE, never by key name: a whole string that STARTS WITH the scheme. A key-name rule
+  // would miss a ref stored under any other name, and a substring rule would match an agent's own output
+  // quoting somebody else's ref — and retention deletes what it matches.
   async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
     const res = await this.client.query<{ ref: string }>(
       `SELECT DISTINCT ref FROM (
-         SELECT jsonb_path_query(e.body, '$.**{0 to 6}.*ref')  #>> '{}' AS ref
+         SELECT jsonb_path_query(e.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectory_events e
            JOIN everdict_trajectories t ON t.run_id = e.run_id
           WHERE t.sealed_at < $1::timestamptz
          UNION ALL
-         SELECT jsonb_path_query(t.body, '$.**{0 to 8}.*ref') #>> '{}' AS ref
+         SELECT jsonb_path_query(t.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectories t
           WHERE t.sealed_at < $1::timestamptz AND t.body IS NOT NULL
        ) refs

@@ -578,16 +578,19 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // ── WHAT RETENTION IS ABOUT TO DESTROY THE ONLY POINTER TO (arch-review 120) ─────────────────────
   //
   // The rung-2 twin of the Postgres reader. A body here is JSON TEXT rather than jsonb, so the refs are
-  // matched over the text — the ceiling on a ref is the `"` that ends its JSON string, and `extractAll`
-  // walks both tables' bodies the same way regardless of where in the bag the ref sits.
+  // matched over the text — and the pattern anchors on the OPENING QUOTE for the reason the Postgres twin
+  // matches whole values: `artifact://[^"]+` alone also matches a ref MENTIONED inside an agent's own
+  // output ("I saved it, see artifact://k9"), and retention deletes what this returns. One run quoting
+  // another run's ref would have destroyed that run's evidence. The three impls answer the same question
+  // now: a complete string value that STARTS WITH the scheme.
   async payloadRefsOlderThan(cutoffIso: string, limit: number): Promise<string[]> {
     const runs = this.expiredRunsSql();
     const rows = await this.select<{ ref: string }>(
       `SELECT DISTINCT ref FROM (
-         SELECT arrayJoin(extractAll(body, 'artifact://[^"]+')) AS ref
+         SELECT arrayJoin(extractAll(body, '"(artifact://[^"]*)"')) AS ref
            FROM ${this.eventsTable()} WHERE run_id IN (${runs})
          UNION ALL
-         SELECT arrayJoin(extractAll(body, 'artifact://[^"]+')) AS ref
+         SELECT arrayJoin(extractAll(body, '"(artifact://[^"]*)"')) AS ref
            FROM ${this.table()} WHERE run_id IN (${runs})
        ) LIMIT {limit:UInt32}`,
       { cutoff: cutoffIso, limit: String(limit) },
