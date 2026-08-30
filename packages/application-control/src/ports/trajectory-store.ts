@@ -704,8 +704,22 @@ export interface TrajectoryPayloadRef {
 //
 // A key that is not ours at all (a handle into somebody else's store entirely) answers false here too, which
 // is the fail-closed direction: we neither read it nor delete it.
+//
+// Compared SEGMENT BY SEGMENT rather than as a string prefix, so the answer does not rest on a precondition
+// this package never states. `trajectory-payloads/<a>/<b>/<c>/…` is the prefix of tenant `a` + run `b/c` and
+// equally of tenant `a/b` + run `c`; a raw `startsWith` calls both of those the owner. Nothing here validates
+// the workspace id — the only charset guard in the repo is `assertFsTenant`, which lives in @everdict/storage
+// for the filesystem's own reasons ("a workspace id can never smuggle a separator") and is not on this path.
+// Depending on a neighbour package's guard for a tenancy decision is how the assumption would outlive it.
+// A tenant that DID contain a separator is then answered false about its own objects, which loses bytes to a
+// leak rather than serving them to a stranger — the direction to fail in.
 export function ownsPayloadKey(key: string, tenant: string, runId: string): boolean {
-  return key.startsWith(`trajectory-payloads/${tenant}/${runId}/`);
+  const segments = key.split("/");
+  // A key that names no object is nobody's: `trajectory-payloads/<tenant>/<runId>/` sits inside the pair's own
+  // namespace and still addresses nothing, so answering "owned" would hand a caller a licence over a
+  // coordinate rather than over bytes.
+  if (segments.length <= 3 || segments.slice(3).join("/").length === 0) return false;
+  return segments[0] === "trajectory-payloads" && segments[1] === tenant && segments[2] === runId;
 }
 
 // ── THE PAGE CEILINGS, OWNED ONCE ────────────────────────────────────────────────────────────────────

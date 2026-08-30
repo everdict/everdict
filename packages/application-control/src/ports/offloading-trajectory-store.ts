@@ -127,7 +127,9 @@ function truncateToBytes(value: string, maxBytes: number): string {
 // The keyspace. TENANT-scoped and content-addressed: a retried seal writes the same bytes to the same key
 // (idempotent by construction, no orphan per attempt), and two workspaces holding identical bytes still get
 // separate objects — a shared key would make one tenant's storage answer a question about another's.
-function offloadKey(tenant: string, runId: string, emitter: string, field: string, value: unknown): string {
+// Exported so `ownsPayloadKey`'s counterexample can hold the MINTER and the ownership predicate to one shape:
+// a test that spells the key itself cannot see the two drift apart, and drift here is a tenancy decision.
+export function offloadKey(tenant: string, runId: string, emitter: string, field: string, value: unknown): string {
   return `trajectory-payloads/${tenant}/${runId}/${emitter}/${contentDigest(value)}.${field}`;
 }
 
