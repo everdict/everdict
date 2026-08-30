@@ -56,6 +56,18 @@ describe("[R122 COUNTEREXAMPLE] a CI link may pin the refs it trusts, and the pi
     expect(ciLinkTrusting([link({ refs: [] })], { repository: "acme/app", ref: "refs/heads/x" })).toBeDefined();
   });
 
+  it("expresses the set the generated workflow ACTUALLY produces — PR refs included", () => {
+    // The workflow fires on pull_request (ref = refs/pull/<n>/merge), issue_comment and push[main]. A pin of
+    // `refs/heads/main` alone would authenticate the merge lane and refuse every PR evaluation — a pin that
+    // silently breaks the feature it protects. One trailing wildcard covers it.
+    const links = [link({ refs: ["refs/heads/main", "refs/pull/*"] })];
+    for (const ref of ["refs/heads/main", "refs/pull/7/merge", "refs/pull/1234/merge"])
+      expect(ciLinkTrusting(links, { repository: "acme/app", ref }), `${ref} was refused`).toBeDefined();
+    // …and the wildcard keeps its slash: it is a prefix, not a substring.
+    expect(ciLinkTrusting(links, { repository: "acme/app", ref: "refs/pullX/evil" })).toBeUndefined();
+    expect(ciLinkTrusting(links, { repository: "acme/app", ref: "refs/heads/other" })).toBeUndefined();
+  });
+
   it("still refuses a disabled link and a foreign repository", () => {
     expect(ciLinkTrusting([link({ disabled: true })], { repository: "acme/app" })).toBeUndefined();
     expect(ciLinkTrusting([link()], { repository: "evil/other" })).toBeUndefined();

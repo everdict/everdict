@@ -2938,8 +2938,8 @@ const MUTATIONS = [
     // access to the linked repo was register-and-spend access on the workspace.
     name: "the CI trust policy ignores the ref the token was minted on",
     file: "packages/domain/src/auth/ci-trust.ts",
-    from: "      (link.refs === undefined || link.refs.length === 0\n        ? true\n        : claims.ref !== undefined && link.refs.includes(claims.ref)),",
-    to: "      (void link.refs, void claims.ref, true),",
+    from: "      refAllowed(link.refs ?? [], claims.ref),",
+    to: "      (void refAllowed, void link.refs, void claims.ref, true),",
     build: "@everdict/domain",
     suite: ["--root", "packages/domain", "src/auth/ci-ref-authority.counterexample.test.ts"],
   },

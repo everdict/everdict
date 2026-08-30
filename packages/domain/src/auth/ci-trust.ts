@@ -22,6 +22,27 @@ export interface CiTokenClaims {
 
 const normHost = (host: string | undefined): string => (host ?? "").replace(/\/$/, "").toLowerCase();
 
+// ── ONE WILDCARD, BECAUSE THE DOMAIN HAS AN IRREDUCIBLE ONE (arch-review 122) ───────────────────────
+//
+// The first version took exact values only, reasoning that "a pattern language is a second thing to get
+// wrong". Reading what the generated workflow actually fires on showed that exact values cannot express the
+// set it produces:
+//
+//     pull_request    ref = refs/pull/<n>/merge   ← a different value per pull request
+//     issue_comment   ref = refs/heads/<default>
+//     push            ref = refs/heads/<default>
+//
+// So a link pinned to `refs/heads/main` would have authenticated the merge lane and REFUSED every PR
+// evaluation — a pin that silently breaks the feature it protects is worse than no pin, because the operator
+// who set it believes they are covered. A trailing `*` is a prefix match and is the only wildcard: it
+// expresses `refs/pull/*` and nothing else needs expressing. `refs/pull/*` does not match `refs/pullX`,
+// because the prefix keeps its slash.
+function refAllowed(patterns: readonly string[], ref: string | undefined): boolean {
+  if (patterns.length === 0) return true;
+  if (ref === undefined) return false; // silence is not the trusted branch
+  return patterns.some((p) => (p.endsWith("*") ? ref.startsWith(p.slice(0, -1)) : p === ref));
+}
+
 // A link trusts a token when the host and repository match AND, when the link names refs, the token carries
 // one of them. A token with NO ref cannot satisfy a link that names refs: silence is not the trusted branch.
 export function ciLinkTrusting(links: readonly WorkspaceCiLink[], claims: CiTokenClaims): WorkspaceCiLink | undefined {
@@ -30,8 +51,6 @@ export function ciLinkTrusting(links: readonly WorkspaceCiLink[], claims: CiToke
       !link.disabled &&
       normHost(link.host) === normHost(claims.host) &&
       link.repository.toLowerCase() === claims.repository.toLowerCase() &&
-      (link.refs === undefined || link.refs.length === 0
-        ? true
-        : claims.ref !== undefined && link.refs.includes(claims.ref)),
+      refAllowed(link.refs ?? [], claims.ref),
   );
 }

@@ -22,6 +22,8 @@ export const UpsertCiLinkBodySchema = z.object({
   // what every link written before the field meant. Without this the field would exist on the record and be
   // unsettable through the API — a capability nobody can deliver, which is the shape `unwired-capabilities`
   // exists to refuse one layer down.
+  // Exact refs plus a single trailing `*` prefix. What CI actually produces is
+  // `["refs/heads/<default>", "refs/pull/*"]` — pinning the branch alone refuses every PR evaluation.
   refs: z.array(z.string().min(1)).optional(),
 });
 export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;

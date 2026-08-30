@@ -25,7 +25,11 @@ export const WorkspaceCiLinkSchema = z.object({
   //
   //     the token is from the linked repo   ≠   it is from a ref this workspace trusts
   //
-  // Exact `ref` values (`refs/heads/main`), because a pattern language is a second thing to get wrong.
+  // Exact `ref` values, plus a single trailing `*` as a prefix — the one wildcard the domain forces. The
+  // generated workflow fires on `pull_request` (ref `refs/pull/<n>/merge`, a different value per PR),
+  // `issue_comment` and `push` to the default branch, so a pin of `refs/heads/main` alone would authenticate
+  // the merge lane and REFUSE every PR evaluation. The set that matches what CI actually produces is
+  // `["refs/heads/<default>", "refs/pull/*"]`.
   // ABSENT = any ref, which is what every link written before this field meant; it is the permissive arm, so
   // it is disclosed rather than silent — `GET /workspace/ci/links` reports it and the setup-PR generator
   // pins the default branch on new links.
