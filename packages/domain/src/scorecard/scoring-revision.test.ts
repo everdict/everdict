@@ -4,6 +4,7 @@ import { caseObservationDigest } from "./case-result-digest.js";
 import {
   appendScoringRevision,
   currentScoringPin,
+  decisionInputTrustOf,
   inputObservationOf,
   inputObservationSetDigest,
   judgmentReceiptSetDigest,
@@ -298,6 +299,47 @@ describe("inputObservationOf — the judgment's input, checked against the ledge
   it("carries the caller's reason when the ledger could not be read at all", () => {
     const observed = inputObservationOf(judged, { kind: "unavailable", reason: "the receipt ledger read failed" });
     expect(observed).toMatchObject({ completed: false, failure: "the receipt ledger read failed", cases: 2 });
+  });
+});
+
+// ── THE CLASSIFIER THE GATE DECIDES ON ───────────────────────────────────────────────────────────────
+//
+// `scoringPinInputDiverged` below had a suite; `decisionInputTrustOf` — whose answer `evaluateGate` and the
+// product readiness surface consume — had none, though they read the same two fields. The accessory was
+// tested and the decision was not.
+//
+// The four arms are not four labels: they carry different POWERS. `diverged` is refused outright, while
+// `unavailable` and `legacy_unverified` are refused only until a policy records `allowUnverifiedInput`. So
+// the arm a pin lands in decides whether a recorded waiver can ship a release over it, and collapsing any
+// two of them either accuses a healthy comparison or lets an accused one through on a waiver written for
+// something else.
+describe("decisionInputTrustOf — which arm a pinned judgment lands in decides what may waive it", () => {
+  const pin = (inputObservation?: { completed: boolean; diverged?: number }) => ({
+    revision: 1,
+    scorePlaneDigest: "sha256:plane",
+    ...(inputObservation ? { inputObservation } : {}),
+  });
+
+  it("vouches for a completed observation that found no divergence", () => {
+    expect(decisionInputTrustOf(pin({ completed: true, diverged: 0 }))).toBe("receipt_vouched");
+    // An observation that completed and reports no count at all is agreement, not silence: `diverged` is the
+    // accusation, and its absence cannot be read as one.
+    expect(decisionInputTrustOf(pin({ completed: true }))).toBe("receipt_vouched");
+  });
+
+  it("accuses only when a COMPLETED observation counted divergence", () => {
+    expect(decisionInputTrustOf(pin({ completed: true, diverged: 1 }))).toBe("diverged");
+    // The count on an incomplete observation may not accuse — the observation did not finish, so what it
+    // saw is a partial reading, and `unavailable` is the honest answer rather than the louder one.
+    expect(decisionInputTrustOf(pin({ completed: false, diverged: 3 }))).toBe("unavailable");
+  });
+
+  it("separates an observation that could not vouch from a revision that predates observing", () => {
+    expect(decisionInputTrustOf(pin({ completed: false }))).toBe("unavailable");
+    expect(decisionInputTrustOf(pin())).toBe("legacy_unverified");
+    // No pin at all is the same answer: nothing states what the judges read. Refused by default, and a
+    // waiver is the only thing that changes it — age is not a vouching.
+    expect(decisionInputTrustOf(undefined)).toBe("legacy_unverified");
   });
 });
 
