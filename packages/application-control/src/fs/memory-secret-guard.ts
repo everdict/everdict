@@ -1,9 +1,29 @@
-import { BadRequestError } from "@everdict/contracts";
+import { BadRequestError, MEMORY_ROOT, normalizeFsPath } from "@everdict/contracts";
 
 // The agents' cross-conversation memory area (see the agent host's Memory section + workspaceMemoryPreamble).
+//
+// ── ASKED WITH THE FILESYSTEM'S OWN CANONICALIZATION, NOT A SECOND ONE ────────────────────────────────
+//
+// This predicate decides whether the bytes below get scanned, and it runs in the revision decorator — ABOVE the
+// adapters, which call `normalizeFsPath` on every operation. So "is this in memory/" has to be asked the way the
+// filesystem will answer it. It was not: a leading "/" was stripped and nothing else, while `normalizeFsPath`
+// also folds "./", repeated slashes and surrounding whitespace. `./memory/notes.md` was therefore not a memory
+// path to the guard and exactly `memory/notes.md` to the store, so a credential written under that spelling
+// landed in the workspace-shared area and was replayed into every later agent context. The entry doors do not
+// close the gap either — `write-fs-file.ts` types the field as a plain bounded string, not `FsPathSchema`.
+//
+// Rule `protocol` L3: a predicate written twice has already diverged. There is one canonicalizer; this asks it.
 export function isMemoryPath(path: string): boolean {
-  const normalized = path.replace(/^\/+/, "");
-  return normalized === "memory" || normalized.startsWith("memory/");
+  let normalized: string;
+  try {
+    normalized = normalizeFsPath(path);
+  } catch {
+    // Not canonicalizable, so the adapter will refuse the write and no bytes can land — but "I could not parse
+    // this" is not "this is not a memory file" (L2), and scanning a path that is about to be rejected costs
+    // nothing. The fail-closed arm is the one that scans.
+    return true;
+  }
+  return normalized === MEMORY_ROOT || normalized.startsWith(`${MEMORY_ROOT}/`);
 }
 
 // Conservative, named credential shapes — precision over recall (a missed exotic token is the prompt discipline's
