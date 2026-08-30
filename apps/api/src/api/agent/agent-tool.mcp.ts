@@ -1,3 +1,4 @@
+import { can } from "@everdict/auth";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -89,7 +90,7 @@ export function registerAgentToolTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ key, bindings }) =>
       run(principal, "agents:write", async () =>
-        ok(await tooling.bindToolSecrets(ws, principal.subject, key, bindings, "mcp")),
+        ok(await tooling.bindToolSecrets(ws, principal.subject, key, bindings, "mcp", can(principal, "secrets:read"))),
       ),
   );
 

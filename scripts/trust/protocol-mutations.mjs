@@ -2933,6 +2933,18 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/ci-link/ci-ref-roundtrip.counterexample.test.ts"],
   },
   {
+    // R122. The secret store decrypts "injection-only" — a member never sees a workspace secret, the platform
+    // injects it. That holds while the DESTINATION is trustworthy, and a remote MCP capability's destination
+    // is a URL `capabilities:write` (member+) lets the same member author, while the value is guarded by
+    // `secrets:write` (admin). Binding without the entitlement is exfiltration with extra steps.
+    name: "a member binds a workspace secret to a destination they chose",
+    file: "apps/api/src/core/agent/agent-member-tooling-service.ts",
+    from: "  return [...new Set(Object.values(bindings))].filter((bound) => shared.has(bound)).sort();",
+    to: "  return (void shared, void bindings, []);",
+    build: "@everdict/api",
+    suite: ["--root", "apps/api", "src/core/agent/workspace-secret-binding.counterexample.test.ts"],
+  },
+  {
     // R122. The CI trust policy decided on repository alone while the token's `ref` was parsed and discarded,
     // and `ci` carries `harnesses:register` (the merge-time re-pin) plus `scorecards:run` — so branch-push
     // access to the linked repo was register-and-spend access on the workspace.

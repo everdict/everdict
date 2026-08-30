@@ -1,3 +1,4 @@
+import { can } from "@everdict/auth";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { agentToolDocs } from "./agent-tool.docs.js";
@@ -105,6 +106,9 @@ export function registerAgentToolRoutes(app: FastifyInstance, deps: ServerDeps):
             req.params.key,
             parsed.data.bindings,
             "web",
+            // Binding a WORKSPACE secret sends its value to the tool endpoint, so it needs the action
+            // that guards the value itself (arch-review 122). A personal secret binds without it.
+            can(principal, "secrets:read"),
           ),
         );
       } catch (err) {

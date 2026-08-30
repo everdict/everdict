@@ -17,6 +17,7 @@ import {
   BadRequestError,
   type CapabilityRecord,
   type CapabilityRef,
+  ForbiddenError,
   NotFoundError,
 } from "@everdict/contracts";
 import type {
@@ -68,6 +69,25 @@ export interface AgentMemberToolingDeps {
   // The workspace's registered models — what a member's default model pick is validated against (an id that resolves
   // nowhere would be a conversation that cannot answer). Absent ⇒ picking a model is unavailable (reading still works).
   models?: ModelRegistry;
+}
+
+// ── WHICH OF THESE BINDINGS REACH FOR A WORKSPACE CREDENTIAL (arch-review 122) ──────────────────────
+//
+// The secret store decrypts "injection-only": a member never SEES a workspace secret, the platform injects it
+// at execution. That premise holds while the DESTINATION is trustworthy — and for a remote MCP capability the
+// destination is `spec.url`, which `capabilities:write` (member+) lets the same member author while the
+// credential's value is guarded by `secrets:write` (admin).
+//
+//     the member cannot read the secret   ≠   the member cannot send it somewhere
+//
+// Deduplicated and sorted so the refusal names each secret once, in a stable order — an error message that
+// varies by object iteration order is one nobody can test or grep for.
+export function workspaceSecretsBound(
+  bindings: Record<string, string>,
+  sharedSecretNames: readonly string[],
+): string[] {
+  const shared = new Set(sharedSecretNames);
+  return [...new Set(Object.values(bindings))].filter((bound) => shared.has(bound)).sort();
 }
 
 export class AgentMemberToolingService {
@@ -155,6 +175,19 @@ export class AgentMemberToolingService {
     // The transport this binding arrived through — the save below registers a new agent version, and a
     // version's birth stamp names its channel (Track A).
     via: "web" | "mcp",
+    // ── BINDING A WORKSPACE CREDENTIAL IS A PRIVILEGED ACT (arch-review 122) ──────────────────────
+    //
+    // The secret store decrypts values "injection-only": a member never SEES a workspace secret, the
+    // platform injects it at execution. That premise holds only while the DESTINATION is trustworthy, and
+    // for a remote MCP capability the destination is `spec.url` — which `capabilities:write` (member+) lets
+    // the same member author, while the credential's value is protected by `secrets:write` (admin).
+    //
+    //     the member cannot read the secret   ≠   the member cannot send it somewhere
+    //
+    // So a member could author a capability at `https://attacker/`, bind it to any WORKSPACE secret, run the
+    // agent, and the value would leave as an `Authorization` header. The personal tier is unaffected — that
+    // is the member's own credential going where they choose.
+    mayBindWorkspaceSecrets: boolean,
   ): Promise<AgentToolDetailResponse> {
     const agentService = this.deps.agentService;
     if (!agentService)
@@ -164,6 +197,18 @@ export class AgentMemberToolingService {
     for (const name of Object.keys(bindings))
       if (!declared.has(name))
         throw new BadRequestError("BAD_REQUEST", { name }, `this tool does not declare a secret named '${name}'.`);
+    // Which of the bound names are WORKSPACE-tier. `list(tenant)` without a subject is the shared tier and
+    // returns metadata only — this decides on names, never on values.
+    if (!mayBindWorkspaceSecrets && this.deps.secrets) {
+      const shared = (await this.deps.secrets.list(tenant)).map((m) => m.name);
+      const privileged = workspaceSecretsBound(bindings, shared);
+      if (privileged.length > 0)
+        throw new ForbiddenError(
+          "FORBIDDEN",
+          { secrets: privileged },
+          `Binding a workspace secret (${privileged.join(", ")}) to a tool requires the secrets:read action — the value is sent to the tool's endpoint, and a member who may not read it may not choose where it goes. A personal secret of the same name binds without it.`,
+        );
+    }
 
     let spec: AgentSpec;
     try {
