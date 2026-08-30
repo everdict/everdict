@@ -21,4 +21,10 @@ regexes = [
   # Fake JWT fixture in trace-source tests — an "offline_token" mints to a bare access token; this is a synthetic
   # value (header {alg:RS256}, payload {sub:robot}, signature literally "sig"), not a real secret. Full-history scan.
   '''eyJhbGciOiJSUzI1NiJ9\.eyJzdWIiOiJyb2JvdCJ9\.sig''',
+  # The memory-guard counterexample's token-shaped fixture: the digits 0-9 then a-n, which is what makes it
+  # obviously synthetic. It exists because that suite's subject IS credential detection, so the file has to
+  # contain something the detector fires on. Pinned to the exact literal rather than to the file or the `ak_`
+  # shape — a real key would still be caught there, and changing the constant makes this entry stop matching
+  # and the gate go red, which is the direction to fail in. Full-history scan.
+  '''ak_0123456789abcdefghijklmn''',
 ]
