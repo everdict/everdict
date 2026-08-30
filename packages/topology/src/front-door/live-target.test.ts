@@ -26,6 +26,24 @@ function socketFor(answering: (url: string) => boolean): (url: string) => CdpSoc
   };
 }
 
+// ── THE PROBE BUDGET IS BOUNDED ON BOTH SIDES, SO IT IS NAMED ────────────────────────────────────────
+//
+// `probeMs` plays two roles at once here, because `pickLivePageTarget` probes candidates SEQUENTIALLY: a
+// ghost has to be waited OUT before the live candidate is reached, and the live one has to answer INSIDE
+// the same budget. So the number is constrained from both directions:
+//
+//   too small — a loaded machine's scheduling latency outruns the socket double's reply (open and message
+//               are two `setTimeout(…, 0)` hops), so a LIVE target reads as a ghost
+//   too large — every ghost is waited out at that price, and the slowest test here waits out two
+//
+// 20ms satisfied both on an idle machine and neither under the commit gate, which runs every package's
+// suite at once: the probe expired first, and the failure surfaced as "none of them answers" — a busy
+// machine wearing the shape of a product defect, which is the worst way for a timing test to fail.
+//
+// 500ms is `DEFAULT_PROBE_MS`, the value production sizes against a measured ~205ms linger. The slowest
+// test waits out two ghosts, so this file costs about a second and no longer asks how loaded the box is.
+const PROBE_MS = 500;
+
 const GHOST = { type: "page", url: "https://shop.example/cart", webSocketDebuggerUrl: "ws://b/devtools/page/dead" };
 const LIVE = { type: "page", url: "https://shop.example/", webSocketDebuggerUrl: "ws://b/devtools/page/live" };
 
@@ -35,13 +53,16 @@ describe("pickLivePageTarget — a listed target is a candidate, not a page", ()
     // precisely why every selection site handed it out.
     const picked = await pickLivePageTarget([GHOST, LIVE], "http://b:9222", {
       connect: socketFor((url) => url.includes("live")),
-      probeMs: 50,
+      probeMs: PROBE_MS,
     });
     expect(picked).toBe(LIVE);
   });
 
   it("returns nothing when every candidate is silent, rather than the first one", async () => {
-    const picked = await pickLivePageTarget([GHOST], "http://b:9222", { connect: socketFor(() => false), probeMs: 20 });
+    const picked = await pickLivePageTarget([GHOST], "http://b:9222", {
+      connect: socketFor(() => false),
+      probeMs: PROBE_MS,
+    });
     expect(picked).toBeUndefined();
   });
 });
@@ -72,7 +93,7 @@ describe("ensureLivePageTarget — the browser ends up with a page that answers"
     const target = await ensureLivePageTarget("http://b:9222", {
       fetch: b.fetch,
       connect: socketFor((url) => url.includes("live")),
-      probeMs: 20,
+      probeMs: PROBE_MS,
     });
     expect(target.webSocketDebuggerUrl).toContain("live");
     expect(b.created()).toBe(1);
@@ -81,7 +102,11 @@ describe("ensureLivePageTarget — the browser ends up with a page that answers"
   it("refuses when even the fresh listing answers nothing — an unusable browser is not handed over", async () => {
     const b = browser([["dead"]]);
     await expect(
-      ensureLivePageTarget("http://b:9222", { fetch: b.fetch, connect: socketFor(() => false), probeMs: 20 }),
+      ensureLivePageTarget("http://b:9222", {
+        fetch: b.fetch,
+        connect: socketFor(() => false),
+        probeMs: PROBE_MS,
+      }),
     ).rejects.toThrow(/none of them answers/);
   });
 });
