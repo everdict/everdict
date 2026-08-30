@@ -76,6 +76,57 @@ describe("transcriptToTrace — the turn transcript projected as the platform Tr
     expect(trace[1]).toMatchObject({ kind: "tool_result", id: "call-7", ok: false, parentId: "call-7" });
   });
 
+  // ── THE ROW SAYS WHETHER THE CALL WORKED; THE TEXT IS THE FALLBACK FOR ROWS THAT CANNOT ────────────
+  //
+  // `ok` used to be re-derived from the result string, which rule `protocol` L3 bans by name ("log text →
+  // outcome"). The kernel knows the answer when it produces the result and the row now carries it (mig 0202).
+  // These pin the three states apart, and the middle one is the case the text reading got WRONG.
+  it("takes a recorded failure over text that looks fine", () => {
+    const trace = transcriptToTrace([
+      record({
+        seq: 0,
+        role: "assistant",
+        toolCalls: [{ id: "call-1", name: "write_file", arguments: "{}" }],
+      }),
+      record({ seq: 1, role: "tool", content: "Permission denied.", toolCallId: "call-1", isError: true }),
+    ]);
+    expect(trace[1]).toMatchObject({ kind: "tool_result", id: "call-1", ok: false });
+  });
+
+  it("takes a recorded SUCCESS over output that merely looks like a failure", () => {
+    const trace = transcriptToTrace([
+      record({
+        seq: 0,
+        role: "assistant",
+        toolCalls: [{ id: "call-2", name: "read_file", arguments: "{}" }],
+      }),
+      // A tool that ran fine and returned somebody else's error text — a log excerpt, a captured stderr, a
+      // grep hit. Reading the first characters called this a failed call and scored the run for it.
+      record({
+        seq: 1,
+        role: "tool",
+        content: "Error: connection reset\nPermission denied: /etc/shadow",
+        toolCallId: "call-2",
+        isError: false,
+      }),
+    ]);
+    expect(trace[1]).toMatchObject({ kind: "tool_result", id: "call-2", ok: true });
+  });
+
+  it("falls back to the text only for a row written before the outcome was recorded", () => {
+    const trace = transcriptToTrace([
+      record({
+        seq: 0,
+        role: "assistant",
+        toolCalls: [{ id: "call-3", name: "run_case", arguments: "{}" }],
+      }),
+      // No `isError` — a legacy row. Absent is not success: the weaker reading applies rather than a pass
+      // nobody observed.
+      record({ seq: 1, role: "tool", content: "Error: dataset not found", toolCallId: "call-3" }),
+    ]);
+    expect(trace[1]).toMatchObject({ kind: "tool_result", id: "call-3", ok: false });
+  });
+
   it("empty-content rows project nothing (no blank message events)", () => {
     expect(transcriptToTrace([record({ seq: 0, role: "assistant" })])).toEqual([]);
   });

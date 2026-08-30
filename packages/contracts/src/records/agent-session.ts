@@ -212,6 +212,10 @@ export const AgentMessageRecordSchema = z.object({
   toolCalls: z.array(AgentToolCallSchema).optional(), // assistant turns that requested tools
   toolCallId: z.string().optional(), // tool turns: the assistant tool_call this answers
   name: z.string().optional(), // tool turns: the tool name (for display)
+  // tool turns: DID THE CALL WORK, as the kernel observed it (`tool_result.isError`), not as a reader guessed it
+  // from the result text. Absent means the row predates this field — NOT success: a projection that read absence as
+  // "it worked" would invent an outcome for every historical row, which is the direction that flatters a run.
+  isError: z.boolean().optional(),
   references: z.array(AgentReferenceSchema).optional(), // user turns: the entities @-referenced this turn
   attachments: z.array(AgentAttachmentSchema).optional(), // user turns: files attached (metadata only)
   createdAt: z.string(),

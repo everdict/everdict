@@ -294,6 +294,7 @@ interface MessageRow {
   name: string | null;
   refs: unknown;
   attachments: unknown;
+  is_error: boolean | null;
   created_at: string | Date;
 }
 
@@ -311,6 +312,7 @@ function messageRowToRecord(row: MessageRow): AgentMessageRecord {
     ...(row.name !== null ? { name: row.name } : {}),
     ...(Array.isArray(row.refs) ? { references: row.refs } : {}),
     ...(Array.isArray(row.attachments) ? { attachments: row.attachments } : {}),
+    ...(row.is_error !== null ? { isError: row.is_error } : {}),
     createdAt: new Date(row.created_at).toISOString(),
   });
 }
@@ -585,8 +587,8 @@ export class PgAgentSessionStore implements AgentSessionStore {
   async appendMessages(records: AgentMessageRecord[]): Promise<void> {
     for (const record of records) {
       await this.client.query(
-        `INSERT INTO everdict_agent_messages (id, tenant, session_id, seq, role, content, reasoning, tool_calls, tool_call_id, name, refs, attachments, created_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        `INSERT INTO everdict_agent_messages (id, tenant, session_id, seq, role, content, reasoning, tool_calls, tool_call_id, name, refs, attachments, is_error, created_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [
           record.id,
           record.tenant,
@@ -600,6 +602,7 @@ export class PgAgentSessionStore implements AgentSessionStore {
           record.name ?? null,
           record.references ? JSON.stringify(record.references) : null,
           record.attachments ? JSON.stringify(record.attachments) : null,
+          record.isError ?? null,
           record.createdAt,
         ],
       );
@@ -609,7 +612,7 @@ export class PgAgentSessionStore implements AgentSessionStore {
   async listMessages(tenant: string, sessionId: string, sinceSeq?: number): Promise<AgentMessageRecord[]> {
     if (sinceSeq !== undefined) {
       const res = await this.client.query<MessageRow>(
-        `SELECT id, tenant, session_id, seq, role, content, reasoning, tool_calls, tool_call_id, name, refs, attachments, created_at
+        `SELECT id, tenant, session_id, seq, role, content, reasoning, tool_calls, tool_call_id, name, refs, attachments, is_error, created_at
          FROM everdict_agent_messages WHERE tenant = $1 AND session_id = $2 AND seq > $3
          ORDER BY seq ASC`,
         [tenant, sessionId, sinceSeq],
@@ -617,7 +620,7 @@ export class PgAgentSessionStore implements AgentSessionStore {
       return res.rows.map(messageRowToRecord);
     }
     const res = await this.client.query<MessageRow>(
-      `SELECT id, tenant, session_id, seq, role, content, reasoning, tool_calls, tool_call_id, name, refs, attachments, created_at
+      `SELECT id, tenant, session_id, seq, role, content, reasoning, tool_calls, tool_call_id, name, refs, attachments, is_error, created_at
        FROM everdict_agent_messages WHERE tenant = $1 AND session_id = $2
        ORDER BY seq ASC`,
       [tenant, sessionId],

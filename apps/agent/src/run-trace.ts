@@ -91,13 +91,17 @@ export function transcriptToTrace(
         ...stamp,
         kind: "tool_result",
         id,
-        // A REFUSAL IS NOT A SUCCESS. The persisted transcript row carries no outcome flag (AgentMessageRecord is
-        // chat protocol), so this projection still reads the text — but it reads the kernel's own refusal constants
-        // (isKernelRefusal: permission denial, envelope refusal, a shadow capture) instead of a hand-guessed "Error"
-        // prefix, so a withheld call scores as the failure it is and a reword of the kernel's sentence moves both
-        // ends together. Carrying the flag on the ROW is the honest fix and needs the record + its store to say it —
-        // a contracts/db change outside this seam.
-        ok: !(m.content.startsWith("Error") || isKernelRefusal(m.content)),
+        // A REFUSAL IS NOT A SUCCESS — and the row now SAYS which it was. `isError` is what the kernel observed
+        // at the moment it produced the result (mig 0202), so this projection reads a recorded fact instead of
+        // re-deriving one from rendered text, which rule `protocol` L3 bans by name ("log text → outcome").
+        //
+        // The text check survives for rows written BEFORE that column and for nothing else. It is the weaker
+        // answer on purpose: it reads the kernel's own refusal constants (isKernelRefusal: permission denial,
+        // envelope refusal, a shadow capture) rather than a prefix somebody guessed, so a reword moves both ends
+        // together — but a tool whose OUTPUT quotes "Error" or a permission problem is still miscounted there,
+        // which is exactly why it is a fallback and not the rule. Absent is not success: it means this row
+        // predates the field, so the weaker reading applies rather than an invented pass.
+        ok: m.isError !== undefined ? !m.isError : !(m.content.startsWith("Error") || isKernelRefusal(m.content)),
         output: m.content,
         parentId: id,
       });

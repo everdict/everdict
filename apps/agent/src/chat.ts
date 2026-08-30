@@ -1013,6 +1013,13 @@ export async function runChat(
   hooks?.onRecord?.(userRecord);
 
   const producedRecords: AgentMessageRecord[] = [];
+  // WHAT THE KERNEL OBSERVED, kept until the row is written. `ChatMessage` is the OpenAI protocol type and has
+  // nowhere to carry an outcome, so the fact would otherwise be lost between the tool_result event and the
+  // persisted row — which is why `run-trace.ts` had to re-read it out of the result TEXT. The kernel emits
+  // `tool_result` BEFORE it awaits `onMessage`, so this map is populated by the time `persist` runs for that
+  // same call; nothing here infers an outcome, it only remembers one.
+  const toolOutcomes = new Map<string, boolean>();
+
   const messageToRecord = (message: ChatMessage): AgentMessageRecord | null => {
     if (message.role === "assistant") {
       const toolCalls = extractToolCalls(message);
@@ -1040,6 +1047,9 @@ export async function runChat(
         role: "tool",
         content: contentToString(message.content),
         toolCallId: message.tool_call_id,
+        // Absent when the kernel reported no outcome for this call id — recorded as absent rather than as
+        // success, because a reader cannot tell an invented `false` from an observed one.
+        ...(toolOutcomes.has(message.tool_call_id) ? { isError: toolOutcomes.get(message.tool_call_id) } : {}),
         createdAt: deps.now(),
       };
     }
@@ -1393,6 +1403,7 @@ export async function runChat(
         ...(deps.persistentRetry === true ? { persistentRetry: true } : {}),
         ...(deps.thinkingBudgetTokens !== undefined ? { thinking: { budgetTokens: deps.thinkingBudgetTokens } } : {}),
         onEvent: (e) => {
+          if (e.type === "tool_result" && e.id !== undefined) toolOutcomes.set(e.id, e.isError);
           meter(e);
           spanRecorder?.observe(e);
           hooks?.onEvent?.(e);
