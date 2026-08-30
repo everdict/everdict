@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import { ConflictError, type FsEntry, type FsRevision, normalizeFsPath } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { generateAgentToken, generateInviteToken, generateKey } from "../credential/credentials.js";
 import type { FsRevisionStore } from "../ports/fs-revision-store.js";
 import type { FsFile, FsWriteOptions, WorkspaceFs } from "../ports/workspace-fs.js";
 import { assertNoSecretsInMemory, isMemoryPath } from "./memory-secret-guard.js";
@@ -171,5 +173,56 @@ describe("a credential may not reach memory/ by a path the guard and the filesys
     expect(() => assertNoSecretsInMemory("docs/../memory/notes.md", new TextEncoder().encode(KEY))).toThrow(
       /never store credentials/,
     );
+  });
+});
+
+// ── THE DETECTOR IS DRIVEN BY THE MINTERS, NOT BY HAND-WRITTEN LOOK-ALIKES ───────────────────────────
+//
+// Both halves of the gap this closes are invisible to a fixture somebody types: a hand-written `ak_` string
+// is alphanumeric, so it matched the old pattern, and a prefix nobody listed is a prefix nobody writes a
+// fixture for. Minting from the real functions is what asks the question the guard is actually answering.
+describe("every credential this repo mints is one the memory guard recognises", () => {
+  // `rnr_` is minted by @everdict/db (`generateRunnerToken`) and application-control may not import it —
+  // that is the layer direction. Its shape is the family's, so it is minted here the same way, and the
+  // family list in the guard is what keeps the two spellings honest.
+  const runnerToken = (): string => `rnr_${randomBytes(24).toString("base64url")}`;
+  const minters: readonly { what: string; mint: () => string }[] = [
+    { what: "a workspace API key", mint: generateKey },
+    { what: "a workspace invite token", mint: generateInviteToken },
+    { what: "an agent execution token", mint: generateAgentToken },
+    { what: "a runner pairing token", mint: runnerToken },
+  ];
+
+  for (const { what, mint } of minters) {
+    // 200 samples, because the defect this replaces was PROBABILISTIC: base64url draws from 64 symbols and
+    // the old pattern accepted 62 of them, so a single sample passed 48% of the time and the suite would
+    // have been flaky rather than red. A miss rate is not something one fixture can see.
+    it(`refuses ${what} in a memory file, whichever characters it draws`, () => {
+      const missed = Array.from({ length: 200 }, mint).filter((token) => {
+        try {
+          assertNoSecretsInMemory("memory/notes.md", new TextEncoder().encode(`the token is ${token}`));
+          return true;
+        } catch {
+          return false;
+        }
+      });
+      expect(missed).toEqual([]);
+    });
+  }
+
+  // The same tokens outside memory/ stay writable — the guard's stated trade is precision over recall, and
+  // widening the alphabet must not turn it into a workspace-wide credential scanner.
+  it("still leaves those tokens alone outside memory/", () => {
+    for (const { mint } of minters) {
+      expect(() => assertNoSecretsInMemory("docs/example.md", new TextEncoder().encode(mint()))).not.toThrow();
+    }
+  });
+
+  // Prose that merely mentions a prefix is not a credential. `{16,}` is the floor that separates them, and
+  // widening the character class must not lower it.
+  it("does not fire on prose that names a prefix without carrying a secret", () => {
+    for (const harmless of ["see ak_ prefixed keys", "the agt_ family", "rnr_ tokens are shown once", "inv_"]) {
+      expect(() => assertNoSecretsInMemory("memory/notes.md", new TextEncoder().encode(harmless))).not.toThrow();
+    }
   });
 });

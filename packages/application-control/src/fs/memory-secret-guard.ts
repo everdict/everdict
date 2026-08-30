@@ -26,11 +26,38 @@ export function isMemoryPath(path: string): boolean {
   return normalized === MEMORY_ROOT || normalized.startsWith(`${MEMORY_ROOT}/`);
 }
 
+// ── OUR OWN CREDENTIALS ARE ONE FAMILY, SO THEY ARE DESCRIBED ONCE ───────────────────────────────────
+//
+// Every first-party credential in this repo is minted the same way — a prefix plus `randomBytes(24)` rendered
+// BASE64URL: `generateKey` (ak_), `generateInviteToken` (inv_) and `generateAgentToken` (agt_) in this
+// package, `generateRunnerToken` (rnr_) in @everdict/db. Spelled out one regex at a time, that shared shape
+// was got wrong in both available ways:
+//
+//   · two of the four were listed. `inv_` grants workspace MEMBERSHIP and `agt_` resolves to a Principal that
+//     acts AS its creator, and neither was named — the two most impersonating credentials we mint.
+//   · the two that were listed matched `[A-Za-z0-9]`, and base64url's alphabet also contains `-` and `_`.
+//     Measured against the real minter, 51.7% of genuine `ak_` tokens did not match at all: a detector that
+//     silently misses half of what it names, and passes every hand-written alphanumeric fixture.
+//
+// One list, one shape. A new prefix is added here and cannot be added with the wrong alphabet.
+const EVERDICT_CREDENTIAL_FAMILY: readonly { prefix: string; name: string }[] = [
+  { prefix: "ak_", name: "workspace API key (ak_…)" },
+  { prefix: "inv_", name: "workspace invite token (inv_…)" },
+  { prefix: "agt_", name: "agent execution token (agt_…)" },
+  { prefix: "rnr_", name: "runner pairing token (rnr_…)" },
+];
+
+// No trailing `\b`: a base64url token may end in `-`, which is not a word character, so the boundary would
+// fail exactly on the tokens whose last character came out of the two-symbol part of the alphabet.
+const BASE64URL_TAIL = "[A-Za-z0-9_-]{16,}";
+
 // Conservative, named credential shapes — precision over recall (a missed exotic token is the prompt discipline's
 // job; a false positive here blocks a legitimate memory). Each entry names what the error reports.
 const SECRET_PATTERNS: readonly { name: string; pattern: RegExp }[] = [
-  { name: "workspace API key (ak_…)", pattern: /\bak_[A-Za-z0-9]{16,}\b/ },
-  { name: "runner token (rnr_…)", pattern: /\brnr_[A-Za-z0-9]{16,}\b/ },
+  ...EVERDICT_CREDENTIAL_FAMILY.map(({ prefix, name }) => ({
+    name,
+    pattern: new RegExp(`\\b${prefix}${BASE64URL_TAIL}`),
+  })),
   { name: "provider API key (sk-…)", pattern: /\bsk-[A-Za-z0-9_-]{20,}\b/ },
   { name: "GitHub token", pattern: /\b(?:ghp_|gho_|ghs_|github_pat_)[A-Za-z0-9_]{20,}\b/ },
   { name: "AWS access key id", pattern: /\bAKIA[0-9A-Z]{16}\b/ },
