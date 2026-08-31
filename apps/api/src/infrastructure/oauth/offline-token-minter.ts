@@ -1,5 +1,10 @@
 import type { OfflineTokenMinter } from "@everdict/application-control";
-import { type MintedAccessToken, type OfflineTokenGrant, UpstreamError } from "@everdict/contracts";
+import {
+  type MintedAccessToken,
+  type OfflineTokenGrant,
+  UpstreamError,
+  refuseUnsafeOutboundUrl,
+} from "@everdict/contracts";
 import { z } from "zod";
 import { oauthFetchJson } from "./provider.js";
 
@@ -28,7 +33,20 @@ export function httpOfflineTokenMinter(now: () => number = () => Date.now()): Of
       });
       if (grant.clientSecret) body.set("client_secret", grant.clientSecret);
       if (grant.scope) body.set("scope", grant.scope);
-      const json = await oauthFetchJson(grant.tokenUrl, {
+      // ── THE SAME QUESTION THE OTHER THREE LANES ASK (arch-review 124) ──────────────────────────
+      //
+      // `tokenUrl` is admin-authored, and this POST carries the workspace's client secret and refresh token.
+      // Sending a workspace's own credential to the provider it belongs to is the FEATURE, so the refusal
+      // here is not about the credential — it is about the dial: the control plane sits inside a network the
+      // admin does not, and a token endpoint at `http://169.254.169.254/` is a metadata read wearing an OAuth
+      // shape. Admin is a high bar and it is not the network boundary.
+      //
+      // No exception, because the sibling has none IN PRACTICE: `RunWebhookDeps.allowPrivateHosts` exists
+      // and `main.ts` never sets it, so private callbacks are refused in every deployment. Adding an escape
+      // hatch here that the other lane does not have would be a second spelling of a decision nobody has
+      // made — if a single-tenant install ever needs one, it is one switch for both lanes, added on purpose.
+      const target = refuseUnsafeOutboundUrl(grant.tokenUrl, "oauth token endpoint");
+      const json = await oauthFetchJson(target.href, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
         body: body.toString(),

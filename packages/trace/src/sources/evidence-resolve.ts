@@ -1,3 +1,4 @@
+import { refuseUnsafeOutboundUrl } from "@everdict/contracts";
 import type { SpanAttrMapping, TraceEvidence } from "@everdict/contracts";
 import { type Span, spansToEvidence } from "./trace-source.js";
 
@@ -6,8 +7,49 @@ const MAX_TEXT_BYTES = 1024 * 1024; // text artifacts feed a prompt that slices 
 
 const isHttpUrl = (v: string): boolean => /^https?:\/\/\S+$/i.test(v.trim());
 
-// Credentials only travel to the source's own origin — an attacker-controlled URL inside a trace must never
-// receive the tenant's observability credential (SSRF/credential-leak guard). Cross-origin fetches go bare.
+// ── AND WHERE IT POINTS, NOT ONLY THAT IT IS A URL (arch-review 124) ─────────────────────────────────
+//
+// These URLs can be PRODUCER-authored: a pushed trace names its own artifacts and this resolver dials them,
+// putting the bytes into a judge's prompt. `headersFor` below has always been the credential half — no
+// cross-origin request carries the tenant's observability token — and the comment called the pair an
+// "SSRF/credential-leak guard" while only the credential half existed.
+//
+// The address half is this, and it splits on the SAME predicate `headersFor` already uses, because the two
+// lanes are genuinely different:
+//
+//   PULL  — `extractEvidence` holds the workspace-REGISTERED source endpoint, and a tenant's own MLflow or
+//           Langfuse is routinely plain http on a private network. An artifact on that exact origin is the
+//           feature, so it is allowed there and nowhere else.
+//   PUSH  — the judge resolver in apps/api has no registered endpoint, because the trace was submitted. Every
+//           address must be public.
+//
+// One predicate deciding both credentials and destination is the point: an origin the tenant registered is
+// the only thing that makes a private address legitimate here, and it is the same fact that makes a header
+// legitimate.
+function sameOrigin(url: string, endpoint: string | undefined): boolean {
+  if (endpoint === undefined) return false;
+  try {
+    return new URL(url).origin === new URL(endpoint).origin;
+  } catch {
+    return false;
+  }
+}
+
+function safeTarget(url: string, endpoint: string | undefined): URL | undefined {
+  try {
+    return refuseUnsafeOutboundUrl(url, "trace artifact", {
+      allowHttp: true,
+      ...(sameOrigin(url, endpoint) ? { allowPrivateHosts: true } : {}),
+    });
+  } catch {
+    return undefined; // a destination we will not dial reads the same as one that did not answer
+  }
+}
+
+// The CREDENTIAL half: a token only travels to the source's own origin, so an attacker-controlled URL inside
+// a trace never receives the tenant's observability credential. The DESTINATION half is `safeTarget` above —
+// this comment used to claim both under the name "SSRF guard" while only this one existed, which is why the
+// address check went unwritten for as long as it did.
 function headersFor(
   url: string,
   headers: Record<string, string> | undefined,
@@ -28,10 +70,15 @@ export async function fetchImageBase64(
   f: typeof fetch,
   url: string,
   headers?: Record<string, string>,
+  // The workspace-registered source this trace was PULLED from, when there is one. Its own origin is the
+  // only place a private address is legitimate — see `safeTarget`.
+  endpoint?: string,
 ): Promise<{ base64: string; mediaType: string } | undefined> {
   if (!isHttpUrl(url)) return undefined;
   try {
-    const res = await f(url, { ...(headers ? { headers } : {}) });
+    const target = safeTarget(url, endpoint);
+    if (!target) return undefined;
+    const res = await f(target, { ...(headers ? { headers } : {}) });
     if (!res.ok) return undefined;
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) return undefined;
@@ -53,10 +100,13 @@ export async function fetchTextArtifact(
   f: typeof fetch,
   url: string,
   headers?: Record<string, string>,
+  endpoint?: string,
 ): Promise<string | undefined> {
   if (!isHttpUrl(url)) return undefined;
   try {
-    const res = await f(url, { ...(headers ? { headers } : {}) });
+    const target = safeTarget(url, endpoint);
+    if (!target) return undefined;
+    const res = await f(target, { ...(headers ? { headers } : {}) });
     if (!res.ok) return undefined;
     const buf = new Uint8Array(await res.arrayBuffer());
     if (buf.byteLength === 0 || buf.byteLength > MAX_TEXT_BYTES) return undefined;
@@ -101,7 +151,7 @@ export async function extractEvidence(
 
   if (out.screenshotRef && !out.screenshot) {
     const url = resolveArtifactRef(out.screenshotRef, artifactBaseUrl); // the UNRESOLVED ref stays as provenance
-    const img = await fetchImageBase64(f, url, headersFor(url, headers, endpoint));
+    const img = await fetchImageBase64(f, url, headersFor(url, headers, endpoint), endpoint);
     if (img) {
       out.screenshot = img.base64;
       out.screenshotMediaType = img.mediaType;
@@ -111,7 +161,7 @@ export async function extractEvidence(
   if (out.dom !== undefined) {
     const url = resolveArtifactRef(out.dom, artifactBaseUrl);
     if (isHttpUrl(url)) {
-      const text = await fetchTextArtifact(f, url, headersFor(url, headers, endpoint));
+      const text = await fetchTextArtifact(f, url, headersFor(url, headers, endpoint), endpoint);
       if (text !== undefined) out.dom = text;
     }
   }
@@ -121,7 +171,7 @@ export async function extractEvidence(
     for (const [name, value] of Object.entries(out.custom)) {
       const url = resolveArtifactRef(value, artifactBaseUrl);
       if (isHttpUrl(url)) {
-        const text = await fetchTextArtifact(f, url, headersFor(url, headers, endpoint));
+        const text = await fetchTextArtifact(f, url, headersFor(url, headers, endpoint), endpoint);
         custom[name] = text ?? value;
       } else {
         custom[name] = value;

@@ -1,4 +1,5 @@
 import { createHmac } from "node:crypto";
+import { refuseUnsafeOutboundUrl } from "@everdict/contracts";
 import type { PlatformEventRecord, SubscriptionRecord } from "@everdict/contracts";
 import { eventSelectorMatches } from "@everdict/domain";
 import type { SubscriptionStore } from "../ports/subscription-store.js";
@@ -101,7 +102,17 @@ async function deliverWebhook(
     message: event.message,
     createdAt: event.createdAt,
   });
-  const res = await fetchImpl(reaction.url, {
+  // ── THE SAME QUESTION THE RUN WEBHOOK ASKS (arch-review 124) ─────────────────────────────────────
+  //
+  // `reaction.url` is member-authored (`agents:write`) and this delivery fires on EVERY matching event, so
+  // an unguarded destination is a repeating, event-triggered dial from the control plane's network position.
+  // The run-webhook lane has judged its destination since arch-review 36; this lane is its sibling and did
+  // not, because the decision lived inside that consumer instead of where both of them look.
+  //
+  // Refused LOUDLY, like the sibling: a throw is dead-lettered with the failing endpoint recorded, and a
+  // reaction that silently never fires is the failure this whole feature exists to remove.
+  const target = refuseUnsafeOutboundUrl(reaction.url, "subscription webhook");
+  const res = await fetchImpl(target, {
     method: "POST",
     headers: {
       "content-type": "application/json",

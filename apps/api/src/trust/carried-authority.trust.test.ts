@@ -757,15 +757,21 @@ describeTrust("TRUST-154 — a recovered run's ending is announced, and its call
   }, 20_000);
 
   it("a callback pointing inside our own network is refused rather than dialled", async () => {
-    const { refuseUnsafeCallback } = await import("@everdict/application-control");
+    // The decision moved to @everdict/contracts, because three other lanes dial a caller-named URL and none
+    // of them imported it while it lived inside this one consumer (arch-review 124).
+    const { refuseUnsafeOutboundUrl } = await import("@everdict/contracts");
     // The control plane sits in a network the submitter does not: this is SSRF in its plainest form.
-    expect(() => refuseUnsafeCallback("http://169.254.169.254/latest/meta-data/", false)).toThrow();
-    expect(() => refuseUnsafeCallback("https://169.254.169.254/latest/meta-data/", false)).toThrow(/private/);
-    expect(() => refuseUnsafeCallback("https://localhost:8080/hook", false)).toThrow(/private/);
-    expect(() => refuseUnsafeCallback("https://10.0.0.5/hook", false)).toThrow(/private/);
-    expect(refuseUnsafeCallback("https://hooks.example.com/cb", false).hostname).toBe("hooks.example.com");
+    expect(() => refuseUnsafeOutboundUrl("http://169.254.169.254/latest/meta-data/", "run webhook")).toThrow();
+    expect(() => refuseUnsafeOutboundUrl("https://169.254.169.254/latest/meta-data/", "run webhook")).toThrow(
+      /private/,
+    );
+    expect(() => refuseUnsafeOutboundUrl("https://localhost:8080/hook", "run webhook")).toThrow(/private/);
+    expect(() => refuseUnsafeOutboundUrl("https://10.0.0.5/hook", "run webhook")).toThrow(/private/);
+    expect(refuseUnsafeOutboundUrl("https://hooks.example.com/cb", "run webhook").hostname).toBe("hooks.example.com");
     // …and a single-tenant install that genuinely posts inside its own network can say so.
-    expect(refuseUnsafeCallback("https://localhost:8080/hook", true).hostname).toBe("localhost");
+    expect(
+      refuseUnsafeOutboundUrl("https://localhost:8080/hook", "run webhook", { allowPrivateHosts: true }).hostname,
+    ).toBe("localhost");
   }, 20_000);
 });
 
@@ -972,18 +978,22 @@ describeTrust("TRUST-156 — a losing driver cannot amend the winner's child res
 // was configured.
 describeTrust("TRUST-157 — a callback is judged by where its name goes, not by how it reads", () => {
   it("a public name that resolves privately is refused", async () => {
-    const { refuseUnsafeCallback, assertPublicTarget } = await import("@everdict/application-control");
-    const url = refuseUnsafeCallback("https://hook.attacker.example/cb", false); // the literal check passes…
-    await expect(assertPublicTarget(url, async () => ["169.254.169.254"])).rejects.toThrow(/private address/);
-    await expect(assertPublicTarget(url, async () => ["10.0.0.7"])).rejects.toThrow(/private address/);
+    const { refuseUnsafeOutboundUrl, assertPublicOutboundTarget } = await import("@everdict/contracts");
+    const url = refuseUnsafeOutboundUrl("https://hook.attacker.example/cb", "run webhook"); // the literal check passes…
+    await expect(assertPublicOutboundTarget(url, "run webhook", async () => ["169.254.169.254"])).rejects.toThrow(
+      /private address/,
+    );
+    await expect(assertPublicOutboundTarget(url, "run webhook", async () => ["10.0.0.7"])).rejects.toThrow(
+      /private address/,
+    );
     // …and a name that resolves nowhere is a delivery that cannot be made, said out loud.
-    await expect(assertPublicTarget(url, async () => [])).rejects.toThrow(/resolves to nothing/);
+    await expect(assertPublicOutboundTarget(url, "run webhook", async () => [])).rejects.toThrow(/resolves to nothing/);
   }, 20_000);
 
   it("a public name keeps its NAME — a verified address is not a substitute for TLS identity", async () => {
-    const { refuseUnsafeCallback, assertPublicTarget } = await import("@everdict/application-control");
-    const url = refuseUnsafeCallback("https://hooks.example.com/cb?token=abc", false);
-    const target = await assertPublicTarget(url, async () => ["93.184.216.34"]);
+    const { refuseUnsafeOutboundUrl, assertPublicOutboundTarget } = await import("@everdict/contracts");
+    const url = refuseUnsafeOutboundUrl("https://hooks.example.com/cb?token=abc", "run webhook");
+    const target = await assertPublicOutboundTarget(url, "run webhook", async () => ["93.184.216.34"]);
     // The first version of this substituted the resolved IP into the URL and put the name in a `Host` header.
     // That is not pinning: TLS verifies the certificate against the URL's host, and `Host` is sent after the
     // handshake — so every ordinary callback would have failed verification. The name is what gets dialled.

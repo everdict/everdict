@@ -85,9 +85,6 @@ export {
 } from "./platform-event/event-consumer-runner.js";
 export { runFeedConsumer, scorecardFeedConsumer } from "./notification/feed-consumers.js";
 export {
-  assertPublicTarget,
-  isPrivateAddress,
-  refuseUnsafeCallback,
   type RunWebhookDeps,
   runWebhookConsumer,
 } from "./platform-event/run-webhook-consumer.js";
@@ -140,7 +137,6 @@ export {
   type ReleasedCleanup,
   probeStagedObject,
   removeStagedObject,
-  requireOwed,
 } from "./ports/intermediate-cleanup-store.js";
 export { type ReplicaRegistry, soloReplicas } from "./ports/replica-registry.js";
 export type { BudgetStore } from "./ports/budget-store.js";

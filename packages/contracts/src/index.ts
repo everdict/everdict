@@ -6,6 +6,12 @@ export * from "./execution/execution-id.js";
 export * from "./job-result-wire.js";
 export { evalContainerSecretEnv } from "./execution/eval-container-env.js";
 export { refuseUnenforceableNetwork } from "./execution/network-enforcement.js";
+export {
+  assertPublicOutboundTarget,
+  isPrivateAddress,
+  type OutboundPolicy,
+  refuseUnsafeOutboundUrl,
+} from "./infra/outbound-target.js";
 export * from "./execution/verifier-job.js";
 export {
   type ExpectedVerifierIdentity,

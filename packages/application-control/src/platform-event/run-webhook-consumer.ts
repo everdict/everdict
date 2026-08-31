@@ -1,4 +1,4 @@
-import type { PlatformEventRecord } from "@everdict/contracts";
+import { type PlatformEventRecord, assertPublicOutboundTarget, refuseUnsafeOutboundUrl } from "@everdict/contracts";
 import type { RunStore } from "../ports/run-store.js";
 import type { PlatformEventConsumer } from "./event-consumer-runner.js";
 
@@ -44,56 +44,13 @@ export interface RunWebhookDeps {
 // credential read. So the scheme is HTTPS and the host is public, and a URL that is neither is refused
 // LOUDLY (a thrown delivery the runner dead-letters) rather than dropped, because a callback that silently
 // never happens is the failure mode this whole feature was built to remove.
-const PRIVATE_HOST = /^(localhost|.*\.local|.*\.internal)$/i;
-const PRIVATE_IPV4 =
-  /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
-
-// Is this ADDRESS one we refuse to dial? The literal-hostname check and the resolved-address check ask the
-// same question of different answers, which is the point: a name is not a destination.
-export function isPrivateAddress(host: string): boolean {
-  const bare = host.replace(/^\[|\]$/g, "").toLowerCase();
-  return (
-    PRIVATE_HOST.test(bare) ||
-    PRIVATE_IPV4.test(bare) ||
-    bare === "::1" ||
-    bare.startsWith("fc") ||
-    bare.startsWith("fd") ||
-    bare.startsWith("fe80")
-  );
-}
-
-export function refuseUnsafeCallback(raw: string, allowPrivateHosts: boolean): URL {
-  const url = new URL(raw);
-  if (url.protocol !== "https:") throw new Error(`run webhook ${raw} is not https`);
-  if (allowPrivateHosts) return url;
-  if (isPrivateAddress(url.hostname)) throw new Error(`run webhook ${raw} points at a private address`);
-  return url;
-}
-
-// …AND WHERE THE NAME ACTUALLY GOES (arch-review 36/37 P1, security). The literal check reads the hostname
-// the tenant wrote, and a hostname is not a destination: `https://hook.attacker.example/` resolves to
-// whatever its owner's DNS says, including `169.254.169.254`. So the name is resolved and the ADDRESSES are
-// judged before anything is dialled.
+// ── THE DECISION MOVED TO CONTRACTS (arch-review 124) ────────────────────────────────────────────────
 //
-// WHAT THIS DELIBERATELY DOES NOT DO ANY MORE: put the resolved IP into the URL. That version looked like
-// pinning and was a broken request — TLS verifies the certificate against the host in the URL, and the HTTP
-// `Host` header is sent AFTER the handshake, so it cannot stand in for SNI. Every ordinary callback
-// (a certificate for `hooks.example.com`, dialled as `https://93.184.216.34/`) would have failed
-// verification or gone out without SNI. A security control that breaks the feature it protects is not a
-// control; it is an outage with a rationale.
-//
-// So the URL keeps its name and the residual is stated instead of papered over: between this check and the
-// connection, the name could answer differently (DNS rebinding). Closing THAT needs the connection itself to
-// use the verified address — a custom dispatcher/agent whose lookup returns only addresses this check
-// approved, with the TLS servername left as the hostname — which is a transport-layer change and belongs
-// with the outbound-proxy work rather than inside a consumer.
-export async function assertPublicTarget(url: URL, lookup: (host: string) => Promise<string[]>): Promise<URL> {
-  const addresses = await lookup(url.hostname);
-  if (addresses.length === 0) throw new Error(`run webhook ${url.href} resolves to nothing`);
-  const offender = addresses.find((address) => isPrivateAddress(address));
-  if (offender) throw new Error(`run webhook ${url.href} resolves to a private address (${offender})`);
-  return url;
-}
+// It used to live here, exported from the package index and imported by nobody — while three other lanes
+// dialled a caller-named URL with no check at all. A safety decision every new lane must REMEMBER to import
+// is a convention; the same decision where every lane already looks is a choke point. See
+// `refuseUnsafeOutboundUrl`.
+const LANE = "run webhook";
 
 // The terminal facts a standalone run emits. A batch's children emit none (`terminalRunFacts` returns [] for
 // a child), which is the right scope: a scorecard's callback is the scorecard's, not each case's.
@@ -112,10 +69,14 @@ export function runWebhookConsumer(deps: RunWebhookDeps): PlatformEventConsumer 
       if (!record?.webhookUrl) return;
       // …to a destination this server is willing to dial (see above). `redirect: "error"` closes the same
       // door one hop later: a public URL that 302s to the metadata service is the same request.
-      const checked = refuseUnsafeCallback(record.webhookUrl, deps.allowPrivateHosts === true);
+      const checked = refuseUnsafeOutboundUrl(record.webhookUrl, LANE, {
+        ...(deps.allowPrivateHosts === true ? { allowPrivateHosts: true } : {}),
+      });
       // …and the name is resolved before it is dialled, unless this deployment says its network is its own.
       const target =
-        deps.allowPrivateHosts === true || !deps.lookup ? checked : await assertPublicTarget(checked, deps.lookup);
+        deps.allowPrivateHosts === true || !deps.lookup
+          ? checked
+          : await assertPublicOutboundTarget(checked, LANE, deps.lookup);
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       try {
