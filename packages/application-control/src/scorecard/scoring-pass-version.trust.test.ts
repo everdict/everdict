@@ -175,6 +175,10 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       async list() {
         return [];
       },
+      // No rows, so no groups — the same answer its `list` gives, in the shape a GROUP BY has.
+      async countByGroup() {
+        return [];
+      },
       async delete() {
         return false;
       },

@@ -1,5 +1,5 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema } from "@everdict/application-control";
-import { GateDecisionSchema, ManifestVerificationSchema } from "@everdict/contracts";
+import { GateDecisionSchema, ManifestVerificationSchema, ScorecardStatusSchema } from "@everdict/contracts";
 import { BackfillModelsResponseSchema } from "@everdict/contracts/wire";
 import { ScorecardAnalysisBundleResponseSchema, ScorecardAnalysisResponseSchema } from "@everdict/contracts/wire";
 import { DeleteScorecardResultSchema } from "@everdict/contracts/wire";
@@ -156,11 +156,58 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
+  counts: {
+    summary: "Count the workspace's scorecards per group",
+    description:
+      "How many batches fall in each bucket under the SAME filter GET /scorecards takes — the headers of a " +
+      "grouped list, and its total. `groupBy` is day | status | harness | dataset | team | creator; `day` is " +
+      "the stored instant's UTC calendar day, which is the key the day grouping buckets a row under (a " +
+      "header counted in one timezone over rows bucketed in another disagrees with itself twice a day). " +
+      "Buckets with no rows are absent, and `key: null` is the unset bucket (no team, no creator). A paged " +
+      "screen cannot get these numbers from its own rows — counting what it received only reports the page " +
+      "size back. Requires scorecards:read.",
+    tags: ["scorecard"],
+    querystring: toJsonSchema(
+      z.object({
+        groupBy: z.enum(["day", "status", "harness", "dataset", "team", "creator"]),
+        judge: z.string().optional(),
+        schedule: z.string().optional(),
+        dataset: z.string().optional(),
+        harness: z.string().optional(),
+        team: z.string().optional(),
+        status: ScorecardStatusSchema.optional(),
+        runtime: z.string().optional(),
+        creator: z.string().optional(),
+        day: z.string().optional(),
+        q: z.string().optional(),
+      }),
+    ),
+    response: {
+      200: {
+        description: "Per-group counts and their total",
+        ...toJsonSchema(
+          z.object({
+            groupBy: z.enum(["day", "status", "harness", "dataset", "team", "creator"]),
+            groups: z.array(z.object({ key: z.string().nullable(), count: z.number().int() })),
+            total: z.number().int(),
+          }),
+        ),
+      },
+      ...errorResponses(400, 401, 403),
+    },
+  },
   list: {
     summary: "List scorecards",
     description:
-      "Lists the workspace's scorecard records. Requires scorecards:read (viewer+). The list view omits the " +
-      "heavy per-case fields (scorecard/steps/runIds/export) — read GET /scorecards/:id for the detail.",
+      "Lists the workspace's scorecard records, newest first (createdAt desc, id desc breaking a tie). " +
+      "Requires scorecards:read (viewer+). The list view omits the heavy per-case fields " +
+      "(scorecard/steps/runIds/export) — read GET /scorecards/:id for the detail. " +
+      "WITHOUT `limit` this answers the whole collection, as it always has. WITH it you get a page, and the " +
+      "cursor for the next one is the LAST ROW YOU DREW: pass its createdAt and id as `beforeCreatedAt` + " +
+      "`beforeId`. Both halves or neither — the ordering is total only with the id, so a cursor carrying the " +
+      "timestamp alone repeats or skips a row wherever two batches share an instant. There is no opaque " +
+      "token because there is nothing to hide: the ordering is this endpoint's contract. For the totals a " +
+      "page cannot know, read GET /scorecards/counts under the same filter.",
     tags: ["scorecard"],
     querystring: toJsonSchema(
       z.object({
@@ -169,6 +216,14 @@ const docs = {
         dataset: z.string().optional().describe("Narrow to batches run on this dataset (any version)"),
         harness: z.string().optional().describe("Narrow to batches run with this harness (any version)"),
         team: z.string().optional().describe('Narrow to one owning team (id or key, e.g. "ENG")'),
+        status: ScorecardStatusSchema.optional().describe("Narrow to one batch status"),
+        runtime: z.string().optional().describe("Narrow to the runtime the batch ran on"),
+        creator: z.string().optional().describe("Narrow to the submitter (subject)"),
+        day: z.string().optional().describe("One UTC calendar day, YYYY-MM-DD — the day grouping's own key"),
+        q: z.string().optional().describe("Free text over the batch id and the dataset/harness ids it names"),
+        limit: z.coerce.number().optional().describe("Page size (1..200). Absent = the whole collection"),
+        beforeCreatedAt: z.string().optional().describe("Cursor: the last drawn row's createdAt"),
+        beforeId: z.string().optional().describe("Cursor: the last drawn row's id (required with the above)"),
       }),
     ),
     response: {

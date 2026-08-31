@@ -30,6 +30,78 @@ export interface ScorecardListFilter {
   // Group kind (P1): "experiment" = only ungraded phase-1 groups; "scorecard" = only real scorecards (incl. every
   // pre-mig-0093 NULL row). Unset = everything (current behavior — the web list shows both, badged).
   kind?: "experiment" | "scorecard";
+
+  // --- The list's own axes, so a narrowed screen narrows the READ -------------------------------------
+  // These exist because a scorecard is an EVENT a CI run files, not a registry entry a human authors: the
+  // collection only grows, and a screen that filters client-side over "everything" pays for the whole
+  // history on every navigation. Each one mirrors a facet the list offers.
+  runtime?: string; // placement target (registered runtime id | self:* runner)
+  createdBy?: string; // the submitter subject
+  // One calendar day of `created_at`, as `YYYY-MM-DD` **in UTC** — the stored instant's date, which is
+  // exactly how the list's day grouping keys a row (`createdAt.slice(0, 10)`). A reader in another timezone
+  // sees the same buckets the server counts; a locale-local day would make the header disagree with the page.
+  day?: string;
+  // Free text over what the list SEARCHES: the batch id and the two capability ids it names. Case-insensitive
+  // substring — the same thing the in-browser search did while the whole collection was in hand.
+  search?: string;
+
+  // --- Paging ----------------------------------------------------------------------------------------
+  // A bounded page in the store's own ordering (created_at DESC, id DESC). ABSENT = every match, which is
+  // what every internal reader wants (boot recovery, the publication sweep, the cascade-cancel walk) and what
+  // the HTTP list did for every caller until this existed. Adding it never changes an unbounded caller.
+  limit?: number;
+  // Keyset cursor: "strictly older than this row" in that same ordering. A row value rather than an OFFSET,
+  // because an offset re-reads what it skipped and drifts by exactly one row for every batch submitted while
+  // somebody pages — and new batches land at the head, which is the end the reader is paging away from.
+  before?: { createdAt: string; id: string };
+}
+
+// The axes a batch can be grouped by — the list's own grouping vocabulary, answered by the store because a
+// page cannot count what it does not hold. `day` is the UTC calendar day (see `ScorecardListFilter.day`).
+export type ScorecardGroupBy = "day" | "status" | "harness" | "dataset" | "team" | "creator";
+
+// `key` is null for the UNSET bucket (no team, no creator) — the same "unset" bucket the list draws last.
+export interface ScorecardGroupCount {
+  key: string | null;
+  count: number;
+}
+
+// The bucket a batch falls under, as ONE function. The Postgres store necessarily says the same thing in SQL
+// (`GROUP_KEY_SQL`), which is the one place two spellings are unavoidable and therefore the one place a parity
+// test is owed; everything else — the in-memory store, every hand-written double — reads this, so a double
+// cannot answer a count that disagrees with its own `list`.
+// `day` is the UTC calendar day of the stored instant, which is exactly how the web keys a row for its day
+// grouping: a header computed in one timezone over rows bucketed in another disagrees with itself twice a day.
+export function scorecardGroupKey(record: ScorecardRecord, groupBy: ScorecardGroupBy): string | null {
+  switch (groupBy) {
+    case "day":
+      return record.createdAt.slice(0, 10);
+    case "status":
+      return record.status;
+    case "harness":
+      return record.harness.id;
+    case "dataset":
+      return record.dataset.id;
+    case "team":
+      return record.teamId ?? null;
+    case "creator":
+      return record.createdBy ?? null;
+  }
+}
+
+// Buckets with no rows are ABSENT, exactly as a SQL GROUP BY leaves them out — a caller that wants the empty
+// columns of a closed vocabulary stands them itself, and one grouping by an open axis must not be handed a
+// row per value that has none.
+export function countScorecardGroups(
+  records: readonly ScorecardRecord[],
+  groupBy: ScorecardGroupBy,
+): ScorecardGroupCount[] {
+  const counts = new Map<string | null, number>();
+  for (const record of records) {
+    const key = scorecardGroupKey(record, groupBy);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts].map(([key, count]) => ({ key, count }));
 }
 
 // The append-only ledgers' optimistic guard (arch-review 7 P1, I5): `scoring` and `gates` are written as
@@ -197,6 +269,16 @@ export interface ScorecardStore {
   ): Promise<ScorecardRecord | undefined>;
   get(id: string): Promise<ScorecardRecord | undefined>;
   list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]>;
+  // How many batches fall in each bucket of `groupBy`, under the SAME filter `list` takes — minus the paging
+  // fields, which describe a page rather than the set. A paged screen cannot count what it does not hold, and
+  // counting the rows it received reports the page size back to itself; this is where the true number comes
+  // from. Buckets with zero rows are absent (a GROUP BY produces no row for them) — the caller stands the
+  // empty columns of a CLOSED vocabulary itself, and must not stand one per absent value of an open axis.
+  countByGroup(
+    tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]>;
   // Hard delete (scorecards are result records, not versioned reproducibility artifacts — no tombstone).
   // Returns false when the id doesn't exist. Tenant scoping is the service's job (get-then-check, like cancel).
   delete(id: string): Promise<boolean>;

@@ -4,7 +4,13 @@ import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict
 import { beforeEach, describe, expect, it } from "vitest";
 import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
-import type { ScorecardListFilter, ScorecardStore } from "../ports/scorecard-store.js";
+import {
+  type ScorecardGroupBy,
+  type ScorecardGroupCount,
+  type ScorecardListFilter,
+  type ScorecardStore,
+  countScorecardGroups,
+} from "../ports/scorecard-store.js";
 import { IssueService } from "./issue-service.js";
 
 // Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
@@ -131,6 +137,15 @@ class FakeScorecardStore implements ScorecardStore {
   }
   async delete(): Promise<boolean> {
     return true;
+  }
+  // Counts the SAME rows this double's own `list` answers, through the one shared counter — a double that
+  // answered `[]` here while holding rows would disagree with itself.
+  async countByGroup(
+    tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]> {
+    return countScorecardGroups(await this.list(tenant, filter), groupBy);
   }
 }
 

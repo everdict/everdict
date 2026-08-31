@@ -86,6 +86,10 @@ function service(record: ScorecardRecord, datasets: DatasetRegistry, harnesses: 
     async list() {
       return [];
     },
+    // No rows, so no groups — the same answer its `list` gives, in the shape a GROUP BY has.
+    async countByGroup() {
+      return [];
+    },
     async delete() {
       return false;
     },
@@ -209,6 +213,10 @@ describeTrust("TRUST-94 — a lost dataset refuses the re-score instead of judgi
           return record;
         },
         async list() {
+          return [];
+        },
+        // No rows, so no groups — the same answer its `list` gives, in the shape a GROUP BY has.
+        async countByGroup() {
           return [];
         },
         async delete() {

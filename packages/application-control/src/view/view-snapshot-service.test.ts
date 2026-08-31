@@ -7,7 +7,13 @@ import {
   ViewSnapshotSchema,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import type { ScorecardListFilter, ScorecardStore } from "../ports/scorecard-store.js";
+import {
+  type ScorecardGroupBy,
+  type ScorecardGroupCount,
+  type ScorecardListFilter,
+  type ScorecardStore,
+  countScorecardGroups,
+} from "../ports/scorecard-store.js";
 import type { ViewStore } from "../ports/view-store.js";
 import type { FsFile, WorkspaceFs } from "../ports/workspace-fs.js";
 import { ViewSnapshotService } from "./view-snapshot-service.js";
@@ -51,6 +57,15 @@ class FakeScorecardStore implements ScorecardStore {
   }
   async delete(): Promise<boolean> {
     throw new Error("unused");
+  }
+  // Counts the SAME rows this double's own `list` answers, through the one shared counter — a double that
+  // answered `[]` here while holding rows would disagree with itself.
+  async countByGroup(
+    tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]> {
+    return countScorecardGroups(await this.list(tenant, filter), groupBy);
   }
 }
 

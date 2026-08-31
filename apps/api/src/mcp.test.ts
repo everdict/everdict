@@ -754,6 +754,7 @@ describe("MCP tools", () => {
       "comment_on_github_issue",
       "commit_github_files",
       "control_runtime",
+      "count_scorecards",
       "create_agent",
       "create_api_key",
       "create_dataset",

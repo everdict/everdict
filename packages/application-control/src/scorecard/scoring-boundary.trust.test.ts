@@ -2,7 +2,14 @@ import type { CaseResult, Dataset, ScorecardRecord, ScoringPass } from "@everdic
 import { describe, expect, it } from "vitest";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
-import type { ScorecardStore, ScorecardUpdateGuard } from "../ports/scorecard-store.js";
+import {
+  type ScorecardGroupBy,
+  type ScorecardGroupCount,
+  type ScorecardListFilter,
+  type ScorecardStore,
+  type ScorecardUpdateGuard,
+  countScorecardGroups,
+} from "../ports/scorecard-store.js";
 import { ScorecardService } from "./scorecard-service.js";
 
 // application-control cannot depend on @everdict/db (that would invert the cone) — a minimal port-shaped
@@ -36,6 +43,15 @@ class FakeScorecardStore implements ScorecardStore {
   }
   async delete(id: string): Promise<boolean> {
     return this.cards.delete(id);
+  }
+  // Counts the SAME rows this double's own `list` answers, through the one shared counter — a double that
+  // answered `[]` here while holding rows would disagree with itself.
+  async countByGroup(
+    _tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    _filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]> {
+    return countScorecardGroups(await this.list(), groupBy);
   }
 }
 

@@ -184,7 +184,15 @@ export {
 } from "./cancellation/cancellation-coordinator.js";
 export { openPhysicalAttempt, jobAttemptId, type PhysicalAttempt } from "./execution/open-physical-attempt.js";
 export type { ScheduleStore } from "./ports/schedule-store.js";
-export type { ScorecardListFilter, ScorecardStore, ScorecardUpdateGuard } from "./ports/scorecard-store.js";
+export {
+  countScorecardGroups,
+  scorecardGroupKey,
+  type ScorecardGroupBy,
+  type ScorecardGroupCount,
+  type ScorecardListFilter,
+  type ScorecardStore,
+  type ScorecardUpdateGuard,
+} from "./ports/scorecard-store.js";
 export {
   claimSupersedes,
   INITIAL_CLAIM,

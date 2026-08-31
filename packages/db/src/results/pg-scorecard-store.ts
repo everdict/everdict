@@ -1,5 +1,7 @@
 import type {
   OutboxEvent,
+  ScorecardGroupBy,
+  ScorecardGroupCount,
   ScorecardListFilter,
   ScorecardStore,
   ScorecardUpdateGuard,
@@ -547,66 +549,13 @@ export class PgScorecardStore implements ScorecardStore {
 
   async list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
     // Don't SELECT the heavy scorecard column (lighter list). Filters narrow via the SQL WHERE (leaderboard/trend).
-    const conds = ["($1::text IS NULL OR tenant = $1)"];
-    const vals: unknown[] = [tenant ?? null];
-    let i = 2;
-    if (filter?.dataset) {
-      conds.push(`dataset_id = $${i++}`);
-      vals.push(filter.dataset);
+    const { conds, vals, put } = scorecardFilterSql(tenant, filter);
+    // Keyset, not OFFSET: the row-value comparison matches the ORDER BY below exactly, so a page is "strictly
+    // older than the last row I showed" — stable while new batches land at the head, which is where they land.
+    if (filter?.before !== undefined) {
+      conds.push(`(created_at, id) < (${put(filter.before.createdAt)}::timestamptz, ${put(filter.before.id)})`);
     }
-    if (filter?.harness) {
-      conds.push(`harness_id = $${i++}`);
-      vals.push(filter.harness);
-    }
-    if (filter?.status) {
-      conds.push(`status = $${i++}`);
-      vals.push(filter.status);
-    }
-    if (filter?.teamId) {
-      conds.push(`team_id = $${i++}`);
-      vals.push(filter.teamId);
-    }
-    if (filter?.visibleTeams) {
-      // Ownership isolation — the caller may only see their own teams' batches. NULL (unowned: `_shared` seeds,
-      // rows from before the team axis) is everyone's, so it is kept rather than swept up by a team the caller
-      // does not happen to be on. An empty array is a real answer (on no team ⇒ only unowned), never "no filter".
-      conds.push(`(team_id IS NULL OR team_id = ANY($${i++}::text[]))`);
-      vals.push(filter.visibleTeams);
-    }
-    if (filter?.judge) {
-      // jsonb containment on the persisted orchestration.judges — matches the judge id at any version.
-      conds.push(`orchestration->'judges' @> $${i++}::jsonb`);
-      vals.push(JSON.stringify([{ id: filter.judge }]));
-    }
-    if (filter?.scheduleId) {
-      // jsonb field match on the persisted origin — the runs a schedule fired (source === "schedule").
-      conds.push(`origin->>'scheduleId' = $${i++}`);
-      vals.push(filter.scheduleId);
-    }
-    if (filter?.productId) {
-      // the product timeline's trend read (expression-indexed, mig 0138) — the batches a product's version
-      // imports fanned out, optionally narrowed to one watch series.
-      conds.push(`origin->>'productId' = $${i++}`);
-      vals.push(filter.productId);
-    }
-    if (filter?.seriesKey) {
-      conds.push(`origin->>'seriesKey' = $${i++}`);
-      vals.push(filter.seriesKey);
-    }
-    if (filter?.causedByRunId) {
-      // the batches a run caused (§5.5 cascade-cancel walk) — jsonb field match on the persisted origin.
-      conds.push(`origin->>'causedByRunId' = $${i++}`);
-      vals.push(filter.causedByRunId);
-    }
-    if (filter?.publicationPending === true) {
-      // the publication reconciler's sweep (mig 0187) — matches the partial index exactly, so it reads the
-      // owed settlements rather than the whole table.
-      conds.push("publication->>'state' = 'pending'");
-    }
-    if (filter?.kind) {
-      // "scorecard" = every pre-mig-0093 row too (NULL) — experiments are the positively-marked minority.
-      conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
-    }
+    const limit = filter?.limit === undefined ? "" : ` LIMIT ${put(Math.max(0, filter.limit))}`;
     const res = await this.client.query<ScorecardRow>(
       // owner_replica rides the LIST projection because boot recovery reads batches through list() and
       // decides on `ownerReplica` alone: omitted, every record reads unowned and a booting replica tombstones
@@ -616,9 +565,101 @@ export class PgScorecardStore implements ScorecardStore {
       `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, publication, owner_replica, owner_epoch, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
-       ORDER BY created_at DESC, id DESC`,
+       ORDER BY created_at DESC, id DESC${limit}`,
       vals,
     );
     return res.rows.map((row) => rowToRecord(row, false));
   }
+
+  async countByGroup(
+    tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]> {
+    // The page fields are deliberately NOT applied: a count is about the set, and one narrowed by the cursor
+    // would hand the caller back the page size it already knows.
+    const { conds, vals } = scorecardFilterSql(tenant, filter);
+    // The key expression comes from a fixed table keyed by a closed union — never interpolated from input.
+    const res = await this.client.query<{ key: string | null; count: string | number }>(
+      `SELECT ${GROUP_KEY_SQL[groupBy]} AS key, COUNT(*) AS count
+       FROM everdict_scorecards
+       WHERE ${conds.join(" AND ")}
+       GROUP BY 1`,
+      vals,
+    );
+    return res.rows.map((row) => ({ key: row.key ?? null, count: Number(row.count) }));
+  }
+}
+
+// The bucket expression per axis. A closed union indexes it, so nothing a caller sends reaches the SQL text.
+// `day` is the UTC calendar day of the stored instant — the same key the in-memory twin and the web derive,
+// so a group header cannot disagree with the rows under it.
+const GROUP_KEY_SQL: Record<ScorecardGroupBy, string> = {
+  day: "to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD')",
+  status: "status",
+  harness: "harness_id",
+  dataset: "dataset_id",
+  team: "team_id",
+  creator: "created_by",
+};
+
+// The ONE predicate `list` and `countByGroup` share. Written twice, the next facet would have been added to
+// one of them and the page would have disagreed with its own header (protocol L3). `put` appends a parameter
+// and answers its placeholder, so a caller can keep adding its own (the cursor, the limit) after the filter.
+function scorecardFilterSql(
+  tenant: string | undefined,
+  filter: ScorecardListFilter | undefined,
+): { conds: string[]; vals: unknown[]; put: (value: unknown) => string } {
+  const conds = ["($1::text IS NULL OR tenant = $1)"];
+  const vals: unknown[] = [tenant ?? null];
+  const put = (value: unknown): string => {
+    vals.push(value);
+    return `$${vals.length}`;
+  };
+  if (filter?.dataset) conds.push(`dataset_id = ${put(filter.dataset)}`);
+  if (filter?.harness) conds.push(`harness_id = ${put(filter.harness)}`);
+  if (filter?.status) conds.push(`status = ${put(filter.status)}`);
+  if (filter?.teamId) conds.push(`team_id = ${put(filter.teamId)}`);
+  if (filter?.visibleTeams) {
+    // Ownership isolation — the caller may only see their own teams' batches. NULL (unowned: `_shared` seeds,
+    // rows from before the team axis) is everyone's, so it is kept rather than swept up by a team the caller
+    // does not happen to be on. An empty array is a real answer (on no team ⇒ only unowned), never "no filter".
+    conds.push(`(team_id IS NULL OR team_id = ANY(${put(filter.visibleTeams)}::text[]))`);
+  }
+  // jsonb containment on the persisted orchestration.judges — matches the judge id at any version.
+  if (filter?.judge) conds.push(`orchestration->'judges' @> ${put(JSON.stringify([{ id: filter.judge }]))}::jsonb`);
+  // jsonb field match on the persisted origin — the runs a schedule fired (source === "schedule").
+  if (filter?.scheduleId) conds.push(`origin->>'scheduleId' = ${put(filter.scheduleId)}`);
+  // the product timeline's trend read (expression-indexed, mig 0138) — the batches a product's version
+  // imports fanned out, optionally narrowed to one watch series.
+  if (filter?.productId) conds.push(`origin->>'productId' = ${put(filter.productId)}`);
+  if (filter?.seriesKey) conds.push(`origin->>'seriesKey' = ${put(filter.seriesKey)}`);
+  // the batches a run caused (§5.5 cascade-cancel walk) — jsonb field match on the persisted origin.
+  if (filter?.causedByRunId) conds.push(`origin->>'causedByRunId' = ${put(filter.causedByRunId)}`);
+  if (filter?.publicationPending === true) {
+    // the publication reconciler's sweep (mig 0187) — matches the partial index exactly, so it reads the
+    // owed settlements rather than the whole table.
+    conds.push("publication->>'state' = 'pending'");
+  }
+  if (filter?.kind) {
+    // "scorecard" = every pre-mig-0093 row too (NULL) — experiments are the positively-marked minority.
+    conds.push(filter.kind === "experiment" ? "kind = 'experiment'" : "(kind IS NULL OR kind <> 'experiment')");
+  }
+  if (filter?.runtime) conds.push(`runtime = ${put(filter.runtime)}`);
+  if (filter?.createdBy) conds.push(`created_by = ${put(filter.createdBy)}`);
+  if (filter?.day) {
+    // A half-open UTC range rather than a cast on the column: this one can use
+    // `everdict_scorecards_tenant_created_idx`, and `(created_at)::date` cannot.
+    const from = put(`${filter.day}T00:00:00Z`);
+    conds.push(`created_at >= ${from}::timestamptz AND created_at < ${from}::timestamptz + interval '1 day'`);
+  }
+  if (filter?.search) {
+    // `strpos` over lowercased text rather than ILIKE: the needle is user input and would otherwise need its
+    // LIKE metacharacters escaped — a `%` typed in the search box must find a percent sign, not everything.
+    const needle = put(filter.search.toLowerCase());
+    conds.push(
+      `(strpos(lower(id), ${needle}) > 0 OR strpos(lower(harness_id), ${needle}) > 0 OR strpos(lower(dataset_id), ${needle}) > 0)`,
+    );
+  }
+  return { conds, vals, put };
 }

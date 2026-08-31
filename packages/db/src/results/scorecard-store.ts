@@ -2,12 +2,15 @@ import { SCORING_PASS_STALE_MS } from "@everdict/contracts";
 import type { PublicationOperation, ScorecardRecord } from "@everdict/contracts";
 import { ScorecardBatch } from "@everdict/domain";
 
-import type {
-  OutboxEvent,
-  PlatformEventStore,
-  ScorecardListFilter,
-  ScorecardStore,
-  ScorecardUpdateGuard,
+import {
+  type OutboxEvent,
+  type PlatformEventStore,
+  type ScorecardGroupBy,
+  type ScorecardGroupCount,
+  type ScorecardListFilter,
+  type ScorecardStore,
+  type ScorecardUpdateGuard,
+  countScorecardGroups,
 } from "@everdict/application-control";
 
 export class InMemoryScorecardStore implements ScorecardStore {
@@ -162,26 +165,81 @@ export class InMemoryScorecardStore implements ScorecardStore {
   }
 
   async list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
-    const all = [...this.cards.values()]
-      .filter((c) => !tenant || c.tenant === tenant)
-      .filter((c) => !filter?.dataset || c.dataset.id === filter.dataset)
-      .filter((c) => !filter?.harness || c.harness.id === filter.harness)
-      .filter((c) => !filter?.status || c.status === filter.status)
-      .filter((c) => !filter?.teamId || c.teamId === filter.teamId)
-      // Ownership ceiling — another team's batch is not visible at all; an unowned one is the workspace's.
-      .filter((c) => !filter?.visibleTeams || c.teamId === undefined || filter.visibleTeams.includes(c.teamId))
-      .filter((c) => !filter?.judge || (c.orchestration?.judges ?? []).some((j) => j.id === filter.judge))
-      .filter((c) => !filter?.scheduleId || c.origin?.scheduleId === filter.scheduleId)
-      .filter((c) => !filter?.productId || c.origin?.productId === filter.productId)
-      .filter((c) => !filter?.seriesKey || c.origin?.seriesKey === filter.seriesKey)
-      .filter((c) => !filter?.causedByRunId || c.origin?.causedByRunId === filter.causedByRunId)
-      // The publication reconciler's sweep (mig 0187) — settlements whose outward effects are still owed.
-      .filter((c) => filter?.publicationPending !== true || c.publication?.state === "pending")
-      // kind filter (P1): "scorecard" also matches every pre-field record (kind unset = scorecard).
-      .filter(
-        (c) => !filter?.kind || (filter.kind === "experiment" ? c.kind === "experiment" : c.kind !== "experiment"),
-      );
+    // The ORDER is part of the contract, not a convenience: the Postgres twin has always answered
+    // `created_at DESC, id DESC`, a keyset cursor is defined against that ordering, and a twin that returned
+    // insertion order would page correctly in production and nonsensically in every unit test.
+    const matched = [...this.cards.values()].filter((c) => matchesScorecardFilter(c, tenant, filter)).sort(newestFirst);
+    const before = filter?.before;
+    const page = before === undefined ? matched : matched.filter((c) => isBefore(c, before));
+    const bounded = filter?.limit === undefined ? page : page.slice(0, Math.max(0, filter.limit));
     // List omits the heavy scorecard/steps + detail-only runIds/export/analysisRef (summary/models only) — get the detail via get.
-    return all.map(({ scorecard, steps, runIds, export: _export, analysisRef, ...rest }) => rest);
+    return bounded.map(({ scorecard, steps, runIds, export: _export, analysisRef, ...rest }) => rest);
   }
+
+  async countByGroup(
+    tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]> {
+    // Counts describe the SET, so the page fields are deliberately not applied here — a count narrowed by the
+    // cursor would report the page back to the caller, which is the number it already has.
+    return countScorecardGroups(
+      [...this.cards.values()].filter((c) => matchesScorecardFilter(c, tenant, filter)),
+      groupBy,
+    );
+  }
+}
+
+// The ONE predicate `list` and `countByGroup` share. Written twice, the next facet would have been added to
+// one of them and the page would have disagreed with its own header (protocol L3).
+function matchesScorecardFilter(
+  c: ScorecardRecord,
+  tenant: string | undefined,
+  filter: ScorecardListFilter | undefined,
+): boolean {
+  if (tenant !== undefined && c.tenant !== tenant) return false;
+  if (filter === undefined) return true;
+  if (filter.dataset !== undefined && c.dataset.id !== filter.dataset) return false;
+  if (filter.harness !== undefined && c.harness.id !== filter.harness) return false;
+  if (filter.status !== undefined && c.status !== filter.status) return false;
+  if (filter.teamId !== undefined && c.teamId !== filter.teamId) return false;
+  // Ownership ceiling — another team's batch is not visible at all; an unowned one is the workspace's.
+  if (filter.visibleTeams !== undefined && c.teamId !== undefined && !filter.visibleTeams.includes(c.teamId))
+    return false;
+  if (filter.judge !== undefined && !(c.orchestration?.judges ?? []).some((j) => j.id === filter.judge)) return false;
+  if (filter.scheduleId !== undefined && c.origin?.scheduleId !== filter.scheduleId) return false;
+  if (filter.productId !== undefined && c.origin?.productId !== filter.productId) return false;
+  if (filter.seriesKey !== undefined && c.origin?.seriesKey !== filter.seriesKey) return false;
+  if (filter.causedByRunId !== undefined && c.origin?.causedByRunId !== filter.causedByRunId) return false;
+  // The publication reconciler's sweep (mig 0187) — settlements whose outward effects are still owed.
+  if (filter.publicationPending === true && c.publication?.state !== "pending") return false;
+  // kind filter (P1): "scorecard" also matches every pre-field record (kind unset = scorecard).
+  if (filter.kind !== undefined && (filter.kind === "experiment" ? c.kind !== "experiment" : c.kind === "experiment"))
+    return false;
+  if (filter.runtime !== undefined && c.runtime !== filter.runtime) return false;
+  if (filter.createdBy !== undefined && c.createdBy !== filter.createdBy) return false;
+  if (filter.day !== undefined && c.createdAt.slice(0, 10) !== filter.day) return false;
+  if (filter.search !== undefined && filter.search !== "" && !matchesSearch(c, filter.search)) return false;
+  return true;
+}
+
+// What the list SEARCHES — the batch id and the two capability ids it names, case-insensitively. The same
+// text the in-browser search swept while the whole collection was in hand.
+function matchesSearch(c: ScorecardRecord, search: string): boolean {
+  const needle = search.toLowerCase();
+  return `${c.id} ${c.harness.id} ${c.dataset.id}`.toLowerCase().includes(needle);
+}
+
+// Newest first, the id breaking the tie so the ordering is TOTAL — a keyset cursor over a non-total order
+// either repeats a row or skips one at every page boundary where two batches share a timestamp.
+function newestFirst(a: ScorecardRecord, b: ScorecardRecord): number {
+  const byTime = b.createdAt.localeCompare(a.createdAt);
+  return byTime !== 0 ? byTime : b.id.localeCompare(a.id);
+}
+
+// Strictly older than the cursor row IN THAT ordering (the row-value comparison the Pg twin writes as
+// `(created_at, id) < ($ts, $id)`).
+function isBefore(c: ScorecardRecord, cursor: { createdAt: string; id: string }): boolean {
+  if (c.createdAt !== cursor.createdAt) return c.createdAt < cursor.createdAt;
+  return c.id < cursor.id;
 }

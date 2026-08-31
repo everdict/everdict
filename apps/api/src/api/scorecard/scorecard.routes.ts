@@ -17,6 +17,13 @@ import {
 import { MoveToTeamBodySchema } from "../team-move.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { GateScorecardsBodySchema, OverrideGateBodySchema } from "./request/gate-scorecards.js";
+import {
+  type ListScorecardsQuery,
+  ScorecardCountsQuerySchema,
+  ScorecardPageQuerySchema,
+  scorecardFilterOf,
+  scorecardPageOf,
+} from "./request/list-scorecards.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";
@@ -333,44 +340,55 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  app.get<{ Querystring: { judge?: string; schedule?: string; dataset?: string; harness?: string; team?: string } }>(
-    "/scorecards",
-    { schema: scorecardDocs.list },
-    async (req, reply) => {
-      if (!deps.scorecardService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
-      const principal = await resolvePrincipal(req, reply, deps);
-      if (!principal) return reply;
-      try {
-        gate(principal, "scorecards:read");
-        const { judge, schedule, dataset, harness, team } = req.query;
-        // Mutually-exclusive detail-history narrows: ?schedule= (schedule's run history) | ?judge= (judge's eval history).
-        // ?dataset=/?harness= are the combinable capability narrows (the store has always supported them) — they
-        // answer "what has this capability been evaluated on", which the tracker's issue history is built from and
-        // the web previously reconstructed by grouping the whole workspace list client-side.
-        const narrow = schedule
-          ? { scheduleId: schedule }
-          : judge
-            ? { judge }
-            : dataset !== undefined || harness !== undefined
-              ? { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }
-              : undefined;
-        // ?team= COMBINES with the narrows above rather than replacing them — it answers "of these, which are
-        // ours", which is the question the team sidebar asks. Named by id or by key (`?team=ENG`), the same ref
-        // the team-scoped URL carries. It is a NARROW, and `visibleTeams` below is the separate CEILING: naming a
-        // team you are not on returns nothing rather than that team's work.
-        const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-        const filter = {
-          ...(narrow ?? {}),
-          ...(teamId !== undefined ? { teamId } : {}),
-          ...(await teamCeiling(deps, principal)),
-        };
-        return reply.send((await deps.scorecardService.list(principal.workspace, filter)).map(serveScorecardListItem));
-      } catch (err) {
-        return sendError(reply, err);
-      }
-    },
-  );
+  app.get("/scorecards", { schema: scorecardDocs.list }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const query = ScorecardPageQuerySchema.safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    try {
+      gate(principal, "scorecards:read");
+      const scope = await scorecardScopeOf(query.data, principal, deps);
+      // The page's bounds are OPTIONAL: without them this answers the whole collection, exactly as it always
+      // did, so no existing caller changes behaviour. With them it answers the newest `limit` rows older than
+      // the cursor — see the query schema for why the cursor is the last row rather than an opaque token.
+      const filter = { ...scorecardFilterOf(query.data, scope), ...scorecardPageOf(query.data) };
+      return reply.send((await deps.scorecardService.list(principal.workspace, filter)).map(serveScorecardListItem));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // How many batches are in each bucket, under the SAME filter the list takes. A paged screen cannot get
+  // these from its own rows — counting what it received only reports the page size back — so the headers of a
+  // grouped list, and its total, come from here. Static path: declared before /scorecards/:id.
+  app.get("/scorecards/counts", { schema: scorecardDocs.counts }, async (req, reply) => {
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const query = ScorecardCountsQuerySchema.safeParse(req.query);
+    if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
+    try {
+      gate(principal, "scorecards:read");
+      const scope = await scorecardScopeOf(query.data, principal, deps);
+      const groups = await deps.scorecardService.countByGroup(
+        principal.workspace,
+        query.data.groupBy,
+        scorecardFilterOf(query.data, scope),
+      );
+      return reply.send({
+        groupBy: query.data.groupBy,
+        groups,
+        // Summed from the same groups rather than counted again: two statements answering one question is
+        // how a total comes to disagree with the headers under it.
+        total: groups.reduce((sum, group) => sum + group.count, 0),
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   // baseline vs candidate comparison (regressions/improvements). Static path → matched before :id. Both must be this workspace's and completed.
   // Cost/time preflight — history-based estimate for a dataset×harness batch ("what will it cost / how long").
@@ -704,4 +722,19 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       }
     },
   );
+}
+
+// The two team narrows, resolved once for both doors. `?team=` is the NARROW ("of the ones I can see, this
+// team's", named by id or key); `visibleTeams` is the separate CEILING every read stays under — naming a team
+// you are not on returns nothing rather than that team's work.
+async function scorecardScopeOf(
+  query: ListScorecardsQuery,
+  principal: Principal,
+  deps: ServerDeps,
+): Promise<{ teamId?: string; visibleTeams?: string[] }> {
+  const teamId = query.team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, query.team);
+  return {
+    ...(teamId !== undefined ? { teamId } : {}),
+    ...(await teamCeiling(deps, principal)),
+  };
 }

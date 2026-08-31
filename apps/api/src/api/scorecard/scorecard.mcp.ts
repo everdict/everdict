@@ -1,5 +1,5 @@
 import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
-import { NotFoundError } from "@everdict/contracts";
+import { NotFoundError, type ScorecardStatus, ScorecardStatusSchema } from "@everdict/contracts";
 import { type Action, authorize, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
 import { moveToolDescription } from "../team-move.js";
 import { AnalysisDimensionSchema } from "./request/analysis-query.js";
+import { ScorecardGroupBySchema, scorecardFilterOf, scorecardPageOf } from "./request/list-scorecards.js";
 import { serveScorecard, serveScorecardListItem } from "./serve.js";
 
 // The owning team a JSON body names, if any. The shared body schemas do not carry `teamId` (it is transport
@@ -339,42 +340,113 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       ({ id }) => plain(async () => ok(await scorecards.delete({ principal, id }))),
     );
 
+    // The narrow both scorecard reads share. Written once for the same reason the HTTP doors share
+    // `scorecardFilterOf`: a page and the counts over it must be narrowed identically, or the header
+    // contradicts the rows beneath it.
+    const scorecardNarrow = async (input: {
+      judge?: string;
+      schedule?: string;
+      dataset?: string;
+      harness?: string;
+      team?: string;
+      status?: ScorecardStatus;
+      runtime?: string;
+      creator?: string;
+      day?: string;
+      q?: string;
+    }) => ({
+      ...scorecardFilterOf(
+        {
+          ...(input.judge !== undefined ? { judge: input.judge } : {}),
+          ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
+          ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
+          ...(input.harness !== undefined ? { harness: input.harness } : {}),
+          ...(input.status !== undefined ? { status: input.status } : {}),
+          ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+          ...(input.creator !== undefined ? { creator: input.creator } : {}),
+          ...(input.day !== undefined ? { day: input.day } : {}),
+          ...(input.q !== undefined ? { q: input.q } : {}),
+        },
+        {
+          // `team` COMBINES with the narrows above rather than replacing them — "of these, which are ours".
+          ...(input.team !== undefined ? { teamId: await resolveTeam(ctx, input.team) } : {}),
+          // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
+          // person's teams and no more. The narrow above never reaches past this ceiling.
+          ...(await teamCeiling(ctx.deps, principal)),
+        },
+      ),
+    });
+
     server.registerTool(
       "list_scorecards",
       {
         annotations: { readOnlyHint: true },
         description:
-          "This workspace's scorecards (summary only — excludes heavy per-case results). Each row carries the " +
-          "served `headlinePassRate` (authority-ranked) — read it instead of re-deriving a representative from " +
-          "summary order. Narrow by dataset or harness to see what a capability has been evaluated on over time " +
-          "— that is the comparison to make before claiming something regressed.",
+          "This workspace's scorecards (summary only — excludes heavy per-case results), newest first. Each row " +
+          "carries the served `headlinePassRate` (authority-ranked) — read it instead of re-deriving a " +
+          "representative from summary order. Narrow by dataset or harness to see what a capability has been " +
+          "evaluated on over time — that is the comparison to make before claiming something regressed. " +
+          "A scorecard is filed by every CI run, so this collection only grows: pass `limit` to take a page, " +
+          "and continue it with the LAST ROW YOU READ (`beforeCreatedAt` + `beforeId`, both or neither — the " +
+          "ordering is total only with the id). For the totals a page cannot know, call count_scorecards under " +
+          "the same narrows. HTTP parity (GET /scorecards).",
         inputSchema: {
           judge: z.string().optional().describe("narrow to batches that applied this Agent Judge (any version)"),
           schedule: z.string().optional().describe("narrow to the runs a schedule fired (its run history)"),
           dataset: z.string().optional().describe("narrow to batches run on this dataset (any version)"),
           harness: z.string().optional().describe("narrow to batches run with this harness (any version)"),
           team: z.string().optional().describe('narrow to one team\'s batches — id or key ("ENG")'),
+          status: ScorecardStatusSchema.optional().describe("narrow to one batch status"),
+          runtime: z.string().optional().describe("narrow to the runtime the batch ran on"),
+          creator: z.string().optional().describe("narrow to the submitter (subject)"),
+          day: z.string().optional().describe("one UTC calendar day, YYYY-MM-DD"),
+          q: z.string().optional().describe("free text over the batch id and the dataset/harness ids it names"),
+          limit: z.number().int().positive().max(200).optional().describe("page size; absent = every match"),
+          beforeCreatedAt: z.string().optional().describe("cursor: the last read row's createdAt"),
+          beforeId: z.string().optional().describe("cursor: the last read row's id (required with the above)"),
         },
       },
-      ({ judge, schedule, dataset, harness, team }) =>
+      (input) =>
         run(principal, "scorecards:read", async () =>
           ok(
-            (
-              await scorecards.list(ws, {
-                ...(schedule
-                  ? { scheduleId: schedule }
-                  : judge
-                    ? { judge }
-                    : { ...(dataset !== undefined ? { dataset } : {}), ...(harness !== undefined ? { harness } : {}) }),
-                // `team` COMBINES with the narrows above rather than replacing them — "of these, which are ours".
-                ...(team !== undefined ? { teamId: await resolveTeam(ctx, team) } : {}),
-                // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-                // person's teams and no more. The narrow above never reaches past this ceiling.
-                ...(await teamCeiling(ctx.deps, principal)),
-              })
-            ).map(serveScorecardListItem), // BFF parity — the ranked headline rides the MCP list too
+            (await scorecards.list(ws, { ...(await scorecardNarrow(input)), ...scorecardPageOf(input) })).map(
+              serveScorecardListItem, // BFF parity — the ranked headline rides the MCP list too
+            ),
           ),
         ),
+    );
+
+    server.registerTool(
+      "count_scorecards",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "How many batches fall in each bucket under the SAME narrows list_scorecards takes — 'how much has " +
+          "run, and where' without reading the rows. `groupBy` is day | status | harness | dataset | team | " +
+          "creator; `day` is the stored instant's UTC calendar day. Buckets with no rows are absent and " +
+          "`key: null` is the unset bucket (no team, no creator). Counting a PAGE's rows would only report the " +
+          "page size back, which is why this exists. HTTP parity (GET /scorecards/counts).",
+        inputSchema: {
+          groupBy: ScorecardGroupBySchema.describe("day | status | harness | dataset | team | creator"),
+          judge: z.string().optional(),
+          schedule: z.string().optional(),
+          dataset: z.string().optional(),
+          harness: z.string().optional(),
+          team: z.string().optional().describe('narrow to one team\'s batches — id or key ("ENG")'),
+          status: ScorecardStatusSchema.optional(),
+          runtime: z.string().optional(),
+          creator: z.string().optional(),
+          day: z.string().optional(),
+          q: z.string().optional(),
+        },
+      },
+      ({ groupBy, ...input }) =>
+        run(principal, "scorecards:read", async () => {
+          const groups = await scorecards.countByGroup(ws, groupBy, await scorecardNarrow(input));
+          // Summed from the same groups rather than counted again — two answers to one question is how a
+          // total comes to disagree with the headers under it.
+          return ok({ groupBy, groups, total: groups.reduce((sum, group) => sum + group.count, 0) });
+        }),
     );
 
     server.registerTool(

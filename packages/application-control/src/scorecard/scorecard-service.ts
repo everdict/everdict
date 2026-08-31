@@ -71,7 +71,7 @@ import { stampFacts } from "../platform-event/outbox.js";
 import { refreshSnapshotRefs } from "../ports/artifact-store.js";
 import type { CancellationCertificate, CancellationTarget } from "../ports/cancellation-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
-import type { ScorecardListFilter } from "../ports/scorecard-store.js";
+import type { ScorecardGroupBy, ScorecardGroupCount, ScorecardListFilter } from "../ports/scorecard-store.js";
 import type { JudgmentClaim } from "../ports/scoring-stage-store.js";
 import { settleRun, settleScorecard } from "../ports/settle.js";
 import { assertRuntimeTarget } from "../require-runtime/require-runtime.js";
@@ -1719,6 +1719,17 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
 
   list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
     return this.deps.store.list(tenant, filter);
+  }
+
+  // How many batches fall in each bucket, under the SAME narrow `list` takes. A screen that reads a page
+  // cannot count what it does not hold, and counting the rows it received reports the page size back to
+  // itself — so the number comes from here, computed over the set.
+  countByGroup(
+    tenant: string | undefined,
+    groupBy: ScorecardGroupBy,
+    filter?: ScorecardListFilter,
+  ): Promise<ScorecardGroupCount[]> {
+    return this.deps.store.countByGroup(tenant, groupBy, filter);
   }
 
   // Cost/time preflight — "what will this batch cost, and how long will it run?" answered from HISTORY: the per-case
