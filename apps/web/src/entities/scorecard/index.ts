@@ -42,6 +42,7 @@ export {
   SCORECARD_ORDERS,
   scorecardListSpec,
 } from './model/list-view'
+export { toScorecardRow, type ScorecardRow } from './model/list-row'
 export {
   CASE_FACETS,
   CASE_GROUPINGS,

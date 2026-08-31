@@ -2,7 +2,7 @@ import { NextIntlClientProvider } from 'next-intl'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 
-import { scorecardsSchema, type ScorecardRecord } from '@/entities/scorecard'
+import { scorecardsSchema, toScorecardRow, type ScorecardRow } from '@/entities/scorecard'
 import type { ListViewScope } from '@/shared/lib/load-list-view'
 
 import en from '../../../../messages/en.json'
@@ -30,9 +30,11 @@ const record = (i: number): unknown => ({
   updatedAt: new Date(Date.UTC(2026, 7, i % 2 === 0 ? 1 : 2, 0, 14, i % 60)).toISOString(),
 })
 
-const scorecards: ScorecardRecord[] = scorecardsSchema.parse(
-  Array.from({ length: N }, (_, i) => record(i))
-)
+// Through the real projection the server component uses — a fixture built by hand would assert against a
+// shape no production path emits.
+const scorecards: ScorecardRow[] = scorecardsSchema
+  .parse(Array.from({ length: N }, (_, i) => record(i)))
+  .map(toScorecardRow)
 
 const scope: ListViewScope = {
   basePath: '/acme/scorecards',

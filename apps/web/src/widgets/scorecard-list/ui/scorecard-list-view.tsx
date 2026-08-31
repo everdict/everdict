@@ -8,6 +8,7 @@ import {
   SCORECARD_GROUPINGS,
   SCORECARD_ORDERS,
   scorecardsSchema,
+  toScorecardRow,
 } from '@/entities/scorecard'
 import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
@@ -117,7 +118,7 @@ export async function ScorecardListView({
       ) : (
         <ScorecardList
           workspace={workspace}
-          scorecards={scorecards}
+          scorecards={scorecards.map(toScorecardRow)}
           authors={authors}
           runnerLabels={runnerLabels}
           teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}

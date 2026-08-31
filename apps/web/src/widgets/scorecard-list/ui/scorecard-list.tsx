@@ -13,7 +13,7 @@ import {
   SCORECARD_ORDERS,
   scorecardListSpec,
   TRACE_EVAL_REF,
-  type ScorecardRecord,
+  type ScorecardRow,
 } from '@/entities/scorecard'
 import {
   fmtDateHeading,
@@ -66,7 +66,7 @@ type ListRow =
       count: number
       collapsed: boolean
     }
-  | { kind: 'card'; key: string; item: ScorecardRecord }
+  | { kind: 'card'; key: string; item: ScorecardRow }
 
 type Author = { name: string; avatarUrl?: string }
 type TeamOption = { id: string; key: string; name: string }
@@ -102,7 +102,7 @@ export function ScorecardList({
   viewer,
 }: {
   workspace: string
-  scorecards: ScorecardRecord[]
+  scorecards: ScorecardRow[]
   authors: Record<string, Author>
   teams: TeamOption[]
   scope: ListViewScope
@@ -240,7 +240,7 @@ export function ScorecardList({
   }, [scorecards, teamName, runnerLabels, list, t, authors])
 
   // Row-level delete gating — terminal batches only (a live one must be stopped first, same as the detail page).
-  const canDeleteRow = (s: ScorecardRecord) =>
+  const canDeleteRow = (s: ScorecardRow) =>
     s.status !== 'queued' &&
     s.status !== 'running' &&
     (viewer.admin || (s.createdBy !== undefined && s.createdBy === viewer.subject))
@@ -278,7 +278,7 @@ export function ScorecardList({
   // 화면에 실제로 서 있는 순서 그대로 — shift 범위 선택과 「보이는 것 전체」가 이 순서를 읽는다.
   const visible = useMemo(() => groups.flatMap((group) => group.items), [groups])
 
-  function groupLabel(key: string | null, items: ScorecardRecord[]): string {
+  function groupLabel(key: string | null, items: ScorecardRow[]): string {
     if (key === null) return list(`unset.${view.display.grouping}`)
     switch (view.display.grouping) {
       case 'day':
@@ -395,7 +395,7 @@ export function ScorecardList({
   const byId = useMemo(() => new Map(scorecards.map((s) => [s.id, s])), [scorecards])
   const selectedTargets = [...selected]
     .map((id) => byId.get(id))
-    .filter((s): s is ScorecardRecord => s !== undefined)
+    .filter((s): s is ScorecardRow => s !== undefined)
 
   // Keep the floating action bar centered over the eval (left) content region, not the full viewport. The bar is
   // portaled to <body> and `fixed`, so `inset-x-0` would center it across the whole screen — when the infra split
@@ -570,7 +570,7 @@ const ScorecardRow = memo(function ScorecardRow({
   selectionMode,
   onToggle,
 }: {
-  s: ScorecardRecord
+  s: ScorecardRow
   workspace: string
   byDay: boolean
   authors: Record<string, Author>
@@ -589,9 +589,8 @@ const ScorecardRow = memo(function ScorecardRow({
   const known = s.createdBy !== undefined
   const profile = s.createdBy !== undefined ? authors[s.createdBy] : undefined
   const authorName = profile?.name ?? (s.createdBy !== undefined ? fmtSubject(s.createdBy) : '—')
-  const metrics = s.summary ?? []
-  const shownMetrics = metrics.slice(0, 3) // keep the card format — top 3 only, the rest as +N
-  const judges = s.judgeModels ?? []
+  const shownMetrics = s.metrics // the card format — the first three, the rest as +N
+  const hiddenMetrics = s.metricNames.length - shownMetrics.length
   // Runtime the batch ran on (self-hosted names resolved to device labels); unset on legacy·ingest rows.
   const runtimeText = s.runtime
     ? runtimeChipLabel(s.runtime, {
@@ -670,9 +669,9 @@ const ScorecardRow = memo(function ScorecardRow({
                 <Telescope className="size-3" />
                 {t('traceEvaluation')}
               </span>
-              {s.models?.primary ? (
+              {s.model ? (
                 <span className="hidden shrink-0 sm:inline-flex">
-                  <ModelChip>{s.models.primary}</ModelChip>
+                  <ModelChip>{s.model}</ModelChip>
                 </span>
               ) : null}
             </div>
@@ -692,9 +691,9 @@ const ScorecardRow = memo(function ScorecardRow({
                 <span className="truncate">
                   <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
                 </span>
-                {s.models?.primary ? (
+                {s.model ? (
                   <span className="hidden shrink-0 sm:inline-flex">
-                    <ModelChip>{s.models.primary}</ModelChip>
+                    <ModelChip>{s.model}</ModelChip>
                   </span>
                 ) : null}
                 {s.origin ? (
@@ -719,7 +718,7 @@ const ScorecardRow = memo(function ScorecardRow({
                     mean={m.mean}
                     passRate={m.passRate}
                     unmeasured={m.unmeasured}
-                    siblings={metrics.map((x) => x.metric)}
+                    siblings={s.metricNames}
                   />
                 </span>
               ))
@@ -728,17 +727,15 @@ const ScorecardRow = memo(function ScorecardRow({
                 {s.status === 'failed' ? t('noAggregate') : t('pendingAggregate')}
               </span>
             )}
-            {metrics.length > shownMetrics.length && (
-              <span className="shrink-0 text-[11px] text-faint">
-                +{metrics.length - shownMetrics.length}
-              </span>
+            {hiddenMetrics > 0 && (
+              <span className="shrink-0 text-[11px] text-faint">+{hiddenMetrics}</span>
             )}
-            {judges.length > 0 && (
+            {s.judgeModel !== undefined && (
               <span className="ml-1 hidden shrink-0 items-center gap-1 lg:inline-flex">
                 <span className="text-[10px] uppercase tracking-wide text-faint">judge</span>
-                <ModelChip muted>{judges[0]}</ModelChip>
-                {judges.length > 1 && (
-                  <span className="text-[11px] text-faint">+{judges.length - 1}</span>
+                <ModelChip muted>{s.judgeModel}</ModelChip>
+                {s.judgeModelCount > 1 && (
+                  <span className="text-[11px] text-faint">+{s.judgeModelCount - 1}</span>
                 )}
               </span>
             )}

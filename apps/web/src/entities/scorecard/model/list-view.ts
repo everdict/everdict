@@ -1,6 +1,6 @@
 import type { ListDisplay, ListViewSpec } from '@/shared/lib/list-view'
 
-import type { ScorecardRecord } from './schema'
+import type { ScorecardRow } from './list-row'
 
 // 배치 평가 목록의 어휘. 다른 셋과 다른 점이 둘 있다.
 //
@@ -32,11 +32,11 @@ export const DEFAULT_SCORECARD_DISPLAY: ListDisplay = { grouping: 'day', order: 
 const STATUS_ORDER = ['running', 'queued', 'failed', 'succeeded', 'cancelled', 'superseded']
 
 // 그 배치가 돈 날(로컬 달력 날짜가 아니라 ISO 날짜) — 묶기 전용 키다.
-function dayOf(record: ScorecardRecord): string {
+function dayOf(record: ScorecardRow): string {
   return record.createdAt.slice(0, 10)
 }
 
-export const scorecardListSpec: ListViewSpec<ScorecardRecord> = {
+export const scorecardListSpec: ListViewSpec<ScorecardRow> = {
   facetValues: (record, facet) => {
     switch (facet) {
       case 'team':

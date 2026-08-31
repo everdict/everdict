@@ -414,11 +414,22 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   elements, so the scorecards list at 1000 batches measured 128,490 elements and **8.69MB of HTML built from
   1MB of data**, 2.2s of render before anything could paint — and every keystroke re-created it. Windowed,
   the same screen is ~2,000 elements and 0.14MB *at any n* (the numbers are locked by
-  `widgets/scorecard-list/ui/scorecard-list.test.tsx`). **The payload is the other**: the case list used to
-  ship each case's full task body, every score's judge rationale, the whole error text and a base64
-  screenshot — none of which a ROW draws, all of it multiplied by the case count — so the serialized row now
-  carries a SUMMARY LINE (`taskSummary` / `errorSummary`) and the evidence is fetched for the ONE case a
-  dialog opened (`widgets/scorecard-cases/api/case-detail.ts`, the same door the trace already went through).
+  `widgets/scorecard-list/ui/scorecard-list.test.tsx`). **The payload is the other, and it is invisible in
+  the markup**: a client island's props are serialized into the page a SECOND time as flight data, so every
+  field of every record handed to it ships whether or not a pixel of it is drawn. The case list used to send
+  each case's full task body, every score's judge rationale, the whole error text and a base64 screenshot —
+  so the serialized row now carries a SUMMARY LINE (`taskSummary` / `errorSummary`) and the evidence is
+  fetched for the ONE case a dialog opened (`widgets/scorecard-cases/api/case-detail.ts`, the same door the
+  trace already went through). The scorecards list sends a PROJECTION for the same reason
+  (`entities/scorecard/model/list-row.ts` — `toScorecardRow`, guarded by its own test): a completed
+  CI-triggered batch is ~1.8KB and ~4KB when it ran a subset (`subset.ids` names every case), against ~0.9KB
+  the card reads — the rest being `models.observed`, every metric past the third, `verdictPolicy`, `tenant`,
+  `requested`. **A list-row type is the right place for that rule**: a row carries what a row draws, plus what
+  deciding which rows to draw needs (the facet axes, the search text, the delete gate), and the resource's
+  `ListViewSpec` is typed on the ROW so the two cannot drift.
+  ⚠ Scope this to collections that GROW: the four eval lists look alike, but harness · dataset · judge are
+  registries a human authors (dozens), while a scorecard is an EVENT a CI run files (thousands). Only the
+  event collection needed either treatment.
   The window has ONE rule: a row's real height equals the declared `heightOf`, because the spacers are
   computed from that number. A row that wraps desyncs the scroll — which is why these rows pin their height
   (`style={{height}}` + `overflow-hidden`, each line `h-5`, badges capped with a `+k`) rather than letting
