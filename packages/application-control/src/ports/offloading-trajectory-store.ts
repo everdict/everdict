@@ -387,13 +387,20 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // So the record is resolved first and the projection is redone from it, with the plane's own batch facts
     // (carried on the page for exactly this) so the re-projection is the whole-plane one and not the page's.
     if (result.page.spans !== undefined) {
-      const spans = await Promise.all(result.page.spans.map((span) => this.resolveSpan(span, tenant, runId)));
+      // Under the SAME budget as the events branch below, and by the same function — a spans page's
+      // attribute bags are the shape that carries whole completions, so this is the branch where fetching
+      // first and counting after costs the most. See `resolveBudgeted`.
+      const start = clampWindow(window).after;
+      const spans = await this.resolveBudgeted(result.page.spans, (span) => this.resolveSpan(span, tenant, runId));
       return {
         kind: "page",
         page: {
           ...result.page,
-          spans,
-          events: spansToEvents(spans, result.page.batch !== undefined ? { batch: result.page.batch } : {}),
+          spans: spans.kept,
+          // Re-projected from what SURVIVED the budget, so the events a judge reads and the spans they were
+          // built from are one set. A shorter page, never a page describing spans it does not carry.
+          events: spansToEvents(spans.kept, result.page.batch !== undefined ? { batch: result.page.batch } : {}),
+          ...(spans.stopped ? { nextAfter: start + spans.kept.length } : {}),
         },
       };
     }
@@ -410,20 +417,39 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // At least one event always comes back. A payload larger than the whole budget is served alone — a page
     // that can come back empty is a stream that never advances, which is the pager's own law one layer up.
     const start = clampWindow(window).after;
-    const resolved: TraceEvent[] = [];
-    let spent = 0;
-    for (const event of result.page.events) {
-      const one = await this.resolveEvent(event, tenant, runId);
-      const size = serializedBytes(one);
-      if (resolved.length > 0 && spent + size > MAX_RESOLVED_PAGE_BYTES)
-        // The cursor is the ABSOLUTE index of the first event we did not include, which is where the inner
+    const resolved = await this.resolveBudgeted(result.page.events, (event) => this.resolveEvent(event, tenant, runId));
+    return {
+      kind: "page",
+      page: {
+        ...result.page,
+        events: resolved.kept,
+        // The cursor is the ABSOLUTE index of the first item we did not include, which is where the inner
         // page began plus what we kept — the same coordinate `pageOf` hands back, so a caller pages on
         // without knowing a budget stopped it.
-        return { kind: "page", page: { ...result.page, events: resolved, nextAfter: start + resolved.length } };
-      resolved.push(one);
+        ...(resolved.stopped ? { nextAfter: start + resolved.kept.length } : {}),
+      },
+    };
+  }
+
+  // Spend the page budget as the page is BUILT. One owner for both plane shapes: written twice, one of them
+  // was a `Promise.all` that had already fetched everything by the time anyone counted (arch-review 123).
+  //
+  // At least one item always comes back. A payload larger than the whole budget is served alone — a page
+  // that can come back empty is a stream that never advances, which is the pager's own law one layer up.
+  private async resolveBudgeted<T>(
+    items: readonly T[],
+    resolve: (item: T) => Promise<T>,
+  ): Promise<{ kept: T[]; stopped: boolean }> {
+    const kept: T[] = [];
+    let spent = 0;
+    for (const item of items) {
+      const one = await resolve(item);
+      const size = serializedBytes(one);
+      if (kept.length > 0 && spent + size > MAX_RESOLVED_PAGE_BYTES) return { kept, stopped: true };
+      kept.push(one);
       spent += size;
     }
-    return { kind: "page", page: { ...result.page, events: resolved } };
+    return { kept, stopped: false };
   }
 
   private async resolveEvent(event: TraceEvent, tenant: string, runId: string): Promise<TraceEvent> {
