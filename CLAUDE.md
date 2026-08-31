@@ -20,6 +20,11 @@ round reviewed the CHANGE and none asked who can author the values it made load-
 the last pass, not the first. A review that stops at "the gates are green" has reported the gates' opinion:
 no gate here can see a forged capability, a bound composed with an unbounded neighbour, or SQL no engine has
 planned.
+The skill has now failed TWICE and been paid for twice. The second failure is the one to remember: six passes
+all phrased "for every value **this change** …", against three P0s that lived in code the batch never touched
+and had merely come to DEPEND on — a parser it cited instead of opening, a two-statement seal it started
+reading as evidence, a sibling query it forgot to teach. Reviewing what you wrote is not the same as
+reviewing what you now rest on.
 
 ## Language policy (public repo — English-only source)
 - Everything in the repo is **English**: docs, code comments, log/error messages, OpenAPI summaries,

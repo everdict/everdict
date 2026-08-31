@@ -105,3 +105,106 @@ What the scanner does NOT do is the rest of pass 1. It knows the three documents
 tell you that some OTHER value is a capability. `traceRef` was found by reading — the control plane resolved
 a secret the producer named and sent it where the producer said — and no check would have asked that
 question. The scanner closes the regression, and the pass still has to be run.
+
+---
+
+# The SECOND measured failure — six passes, thirty commits, three P0s missed
+
+The passes above were written from one event and then applied to the next batch: thirty commits, several
+self-review rounds, every gate green, a push. An outside review of the same tree found three P0s. None was
+information the author lacked; all three were verified from the tree afterwards in under twenty minutes.
+
+What makes this event worth a section is that the earlier diagnosis does not explain it. Round 1–3 shared
+"the producer is benign". These rounds did NOT — pass 1 ran, and it is what found and closed the
+`artifact://` forgery in the first place. The blind spot moved.
+
+## The shared property: every pass took THE CHANGE as its subject
+
+| P0 | the pre-existing code | what the change actually did to it |
+|---|---|---|
+| legacy URL signing | `S3ArtifactStore.keyOf` parses ANY host whose path starts with `/<bucket>/` | the new strip decided which values reach it |
+| Postgres split seal | header INSERT and `writeEvents` are two statements, no transaction | the new paging read made it authoritative evidence |
+| ClickHouse event bytes | `argMin(body, sealed_at)` — first write by clock | attempt-ranking was added to two sibling reads, not this one |
+
+Pass 2 asks *what did this change make load-bearing* and finds values it PROMOTED. It does not find code the
+change came to LEAN ON, and those are different sets — which is why pass 3 was added.
+
+## Case law 1 — a conditional strip, defended by a claim about the parser
+
+`stripPlatformAuthoredFields` deletes `screenshotRef` / `outputRef` / … only when the value starts with
+`artifact://`. The comment above it states the reasoning, and the reasoning is the defect:
+
+> ⚠️ THE RULE IS THE SCHEME, NOT THE FIELD NAME. […] `os-use` legitimately reports where it captured a
+> screenshot INSIDE the compute (`/tmp/shot.png`), which names nothing of ours — **`publicUrlFor` already
+> ignores it**, and deleting it would throw away a producer's own report.
+
+`publicUrlFor` → `keyOf` ignores a RELATIVE path, because `new URL(ref)` throws. It does not ignore an
+absolute URL on a foreign host: the comment there says the host is *deliberately* not compared, so a legacy
+ref minted before the public base was configured still resolves. Put together, a producer submitting
+
+    "screenshotRef": "https://attacker.invalid/<configured-bucket>/<target-key>"
+
+survives the strip, is stored, and on the next run-detail read is handed to `publicUrlFor`, which returns a
+freshly signed URL for `<target-key>` in the deployment's one artifact bucket.
+
+Two lessons, and the second is the general one:
+
+- **The residue is the finding.** A predicate splits a field's values in two, and review attention follows
+  the half that was REMOVED. The surviving half has the same author, the same field and the same consumer.
+  The counterexample file for this fix pins `artifact://forged` → stripped and `/tmp/local` → kept, and has
+  no case at all for the third shape that exists.
+- **A present-tense claim about another component is a claim.** rule `protocol`'s comment-is-a-claim law was
+  read and cited during this work; its examples are all future tense ("the caller handles", "the sweep
+  retries"), and "already ignores" does not pattern-match as a promise. It is one.
+
+## Case law 2 — two statements, one header, no transaction
+
+    const inserted = await client.query(`INSERT INTO everdict_trajectories … body_split=true, event_count=$5
+                                          … ON CONFLICT (run_id) DO NOTHING RETURNING run_id`);
+    if (inserted.rows.length > 0) {
+      await this.writeEvents(input.runId, emitter, items);   // ← a second statement, a second commit
+
+If `writeEvents` throws, the header stands claiming N events over zero rows, and the retry hits
+`ON CONFLICT DO NOTHING` → `created: false` → no repair path. The reader then serves an empty page and the
+collector converges on `[]`: **not "evidence missing" but "evidence empty"**, which every downstream consumer
+accepts as an answer.
+
+This is not hypothetical here. `writeEvents`' SQL carried an ambiguous `value` column and was rejected by the
+planner on every call until a real-Postgres run found it — the exact window in which header-only rows would
+have been produced.
+
+Why pass 5 (as written) could not see it: it asks *has an ENGINE run this?* A green engine proves the
+statements EXECUTE. Atomicity is only observable at a crash, and a passing test never crashes. Hence the
+question added to pass 6: **how many independent commits is this write, and what is served between them?**
+
+## Case law 3 — the sibling read with no method to grep
+
+The exact-attempt fix introduced one shared constant so the plane header and the body would agree:
+
+    const ATTEMPT_RANK = "if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2))";
+
+It is applied to `planeRows` and to the LEGACY (unsplit) body read. The SPLIT event read — the one that
+serves every modern plane — still resolves purely by clock, on a table that has no `attempt_id` column at
+all:
+
+    SELECT seq, argMin(body, sealed_at) AS body_first FROM …everdict_trajectory_events
+     WHERE run_id = {runId} AND emitter = {emitter} GROUP BY seq
+
+and its comment claims the parity that is missing: *"the same first-write-wins resolution the plane rows
+use"*. The plane rows rank by attempt FIRST and break ties by clock; these rank by clock alone. So a receipt
+selecting attempt B is served B's header over A's bytes, and both halves are internally consistent.
+
+one-lane-only, again — but the law's mechanism (`grep -n` the other CALLERS of the method you changed) cannot
+reach this: there is no method, only three SQL strings answering one question. Hence the question added to
+pass 4: **how many reads answer this same question?**
+
+## What this second failure says about adding passes
+
+Both events produced passes, and both times the pass was a QUESTION rather than a rule about correctness —
+"who can write this", "what do you now lean on", "how many commits", "how many reads". That is the only kind
+that survives self-review, because the author cannot answer it from intent. A pass phrased as "check that X
+is correct" is answered by the same model that wrote X.
+
+The reviewer's own summary of the batch is the tell worth remembering. It ended with a section titled *what
+is still open* — and every item in it was something the change had ADDED. Nothing in that section named code
+the change had started to depend on, because nothing had asked.

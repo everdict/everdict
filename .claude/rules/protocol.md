@@ -147,6 +147,25 @@ So, when a comment contains a promise about another component — "the caller ha
 counterexample. Grep for the promised component before writing the sentence; if it does not exist, the change
 is not done, and if it does exist, the test drives it rather than the guard.
 
+⚠️ **AND THE PRESENT TENSE IS THE HALF THAT SLIPS THROUGH.** Every example above is future — a recovery, a
+retry, a later pass — so a reviewer scanning for this law scans for promises, and a sentence that states a
+FACT about another component reads as verified. It is the same claim:
+
+    "the caller handles it later"      →  reads as a promise  →  gets checked
+    "publicUrlFor already ignores it"  →  reads as a fact     →  nobody opens publicUrlFor
+
+The second one shipped a P0. `stripPlatformAuthoredFields` deletes a platform-authored ref field only when
+the value carries the `artifact://` scheme, and the comment defending the exception says a producer's own
+`/tmp/shot.png` is harmless because *"`publicUrlFor` already ignores it"*. `publicUrlFor` → `keyOf` ignores a
+RELATIVE path (`new URL()` throws). It does not ignore an absolute URL on a foreign host, because that
+parser's own comment says the host is deliberately not compared — so
+`https://attacker/<configured-bucket>/<key>` survives the strip and is handed back as a freshly signed URL
+for somebody else's object.
+
+The tells are `already`, `cannot`, `always`, `never`, `is`, `does not` — applied to a component the change
+does not contain. Open it and read it against the input classes you actually send, or delete the sentence:
+an unexplained guard is weaker prose and stronger code than a guard justified by a fiction.
+
 ## A PROOF IS BORN FROM THE SAME BUILDER AS THE EFFECT
 L3 says provenance is born at the source. Attestation is where that law gets broken by people who believe they
 are obeying it, because the request and the effect are both right there and copying the wrong one type checks.
@@ -592,6 +611,19 @@ exactly, because there was nothing to grep: the lane was new.
 - ⚠️ The gates cannot see this: `unwired-capabilities` asks whether an optional PORT has an implementation,
   and this is a required argument with a legal value. What catches it is reading the sibling call sites,
   which is why that instruction now leads with "read", not "count".
+- ⚠️ **AND WHEN THERE IS NO METHOD, THERE IS NOTHING TO GREP — COUNT THE READS THAT ANSWER ONE QUESTION.**
+  Every version of this law says "grep the other CALLERS", which assumes the lanes meet at a symbol. Three
+  SQL strings in one adapter meet at nothing. The exact-attempt fix introduced a shared
+  `ATTEMPT_RANK` constant precisely so header and body would agree, applied it to `planeRows` and to the
+  legacy unsplit body read, and left the SPLIT event read — the one serving every modern plane — resolving
+  by `argMin(body, sealed_at)` on a table with no attempt column at all. Its comment claims the parity that
+  is missing: *"the same first-write-wins resolution the plane rows use"*, when the plane rows rank by
+  attempt first and clock second. A receipt selecting attempt B is then served B's header over A's bytes,
+  each half internally consistent.
+  So the question is not "who calls this" but **"how many reads answer this same question"** — and the
+  answer is counted in the commit message the way callers are. Where two reads must agree, the agreement
+  belongs in one identity the rows CARRY (a seal id the events are written with), not in a predicate each
+  read is supposed to remember to apply.
 
 ## A REFUSAL BELONGS TO THE FUNCTION THAT ANSWERS, NOT TO THE ONE THAT RENDERS THE ANSWER
 arch-review 71 abolished exactly one state: a campaign that closes `adopted` while nothing anywhere is
@@ -933,6 +965,49 @@ the ledger; this is silent, and the batch's own numbers are the thing that is wr
   operation owed.
 - This is L2 and L3 meeting: the third value is `inconsistent`, and the identity comes from the row that
   won rather than from the caller that is asking.
+
+## A GUARD NARROWED BY A PREDICATE OWNS THE VALUES IT KEEPS
+A strip, a filter or a refusal written as *"…when P"* splits its field's value space in two, and review
+attention follows the half that was REMOVED. The surviving half has the same author, the same field name and
+the same consumer — it is simply the part nobody looked at.
+
+    delete copy[field] if value.startsWith("artifact://")     ← reviewed, tested, correct
+    everything else                                           ← same producer, same consumer, no test
+
+Both counterexamples written for that strip pin the removed class (`artifact://forged` → gone) and one benign
+kept class (`/tmp/shot.png` → kept). The class that mattered — an absolute URL on a foreign host whose path
+begins with the deployment's bucket — was neither, and it turned a display read into a signing oracle.
+
+- **Enumerate the KEPT classes explicitly** and follow each to the consumer the removed class was heading
+  for. If any kept class reaches a capability, the predicate is the defect, not the guard.
+- **Prefer removing the field to narrowing it.** A producer's own report belongs in a producer-owned field
+  (`screenshotPath`), never in the field the platform mints handles into — that is the three-schemas law at
+  the granularity of one key, and it makes the predicate unnecessary.
+- The residue is where a "fix" for a defect class quietly keeps a member of that class alive, which is worse
+  than not fixing it: the test file's existence reads as coverage.
+
+## A LOGICAL WRITE IS AS ATOMIC AS ITS STATEMENT COUNT, AND A GREEN ENGINE CANNOT SAY OTHERWISE
+`pnpm trust-fast` against real Postgres is what proves a statement PARSES and PLANS — it found an ambiguous
+`value` column that had been failing every split-plane event write since it shipped. What no green run can
+observe is how many COMMITS the write takes, because a passing test never dies in between:
+
+    INSERT INTO everdict_trajectories (… body_split=true, event_count=$5 …) ON CONFLICT DO NOTHING RETURNING
+    if (inserted.rows.length > 0) await this.writeEvents(runId, emitter, items);   ← a second commit
+
+A crash between them leaves a header claiming N events over zero event rows, and the retry meets
+`ON CONFLICT DO NOTHING` → `created: false` → nothing repairs it. The reader then serves an EMPTY page, so
+downstream sees *evidence empty* rather than *evidence missing* — a legitimate-looking answer, which is the
+worst direction for evidence to fail in (the L2 collapse, arriving through durability instead of a `catch`).
+
+- **Count the statements and name what is served between each pair.** One transaction, or a state machine
+  (`prepared` → `events_written` → `committed`) whose reader only accepts the terminal state.
+- **An idempotency guard is not a repair.** `created: false` must mean "the same complete seal already
+  exists", verified against its count and digest — never "a row with this key is present".
+- Where the adapter has no multi-statement transaction (ClickHouse), the order is rows-then-manifest and the
+  manifest is what a reader joins on; rows with no manifest are an orphan worklist, not evidence.
+- And a partial state that already exists is a MIGRATION question: `body_split = true AND event_count <>
+  count(rows)` is either corrupt, repairable or unrecoverable, and a deployment that cannot say which has
+  not finished the change.
 
 ## A CONDITIONAL WRITE INSIDE A TRANSACTION IS NOT A SUCCESSFUL ONE
 The previous wave put both contributing attempts inside the settlement transaction — the right structure, and
