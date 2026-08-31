@@ -8,6 +8,7 @@ import {
 import {
   type SealInput,
   type TrajectoryEventsResult,
+  type TrajectoryPayloadRef,
   type TrajectoryStore,
   type TrajectoryWindow,
   clampWindow,
@@ -100,10 +101,10 @@ function inner(): TrajectoryStore & { sealedEvents: () => TraceEvent[] } {
     // Honours BOTH the limit and the cursor, because the real stores do (arch-review 121). The first version
     // took the arguments and ignored them, which made the `limit + 1` counterexample below pass over a defect
     // that was live — a twin that ignores an argument its adapter filters on is a guard no unit test can see.
-    async payloadRefsOlderThan(_cutoffIso: string, limit: number, after?: string) {
+    async payloadRefsOlderThan(_cutoffIso: string, limit: number, after?: TrajectoryPayloadRef) {
       return refsOf(held)
         .sort()
-        .filter((ref) => after === undefined || ref > after)
+        .filter((ref) => after === undefined || ref > after.ref)
         .slice(0, limit)
         .map((ref) => ({ tenant: "acme", runId: "r1", ref }));
     },

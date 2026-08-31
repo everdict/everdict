@@ -79,12 +79,19 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-190 — retention enumerates and delet
       "the enumeration did not find the trajectory's own payload",
     ).toContain(`artifact://${owned}`);
     // The owner travels with the ref, so the sweep can join it against the key rather than assuming it.
+    //
+    // ⚠️ SCOPED TO THIS RUN. The suite is designed to run against a database it may REUSE — that is what
+    // `trustId` is for — so "every row this enumeration returned belongs to me" is a claim about the whole
+    // database rather than about the read. It went red the first time another scenario in the same file set
+    // left an expired row behind, which is a false RED: the enumeration was correct and the premise was not.
+    const mine = refs.filter((r) => r.runId === runId);
+    expect(mine, "the enumeration returned nothing for this run").not.toHaveLength(0);
     expect(
-      refs.every((r) => r.tenant === tenant && r.runId === runId),
+      mine.every((r) => r.tenant === tenant),
       "the enumeration answered a ref without saying which trajectory holds it",
     ).toBe(true);
     expect(
-      refs.some((r) => r.ref.includes("someone-elses-key")),
+      mine.some((r) => r.ref.includes("someone-elses-key")),
       "a ref merely MENTIONED in the trace was claimed as this trajectory's own",
     ).toBe(false);
 

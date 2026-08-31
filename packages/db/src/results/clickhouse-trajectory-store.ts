@@ -648,7 +648,11 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // output ("I saved it, see artifact://k9"), and retention deletes what this returns. One run quoting
   // another run's ref would have destroyed that run's evidence. The three impls answer the same question
   // now: a complete string value that STARTS WITH the scheme.
-  async payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+  async payloadRefsOlderThan(
+    cutoffIso: string,
+    limit: number,
+    after?: TrajectoryPayloadRef,
+  ): Promise<TrajectoryPayloadRef[]> {
     const runs = this.expiredRunsSql();
     // Tenant and run travel WITH the ref for the reason the Postgres twin gives: the row is the only thing
     // that says which trajectory holds it, and a ref alone is a string a producer can author. `ORDER BY ref`
@@ -674,10 +678,17 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
                 arrayJoin(extractAll(t.body, '"(artifact://[^"]*)"')) AS ref
            FROM ${this.table()} t WHERE t.run_id IN (${runs})
        )
-       WHERE {after:String} = '' OR ref > {after:String}
-       ORDER BY ref
+       WHERE {afterRef:String} = ''
+          OR (ref, tenant, run_id) > ({afterRef:String}, {afterTenant:String}, {afterRun:String})
+       ORDER BY ref, tenant, run_id
        LIMIT {limit:UInt32}`,
-      { cutoff: cutoffIso, limit: String(limit), after: after ?? "" },
+      {
+        cutoff: cutoffIso,
+        limit: String(limit),
+        afterRef: after?.ref ?? "",
+        afterTenant: after?.tenant ?? "",
+        afterRun: after?.runId ?? "",
+      },
     );
     return rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
   }

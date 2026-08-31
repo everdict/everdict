@@ -681,7 +681,13 @@ export interface TrajectoryStore {
   //   · a single bounded call let the caller delete every expired ROW after accounting for only the first
   //     `limit` REFS, orphaning the rest permanently. `after` is a cursor over `ref` (the rows are ordered by
   //     it), so a sweep drains the enumeration before it deletes anything that names it.
-  payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]>;
+  //     ⚠️ AND THE CURSOR IS THE ROW, NOT THE REF (arch-review 124). A result's identity is
+  //     `(ref, tenant, runId)` — `SELECT DISTINCT` legitimately returns ONE ref under two owners, because a
+  //     producer can quote another run's ref inside its own trace and both rows are real. Paging on the ref
+  //     alone then skips every remaining owner of a ref a page boundary landed inside, and an object whose
+  //     only surviving owner row was skipped is deleted with its rows and named by nothing. So the caller
+  //     hands back the last ROW it saw and every adapter orders and compares the whole tuple.
+  payloadRefsOlderThan(cutoffIso: string, limit: number, after?: TrajectoryPayloadRef): Promise<TrajectoryPayloadRef[]>;
 }
 
 // One offloaded payload reference, WITH the trajectory that holds it. The pair is the point: a ref alone is

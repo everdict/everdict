@@ -621,7 +621,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // alone. The cursor pages until the enumeration is exhausted, so no row is deleted until every ref it
     // carries has been accounted for.
     const page = this.sweepLimit;
-    let after: string | undefined;
+    let after: TrajectoryPayloadRef | undefined;
     for (;;) {
       const refs: TrajectoryPayloadRef[] = await this.inner.payloadRefsOlderThan(cutoffIso, page, after);
       if (refs.length === 0) break;
@@ -640,7 +640,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
         await this.artifacts.remove(key);
       }
       if (refs.length < page) break;
-      after = refs[refs.length - 1]?.ref;
+      after = refs[refs.length - 1];
       if (after === undefined) break;
     }
     return this.inner.deleteOlderThan(cutoffIso);
@@ -648,7 +648,11 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
 
   // Forwarded verbatim: the refs are the INNER store's rows to enumerate, and this decorator's only business
   // with them is deleting what they name.
-  payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+  payloadRefsOlderThan(
+    cutoffIso: string,
+    limit: number,
+    after?: TrajectoryPayloadRef,
+  ): Promise<TrajectoryPayloadRef[]> {
     return this.inner.payloadRefsOlderThan(cutoffIso, limit, after);
   }
 }

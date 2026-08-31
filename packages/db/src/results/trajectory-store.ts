@@ -252,21 +252,42 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
 
   // The twin of the Pg reader (arch-review 120): every payload ref the doomed rows hold, so the decorator can
   // delete the bytes before the rows that name them are gone.
-  async payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+  async payloadRefsOlderThan(
+    cutoffIso: string,
+    limit: number,
+    after?: TrajectoryPayloadRef,
+  ): Promise<TrajectoryPayloadRef[]> {
     const found: TrajectoryPayloadRef[] = [];
+    // ── DEDUPED PER (ref, tenant, run), NOT PER REF (arch-review 124) ────────────────────────────────
+    //
+    // The adapters answer `SELECT DISTINCT tenant, run_id, ref`, so one ref quoted by three runs is THREE
+    // rows and only the run whose key namespace matches owns the object. A `Set` of refs collapsed them to
+    // one, which made the twin disagree with production on exactly the case the cursor exists for.
     const seen = new Set<string>();
     const walk = (value: unknown, tenant: string, runId: string): void => {
       if (typeof value === "string") {
         // The owner travels WITH the ref: the row it was read from is the only thing that says which
         // trajectory holds it, and a ref alone is a string a producer can author (arch-review 121).
-        if (value.startsWith("artifact://") && !seen.has(value)) {
-          seen.add(value);
-          found.push({ tenant, runId, ref: value });
-        }
+        if (!value.startsWith("artifact://")) return;
+        const key = `${value}\u0001${tenant}\u0001${runId}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        found.push({ tenant, runId, ref: value });
         return;
       }
       if (Array.isArray(value)) {
         for (const item of value) walk(item, tenant, runId);
+        return;
+      }
+      // ── AND A Map's CONTENTS ARE NOT ITS PROPERTIES ─────────────────────────────────────────────
+      //
+      // The row keeps its per-emitter bodies in `items: Map<string, SizedItem[]>` and its usage in another
+      // Map. `Object.values(aMap)` is `[]` — a Map's entries are not own enumerable properties — so this
+      // walk reached the header fields and NOTHING ELSE, and the twin returned no refs for a row that
+      // plainly held one. Every unit test of the retention drain over this store was therefore vacuous
+      // (rule `testing`: a twin that cannot answer what the real store answers is a guard no test can see).
+      if (value instanceof Map) {
+        for (const item of value.values()) walk(item, tenant, runId);
         return;
       }
       if (value !== null && typeof value === "object")
@@ -275,11 +296,13 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     // The twin walks the WHOLE row — header, segments and items alike — which is what the Pg statement's
     // three-way UNION has to reproduce, side segments included.
     for (const [runId, row] of this.rows.entries()) if (row.sealedAt < cutoffIso) walk(row, row.tenant, runId);
-    // Ordered by ref so `after` is a stable cursor — the twin pages the way the adapters do, or the sweep's
-    // drain is a property no unit test can see.
+    // Ordered and compared on the WHOLE identity, because one ref legitimately has several owners — see the
+    // port. The twin pages the way the adapters do, or the sweep's drain is a property no unit test can see.
+    const key = (r: TrajectoryPayloadRef): string => `${r.ref}\u0001${r.tenant}\u0001${r.runId}`;
+    const cursor = after === undefined ? undefined : key(after);
     return found
-      .sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0))
-      .filter((r) => after === undefined || r.ref > after)
+      .sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0))
+      .filter((r) => cursor === undefined || key(r) > cursor)
       .slice(0, limit);
   }
 
@@ -748,7 +771,11 @@ export class PgTrajectoryStore implements TrajectoryStore {
   // Matching is by VALUE, never by key name: a whole string that STARTS WITH the scheme. A key-name rule
   // would miss a ref stored under any other name, and a substring rule would match an agent's own output
   // quoting somebody else's ref — and retention deletes what it matches.
-  async payloadRefsOlderThan(cutoffIso: string, limit: number, after?: string): Promise<TrajectoryPayloadRef[]> {
+  async payloadRefsOlderThan(
+    cutoffIso: string,
+    limit: number,
+    after?: TrajectoryPayloadRef,
+  ): Promise<TrajectoryPayloadRef[]> {
     const res = await this.client.query<{ tenant: string; run_id: string; ref: string }>(
       `SELECT DISTINCT tenant, run_id, ref FROM (
          SELECT t.tenant, t.run_id, jsonb_path_query(e.body, '$.**') #>> '{}' AS ref
@@ -772,10 +799,11 @@ export class PgTrajectoryStore implements TrajectoryStore {
            JOIN everdict_trajectories t ON t.run_id = g.run_id
           WHERE t.sealed_at < $1::timestamptz AND g.body IS NOT NULL
        ) refs
-       WHERE ref LIKE 'artifact://%' AND ($3::text IS NULL OR ref > $3)
-       ORDER BY ref
+       WHERE ref LIKE 'artifact://%'
+         AND ($3::text IS NULL OR (ref, tenant, run_id) > ($3, $4, $5))
+       ORDER BY ref, tenant, run_id
        LIMIT $2`,
-      [cutoffIso, limit, after ?? null],
+      [cutoffIso, limit, after?.ref ?? null, after?.tenant ?? null, after?.runId ?? null],
     );
     return res.rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
   }
