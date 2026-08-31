@@ -255,13 +255,24 @@ interface OffloadField {
   kind: TraceEvent["kind"] | "span-record";
   field: string;
   ref: string;
+  // ── HOW BIG THE THING BEHIND THE REF IS, RECORDED WHERE THE WRITER KNEW IT (arch-review 124) ─────
+  //
+  // A resolved page spends `MAX_RESOLVED_PAGE_BYTES` as it is built, and until now it learned an event's
+  // resolved size by MATERIALIZING it: get the object, parse it, measure it. That is a refusal after the
+  // risk rather than before it, and the first event of a page is served whatever its size, so one 2 GB
+  // payload was read into a shared process before anything could object.
+  //
+  // The writer knows the number exactly — it is the length of the buffer it just put — so it records it
+  // instead of leaving the reader to find out the expensive way. Absent means an object sealed before this
+  // field existed, and the reader falls back to measuring after the fetch, which is what it always did.
+  bytes: string;
 }
 const OFFLOADABLE: readonly OffloadField[] = [
-  { kind: "message", field: "text", ref: "textRef" },
-  { kind: "tool_call", field: "args", ref: "argsRef" },
-  { kind: "tool_result", field: "output", ref: "outputRef" },
-  { kind: "log", field: "text", ref: "textRef" },
-  { kind: "span", field: "attributes", ref: "attributesRef" },
+  { kind: "message", field: "text", ref: "textRef", bytes: "textRefBytes" },
+  { kind: "tool_call", field: "args", ref: "argsRef", bytes: "argsRefBytes" },
+  { kind: "tool_result", field: "output", ref: "outputRef", bytes: "outputRefBytes" },
+  { kind: "log", field: "text", ref: "textRef", bytes: "textRefBytes" },
+  { kind: "span", field: "attributes", ref: "attributesRef", bytes: "attributesRefBytes" },
 ];
 
 function fieldsFor(kind: string): OffloadField[] {
@@ -338,7 +349,8 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
       let next: Record<string, unknown> = { ...event };
       for (const spec of fieldsFor(event.kind)) {
         const moved = await this.move(input, emitter, spec.field, next[spec.field]);
-        if (moved !== undefined) next = { ...next, [spec.field]: moved.preview, [spec.ref]: moved.ref };
+        if (moved !== undefined)
+          next = { ...next, [spec.field]: moved.preview, [spec.ref]: moved.ref, [spec.bytes]: moved.bytes };
       }
       out.push(next as TraceEvent);
     }
@@ -373,7 +385,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     emitter: string,
     field: string,
     value: unknown,
-  ): Promise<{ preview: unknown; ref: string } | undefined> {
+  ): Promise<{ preview: unknown; ref: string; bytes: number } | undefined> {
     if (value === undefined || value === null) return undefined;
     const strings = previewOf(value, EVENT_INLINE_MAX);
     // Two passes, because they bound different things: the first shares the budget between string leaves,
@@ -382,12 +394,27 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     const preview = structure.preview;
     if (!strings.truncated && !structure.truncated) return undefined;
     const key = offloadKey(input.tenant, input.runId, emitter, field, value);
+    const bytes = Buffer.from(JSON.stringify(value), "utf8");
     try {
-      await this.artifacts.put(key, Buffer.from(JSON.stringify(value), "utf8"), "application/json");
+      await this.artifacts.put(key, bytes, "application/json");
     } catch {
+      // ── EVIDENCE FIRST, AND THE BOUND SAYS SO (arch-review 124) ────────────────────────────────
+      //
+      // A failed put leaves the value INLINE — the whole of it, unbounded — which is the one place this
+      // store's own premise ("one event is bounded") does not hold. That is deliberate and it is the right
+      // trade: the alternative is keeping the bounded preview and losing the rest, and an object-store
+      // outage must not become permanent evidence loss.
+      //
+      // What it must not be is SILENT. The offload is a durability decision (rule `protocol`: a swallow
+      // inside a function whose purpose is durability is reviewed as a protocol decision), and an operator
+      // whose bound has quietly stopped applying should be able to see it in the log rather than infer it
+      // from a heap profile.
+      console.warn(
+        `[trajectory] offload failed for ${key} (${bytes.byteLength} bytes) — the value stays INLINE, so this event is not bounded. Evidence is preserved; the page bound is not.`,
+      );
       return undefined;
     }
-    return { preview, ref: artifactRefOf(key) };
+    return { preview, ref: artifactRefOf(key), bytes: bytes.byteLength };
   }
 
   async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
@@ -408,7 +435,10 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
       // attribute bags are the shape that carries whole completions, so this is the branch where fetching
       // first and counting after costs the most. See `resolveBudgeted`.
       const start = clampWindow(window).after;
-      const spans = await this.resolveBudgeted(result.page.spans, (span) => this.resolveSpan(span, tenant, runId));
+      const spans = await this.resolveBudgeted(result.page.spans, async (span) => ({
+        value: await this.resolveSpan(span, tenant, runId),
+        skipped: false,
+      }));
       return {
         kind: "page",
         page: {
@@ -434,7 +464,9 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // At least one event always comes back. A payload larger than the whole budget is served alone — a page
     // that can come back empty is a stream that never advances, which is the pager's own law one layer up.
     const start = clampWindow(window).after;
-    const resolved = await this.resolveBudgeted(result.page.events, (event) => this.resolveEvent(event, tenant, runId));
+    const resolved = await this.resolveBudgeted(result.page.events, (event, remaining) =>
+      this.resolveEvent(event, tenant, runId, remaining),
+    );
     return {
       kind: "page",
       page: {
@@ -455,28 +487,59 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
   // that can come back empty is a stream that never advances, which is the pager's own law one layer up.
   private async resolveBudgeted<T>(
     items: readonly T[],
-    resolve: (item: T) => Promise<T>,
+    resolve: (item: T, remaining: number) => Promise<{ value: T; skipped: boolean }>,
   ): Promise<{ kept: T[]; stopped: boolean }> {
     const kept: T[] = [];
     let spent = 0;
     for (const item of items) {
-      const one = await resolve(item);
-      const size = serializedBytes(one);
+      const { value, skipped } = await resolve(item, MAX_RESOLVED_PAGE_BYTES - spent);
+      // A payload declined on its DECLARED size ends the page: the caller pages on and asks for it with a
+      // full budget, which is the one request in which it can fit.
+      if (skipped && kept.length > 0) return { kept, stopped: true };
+      const size = serializedBytes(value);
       if (kept.length > 0 && spent + size > MAX_RESOLVED_PAGE_BYTES) return { kept, stopped: true };
-      kept.push(one);
+      kept.push(value);
       spent += size;
+      // …and one declined on an empty page is served alone, unresolved but present, so the stream advances.
+      if (skipped) return { kept, stopped: true };
     }
     return { kept, stopped: false };
   }
 
-  private async resolveEvent(event: TraceEvent, tenant: string, runId: string): Promise<TraceEvent> {
+  // ── THE SIZE IS CONSULTED BEFORE THE FETCH, NOT MEASURED AFTER IT ────────────────────────────────
+  //
+  // `remaining` is what is left of the page budget. A payload the writer recorded as larger than the whole
+  // budget is not fetched at all: the event keeps its preview and its ref, and carries `resolvedTooLarge` so
+  // the caller can tell "we did not resolve this" from "this is what it said". Reading it first and refusing
+  // after is not a bound — it is a refusal that arrives once the bytes are already in the heap.
+  //
+  // A ref with no recorded size is an object sealed before that field existed. Those are fetched and
+  // measured the old way, which is the behaviour this replaces rather than a hole it opens.
+  private async resolveEvent(
+    event: TraceEvent,
+    tenant: string,
+    runId: string,
+    remaining: number,
+  ): Promise<{ value: TraceEvent; skipped: boolean }> {
     let next: Record<string, unknown> = { ...event };
+    let skipped = false;
     for (const spec of fieldsFor(event.kind)) {
       const ref = next[spec.ref];
       if (typeof ref !== "string") continue;
-      next = { ...next, [spec.field]: await this.fetch(ref, tenant, runId), [spec.ref]: undefined };
+      const declared = next[spec.bytes];
+      if (typeof declared === "number" && declared > remaining) {
+        next = { ...next, resolvedTooLarge: true };
+        skipped = true;
+        continue;
+      }
+      next = {
+        ...next,
+        [spec.field]: await this.fetch(ref, tenant, runId),
+        [spec.ref]: undefined,
+        [spec.bytes]: undefined,
+      };
     }
-    return next as TraceEvent;
+    return { value: next as TraceEvent, skipped };
   }
 
   private async resolveSpan(span: TraceSpan, tenant: string, runId: string): Promise<TraceSpan> {

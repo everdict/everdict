@@ -173,8 +173,13 @@ describe("StoreRunnerHub — multi-replica lease over a shared store", () => {
     const store = new InMemoryRunnerJobStore();
     const hub = new StoreRunnerHub(store, opts());
     hub.enqueue(keyA, imageJob("c-img")).catch(() => {});
+    // The 20ms here is load-safe on purpose: an EXPIRED wait resolves null, which is exactly what this line
+    // asserts, so a busy machine cannot turn it into a false green or a false red.
     expect(await hub.leaseWait(keyA, 20, ["repo"])).toBeNull(); // no docker → can't claim
-    const leased = await hub.leaseWait(keyA, 20, ["repo", "docker"]); // docker runner claims it
+    // …and this one expects a LEASE, so it gets a budget that is not about machine load — the same trap the
+    // rollback case below was actually caught by. A capable runner claims immediately, so the wait never
+    // elapses on a healthy run.
+    const leased = await hub.leaseWait(keyA, 2000, ["repo", "docker"]); // docker runner claims it
     if (!leased) throw new Error("expected a lease");
     expect(leased.job.evalCase.id).toBe("c-img");
   });
@@ -534,7 +539,16 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
 
     // The re-lease's mint fails: "this runner holds a lease" and "the ledger could not record its attempt"
     // must not both be true, so the claim itself is undone.
-    await expect(hub.leaseWait(keyA, 50, ["repo"])).rejects.toThrow("attempt ledger unreachable");
+    //
+    // ⚠️ THE WAIT BUDGET IS NOT A STATEMENT ABOUT THIS CODE. It used to be 50ms, and a `leaseWait` that
+    // expires resolves `null` instead of rejecting — so under `pnpm ci:commits`, which builds and tests every
+    // package at once, this failed as `promise resolved "null" instead of rejecting`, which reads as "the
+    // rollback did not throw" and sends the next reader into the hub. The number was about how loaded the
+    // machine is, exactly as `apps/api/vitest.config.ts` records for the route suites.
+    //
+    // A generous budget costs nothing here: the expected outcome is a REJECTION that arrives as soon as the
+    // mint throws, so the wait never actually elapses on a healthy run — it only stops the race on a busy one.
+    await expect(hub.leaseWait(keyA, 2000, ["repo"])).rejects.toThrow("attempt ledger unreachable");
     // The row is back in the QUEUE, not sitting `leased` under an epoch nobody holds — which is the half a
     // rollback-less claim gets wrong: the epoch it minted would go on authorizing evidence for a lease that
     // was never handed out, and only the idle-timeout sweep would ever free the job.

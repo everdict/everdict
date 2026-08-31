@@ -183,6 +183,17 @@ const PLATFORM_AUTHORED_REF_FIELDS = [
   "domRef",
 ] as const;
 
+// ── AND THE SIZES THAT DECIDE A BUDGET (arch-review 124) ────────────────────────────────────────────
+//
+// The offload records how big the object behind each ref is, so a resolved page can refuse an oversized
+// payload BEFORE fetching it. That number decides whether bytes are read into a shared process, which makes
+// it a capability in exactly the sense the refs are: a producer that could write `outputRefBytes: 1` would
+// have every page fetch its payload whatever the real size.
+//
+// Stripped UNCONDITIONALLY — unlike the refs, there is no legitimate producer meaning for these at all, so
+// there is no residue to reason about.
+const PLATFORM_AUTHORED_SIZE_FIELDS = ["textRefBytes", "argsRefBytes", "outputRefBytes", "attributesRefBytes"] as const;
+
 // ⚠️ THE RULE IS THE SCHEME, NOT THE FIELD NAME. `artifact://` is OUR handle over OUR object store, and that
 // is the only thing a producer may not author. `os-use` legitimately reports where it captured a screenshot
 // INSIDE the compute (`/tmp/shot.png`), which names nothing of ours — `publicUrlFor` already ignores it, and
@@ -195,6 +206,7 @@ export function stripPlatformAuthoredFields(value: unknown): unknown {
     const held = copy[field];
     if (typeof held === "string" && held.startsWith(ARTIFACT_REF_SCHEME)) delete copy[field];
   }
+  for (const field of PLATFORM_AUTHORED_SIZE_FIELDS) delete copy[field];
   // Nested: `CaseResult` carries a snapshot and a whole trace, so the walk has to reach them.
   for (const [key, item] of Object.entries(copy))
     if (item !== null && typeof item === "object") copy[key] = stripPlatformAuthoredFields(item);
