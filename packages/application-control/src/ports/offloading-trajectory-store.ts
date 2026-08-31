@@ -304,6 +304,23 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     private readonly sweepLimit: number = PAYLOAD_SWEEP_LIMIT,
   ) {}
 
+  // ── ⚠️ A LOSING SEAL'S OBJECTS ARE NOT COLLECTED, AND THE OBVIOUS FIX IS WRONG ──────────────────
+  //
+  // The objects are put BEFORE the inner seal, so a seal that returns `created: false` — a duplicate, or the
+  // loser of a race on one (run, emitter) — leaves behind whatever it wrote that the WINNER's row does not
+  // name. Retention enumerates refs from ROWS, so an object no row names is invisible to it: a permanent
+  // orphan, and one a concurrent writer can produce.
+  //
+  // Deleting what this call put is NOT the repair, and the reason is the content addressing. The key carries
+  // the digest, so two writers with the SAME bytes mint the SAME key and share one object — the loser
+  // deleting "its" object destroys the winner's evidence. Splitting on who CREATED the object does not help
+  // either: if the loser put first and the winner reused that key, the loser is the creator and the winner is
+  // the referent.
+  //
+  // What closes it is an ORPHAN SWEEP — list the objects under `payloadKeyPrefix(tenant, runId)` and delete
+  // the ones no row references — and `ArtifactStore` has no `list`. That is a port change with two
+  // implementations plus a reconciler, so it is written down here rather than guessed at: the leak is
+  // bounded (one loser's payloads per raced seal) and the wrong fix is unbounded (another attempt's evidence).
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
     const emitter = input.emitter ?? input.source;
     const events = input.events !== undefined ? await this.offloadEvents(input, emitter, input.events) : undefined;
