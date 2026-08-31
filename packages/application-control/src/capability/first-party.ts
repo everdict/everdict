@@ -689,10 +689,27 @@ const POSTGRES_MCP: CapabilityRecord = {
 // gone: nothing is auto-attached, so there is nothing to gate. The copy tells the agent to use the GitHub tools, and
 // those are gated on their own.
 // The self-evolution campaign (docs/architecture/agent-automation.md B5 closed into a procedure). A SKILL — not
-// code: every step is a tool the agent already has (try_agent + ingest_scorecard + diff_scorecards + save_agent),
-// so what this adds is the DISCIPLINE — the trust harness as the oracle, a measured noise floor before any delta
-// is read, one hypothesis per round, and adoption only over a statistically significant diff. The target may be
-// the running agent itself: "self-evolving" is this skill pointed at its own configuration.
+// code: every step is a tool the agent already has (try_agent + ingest_scorecard + diff_scorecards + the campaign
+// doors + save_agent), so what this adds is the DISCIPLINE — the trust harness as the oracle, a measured noise
+// floor before any delta is read, one hypothesis per round, and adoption only over a statistically significant
+// diff. The target may be the running agent itself: "self-evolving" is this skill pointed at its own configuration.
+//
+// ── THE SKILL AND THE SETTLEMENT SHIPPED TEN DAYS APART AND WERE NEVER JOINED ────────────────────────
+//
+// This procedure was drilled live (2026-08-16) against raw scorecards and a tracker issue; the campaign
+// RECORD landed after it (2026-08-26, evolution-lineage Track D). The copy was then given three of the six
+// campaign doors — open, settle, adopt — and never the two that make a campaign move: `log_campaign_round`
+// and `campaign_decision`. So the procedure as written opened a campaign, logged nothing into it, and called
+// settle, which the gate refuses because an empty round trace answers `continue`. Every campaign this skill
+// opened would have stayed open forever.
+//
+// It is the "one lane only" shape with no method to grep: six tool NAMES in prose, of which four were taught.
+// The repair is that the record is now the spine of the procedure rather than a paragraph in its step 4 — the
+// gate is ASKED (`campaign_decision`) instead of restated, which also retires a re-derived adoption predicate
+// that had already diverged from it (the prose counted whole-round improvements; the gate reads held-out).
+//
+// The trial floor moved 3 → 5 in the same pass, from the drill's own arithmetic: at N=3 a total flip is
+// Fisher p = 0.10, so every round the old default authored was unable to produce a significant result.
 const AGENT_EVOLVE_INSTRUCTIONS = `
 # Evolve an agent configuration (self-evolution campaign)
 
@@ -701,18 +718,27 @@ adopted only when a statistically significant scorecard diff proves it better on
 adopt on impression, and you never touch the oracle to make a candidate pass.
 
 Everdict's tools load on demand. Before anything else:
-\`ToolSearch\` with \`select:get_agent,try_agent,ingest_scorecard,get_scorecard,diff_scorecards,save_agent,create_issue,update_issue\`.
+\`ToolSearch\` with \`select:get_agent,try_agent,ingest_scorecard,get_scorecard,diff_scorecards,save_agent,create_issue,update_issue,open_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate\`.
 
-## 0. Frame the campaign
+## 0. Frame the campaign — and freeze it
 - Name the target (\`get_agent\`), the goal (which judge scores define "better"), and the scenario set: 5-10
   representative platform events — REPLAYED real events over invented ones — plus the trial count N per
-  scenario (at least 3; 5 when budget allows).
+  scenario.
+- **N is at least 5.** With 3 trials a side, a TOTAL flip (0/3 → 3/3) is Fisher p = 0.10 and can never clear
+  significance, so a round at N=3 spends real budget it cannot convert into evidence. 0/5 → 5/5 is p = 0.0079.
 - Hold out at least 2 scenarios you will never quote or paraphrase while writing candidates — a candidate
   tuned to the eval verbatim is memorization, and the held-out rows are what catch it.
-- Open a campaign issue (\`create_issue\`): the hypothesis log. Every round appends what was tried, the two
-  scorecard ids, and what the diff said — the campaign must be auditable without this conversation.
-- State the budget cap up front (rounds x scenarios x N tries, \`try_agent\` spends real LLM budget) and stop
-  when it is spent, whatever round you are in.
+- Open a campaign issue (\`create_issue\`): the narrative journal. Then \`open_campaign\` { issueId, frame } —
+  the RECORD, and the frame is FROZEN at that call and referenced by digest forever after. Put in it exactly
+  what the decision will read: \`scenarios\` (each with \`heldOut\`), \`judges\`, \`trialsPerCase\`,
+  \`budget.maxRounds\`, \`stopAfterRejectedRounds\`. There is no edit; a frame you want to change is a new
+  campaign.
+- \`heldOut: true\` is a FLAG THE GATE READS, and it reads only those rows. A private promise not to look at
+  a scenario is not a held-out set — mark them, or the walk proves nothing about generalization.
+- The frame's \`scenarios\` are the exam: every round's two batches must run EXACTLY that set. A batch that
+  ran a different slice makes the round incomparable, with no error at submit time to warn you.
+- State the budget cap up front (rounds x scenarios x N tries, \`try_agent\` spends real LLM budget). The
+  frame's \`budget.maxRounds\` is the hard one — the gate stops the walk, you do not have to count.
 
 ## 1. Baseline — and its noise floor
 - For each scenario run \`try_agent\` { agentId } N times; collect each result's \`trace\`.
@@ -733,19 +759,33 @@ Everdict's tools load on demand. Before anything else:
 
 ## 3. Evaluate the candidate
 - Same scenarios, same N, same judges → a second ingested scorecard (candidate version label in \`harness\`).
-- \`diff_scorecards\` { baseline, candidate }. Read \`comparability\` FIRST — 'none' means the comparison does
-  not hold, which is a different fact from "no difference". The trials diff is the verdict: per-case Fisher/z
-  significance with the FDR correction and the practical minDelta floor already applied.
+- \`diff_scorecards\` { baseline, candidate } is for YOUR reading — what moved, and where to aim the next
+  hypothesis. Read \`comparability\` FIRST — 'none' means the comparison does not hold, which is a different
+  fact from "no difference". The trials diff carries per-case Fisher/z significance with the FDR correction
+  and the practical minDelta floor already applied.
+- Then RECORD the round: \`log_campaign_round\` { hypothesis, candidateVersion, baselineScorecardId,
+  candidateScorecardId }. **You do not send a verdict.** The platform derives it from that same diff, so the
+  loop cannot write its own report card — and a round you never logged is a round the campaign cannot count.
+- A round the platform records as not-comparable still spends a round and counts toward the rejected streak.
+  Read its reason before spending another one: the usual causes are a batch that ran a slice the frame does
+  not name, thinner trials than \`trialsPerCase\`, a judge set that differs from the frame's, or a confound —
+  an axis the diff proved actually different between the two sides, which no waiver forgives.
 
-## 4. Decide — adoption is a gate, not a feeling
-- Adopt only when ALL hold: at least one significant improvement · zero significant regressions · the
-  aggregate delta clears the noise floor measured in step 1 (never a fixed magic number).
-- When the campaign is a RECORD (\`open_campaign\`), adoption is not a save you perform — it is an
-  authorization you spend. \`settle_campaign\` writes it, \`campaign_adoption\` reads it back, and
-  \`adopt_campaign_candidate\` presents it with the spec being registered: the platform compares every
-  coordinate against the stored proof and refuses a candidate substituted between the evaluation and the
-  registration. Spendable ONCE, and re-drivable after a crash. Bare \`save_agent\` still works for
-  campaign-less work; it carries no proof, so it claims nothing about having been measured.
+## 4. Decide — ask the gate, never re-derive it
+- \`campaign_decision\` answers \`continue\` · \`adopt\` · \`halt\`, reading the frozen frame and the whole
+  round trace. Ask it; do not re-implement it. The arithmetic is the frame's, and it reads the HELD-OUT
+  counts — improving where you have been pushing is evidence about your search, not about the agent.
+- \`continue\` → back to step 2. \`halt\` → \`settle_campaign\` and report the reason (\`no_improvement\` after
+  the rejected streak · \`budget_exhausted\` · \`identity_unverified\`, which is asking which bytes you
+  measured rather than ending the walk).
+- \`adopt\` → adoption is not a save you perform, it is an authorization you spend. \`settle_campaign\` writes
+  it, \`campaign_adoption\` reads it back, and \`adopt_campaign_candidate\` presents it with the spec being
+  registered: the platform compares every coordinate against the stored proof and refuses a candidate
+  substituted between the evaluation and the registration. Spendable ONCE, and re-drivable after a crash.
+  Bare \`save_agent\` still works for campaign-less work; it carries no proof, so it claims nothing about
+  having been measured.
+- Only the LATEST round is adoptable. If round 4 won and round 5 regressed, re-run round 4's candidate to
+  adopt it — the gate does no archaeology over the trace.
 - ⚠️ An INGESTED scorecard names no registry document, so its rounds carry no candidate spec digest and the
   gate can authorize only the version LABEL. It refuses that by default: record
   \`allowLabelOnlyAdoption: true\` on the frame at open when the loop runs on ingested traces, or run the
@@ -753,9 +793,13 @@ Everdict's tools load on demand. Before anything else:
   campaign open — it is asking which bytes you measured, not ending the walk.
 - Present the diff and ask the member BEFORE adopting when working interactively; in headless automation park
   it behind an approval — never silently swap a live configuration.
-- Rejection changes nothing: record the hypothesis and the diff in the issue and move on.
-- Close the campaign (\`update_issue\`) naming the adopted version and the scorecard that proved it — or close
-  as no-improvement after 3 consecutive rejected rounds; a longer walk is spending, not learning.
+- Rejection changes nothing about the agent: the round is already recorded, so write the hypothesis and what
+  the diff said into the issue and move on.
+- Close the ISSUE (\`update_issue\`) naming the adopted version and the scorecard that proved it, or the
+  reason the gate halted with the strongest rejected hypothesis named. The record already holds the
+  arithmetic; the issue is where a reader learns what you were thinking.
+- ⚠️ A campaign with no logged rounds cannot be settled — the gate answers \`continue\` on an empty trace and
+  \`settle_campaign\` refuses that. If you opened one, either walk it or say in the issue why it was abandoned.
 
 ## Constraints
 - NEVER weaken judges, verdict policy, or scenarios mid-campaign to make a candidate pass — changing the
@@ -775,13 +819,16 @@ const AGENT_EVOLVE_CAMPAIGN_LOG = `
 
 The campaign issue must let a reader judge the walk without this conversation:
 
-- **Frame** — target agent@version, goal judges, scenario ids (held-out rows marked), N trials, budget cap.
-- **Noise floor** — baseline scorecard id, flake rate, per-case variance; the adoption threshold derived from it.
+- **Frame** — the campaign RECORD id (from \`open_campaign\`) first, then target agent@version, goal judges,
+  scenario ids with the held-out rows marked, N trials, budget cap. The record holds the frozen frame; this
+  line is so a reader can reach it.
+- **Noise floor** — baseline scorecard id, flake rate, per-case variance. This is what tells you whether a
+  delta is readable at all; it is NOT the adoption rule — the gate is.
 - **Rounds** — one row per round: hypothesis (the ONE variable) · candidate (draft or saved version) ·
-  baseline/candidate scorecard ids · diff verdict (significant improvements/regressions after correction) ·
-  decision (adopted/rejected) and why.
-- **Close** — adopted version + the proving scorecard id, or "no improvement in K rounds" with the strongest
-  rejected hypothesis named. Never close a campaign without one of the two.
+  baseline/candidate scorecard ids · what the diff showed and why it pointed at the next hypothesis. The
+  round's own verdict lives in the record, derived — do not restate it here as if you had decided it.
+- **Close** — the gate's answer and what was done with it: the adopted version + the proving scorecard id,
+  or the halt reason with the strongest rejected hypothesis named. Never close without one of the two.
 `.trim();
 
 const AGENT_EVOLVE: CapabilityRecord = {

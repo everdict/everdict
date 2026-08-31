@@ -133,6 +133,61 @@ describe("firstPartySkillExamples", () => {
     }
   });
 
+  // ── A PROCEDURE THAT OPENS A CAMPAIGN AND NEVER LOGS A ROUND CANNOT CLOSE ONE ─────────────────────
+  //
+  // The campaign RECORD landed ten days after this procedure was drilled, and the copy was then given three
+  // of the six doors — open, settle, adopt — and never the two that make a campaign move. `campaignAdoption`
+  // answers `continue` on an empty round trace and `settle` refuses `continue`, so every campaign the skill
+  // opened would have stayed open forever, with the failure appearing three steps away from the omission.
+  //
+  // Anchors alone would not have caught it: the four doors that WERE named read as coverage. So the
+  // assertion is derived — every campaign door the body names must also be in the `select:` preload, which
+  // is the line that decides whether the agent can call it at all. Pre-fix that fails naming all four.
+  it("the agent-evolve example drives the campaign record, and preloads every door it names", () => {
+    const skill = examples.find((r) => r.id === "agent-evolve");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    const body = skill.spec.instructions;
+
+    // The two the procedure was missing are the two that move a campaign: one records the evidence, the
+    // other asks the frozen frame what to do with it.
+    for (const door of [
+      "open_campaign",
+      "log_campaign_round",
+      "campaign_decision",
+      "settle_campaign",
+      "campaign_adoption",
+      "adopt_campaign_candidate",
+    ]) {
+      expect(body, `the procedure must name ${door}`).toContain(door);
+    }
+
+    // Everdict's tools load on demand, so a door named in prose and absent from the preload is a door the
+    // agent has to go looking for mid-walk. Derived from the body rather than restated.
+    const select = /select:([a-z_,]+)/.exec(body)?.[1];
+    expect(select, "the procedure must open with a ToolSearch preload").toBeDefined();
+    const preloaded = new Set((select ?? "").split(","));
+    const DOOR =
+      /^(open_campaign|log_campaign_round|settle_campaign|campaign_(decision|adoption)|adopt_campaign_candidate)$/;
+    const named = [...body.matchAll(/\b([a-z_]*campaign[a-z_]*)\b/g)]
+      .map((m) => m[1])
+      .filter((word): word is string => word !== undefined && DOOR.test(word));
+    expect(named.length).toBeGreaterThan(0); // the derivation must actually reach something
+    for (const door of new Set(named)) {
+      expect(preloaded.has(door), `${door} is named but not preloaded`).toBe(true);
+    }
+
+    // …and the gate is ASKED, not restated. The prose used to carry its own adoption predicate over
+    // whole-round counts while the gate reads the held-out ones — a predicate written twice that had
+    // already diverged (rule `protocol` L3).
+    expect(body).toContain("HELD-OUT");
+    expect(body).not.toContain("Adopt only when ALL hold");
+
+    // The drill's own arithmetic: at N=3 a total flip is Fisher p = 0.10, so the old "at least 3" default
+    // authored rounds that could not produce a significant result whatever the candidate did.
+    expect(body).toContain("N is at least 5");
+  });
+
   it("the memory-consolidation example carries the orient→gather→consolidate→prune pass over memory/", () => {
     const skill = examples.find((r) => r.id === "memory-consolidation");
     expect(skill).toBeDefined();
