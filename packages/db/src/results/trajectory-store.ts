@@ -20,7 +20,7 @@ import {
   serializedBytes,
   trajectoryForAttempt,
 } from "@everdict/application-control";
-import { type RunUsageSummary, RunUsageSummarySchema } from "@everdict/contracts";
+import { type RunUsageSummary, RunUsageSummarySchema, UpstreamError } from "@everdict/contracts";
 import type { SpanBatchFacts } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
 import { bodyOf, formatOf, pageBodyOf } from "./trajectory-body.js";
@@ -377,11 +377,17 @@ export class PgTrajectoryStore implements TrajectoryStore {
     // would crash its schema parse. The bytes are in everdict_trajectory_events throughout.
     const EMPTY = "[]";
     // RETURNING under ON CONFLICT DO NOTHING yields a row ONLY when this call inserted — `created` for free.
+    // ONE STATEMENT, ONE COMMIT. The header and the rows it counts are written together — see `eventsCte`.
     const inserted = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id, usage, body_split, batch)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13, $14, $15, true, $16)
-       ON CONFLICT (run_id) DO NOTHING
-       RETURNING run_id`,
+      `WITH plane AS (
+         INSERT INTO everdict_trajectories (run_id, tenant, source, emitter, event_count, body, body_format, t0, sealed_at, owner, kind, label, preview, attempt_id, usage, body_split, batch)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, $12, $13, $14, $15, true, $16)
+         ON CONFLICT (run_id) DO NOTHING
+         RETURNING run_id
+       ), events AS (
+         ${PgTrajectoryStore.eventsCte("plane", "$4", "$17", "$18")}
+       )
+       SELECT run_id FROM plane`,
       [
         input.runId,
         input.tenant,
@@ -402,10 +408,11 @@ export class PgTrajectoryStore implements TrajectoryStore {
         // read reports that as unknown, never as zero (mig 0199).
         usage,
         batch,
+        items.map((item) => JSON.stringify(item.body)),
+        items.map((item) => item.bytes),
       ],
     );
     if (inserted.rows.length > 0) {
-      await this.writeEvents(input.runId, emitter, items);
       return {
         runId: input.runId,
         tenant: input.tenant,
@@ -433,11 +440,23 @@ export class PgTrajectoryStore implements TrajectoryStore {
       };
     }
     if ((primary.emitter ?? primary.source) === emitter) return { ...metaOf(primary), created: false };
+    // ONE STATEMENT, ONE COMMIT — and here it is THREE effects, not two: the segment row, the event rows it
+    // counts, and the aggregate that must never drift from them. `bump` draws FROM segment, so a segment that
+    // lost its ON CONFLICT increments nothing.
     const appended = await this.client.query<{ run_id: string }>(
-      `INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id, usage, body_split, batch)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, true, $12)
-       ON CONFLICT (run_id, emitter) DO NOTHING
-       RETURNING run_id`,
+      `WITH segment AS (
+         INSERT INTO everdict_trajectory_segments (run_id, emitter, tenant, source, event_count, body, body_format, t0, sealed_at, attempt_id, usage, body_split, batch)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9, $10, $11, true, $12)
+         ON CONFLICT (run_id, emitter) DO NOTHING
+         RETURNING run_id
+       ), events AS (
+         ${PgTrajectoryStore.eventsCte("segment", "$2", "$13", "$14")}
+       ), bump AS (
+         UPDATE everdict_trajectories t SET segment_event_count = t.segment_event_count + $5
+           FROM segment WHERE t.run_id = segment.run_id
+         RETURNING t.run_id
+       )
+       SELECT run_id FROM segment`,
       [
         input.runId,
         emitter,
@@ -451,40 +470,42 @@ export class PgTrajectoryStore implements TrajectoryStore {
         input.attemptId ?? null,
         usage,
         batch,
+        items.map((item) => JSON.stringify(item.body)),
+        items.map((item) => item.bytes),
       ],
     );
     const created = appended.rows.length > 0;
-    if (created) {
-      await this.writeEvents(input.runId, emitter, items);
-      await this.client.query(
-        "UPDATE everdict_trajectories SET segment_event_count = segment_event_count + $1 WHERE run_id = $2",
-        [count, input.runId],
-      );
-    }
     const refreshed = await this.primary(input.runId);
     return { ...metaOf(refreshed ?? primary), created };
   }
 
   // One row per event, seq 1..N in PAGING order. Written AFTER the plane row wins its ON CONFLICT, so two
   // concurrent seals of the same emitter cannot interleave rows: the loser never reaches this.
-  private async writeEvents(runId: string, emitter: string, items: SizedItem[]): Promise<void> {
-    if (items.length === 0) return;
-    // One statement, unnested — a per-event round trip would make sealing a long-horizon run O(N) round trips.
-    //
-    // ⚠️ `body_in.value` IS QUALIFIED, AND THE UNQUALIFIED VERSION SHIPPED (design review). Both `unnest`
-    // aliases expose a column called `value`, so a bare `value` here is `column reference "value" is
-    // ambiguous` — every split-plane seal failed against real Postgres from the moment this statement was
-    // written. Nothing caught it: `InMemoryTrajectoryStore` keeps its rows in a Map and the fake `SqlClient`
-    // asserts on the SQL TEXT, so both answer happily to a statement Postgres refuses to plan. It was found
-    // by TRUST-190, the first scenario to execute this path against an engine.
-    await this.client.query(
-      `INSERT INTO everdict_trajectory_events (run_id, emitter, seq, body, bytes)
-       SELECT $1, $2, ordinality, body_in.value, (bytes_in.value)::int
-         FROM unnest($3::jsonb[]) WITH ORDINALITY AS body_in(value, ordinality)
-         JOIN unnest($4::int[]) WITH ORDINALITY AS bytes_in(value, ordinality) USING (ordinality)
-       ON CONFLICT (run_id, emitter, seq) DO NOTHING`,
-      [runId, emitter, items.map((item) => JSON.stringify(item.body)), items.map((item) => item.bytes)],
-    );
+  // ── THE EVENT ROWS, AS A CTE OF THE STATEMENT THAT WRITES THEIR PLANE ─────────────────────────────
+  //
+  // Not a statement of its own. A split plane's header claims `event_count = N`, and the rows ARE that claim
+  // — written apart they were a second COMMIT, so a failure between them left a header over zero rows that
+  // reads as an empty trajectory rather than a missing one, and the retry's `ON CONFLICT DO NOTHING` →
+  // `created: false` reported success over the damage.
+  //
+  // It draws from `<planeCte>` rather than from the parameters, so when the plane row loses its ON CONFLICT
+  // the cross join yields nothing and no event row is written — the "only the winner writes events" rule
+  // becomes a property of the statement instead of an `if` around a second one.
+  //
+  // ⚠️ `body_in.value` IS QUALIFIED, AND THE UNQUALIFIED VERSION SHIPPED (design review). Both `unnest`
+  // aliases expose a column called `value`, so a bare `value` here is `column reference "value" is
+  // ambiguous` — every split-plane seal failed against real Postgres from the moment this statement was
+  // written. Nothing caught it: `InMemoryTrajectoryStore` keeps its rows in a Map and the fake `SqlClient`
+  // asserts on the SQL TEXT, so both answer happily to a statement Postgres refuses to plan. It was found
+  // by TRUST-190, the first scenario to execute this path against an engine.
+  private static eventsCte(planeCte: string, emitter: string, bodies: string, bytes: string): string {
+    return `INSERT INTO everdict_trajectory_events (run_id, emitter, seq, body, bytes)
+       SELECT ${planeCte}.run_id, ${emitter}, ordinality, body_in.value, (bytes_in.value)::int
+         FROM ${planeCte}
+         CROSS JOIN unnest(${bodies}::jsonb[]) WITH ORDINALITY AS body_in(value, ordinality)
+         JOIN unnest(${bytes}::int[]) WITH ORDINALITY AS bytes_in(value, ordinality) USING (ordinality)
+       ON CONFLICT (run_id, emitter, seq) DO NOTHING
+       RETURNING 1`;
   }
 
   async planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
@@ -545,6 +566,23 @@ export class PgTrajectoryStore implements TrajectoryStore {
         ORDER BY e.seq`,
       [runId, row.emitter, after, limit, maxBytes],
     );
+    // ── A HEADER THAT CLAIMS EVENTS IT DOES NOT HAVE IS CORRUPT, NOT EMPTY ────────────────────────
+    //
+    // A split plane's `event_count` is the header's CLAIM about rows in another table. The seal writes both
+    // in one statement now, so a new plane cannot disagree — but deployments that ran the version where the
+    // event INSERT was refused by the planner (the ambiguous `value` column, TRUST-190) hold headers over
+    // zero rows, and this read used to serve them as `{kind:"page", events: []}`.
+    //
+    // That is the L2 collapse arriving through durability: "we have no evidence" and "the evidence is empty"
+    // become one answer, and every consumer above — the collector, the exact-attempt scorer, the run detail —
+    // accepts the second. Refusing at the FIRST page is what makes it visible; a later page legitimately
+    // returns nothing once the plane is drained, which is why `after === 0` is part of the condition.
+    if (page.rows.length === 0 && after === 0 && plane.eventCount > 0)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { runId, emitter: row.emitter, claimed: plane.eventCount },
+        `this trajectory plane claims ${plane.eventCount} event(s) and no rows are stored for it — its seal did not complete, so the evidence is INCOMPLETE rather than empty. Re-seal the run or drop the plane; serving it as an empty trajectory would report a run that produced nothing.`,
+      );
     const lastSeq = page.rows[page.rows.length - 1]?.seq;
     return {
       kind: "page",

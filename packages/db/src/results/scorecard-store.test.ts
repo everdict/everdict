@@ -590,8 +590,10 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
 
   it("Pg impl round-trips the preview through the INSERT and the browse SELECT", async () => {
     // Given a store whose SELECT answers with a stored row
+    // The seal writes its plane and that plane's event rows in ONE data-modifying CTE, so a write no longer
+    // begins with the INSERT keyword — see split-plane-atomicity.counterexample.test.ts.
     const { client, calls } = fakeClient((text) =>
-      text.startsWith("INSERT")
+      /\bINSERT\b/.test(text)
         ? { rows: [{ run_id: "turn-a" }] }
         : {
             rows: [
@@ -625,11 +627,12 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     });
     const listed = await store.list("acme");
     // Then the column is written and read back — a value that only lives in memory names nothing on reload
-    const planeInsert = calls.find((c) => c.text.startsWith("INSERT INTO everdict_trajectories"));
+    const planeInsert = calls.find((c) => c.text.includes("INSERT INTO everdict_trajectories"));
     expect(planeInsert?.text).toMatch(/INSERT INTO everdict_trajectories \([^)]*preview[^)]*\)/);
     expect(planeInsert?.params?.[12]).toBe("analyze the failing payment logs");
-    // …and the events go to their own table in the same seal (mig 0200).
-    expect(calls.some((c) => c.text.startsWith("INSERT INTO everdict_trajectory_events"))).toBe(true);
+    // …and the events go to their own table IN THE SAME STATEMENT (mig 0200): the header's `event_count` is a
+    // claim about those rows, so writing them apart would be a second commit the claim could outlive.
+    expect(planeInsert?.text).toContain("INSERT INTO everdict_trajectory_events");
     expect(calls.find((c) => c.text.includes("FROM everdict_trajectories\n"))?.text).toMatch(
       /label, preview FROM everdict_trajectories/,
     );
@@ -749,7 +752,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
         calls.push({ text, params });
         // The header insert loses the race; the segment insert takes.
         if (text.includes("INSERT INTO everdict_trajectory_segments")) return { rows: [{ run_id: "r1" }] } as never;
-        if (text.startsWith("INSERT")) return { rows: [] } as never;
+        if (/\bINSERT\b/.test(text)) return { rows: [] } as never;
         if (text.includes("FROM everdict_trajectory_segments")) return { rows: [] } as never;
         if (text.startsWith("SELECT"))
           return {
@@ -776,7 +779,8 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(segmentInsert?.text).toMatch(/ON CONFLICT \(run_id, emitter\) DO NOTHING/);
     expect(segmentInsert?.params?.[1]).toBe("run"); // the emitter this seal belongs to
     // The denormalized counter keeps the browse row and the ingestion meter honest.
-    expect(calls.some((c) => /SET segment_event_count = segment_event_count \+ \$1/.test(c.text))).toBe(true);
+    // …and the counter rides in the SEGMENT'S OWN statement, so it can never drift from the rows it counts.
+    expect(segmentInsert?.text).toMatch(/SET segment_event_count = t\.segment_event_count \+ \$5/);
   });
 });
 
