@@ -28,7 +28,21 @@ export interface S3ArtifactStoreOptions {
 export class S3ArtifactStore implements ArtifactStore {
   private readonly client: S3Client; // server-internal endpoint — put/get/bucket calls
   private readonly presigner: S3Client; // signs the browser-facing URL (publicBaseUrl when set, else the same endpoint)
+  // The addresses this store ever MINTS a URL at — the only ones a legacy presigned ref can have come from,
+  // and therefore the only ones `keyOf` will re-sign. An unparseable option contributes nothing rather than
+  // widening the set: with no origins, every legacy URL is refused and only the stable handle resolves.
+  private readonly signedOrigins: ReadonlySet<string>;
   constructor(private readonly opts: S3ArtifactStoreOptions) {
+    this.signedOrigins = new Set(
+      [opts.endpoint, opts.publicBaseUrl].flatMap((address) => {
+        if (address === undefined) return [];
+        try {
+          return [new URL(address).origin];
+        } catch {
+          return [];
+        }
+      }),
+    );
     const shared = {
       region: opts.region ?? "us-east-1",
       forcePathStyle: true,
@@ -131,19 +145,35 @@ export class S3ArtifactStore implements ArtifactStore {
     return key === undefined ? undefined : await this.signedUrl(this.presigner, key);
   }
 
-  // `artifact://<key>` (the stable stored handle) or `<endpoint>/<bucket>/<key>?<signature>` (a legacy row's
-  // presigned URL) → `<key>` (path-style, which is what we always sign). The endpoint's host is deliberately
-  // NOT compared: an old ref minted before the public base was configured names a different host and still
-  // points at this bucket.
+  // `artifact://<key>` (the stable stored handle) or `<origin we sign for>/<bucket>/<key>?<signature>` (a
+  // legacy row's presigned URL) → `<key>` (path-style, which is what we always sign).
+  //
+  // ── THE PATH STARTS WITH OUR BUCKET IS NOT WE MINTED THIS URL ───────────────────────────────────
+  //
+  // This used to compare no host at all, so that a ref minted against the server-internal endpoint would
+  // still resolve after a `publicBaseUrl` was configured. That case is real and is still served — by naming
+  // the origins rather than by accepting every one.
+  //
+  // `screenshotRef` is not always ours to begin with: `EnvSnapshot` legitimately carries a producer's own
+  // http(s) artifact URL (the push-ingest channel — the judge resolver fetches those BARE, with no
+  // credentials, precisely because they are attacker-influenced). So a producer that knows the deployment's
+  // bucket name could submit `https://attacker.invalid/<bucket>/<someone-elses-key>`, and the run-detail
+  // read would hand it here and return a URL signed WITH OUR CREDENTIALS for an object it has no
+  // relationship with. The bare fetch was designed for hostile input; the signer never was.
+  //
+  // A ref naming an origin we no longer sign for (the endpoint moved) resolves to nothing and the caller
+  // keeps the stored URL — a stale display, which is the direction to fail in.
   private keyOf(ref: string): string | undefined {
     const stable = artifactKeyOf(ref);
     if (stable !== undefined) return stable;
-    let path: string;
+    let url: URL;
     try {
-      path = decodeURIComponent(new URL(ref).pathname);
+      url = new URL(ref);
     } catch {
-      return undefined; // not a url (dev's memory:// ref, a relative path) — nothing to re-sign
+      return undefined; // not a url (dev's memory:// ref, a path inside the compute) — nothing to re-sign
     }
+    if (!this.signedOrigins.has(url.origin)) return undefined;
+    const path = decodeURIComponent(url.pathname);
     const prefix = `/${this.opts.bucket}/`;
     return path.startsWith(prefix) ? path.slice(prefix.length) || undefined : undefined;
   }
