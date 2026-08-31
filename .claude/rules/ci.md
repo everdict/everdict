@@ -62,6 +62,20 @@ See skill `ci`.
   leaving every production private-verifier case recording no cleanup debt. Ports satisfied STRUCTURALLY (an
   object literal at the root) are deliberately not flagged — the compiler already refuses a missing one where
   it is passed. `DECLARED_UNWIRED` states why a capability is inert on purpose.
+- **`pnpm unwired-guards` is the other half of `unwired-capabilities`** (arch-review 124). That one asks
+  whether an optional PORT has an implementation; this asks whether a pure GUARD — `assert*` / `refuse*` /
+  `require*` / `reject*` — is CALLED. They fail the same way and neither sees the other's shape. One review
+  found three at once: `refuseUnsafeCallback`/`assertPublicTarget`, the outbound SSRF decision, exported from
+  application-control's index and imported by nobody while three other lanes dialled a caller-named URL
+  unchecked; `assertRoleProfile`, the ownership protocol's O2 invariant, cited by `assertIndependentVerification`
+  as the "necessary" half and called by nothing; and `requireOwed`, a third spelling of a rule already decided
+  at boot and by a throw. The three repairs are the three legal answers the check asks for — WIRE it, DELETE it
+  (saying where the rule is enforced instead), or DECLARE it with the door that will open it.
+  ⚠️ Its first draft's sweep used `git ls-files 'apps/*/src/**/*.ts'`, which does not match a file directly
+  under `src/` — so `main.ts`, `server.ts` and `mcp.ts`, the composition roots where wiring LIVES, were
+  invisible and a correctly-wired guard was reported unwired. The check walks whole-tree pathspecs and
+  `.tsx` for that reason; a scanner that cannot see the composition root generates false findings, which is
+  worse than none.
 - **`pnpm authz-optional` is the "an authorization input may not be a maybe" law, enforced instead of stated**
   (arch-review 79). In an authz call `undefined` is the PERMISSIVE arm — no team constraint, so the
   workspace-level action decides alone — and optional chaining produces `undefined` for reasons that have

@@ -17,6 +17,7 @@ import {
   assertCheckpointForEnvelope,
   assertCompletionForRole,
   assertIndependentVerification,
+  assertRoleProfile,
   danglingCheckpointRefs,
   verificationClaimFor,
   verifierEnvelopeFor,
@@ -111,6 +112,20 @@ const VERIFIER_ASSIGNMENT_PROFILE: RoleProfile = {
   requiredEvidence: [],
   completion: "verified_verdict",
 };
+
+// ── O2, CHECKED RATHER THAN INSPECTED (arch-review 124) ──────────────────────────────────────────────
+//
+// `assertRoleProfile` refuses a read-only role that can write, and a `verified_verdict` completion from
+// anyone but the verifier — the half `assertIndependentVerification` calls "necessary and not sufficient".
+// It was exported from @everdict/domain and CALLED BY NOTHING, so the separation this service sells had one
+// half enforced (actor identity) and one half written down.
+//
+// It reads as unreachable because no door parses a `RoleProfile`: every profile at runtime is one of the
+// three constants above. That is exactly why the check belongs HERE and at module load — the constants are
+// the whole population, so checking them is checking every profile that exists, and the day a door does
+// accept one, the guard already has a caller to add it to instead of a comment to notice.
+for (const profile of [EXECUTOR_ASSIGNMENT_PROFILE, VERIFIER_SPAWN_PROFILE, VERIFIER_ASSIGNMENT_PROFILE])
+  assertRoleProfile(profile);
 
 export interface CreateCheckpointInput {
   tenant: string;

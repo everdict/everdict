@@ -1,4 +1,3 @@
-import { UpstreamError } from "@everdict/contracts";
 import type { ExecutionId } from "@everdict/contracts";
 
 // ── THE DEBT IS RECORDED WHERE THE BYTES ARE WRITTEN (arch-review 66 P1-high · P1-security) ──────────
@@ -415,14 +414,18 @@ export async function dischargeIntermediates(
   return await collectReleased(deps, released, tenant, executionId);
 }
 
-// A staging call that could not record its debt must not proceed to hand the bytes to a lane that will
-// reclaim the container: the object would exist with nothing pointing at it. Same shape as the reservation's
-// refusal — a caller that cannot record where the work is does not get the work.
-export function requireOwed(recorded: IntermediateCleanupDebt | undefined, key: string): void {
-  if (recorded !== undefined) return;
-  throw new UpstreamError(
-    "UPSTREAM_ERROR",
-    { key },
-    `the cleanup debt for ${key} could not be recorded, so these bytes would be written with nothing owning their removal`,
-  );
-}
+// ── WHY THERE IS NO `requireOwed` HERE ANY MORE (arch-review 124) ────────────────────────────────────
+//
+// One stood here: "a staging call that could not record its debt must not proceed to hand the bytes to a
+// lane that will reclaim the container". The rule is right and it was the THIRD spelling of it, exported and
+// called by nobody:
+//
+//   · `owe` returns `Promise<IntermediateCleanupDebt>`, so a ledger that cannot record THROWS, and
+//     `stageAgentHalf` deliberately does not swallow it — the put never runs.
+//   · `assertVerifierDurabilitySatisfiable` refuses at BOOT when `required` is chosen without this ledger,
+//     so the `cleanup?.` that yields undefined only exists under `best_effort`, where the loss is the
+//     policy's stated cost rather than a violation.
+//
+// A guard whose every reachable case is already decided elsewhere is not a safety net; it is a fourth thing
+// to keep in sync, and the exported name reads to a reviewer as an enforcement that runs. Deleted rather
+// than wired, and the reasoning kept here because "why is there no check?" is the question this answers.
