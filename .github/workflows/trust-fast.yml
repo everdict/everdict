@@ -51,8 +51,21 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U everdict -d everdict_trust"
           --health-interval 5s --health-timeout 5s --health-retries 20
+      # The ClickHouse lane's resolution rules are SQL — `argMin(x, (rank, clock))` either orders the way the
+      # store claims or it does not, and MergeTree has no unique key so every read collapses duplicate rows
+      # itself. A fake that echoes the query text answers happily to either. TRUST-192 is what the receipt's
+      # attempt → the bytes it is served join rests on, and a SKIPPED scenario counts as FAIL, so this service
+      # is part of the check rather than an optional extra.
+      clickhouse:
+        image: clickhouse/clickhouse-server:24-alpine
+        ports: ["8123:8123"]
+        options: >-
+          --health-cmd "wget -q -O - http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+          --ulimit nofile=262144:262144
     env:
       EVERDICT_TRUST_DATABASE_URL: postgresql://everdict:everdict@127.0.0.1:5432/everdict_trust
+      EVERDICT_TRUST_CLICKHOUSE_URL: http://127.0.0.1:8123
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6 # version resolved from package.json "packageManager"
@@ -96,7 +109,7 @@ jobs:
           docker logs minio 2>&1 | tail -40 >&2
           exit 1
 
-      - name: Trust suite (Postgres + object store subset)
+      - name: Trust suite (Postgres + object store + ClickHouse subset)
         env:
           EVERDICT_TRUST_S3_ENDPOINT: http://127.0.0.1:9000
           EVERDICT_TRUST_S3_ACCESS_KEY: everdict

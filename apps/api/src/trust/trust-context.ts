@@ -20,6 +20,35 @@ const DATABASE_URL = process.env.EVERDICT_TRUST_DATABASE_URL ?? process.env.DATA
 
 export const TRUST_PG_ENABLED = TRUST_SUITE_ENABLED && DATABASE_URL !== undefined && DATABASE_URL !== "";
 
+// The ClickHouse lane, gated the same way and for the same reason. Its resolution rules are SQL — an
+// `argMin(x, (rank, clock))` either orders the way the store claims or it does not, and MergeTree's lack of a
+// unique key means every read has to collapse duplicate rows itself. Neither is answerable by a fake that
+// echoes the query text back.
+//   EVERDICT_TRUST_CLICKHOUSE_URL — e.g. http://127.0.0.1:8123
+const CLICKHOUSE_URL = process.env.EVERDICT_TRUST_CLICKHOUSE_URL;
+
+export const TRUST_CH_ENABLED = TRUST_SUITE_ENABLED && CLICKHOUSE_URL !== undefined && CLICKHOUSE_URL !== "";
+
+export function trustClickHouseUrl(): string {
+  if (CLICKHOUSE_URL === undefined || CLICKHOUSE_URL === "")
+    throw new Error(
+      "trustClickHouseUrl called without EVERDICT_TRUST_CLICKHOUSE_URL — guard the describe with TRUST_CH_ENABLED",
+    );
+  return CLICKHOUSE_URL;
+}
+
+// Send a statement straight to ClickHouse. The scenarios need this to SET UP states the store deliberately
+// cannot produce — two attempts that both passed the seal's pre-read and both wrote rows, which is the race
+// the resolution exists to answer.
+export async function trustClickHouseCommand(sql: string, body?: string): Promise<string> {
+  const url = new URL(trustClickHouseUrl());
+  url.searchParams.set("query", sql);
+  const res = await fetch(url, { method: "POST", body: body ?? "" });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`ClickHouse refused: ${res.status} ${text}`);
+  return text;
+}
+
 export interface TrustPg {
   client: SqlClient;
   pool: PgPool;

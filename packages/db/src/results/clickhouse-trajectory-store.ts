@@ -137,6 +137,12 @@ const EVENT_COLUMNS: readonly ColumnSpec[] = [
   // The seal's own stamp, so a duplicate seal (this engine has no unique key — see the header) resolves to
   // the FIRST writer per (run_id, emitter, seq), exactly as the plane rows do.
   { name: "sealed_at", type: "String" },
+  // WHOSE evidence these bytes are. Without it the plane header could be chosen by ATTEMPT while the bodies
+  // were chosen by CLOCK, so a receipt naming attempt B was answered with B's header over whichever attempt
+  // sealed first — two internally consistent halves whose JOIN was wrong (arch-review 123). `''` is the
+  // pre-column value and means "unattributed", which ranks BELOW an exact match and above another attempt's,
+  // exactly as it does on the plane rows.
+  { name: "attempt_id", type: "String", default: "''" },
 ];
 const EVENT_ORDER_BY = "(run_id, emitter, seq)";
 
@@ -366,7 +372,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     // plane points at — invisible, and swept with the run by retention — where the other order would leave a
     // plane claiming `body_split` over rows that do not exist yet, which every read would serve as an empty
     // trajectory. Neither is a transaction (this engine has none); the order decides which failure you get.
-    await this.writeEvents(input.runId, emitter, sealedAt, items);
+    await this.writeEvents(input.runId, emitter, sealedAt, items, input.attemptId);
     await this.command(`INSERT INTO ${this.table()} FORMAT JSONEachRow`, {}, JSON.stringify(row));
     if (!existing) return { ...fallback, created: true };
     return {
@@ -469,11 +475,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     // The `argMin(…, sealed_at)` is the same first-write-wins resolution the plane rows use: MergeTree has no
     // unique key, so a duplicate seal is a duplicate ROW and every read has to collapse it the same way.
     const sizes = await this.select<{ seq: number | string; bytes_first: number | string }>(
-      `SELECT seq, argMin(bytes, sealed_at) AS bytes_first FROM ${this.eventsTable()}
-        WHERE run_id = {runId:String} AND emitter = {emitter:String}
-          AND seq > {after:UInt32} AND seq <= {upper:UInt32}
-        GROUP BY seq ORDER BY seq`,
-      { ...params, after: String(after), upper: String(after + limit) },
+      this.eventPageSql("bytes", "{upper:UInt32}", window.attemptId),
+      this.eventPageParams(params, after, after + limit, window.attemptId),
     );
     const budgeted = pageOf(sizes, 0, limit, maxBytes, (s) => Number(s.bytes_first));
     const cut = budgeted.slice[budgeted.slice.length - 1]?.seq;
@@ -483,11 +486,8 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
         page: { emitter: plane.emitter, format: plane.format, events: [], eventCount: plane.eventCount },
       };
     const bodies = await this.select<{ seq: number | string; body_first: string }>(
-      `SELECT seq, argMin(body, sealed_at) AS body_first FROM ${this.eventsTable()}
-        WHERE run_id = {runId:String} AND emitter = {emitter:String}
-          AND seq > {after:UInt32} AND seq <= {cut:UInt32}
-        GROUP BY seq ORDER BY seq`,
-      { ...params, after: String(after), cut: String(Number(cut)) },
+      this.eventPageSql("body", "{cut:UInt32}", window.attemptId),
+      this.eventPageParams(params, after, Number(cut), window.attemptId, "cut"),
     );
     const lastSeq = Number(cut);
     return {
@@ -507,9 +507,52 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     };
   }
 
+  // ── ONE PAGE OF EVENT ROWS, RESOLVED THE WAY THE PLANE WAS ──────────────────────────────────────
+  //
+  // Sizes and bodies are two reads of the SAME rows, so they resolve identically or the page counts one
+  // attempt's bytes and serves another's text. Written once, for both, for that reason (L3).
+  //
+  // With an attempt asked for, the rank leads and the clock only breaks ties inside it — the same ordering
+  // `planeRows` and the legacy body read use — and `attempt_rank < 2` drops another attempt's rows outright
+  // rather than leaving them reachable at a seq the wanted attempt did not seal. With no attempt asked for,
+  // there is nothing to rank AGAINST: ranking on an empty id would make every attributed row rank 2 and
+  // answer nothing, so that read stays first-write-wins by clock across all rows, exactly as before.
+  private eventPageSql(field: "body" | "bytes", upper: string, attemptId: string | undefined): string {
+    const where = `run_id = {runId:String} AND emitter = {emitter:String} AND seq > {after:UInt32} AND seq <= ${upper}`;
+    return attemptId === undefined
+      ? `SELECT seq, argMin(${field}, sealed_at) AS ${field}_first FROM ${this.eventsTable()}
+        WHERE ${where}
+        GROUP BY seq ORDER BY seq`
+      : `SELECT seq, argMin(${field}, (attempt_rank, sealed_at)) AS ${field}_first
+           FROM (SELECT *, ${ATTEMPT_RANK} AS attempt_rank FROM ${this.eventsTable()} WHERE ${where})
+          WHERE attempt_rank < 2
+          GROUP BY seq ORDER BY seq`;
+  }
+
+  private eventPageParams(
+    params: Record<string, string>,
+    after: number,
+    upper: number,
+    attemptId: string | undefined,
+    upperName: "upper" | "cut" = "upper",
+  ): Record<string, string> {
+    return {
+      ...params,
+      after: String(after),
+      [upperName]: String(upper),
+      ...(attemptId !== undefined ? { attemptId } : {}),
+    };
+  }
+
   // One row per event, seq 1..N in PAGING order, as a single JSONEachRow batch — a per-event round trip would
   // make sealing a long-horizon run O(N) HTTP requests.
-  private async writeEvents(runId: string, emitter: string, sealedAt: string, items: SizedItem[]): Promise<void> {
+  private async writeEvents(
+    runId: string,
+    emitter: string,
+    sealedAt: string,
+    items: SizedItem[],
+    attemptId: string | undefined,
+  ): Promise<void> {
     if (items.length === 0) return;
     const body = items
       .map((item, index) =>
@@ -520,6 +563,9 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
           body: JSON.stringify(item.body),
           bytes: item.bytes,
           sealed_at: sealedAt,
+          // The same identity the plane row carries, on the rows the plane's `event_count` counts — a header
+          // that names an attempt and bytes that cannot is the substitution this closes.
+          attempt_id: attemptId ?? "",
         }),
       )
       .join("\n");
