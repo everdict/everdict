@@ -160,6 +160,36 @@ describe("a scorecard belongs to a team", () => {
     await outsider.close();
   });
 
+  // The COUNTS door is a second read of the same collection, and a ceiling that only one of the two applies
+  // is a private team's work leaking as a number. It was added with the paging; nothing covered it until this.
+  it("counts under the same ceiling the rows are read under — a private team is not a total either", async () => {
+    const ctx = await build();
+    const secret = await ctx.teamService.create({
+      tenant: "acme",
+      key: "SEC2",
+      name: "Secret",
+      createdBy: "system",
+      isPrivate: true,
+    });
+    await ctx.teamService.addMember("acme", secret.id, "u", { subject: "system" });
+    const insider = serverFor(ctx, [secret.id, ctx.web.id]);
+    await insider.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: bearer,
+      payload: { ...body, teamId: secret.id },
+    });
+    const seen = await insider.inject({ method: "GET", url: "/scorecards/counts?groupBy=status", headers: bearer });
+    expect(seen.json().total).toBe(1);
+    await insider.close();
+
+    const outsider = serverFor(ctx, [ctx.mobile.id], "other");
+    const hidden = await outsider.inject({ method: "GET", url: "/scorecards/counts?groupBy=status", headers: bearer });
+    expect(hidden.statusCode).toBe(200);
+    expect(hidden.json()).toEqual({ groupBy: "status", groups: [], total: 0 });
+    await outsider.close();
+  });
+
   it("narrows to one team with ?team= by KEY, and never past the caller's own ceiling", async () => {
     const ctx = await build();
     const app = serverFor(ctx, [ctx.web.id]);
