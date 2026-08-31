@@ -2899,7 +2899,10 @@
     "traceEvaluation": "트레이스 평가",
     "sourceMeta": "소스",
     "runForTeam": "{team} 팀의 이름으로 평가를 실행합니다.",
-    "metaTeam": "팀"
+    "metaTeam": "팀",
+    "caseVerdictPass": "통과",
+    "caseVerdictFail": "실패",
+    "caseVerdictSkip": "판정 없음"
   },
   "scorecardSummary": {
     "statTotal": "전체 실행",
@@ -5811,7 +5814,10 @@
       "dataset": "데이터셋",
       "runtime": "런타임",
       "tag": "태그",
-      "origin": "트리거"
+      "origin": "트리거",
+      "verdict": "판정",
+      "failedBy": "떨어뜨린 지표",
+      "env": "환경"
     },
     "groupBy": {
       "none": "묶지 않음",
@@ -5825,7 +5831,8 @@
       "dataset": "데이터셋",
       "runtime": "런타임",
       "template": "형상",
-      "day": "실행한 날"
+      "day": "실행한 날",
+      "verdict": "판정"
     },
     "orderBy": {
       "name": "이름순",
@@ -5833,7 +5840,9 @@
       "created": "최근 생성순",
       "recent": "최근 실행순",
       "versions": "버전 많은순",
-      "cases": "케이스 많은순"
+      "cases": "케이스 많은순",
+      "failuresFirst": "실패 먼저",
+      "caseId": "케이스 id순"
     },
     "unset": {
       "team": "팀 없음",
@@ -5844,7 +5853,8 @@
       "dataset": "데이터셋 없음",
       "runtime": "런타임 없음",
       "tag": "태그 없음",
-      "origin": "직접 실행"
+      "origin": "직접 실행",
+      "env": "환경 없음"
     },
     "ownerWorkspace": "워크스페이스",
     "ownerShared": "기본 제공"

@@ -1,8 +1,16 @@
 'use client'
 
+import { memo, useCallback, useMemo, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
+import {
+  CASE_GROUPINGS,
+  CASE_ORDERS,
+  caseVerdictKey,
+  scorecardCaseListSpec,
+  type CaseVerdictKey,
+} from '@/entities/scorecard'
 import {
   fmtMetricLabel,
   groupMetricRows,
@@ -12,79 +20,297 @@ import {
 } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
+import { EmptyState } from '@/shared/ui/empty-state'
+import { facetOptionsOf, ListToolbar, type FacetSpec } from '@/shared/ui/list-toolbar'
+import { VirtualList } from '@/shared/ui/virtual-list'
 
 import type { ScorecardCaseView } from '../model/case-view'
 import { useScorecardCases } from './case-dialog-context'
 
-// 케이스 목록 — 한 케이스가 한 줄로 읽히는 컴팩트 행. 판정 배지 · 케이스 id · 과제 한 줄 · overall 점수
-// 배지까지만 싣고, 나머지(스크린샷·근거·에러·criterion)는 전부 클릭해 여는 상세 다이얼로그의 것이다.
-// 이전의 카드 그리드가 모든 케이스의 모든 근거를 목록에 펼쳐 화면을 압도하던 것의 교체.
+// The case explorer — one case reads as ONE fixed-height line, with the list toolbar (search · filter ·
+// display) above it.
+//
+// This screen was redrawn because of batches of hundreds. Before, each case was a card, all of them stood at
+// once, and the filter was a link that re-rendered the whole route: 500 cases meant thousands of nodes, and
+// pressing "failed only" ran a server render that re-read the scorecard, the dataset, the child runs and the
+// runner roster. Three things changed:
+//  ① the window (VirtualList) — only the rows crossing the screen are drawn, so the DOM tracks the viewport
+//     rather than the case count.
+//  ② the list grammar (ListToolbar) — filtering, grouping and ordering happen in the browser, zero round
+//     trips; the collection is already in hand.
+//  ③ the weight — the evidence (task body, score detail, full error text, screenshot) does not ride a row.
+//     The dialog fetches the one case it opened.
+// The principle that everything else belongs to the dialog you click into is unchanged.
+
+// Row height is **fixed**: the window computes its spacers from this number, so a single row that grows by
+// wrapping desyncs the scroll. That is why the badges stop at a few and the rest folds into +N — all of them
+// are in the dialog anyway.
+const ROW_HEIGHT_PX = 40
+const GROUP_HEADER_HEIGHT_PX = 34
+const MAX_ROW_BADGES = 2
+// The window's max height. Shorter content stands at its own height with no scrollbar, so a batch of a few
+// cases looks exactly as it did before.
+const VIEWPORT_MAX_HEIGHT = 'min(70vh, 780px)'
+
+type CaseRow =
+  | {
+      kind: 'group'
+      key: string
+      groupKey: string
+      label: string
+      count: number
+      collapsed: boolean
+    }
+  | { kind: 'case'; key: string; item: ScorecardCaseView }
+
 export function ScorecardCaseList() {
-  const { cases, openCase } = useScorecardCases()
+  const { all, groups, visible, view, activeKey, openCase } = useScorecardCases()
+  const t = useTranslations('scorecardsPage')
+  const list = useTranslations('listView')
+
+  const verdictLabel = useCallback(
+    (key: string): string =>
+      key === 'fail'
+        ? t('caseVerdictFail')
+        : key === 'skip'
+          ? t('caseVerdictSkip')
+          : t('caseVerdictPass'),
+    [t]
+  )
+
+  const facets = useMemo((): FacetSpec[] => {
+    const of = (facet: string, labelOf: (value: string) => string, unset?: string): FacetSpec => ({
+      key: facet,
+      label: list(`facet.${facet}`),
+      options: facetOptionsOf(
+        all,
+        (c) => scorecardCaseListSpec.facetValues(c, facet),
+        labelOf,
+        unset
+      ),
+    })
+    return [
+      of('verdict', verdictLabel),
+      // "What knocked it down" only has values on failed cases — on an all-passing batch the axis disappears.
+      of('failedBy', (value) => value),
+      of('tag', (value) => value),
+      of('env', (value) => value, list('unset.env')),
+    ].filter((facet) => facet.options.length > 0)
+  }, [all, list, verdictLabel])
+
+  // Collapsed groups — folding "470 passed" away is the thing people do most in front of hundreds of rows.
+  // It is a momentary state of the reader, so it goes into neither the cookie nor the URL: unlike a display
+  // preference, it is not something to remember until the next visit.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  const grouped = view.display.grouping !== 'none'
+  const rows = useMemo((): CaseRow[] => {
+    const out: CaseRow[] = []
+    for (const group of groups) {
+      const groupKey = group.key ?? ''
+      if (grouped) {
+        const isCollapsed = collapsed.has(groupKey)
+        out.push({
+          kind: 'group',
+          key: `group:${groupKey}`,
+          groupKey,
+          // Grouped by verdict the key is never empty — caseVerdictKey always answers one of three. If it
+          // somehow were, it would mean "no verdict", which IS skip (no invented label goes up).
+          label: group.key === null ? t('caseVerdictSkip') : verdictLabel(group.key),
+          count: group.items.length,
+          collapsed: isCollapsed,
+        })
+        if (isCollapsed) continue
+      }
+      for (const item of group.items) out.push({ kind: 'case', key: item.key, item })
+    }
+    return out
+  }, [groups, grouped, collapsed, list, verdictLabel, view.display.grouping])
+
+  // Back to the top when the contents change — a filter applied while you were at row 500 leaves that
+  // position pointing at nothing.
+  const resetKey = `${JSON.stringify(view.filters)}|${view.search}|${view.display.grouping}|${view.display.order}`
+
+  const heightOf = useCallback(
+    (row: CaseRow) => (row.kind === 'group' ? GROUP_HEADER_HEIGHT_PX : ROW_HEIGHT_PX),
+    []
+  )
+  const keyOf = useCallback((row: CaseRow) => row.key, [])
+
   return (
-    <div className="space-y-1.5">
-      {cases.map((c) => (
-        <CaseRow key={c.key} item={c} onOpen={() => openCase(c.key)} />
-      ))}
+    <div className="space-y-2.5">
+      <ListToolbar
+        search={view.search}
+        onSearch={view.setSearch}
+        facets={facets}
+        filters={view.filters}
+        onToggleFilter={view.toggleFilter}
+        onClearFilters={view.clearFilters}
+        total={visible.length}
+        groupings={CASE_GROUPINGS}
+        orders={CASE_ORDERS}
+        display={view.display}
+        onDisplay={view.setDisplay}
+      />
+      {visible.length === 0 ? (
+        <EmptyState title={list('emptyFilteredTitle')} hint={list('emptyFilteredHint')} />
+      ) : (
+        <VirtualList
+          items={rows}
+          keyOf={keyOf}
+          heightOf={heightOf}
+          maxHeight={VIEWPORT_MAX_HEIGHT}
+          resetKey={resetKey}
+          className="overflow-y-auto rounded-lg border border-border bg-card"
+        >
+          {(row) =>
+            row.kind === 'group' ? (
+              <GroupHeaderRow row={row} onToggle={toggleGroup} />
+            ) : (
+              <CaseListRow
+                item={row.item}
+                active={row.item.key === activeKey}
+                onOpen={openCase}
+                verdictLabel={verdictLabel}
+              />
+            )
+          }
+        </VirtualList>
+      )}
     </div>
   )
 }
 
-function CaseRow({ item: c, onOpen }: { item: ScorecardCaseView; onOpen: () => void }) {
+// The group header — the same grammar as the toolbar's ListGroup (chevron + label + count) without using
+// that component: the window needs a FLAT row array (so a collapsed group does not stand 500 rows under it),
+// which means the collapsed state has to belong to the list.
+function GroupHeaderRow({
+  row,
+  onToggle,
+}: {
+  row: Extract<CaseRow, { kind: 'group' }>
+  onToggle: (key: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onToggle(row.groupKey)}
+      aria-expanded={!row.collapsed}
+      style={{ height: GROUP_HEADER_HEIGHT_PX }}
+      className="flex w-full items-center gap-1.5 border-b border-border bg-elevated/60 px-2.5 text-left text-[12px] font-[560] text-foreground transition-colors hover:bg-accent/60"
+    >
+      <ChevronRight
+        className={cn(
+          'size-3 shrink-0 text-faint transition-transform duration-150',
+          !row.collapsed && 'rotate-90'
+        )}
+        strokeWidth={2.25}
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1 truncate">{row.label}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground">{row.count}</span>
+    </button>
+  )
+}
+
+// One case = one line. Memoized because every ←/→ step through the open dialog re-renders this list, while
+// the only rows that actually differ are the two the highlight moved between.
+const CaseListRow = memo(function CaseListRow({
+  item,
+  active,
+  onOpen,
+  verdictLabel,
+}: {
+  item: ScorecardCaseView
+  active: boolean
+  // Takes a STABLE function — a closure built per row would break the memo on every render.
+  onOpen: (key: string) => void
+  verdictLabel: (key: CaseVerdictKey) => string
+}) {
   const t = useTranslations('scorecardsPage')
-  const caseMetrics = c.scores.map((s) => s.metric)
-  // criterion 은 다이얼로그에서 — 목록 행은 overall(그룹 대표) 배지만 세운다.
-  const overallScores = groupMetricRows(c.scores).map((g) => g.row)
+  const caseMetrics = item.scores.map((s) => s.metric)
+  // Criteria belong to the dialog — a row stands only the overall (group head) badges, and only a few.
+  const overall = groupMetricRows(item.scores).map((g) => g.row)
+  const shown = overall.slice(0, MAX_ROW_BADGES)
+  const verdict = caseVerdictKey(item.verdict)
+  // On a failed case "how it died" comes before "what it was" — there is one line, so it carries that one.
+  const line = item.errorSummary ?? item.taskSummary
+
   return (
     <div
       role="button"
       tabIndex={0}
-      onClick={onOpen}
+      onClick={() => onOpen(item.key)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onOpen()
+          onOpen(item.key)
         }
       }}
+      style={{ height: ROW_HEIGHT_PX }}
       className={cn(
-        'flex cursor-pointer items-center gap-3 rounded-lg border border-l-2 bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
-        c.verdict === false
-          ? 'border-l-destructive'
-          : c.verdict == null
-            ? 'border-l-border-strong'
-            : 'border-l-[var(--color-success)]/60'
+        'flex cursor-pointer items-center gap-2.5 border-b border-border/60 px-2.5 transition-colors hover:bg-elevated focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40',
+        active && 'bg-accent/70'
       )}
     >
-      <Badge tone={c.verdict == null ? 'neutral' : c.verdict ? 'success' : 'danger'}>
-        {c.verdict == null ? 'SKIP' : c.verdict ? 'PASS' : 'FAIL'}
+      <Badge
+        tone={verdict === 'fail' ? 'danger' : verdict === 'skip' ? 'neutral' : 'success'}
+        title={verdictLabel(verdict)}
+      >
+        {verdict === 'fail' ? 'FAIL' : verdict === 'skip' ? 'SKIP' : 'PASS'}
       </Badge>
-      <span className="flex min-w-0 flex-1 items-baseline gap-2.5">
-        <span className="shrink-0 font-mono text-[13px] font-[510]">{c.caseId}</span>
-        {/* 트라이얼 배치 — 같은 케이스의 몇 번째 실행인지 없으면 행들이 구분 불가능한 쌍둥이로 보인다. */}
-        {c.trial !== undefined && (
-          <span className="shrink-0 font-mono text-[11px] text-faint">
-            {t('caseTrialBadge', { n: c.trial })}
-          </span>
-        )}
-        {/* 케이스의 정체 한 줄 — 분석하는 사람이 목록에서도 "무슨 케이스인지" 바로 읽도록. */}
-        {c.task && (
-          <span className="min-w-0 truncate text-[12px] text-muted-foreground">{c.task}</span>
-        )}
-      </span>
-      {/* shrink-0 금지 — 배지가 많은(다중 저지) 케이스가 좁은 컬럼에서 행 밖으로 밀려나지 않고 줄바꿈된다. */}
-      <span className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
-        {c.scores.length === 0 ? (
-          <span className="text-[12px] text-muted-foreground">{t('noScores')}</span>
+      <span className="shrink-0 truncate font-mono text-[12.5px] font-[510]">{item.caseId}</span>
+      {/* A trialled batch — without which run of the same case this is, the rows read as identical twins. */}
+      {item.trial !== undefined && (
+        <span className="shrink-0 font-mono text-[11px] text-faint">
+          {t('caseTrialBadge', { n: item.trial })}
+        </span>
+      )}
+      {/* One line of what the case was (or what killed it) — so the list itself already says which case
+          this is. */}
+      {line !== undefined && (
+        <span
+          className={cn(
+            'min-w-0 flex-1 truncate text-[12px]',
+            item.errorSummary !== undefined ? 'text-destructive/80' : 'text-muted-foreground'
+          )}
+          title={line}
+        >
+          {line}
+        </span>
+      )}
+      {line === undefined && <span className="min-w-0 flex-1" />}
+      {/* In a narrow column (the infra panel open) the score badges drop out — omitted, never wrapped: under
+          the window's fixed-height rule a wrap desyncs the scroll, and the full values belong to the dialog
+          anyway. */}
+      <span className="hidden shrink-0 items-center gap-1.5 @2xl:flex">
+        {item.scores.length === 0 ? (
+          <span className="text-[11.5px] text-faint">{t('noScores')}</span>
         ) : (
-          overallScores.map((s) => (
-            <Badge key={`${s.graderId}:${s.metric}`} title={s.metric} tone={scoreTone(s)}>
-              {fmtMetricLabel(s.metric, caseMetrics)}{' '}
-              {isUnmeasuredScore(s) ? t('scoreUnmeasured') : scoreBadgeValue(s)}
-            </Badge>
-          ))
+          <>
+            {shown.map((s) => (
+              <Badge key={`${s.graderId}:${s.metric}`} title={s.metric} tone={scoreTone(s)}>
+                {fmtMetricLabel(s.metric, caseMetrics)}{' '}
+                {isUnmeasuredScore(s) ? t('scoreUnmeasured') : scoreBadgeValue(s)}
+              </Badge>
+            ))}
+            {overall.length > shown.length && (
+              <span className="text-[11px] tabular-nums text-faint">
+                +{overall.length - shown.length}
+              </span>
+            )}
+          </>
         )}
-        <ChevronRight className="size-3.5 text-faint" />
       </span>
+      <ChevronRight className="size-3.5 shrink-0 text-faint" />
     </div>
   )
-}
+})

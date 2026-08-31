@@ -42,3 +42,14 @@ export {
   SCORECARD_ORDERS,
   scorecardListSpec,
 } from './model/list-view'
+export {
+  CASE_FACETS,
+  CASE_GROUPINGS,
+  CASE_ORDERS,
+  caseFailedBy,
+  caseVerdictKey,
+  DEFAULT_CASE_DISPLAY,
+  scorecardCaseListSpec,
+  type CaseVerdictKey,
+  type ScorecardCaseFacts,
+} from './model/case-list-view'

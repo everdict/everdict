@@ -3,6 +3,7 @@ import { getLocale, getTimeZone, getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton } from '@/widgets/infra-panel'
 import {
+  CaseVerdictTabs,
   OpenCaseChip,
   ScorecardCaseList,
   ScorecardCasesProvider,
@@ -21,6 +22,10 @@ import { runsSchema, type RunStatus } from '@/entities/run'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import {
+  CASE_FACETS,
+  CASE_GROUPINGS,
+  CASE_ORDERS,
+  DEFAULT_CASE_DISPLAY,
   isTraceEvaluation,
   scorecardRecordSchema,
   type MetricSummary,
@@ -42,6 +47,7 @@ import {
   HEALTH_TEXT,
   rateHealth,
 } from '@/shared/lib/format'
+import { loadListViewScope } from '@/shared/lib/load-list-view'
 import { resolveTemporalUiBase } from '@/shared/lib/temporal-ui'
 import { cn } from '@/shared/lib/utils'
 import { AutoRefresh } from '@/shared/ui/auto-refresh'
@@ -69,15 +75,25 @@ function rateTone(rate: number): 'success' | 'default' | 'danger' {
 
 export const dynamic = 'force-dynamic'
 
-// os-use screenshot src: base64 embedded (dev) → data URL, otherwise object storage URL (offload). undefined if neither.
-function osUseShotSrc(snapshot?: {
-  screenshot?: string
-  screenshotRef?: string
-}): string | undefined {
-  if (snapshot?.screenshot) return `data:image/png;base64,${snapshot.screenshot}`
-  if (snapshot?.screenshotRef && /^https?:\/\//.test(snapshot.screenshotRef))
-    return snapshot.screenshotRef
-  return undefined
+// Does this case have an os-use screenshot at all? The IMAGE itself never rides the case list — a dev-mode
+// base64 embed is hundreds of KB per case, and the list draws none of it. The case-detail dialog asks for the
+// one case it opened. Mirror of the src resolution in the widget's case-detail action.
+function hasOsUseShot(snapshot?: { screenshot?: string; screenshotRef?: string }): boolean {
+  if (snapshot?.screenshot) return true
+  return snapshot?.screenshotRef !== undefined && /^https?:\/\//.test(snapshot.screenshotRef)
+}
+
+// Cut to what one list row carries — a task body and an error text are both long and multi-line. The first
+// line only, and only a line's worth of it. The full text is fetched when the dialog opens that case.
+const CASE_LINE_MAX = 160
+function summarizeLine(text: string | undefined): string | undefined {
+  if (text === undefined) return undefined
+  const line = text
+    .split('\n')
+    .map((part) => part.trim())
+    .find((part) => part.length > 0)
+  if (line === undefined || line === '') return undefined
+  return line.length > CASE_LINE_MAX ? `${line.slice(0, CASE_LINE_MAX)}…` : line
 }
 
 // The runtime a batch ran on → a display name + optional detail link.
@@ -221,44 +237,19 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
   )
 }
 
-// Case filter segment — all ↔ failed only (#cases anchor keeps scroll). Server component, so toggle via URL param.
-function CaseFilterTab({
-  href,
-  active,
-  danger,
-  children,
-}: {
-  href: string
-  active: boolean
-  danger?: boolean
-  children: React.ReactNode
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        'px-2.5 py-1 text-[12px] font-[510] tabular-nums transition-colors first:border-l-0 [&:not(:first-child)]:border-l',
-        active
-          ? danger
-            ? 'bg-destructive/15 text-destructive'
-            : 'bg-elevated text-foreground'
-          : 'text-muted-foreground hover:bg-elevated hover:text-foreground'
-      )}
-    >
-      {children}
-    </Link>
-  )
-}
-
 export default async function ScorecardDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ workspace: string; id: string }>
-  searchParams: Promise<{ cases?: string; case?: string }>
+  // The case list's filter axes (verdict · failedBy · tag · env) and its search term ride here, under the
+  // list grammar's rule: WHICH cases belongs to the address, HOW they are drawn belongs to the reader's
+  // cookie. `case` is the open dialog.
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspace, id } = await params
-  const { cases, case: caseParam } = await searchParams
+  const query = await searchParams
+  const caseParam = typeof query.case === 'string' ? query.case : undefined
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
 
@@ -324,12 +315,30 @@ export default async function ScorecardDetailPage({
   const verdictedTotal = record.casePass?.total ?? passed + failedCount
   const passRate = verdictedTotal > 0 ? (record.casePass?.pass ?? passed) / verdictedTotal : null
 
-  // Failure-first sort (fail → skip → pass), then failed-only/all filter.
-  const filter = cases === 'failed' ? 'failed' : 'all'
-  const weight = (v: boolean | undefined) => (v === false ? 0 : v == null ? 1 : 2)
-  const ordered = [...cased].sort((a, b) => weight(a.verdict) - weight(b.verdict))
-  const shown = filter === 'failed' ? ordered.filter((c) => c.verdict === false) : ordered
-  const base = `/${workspace}/scorecard/${encodeURIComponent(id)}`
+  // The case list's view state — filters from the address, grouping/ordering from the reader's cookie (the
+  // same grammar the four evaluation lists use). The filtering, grouping and ordering themselves happen in
+  // the browser: one batch's cases are all in hand, so a filter costs zero round trips. The former
+  // failures-first sort is now the default ORDER axis, so the server no longer pre-sorts.
+  const basePath = `/${workspace}/scorecard/${encodeURIComponent(id)}`
+  const caseScope = await loadListViewScope({
+    basePath,
+    // One key per SCREEN, not per scorecard: remembering one per batch would overflow the cookie's 12 slots
+    // immediately.
+    viewKey: 'scorecard-cases',
+    facets: CASE_FACETS,
+    vocabulary: {
+      groupings: CASE_GROUPINGS,
+      orders: CASE_ORDERS,
+      fallback: DEFAULT_CASE_DISPLAY,
+    },
+    params: query,
+  })
+  // A link arriving on the old address (`?cases=failed`) still opens "failed only" — the same meaning,
+  // carried onto the new axis.
+  const caseViewScope =
+    query.cases === 'failed' && caseScope.filters.verdict === undefined
+      ? { ...caseScope, filters: { ...caseScope.filters, verdict: ['fail'] } }
+      : caseScope
 
   // Trace sink export results — jump via per-case external deep link (trace detail on the observability platform).
   const exportByCase = new Map((record.export?.cases ?? []).map((c) => [c.caseId, c]))
@@ -472,9 +481,14 @@ export default async function ScorecardDetailPage({
     trialTotals.set(r.caseId, n + 1)
   }
 
-  // 케이스 탐색기(컴팩트 행 + 상세 다이얼로그)에 넘길 직렬화된 케이스 뷰 — 정렬·필터가 끝난 shown 순서
-  // 그대로라 다이얼로그의 prev/next 가 목록과 같은 순서로 걷는다.
-  const caseViews: ScorecardCaseView[] = shown.map(({ r, verdict }) => {
+  // The serialized case views handed to the case explorer (compact rows + the detail dialog) — all of them,
+  // in the record's original order; which ones stand and in what order is the browser's list grammar to decide.
+  //
+  // **Only what the list draws rides here.** The task body, each score's rationale (detail), the full error
+  // text and a base64 screenshot were carried multiplied by the case count while not a pixel of them was
+  // drawn, and on a batch of hundreds that payload WAS the reason the screen stalled. All four are fetched by
+  // a server action when the dialog opens that case.
+  const caseViews: ScorecardCaseView[] = cased.map(({ r, verdict }) => {
     const datasetCase = datasetCaseById.get(r.caseId)
     const occurrence = occurrenceByResult.get(r) ?? 0
     const trialTotal = trialTotals.get(r.caseId) ?? 1
@@ -486,8 +500,13 @@ export default async function ScorecardDetailPage({
       canonicalRunByTrial.get(`${r.caseId}#${r.trial ?? occurrence}`) ??
       (runList.length === trialTotal ? runList[occurrence] : runList[runList.length - 1])
     const exportCase = exportByCase.get(r.caseId)
-    const screenshotSrc = osUseShotSrc(r.snapshot)
     const runnerHint = runnerHintFor(r.failure)
+    const errors = (r.trace ?? []).filter(
+      (e): e is typeof e & { message: string } =>
+        e.kind === 'error' && typeof e.message === 'string'
+    )
+    const errorSummary = summarizeLine(errors[0]?.message)
+    const taskSummary = summarizeLine(datasetCase?.task)
     return {
       key: trialTotal > 1 ? `${r.caseId}#${occurrence + 1}` : r.caseId,
       caseId: r.caseId,
@@ -506,15 +525,15 @@ export default async function ScorecardDetailPage({
             },
           }
         : {}),
+      // Only what a badge draws — the verdict rationale (detail) and the unmeasured reason belong to an
+      // opened case.
       scores: r.scores.map((s) => ({
         graderId: s.graderId,
         metric: s.metric,
         value: s.value,
         ...(s.pass !== undefined ? { pass: s.pass } : {}),
         ...(s.label !== undefined ? { label: s.label } : {}),
-        ...(s.detail !== undefined ? { detail: s.detail } : {}),
         ...(s.status !== undefined ? { status: s.status } : {}),
-        ...(s.reason !== undefined ? { reason: s.reason } : {}),
       })),
       ...(runId !== undefined ? { runId } : {}),
       ...(exportCase?.url !== undefined && record.export !== undefined
@@ -524,7 +543,6 @@ export default async function ScorecardDetailPage({
         ? {
             snapshot: {
               kind: String(r.snapshot.kind),
-              ...(screenshotSrc !== undefined ? { screenshotSrc } : {}),
               ...(r.snapshot.kind === 'browser' && r.snapshot.url !== undefined
                 ? { url: r.snapshot.url }
                 : {}),
@@ -537,12 +555,11 @@ export default async function ScorecardDetailPage({
             },
           }
         : {}),
-      errors: (r.trace ?? [])
-        .filter(
-          (e): e is typeof e & { message: string } =>
-            e.kind === 'error' && typeof e.message === 'string'
-        )
-        .map((e) => e.message),
+      hasScreenshot: hasOsUseShot(r.snapshot),
+      // How many there were and what the first one said — the full text belongs to the dialog. This one line
+      // is how a failed row says "why it died" (before, that needed opening the case).
+      errorCount: errors.length,
+      ...(errorSummary !== undefined ? { errorSummary } : {}),
       ...(runnerHint !== undefined ? { runnerHint } : {}),
       hasTrace: (r.trace ?? []).length > 0,
       // 실행 매니페스트는 그대로 넘긴다 — 없는 케이스(디스패치 실패 합성·ingest)는 없는 채로 넘겨서
@@ -560,7 +577,7 @@ export default async function ScorecardDetailPage({
         : {}),
       ...(datasetCase !== undefined
         ? {
-            task: datasetCase.task,
+            ...(taskSummary !== undefined ? { taskSummary } : {}),
             ...(datasetCase.env?.kind !== undefined ? { envKind: datasetCase.env.kind } : {}),
             graderIds: datasetCase.graders.map((g) => g.id),
             tags: datasetCase.tags,
@@ -1019,6 +1036,7 @@ export default async function ScorecardDetailPage({
         scorecardId={record.id}
         cases={caseViews}
         initialCaseId={caseParam}
+        scope={caseViewScope}
       >
         {(steps.length > 0 || live) && (
           <section className="space-y-2.5">
@@ -1133,26 +1151,12 @@ export default async function ScorecardDetailPage({
         </section>
 
         <section id="cases" className="scroll-mt-6 space-y-2.5">
+          {/* "All / Failed" is a client control now — the same place and the same shape, but pressing it no
+              longer re-renders the route (it used to be a link, re-reading the scorecard, the dataset, the
+              child runs and the roster). */}
           <SectionHeader
             title={t('casesTitle', { count: results.length })}
-            action={
-              failedCount > 0 ? (
-                <div className="inline-flex overflow-hidden rounded-md border">
-                  <CaseFilterTab href={`${base}#cases`} active={filter === 'all'}>
-                    {t('filterAll', { n: results.length })}
-                  </CaseFilterTab>
-                  <CaseFilterTab
-                    href={`${base}?cases=failed#cases`}
-                    active={filter === 'failed'}
-                    danger
-                  >
-                    {t('filterFailed', { n: failedCount })}
-                  </CaseFilterTab>
-                </div>
-              ) : results.length > 0 ? (
-                <Badge tone="success">{t('allPassed')}</Badge>
-              ) : undefined
-            }
+            action={<CaseVerdictTabs />}
           />
           {/* Case-fate denominators — shown whenever the funnel is lossy (infra failures, unmeasured, cancelled,
             or unlaunched requested cases), so the pass count is never silently read against the wrong
@@ -1183,8 +1187,8 @@ export default async function ScorecardDetailPage({
                   : t('noCasesGeneric')}
             </p>
           ) : (
-            // 한 케이스 = 한 줄 (판정 · id · 과제 한 줄 · overall 배지). 근거 전부(스크린샷·리즈닝·에러·criterion)는
-            // 클릭해 여는 케이스 상세 다이얼로그의 것 — 목록이 모든 케이스의 모든 근거를 펼치던 이전 카드의 교체.
+            // One case = one line (verdict · id · a line of the task · the overall badges). Every piece of
+            // evidence — screenshot, rationale, error, criteria — belongs to the dialog you click into.
             <ScorecardCaseList />
           )}
         </section>

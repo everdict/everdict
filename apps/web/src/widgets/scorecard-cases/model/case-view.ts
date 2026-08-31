@@ -1,21 +1,29 @@
-// 스코어카드 상세(서버)가 케이스 탐색기(행 목록 + 상세 다이얼로그)에 넘기는 직렬화된 케이스 뷰.
-// 서버 컴포넌트가 계산을 끝내고(판정·러너 힌트 로컬라이즈·스크린샷 src 해석) 평평한 값만 넘긴다 —
-// 클라이언트는 절대 재계산하지 않는다(판정은 서버가 실어 보낸 값 그대로).
+import type { ScorecardCaseFacts } from '@/entities/scorecard'
+
+// The serialized case view the scorecard detail (server) hands to the case explorer (row list + detail
+// dialog). The server component finishes every computation — verdict, localized runner hint, summary lines —
+// and passes flat values; the client never recomputes one (the verdict is whatever the server served).
+//
+// **This type carries only what a ROW draws.** On a batch of hundreds, shipping one case's whole evidence is
+// exactly what freezes the screen: the task body (kilobytes per case), every score's rationale, the full
+// error text and a base64 screenshot were all multiplied by the case count while none of them was drawn by a
+// row. Those four moved to `ScorecardCaseDetail`, fetched for the one case a dialog opens — the same door the
+// trace already went through.
 
 export type CaseScoreView = {
   graderId: string
   metric: string
-  // 측정이 아닌 행(그레이더 사망·저지 스킵)에는 아예 없다 — 계약의 Score 는 status 판별 유니언이고
-  // unmeasured/invalid 변종은 value 를 들고 다니지 않는다(렌더할 자리표시자 0 자체가 없다).
+  // Absent on a row that is not a measurement (grader died / judge skipped): the contract's Score is a
+  // status-discriminated union and its unmeasured/invalid variants carry no `value` at all — there is no
+  // placeholder zero to render.
   value?: number
   pass?: boolean
   label?: string
-  detail?: unknown
   status?: string
-  reason?: string
 }
 
-// 판정의 감사 흔적 — 어느 권위 층이, 어떤 집계로, 어떤 측정들로 결정했는가 (서버 계산 verdictBasis 그대로).
+// The verdict's audit trail — which authority layer decided, under which aggregation, from which
+// measurements (the server-computed verdictBasis, verbatim).
 export type CaseVerdictBasisView = {
   authority: string
   aggregation: string
@@ -24,15 +32,13 @@ export type CaseVerdictBasisView = {
 
 export type CaseSnapshotView = {
   kind: string
-  // os-use 스크린샷 — base64 data URL(개발) 또는 오프로드된 오브젝트 스토리지 URL. 렌더 가능한 것만 싣는다.
-  screenshotSrc?: string
   url?: string
   domRef?: string
 }
 
-// 이 케이스가 "실제로 어떤 세계에서 돌았나" — 실행 매니페스트 그대로. osResolved 가 defaulted 면 케이스가
-// os 를 쓴 적이 없고 기본값이 정한 것이다(선언한 linux 와 구별되는 사실). 없으면 아예 기록이 없다는 뜻이므로
-// 스트립을 숨긴다 — linux 로 지어내지 않는다.
+// Which world this case actually ran in — the execution manifest as recorded. `osResolved: 'defaulted'` means
+// the case never named an os and a default decided it (a different fact from a declared linux). Absent means
+// there is no record at all, so the strip hides rather than inventing "linux".
 export type CaseExecutionView = {
   os: string
   osResolved: string
@@ -42,36 +48,89 @@ export type CaseExecutionView = {
 }
 
 export type ScorecardCaseView = {
-  // 행의 유일 키 — 트라이얼 배치에서는 같은 caseId 가 여러 행(트라이얼)으로 반복되므로 caseId 만으로는
-  // 선택을 특정할 수 없다. 유일하면 caseId 그대로, 중복이면 `caseId#n` (n = 목록 내 등장 순번).
+  // The row's unique key. A trialled batch repeats one caseId across several rows, so the id alone cannot
+  // identify a selection: unique cases keep their caseId, repeated ones become `caseId#n` (n = the occurrence
+  // in the list).
   key: string
   caseId: string
-  // 같은 caseId 가 여러 번 등장할 때만 실리는 1-기반 트라이얼 순번 — 다이얼로그 헤더가 어느 트라이얼인지 밝힌다.
+  // The 1-based trial number, present only when the same caseId appears more than once — the dialog header
+  // says which trial you are looking at.
   trial?: number
-  // 레코드 원본 results 순서 기준 0-기반 등장 순번 — 임베디드 트레이스를 요청할 때 이 행(트라이얼)의
-  // 결과를 특정하는 좌표 (caseId 만으로는 트라이얼 배치에서 첫 행에 뭉개진다).
+  // The 0-based occurrence in the record's ORIGINAL results order. It is the coordinate that asks for this
+  // row's evidence and embedded trace; a caseId alone collapses every trial onto the first row.
   occurrence: number
   verdict?: boolean
   verdictBasis?: CaseVerdictBasisView
   scores: CaseScoreView[]
-  // 이 케이스를 실행한 자식 run — 있으면 다이얼로그의 실행 증거(궤적)는 궤적 원장에서 읽는다.
+  // The child run that executed this case. When present, the dialog reads the trajectory from the ledger.
   runId?: string
-  // 트레이스 싱크로 내보낸 원본/외부 트레이스 딥링크 (관측 플랫폼).
+  // Deep link to the original/exported trace on the observability platform (trace sink).
   exportUrl?: string
   sinkKind?: string
   snapshot?: CaseSnapshotView
-  // 임베디드 케이스 트레이스의 error 이벤트 메시지 — 케이스가 어떻게 죽었는가.
-  errors: string[]
-  // self-hosted 러너 실패 힌트 — 서버가 로케일까지 끝내서 넘긴 문장 (로스터 조회는 서버의 것).
+  // Did this case leave a screenshot? The image itself (hundreds of KB per case when it is an embedded
+  // base64) is fetched after the dialog opens — the list only needs to know it exists, and in fact does not
+  // draw even that.
+  hasScreenshot: boolean
+  // How the case died — the count of trace error events and the first one's opening line. The full text
+  // belongs to the dialog.
+  errorCount: number
+  errorSummary?: string
+  // Self-hosted runner failure hint — a sentence the server already localized (reading the roster is the
+  // server's job).
   runnerHint?: string
-  // 자식 run 이 없어도(레거시·ingest) 임베디드 트레이스로 실행 증거를 열 수 있는가.
+  // Can execution evidence be opened from the embedded trace even without a child run (legacy · ingest)?
   hasTrace: boolean
-  // 실행 매니페스트 — 이 케이스가 돌아간 세계 (컴퓨트를 실제로 잡은 생산자만 기록한다).
+  // The execution manifest — only a producer that actually took compute records one.
   execution?: CaseExecutionView
-  // 데이터셋 케이스 정의 — "이 케이스가 무엇이었는가". 트레이스 평가/데이터셋 조회 실패 시 없다.
-  task?: string
+  // The dataset case definition: "what was this case". Absent on a trace evaluation or a failed dataset read.
+  // This is the list's one line, not the body — the dialog fetches the body separately.
+  taskSummary?: string
   envKind?: string
   graderIds?: string[]
   tags?: string[]
   timeoutSec?: number
 }
+
+// One score's evidence — a judge's rationale (detail) and, when the score is not a measurement, the reason it
+// is not (reason). Both are read only once a case is open, so neither rides the list payload.
+//
+// **It carries WHICH score it belongs to as two fields.** Joining them into one `${graderId}:${metric}` key
+// is what must not happen: a graderId is a name the workspace chose and judge metrics are already spelled
+// `judge:<id>`, so grader `judge` + metric `style:tone` and grader `judge:style` + metric `tone` produce the
+// same key. Judge A's reasoning would then sit silently under judge B's row — the worst kind of quiet wrong
+// answer on a screen that sells a defensible verdict, and precisely the "never re-derive identity from
+// rendered output" of protocol law 3.
+export type CaseScoreEvidence = {
+  graderId: string
+  metric: string
+  detail?: unknown
+  reason?: string
+}
+
+// The heavy half, fetched one case at a time when the dialog opens.
+export type ScorecardCaseDetail = {
+  // The dataset case's full task body (markdown).
+  task?: string
+  // The full text of the trace's error events.
+  errors: string[]
+  // os-use screenshot — a base64 data URL (dev) or the offloaded object-storage URL.
+  screenshotSrc?: string
+  // One entry per score that has evidence. It is a list rather than a map to avoid minting a joined key at
+  // all, not because anything depends on its order.
+  evidence: CaseScoreEvidence[]
+}
+
+// This score's evidence — the entry whose BOTH fields match. The row and the dialog look it up the same way.
+export function findCaseEvidence(
+  evidence: CaseScoreEvidence[] | undefined,
+  score: { graderId: string; metric: string }
+): CaseScoreEvidence | undefined {
+  return evidence?.find((e) => e.graderId === score.graderId && e.metric === score.metric)
+}
+
+// Does the row view actually carry the facts the list's axes (entities/scorecard's case-list-view) read?
+// Bound at compile time, because the two drifting apart makes a filter quietly answer wrong rather than
+// break: a missing field yields an empty array, and an empty array reads as "this case has no such value".
+type AssertAssignable<A extends B, B> = A
+type _caseFacts = AssertAssignable<ScorecardCaseView, ScorecardCaseFacts>

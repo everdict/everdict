@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   listViewQuery,
@@ -43,8 +43,14 @@ export function useListView(input: {
   initialFilters: ListFilters
   initialSearch: string
   initialDisplay: ListDisplay
+  // Params that are NOT this list's axes but must survive in the address. They are copied from the address
+  // bar AT WRITE TIME, because they are not part of the list's state. The scorecard detail's case list is
+  // such a screen: an open case dialog lives at the same address as `?case=`, so a rebuilt query string
+  // would delete that shareable link the moment anyone touched a filter.
+  preserve?: readonly string[]
 }): ListViewControls {
-  const { basePath, viewKey, facets, initialFilters, initialSearch, initialDisplay } = input
+  const { basePath, viewKey, facets, initialFilters, initialSearch, initialDisplay, preserve } =
+    input
   const [filters, setFilters] = useState<ListFilters>(initialFilters)
   const [search, setSearchValue] = useState(initialSearch)
   const [display, setDisplayValue] = useState<ListDisplay>(initialDisplay)
@@ -57,9 +63,16 @@ export function useListView(input: {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const writeUrl = useCallback(() => {
-    const qs = listViewQuery(latest.current.filters, facets, latest.current.search).toString()
+    const query = listViewQuery(latest.current.filters, facets, latest.current.search)
+    if (preserve !== undefined && preserve.length > 0) {
+      const current = new URLSearchParams(window.location.search)
+      for (const name of preserve) {
+        for (const value of current.getAll(name)) query.append(name, value)
+      }
+    }
+    const qs = query.toString()
     window.history.replaceState(null, '', qs === '' ? basePath : `${basePath}?${qs}`)
-  }, [basePath, facets])
+  }, [basePath, facets, preserve])
 
   useEffect(() => () => clearTimeout(timer.current), [])
 
@@ -100,5 +113,11 @@ export function useListView(input: {
     [viewKey]
   )
 
-  return { filters, search, display, toggleFilter, clearFilters, setSearch, setDisplay }
+  // The returned object's identity is pinned: one screen hands this down through context (the scorecard
+  // detail's case explorer), and a fresh object per render would re-render the list reading that context on
+  // every unrelated state change — a dialog opening, for instance.
+  return useMemo(
+    () => ({ filters, search, display, toggleFilter, clearFilters, setSearch, setDisplay }),
+    [filters, search, display, toggleFilter, clearFilters, setSearch, setDisplay]
+  )
 }

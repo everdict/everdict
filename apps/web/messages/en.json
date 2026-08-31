@@ -2899,7 +2899,10 @@
     "traceEvaluation": "Trace evaluation",
     "sourceMeta": "source",
     "runForTeam": "Run an evaluation as {team}.",
-    "metaTeam": "Team"
+    "metaTeam": "Team",
+    "caseVerdictPass": "Passed",
+    "caseVerdictFail": "Failed",
+    "caseVerdictSkip": "No verdict"
   },
   "scorecardSummary": {
     "statTotal": "Total runs",
@@ -5811,7 +5814,10 @@
       "dataset": "Dataset",
       "runtime": "Runtime",
       "tag": "Tag",
-      "origin": "Trigger"
+      "origin": "Trigger",
+      "verdict": "Verdict",
+      "failedBy": "Failed by",
+      "env": "Environment"
     },
     "groupBy": {
       "none": "No grouping",
@@ -5825,7 +5831,8 @@
       "dataset": "Dataset",
       "runtime": "Runtime",
       "template": "Shape",
-      "day": "Day it ran"
+      "day": "Day it ran",
+      "verdict": "Verdict"
     },
     "orderBy": {
       "name": "Name",
@@ -5833,7 +5840,9 @@
       "created": "Last created",
       "recent": "Most recent run",
       "versions": "Most versions",
-      "cases": "Most cases"
+      "cases": "Most cases",
+      "failuresFirst": "Failures first",
+      "caseId": "Case id"
     },
     "unset": {
       "team": "No team",
@@ -5844,7 +5853,8 @@
       "dataset": "No dataset",
       "runtime": "No runtime",
       "tag": "No tag",
-      "origin": "Run by hand"
+      "origin": "Run by hand",
+      "env": "No environment"
     },
     "ownerWorkspace": "Workspace",
     "ownerShared": "Built in"

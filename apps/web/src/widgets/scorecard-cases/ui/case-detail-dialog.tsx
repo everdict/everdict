@@ -31,14 +31,26 @@ import { MetricLabel } from '@/shared/ui/metric-label'
 import { ScoreDetail } from '@/shared/ui/score-detail'
 import { Tooltip } from '@/shared/ui/tooltip'
 
-import { getScorecardCaseTraceAction } from '../api/case-trace'
-import type { CaseExecutionView, CaseScoreView, ScorecardCaseView } from '../model/case-view'
+import { getScorecardCaseAction } from '../api/case-detail'
+import {
+  findCaseEvidence,
+  type CaseExecutionView,
+  type CaseScoreEvidence,
+  type CaseScoreView,
+  type ScorecardCaseDetail,
+  type ScorecardCaseView,
+} from '../model/case-view'
 
 // 케이스 상세 다이얼로그 — 분석하는 사람의 세 질문에 위에서 아래로 답한다:
 // ① 어떤 케이스였나(데이터셋 과제) → ② 실제로 어떻게 실행됐나(에이전트 궤적 + 스냅샷/에러) →
 // ③ 어떻게 평가됐나(판정 근거 + 저지/그레이더 점수와 리즈닝). 궤적은 봉인 증거의 단일 읽기 표면인
 // TrajectoryView 로 연다(자식 run → 궤적 원장, 없으면 임베디드 케이스 트레이스). 헤더·메타·prev/next·←/→ 는
 // TrajectoryDetailDialog 와 같은 문법.
+//
+// **The evidence arrives per case, on open.** The task body, each score's rationale, the full error text and
+// the screenshot do not ride the list payload — on a batch of hundreds that WAS why the screen stalled. A row
+// knows only whether they exist; the contents come through one server action here, the same door the trace
+// already went through.
 export function CaseDetailDialog({
   workspace,
   scorecardId,
@@ -50,36 +62,48 @@ export function CaseDetailDialog({
   scorecardId: string
   item: ScorecardCaseView
   onClose: () => void
+  // index < 0 = a case outside the current filter (opened from the timeline) — no sibling control is stood up.
   nav: { index: number; total: number; onPrev: () => void; onNext: () => void }
 }) {
   const t = useTranslations('scorecardsPage')
+  const [detail, setDetail] = useState<ScorecardCaseDetail | undefined>()
   const [segments, setSegments] = useState<TrajectorySegment[] | undefined>()
   const [traceError, setTraceError] = useState<string | undefined>()
   const [pending, start] = useTransition()
 
-  // 실행 증거는 열릴 때 그 케이스 것만 가져온다 — 자식 run 이 있으면 궤적 원장(다중 평면), 없으면
-  // 스코어카드에 임베디드된 케이스 트레이스(단일 평면). 목록 직렬화에 전 케이스 트레이스를 싣지 않는 이유.
+  // Execution evidence and score evidence are fetched for this one case on open: with a child run the
+  // trajectory comes from the ledger (several planes); without one, the scorecard's embedded case trace
+  // (a single plane) rides the same round trip as the evidence.
   useEffect(() => {
+    setDetail(undefined)
     setSegments(undefined)
     setTraceError(undefined)
-    if (c.runId === undefined && !c.hasTrace) return
     const runId = c.runId
+    const embedded = runId === undefined && c.hasTrace
     start(async () => {
-      if (runId !== undefined) {
-        const res = await getTrajectoryAction(runId)
-        if (res.ok) setSegments(res.segments)
-        else setTraceError(res.error)
-      } else {
-        const res = await getScorecardCaseTraceAction(scorecardId, c.caseId, c.occurrence)
-        if (res.ok) setSegments(res.events.length > 0 ? asSingleSegment(res.events, 'run') : [])
-        else setTraceError(res.error)
+      const res = await getScorecardCaseAction(scorecardId, c.caseId, c.occurrence, embedded)
+      if (!res.ok) {
+        setTraceError(res.error)
+        return
       }
+      setDetail(res.detail)
+      if (embedded)
+        setSegments(
+          res.events !== undefined && res.events.length > 0
+            ? asSingleSegment(res.events, 'run')
+            : []
+        )
+      if (runId === undefined) return
+      const trajectory = await getTrajectoryAction(runId)
+      if (trajectory.ok) setSegments(trajectory.segments)
+      else setTraceError(trajectory.error)
     })
   }, [scorecardId, c.key, c.caseId, c.occurrence, c.runId, c.hasTrace])
 
   // ←/→ 로 형제 케이스 이동 (궤적/외부 트레이스 상세와 동일한 조작).
-  const hasPrev = nav.index > 0
-  const hasNext = nav.index < nav.total - 1
+  const navigable = nav.index >= 0
+  const hasPrev = navigable && nav.index > 0
+  const hasNext = navigable && nav.index < nav.total - 1
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' && hasPrev) nav.onPrev()
@@ -95,11 +119,12 @@ export function CaseDetailDialog({
   const hasExecution =
     hasTrajectory ||
     c.snapshot !== undefined ||
-    c.errors.length > 0 ||
+    c.hasScreenshot ||
+    c.errorCount > 0 ||
     c.runnerHint !== undefined ||
     c.execution !== undefined
   const hasIdentity =
-    c.task !== undefined || c.envKind !== undefined || (c.graderIds?.length ?? 0) > 0
+    c.taskSummary !== undefined || c.envKind !== undefined || (c.graderIds?.length ?? 0) > 0
 
   return (
     <Dialog
@@ -154,29 +179,31 @@ export function CaseDetailDialog({
             message={t('caseLinkCopied')}
             className="rounded-md border border-border p-1.5 text-muted-foreground"
           />
-          <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
-            <button
-              type="button"
-              onClick={nav.onPrev}
-              disabled={!hasPrev}
-              aria-label={t('casePrev')}
-              className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35 disabled:hover:text-muted-foreground"
-            >
-              <ChevronLeft className="size-4" />
-            </button>
-            <span className="min-w-12 text-center font-mono text-[11px] tabular-nums text-faint">
-              {nav.index + 1} / {nav.total}
-            </span>
-            <button
-              type="button"
-              onClick={nav.onNext}
-              disabled={!hasNext}
-              aria-label={t('caseNext')}
-              className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35 disabled:hover:text-muted-foreground"
-            >
-              <ChevronRight className="size-4" />
-            </button>
-          </div>
+          {navigable && (
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5">
+              <button
+                type="button"
+                onClick={nav.onPrev}
+                disabled={!hasPrev}
+                aria-label={t('casePrev')}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35 disabled:hover:text-muted-foreground"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <span className="min-w-12 text-center font-mono text-[11px] tabular-nums text-faint">
+                {nav.index + 1} / {nav.total}
+              </span>
+              <button
+                type="button"
+                onClick={nav.onNext}
+                disabled={!hasNext}
+                aria-label={t('caseNext')}
+                className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground disabled:opacity-35 disabled:hover:text-muted-foreground"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={onClose}
@@ -210,9 +237,15 @@ export function CaseDetailDialog({
                 </span>
               ))}
             </div>
-            {c.task && (
+            {/* The body arrives after opening — until it does, the one line the list already had holds the
+                place (rather than a blank). */}
+            {(detail?.task ?? c.taskSummary) !== undefined && (
               <div className="rounded-lg border border-border bg-card p-3.5">
-                <Markdown content={c.task} />
+                {detail?.task !== undefined ? (
+                  <Markdown content={detail.task} />
+                ) : (
+                  <p className="text-[13px] text-muted-foreground">{c.taskSummary}</p>
+                )}
               </div>
             )}
           </section>
@@ -236,11 +269,12 @@ export function CaseDetailDialog({
             ) : hasTrajectory ? (
               <p className="text-[12px] text-muted-foreground">{t('caseTraceEmpty')}</p>
             ) : null}
-            {/* os-use 스크린샷 — VLM 이 채점한 바로 그 화면. */}
-            {c.snapshot?.screenshotSrc && (
+            {/* The os-use screenshot — the very screen the VLM graded. As base64 it is hundreds of KB per
+                case, so it is fetched here and never in the list. */}
+            {detail?.screenshotSrc !== undefined && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={c.snapshot.screenshotSrc}
+                src={detail.screenshotSrc}
                 alt={`${c.caseId} screenshot`}
                 className="max-h-80 w-auto rounded-lg border"
               />
@@ -263,23 +297,27 @@ export function CaseDetailDialog({
                 {t('downloadDom')}
               </a>
             )}
-            {/* 케이스가 어떻게 죽었나 — 트레이스의 error 이벤트 (하네스 크래시/디스패치 에러). */}
-            {c.errors.map((message, i) => (
-              <div
-                key={`case-error-${i}`}
-                className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
-              >
-                <ExpandableText
-                  text={message}
-                  prefix={
-                    <>
-                      <span className="font-[560]">error</span> ·{' '}
-                    </>
-                  }
-                  className="whitespace-pre-wrap break-words"
-                />
-              </div>
-            ))}
+            {/* How the case died — the trace's error events (a harness crash, a dispatch error). Until the
+                full text arrives, the first line the list already carried stands, so opening a failed case is
+                never a moment of silence. */}
+            {(detail?.errors ?? (c.errorSummary !== undefined ? [c.errorSummary] : [])).map(
+              (message, i) => (
+                <div
+                  key={`case-error-${i}`}
+                  className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
+                >
+                  <ExpandableText
+                    text={message}
+                    prefix={
+                      <>
+                        <span className="font-[560]">error</span> ·{' '}
+                      </>
+                    }
+                    className="whitespace-pre-wrap break-words"
+                  />
+                </div>
+              )
+            )}
             {/* self-hosted 러너 실패 힌트 — 서버가 로스터를 읽어 로컬라이즈까지 끝낸 문장. */}
             {c.runnerHint && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
@@ -324,12 +362,17 @@ export function CaseDetailDialog({
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               {scoreGroups.map((group) => (
                 <div key={`${group.row.graderId}:${group.row.metric}`}>
-                  <ScoreRow score={group.row} siblings={caseMetrics} />
+                  <ScoreRow
+                    score={group.row}
+                    siblings={caseMetrics}
+                    evidence={findCaseEvidence(detail?.evidence, group.row)}
+                  />
                   {group.criteria.map((criterion) => (
                     <ScoreRow
                       key={criterion.row.metric}
                       score={criterion.row}
                       siblings={caseMetrics}
+                      evidence={findCaseEvidence(detail?.evidence, criterion.row)}
                       nested
                     />
                   ))}
@@ -418,16 +461,24 @@ function displayValue(s: CaseScoreView): string {
 function ScoreRow({
   score,
   siblings,
+  evidence,
   nested,
 }: {
   score: CaseScoreView
   siblings: string[]
+  // Evidence arrives after the dialog opens — until then this is an ordinary row with nothing to expand.
+  evidence?: CaseScoreEvidence
   nested?: boolean
 }) {
   const t = useTranslations('scorecardsPage')
-  const hasDetail = classifyScoreDetail(score.detail) !== undefined
+  const hasDetail = classifyScoreDetail(evidence?.detail) !== undefined
   const unmeasured = isUnmeasuredScore(score)
-  const [open, setOpen] = useState(score.pass === false && hasDetail)
+  // undefined = nobody has pressed it yet. That way a failing row still opens itself when its evidence
+  // arrives late, and a row somebody closed is not re-opened by that arrival.
+  const [toggled, setToggled] = useState<boolean | undefined>(undefined)
+  // Gated on hasDetail as well: stepping to a sibling case reuses this row in place, so a `toggled` left
+  // over from the previous case could otherwise mark a row with no evidence as open.
+  const open = hasDetail && (toggled ?? score.pass === false)
   const body = (
     <div
       className={cn(
@@ -457,13 +508,18 @@ function ScoreRow({
   return (
     <div className="border-b border-border/60 last:border-b-0">
       {hasDetail ? (
-        <button type="button" onClick={() => setOpen((v) => !v)} className="block w-full">
+        <button type="button" onClick={() => setToggled(!open)} className="block w-full">
           {body}
         </button>
       ) : (
         body
       )}
-      {open && <ScoreDetail detail={score.detail} className="mx-3 mb-3" />}
+      {/* On a row that is not a measurement, "why it could not be measured" IS the row — a value cell saying
+          only "unmeasured", with the reason nowhere, leaves nothing to read. */}
+      {unmeasured && evidence?.reason !== undefined && (
+        <p className="px-3 pb-2 text-[12px] text-muted-foreground">{evidence.reason}</p>
+      )}
+      {open && <ScoreDetail detail={evidence?.detail} className="mx-3 mb-3" />}
     </div>
   )
 }

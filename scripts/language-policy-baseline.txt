@@ -65,7 +65,7 @@
 2	apps/web/src/app/[workspace]/projects/page.tsx
 8	apps/web/src/app/[workspace]/release/[id]/page.tsx
 67	apps/web/src/app/[workspace]/run/[id]/page.tsx
-22	apps/web/src/app/[workspace]/scorecard/[id]/page.tsx
+18	apps/web/src/app/[workspace]/scorecard/[id]/page.tsx
 1	apps/web/src/app/[workspace]/scorecards/page.tsx
 9	apps/web/src/app/[workspace]/settings/agent/[id]/page.tsx
 6	apps/web/src/app/[workspace]/settings/agent/page.tsx
@@ -493,11 +493,7 @@
 12	apps/web/src/widgets/run-topology/ui/run-topology.tsx
 19	apps/web/src/widgets/run-workbench/ui/run-file-workbench.tsx
 10	apps/web/src/widgets/sandbox-terminal/ui/live-screen.tsx
-7	apps/web/src/widgets/scorecard-cases/api/case-trace.ts
-22	apps/web/src/widgets/scorecard-cases/model/case-view.ts
-32	apps/web/src/widgets/scorecard-cases/ui/case-detail-dialog.tsx
-11	apps/web/src/widgets/scorecard-cases/ui/case-dialog-context.tsx
-7	apps/web/src/widgets/scorecard-cases/ui/case-list.tsx
+28	apps/web/src/widgets/scorecard-cases/ui/case-detail-dialog.tsx
 3	apps/web/src/widgets/scorecard-list/ui/scorecard-list-view.tsx
 3	apps/web/src/widgets/scorecard-list/ui/scorecard-list.tsx
 8	apps/web/src/widgets/team-scope-bar/ui/team-scope-bar.tsx

@@ -66,7 +66,14 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   page silently RESTORES the old address. The previous rows stay on screen instead of flashing the loading
   skeleton. Never reintroduce `router.push`/`router.refresh()` for a view change. Toolbar UI comes from
   `shared/ui/list-toolbar` and the axes from `entities/<x>/model/list-view.ts` — one filter/display grammar for
-  every list.
+  every list, sub-lists inside a detail page included (a scorecard's cases).
+- **Hundreds of rows draw a WINDOW, and a row carries only what a row draws.** `shared/ui/virtual-list.tsx`
+  renders the rows crossing the scroll area and spaces out the rest, so the DOM tracks the screen rather than
+  the collection; its one rule is that a row's real height equals the declared `heightOf` (a wrapping row
+  desyncs the scroll — cap the badges, keep one line). The serialized row carries a summary line, never the
+  evidence: a task body, a judge rationale, an error text and a base64 screenshot per case are none of them
+  drawn by a row, and multiplied by the case count they ARE the lag. The detail dialog fetches them for the
+  one case it opened.
 - **Evaluation collections are workspace-wide, not team paths.** Harness · dataset · judge · scorecard have ONE
   address each and sit in the sidebar's `평가` group; the owning team is the `team` FILTER on that list, not a
   path segment (`TEAM_SECTIONS` is issues/triage/cycles/projects only). Old team addresses 307 in `next.config.ts`.
