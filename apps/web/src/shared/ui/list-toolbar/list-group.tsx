@@ -42,6 +42,50 @@ export function ListGroup({
   )
 }
 
+// The same header, CONTROLLED and of a declared height — for a list that draws a window
+// (`shared/ui/virtual-list`). A window needs a FLAT row array, or a collapsed group would still stand its 500
+// rows to be measured, so the collapsed state has to belong to the list rather than to this component. The
+// height is a constant here for the same reason the rows' is: the window computes its spacers from it.
+export const LIST_GROUP_ROW_HEIGHT_PX = 34
+
+export function ListGroupRow({
+  label,
+  count,
+  collapsed,
+  onToggle,
+  className,
+}: {
+  label: ReactNode
+  count: number
+  collapsed: boolean
+  onToggle: () => void
+  className?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      style={{ height: LIST_GROUP_ROW_HEIGHT_PX }}
+      className={cn(
+        'flex w-full items-center gap-1.5 px-1 text-left text-[12px] font-[560] text-foreground transition-colors hover:bg-accent/60',
+        className
+      )}
+    >
+      <ChevronRight
+        className={cn(
+          'size-3 shrink-0 text-faint transition-transform duration-150',
+          !collapsed && 'rotate-90'
+        )}
+        strokeWidth={2.25}
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="shrink-0 tabular-nums text-muted-foreground">{count}</span>
+    </button>
+  )
+}
+
 // 묶여 있으면 그룹, 아니면 그냥 행들. 목록이 「묶지 않음」일 때 이름표 없는 그룹 껍데기를 세우지 않기 위한
 // 것뿐이다 — 이름 없는 머리글은 목록의 첫 줄이 무엇인지 헷갈리게 만든다.
 export function ListSection({

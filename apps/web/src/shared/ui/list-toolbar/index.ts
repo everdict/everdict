@@ -8,5 +8,5 @@ export {
   type DisplayToggle,
   type LayoutOption,
 } from './list-display-menu'
-export { ListGroup, ListSection } from './list-group'
+export { LIST_GROUP_ROW_HEIGHT_PX, ListGroup, ListGroupRow, ListSection } from './list-group'
 export { ListToolbar } from './list-toolbar'

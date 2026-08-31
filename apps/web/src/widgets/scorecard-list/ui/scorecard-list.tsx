@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
@@ -32,10 +32,41 @@ import { Button } from '@/shared/ui/button'
 import { EntityRef, MetricChip, ModelChip, RuntimeChip, SubsetChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
-import { facetOptionsOf, ListSection, ListToolbar, type FacetSpec } from '@/shared/ui/list-toolbar'
+import {
+  facetOptionsOf,
+  LIST_GROUP_ROW_HEIGHT_PX,
+  ListGroupRow,
+  ListToolbar,
+  type FacetSpec,
+} from '@/shared/ui/list-toolbar'
 import { OriginChip } from '@/shared/ui/origin'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusIcon } from '@/shared/ui/status-pill'
+import { VirtualList } from '@/shared/ui/virtual-list'
+
+// The row's height is DECLARED, not measured — the window (shared/ui/virtual-list) computes its spacers from
+// this number, so the card is pinned to it and its three lines are pinned to `h-5` each. Before the window,
+// this list drew every batch at once: measured at 1000 scorecards that was 128k DOM elements and 8.7MB of
+// HTML from 1MB of data (~128 elements per row — every chip carries an icon), and 2.2s of render before the
+// screen could appear. A workspace that runs CI-triggered evals reaches those numbers in weeks.
+const CARD_HEIGHT_PX = 88
+const ROW_GAP_PX = 8
+const ROW_HEIGHT_PX = CARD_HEIGHT_PX + ROW_GAP_PX
+// A group header carries the gap that used to be `space-y-4` between sections.
+const GROUP_ROW_HEIGHT_PX = LIST_GROUP_ROW_HEIGHT_PX + 12
+// The scroll area. Shorter content stands at its own height, so a workspace with six batches looks unchanged.
+const VIEWPORT_MAX_HEIGHT = 'clamp(360px, calc(100vh - 22rem), 1200px)'
+
+type ListRow =
+  | {
+      kind: 'group'
+      key: string
+      groupKey: string
+      label: string
+      count: number
+      collapsed: boolean
+    }
+  | { kind: 'card'; key: string; item: ScorecardRecord }
 
 type Author = { name: string; avatarUrl?: string }
 type TeamOption = { id: string; key: string; name: string }
@@ -103,6 +134,10 @@ export function ScorecardList({
   // sessionStorage (per tab + workspace). A floating action bar (portaled — see below) carries the bulk actions; the
   // row-level trash stays for the quick single-delete case.
   const selectionStorageKey = `everdict:selection:scorecards:${workspace}`
+  // Read through a ref by the stable toggle above — the key is derived from a prop, so it never actually
+  // changes, but the callback must not close over the render that happened to define it.
+  const storageKeyRef = useRef(selectionStorageKey)
+  storageKeyRef.current = selectionStorageKey
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
   const selectionMode = selected.size > 0
@@ -115,13 +150,6 @@ export function ScorecardList({
     }
     return next
   }
-  const toggleSelect = (id: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return persistSelection(next)
-    })
   const clearSelection = () => {
     setSelected(new Set())
     try {
@@ -157,19 +185,6 @@ export function ScorecardList({
   const succeeded = scorecards.filter((s) => s.status === 'succeeded').length
   const running = scorecards.filter((s) => s.status === 'running' || s.status === 'queued').length
   const failed = scorecards.filter((s) => s.status === 'failed').length
-
-  // Runner info — shown if createdBy exists (members profile if available). Hidden if absent (legacy records / machine-fired).
-  function authorInfo(s: ScorecardRecord): { name: string; avatarUrl?: string; known: boolean } {
-    if (s.createdBy) {
-      const a = authors[s.createdBy]
-      return {
-        name: a?.name ?? fmtSubject(s.createdBy),
-        ...(a?.avatarUrl ? { avatarUrl: a.avatarUrl } : {}),
-        known: true,
-      }
-    }
-    return { name: '—', known: false }
-  }
 
   const teamName = useMemo(
     () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
@@ -282,6 +297,49 @@ export function ScorecardList({
     }
   }
 
+  // Collapsed groups — the reader's momentary state, so neither the URL nor the display cookie holds it.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleGroup = useCallback((key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  // Groups and cards flattened into ONE array — the window needs a flat list, and a collapsed group must not
+  // stand its rows to be measured.
+  const grouped = view.display.grouping !== 'none'
+  const rows = ((): ListRow[] => {
+    const out: ListRow[] = []
+    for (const group of groups) {
+      const groupKey = group.key ?? ''
+      if (grouped) {
+        const isCollapsed = collapsed.has(groupKey)
+        out.push({
+          kind: 'group',
+          key: `group:${groupKey}`,
+          groupKey,
+          label: groupLabel(group.key, group.items),
+          count: group.items.length,
+          collapsed: isCollapsed,
+        })
+        if (isCollapsed) continue
+      }
+      for (const item of group.items) out.push({ kind: 'card', key: item.id, item })
+    }
+    return out
+  })()
+
+  const heightOf = useCallback(
+    (row: ListRow) => (row.kind === 'group' ? GROUP_ROW_HEIGHT_PX : ROW_HEIGHT_PX),
+    []
+  )
+  const keyOf = useCallback((row: ListRow) => row.key, [])
+  // Back to the top when the set changes — the row you were looking at is not there any more.
+  const resetKey = `${JSON.stringify(view.filters)}|${view.search}|${view.display.grouping}|${view.display.order}`
+
   // "Select all" adds every currently-visible deletable row to the selection (keeps ones hidden by a filter untouched).
   const selectAllVisible = () =>
     setSelected((prev) => {
@@ -291,26 +349,48 @@ export function ScorecardList({
     })
   // Shift-click selects the whole range between the last-toggled row (the anchor) and the clicked one. The anchor is
   // tracked by id so a filter/sort change can't mis-range; if it left the visible list, fall back to a plain toggle.
+  //
+  // It is a STABLE callback reading refs, because every row holds it: a handler rebuilt per render is a new prop
+  // on 1000 memoized rows, which is the memo not existing.
   const anchorRef = useRef<string | null>(null)
-  const handleToggle = (id: string, shiftKey: boolean) => {
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
+  const canDeleteRef = useRef(canDeleteRow)
+  canDeleteRef.current = canDeleteRow
+  const handleToggle = useCallback((id: string, shiftKey: boolean) => {
+    const ordered = visibleRef.current
+    const deletable = canDeleteRef.current
+    const persist = (next: Set<string>) => {
+      try {
+        sessionStorage.setItem(storageKeyRef.current, JSON.stringify([...next]))
+      } catch {
+        // sessionStorage blocked: the selection just won't survive navigation
+      }
+      return next
+    }
     const anchor = anchorRef.current
     if (shiftKey && anchor !== null && anchor !== id) {
-      const from = visible.findIndex((s) => s.id === anchor)
-      const to = visible.findIndex((s) => s.id === id)
+      const from = ordered.findIndex((s) => s.id === anchor)
+      const to = ordered.findIndex((s) => s.id === id)
       if (from !== -1 && to !== -1) {
         const [lo, hi] = from < to ? [from, to] : [to, from]
-        const range = visible
+        const range = ordered
           .slice(lo, hi + 1)
-          .filter(canDeleteRow)
+          .filter(deletable)
           .map((s) => s.id)
-        setSelected((prev) => persistSelection(new Set([...prev, ...range])))
+        setSelected((prev) => persist(new Set([...prev, ...range])))
         anchorRef.current = id
         return
       }
     }
-    toggleSelect(id)
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return persist(next)
+    })
     anchorRef.current = id
-  }
+  }, [])
   // The confirm dialog needs each selected batch's coordinates — resolve ids against the full list (some may be filtered out).
   const byId = useMemo(() => new Map(scorecards.map((s) => [s.id, s])), [scorecards])
   const selectedTargets = [...selected]
@@ -377,244 +457,41 @@ export function ScorecardList({
       {matchedCount === 0 ? (
         <EmptyState title={list('emptyFilteredTitle')} hint={list('emptyFilteredHint')} />
       ) : (
-        <div className="space-y-4">
-          {groups.map((group) => (
-            <ListSection
-              key={group.key ?? 'unset'}
-              grouped={view.display.grouping !== 'none'}
-              label={groupLabel(group.key, group.items)}
-              count={group.items.length}
-            >
-              {group.items.map((s, i) => {
-                const author = authorInfo(s)
-                const metrics = s.summary ?? []
-                const shownMetrics = metrics.slice(0, 3) // keep the card format — top 3 only, the rest as +N
-                const judges = s.judgeModels ?? []
-                const selectable = canDeleteRow(s)
-                const isSelected = selected.has(s.id)
-                // Runtime the batch ran on (self-hosted names resolved to device labels); unset on legacy·ingest rows.
-                const runtimeText = s.runtime
-                  ? runtimeChipLabel(s.runtime, {
-                      runnerLabelOf: (id) => runnerLabels[id],
-                      poolPersonal: t('runtimePoolPersonal'),
-                      poolWorkspace: t('runtimePoolWorkspace'),
-                    })
-                  : undefined
-                // Wall-clock duration (submit → finish) is only meaningful once terminal — a live batch has no end yet.
-                const terminal = s.status !== 'queued' && s.status !== 'running'
-                return (
-                  // Fixed-format card — 3 lines (dataset/harness/aggregate), no arrow·inline name. Status is a color icon only.
-                  <Link
-                    key={s.id}
-                    href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
-                    style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
-                    onClick={(e) => {
-                      // Selection mode: a card click toggles (no-op on a non-deletable row) instead of navigating —
-                      // a stray click must not throw the user into the detail page mid-selection.
-                      if (!selectionMode) return
-                      e.preventDefault()
-                      if (selectable) handleToggle(s.id, e.shiftKey)
-                    }}
-                    className={cn(
-                      'rise group flex items-center gap-3 rounded-lg border px-3.5 py-2.5 shadow-raise transition-colors',
-                      selectionMode && 'select-none', // shift-range clicks must not highlight card text
-                      isSelected
-                        ? 'border-primary/50 bg-primary/[0.05]'
-                        : 'bg-card hover:border-border-strong hover:bg-elevated'
-                    )}
-                  >
-                    {/* Left multi-select checkbox — the visual box stays small but the hit target is a generous 32px
-                        square (negative margins overlap the card padding; z-[1] wins the overlap). Hover-revealed
-                        until a selection starts, then every checkbox stays visible. */}
-                    {showDeleteSlot && (
-                      <span className="relative z-[1] flex w-5 shrink-0 justify-center">
-                        {selectable && (
-                          <button
-                            type="button"
-                            role="checkbox"
-                            aria-checked={isSelected}
-                            aria-label={t('selectAria')}
-                            onClick={(e) => {
-                              // The whole card is a Link — stop it so the checkbox click doesn't navigate.
-                              e.preventDefault()
-                              e.stopPropagation()
-                              handleToggle(s.id, e.shiftKey)
-                            }}
-                            className={cn(
-                              '-m-2 grid size-8 place-items-center rounded-md outline-none transition-opacity hover:bg-accent/60 focus-visible:opacity-100',
-                              isSelected || selectionMode
-                                ? 'opacity-100'
-                                : 'opacity-0 group-hover:opacity-100'
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                'grid size-[18px] place-items-center rounded border transition-colors',
-                                isSelected
-                                  ? 'border-primary bg-primary text-primary-foreground'
-                                  : 'border-border-strong bg-card'
-                              )}
-                            >
-                              {isSelected && <Check className="size-3" strokeWidth={3} />}
-                            </span>
-                          </button>
-                        )}
-                      </span>
-                    )}
-                    {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each one line, truncated
-                        (no wrap). A trace evaluation (sentinel dataset/harness) collapses ①② into a single badge line
-                        instead of two literal "_traces" refs that would read as a broken entity. */}
-                    <div className="min-w-0 flex-1 space-y-1">
-                      {isTraceEvaluation(s) ? (
-                        <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                          <span className="inline-flex shrink-0 items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[11px] font-[560] text-secondary-foreground ring-1 ring-inset ring-border">
-                            <Telescope className="size-3" />
-                            {t('traceEvaluation')}
-                          </span>
-                          {s.models?.primary ? (
-                            <span className="hidden shrink-0 sm:inline-flex">
-                              <ModelChip>{s.models.primary}</ModelChip>
-                            </span>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                            <span className="truncate">
-                              <EntityRef
-                                id={s.dataset.id}
-                                version={s.dataset.version}
-                                kind="dataset"
-                              />
-                            </span>
-                            {s.subset ? (
-                              <span className="shrink-0">
-                                <SubsetChip selected={s.subset.selected} total={s.subset.total} />
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                            <span className="truncate">
-                              <EntityRef
-                                id={s.harness.id}
-                                version={s.harness.version}
-                                kind="harness"
-                              />
-                            </span>
-                            {s.models?.primary ? (
-                              <span className="hidden shrink-0 sm:inline-flex">
-                                <ModelChip>{s.models.primary}</ModelChip>
-                              </span>
-                            ) : null}
-                            {s.origin ? (
-                              <span className="hidden shrink-0 md:inline-flex">
-                                <OriginChip origin={s.origin} />
-                              </span>
-                            ) : null}
-                            {runtimeText ? (
-                              <span
-                                className="hidden shrink-0 sm:inline-flex"
-                                title={t('runtimeTitle')}
-                              >
-                                <RuntimeChip label={runtimeText} />
-                              </span>
-                            ) : null}
-                          </div>
-                        </>
-                      )}
-                      <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
-                        {shownMetrics.length > 0 ? (
-                          shownMetrics.map((m) => (
-                            <span key={m.metric} className="shrink-0">
-                              <MetricChip
-                                metric={m.metric}
-                                mean={m.mean}
-                                passRate={m.passRate}
-                                unmeasured={m.unmeasured}
-                                siblings={metrics.map((x) => x.metric)}
-                              />
-                            </span>
-                          ))
-                        ) : (
-                          <span className="text-[11px] text-faint">
-                            {s.status === 'failed' ? t('noAggregate') : t('pendingAggregate')}
-                          </span>
-                        )}
-                        {metrics.length > shownMetrics.length && (
-                          <span className="shrink-0 text-[11px] text-faint">
-                            +{metrics.length - shownMetrics.length}
-                          </span>
-                        )}
-                        {judges.length > 0 && (
-                          <span className="ml-1 hidden shrink-0 items-center gap-1 lg:inline-flex">
-                            <span className="text-[10px] uppercase tracking-wide text-faint">
-                              judge
-                            </span>
-                            <ModelChip muted>{judges[0]}</ModelChip>
-                            {judges.length > 1 && (
-                              <span className="text-[11px] text-faint">+{judges.length - 1}</span>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {/* Right: fixed slots — runner (thumbnail) · time (grouped = time only) · status (color icon). */}
-                    <div className="flex shrink-0 items-center gap-2.5">
-                      <span className="flex w-6 justify-center">
-                        {author.known && (
-                          <UserAvatar
-                            name={author.name}
-                            url={author.avatarUrl}
-                            label={t('runnerLabel')}
-                          />
-                        )}
-                      </span>
-                      <time
-                        className={
-                          byDay
-                            ? 'hidden w-[44px] text-right font-mono text-[11px] text-muted-foreground sm:block'
-                            : 'hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block'
-                        }
-                        title={fmtDateTimeFull(s.createdAt, { locale, timeZone })}
-                      >
-                        {byDay
-                          ? fmtTimeOnly(s.createdAt, timeZone)
-                          : fmtDateTime(s.createdAt, timeZone)}
-                      </time>
-                      {/* Wall-clock duration (submit → finish) — a dash while the batch is still live (no end yet). */}
-                      <span
-                        className="hidden w-[54px] text-right font-mono text-[11px] text-muted-foreground sm:block"
-                        title={t('durationTitle')}
-                      >
-                        {terminal ? (
-                          fmtElapsed(s.createdAt, s.updatedAt)
-                        ) : (
-                          <span className="text-faint">–</span>
-                        )}
-                      </span>
-                      <span className="flex w-5 justify-end">
-                        <StatusIcon status={s.status} />
-                      </span>
-                      {/* Hover-revealed trash (harness/judge list grammar) — a fixed slot keeps the columns aligned. */}
-                      {showDeleteSlot && (
-                        <span className="flex w-7 justify-end">
-                          {canDeleteRow(s) && (
-                            <DeleteScorecardRowButton
-                              id={s.id}
-                              dataset={s.dataset}
-                              harness={s.harness}
-                              workspace={workspace}
-                            />
-                          )}
-                        </span>
-                      )}
-                    </div>
-                  </Link>
-                )
-              })}
-            </ListSection>
-          ))}
-        </div>
+        <VirtualList
+          items={rows}
+          keyOf={keyOf}
+          heightOf={heightOf}
+          maxHeight={VIEWPORT_MAX_HEIGHT}
+          resetKey={resetKey}
+          className="overflow-y-auto pr-1"
+        >
+          {(row) =>
+            row.kind === 'group' ? (
+              <div className="flex items-end" style={{ height: GROUP_ROW_HEIGHT_PX }}>
+                <ListGroupRow
+                  label={row.label}
+                  count={row.count}
+                  collapsed={row.collapsed}
+                  onToggle={() => toggleGroup(row.groupKey)}
+                  className="rounded-md"
+                />
+              </div>
+            ) : (
+              <ScorecardRow
+                s={row.item}
+                workspace={workspace}
+                byDay={byDay}
+                authors={authors}
+                runnerLabels={runnerLabels}
+                showDeleteSlot={showDeleteSlot}
+                selectable={canDeleteRow(row.item)}
+                isSelected={selected.has(row.item.id)}
+                selectionMode={selectionMode}
+                onToggle={handleToggle}
+              />
+            )
+          }
+        </VirtualList>
       )}
 
       {/* Floating action bar — appears while any row is selected (Linear-style) and fans out the delete over the
@@ -673,3 +550,250 @@ export function ScorecardList({
     </div>
   )
 }
+
+// One batch = one fixed-format card of three truncated lines. Memoized because the list around it re-renders
+// on every keystroke, every filter and every selection change, while a row's own props change on almost none
+// of them — and because the window only ever mounts a screenful, the memo is what keeps SCROLLING cheap too.
+// Its height is pinned (CARD_HEIGHT_PX, three `h-5` lines) rather than left to the content: the window's
+// spacers are computed from that number, and a row that grew would desync the scroll.
+// The former staggered `rise` animation is gone with it — an entrance animation on a row that mounts mid-scroll
+// is not an entrance.
+const ScorecardRow = memo(function ScorecardRow({
+  s,
+  workspace,
+  byDay,
+  authors,
+  runnerLabels,
+  showDeleteSlot,
+  selectable,
+  isSelected,
+  selectionMode,
+  onToggle,
+}: {
+  s: ScorecardRecord
+  workspace: string
+  byDay: boolean
+  authors: Record<string, Author>
+  runnerLabels: Record<string, string>
+  showDeleteSlot: boolean
+  selectable: boolean
+  isSelected: boolean
+  selectionMode: boolean
+  // Stable — a handler rebuilt per render would be a changed prop on every row.
+  onToggle: (id: string, shiftKey: boolean) => void
+}) {
+  const t = useTranslations('scorecardList')
+  const locale = useLocale()
+  const timeZone = useTimeZone()
+
+  const known = s.createdBy !== undefined
+  const profile = s.createdBy !== undefined ? authors[s.createdBy] : undefined
+  const authorName = profile?.name ?? (s.createdBy !== undefined ? fmtSubject(s.createdBy) : '—')
+  const metrics = s.summary ?? []
+  const shownMetrics = metrics.slice(0, 3) // keep the card format — top 3 only, the rest as +N
+  const judges = s.judgeModels ?? []
+  // Runtime the batch ran on (self-hosted names resolved to device labels); unset on legacy·ingest rows.
+  const runtimeText = s.runtime
+    ? runtimeChipLabel(s.runtime, {
+        runnerLabelOf: (id) => runnerLabels[id],
+        poolPersonal: t('runtimePoolPersonal'),
+        poolWorkspace: t('runtimePoolWorkspace'),
+      })
+    : undefined
+  // Wall-clock duration (submit → finish) is only meaningful once terminal — a live batch has no end yet.
+  const terminal = s.status !== 'queued' && s.status !== 'running'
+
+  return (
+    <div style={{ height: ROW_HEIGHT_PX }} className="pb-2">
+      <Link
+        href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
+        onClick={(e) => {
+          // Selection mode: a card click toggles (no-op on a non-deletable row) instead of navigating —
+          // a stray click must not throw the user into the detail page mid-selection.
+          if (!selectionMode) return
+          e.preventDefault()
+          if (selectable) onToggle(s.id, e.shiftKey)
+        }}
+        style={{ height: CARD_HEIGHT_PX }}
+        className={cn(
+          'group flex items-center gap-3 overflow-hidden rounded-lg border px-3.5 shadow-raise transition-colors',
+          selectionMode && 'select-none', // shift-range clicks must not highlight card text
+          isSelected
+            ? 'border-primary/50 bg-primary/[0.05]'
+            : 'bg-card hover:border-border-strong hover:bg-elevated'
+        )}
+      >
+        {/* Left multi-select checkbox — the visual box stays small but the hit target is a generous 32px
+            square (negative margins overlap the card padding; z-[1] wins the overlap). Hover-revealed
+            until a selection starts, then every checkbox stays visible. */}
+        {showDeleteSlot && (
+          <span className="relative z-[1] flex w-5 shrink-0 justify-center">
+            {selectable && (
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={isSelected}
+                aria-label={t('selectAria')}
+                onClick={(e) => {
+                  // The whole card is a Link — stop it so the checkbox click doesn't navigate.
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onToggle(s.id, e.shiftKey)
+                }}
+                className={cn(
+                  '-m-2 grid size-8 place-items-center rounded-md outline-none transition-opacity hover:bg-accent/60 focus-visible:opacity-100',
+                  isSelected || selectionMode ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                )}
+              >
+                <span
+                  className={cn(
+                    'grid size-[18px] place-items-center rounded border transition-colors',
+                    isSelected
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border-strong bg-card'
+                  )}
+                >
+                  {isSelected && <Check className="size-3" strokeWidth={3} />}
+                </span>
+              </button>
+            )}
+          </span>
+        )}
+        {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each ONE line of a declared
+            height, truncated (no wrap) — the card's height is the sum, which is what the window is told.
+            A trace evaluation (sentinel dataset/harness) collapses ①② into a single badge line instead of two
+            literal "_traces" refs that would read as a broken entity; the card keeps its height and centers. */}
+        <div className="min-w-0 flex-1 space-y-1">
+          {isTraceEvaluation(s) ? (
+            <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+              <span className="inline-flex shrink-0 items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[11px] font-[560] text-secondary-foreground ring-1 ring-inset ring-border">
+                <Telescope className="size-3" />
+                {t('traceEvaluation')}
+              </span>
+              {s.models?.primary ? (
+                <span className="hidden shrink-0 sm:inline-flex">
+                  <ModelChip>{s.models.primary}</ModelChip>
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <>
+              <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                <span className="truncate">
+                  <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
+                </span>
+                {s.subset ? (
+                  <span className="shrink-0">
+                    <SubsetChip selected={s.subset.selected} total={s.subset.total} />
+                  </span>
+                ) : null}
+              </div>
+              <div className="flex h-5 items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                <span className="truncate">
+                  <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
+                </span>
+                {s.models?.primary ? (
+                  <span className="hidden shrink-0 sm:inline-flex">
+                    <ModelChip>{s.models.primary}</ModelChip>
+                  </span>
+                ) : null}
+                {s.origin ? (
+                  <span className="hidden shrink-0 md:inline-flex">
+                    <OriginChip origin={s.origin} />
+                  </span>
+                ) : null}
+                {runtimeText ? (
+                  <span className="hidden shrink-0 sm:inline-flex" title={t('runtimeTitle')}>
+                    <RuntimeChip label={runtimeText} />
+                  </span>
+                ) : null}
+              </div>
+            </>
+          )}
+          <div className="flex h-5 items-center gap-1 overflow-hidden whitespace-nowrap">
+            {shownMetrics.length > 0 ? (
+              shownMetrics.map((m) => (
+                <span key={m.metric} className="shrink-0">
+                  <MetricChip
+                    metric={m.metric}
+                    mean={m.mean}
+                    passRate={m.passRate}
+                    unmeasured={m.unmeasured}
+                    siblings={metrics.map((x) => x.metric)}
+                  />
+                </span>
+              ))
+            ) : (
+              <span className="text-[11px] text-faint">
+                {s.status === 'failed' ? t('noAggregate') : t('pendingAggregate')}
+              </span>
+            )}
+            {metrics.length > shownMetrics.length && (
+              <span className="shrink-0 text-[11px] text-faint">
+                +{metrics.length - shownMetrics.length}
+              </span>
+            )}
+            {judges.length > 0 && (
+              <span className="ml-1 hidden shrink-0 items-center gap-1 lg:inline-flex">
+                <span className="text-[10px] uppercase tracking-wide text-faint">judge</span>
+                <ModelChip muted>{judges[0]}</ModelChip>
+                {judges.length > 1 && (
+                  <span className="text-[11px] text-faint">+{judges.length - 1}</span>
+                )}
+              </span>
+            )}
+          </div>
+        </div>
+        {/* Right: fixed slots — runner (thumbnail) · time (grouped = time only) · status (color icon). */}
+        <div className="flex shrink-0 items-center gap-2.5">
+          <span className="flex w-6 justify-center">
+            {known && (
+              <UserAvatar
+                name={authorName}
+                {...(profile?.avatarUrl ? { url: profile.avatarUrl } : {})}
+                label={t('runnerLabel')}
+              />
+            )}
+          </span>
+          <time
+            className={
+              byDay
+                ? 'hidden w-[44px] text-right font-mono text-[11px] text-muted-foreground sm:block'
+                : 'hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block'
+            }
+            title={fmtDateTimeFull(s.createdAt, { locale, timeZone })}
+          >
+            {byDay ? fmtTimeOnly(s.createdAt, timeZone) : fmtDateTime(s.createdAt, timeZone)}
+          </time>
+          {/* Wall-clock duration (submit → finish) — a dash while the batch is still live (no end yet). */}
+          <span
+            className="hidden w-[54px] text-right font-mono text-[11px] text-muted-foreground sm:block"
+            title={t('durationTitle')}
+          >
+            {terminal ? (
+              fmtElapsed(s.createdAt, s.updatedAt)
+            ) : (
+              <span className="text-faint">–</span>
+            )}
+          </span>
+          <span className="flex w-5 justify-end">
+            <StatusIcon status={s.status} />
+          </span>
+          {/* Hover-revealed trash (harness/judge list grammar) — a fixed slot keeps the columns aligned. */}
+          {showDeleteSlot && (
+            <span className="flex w-7 justify-end">
+              {selectable && (
+                <DeleteScorecardRowButton
+                  id={s.id}
+                  dataset={s.dataset}
+                  harness={s.harness}
+                  workspace={workspace}
+                />
+              )}
+            </span>
+          )}
+        </div>
+      </Link>
+    </div>
+  )
+})

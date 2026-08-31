@@ -407,21 +407,31 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   `useListView` naming the params that are NOT its axes but must survive a filter (the case dialog's `?case=`,
   which a rebuilt query string would otherwise delete the moment anyone touched a filter).
 - **A list that can hold hundreds of rows draws a WINDOW, and a row carries only what a row draws**
-  (`shared/ui/virtual-list.tsx` over `shared/lib/virtual-window.ts`; the scorecard detail's case explorer,
-  `widgets/scorecard-cases`, is the reference). Two costs grow with the collection and neither shows on a
-  ten-case demo: the DOM (500 case cards were thousands of nodes, re-created by every keystroke and every
-  dialog step) and the RSC payload — the case list shipped each case's full task body, every score's judge
-  rationale, the whole error text and a base64 screenshot, none of which a ROW draws, all of it multiplied by
-  the case count. So `VirtualList` renders only the rows crossing the scroll area and stands two spacers in
-  for the rest, and the serialized row carries a SUMMARY LINE (`taskSummary` / `errorSummary`) while the
-  evidence is fetched for the ONE case a dialog opened (`widgets/scorecard-cases/api/case-detail.ts` — the
-  same door the trace already went through). The window has ONE rule: a row's real height equals the declared
-  `heightOf`, because the spacers are computed from that number. A row that wraps desyncs the scroll — which
-  is why these rows are one line with the score badges capped and a `+k`, and why the arithmetic lives in a
-  tested pure module (`virtualWindowOf`) instead of inside the component, where being wrong raises nothing and
-  only draws the wrong screen. Rows are `memo`ed and take a STABLE `onOpen(key)` (a closure built per row
-  defeats the memo), and `useListView` memoizes its own return value so a list reading it through context does
-  not re-render on state that is none of its business.
+  (`shared/ui/virtual-list.tsx` over `shared/lib/virtual-window.ts`; both scorecard surfaces are the
+  reference — the detail's case explorer `widgets/scorecard-cases` and the collection list
+  `widgets/scorecard-list`). Two costs grow with the collection and neither shows on a ten-row demo.
+  **The DOM is the bigger one and it is not obvious**: a card whose chips each carry an icon costs ~128
+  elements, so the scorecards list at 1000 batches measured 128,490 elements and **8.69MB of HTML built from
+  1MB of data**, 2.2s of render before anything could paint — and every keystroke re-created it. Windowed,
+  the same screen is ~2,000 elements and 0.14MB *at any n* (the numbers are locked by
+  `widgets/scorecard-list/ui/scorecard-list.test.tsx`). **The payload is the other**: the case list used to
+  ship each case's full task body, every score's judge rationale, the whole error text and a base64
+  screenshot — none of which a ROW draws, all of it multiplied by the case count — so the serialized row now
+  carries a SUMMARY LINE (`taskSummary` / `errorSummary`) and the evidence is fetched for the ONE case a
+  dialog opened (`widgets/scorecard-cases/api/case-detail.ts`, the same door the trace already went through).
+  The window has ONE rule: a row's real height equals the declared `heightOf`, because the spacers are
+  computed from that number. A row that wraps desyncs the scroll — which is why these rows pin their height
+  (`style={{height}}` + `overflow-hidden`, each line `h-5`, badges capped with a `+k`) rather than letting
+  content decide it, and why the arithmetic lives in a tested pure module (`virtualWindowOf`) instead of
+  inside the component, where being wrong raises nothing and only draws the wrong screen. Rows are `memo`ed
+  and take a STABLE handler (a closure built per row defeats the memo — the scorecard list's shift-range
+  toggle reads refs to stay stable), `useListView` memoizes its own return value so a list reading it through
+  context does not re-render on state that is none of its business, and a grouped window flattens groups into
+  one row array with the collapse state held by the LIST (`ListGroupRow`, the controlled twin of `ListGroup`)
+  — a collapsed group must not stand its 500 rows to be measured. ⚠ What a window does NOT fix is the read:
+  `GET /scorecards` still returns every batch a workspace ever ran (~1KB each on the wire, plus its zod
+  parse), so the remaining cost is linear in the collection and the fix for THAT is a bounded read, not more
+  rendering.
 - **A work LIST is a view with two halves: WHICH issues is the URL's, HOW they are drawn is the READER's**
   (`widgets/issue-list` + `features/browse-issues` + `entities/issue/model/{view,display}.ts` — the tracker's
   issue list is the reference). A filter decides the SET, so it serializes into the query string (`issueViewOf` /

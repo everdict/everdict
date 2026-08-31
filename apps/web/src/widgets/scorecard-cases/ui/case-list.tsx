@@ -21,7 +21,13 @@ import {
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { EmptyState } from '@/shared/ui/empty-state'
-import { facetOptionsOf, ListToolbar, type FacetSpec } from '@/shared/ui/list-toolbar'
+import {
+  facetOptionsOf,
+  LIST_GROUP_ROW_HEIGHT_PX,
+  ListGroupRow,
+  ListToolbar,
+  type FacetSpec,
+} from '@/shared/ui/list-toolbar'
 import { VirtualList } from '@/shared/ui/virtual-list'
 
 import type { ScorecardCaseView } from '../model/case-view'
@@ -46,7 +52,6 @@ import { useScorecardCases } from './case-dialog-context'
 // wrapping desyncs the scroll. That is why the badges stop at a few and the rest folds into +N — all of them
 // are in the dialog anyway.
 const ROW_HEIGHT_PX = 40
-const GROUP_HEADER_HEIGHT_PX = 34
 const MAX_ROW_BADGES = 2
 // The window's max height. Shorter content stands at its own height with no scrollbar, so a batch of a few
 // cases looks exactly as it did before.
@@ -140,7 +145,7 @@ export function ScorecardCaseList() {
   const resetKey = `${JSON.stringify(view.filters)}|${view.search}|${view.display.grouping}|${view.display.order}`
 
   const heightOf = useCallback(
-    (row: CaseRow) => (row.kind === 'group' ? GROUP_HEADER_HEIGHT_PX : ROW_HEIGHT_PX),
+    (row: CaseRow) => (row.kind === 'group' ? LIST_GROUP_ROW_HEIGHT_PX : ROW_HEIGHT_PX),
     []
   )
   const keyOf = useCallback((row: CaseRow) => row.key, [])
@@ -173,7 +178,13 @@ export function ScorecardCaseList() {
         >
           {(row) =>
             row.kind === 'group' ? (
-              <GroupHeaderRow row={row} onToggle={toggleGroup} />
+              <ListGroupRow
+                label={row.label}
+                count={row.count}
+                collapsed={row.collapsed}
+                onToggle={() => toggleGroup(row.groupKey)}
+                className="border-b border-border bg-elevated/60 px-2.5"
+              />
             ) : (
               <CaseListRow
                 item={row.item}
@@ -186,38 +197,6 @@ export function ScorecardCaseList() {
         </VirtualList>
       )}
     </div>
-  )
-}
-
-// The group header — the same grammar as the toolbar's ListGroup (chevron + label + count) without using
-// that component: the window needs a FLAT row array (so a collapsed group does not stand 500 rows under it),
-// which means the collapsed state has to belong to the list.
-function GroupHeaderRow({
-  row,
-  onToggle,
-}: {
-  row: Extract<CaseRow, { kind: 'group' }>
-  onToggle: (key: string) => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={() => onToggle(row.groupKey)}
-      aria-expanded={!row.collapsed}
-      style={{ height: GROUP_HEADER_HEIGHT_PX }}
-      className="flex w-full items-center gap-1.5 border-b border-border bg-elevated/60 px-2.5 text-left text-[12px] font-[560] text-foreground transition-colors hover:bg-accent/60"
-    >
-      <ChevronRight
-        className={cn(
-          'size-3 shrink-0 text-faint transition-transform duration-150',
-          !row.collapsed && 'rotate-90'
-        )}
-        strokeWidth={2.25}
-        aria-hidden
-      />
-      <span className="min-w-0 flex-1 truncate">{row.label}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground">{row.count}</span>
-    </button>
   )
 }
 
