@@ -14,6 +14,7 @@ import {
   type TrajectoryWindow,
   clampWindow,
   ownsPayloadKey,
+  payloadKeyPrefix,
   serializedBytes,
 } from "./trajectory-store.js";
 
@@ -130,7 +131,11 @@ function truncateToBytes(value: string, maxBytes: number): string {
 // Exported so `ownsPayloadKey`'s counterexample can hold the MINTER and the ownership predicate to one shape:
 // a test that spells the key itself cannot see the two drift apart, and drift here is a tenancy decision.
 export function offloadKey(tenant: string, runId: string, emitter: string, field: string, value: unknown): string {
-  return `trajectory-payloads/${tenant}/${runId}/${emitter}/${contentDigest(value)}.${field}`;
+  // The owner half comes from `payloadKeyPrefix`, which `ownsPayloadKey` also renders — one address, one
+  // spelling, so the minter and the check cannot disagree about where a segment ends. The emitter stays raw:
+  // it sits AFTER the prefix and cannot shift the segments ownership reads, and escaping it would move every
+  // existing `judge:quality` key for no gain.
+  return `${payloadKeyPrefix(tenant, runId)}${emitter}/${contentDigest(value)}.${field}`;
 }
 
 // ── WHAT "TOO LARGE" MEANS FOR A STRUCTURED FIELD ───────────────────────────────────────────────────

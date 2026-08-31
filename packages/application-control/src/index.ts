@@ -47,6 +47,7 @@ export {
   serializedBytes,
   type TrajectoryPayloadRef,
   ownsPayloadKey,
+  payloadKeyPrefix,
   placementSpan,
   sealBody,
   sealExecutionPlanes,

@@ -33,13 +33,60 @@ describe("a trajectory payload key belongs to exactly one (workspace, run)", () 
     expect(ownsPayloadKey(offloadKey("acme", "run-2", "agent", "textRef", { text: "x" }), "acme", "run-1")).toBe(false);
   });
 
-  // The confusion the segment comparison exists to refuse. Both spellings render the same path, so a prefix
-  // test answers true for a workspace that owns neither the run nor the bytes.
-  it("does not let a separator in one identifier claim another's objects", () => {
+  // ── AN IDENTIFIER CARRYING THE SEPARATOR ────────────────────────────────────────────────────────
+  //
+  // Not hypothetical: the OTLP door groups spans by the producer's own `everdict.run_id` attribute and seals
+  // a trajectory under it, so a pushed run id is a producer-authored string with no charset rule on it.
+  //
+  // Unescaped, one address serves two owners — `…/acme/b/c/…` is what (acme, "b/c") mints and what
+  // (acme, "b") claims — so run "b" could delete run "b/c"'s evidence at its own retention, and the platform
+  // could not read back its own object. Escaping makes the two addresses different.
+  it("keeps a run id containing the separator inside its OWN namespace", () => {
+    const slashed = offloadKey("acme", "b/c", "agent", "textRef", { text: "x" });
+    const sibling = offloadKey("acme", "b", "agent", "textRef", { text: "x" });
+    expect(slashed).not.toBe(sibling);
+
+    // Each pair owns its own object and only its own.
+    expect(ownsPayloadKey(slashed, "acme", "b/c")).toBe(true);
+    expect(ownsPayloadKey(slashed, "acme", "b")).toBe(false);
+    expect(ownsPayloadKey(sibling, "acme", "b")).toBe(true);
+    expect(ownsPayloadKey(sibling, "acme", "b/c")).toBe(false);
+  });
+
+  it("keeps a workspace id containing the separator inside its own namespace", () => {
+    const nested = offloadKey("acme/eu", "run-1", "agent", "textRef", { text: "x" });
+    expect(ownsPayloadKey(nested, "acme/eu", "run-1")).toBe(true);
+    expect(ownsPayloadKey(nested, "acme", "eu")).toBe(false);
+    expect(ownsPayloadKey(offloadKey("acme", "eu", "agent", "textRef", { text: "x" }), "acme/eu", "run-1")).toBe(false);
+  });
+
+  // The escape is injective, so two different ids cannot render to one address by one of them spelling the
+  // other's escape.
+  it("does not let an id spell another id's escape sequence", () => {
+    const literal = offloadKey("acme", "a%2Fb", "agent", "textRef", { text: "x" });
+    const slashed = offloadKey("acme", "a/b", "agent", "textRef", { text: "x" });
+    expect(literal).not.toBe(slashed);
+    expect(ownsPayloadKey(literal, "acme", "a/b")).toBe(false);
+    expect(ownsPayloadKey(slashed, "acme", "a%2Fb")).toBe(false);
+  });
+
+  // An ordinary identifier renders EXACTLY as before, so this repairs the broken addresses without moving
+  // the working ones — including the `:` that every emitter and most attempt ids carry.
+  it("leaves an ordinary identifier's address unchanged", () => {
+    // Written out rather than derived, because the point IS the literal spelling: `%`-encoding the whole
+    // segment (encodeURIComponent) would turn `judge:quality` into `judge%3Aquality` and orphan every object
+    // already stored under it.
+    expect(offloadKey("acme", "run-1", "judge:quality", "textRef", { text: "x" })).toMatch(
+      /^trajectory-payloads\/acme\/run-1\/judge:quality\/sha256:[0-9a-f]{64}\.textRef$/,
+    );
+  });
+
+  // The confusion the escape exists to refuse, from the other side: a hand-written key that merely LOOKS
+  // like one of ours still has exactly one owner.
+  it("does not let a forged path claim two owners", () => {
     const forged = "trajectory-payloads/acme/run-1/agent/deadbeef.textRef";
-    expect(forged.startsWith("trajectory-payloads/acme/run-1/")).toBe(true); // the prefix reading says yes…
-    expect(ownsPayloadKey(forged, "acme/run-1", "agent")).toBe(false); // …and the owner is not this pair
-    expect(ownsPayloadKey(forged, "acme", "run-1/agent")).toBe(false);
+    expect(ownsPayloadKey(forged, "acme", "run-1")).toBe(true); // the pair the address names…
+    expect(ownsPayloadKey(forged, "acme/run-1", "agent")).toBe(false); // …and nobody else
   });
 
   // A handle into somebody else's store entirely — the shape a producer would submit to make us fetch or

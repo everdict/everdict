@@ -705,21 +705,37 @@ export interface TrajectoryPayloadRef {
 // A key that is not ours at all (a handle into somebody else's store entirely) answers false here too, which
 // is the fail-closed direction: we neither read it nor delete it.
 //
-// Compared SEGMENT BY SEGMENT rather than as a string prefix, so the answer does not rest on a precondition
-// this package never states. `trajectory-payloads/<a>/<b>/<c>/…` is the prefix of tenant `a` + run `b/c` and
-// equally of tenant `a/b` + run `c`; a raw `startsWith` calls both of those the owner. Nothing here validates
-// the workspace id — the only charset guard in the repo is `assertFsTenant`, which lives in @everdict/storage
-// for the filesystem's own reasons ("a workspace id can never smuggle a separator") and is not on this path.
-// Depending on a neighbour package's guard for a tenancy decision is how the assumption would outlive it.
-// A tenant that DID contain a separator is then answered false about its own objects, which loses bytes to a
-// leak rather than serving them to a stranger — the direction to fail in.
+// ── THE COORDINATE IS RENDERED ONCE, AND ITS SEGMENTS CANNOT BE RE-CUT ──────────────────────────────
+//
+// `ownsPayloadKey` and the minter are two views of ONE address, so they share the rendering rather than each
+// spelling it (L3). And the segments are escaped, because an identifier carrying the separator makes the
+// address ambiguous in both directions:
+//
+//     tenant a · run "b/c"     mints  …/a/b/c/…      ← which run "b" then claims as its own
+//     tenant a · run "b"       mints  …/a/b/…        ← and whose retention would delete it
+//
+// Neither id is hypothetical: the OTLP door groups by the producer's own `everdict.run_id` attribute and
+// seals a trajectory under it, so a pushed run id is a producer-authored string. A prefix comparison called
+// both pairs the owner; a segment comparison called the platform's OWN object foreign, which loses the bytes
+// to a leak instead — better, and still wrong. Escaping removes the question.
+//
+// `%` and `/` only. Not `encodeURIComponent`, which would also escape `:` and move every existing
+// `judge:quality` / `service:checkout` key — an identifier that contains neither is rendered exactly as
+// before, so this repairs the broken addresses without orphaning the working ones.
+const escapeSegment = (value: string): string => value.replace(/%/g, "%25").replace(/\//g, "%2F");
+
+// The prefix every payload of one (workspace, run) lives under — the minter's first two segments, and the
+// whole of what ownership is.
+export function payloadKeyPrefix(tenant: string, runId: string): string {
+  return `trajectory-payloads/${escapeSegment(tenant)}/${escapeSegment(runId)}/`;
+}
+
 export function ownsPayloadKey(key: string, tenant: string, runId: string): boolean {
-  const segments = key.split("/");
-  // A key that names no object is nobody's: `trajectory-payloads/<tenant>/<runId>/` sits inside the pair's own
-  // namespace and still addresses nothing, so answering "owned" would hand a caller a licence over a
-  // coordinate rather than over bytes.
-  if (segments.length <= 3 || segments.slice(3).join("/").length === 0) return false;
-  return segments[0] === "trajectory-payloads" && segments[1] === tenant && segments[2] === runId;
+  const prefix = payloadKeyPrefix(tenant, runId);
+  // A key that names no object is nobody's: the bare prefix sits inside the pair's own namespace and still
+  // addresses nothing, so answering "owned" would hand a caller a licence over a coordinate rather than over
+  // bytes.
+  return key.startsWith(prefix) && key.length > prefix.length;
 }
 
 // ── THE PAGE CEILINGS, OWNED ONCE ────────────────────────────────────────────────────────────────────
