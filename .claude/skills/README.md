@@ -75,11 +75,12 @@ two reviews after it was deleted). A name that is gone may still be written — 
 
 ---
 
-## PULL — the 17 skills, by what they answer
+## PULL — the 18 skills, by what they answer
 
-- `code-review/` — **how to review**: the six passes a diff cannot do (authorship / blast radius / composition of
-  bounds / adversarial counterexample / adapter certification / stop-on-passes), the measured failure that
-  produced them, and the report shape. Fires on any review request.
+- `code-review/` — **how to review**: the seven passes a diff cannot do (authorship / blast radius / the
+  neighbour you now lean on / composition of bounds / adversarial counterexample / adapter certification and
+  atomicity / stop-on-passes), the two measured failures that produced them, and the report shape. Fires on
+  any review request.
 - `protocol/` — **effects and authority**: the five laws in full, the design checklist to run BEFORE writing
   an effect path, the **case law** (every recurring defect with file, line, and the wrong reasoning verbatim),
   and the verification protocol (mutation-first, non-vacuous fixtures, when a scanner is legitimate).
@@ -87,6 +88,10 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `core-contracts/` — the interfaces, Zod schemas and `AppError` model in `packages/contracts` (the dependency
   root) and the kernel in `packages/domain`.
 - `evaluation/` — the eval domain: graders, judges, scorecards, regression/leaderboard, saved views, ingest.
+- `evolve/` — **driving an evolution campaign**: the loop over everdict's own doors (freeze a frame, log
+  rounds whose verdict the platform derives, spend the adoption the gate authorizes), the frame fields and
+  their three waivers, and every refusal with its repair. The record is a settlement, not an engine — this
+  skill is the driver it deliberately does not ship.
 - `graders/` — implementing one Grader (recipe). The scoring *domain* is `evaluation`.
 - `harnesses/` — implementing an EvaluableHarness (the agent under test) + trace normalization.
 - `drivers/` — implementing a Driver (in-sandbox compute: `LocalDriver`, `DockerDriver`).
