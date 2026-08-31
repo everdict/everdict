@@ -272,6 +272,8 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       if (value !== null && typeof value === "object")
         for (const item of Object.values(value)) walk(item, tenant, runId);
     };
+    // The twin walks the WHOLE row — header, segments and items alike — which is what the Pg statement's
+    // three-way UNION has to reproduce, side segments included.
     for (const [runId, row] of this.rows.entries()) if (row.sealedAt < cutoffIso) walk(row, row.tenant, runId);
     // Ordered by ref so `after` is a stable cursor — the twin pages the way the adapters do, or the sweep's
     // drain is a property no unit test can see.
@@ -757,6 +759,18 @@ export class PgTrajectoryStore implements TrajectoryStore {
          SELECT t.tenant, t.run_id, jsonb_path_query(t.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectories t
           WHERE t.sealed_at < $1::timestamptz AND t.body IS NOT NULL
+         UNION ALL
+         -- ── AND THE SIDE SEGMENTS' OWN BODIES ────────────────────────────────────────────────────
+         --
+         -- A plane sealed BEFORE the split (mig 0200), or arriving through a rolling deploy, a migration or
+         -- a legacy import, holds its events in the segments table's own body column — and this enumeration
+         -- read the header's body and the split event rows and not this one. deleteOlderThan cascades the
+         -- segments away with their header, so every payload named only there was orphaned permanently:
+         -- exactly the leak the drain above was written to close, through the third table.
+         SELECT g.tenant, g.run_id, jsonb_path_query(g.body, '$.**') #>> '{}' AS ref
+           FROM everdict_trajectory_segments g
+           JOIN everdict_trajectories t ON t.run_id = g.run_id
+          WHERE t.sealed_at < $1::timestamptz AND g.body IS NOT NULL
        ) refs
        WHERE ref LIKE 'artifact://%' AND ($3::text IS NULL OR ref > $3)
        ORDER BY ref

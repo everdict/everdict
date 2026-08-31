@@ -111,6 +111,38 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-191 — a split plane seals atomically
     expect(header.rows[0]?.event_count).toBe(2);
   });
 
+  // ── AND THE ENUMERATION HAS TO SEE A LEGACY SIDE SEGMENT'S OWN BODY ─────────────────────────────
+  //
+  // A plane sealed before mig 0200 keeps its events in the segments table's own `body` column. Retention
+  // enumerates payload refs so the OBJECTS can be deleted before the rows that name them, and that statement
+  // read the header's body and the split event rows only — so a payload named nowhere else was orphaned
+  // permanently when `deleteOlderThan` cascaded the segment away.
+  //
+  // Written as a direct INSERT because the seal cannot produce a legacy row any more, which is exactly why
+  // the omission survived: nothing that runs today writes the shape the statement was missing.
+  it("enumerates a payload ref held only in a legacy side segment's body", async () => {
+    const runId = trustId("run-legacy-seg");
+    const tenant = trustId("acme");
+    const store = new PgTrajectoryStore(pg.client);
+    await store.seal({ runId, tenant, source: "run", events: events(1) });
+
+    const ref = `artifact://trajectory-payloads/${tenant}/${runId}/judge:legacy/sha256:${"a".repeat(64)}.outputRef`;
+    await pg.client.query(
+      `INSERT INTO everdict_trajectory_segments
+         (run_id, emitter, tenant, source, event_count, body, body_format, sealed_at, body_split)
+       VALUES ($1, 'judge:legacy', $2, 'run', 1, $3::jsonb, 'events', now(), false)`,
+      [runId, tenant, JSON.stringify([{ t: 0, kind: "tool_result", id: "c1", ok: true, outputRef: ref }])],
+    );
+
+    const refs = await store.payloadRefsOlderThan("2999-01-01T00:00:00.000Z", 5_000);
+    expect(
+      refs.filter((r) => r.runId === runId).map((r) => r.ref),
+      "the legacy segment's payload was invisible to retention, so its object outlives every row that named it",
+    ).toContain(ref);
+    // …and it arrives WITH its owner, so the sweep's ownership join can still refuse a forged one.
+    expect(refs.find((r) => r.ref === ref)).toMatchObject({ tenant, runId });
+  });
+
   it("a losing SEGMENT seal bumps the aggregate exactly once", async () => {
     const runId = trustId("run-segment-race");
     const tenant = trustId("acme");
