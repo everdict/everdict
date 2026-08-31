@@ -159,6 +159,60 @@ function issueListParams(filter?: IssueListQuery): URLSearchParams {
   return q
 }
 
+// The scorecards list's query, as the control plane spells it. Exported because the server component, the
+// view action and the "load older" all build one — written twice, the page and its counts would drift.
+export interface ScorecardListQuery {
+  // Scopes — one value each.
+  judge?: string
+  schedule?: string
+  dataset?: string
+  harness?: string
+  team?: string
+  day?: string
+  q?: string
+  // Facets — sets. An empty string names the UNSET bucket (no runtime, no creator, no team), because a query
+  // string has no null and "none" is a bucket people filter to.
+  statuses?: readonly string[]
+  datasets?: readonly string[]
+  harnesses?: readonly string[]
+  runtimes?: readonly string[]
+  creators?: readonly string[]
+  teams?: readonly string[]
+  // The page: a size, and the last row you drew.
+  limit?: number
+  before?: { createdAt: string; id: string }
+}
+
+function scorecardQueryString(query?: ScorecardListQuery): URLSearchParams {
+  const q = new URLSearchParams()
+  if (query === undefined) return q
+  // schedule and judge are mutually exclusive detail-history reads, exactly as the route reads them.
+  if (query.schedule) q.set('schedule', query.schedule)
+  else if (query.judge) q.set('judge', query.judge)
+  if (query.dataset) q.set('dataset', query.dataset)
+  if (query.harness) q.set('harness', query.harness)
+  // 팀 스코프는 위 좁힘과 결합한다 — "이 중에 우리 팀 것"이 팀 사이드바가 묻는 질문이다.
+  if (query.team) q.set('team', query.team)
+  if (query.day) q.set('day', query.day)
+  if (query.q) q.set('q', query.q)
+  for (const [key, values] of [
+    ['statuses', query.statuses],
+    ['datasets', query.datasets],
+    ['harnesses', query.harnesses],
+    ['runtimes', query.runtimes],
+    ['creators', query.creators],
+    ['teams', query.teams],
+  ] as const) {
+    for (const value of values ?? []) q.append(key, value)
+  }
+  if (query.limit !== undefined) q.set('limit', String(query.limit))
+  if (query.before !== undefined) {
+    q.set('beforeCreatedAt', query.before.createdAt)
+    q.set('beforeId', query.before.id)
+  }
+  return q
+}
+
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
   // Notification feed (personally owned; bell inbox) — qs is a raw query string like '?unread=1&limit=30'.
@@ -1005,25 +1059,23 @@ export const controlPlane = {
   // filter.judge = only batches that applied this Agent Judge (the judge detail's evaluation history);
   // filter.schedule = only the runs a schedule fired (the schedule detail's run history);
   // filter.dataset / filter.harness = every batch that exercised a capability (the tracker's evaluation history).
-  listScorecards: <T>(
-    auth: AuthContext,
-    filter?: {
-      judge?: string
-      schedule?: string
-      dataset?: string
-      harness?: string
-      team?: string
-    }
-  ) => {
-    const q = new URLSearchParams()
-    if (filter?.schedule) q.set('schedule', filter.schedule)
-    else if (filter?.judge) q.set('judge', filter.judge)
-    if (filter?.dataset) q.set('dataset', filter.dataset)
-    if (filter?.harness) q.set('harness', filter.harness)
-    // 팀 스코프는 위 좁힘과 결합한다 — "이 중에 우리 팀 것"이 팀 사이드바가 묻는 질문이다.
-    if (filter?.team) q.set('team', filter.team)
-    const qs = q.toString()
+  // The scorecards LIST. Two shapes of narrow, deliberately distinct on the wire:
+  //  · the SCOPES a detail-history read asks with (a judge's evaluations, a schedule's runs, one team's page)
+  //  · the FACETS a list's filter menu asks with — sets, repeated keys, "any of these"
+  // …plus the page. Absent `limit` this is the unbounded read it has always been.
+  listScorecards: <T>(auth: AuthContext, query?: ScorecardListQuery) => {
+    const qs = scorecardQueryString(query).toString()
     return call<T>(auth, qs ? `/scorecards?${qs}` : '/scorecards')
+  },
+  // How many batches per bucket under the SAME narrow — the total and the group headers a page cannot know.
+  countScorecards: <T>(auth: AuthContext, groupBy: string, query?: ScorecardListQuery) => {
+    const q = scorecardQueryString(query)
+    // Never the page's own bounds: a count narrowed by the cursor answers the page size back.
+    q.delete('limit')
+    q.delete('beforeCreatedAt')
+    q.delete('beforeId')
+    q.set('groupBy', groupBy)
+    return call<T>(auth, `/scorecards/counts?${q.toString()}`)
   },
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),

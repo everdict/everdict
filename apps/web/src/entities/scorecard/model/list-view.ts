@@ -1,12 +1,17 @@
-import type { ListDisplay, ListViewSpec } from '@/shared/lib/list-view'
+import type { ListDisplay } from '@/shared/lib/list-view'
 
 import type { ScorecardRow } from './list-row'
 
-// 배치 평가 목록의 어휘. 다른 셋과 다른 점이 둘 있다.
+// The batch list's vocabulary. Two things set it apart from the other three evaluation lists, and both come
+// from what a scorecard IS — an event a CI run files rather than a registry entry a human authors:
 //
-// ① 상태가 닫힌 어휘라 그룹 순서가 정해져 있다 — 실행 중인 것이 끝난 것 위에 서야 이 화면이 "지금 무슨 일이
-//    벌어지고 있나"에 먼저 답한다. ② 「실행한 날」로 묶을 수 있다: 스코어카드는 사건이라, 사람들이 실제로
-//    묻는 것은 "어제 무엇이 돌았나"이다.
+// ① the collection only grows, so this list READS A PAGE. Every axis below is applied by the control plane
+//    (`GET /scorecards`), and the group headers come from `GET /scorecards/counts`. Nothing here filters an
+//    array in the browser any more: a facet applied to a loaded window silently stops finding batches once
+//    the workspace outgrows the window, which is the one thing a filter must never do.
+// ② status is a closed vocabulary and its groups have an order — running above finished, so the screen
+//    answers "what is happening" before "what happened" — and a batch can be grouped by the day it RAN,
+//    because what people ask an event list is "what ran yesterday".
 export const SCORECARD_FACETS = [
   'team',
   'status',
@@ -24,65 +29,52 @@ export const SCORECARD_GROUPINGS = [
   'team',
   'creator',
 ] as const
-export const SCORECARD_ORDERS = ['recent', 'name'] as const
+
+// Newest first, and only that. The ordering used to offer "by name" as well, which the store cannot page:
+// applied to the loaded window it would re-sort a partial set and read as the whole one. "Which harness" is
+// answered here by the facet and by the grouping, and both of those are exact.
+export const SCORECARD_ORDERS = ['recent'] as const
 
 export const DEFAULT_SCORECARD_DISPLAY: ListDisplay = { grouping: 'day', order: 'recent' }
 
 // 상태 그룹의 순서 — 어휘 자체가 순서다.
 const STATUS_ORDER = ['running', 'queued', 'failed', 'succeeded', 'cancelled', 'superseded']
 
-// 그 배치가 돈 날(로컬 달력 날짜가 아니라 ISO 날짜) — 묶기 전용 키다.
-function dayOf(record: ScorecardRow): string {
-  return record.createdAt.slice(0, 10)
+// The bucket a row falls under, for a client arranging the page it holds under headers the SERVER counted.
+// It must key a row exactly as the store does, or a row stands under a header that did not count it — which
+// is why `day` is the ISO (UTC) date and not the reader's local one, mirroring `scorecardGroupKey` in
+// @everdict/application-control.
+export function scorecardGroupKeyOf(row: ScorecardRow, grouping: string): string | null {
+  switch (grouping) {
+    case 'status':
+      return row.status
+    case 'day':
+      return row.createdAt.slice(0, 10)
+    case 'harness':
+      return row.harness.id
+    case 'dataset':
+      return row.dataset.id
+    case 'team':
+      return row.teamId ?? null
+    case 'creator':
+      return row.createdBy ?? null
+    default:
+      return null
+  }
 }
 
-export const scorecardListSpec: ListViewSpec<ScorecardRow> = {
-  facetValues: (record, facet) => {
-    switch (facet) {
-      case 'team':
-        return record.teamId === undefined ? [] : [record.teamId]
-      case 'status':
-        return [record.status]
-      case 'harness':
-        return [record.harness.id]
-      case 'dataset':
-        return [record.dataset.id]
-      case 'runtime':
-        return record.runtime === undefined ? [] : [record.runtime]
-      case 'creator':
-        return record.createdBy === undefined ? [] : [record.createdBy]
-      default:
-        return []
-    }
-  },
-  searchText: (record) => [record.id, record.harness.id, record.dataset.id].join(' '),
-  groupKey: (record, grouping) => {
-    switch (grouping) {
-      case 'status':
-        return record.status
-      case 'day':
-        return dayOf(record)
-      case 'harness':
-        return record.harness.id
-      case 'dataset':
-        return record.dataset.id
-      case 'team':
-        return record.teamId ?? null
-      case 'creator':
-        return record.createdBy ?? null
-      default:
-        return null
-    }
-  },
-  compare: (a, b, order) =>
-    order === 'name'
-      ? `${a.harness.id} ${a.dataset.id}`.localeCompare(`${b.harness.id} ${b.dataset.id}`)
-      : b.createdAt.localeCompare(a.createdAt),
-  // 날짜는 큰 그룹 먼저가 아니라 **최근 먼저**다 — 어제가 지난달 아래에 서면 그건 목록이 아니다.
-  groupOrder: (grouping) =>
-    grouping === 'status'
-      ? STATUS_ORDER
-      : grouping === 'day'
-        ? (a: string, b: string) => b.localeCompare(a)
-        : undefined,
+// How the server's group rows are stood up. A closed vocabulary IS its own order; a date reads newest-first
+// (어제가 지난달 아래에 서면 그건 목록이 아니다); everything else — people, teams, capabilities — has no
+// order of its own, so the biggest group leads. The unset bucket goes last wherever it came from.
+export function orderScorecardGroups<T extends { key: string | null; count: number }>(
+  groups: readonly T[],
+  grouping: string
+): T[] {
+  return [...groups].sort((a, b) => {
+    if (a.key === null || b.key === null) return a.key === null ? (b.key === null ? 0 : 1) : -1
+    if (grouping === 'status') return STATUS_ORDER.indexOf(a.key) - STATUS_ORDER.indexOf(b.key)
+    if (grouping === 'day') return b.key.localeCompare(a.key)
+    if (a.count !== b.count) return b.count - a.count
+    return a.key.localeCompare(b.key)
+  })
 }

@@ -323,6 +323,16 @@ export const scorecardRecordSchema = z.object({
 })
 export const scorecardsSchema = z.array(scorecardRecordSchema)
 
+// GET /scorecards/counts — how many batches are in each bucket under the same narrow the list takes. The
+// number a paged screen cannot get from its own rows: counting what it received reports the page size back.
+// `key: null` is the unset bucket (no team, no creator); buckets with no rows are simply absent.
+export const scorecardGroupCountsSchema = z.object({
+  groupBy: z.string(),
+  groups: z.array(z.object({ key: z.string().nullable(), count: z.number().int() })),
+  total: z.number().int(),
+})
+export type ScorecardGroupCounts = z.infer<typeof scorecardGroupCountsSchema>
+
 // GET /scorecards/diff response: baseline vs candidate (metric mean delta + case regressions/improvements).
 export const caseDeltaSchema = z.object({
   caseId: z.string(),

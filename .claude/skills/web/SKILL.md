@@ -381,8 +381,19 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
     The action and the server component's first paint share `loadIssueViewData`, so "after a filter" and "after a
     refresh" cannot describe different lists. The previous rows STAY on screen (dimmed, `aria-busy`) instead of
     flashing a skeleton, and a stale response is dropped by sequence number.
-  · **Client-side (harness · dataset · judge · scorecard)** — these have no pagination, so the whole collection is
+  · **Client-side (harness · dataset · judge)** — these have no pagination, so the whole collection is
     already in hand: `applyListView` does filter/search/order/group in memory and a change costs zero round trips.
+  **Which branch a list takes is decided by what the collection IS, not by how big it is today.** Harness,
+  dataset and judge are REGISTRIES a human authors — dozens of rows, bounded by the authoring. A scorecard is
+  an EVENT a CI run files, so it only grows, and it moved to the server-backed branch
+  (`features/browse-scorecards` + `GET /scorecards?limit&beforeCreatedAt&beforeId` + `GET /scorecards/counts`)
+  once "the whole collection is already in hand" stopped being affordable. Three things travel with that move,
+  and each is a way a paged list lies if you skip it: every FACET and the search go to the server (a filter
+  applied to the loaded window silently stops finding rows once the workspace outgrows it); every NUMBER on
+  screen — the toolbar total, each group header's count — comes from the counts door, because counting the
+  rows in hand reports the page size back under the collection's name; and the screen SAYS how much of the
+  match is loaded, beside the control that loads more. The cursor is the last row drawn (`createdAt` + `id`,
+  both halves — the ordering is total only with the id), never an opaque token and never an offset.
   Either way the URL follows rather than drives: filters are written with `window.history.replaceState` (no server
   render, still a pasteable link — `replace`, not `push`, so six filter touches are not six back-button steps) and
   the display preference is written straight to its cookie from the browser. ⚠ The state argument MUST be `null`:

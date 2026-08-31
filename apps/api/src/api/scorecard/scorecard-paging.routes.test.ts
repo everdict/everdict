@@ -209,3 +209,59 @@ describe("GET /scorecards/counts — the number a page cannot know", () => {
     await app.close();
   });
 });
+
+describe("the facet SETS — 'any of these', which is the question a filter menu asks", () => {
+  it("takes several values on one axis", async () => {
+    const app = await build();
+
+    // Deliberately a set whose answer is NOT the whole collection: "failed or cancelled" is one row here, so
+    // this assertion still fails if the facet is dropped. (It was written the other way first — `failed` OR
+    // `succeeded` covers every record, so it passed with no filtering at all.)
+    const res = await app.inject({
+      method: "GET",
+      url: "/scorecards?statuses=failed&statuses=cancelled",
+      headers: bearer,
+    });
+
+    expect(idsOf(res)).toEqual(["s5"]);
+    await app.close();
+  });
+
+  it("ANDs a facet with the scope beside it", async () => {
+    const app = await build();
+
+    // The day alone answers s5+s4; the facet alone answers s3. Together: nothing — which neither of them
+    // says on its own, so this cannot pass with one of the two ignored.
+    const res = await app.inject({
+      method: "GET",
+      url: "/scorecards?runtimes=nomad-eu&day=2026-08-02",
+      headers: bearer,
+    });
+
+    expect(idsOf(res)).toEqual([]);
+    await app.close();
+  });
+
+  it("names the UNSET bucket with the empty string — a query string has no null", async () => {
+    const app = await build();
+
+    // Four batches carry no runtime at all; that is a bucket people filter to, not a row they cannot reach.
+    const res = await app.inject({ method: "GET", url: "/scorecards?runtimes=", headers: bearer });
+
+    expect(idsOf(res)).toEqual(["s5", "s4", "s2", "s1"]);
+    await app.close();
+  });
+
+  it("counts under the same facet the rows were narrowed by", async () => {
+    const app = await build();
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/scorecards/counts?groupBy=day&statuses=failed",
+      headers: bearer,
+    });
+
+    expect((res.json() as { total: number }).total).toBe(1);
+    await app.close();
+  });
+});

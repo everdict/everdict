@@ -9,6 +9,7 @@ export {
   scorecardOriginSchema,
   scorecardRecordSchema,
   scorecardsSchema,
+  scorecardGroupCountsSchema,
   caseDeltaSchema,
   trialCaseDeltaSchema,
   trialDiffSchema,
@@ -32,15 +33,17 @@ export {
   type ScorecardTrend,
   type LeaderboardRow,
   type Leaderboard,
+  type ScorecardGroupCounts,
 } from './model/schema'
 export { trackOf } from './model/verdict'
 export { TRACE_EVAL_REF, isTraceEvaluation } from './model/trace-eval'
 export {
   DEFAULT_SCORECARD_DISPLAY,
+  orderScorecardGroups,
   SCORECARD_FACETS,
   SCORECARD_GROUPINGS,
   SCORECARD_ORDERS,
-  scorecardListSpec,
+  scorecardGroupKeyOf,
 } from './model/list-view'
 export { toScorecardRow, type ScorecardRow } from './model/list-row'
 export {

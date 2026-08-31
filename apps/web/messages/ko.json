@@ -2731,7 +2731,10 @@
     "selectedCount": "{count}개 선택",
     "selectAllVisible": "전체선택",
     "clearSelection": "해제",
-    "deleteSelected": "삭제"
+    "deleteSelected": "삭제",
+    "loadedOf": "{total, number}건 중 {loaded, number}건을 불러왔습니다",
+    "loadMore": "더 불러오기",
+    "loadingMore": "불러오는 중…"
   },
   "scorecardsPage": {
     "rescoreButton": "미측정 {count}건 재채점",
@@ -5857,7 +5860,8 @@
       "env": "환경 없음"
     },
     "ownerWorkspace": "워크스페이스",
-    "ownerShared": "기본 제공"
+    "ownerShared": "기본 제공",
+    "loadError": "목록을 불러오지 못했습니다: {error}"
   },
   "reliabilityPage": {
     "title": "신뢰성",

@@ -731,10 +731,19 @@ async function scorecardScopeOf(
   query: ListScorecardsQuery,
   principal: Principal,
   deps: ServerDeps,
-): Promise<{ teamId?: string; visibleTeams?: string[] }> {
+): Promise<{ teamId?: string; visibleTeams?: string[]; teamIds?: string[] }> {
   const teamId = query.team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, query.team);
+  // The team FACET names teams the same way the scope does — id or key — so each value is resolved here too.
+  // The unset bucket ("") stays as it is: it is a bucket, not a team.
+  const teamIds =
+    query.teams === undefined
+      ? undefined
+      : await Promise.all(
+          query.teams.map(async (ref) => (ref === "" ? "" : await resolveTeamRef(deps, principal.workspace, ref))),
+        );
   return {
     ...(teamId !== undefined ? { teamId } : {}),
+    ...(teamIds !== undefined ? { teamIds } : {}),
     ...(await teamCeiling(deps, principal)),
   };
 }

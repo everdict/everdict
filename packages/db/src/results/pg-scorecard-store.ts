@@ -647,6 +647,14 @@ function scorecardFilterSql(
   }
   if (filter?.runtime) conds.push(`runtime = ${put(filter.runtime)}`);
   if (filter?.createdBy) conds.push(`created_by = ${put(filter.createdBy)}`);
+  // The facet SETS — `= ANY($n::text[])`, with `coalesce(col, '')` where the axis has an unset bucket, so
+  // "no runtime" is a value the filter can name rather than a row it can never reach.
+  if (filter?.statuses) conds.push(`status = ANY(${put(filter.statuses)}::text[])`);
+  if (filter?.datasets) conds.push(`dataset_id = ANY(${put(filter.datasets)}::text[])`);
+  if (filter?.harnesses) conds.push(`harness_id = ANY(${put(filter.harnesses)}::text[])`);
+  if (filter?.runtimes) conds.push(`coalesce(runtime, '') = ANY(${put(filter.runtimes)}::text[])`);
+  if (filter?.creators) conds.push(`coalesce(created_by, '') = ANY(${put(filter.creators)}::text[])`);
+  if (filter?.teamIds) conds.push(`coalesce(team_id, '') = ANY(${put(filter.teamIds)}::text[])`);
   if (filter?.day) {
     // A half-open UTC range rather than a cast on the column: this one can use
     // `everdict_scorecards_tenant_created_idx`, and `(created_at)::date` cannot.

@@ -59,8 +59,11 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   is stored per view in a cookie written straight from the browser (`saveIssueDisplay` / `saveListDisplay` over
   `shared/lib/keyed-preference`). Cookie rather than localStorage because the first paint is a server render.
 - **Changing a view must not re-render the route.** A filter or grouping change costs ONE list-only server action
-  (`loadIssueViewAction`, sharing `loadIssueViewData` with the first paint) or nothing at all when the collection
-  is already in hand (`applyListView` for harness/dataset/judge/scorecard). The URL follows via
+  (`loadIssueViewAction` / `loadScorecardViewAction`, each sharing its loader with the first paint) or nothing at
+  all when the collection is already in hand (`applyListView` for harness/dataset/judge — REGISTRIES a human
+  authors). A collection that only grows is server-backed instead: a scorecard is an EVENT a CI run files, so
+  its list reads a page, sends every facet and the search to the control plane, takes every number it prints
+  from `GET /scorecards/counts`, and says how much of the match is loaded beside the control that loads more. The URL follows via
   `window.history.replaceState` — with a **`null` state argument**: passing `window.history.state` carries Next's
   `__NA` marker, its history patch then skips the router-canonical-URL sync, and the next server action on the
   page silently RESTORES the old address. The previous rows stay on screen instead of flashing the loading

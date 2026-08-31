@@ -37,6 +37,17 @@ export interface ScorecardListFilter {
   // history on every navigation. Each one mirrors a facet the list offers.
   runtime?: string; // placement target (registered runtime id | self:* runner)
   createdBy?: string; // the submitter subject
+  // …and the SET forms, which are what a facet is. The singular fields above (and `dataset`/`harness`/
+  // `status`/`teamId`) are SCOPES: one value, decided by the address or by the detail-history read that asks
+  // ("this judge's evaluations", "this schedule's runs", "this team's page"). A facet is a question the
+  // reader asks of a list — "any of these" — so it is a set, and the two AND together exactly as the issue
+  // store's `teamId` and `statuses` do. Empty array = chosen and nothing matches, never "no filter".
+  statuses?: ScorecardStatus[];
+  datasets?: string[];
+  harnesses?: string[];
+  runtimes?: string[];
+  creators?: string[];
+  teamIds?: string[];
   // One calendar day of `created_at`, as `YYYY-MM-DD` **in UTC** — the stored instant's date, which is
   // exactly how the list's day grouping keys a row (`createdAt.slice(0, 10)`). A reader in another timezone
   // sees the same buckets the server counts; a locale-local day would make the header disagree with the page.

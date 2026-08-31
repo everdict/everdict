@@ -110,6 +110,16 @@ describe.skipIf(!DATABASE_URL)("the scorecards page over real Postgres", () => {
       { harness: "claude-code" },
       { limit: 3 },
       { limit: 2, before: { createdAt: "2026-08-02T23:30:00.000Z", id: "a4" } },
+      // The facet SETS, including the unset bucket — `= ANY($n::text[])` on one side, `includes` on the
+      // other, and `coalesce(col, '')` is the half only Postgres can be asked about.
+      { statuses: ["failed" as const, "cancelled" as const] },
+      { runtimes: ["nomad-eu", "local"] },
+      { runtimes: [""] },
+      { creators: ["dana"] },
+      { creators: [""] },
+      { teamIds: ["eng"] },
+      { teamIds: [""] },
+      { harnesses: ["codex-cli"] },
     ];
 
     for (const filter of narrows) {

@@ -5,13 +5,17 @@ import { Check, Telescope, Trash2 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 
+import {
+  loadScorecardViewAction,
+  type ScorecardView,
+  type ScorecardViewData,
+} from '@/features/browse-scorecards'
 import { DeleteScorecardRowButton, DeleteScorecardsDialog } from '@/features/delete-scorecard'
 import {
   isTraceEvaluation,
   SCORECARD_FACETS,
   SCORECARD_GROUPINGS,
   SCORECARD_ORDERS,
-  scorecardListSpec,
   TRACE_EVAL_REF,
   type ScorecardRow,
 } from '@/entities/scorecard'
@@ -23,17 +27,16 @@ import {
   fmtSubject,
   fmtTimeOnly,
 } from '@/shared/lib/format'
-import { applyListView } from '@/shared/lib/list-view'
 import type { ListViewScope } from '@/shared/lib/load-list-view'
 import { useListView } from '@/shared/lib/use-list-view'
 import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { EntityRef, MetricChip, ModelChip, RuntimeChip, SubsetChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import {
-  facetOptionsOf,
   LIST_GROUP_ROW_HEIGHT_PX,
   ListGroupRow,
   ListToolbar,
@@ -94,7 +97,8 @@ function runtimeChipLabel(
 // Scorecard list — same pattern as the dataset list (search + Combobox filter + sort + runner avatar).
 export function ScorecardList({
   workspace,
-  scorecards,
+  initialData,
+  stats,
   authors,
   runnerLabels,
   teams,
@@ -102,7 +106,13 @@ export function ScorecardList({
   viewer,
 }: {
   workspace: string
-  scorecards: ScorecardRow[]
+  // The first paint's list data. Every later view — a filter, the search, the grouping, "load older" — comes
+  // from the same loader through one server action, so "after a filter" and "after a refresh" cannot describe
+  // different lists.
+  initialData: ScorecardViewData
+  // The workspace-level tiles. Deliberately NOT part of the view data: they answer "what does this workspace
+  // have", which a filter must not change, so they are read once by the page and never again.
+  stats: { total: number; succeeded: number; running: number; failed: number }
   authors: Record<string, Author>
   teams: TeamOption[]
   scope: ListViewScope
@@ -124,6 +134,49 @@ export function ScorecardList({
     initialFilters: scope.filters,
     initialSearch: scope.search,
     initialDisplay: scope.display,
+  })
+
+  // The list's data, and the fetch that keeps it in step with the view. The previous rows STAY on screen
+  // (dimmed) rather than flashing a skeleton, and a response that arrives out of order is dropped by
+  // sequence number — the issue list's grammar, for the same reason: a view change must not re-render the
+  // route, and the answer to the request before last is not an answer.
+  const [data, setData] = useState<ScorecardViewData>(initialData)
+  const [pending, setPending] = useState(false)
+  const sequence = useRef(0)
+  const request = useCallback(
+    (
+      next: ScorecardView,
+      more?: { rows: ScorecardRow[]; before: { createdAt: string; id: string } }
+    ) => {
+      const ticket = (sequence.current += 1)
+      setPending(true)
+      void (async () => {
+        const answer = await loadScorecardViewAction(next, more)
+        if (ticket !== sequence.current) return // a later request already owns the screen
+        setData(answer)
+        setPending(false)
+      })()
+    },
+    []
+  )
+  // The FIRST paint is already loaded — this effect exists for what happens after it. It watches the view
+  // rather than wrapping every control, so search-as-you-type, a facet toggle and a grouping change all take
+  // the same path (and the same debounce the hook already applies to the address).
+  const viewKeyOf = (v: ScorecardView) =>
+    `${JSON.stringify(v.filters)}|${v.search}|${v.display.grouping}|${v.display.order}`
+  const currentView: ScorecardView = {
+    filters: view.filters,
+    search: view.search,
+    display: view.display,
+  }
+  const lastRequested = useRef(
+    viewKeyOf({ filters: scope.filters, search: scope.search, display: scope.display })
+  )
+  useEffect(() => {
+    const key = viewKeyOf(currentView)
+    if (key === lastRequested.current) return
+    lastRequested.current = key
+    request(currentView)
   })
   // 날짜로 묶었을 때만 행이 시각만 보여 준다 — 머리글이 이미 날짜를 말했으니 줄마다 되풀이할 이유가 없다.
   const byDay = view.display.grouping === 'day'
@@ -181,11 +234,6 @@ export function ScorecardList({
     return () => window.removeEventListener('keydown', onKey)
   }, [selectionMode, confirming, selectionStorageKey])
 
-  const total = scorecards.length
-  const succeeded = scorecards.filter((s) => s.status === 'succeeded').length
-  const running = scorecards.filter((s) => s.status === 'running' || s.status === 'queued').length
-  const failed = scorecards.filter((s) => s.status === 'failed').length
-
   const teamName = useMemo(
     () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
     [teams]
@@ -218,16 +266,19 @@ export function ScorecardList({
     }
   }
 
+  // A facet offers the values that are actually THERE, which a page cannot know — so the options are the
+  // counts door's answer for that axis, under the same narrow as the rows. The empty string is the unset
+  // bucket, which is a value people filter to and a query string has no null for.
   const facets = useMemo((): FacetSpec[] => {
-    const of = (facet: string, labelOf: (value: string) => string, unset?: string) => ({
+    const of = (facet: string, labelOf: (value: string) => string, unset?: string): FacetSpec => ({
       key: facet,
       label: list(`facet.${facet}`),
-      options: facetOptionsOf(
-        scorecards,
-        (s) => scorecardListSpec.facetValues(s, facet),
-        labelOf,
-        unset
-      ),
+      options: (data.facets[facet] ?? [])
+        .map((option) => ({
+          value: option.value,
+          label: option.value === '' ? (unset ?? list('unset.team')) : labelOf(option.value),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
     })
     return [
       of('status', statusName),
@@ -237,7 +288,7 @@ export function ScorecardList({
       of('runtime', runtimeName, list('unset.runtime')),
       of('creator', creatorName, list('unset.creator')),
     ].filter((facet) => facet.options.length > 0)
-  }, [scorecards, teamName, runnerLabels, list, t, authors])
+  }, [data.facets, teamName, runnerLabels, list, t, authors])
 
   // Row-level delete gating — terminal batches only (a live one must be stopped first, same as the detail page).
   const canDeleteRow = (s: ScorecardRow) =>
@@ -245,7 +296,7 @@ export function ScorecardList({
     s.status !== 'running' &&
     (viewer.admin || (s.createdBy !== undefined && s.createdBy === viewer.subject))
   // Keep the right-edge columns aligned: render the trash slot on every row iff any row is deletable.
-  const showDeleteSlot = scorecards.some(canDeleteRow)
+  const showDeleteSlot = data.groups.some((group) => group.items.some(canDeleteRow))
 
   // Restore the saved selection once after mount (SSR-safe: the first render is always empty), dropping ids that no
   // longer exist or stopped being deletable. Ref-guarded instead of a dep array so the lint deps stay honest.
@@ -258,7 +309,9 @@ export function ScorecardList({
       if (!raw) return
       const saved: unknown = JSON.parse(raw)
       if (!Array.isArray(saved)) return
-      const deletable = new Set(scorecards.filter(canDeleteRow).map((s) => s.id))
+      const deletable = new Set(
+        data.groups.flatMap((group) => group.items.filter(canDeleteRow).map((s) => s.id))
+      )
       const valid = saved.filter((x): x is string => typeof x === 'string' && deletable.has(x))
       if (valid.length > 0) setSelected(persistSelection(new Set(valid)))
     } catch {
@@ -266,23 +319,18 @@ export function ScorecardList({
     }
   })
 
-  const { total: matchedCount, groups } = useMemo(
-    () =>
-      applyListView(
-        scorecards,
-        { filters: view.filters, search: view.search, display: view.display },
-        scorecardListSpec
-      ),
-    [scorecards, view.filters, view.search, view.display]
-  )
+  const matchedCount = data.total
+  const groups = data.groups
   // 화면에 실제로 서 있는 순서 그대로 — shift 범위 선택과 「보이는 것 전체」가 이 순서를 읽는다.
   const visible = useMemo(() => groups.flatMap((group) => group.items), [groups])
 
-  function groupLabel(key: string | null, items: ScorecardRow[]): string {
+  // The label reads the server's KEY, never the rows under it: a group whose rows are further down the
+  // collection than this page reached still has a header, and it must be able to say which day it is.
+  function groupLabel(key: string | null): string {
     if (key === null) return list(`unset.${view.display.grouping}`)
     switch (view.display.grouping) {
       case 'day':
-        return items[0] ? fmtDateHeading(items[0].createdAt, locale, timeZone) : key
+        return fmtDateHeading(`${key}T00:00:00.000Z`, locale, timeZone)
       case 'status':
         return statusName(key)
       case 'harness':
@@ -321,8 +369,10 @@ export function ScorecardList({
           kind: 'group',
           key: `group:${groupKey}`,
           groupKey,
-          label: groupLabel(group.key, group.items),
-          count: group.items.length,
+          label: groupLabel(group.key),
+          // The SERVER's count, never the rows in hand: this screen holds a page, so counting its own items
+          // would print the page size under the collection's name.
+          count: group.count,
           collapsed: isCollapsed,
         })
         if (isCollapsed) continue
@@ -392,7 +442,7 @@ export function ScorecardList({
     anchorRef.current = id
   }, [])
   // The confirm dialog needs each selected batch's coordinates — resolve ids against the full list (some may be filtered out).
-  const byId = useMemo(() => new Map(scorecards.map((s) => [s.id, s])), [scorecards])
+  const byId = useMemo(() => new Map(visible.map((s) => [s.id, s])), [visible])
   const selectedTargets = [...selected]
     .map((id) => byId.get(id))
     .filter((s): s is ScorecardRow => s !== undefined)
@@ -426,18 +476,22 @@ export function ScorecardList({
   return (
     <div ref={rootRef} className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label={t('statTotal')} value={total} />
+        <StatCard label={t('statTotal')} value={stats.total} />
         <StatCard
           label={t('statSucceeded')}
-          value={succeeded}
-          tone={succeeded > 0 ? 'success' : 'default'}
+          value={stats.succeeded}
+          tone={stats.succeeded > 0 ? 'success' : 'default'}
         />
         <StatCard
           label={t('statRunning')}
-          value={running}
-          tone={running > 0 ? 'primary' : 'default'}
+          value={stats.running}
+          tone={stats.running > 0 ? 'primary' : 'default'}
         />
-        <StatCard label={t('statFailed')} value={failed} tone={failed > 0 ? 'danger' : 'default'} />
+        <StatCard
+          label={t('statFailed')}
+          value={stats.failed}
+          tone={stats.failed > 0 ? 'danger' : 'default'}
+        />
       </div>
 
       <ListToolbar
@@ -454,44 +508,79 @@ export function ScorecardList({
         onDisplay={view.setDisplay}
       />
 
-      {matchedCount === 0 ? (
+      {/* What is loaded, out of what matches. A window that does not say so reads as "that is all of them",
+          and this list's window is now the control plane's rather than the screen's. */}
+      {data.error === undefined && data.loaded < matchedCount && (
+        <p className="text-[12px] text-muted-foreground">
+          {t('loadedOf', { loaded: data.loaded, total: matchedCount })}
+        </p>
+      )}
+
+      {data.error !== undefined ? (
+        <Callout tone="danger">{list('loadError', { error: data.error })}</Callout>
+      ) : matchedCount === 0 ? (
         <EmptyState title={list('emptyFilteredTitle')} hint={list('emptyFilteredHint')} />
       ) : (
-        <VirtualList
-          items={rows}
-          keyOf={keyOf}
-          heightOf={heightOf}
-          maxHeight={VIEWPORT_MAX_HEIGHT}
-          resetKey={resetKey}
-          className="overflow-y-auto pr-1"
+        // The previous rows stay on screen while a new view is being fetched — dimmed, never replaced by a
+        // skeleton, so a filter reads as a change to this list rather than as a new page.
+        <div
+          className={cn('space-y-3', pending && 'pointer-events-none opacity-60')}
+          aria-busy={pending}
         >
-          {(row) =>
-            row.kind === 'group' ? (
-              <div className="flex items-end" style={{ height: GROUP_ROW_HEIGHT_PX }}>
-                <ListGroupRow
-                  label={row.label}
-                  count={row.count}
-                  collapsed={row.collapsed}
-                  onToggle={() => toggleGroup(row.groupKey)}
-                  className="rounded-md"
+          <VirtualList
+            items={rows}
+            keyOf={keyOf}
+            heightOf={heightOf}
+            maxHeight={VIEWPORT_MAX_HEIGHT}
+            resetKey={resetKey}
+            className="overflow-y-auto pr-1"
+          >
+            {(row) =>
+              row.kind === 'group' ? (
+                <div className="flex items-end" style={{ height: GROUP_ROW_HEIGHT_PX }}>
+                  <ListGroupRow
+                    label={row.label}
+                    count={row.count}
+                    collapsed={row.collapsed}
+                    onToggle={() => toggleGroup(row.groupKey)}
+                    className="rounded-md"
+                  />
+                </div>
+              ) : (
+                <ScorecardRow
+                  s={row.item}
+                  workspace={workspace}
+                  byDay={byDay}
+                  authors={authors}
+                  runnerLabels={runnerLabels}
+                  showDeleteSlot={showDeleteSlot}
+                  selectable={canDeleteRow(row.item)}
+                  isSelected={selected.has(row.item.id)}
+                  selectionMode={selectionMode}
+                  onToggle={handleToggle}
                 />
-              </div>
-            ) : (
-              <ScorecardRow
-                s={row.item}
-                workspace={workspace}
-                byDay={byDay}
-                authors={authors}
-                runnerLabels={runnerLabels}
-                showDeleteSlot={showDeleteSlot}
-                selectable={canDeleteRow(row.item)}
-                isSelected={selected.has(row.item.id)}
-                selectionMode={selectionMode}
-                onToggle={handleToggle}
-              />
-            )
-          }
-        </VirtualList>
+              )
+            }
+          </VirtualList>
+          {/* The cursor is present exactly when the control plane had more to give — never a button that
+              might answer nothing. */}
+          {data.nextCursor !== undefined && (
+            <div className="flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pending}
+                onClick={() => {
+                  const cursor = data.nextCursor
+                  if (cursor === undefined) return
+                  request(currentView, { rows: visible, before: cursor })
+                }}
+              >
+                {pending ? t('loadingMore') : t('loadMore')}
+              </Button>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Floating action bar — appears while any row is selected (Linear-style) and fans out the delete over the

@@ -180,7 +180,7 @@
 5	apps/web/src/entities/run/ui/run-row.tsx
 2	apps/web/src/entities/sandbox-session/index.ts
 2	apps/web/src/entities/sandbox-session/model/schema.ts
-7	apps/web/src/entities/scorecard/model/list-view.ts
+2	apps/web/src/entities/scorecard/model/list-view.ts
 17	apps/web/src/entities/skill/model/schema.ts
 7	apps/web/src/entities/team/lib/href.test.ts
 28	apps/web/src/entities/team/lib/href.ts

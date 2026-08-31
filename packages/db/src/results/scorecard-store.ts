@@ -218,6 +218,14 @@ function matchesScorecardFilter(
     return false;
   if (filter.runtime !== undefined && c.runtime !== filter.runtime) return false;
   if (filter.createdBy !== undefined && c.createdBy !== filter.createdBy) return false;
+  // The facet SETS. `?? ""` renders the unset bucket, which is a value people filter to — a query string has
+  // no null, so the empty string is its name on both sides.
+  if (filter.statuses !== undefined && !filter.statuses.includes(c.status)) return false;
+  if (filter.datasets !== undefined && !filter.datasets.includes(c.dataset.id)) return false;
+  if (filter.harnesses !== undefined && !filter.harnesses.includes(c.harness.id)) return false;
+  if (filter.runtimes !== undefined && !filter.runtimes.includes(c.runtime ?? "")) return false;
+  if (filter.creators !== undefined && !filter.creators.includes(c.createdBy ?? "")) return false;
+  if (filter.teamIds !== undefined && !filter.teamIds.includes(c.teamId ?? "")) return false;
   if (filter.day !== undefined && c.createdAt.slice(0, 10) !== filter.day) return false;
   if (filter.search !== undefined && filter.search !== "" && !matchesSearch(c, filter.search)) return false;
   return true;

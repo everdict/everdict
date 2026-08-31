@@ -2731,7 +2731,10 @@
     "selectedCount": "{count} selected",
     "selectAllVisible": "Select all",
     "clearSelection": "Clear",
-    "deleteSelected": "Delete"
+    "deleteSelected": "Delete",
+    "loadedOf": "{loaded, number} of {total, number} loaded",
+    "loadMore": "Load older",
+    "loadingMore": "Loading…"
   },
   "scorecardsPage": {
     "rescoreButton": "Re-score {count} unmeasured",
@@ -5857,7 +5860,8 @@
       "env": "No environment"
     },
     "ownerWorkspace": "Workspace",
-    "ownerShared": "Built in"
+    "ownerShared": "Built in",
+    "loadError": "Could not load the list: {error}"
   },
   "reliabilityPage": {
     "title": "Reliability",

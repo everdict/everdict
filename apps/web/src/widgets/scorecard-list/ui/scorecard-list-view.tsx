@@ -1,5 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
+import { loadScorecardViewData } from '@/features/browse-scorecards/server'
 import { membersSchema } from '@/entities/member'
 import { runnersResponseSchema } from '@/entities/runner'
 import {
@@ -7,8 +8,7 @@ import {
   SCORECARD_FACETS,
   SCORECARD_GROUPINGS,
   SCORECARD_ORDERS,
-  scorecardsSchema,
-  toScorecardRow,
+  scorecardGroupCountsSchema,
 } from '@/entities/scorecard'
 import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
@@ -34,13 +34,6 @@ export async function ScorecardListView({
 }) {
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
-  let error: string | undefined
-  let scorecards = scorecardsSchema.parse([])
-  try {
-    scorecards = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
 
   // Run-by name (members join) is supplementary info — the list itself shows even if it fails. (Same pattern as the dataset list)
   const members = await controlPlane
@@ -61,23 +54,6 @@ export async function ScorecardListView({
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
 
-  // Self-hosted runner device names for the per-row runtime chip — resolve self:<id> / self:ws:<id> to a friendly
-  // label (bare pools self / self:ws carry no id, so they need no roster). Fetched only when some row names a specific
-  // runner; best-effort like the members join, so a failed fetch just falls back to the raw runtime id.
-  const runnerLabels: Record<string, string> = {}
-  if (
-    scorecards.some(
-      (s) => s.runtime !== undefined && s.runtime.startsWith('self:') && s.runtime !== 'self:ws'
-    )
-  ) {
-    try {
-      const roster = runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
-      for (const r of roster.runners) runnerLabels[r.id] = r.label
-    } catch {
-      // roster fetch failed → the chip shows the raw runtime id
-    }
-  }
-
   const canRun = can(principal?.roles, 'scorecards:run')
   // Row-trash gating info for the list: an admin deletes any terminal batch, a member only their own.
   const viewer = {
@@ -97,6 +73,51 @@ export async function ScorecardListView({
     params,
   })
 
+  // The list's first paint, and the workspace tiles. They are separate reads on purpose: the tiles answer
+  // "what does this workspace have" — a question a filter must not change — so they are counted ONCE,
+  // unnarrowed, while the list below is narrowed by whatever the address says.
+  const view = {
+    filters: withResolvedTeamFilter(scope.filters, teams),
+    search: scope.search,
+    display: scope.display,
+  }
+  const [data, statusCounts] = await Promise.all([
+    loadScorecardViewData(ctx, view),
+    controlPlane
+      .countScorecards(ctx, 'status')
+      .then((r) => scorecardGroupCountsSchema.parse(r))
+      .catch(() => undefined),
+  ])
+  const countOf = (...statuses: string[]) =>
+    (statusCounts?.groups ?? [])
+      .filter((group) => group.key !== null && statuses.includes(group.key))
+      .reduce((sum, group) => sum + group.count, 0)
+  const stats = {
+    total: statusCounts?.total ?? data.total,
+    succeeded: countOf('succeeded'),
+    running: countOf('running', 'queued'),
+    failed: countOf('failed'),
+  }
+
+  // Self-hosted runner device names for the per-row runtime chip — resolve self:<id> / self:ws:<id> to a
+  // friendly label (bare pools self / self:ws carry no id, so they need no roster). Gated on the runtime
+  // FACET rather than on the loaded rows: the facet lists every runtime present in the narrowed collection,
+  // including the ones further down than this page reached, so "load older" cannot surface a runner whose
+  // name we never fetched. Best-effort like the members join — a failed fetch falls back to the raw id.
+  const runnerLabels: Record<string, string> = {}
+  if (
+    (data.facets.runtime ?? []).some(
+      (option) => option.value.startsWith('self:') && option.value !== 'self:ws'
+    )
+  ) {
+    try {
+      const roster = runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
+      for (const r of roster.runners) runnerLabels[r.id] = r.label
+    } catch {
+      // roster fetch failed → the chip shows the raw runtime id
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -111,18 +132,19 @@ export async function ScorecardListView({
         }
       />
 
-      {error ? (
-        <Callout tone="danger">{t('connectError', { error })}</Callout>
-      ) : scorecards.length === 0 ? (
+      {data.error !== undefined ? (
+        <Callout tone="danger">{t('connectError', { error: data.error })}</Callout>
+      ) : stats.total === 0 && data.total === 0 ? (
         <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <ScorecardList
           workspace={workspace}
-          scorecards={scorecards.map(toScorecardRow)}
+          initialData={data}
+          stats={stats}
           authors={authors}
           runnerLabels={runnerLabels}
           teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
-          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
+          scope={{ ...scope, filters: view.filters }}
           viewer={viewer}
         />
       )}

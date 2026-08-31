@@ -11,6 +11,16 @@ import { z } from "zod";
 // authors, so the collection only grows. Every one of these narrows used to be applied in the BROWSER over
 // the whole workspace's history, which is affordable exactly until it isn't.
 
+// A facet is a SET, and a query string spells a set by repeating the key (`?status=failed&status=cancelled`).
+// Fastify hands us a bare value for one and an array for several, so both spellings collapse here rather than
+// at each call site — the same helper the issue list's query has.
+function repeatable<T extends z.ZodType<string>>(item: T) {
+  return z.preprocess(
+    (value) => (value === undefined ? undefined : Array.isArray(value) ? value : [value]),
+    z.array(item).optional(),
+  );
+}
+
 // The unset bucket is spelled as the EMPTY string (`?creator=`) — a query parameter has no null to offer, and
 // "no owner" is a bucket people filter to. These therefore do not require a non-empty value.
 const optionalRef = z.string().max(200);
@@ -20,10 +30,20 @@ export const ListScorecardsQuerySchema = z.object({
   schedule: z.string().min(1).optional(),
   dataset: z.string().min(1).optional(),
   harness: z.string().min(1).optional(),
+  // The SCOPES: one value each, and the ones a detail-history read asks with (a judge's evaluations, a
+  // schedule's runs, one team's page).
   team: z.string().min(1).optional(),
   status: ScorecardStatusSchema.optional(),
   runtime: optionalRef.optional(),
   creator: optionalRef.optional(),
+  // The FACETS: sets, because "any of these" is the question a list's filter menu asks. They AND with the
+  // scopes above rather than replacing them.
+  statuses: repeatable(ScorecardStatusSchema),
+  datasets: repeatable(optionalRef),
+  harnesses: repeatable(optionalRef),
+  runtimes: repeatable(optionalRef),
+  creators: repeatable(optionalRef),
+  teams: repeatable(z.string().min(1).max(200)),
   // A UTC calendar day (`YYYY-MM-DD`) — the same key the day grouping buckets a row under, which is the
   // stored instant's UTC date rather than the reader's local one.
   day: z
@@ -83,7 +103,9 @@ export type ScorecardCountsQuery = z.infer<typeof ScorecardCountsQuerySchema>;
 // schedule's runs"), not facets of the workspace list.
 export function scorecardFilterOf(
   query: ListScorecardsQuery,
-  scope: { teamId?: string; visibleTeams?: string[] },
+  // `teamIds` arrives resolved by the route: the facet names teams by id or key, and resolving a key needs
+  // the team service, which is the transport's to reach.
+  scope: { teamId?: string; visibleTeams?: string[]; teamIds?: string[] },
 ): ScorecardListFilter {
   const narrow: ScorecardListFilter = query.schedule
     ? { scheduleId: query.schedule }
@@ -100,6 +122,12 @@ export function scorecardFilterOf(
     ...(query.creator !== undefined ? { createdBy: query.creator } : {}),
     ...(query.day !== undefined ? { day: query.day } : {}),
     ...(query.q !== undefined ? { search: query.q } : {}),
+    ...(query.statuses !== undefined ? { statuses: query.statuses } : {}),
+    ...(query.datasets !== undefined ? { datasets: query.datasets } : {}),
+    ...(query.harnesses !== undefined ? { harnesses: query.harnesses } : {}),
+    ...(query.runtimes !== undefined ? { runtimes: query.runtimes } : {}),
+    ...(query.creators !== undefined ? { creators: query.creators } : {}),
+    ...(scope.teamIds !== undefined ? { teamIds: scope.teamIds } : {}),
     ...(scope.teamId !== undefined ? { teamId: scope.teamId } : {}),
     ...(scope.visibleTeams !== undefined ? { visibleTeams: scope.visibleTeams } : {}),
   };
