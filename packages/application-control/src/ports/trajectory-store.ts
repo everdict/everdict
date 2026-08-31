@@ -654,6 +654,24 @@ export interface TrajectoryStore {
   // Retention (N3): delete trajectories sealed before the cutoff, across tenants (operator policy). Returns
   // how many rows went — the sweep logs it, never silently. No retention configured = keep forever.
   deleteOlderThan(cutoffIso: string): Promise<number>;
+
+  // ── THE RUNS A SWEEP IS ABOUT, CLAIMED BEFORE ANYTHING IS READ (arch-review 124) ─────────────────
+  //
+  // `deleteOlderThan(cutoff)` deletes EVERY expired row, and the sweep that calls it first enumerates refs
+  // from the rows it can see. Those are two different sets whenever anything changes in between: a plane
+  // sealed against an old run after the enumeration is deleted by the cutoff with its refs never counted,
+  // and its object is then named by nothing.
+  //
+  //     the refs were drained   ≠   nothing was added before the delete
+  //
+  // So the sweep works on an EXACT set instead: a bounded page of expired runs, whose refs it drains, whose
+  // payload prefixes it lists, and which it then deletes BY ID. A run that gained a plane after the page was
+  // taken is simply not in it and survives to the next sweep, which is the direction to fail in.
+  expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>>;
+
+  // Delete exactly these runs and everything cascading from them. Returns the rows actually removed, because
+  // a decision that rests on a delete needs evidence it happened (L1) — "we asked" is not "they are gone".
+  deleteRuns(runIds: readonly string[]): Promise<number>;
   // ── WHAT RETENTION IS ABOUT TO DESTROY THE ONLY POINTER TO (arch-review 120) ─────────────────────
   //
   // An offloaded payload lives in object storage and is named ONLY by the event row that carries its ref. So

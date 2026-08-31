@@ -693,6 +693,32 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     return rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
   }
 
+  async expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>> {
+    // The tenant comes from the plane row for the reason the ref enumeration gives: it is the row that names
+    // the workspace. Ordered so consecutive sweeps take a STABLE page.
+    const rows = await this.select<{ tenant: string; run_id: string }>(
+      `SELECT run_id, argMin(tenant, sealed_at) AS tenant
+         FROM ${this.table()}
+        GROUP BY run_id
+       HAVING min(sealed_at) < {cutoff:String}
+        ORDER BY run_id
+        LIMIT {limit:UInt32}`,
+      { cutoff: cutoffIso, limit: String(limit) },
+    );
+    return rows.map((r) => ({ tenant: r.tenant, runId: r.run_id }));
+  }
+
+  async deleteRuns(runIds: readonly string[]): Promise<number> {
+    if (runIds.length === 0) return 0;
+    // ⚠️ MergeTree deletes are MUTATIONS: asynchronous by construction, so the count here is what we ASKED
+    // to remove rather than what has left disk. That is the same contract `deleteOlderThan` has on this
+    // engine and it is stated rather than implied — the caller uses it as a pace, never as a certificate.
+    const list = runIds.map((r) => `'${r.replace(/'/g, "\\'")}'`).join(",");
+    await this.command(`ALTER TABLE ${this.eventsTable()} DELETE WHERE run_id IN (${list})`, {});
+    await this.command(`ALTER TABLE ${this.table()} DELETE WHERE run_id IN (${list})`, {});
+    return runIds.length;
+  }
+
   async deleteOlderThan(cutoffIso: string): Promise<number> {
     // Cutoff applies to the TRAJECTORY (its earliest seal), never to a single plane — a later segment must
     // not survive its own run, and an early one must not drag a live run's planes away.

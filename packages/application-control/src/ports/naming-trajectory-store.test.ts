@@ -39,6 +39,14 @@ function recorder(): { seals: SealInput[]; store: TrajectoryStore } {
     async deleteOlderThan() {
       return 0;
     },
+    // Nothing expires in these fixtures, so the run-set pair answers the empty truth rather than a stub that
+    // would let a sweep think it had work.
+    async expiredRuns() {
+      return [];
+    },
+    async deleteRuns() {
+      return 0;
+    },
     // No offload in this fixture, so there is nothing to enumerate — the honest answer, not a stub.
     async payloadRefsOlderThan() {
       return [];

@@ -33,6 +33,8 @@ export function withTracePerception(
     list: (tenant, opts) => store.list(tenant, opts),
     ingestedSince: (tenant, sinceIso) => store.ingestedSince(tenant, sinceIso),
     deleteOlderThan: (cutoffIso) => store.deleteOlderThan(cutoffIso),
+    expiredRuns: (cutoffIso, limit) => store.expiredRuns(cutoffIso, limit),
+    deleteRuns: (runIds) => store.deleteRuns(runIds),
     // The THIRD decorator in this chain, and the third that would have dropped an optional method silently.
     // Retention's enumeration has to reach the concrete store or the sweep deletes rows whose payload
     // objects nothing can name afterwards (arch-review 120).

@@ -39,6 +39,13 @@ function artifacts() {
     async publicUrlFor() {
       return undefined;
     },
+    // The sweep lists a run's own prefix for what no row named (arch-review 124). Both real stores refuse an
+    // empty prefix, so this one does too — a double more permissive than production is what rule `testing`
+    // refuses, and this is a delete path.
+    async listKeys(prefix: string) {
+      if (prefix === "") throw new Error("refusing to list the whole artifact store");
+      return [...objects.keys()].filter((key) => key.startsWith(prefix));
+    },
     async remove(key: string) {
       objects.delete(key);
     },

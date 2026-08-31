@@ -124,6 +124,12 @@ function ledger(answer: TrajectoryUsage): { store: TrajectoryStore; bodyReads: s
         return 0;
       },
       // No offload in this fixture, so there is nothing to enumerate — the honest answer, not a stub.
+      async expiredRuns() {
+        return [];
+      },
+      async deleteRuns() {
+        return 0;
+      },
       async payloadRefsOlderThan() {
         return [];
       },

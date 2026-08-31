@@ -49,6 +49,10 @@ function artifacts() {
     async publicUrlFor() {
       return undefined;
     },
+    async listKeys(prefix: string) {
+      if (prefix === "") throw new Error("refusing to list the whole artifact store");
+      return [...objects.keys()].filter((key) => key.startsWith(prefix));
+    },
     async remove(key: string) {
       objects.delete(key);
     },

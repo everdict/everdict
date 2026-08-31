@@ -63,6 +63,14 @@ function inner(events: TraceEvent[]): TrajectoryStore {
     async deleteOlderThan() {
       return 0;
     },
+    // Nothing expires in these fixtures, so the run-set pair answers the empty truth rather than a stub that
+    // would let a sweep think it had work.
+    async expiredRuns() {
+      return [];
+    },
+    async deleteRuns() {
+      return 0;
+    },
     async payloadRefsOlderThan() {
       return [];
     },
@@ -86,6 +94,9 @@ function artifacts(): TrajectoryPayloadArtifacts & { fetched: () => string[] } {
     },
     async publicUrlFor() {
       return undefined;
+    },
+    async listKeys() {
+      return [];
     },
     async remove() {
       return undefined;

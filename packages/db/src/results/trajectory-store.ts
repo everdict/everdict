@@ -306,6 +306,21 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
       .slice(0, limit);
   }
 
+  async expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>> {
+    const out: Array<{ tenant: string; runId: string }> = [];
+    // Ordered so the page is stable across calls — an unstable page would revisit some runs forever and
+    // never reach others, which is a sweep that does not converge.
+    for (const [runId, row] of [...this.rows.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)))
+      if (row.sealedAt < cutoffIso) out.push({ tenant: row.tenant, runId });
+    return out.slice(0, limit);
+  }
+
+  async deleteRuns(runIds: readonly string[]): Promise<number> {
+    let removed = 0;
+    for (const runId of runIds) if (this.rows.delete(runId)) removed += 1;
+    return removed;
+  }
+
   async deleteOlderThan(cutoffIso: string): Promise<number> {
     let removed = 0;
     for (const [runId, row] of this.rows) {
@@ -806,6 +821,30 @@ export class PgTrajectoryStore implements TrajectoryStore {
       [cutoffIso, limit, after?.ref ?? null, after?.tenant ?? null, after?.runId ?? null],
     );
     return res.rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
+  }
+
+  async expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>> {
+    // Ordered by run_id so consecutive sweeps take a STABLE page: an unstable one revisits some runs forever
+    // and never reaches others, which is a sweep that does not converge.
+    const res = await this.client.query<{ tenant: string; run_id: string }>(
+      `SELECT tenant, run_id FROM everdict_trajectories
+        WHERE sealed_at < $1::timestamptz
+        ORDER BY run_id
+        LIMIT $2`,
+      [cutoffIso, limit],
+    );
+    return res.rows.map((r) => ({ tenant: r.tenant, runId: r.run_id }));
+  }
+
+  async deleteRuns(runIds: readonly string[]): Promise<number> {
+    if (runIds.length === 0) return 0;
+    // BY ID, not by cutoff: the sweep accounted for the objects of exactly these runs, and a row that became
+    // expired since then has had nothing accounted for.
+    const res = await this.client.query<{ run_id: string }>(
+      "DELETE FROM everdict_trajectories WHERE run_id = ANY($1::text[]) RETURNING run_id",
+      [[...runIds]],
+    );
+    return res.rows.length;
   }
 
   async deleteOlderThan(cutoffIso: string): Promise<number> {

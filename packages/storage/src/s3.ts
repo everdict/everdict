@@ -3,12 +3,13 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { type ArtifactStore, artifactKeyOf } from "@everdict/application-control";
-import { ConflictError, UpstreamError } from "@everdict/contracts";
+import { BadRequestError, ConflictError, UpstreamError } from "@everdict/contracts";
 
 export interface S3ArtifactStoreOptions {
   endpoint: string; // S3 API endpoint (e.g. http://localhost:9100 = MinIO)
@@ -206,6 +207,43 @@ export class S3ArtifactStore implements ArtifactStore {
   // distinct answer: S3 DELETE is idempotent and does not say whether anything was there, so a
   // `deleted | absent` union would have one arm the adapter can almost never reach, and no caller reads it.
   // What matters to every caller is that a FAILURE throws (arch-review 120).
+  // ── EVERY OBJECT UNDER A PREFIX, PAGED (arch-review 124) ────────────────────────────────────────
+  //
+  // Retention lists a run's own payload prefix so it can delete what NO ROW ever named — a seal that lost
+  // its `ON CONFLICT` wrote its payloads before the inner store refused it, and those bytes were invisible
+  // to a ref walk forever.
+  //
+  // Paged to exhaustion on purpose: `ListObjectsV2` truncates at 1000 and a run with more payloads than
+  // that would otherwise have its tail left behind — the same `limit + 1` shape the ref drain exists for,
+  // one layer down. An empty prefix is refused rather than answered, because "list everything in the
+  // bucket" is never a question this caller asks and a caller that computed one by accident would be handed
+  // every tenant's objects.
+  async listKeys(prefix: string): Promise<string[]> {
+    if (prefix === "") throw new BadRequestError("BAD_REQUEST", {}, "refusing to list the whole artifact bucket");
+    const keys: string[] = [];
+    let token: string | undefined;
+    try {
+      do {
+        const res = await this.client.send(
+          new ListObjectsV2Command({
+            Bucket: this.opts.bucket,
+            Prefix: prefix,
+            ...(token !== undefined ? { ContinuationToken: token } : {}),
+          }),
+        );
+        for (const item of res.Contents ?? []) if (item.Key !== undefined) keys.push(item.Key);
+        token = res.IsTruncated === true ? res.NextContinuationToken : undefined;
+      } while (token !== undefined);
+    } catch (err) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { prefix },
+        `object storage listing failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return keys;
+  }
+
   async remove(key: string): Promise<void> {
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.opts.bucket, Key: key }));

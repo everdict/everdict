@@ -72,6 +72,14 @@ export class NamingTrajectoryStore implements TrajectoryStore {
     return this.inner.deleteOlderThan(cutoffIso);
   }
 
+  expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>> {
+    return this.inner.expiredRuns(cutoffIso, limit);
+  }
+
+  deleteRuns(runIds: readonly string[]): Promise<number> {
+    return this.inner.deleteRuns(runIds);
+  }
+
   // The retention sweep's other half, and the reason the port declares it REQUIRED: this decorator sits
   // BETWEEN the offloading store and the concrete one, so a method it does not forward is a capability that
   // exists in `@everdict/db` and never reaches the caller that decides (arch-review 120).

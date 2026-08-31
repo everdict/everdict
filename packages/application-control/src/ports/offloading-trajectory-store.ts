@@ -301,6 +301,20 @@ export interface TrajectoryPayloadArtifacts extends ArtifactStore {
   // does not declare (only two owners want it, and both hold a concrete store). An outage THROWS — an
   // outage is not an absence, and swallowing it here is how the bytes became unfindable in the first place.
   remove(key: string): Promise<void>;
+
+  // ── WHAT IS ACTUALLY UNDER A RUN'S PREFIX, WHICH THE ROWS CANNOT SAY (arch-review 124) ───────────
+  //
+  // The ref walk answers "which objects do the rows NAME". That is not the same set as "which objects are
+  // there", and the difference is every object no row ever named: a seal that lost its `ON CONFLICT` wrote
+  // its payloads before the inner store refused it, so those bytes exist with no row pointing at them and
+  // retention could never find them. Deleting them from the losing writer is not the repair — the keys are
+  // content-addressed, so a loser and a winner with identical bytes share one object and the loser would be
+  // destroying the winner's evidence.
+  //
+  // Listing the prefix answers it directly, and safely, because the prefix IS the ownership: the key is
+  // `trajectory-payloads/<tenant>/<runId>/…` and `payloadKeyPrefix` renders that one place. It ends in `/`,
+  // so `run-1` never matches `run-10`.
+  listKeys(prefix: string): Promise<string[]>;
 }
 
 export class OffloadingTrajectoryStore implements TrajectoryStore {
@@ -613,19 +627,41 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
   // `NamingTrajectoryStore` sits between this decorator and the concrete store, so the fallback is the arm
   // every production deployment would have taken (L2 — a read that did not happen is not an empty answer).
   async deleteOlderThan(cutoffIso: string): Promise<number> {
-    // Bounded per sweep for the same reason every other worklist here is: a retention pass that tries to hold
-    // every ref in a decade of trajectories is a pass that never finishes.
-    // ⚠️ DRAINED, NOT SAMPLED (arch-review 121). This read used to be a single bounded call followed by
-    // `deleteOlderThan(cutoff)`, which deletes EVERY expired row — so at `limit + 1` distinct refs the last
-    // object was orphaned permanently, named by nothing any later pass could find. Both lines were right
-    // alone. The cursor pages until the enumeration is exhausted, so no row is deleted until every ref it
-    // carries has been accounted for.
+    // ── THE SWEEP WORKS ON AN EXACT RUN SET, NOT ON A CUTOFF (arch-review 124) ──────────────────────
+    //
+    // It used to drain the refs of everything expired and then call `deleteOlderThan(cutoff)`, which deletes
+    // EVERY expired row. Those are two different sets the moment anything changes in between: a plane sealed
+    // against an old run after the enumeration was deleted by the cutoff with its refs never counted, and its
+    // object was left named by nothing.
+    //
+    //     the refs were drained   ≠   nothing was added before the delete
+    //
+    // So a bounded page of expired runs is taken FIRST and everything after that is about those runs only. A
+    // run that gained a plane after the page was taken is not in it and survives to the next sweep.
+    //
+    // ⚠️ WHAT THIS STILL DOES NOT BUY, said plainly: the page is a read, not a CLAIM. A plane sealed against
+    // a run already in the page, between the page and the delete, is still a late write whose object the
+    // prefix listing below may or may not have reached. Closing that needs the seal to be refusable while a
+    // retention operation holds the run — a durable claim with its own state, which is a protocol decision
+    // about the seal path rather than a line here.
     const page = this.sweepLimit;
+    const runs = await this.inner.expiredRuns(cutoffIso, page);
+    if (runs.length === 0) return 0;
+    const wanted = new Set(runs.map((r) => r.runId));
+
+    // ── FIRST, WHAT THE ROWS NAME ────────────────────────────────────────────────────────────────
+    //
+    // Drained rather than sampled (arch-review 121): a single bounded call followed by a delete orphaned the
+    // `limit + 1`st object permanently, named by nothing any later pass could find. The cursor pages until
+    // the enumeration is exhausted, and it pages on the whole ROW because one ref legitimately has several
+    // owners (arch-review 124).
     let after: TrajectoryPayloadRef | undefined;
     for (;;) {
       const refs: TrajectoryPayloadRef[] = await this.inner.payloadRefsOlderThan(cutoffIso, page, after);
       if (refs.length === 0) break;
       for (const owned of refs) {
+        // A row outside this sweep's page is not ours to act on yet — its own sweep will take it.
+        if (!wanted.has(owned.runId)) continue;
         const key = artifactKeyOf(owned.ref);
         // A ref this store did not mint is not ours to delete — and it is not an error either: an event may
         // carry a handle to somebody else's object store entirely.
@@ -643,7 +679,33 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
       after = refs[refs.length - 1];
       if (after === undefined) break;
     }
-    return this.inner.deleteOlderThan(cutoffIso);
+
+    // ── THEN, WHAT IS ACTUALLY THERE ─────────────────────────────────────────────────────────────
+    //
+    // The walk above answers "which objects do the rows NAME", and the difference between that and "which
+    // objects are there" is every object no row ever named — a seal that lost its `ON CONFLICT` wrote its
+    // payloads before the inner store refused it. Those were invisible to retention forever, and deleting
+    // them from the losing writer was not the repair: content-addressed keys mean a loser and a winner with
+    // identical bytes SHARE one object, so the loser would be destroying the winner's evidence.
+    //
+    // Listing the run's own prefix answers it directly and safely, because the prefix IS the ownership.
+    for (const run of runs) {
+      for (const key of await this.artifacts.listKeys(payloadKeyPrefix(run.tenant, run.runId)))
+        await this.artifacts.remove(key);
+    }
+
+    // …and only now the rows, BY ID. Every object these runs could name has been accounted for.
+    return this.inner.deleteRuns(runs.map((r) => r.runId));
+  }
+
+  // Forwarded verbatim: which runs are expired and which rows to remove are the INNER store's questions.
+  // This decorator owns only what happens to the BYTES in between — see `deleteOlderThan`.
+  expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>> {
+    return this.inner.expiredRuns(cutoffIso, limit);
+  }
+
+  deleteRuns(runIds: readonly string[]): Promise<number> {
+    return this.inner.deleteRuns(runIds);
   }
 
   // Forwarded verbatim: the refs are the INNER store's rows to enumerate, and this decorator's only business

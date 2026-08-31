@@ -143,6 +143,51 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-191 — a split plane seals atomically
     expect(refs.find((r) => r.ref === ref)).toMatchObject({ tenant, runId });
   });
 
+  // ── THE SWEEP'S RUN SET AND ITS DELETE, EXECUTED (arch-review 124) ──────────────────────────────
+  //
+  // `expiredRuns` + `deleteRuns` replaced `deleteOlderThan(cutoff)` so the sweep works on an EXACT set: a
+  // plane sealed after the page was taken is not in it and survives. Both are SQL — a bounded ordered read
+  // and a `WHERE run_id = ANY($1)` delete — so an engine says whether they work, and this one DELETES, which
+  // is the highest-stakes statement in the subsystem.
+  it("takes a bounded, stable page of expired runs and deletes exactly those", async () => {
+    const tenant = trustId("acme");
+    const ids = [trustId("sweep-a"), trustId("sweep-b"), trustId("sweep-c")].sort();
+    const store = new PgTrajectoryStore(pg.client);
+    for (const runId of ids) await store.seal({ runId, tenant, source: "run", events: events(1) });
+
+    const page = await store.expiredRuns("2999-01-01T00:00:00.000Z", 5_000);
+    const mine = page.filter((r) => ids.includes(r.runId));
+    expect(mine.map((r) => r.runId).sort(), "the page did not contain the runs this test sealed").toEqual(ids);
+    expect(
+      mine.every((r) => r.tenant === tenant),
+      "a run arrived without its workspace",
+    ).toBe(true);
+
+    // Bounded, and STABLE: the same first row every time, or consecutive sweeps revisit some runs forever
+    // and never reach others.
+    const first = await store.expiredRuns("2999-01-01T00:00:00.000Z", 1);
+    expect(first).toHaveLength(1);
+    expect((await store.expiredRuns("2999-01-01T00:00:00.000Z", 1))[0]?.runId).toBe(first[0]?.runId);
+
+    // …and the delete removes exactly the ids it was handed, cascading their planes and event rows.
+    expect(await store.deleteRuns([ids[0] as string, ids[1] as string])).toBe(2);
+    const left = (await store.expiredRuns("2999-01-01T00:00:00.000Z", 5_000)).map((r) => r.runId);
+    expect(left).not.toContain(ids[0]);
+    expect(left).toContain(ids[2]);
+    const rows = await pg.client.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM everdict_trajectory_events WHERE run_id = $1",
+      [ids[0]],
+    );
+    expect(Number(rows.rows[0]?.n ?? "0"), "the event rows outlived the run").toBe(0);
+  });
+
+  it("deleting no runs is a no-op rather than a delete of everything", async () => {
+    const store = new PgTrajectoryStore(pg.client);
+    const before = (await store.expiredRuns("2999-01-01T00:00:00.000Z", 5_000)).length;
+    expect(await store.deleteRuns([])).toBe(0);
+    expect((await store.expiredRuns("2999-01-01T00:00:00.000Z", 5_000)).length).toBe(before);
+  });
+
   it("a losing SEGMENT seal bumps the aggregate exactly once", async () => {
     const runId = trustId("run-segment-race");
     const tenant = trustId("acme");

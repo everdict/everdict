@@ -101,6 +101,13 @@ function inner(): TrajectoryStore & { sealedEvents: () => TraceEvent[] } {
     // Honours BOTH the limit and the cursor, because the real stores do (arch-review 121). The first version
     // took the arguments and ignored them, which made the `limit + 1` counterexample below pass over a defect
     // that was live — a twin that ignores an argument its adapter filters on is a guard no unit test can see.
+    async expiredRuns() {
+      return [{ tenant: "acme", runId: "r1" }];
+    },
+    async deleteRuns() {
+      held = [];
+      return 1;
+    },
     async payloadRefsOlderThan(_cutoffIso: string, limit: number, after?: TrajectoryPayloadRef) {
       return refsOf(held)
         .sort()
@@ -149,6 +156,10 @@ function artifactStore(opts: { failPut?: boolean; loseObjects?: boolean } = {}):
     },
     // Retention's delete (arch-review 120): it ANSWERS, so a caller settling a debt can tell "already gone"
     // from "I removed it".
+    // Retention lists a run's prefix for what no row named; this fixture holds only what it put.
+    async listKeys(prefix: string) {
+      return [...objects.keys()].filter((k) => k.startsWith(prefix));
+    },
     async remove(key: string) {
       objects.delete(key);
     },

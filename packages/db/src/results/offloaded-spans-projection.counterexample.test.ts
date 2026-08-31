@@ -54,6 +54,12 @@ function artifactStore(): TrajectoryPayloadArtifacts {
     async get(key: string) {
       return objects.get(key);
     },
+    // Matches production, refusal included: both real adapters refuse an empty prefix rather than enumerate
+    // the whole store. A double that answered it would be more permissive than the thing it stands for.
+    async listKeys(prefix: string) {
+      if (prefix === "") throw new Error("refusing to list the whole artifact store");
+      return [...objects.keys()].filter((key) => key.startsWith(prefix));
+    },
     async publicUrlFor() {
       return undefined;
     },

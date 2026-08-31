@@ -19,6 +19,13 @@ export class InMemoryArtifactStore implements ArtifactStore {
     this.objects.delete(key);
   }
 
+  // The twin of the S3 listing, including its refusal: retention lists a run's own payload prefix to delete
+  // what no row ever named, and an empty prefix is never a question that caller asks (arch-review 124).
+  async listKeys(prefix: string): Promise<string[]> {
+    if (prefix === "") throw new Error("refusing to list the whole artifact store");
+    return [...this.objects.keys()].filter((key) => key.startsWith(prefix)).sort();
+  }
+
   // memory:// refs don't expire and there is no second address to mint — a ref of ours is already the only
   // one; the stable artifact:// handle mints against the base like the S3 twin signs against its endpoint.
   async publicUrlFor(ref: string): Promise<string | undefined> {
