@@ -359,8 +359,16 @@ export const controlPlane = {
   },
   // One sealed trajectory from the owned ledger (meta + events). Opens every source — an otlp arrival or a
   // materialized import has no run row, so the run-scoped read above cannot reach it.
-  getTrajectory: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/trajectories/${encodeURIComponent(id)}`),
+  // Paged for the same reason the run-scoped twin is: an INGESTED trace belongs to somebody else's five-hour
+  // agent, and this door is the one that opens it. The route has taken `after`/`limit` since the split-plane
+  // read landed; passing neither meant the dialog fetched every event before it could draw one.
+  getTrajectory: <T>(auth: AuthContext, id: string, query: { after?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (query.after !== undefined) qs.set('after', String(query.after))
+    if (query.limit !== undefined) qs.set('limit', String(query.limit))
+    const suffix = qs.toString()
+    return call<T>(auth, `/trajectories/${encodeURIComponent(id)}${suffix ? `?${suffix}` : ''}`)
+  },
   // Browse the workspace's sealed trajectories (the owned evidence ledger, N1 look-inward) — metas only, cursor-paginated.
   listTrajectories: <T>(
     auth: AuthContext,

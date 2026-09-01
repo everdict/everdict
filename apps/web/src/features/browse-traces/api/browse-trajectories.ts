@@ -83,16 +83,38 @@ const trajectoryDetailSchema = z.object({
 })
 
 export type GetTrajectoryResult =
-  | { ok: true; meta: TrajectoryMeta; events: TraceEvent[]; segments: TrajectorySegment[] }
+  | {
+      ok: true
+      meta: TrajectoryMeta
+      events: TraceEvent[]
+      segments: TrajectorySegment[]
+      // The window this answer is: `from` is the absolute position of events[0], `total` the sealed count.
+      // A caller that never reads them still draws a correct (if partial) view; one that does can page.
+      from: number
+      total: number
+    }
   | { ok: false; error: string }
+
+// ── SOMEBODY ELSE'S FIVE-HOUR AGENT ARRIVES HERE ────────────────────────────────────────────────────
+//
+// This door opens INGESTED evidence — an OTLP arrival, a pulled MLflow trace, a materialized import — which
+// is to say a trace this deployment did not produce and cannot bound at the source. Reading it whole to draw
+// a dialog made the open cost scale with the other host's run length: the fetch, the per-event parse, and
+// the DOM all of them.
+//
+// 500 is the same window the run detail reads, for the same reason: more than a screenful, small enough that
+// the parse stays imperceptible.
+const TRACE_PAGE = 500
 
 // One sealed trajectory's full evidence — the ledger's own detail read (GET /trajectories/:id), which
 // unlike the run-scoped twin opens otlp arrivals and materialized imports too. authZ (runs:read) is the
 // control plane's.
-export async function getTrajectoryAction(runId: string): Promise<GetTrajectoryResult> {
+export async function getTrajectoryAction(runId: string, after = 0): Promise<GetTrajectoryResult> {
   const ctx = await authContext()
   try {
-    const detail = trajectoryDetailSchema.parse(await controlPlane.getTrajectory(ctx, runId))
+    const detail = trajectoryDetailSchema.parse(
+      await controlPlane.getTrajectory(ctx, runId, { after, limit: TRACE_PAGE })
+    )
     const segments: TrajectorySegment[] = detail.segments.map((segment) => ({
       ...segment,
       events: segment.events ?? detail.events,
@@ -101,6 +123,8 @@ export async function getTrajectoryAction(runId: string): Promise<GetTrajectoryR
       ok: true,
       meta: detail.meta,
       events: detail.events,
+      from: after,
+      total: detail.meta.eventCount,
       // A control plane that predates the multi-plane rung sends no segments — the execution's own stream
       // is then the whole trajectory, and the view reads it as a single plane.
       segments:

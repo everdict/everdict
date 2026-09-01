@@ -2837,6 +2837,8 @@
     "caseWorldDriver": "드라이버",
     "caseWorldRuntime": "런타임",
     "caseWorldImage": "이미지",
+    "caseTraceWindow": "{total}개 중 {shown}개를 불러왔습니다.",
+    "caseTraceMore": "더 불러오기",
     "caseTraceLoading": "트레이스를 불러오는 중…",
     "caseTraceError": "트레이스를 불러오지 못했습니다: {error}",
     "caseTraceEmpty": "이 케이스의 트레이스 증거가 없습니다.",
@@ -4816,6 +4818,8 @@
     "unpublish": "발행 회수"
   },
   "trajectoryBrowser": {
+    "traceWindow": "{total}개 중 {shown}개를 불러왔습니다.",
+    "traceMore": "더 불러오기",
     "emptyTitle": "봉인된 트레이스가 아직 없습니다",
     "emptyHint": "무언가를 실행하거나, OTLP 익스포터를 /v1/traces에 연결하거나, pull-ingest 하면 봉인 궤적이 여기에 쌓입니다.",
     "count": "{count}개 봉인됨",

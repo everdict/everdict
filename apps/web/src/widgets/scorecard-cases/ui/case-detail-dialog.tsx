@@ -69,6 +69,9 @@ export function CaseDetailDialog({
   const [detail, setDetail] = useState<ScorecardCaseDetail | undefined>()
   const [segments, setSegments] = useState<TrajectorySegment[] | undefined>()
   const [traceError, setTraceError] = useState<string | undefined>()
+  // How much of the trace this dialog holds, and how much the seal says there is.
+  const [traceLoaded, setTraceLoaded] = useState(0)
+  const [traceTotal, setTraceTotal] = useState(0)
   const [pending, start] = useTransition()
 
   // Execution evidence and score evidence are fetched for this one case on open: with a child run the
@@ -94,11 +97,42 @@ export function CaseDetailDialog({
             : []
         )
       if (runId === undefined) return
+      // A window, not the whole trace: a case can carry somebody else's long agent run, and the dialog
+      // should open at the same speed whatever the run's length. `loadMoreTrace` fetches the rest.
       const trajectory = await getTrajectoryAction(runId)
-      if (trajectory.ok) setSegments(trajectory.segments)
-      else setTraceError(trajectory.error)
+      if (trajectory.ok) {
+        setSegments(trajectory.segments)
+        setTraceLoaded(trajectory.events.length)
+        setTraceTotal(trajectory.total)
+      } else setTraceError(trajectory.error)
     })
   }, [scorecardId, c.key, c.caseId, c.occurrence, c.runId, c.hasTrace])
+
+  // Append the next window of the case's trace onto the planes already drawn — same merge as the
+  // observability dialog: a page belongs to whichever emitters it carried, and an absent emitter keeps what
+  // it had rather than being reset.
+  const loadMoreTrace = () => {
+    const runId = c.runId
+    if (runId === undefined) return
+    start(async () => {
+      const more = await getTrajectoryAction(runId, traceLoaded)
+      if (!more.ok) {
+        setTraceError(more.error)
+        return
+      }
+      setSegments((held) => {
+        if (!held) return more.segments
+        const byEmitter = new Map(more.segments.map((seg) => [seg.emitter, seg]))
+        const merged = held.map((seg) => {
+          const extra = byEmitter.get(seg.emitter)
+          byEmitter.delete(seg.emitter)
+          return extra ? { ...seg, events: [...seg.events, ...extra.events] } : seg
+        })
+        return [...merged, ...byEmitter.values()]
+      })
+      setTraceLoaded((n) => n + more.events.length)
+    })
+  }
 
   // ←/→ 로 형제 케이스 이동 (궤적/외부 트레이스 상세와 동일한 조작).
   const navigable = nav.index >= 0
@@ -264,6 +298,19 @@ export function CaseDetailDialog({
             ) : segments !== undefined && segments.length > 0 ? (
               // TrajectoryView 는 호스트가 확정 높이를 줘야 한다 — run 상세의 증거 섹션과 같은 규칙.
               <div className="h-[46vh] min-h-[320px] rounded-lg border border-border bg-card p-3">
+                {traceTotal > traceLoaded && (
+                  <p className="flex items-center gap-3 pb-2 text-[12px] text-faint">
+                    <span>{t('caseTraceWindow', { shown: traceLoaded, total: traceTotal })}</span>
+                    <button
+                      className="underline"
+                      disabled={pending}
+                      onClick={loadMoreTrace}
+                      type="button"
+                    >
+                      {pending ? t('caseTraceLoading') : t('caseTraceMore')}
+                    </button>
+                  </p>
+                )}
                 <TrajectoryView segments={segments} />
               </div>
             ) : hasTrajectory ? (

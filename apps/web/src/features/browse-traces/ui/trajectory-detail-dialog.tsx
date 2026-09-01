@@ -48,20 +48,53 @@ export function TrajectoryDetailDialog({
   const [fetchedMeta, setFetchedMeta] = useState<TrajectoryMeta | undefined>()
   const [error, setError] = useState<string | undefined>()
   const [pending, start] = useTransition()
+  // How much of this trajectory the dialog holds. An ingested trace can be somebody else's five-hour agent,
+  // so the open reads a window and the reader asks for the rest — the alternative is an open that costs the
+  // whole run before it draws anything.
+  const [loaded, setLoaded] = useState(0)
+  const [total, setTotal] = useState(0)
 
   useEffect(() => {
     if (!open) return
     setSegments(undefined)
     setFetchedMeta(undefined)
     setError(undefined)
+    setLoaded(0)
+    setTotal(0)
     start(async () => {
       const res = await getTrajectoryAction(runId)
       if (res.ok) {
         setSegments(res.segments)
         setFetchedMeta(res.meta)
+        setLoaded(res.events.length)
+        setTotal(res.total)
       } else setError(res.error)
     })
   }, [open, runId])
+
+  // Append the next window onto the planes already drawn. Segment-wise, because the view reads planes: the
+  // page's events belong to whichever emitters it carried, and an emitter absent from this page keeps what
+  // it had rather than being reset to nothing.
+  const loadMore = () => {
+    start(async () => {
+      const res = await getTrajectoryAction(runId, loaded)
+      if (!res.ok) {
+        setError(res.error)
+        return
+      }
+      setSegments((held) => {
+        if (!held) return res.segments
+        const byEmitter = new Map(res.segments.map((s) => [s.emitter, s]))
+        const merged = held.map((s) => {
+          const more = byEmitter.get(s.emitter)
+          byEmitter.delete(s.emitter)
+          return more ? { ...s, events: [...s.events, ...more.events] } : s
+        })
+        return [...merged, ...byEmitter.values()]
+      })
+      setLoaded((n) => n + res.events.length)
+    })
+  }
 
   const shown = meta ?? fetchedMeta
 
@@ -167,7 +200,19 @@ export function TrajectoryDetailDialog({
         ) : pending && !segments ? (
           <p className="px-1 py-2 text-[12px] text-faint">{t('loading')}</p>
         ) : segments ? (
-          <TrajectoryView segments={segments} />
+          <>
+            {/* A partial view says so. A trace silently cut is evidence a reader would draw conclusions
+                from without knowing what was left out. */}
+            {total > loaded && (
+              <p className="flex items-center gap-3 px-1 pb-2 text-[12px] text-faint">
+                <span>{t('traceWindow', { shown: loaded, total })}</span>
+                <button className="underline" disabled={pending} onClick={loadMore} type="button">
+                  {pending ? t('loading') : t('traceMore')}
+                </button>
+              </p>
+            )}
+            <TrajectoryView segments={segments} />
+          </>
         ) : null}
       </div>
     </Dialog>

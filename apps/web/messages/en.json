@@ -2837,6 +2837,8 @@
     "caseWorldDriver": "driver",
     "caseWorldRuntime": "runtime",
     "caseWorldImage": "image",
+    "caseTraceWindow": "Loaded {shown} of {total} events.",
+    "caseTraceMore": "Load more",
     "caseTraceLoading": "Loading trace…",
     "caseTraceError": "Couldn't load the trace: {error}",
     "caseTraceEmpty": "No trace evidence for this case.",
@@ -4816,6 +4818,8 @@
     "unpublish": "Unpublish"
   },
   "trajectoryBrowser": {
+    "traceWindow": "Loaded {shown} of {total} events.",
+    "traceMore": "Load more",
     "emptyTitle": "No sealed traces yet",
     "emptyHint": "Run something, point an OTLP exporter at /v1/traces, or pull-ingest — sealed trajectories land here.",
     "count": "{count} sealed",
