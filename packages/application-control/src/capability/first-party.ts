@@ -810,6 +810,11 @@ Everdict's tools load on demand. Before anything else:
   arithmetic; the issue is where a reader learns what you were thinking.
 - ⚠️ A campaign with no logged rounds cannot be settled — the gate answers \`continue\` on an empty trace and
   \`settle_campaign\` refuses that. If you opened one, either walk it or say in the issue why it was abandoned.
+- To KEEP GOING after an adoption, open the next campaign with \`continues: <this campaign's id>\` and its
+  baseline set to the adopted version. That is not a convenience: a successor over the same held-out rows
+  spends more tests against them, so the chain shares ONE \`significance\` block and the family covers every
+  round in the chain. The open refuses when it would not — shorten the next budget, or start a fresh campaign
+  on rows nobody has asked yet.
 
 ## Constraints
 - NEVER weaken judges, verdict policy, or scenarios mid-campaign to make a candidate pass — changing the
@@ -963,6 +968,10 @@ and the one that most deserves a fresh baseline). Load \`references/levers.md\` 
   \`adopt_campaign_candidate\` spends it. Hand it the INSTANCE spec you registered in step 2 — not the resolved
   document: the platform resolves, registers, reads back and compares against what the campaign measured.
 - Only the LATEST round is adoptable. If round 4 won and round 5 regressed, re-run round 4's candidate.
+- To keep going, open the next campaign with \`continues: <this campaign's id>\` and its baseline set to the
+  adopted version. The chain shares one \`significance\` block and one family across every round in it, so the
+  open refuses a successor that would overspend what the walk pre-registered — shorten its budget, or start
+  fresh on held-out rows nobody has asked yet.
 
 ## Constraints
 - NEVER weaken the dataset, the judges or the verdict policy mid-campaign — changing the oracle to manufacture

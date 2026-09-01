@@ -23,6 +23,21 @@ export type CampaignSubject = z.infer<typeof CampaignSubjectSchema>;
 // that arrived later would be a rule the loop chose after seeing the data.
 const CampaignFrameShape = z.object({
   subject: CampaignSubjectSchema,
+  // ── A CHAIN REUSES THE HELD-OUT SET, AND THE FAMILY HAS TO SPAN THE CHAIN ────────────────────────
+  //
+  // One campaign ends. The obvious next move is another one starting from what it adopted, and that is what
+  // "keeps improving" means here — a walk is a chain of campaigns, not a campaign that runs forever.
+  //
+  // Declared rather than inferred, because the honest version is not the convenience. `heldOutFamilySize`
+  // corrects the tests one campaign spends against its frozen held-out rows; a successor reusing THOSE ROWS
+  // spends more tests against the same population, and a per-campaign family cannot see them. So the link is
+  // frozen in the frame (it rides the digest), and the service verifies at open what a pure predicate cannot:
+  // the predecessor adopted, this campaign starts from the version it adopted, the held-out set is the same
+  // exam, the pre-registration is the same, and the whole chain's rounds still fit inside it.
+  //
+  // Absent = a fresh walk, whose family covers only itself. That is the correct default and the one every
+  // campaign written before this had.
+  continues: z.string().min(1).max(200).optional(),
   // Scenario/case ids, with the held-out ones marked. The skill's discipline (≥2 held out) is authored
   // here once and then immutable.
   scenarios: z

@@ -708,6 +708,103 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     await expect(svc.settle("acme", rec.id, "alice")).rejects.toBeInstanceOf(ConflictError);
   });
 
+  // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS (counterexample) ──────────────────────────
+  //
+  // The family correction bounds the tests ONE campaign spends against its frozen held-out rows. "Keep
+  // improving" means opening another campaign from what this one adopted — against the SAME held-out rows —
+  // and a per-campaign family cannot see those tests at all. So a walk of five 5-round campaigns spends 25
+  // tests against a population each frame corrected for 5, and the correction leaks straight back out
+  // through the thing it exists to make honest.
+  //
+  // Seen RED before `continues` was verified, observed:
+  //   a successor budgeting 5 more rounds over a family of 5 with 1 already spent OPENED, and its rounds
+  //   were judged at 0.01 as though nothing had been asked of those rows before.
+  //
+  // The refusal is at OPEN because that is the only moment it can change anything: afterwards the frame is
+  // frozen and its rounds are judged at a level nobody may revise.
+  describe("continuing a campaign", () => {
+    const adoptedPredecessor = async (store: InMemoryEvolutionCampaignStore) => {
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      await svc.settle("acme", rec.id, "alice"); // adopts 1.0.1, one round spent
+      return { svc, id: rec.id };
+    };
+    // Everything a successor must agree with its predecessor about, with the budget left to spend.
+    const successor = (id: string, over: Partial<CampaignFrame> = {}): CampaignFrame => ({
+      ...frame,
+      continues: id,
+      subject: { ...frame.subject, baselineVersion: "1.0.1" },
+      budget: { maxRounds: 4 }, // 1 spent + 4 = the pre-registered family of 5
+      ...over,
+    });
+
+    it("opens when the chain still fits inside the family it pre-registered", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { svc, id } = await adoptedPredecessor(store);
+      const next = await svc.open("acme", { issueId: "iss_1", frame: successor(id) }, "alice");
+      expect(next.frame.continues).toBe(id);
+      // …and the link rides the DIGEST, so a chain claim cannot be edited after the fact.
+      expect(next.frameDigest).not.toBe((await svc.get("acme", id)).frameDigest);
+    });
+
+    it("[COUNTEREXAMPLE] REFUSES a successor whose rounds would overspend the shared family", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { svc, id } = await adoptedPredecessor(store);
+      // Five more rounds against rows already asked once, under a family pre-registered for five in total.
+      const over = successor(id, { budget: { maxRounds: 5 } });
+      await expect(svc.open("acme", { issueId: "iss_1", frame: over }, "alice")).rejects.toThrow(
+        /spent 1 of its 5 pre-registered held-out tests/,
+      );
+    });
+
+    it("refuses a predecessor that proved nothing to continue from", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const open = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      await expect(svc.open("acme", { issueId: "iss_1", frame: successor(open.id) }, "alice")).rejects.toBeInstanceOf(
+        ConflictError,
+      );
+      // …and a chain naming a campaign that does not exist refuses with the read, never by opening.
+      await expect(
+        svc.open("acme", { issueId: "iss_1", frame: successor("evc_ghost") }, "alice"),
+      ).rejects.toBeInstanceOf(NotFoundError);
+    });
+
+    it("refuses a chain that starts somewhere other than what its predecessor proved", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { svc, id } = await adoptedPredecessor(store);
+      const drifted = successor(id, { subject: { ...frame.subject, baselineVersion: "9.9.9" } });
+      await expect(svc.open("acme", { issueId: "iss_1", frame: drifted }, "alice")).rejects.toThrow(
+        /a chain starts from what its predecessor proved/,
+      );
+    });
+
+    it("refuses a chain over DIFFERENT held-out rows — that is another exam, and its tests do not carry", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { svc, id } = await adoptedPredecessor(store);
+      const otherExam = successor(id, {
+        scenarios: [
+          { id: "c1", heldOut: true },
+          { id: "c3", heldOut: true },
+        ],
+      });
+      await expect(svc.open("acme", { issueId: "iss_1", frame: otherExam }, "alice")).rejects.toThrow(/different exam/);
+    });
+
+    it("refuses a chain that re-declares its statistics — one walk, one pre-registration", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { svc, id } = await adoptedPredecessor(store);
+      // A looser level, or a bigger family, chosen AFTER seeing the predecessor's rounds. Either is a rule
+      // picked with the data in hand, which is what freezing a frame exists to prevent.
+      const relaxed = successor(id, { significance: { fdrAlpha: 0.05, heldOutFamilySize: 50 } });
+      await expect(svc.open("acme", { issueId: "iss_1", frame: relaxed }, "alice")).rejects.toThrow(
+        /a chain shares one pre-registration/,
+      );
+    });
+  });
+
   it("a round landing between the gate's read and the close makes the settle CONFLICT — the answer was stale", async () => {
     const store = new InMemoryEvolutionCampaignStore();
     const svc = service(store);

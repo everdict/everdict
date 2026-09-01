@@ -147,6 +147,22 @@ export interface NewRoundInput {
   candidateScorecardId: string;
 }
 
+// How far a `continues` walk will follow caller-authored links before refusing. A chain this long is not a
+// research programme, it is a loop or a mistake, and either way the answer is the same refusal.
+const MAX_CHAIN_LINKS = 64;
+
+// The held-out POPULATION, as a comparable key. Deduplicated and sorted because the question is "are these
+// the same rows", not "were they written in the same order" — and the frame's own creation rule already
+// refuses duplicate ids, so the dedupe only matters for frames written before it did.
+//
+// `\u0000` separates because a scenario id may contain anything a 300-character string can, a space
+// included: joining on one would let {"a b"} and {"a","b"} produce the same key, and the chain check would
+// then accept a different exam as the same one. Written as the ESCAPE — the raw byte makes git treat the
+// file as binary and every scanner in this repo goes blind to it (rule `typescript`).
+function heldOutKey(frame: Pick<CampaignFrame, "scenarios">): string {
+  return [...new Set(frame.scenarios.filter((s) => s.heldOut === true).map((s) => s.id))].sort().join("\u0000");
+}
+
 export class CampaignService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -168,6 +184,10 @@ export class CampaignService {
         { issue: input.issueId, authorized: input.expectedIssueTeamId ?? null, current: issue.teamId ?? null },
         "this issue changed teams while the campaign was being opened — read it back and open again",
       );
+    // …and if this campaign says it CONTINUES another, the claim is verified before anything is written.
+    // Open is the only moment the answer can change anything: after it the frame is frozen and its rounds are
+    // judged at a level nobody may revise.
+    await this.assertChainIsHonest(tenant, input.frame);
     const record: EvolutionCampaignRecord = {
       id: this.newId(),
       tenant,
@@ -195,6 +215,100 @@ export class CampaignService {
     };
     await this.deps.store.create(record, this.stamped(tenant, [fact]));
     return record;
+  }
+
+  // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────
+  //
+  // `heldOutFamilySize` corrects the tests ONE campaign spends against its frozen held-out rows. A successor
+  // that reuses those rows spends more tests against the same population, and a per-campaign family cannot
+  // see them — so the correction this repo just bought would leak straight back out through the walk it
+  // exists to make honest.
+  //
+  // Six claims, and each is refused rather than assumed. Five are about whether this is the same exam at all;
+  // the sixth is the arithmetic. A caller who cannot satisfy them has a fresh campaign, not a chain — which
+  // is the honest shape and stays available by simply omitting `continues`.
+  private async assertChainIsHonest(tenant: string, frame: CampaignFrame): Promise<void> {
+    const predecessorId = frame.continues;
+    if (predecessorId === undefined) return;
+    const family = frame.significance.heldOutFamilySize;
+    if (family === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { continues: predecessorId },
+        "a campaign that continues another must declare significance.heldOutFamilySize — the family is what the chain is spending, so a chain without one is a correction that stops at the first campaign",
+      );
+
+    // Walk the ancestors, counting the rounds already spent against these rows. Bounded and cycle-guarded:
+    // `continues` is caller-authored, and an unbounded walk over caller-authored links is an outage with a
+    // comment. `get` throws NotFound, so a chain naming a ghost refuses here rather than opening.
+    const parent = await this.get(tenant, predecessorId);
+    const seen = new Set<string>([predecessorId]);
+    let spent = parent.rounds.length;
+    let cursor = parent.frame.continues;
+    while (cursor !== undefined) {
+      if (seen.has(cursor) || seen.size >= MAX_CHAIN_LINKS)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { continues: predecessorId, at: cursor, links: seen.size },
+          `the chain from '${predecessorId}' does not terminate within ${MAX_CHAIN_LINKS} links`,
+        );
+      seen.add(cursor);
+      const ancestor = await this.get(tenant, cursor);
+      spent += ancestor.rounds.length;
+      cursor = ancestor.frame.continues;
+    }
+
+    // 1. It continues a RESULT. A campaign that halted proved nothing to carry forward, and one still open
+    //    has not finished spending its own share of the family.
+    const outcome = parent.close?.outcome;
+    if (outcome === undefined || outcome.kind !== "adopted")
+      throw new ConflictError(
+        "CONFLICT",
+        { continues: parent.id, state: parent.state },
+        `campaign '${parent.id}' adopted nothing, so there is no version to continue from — a chain continues a result, not an attempt`,
+      );
+    // 2. …of the same subject, and 3. from the version that result named. A "chain" starting somewhere else
+    //    is two campaigns sharing an exam, which is exactly the thing the family cannot account for.
+    if (parent.frame.subject.type !== frame.subject.type || parent.frame.subject.id !== frame.subject.id)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { continues: parent.id },
+        `campaign '${parent.id}' optimized ${parent.frame.subject.type} '${parent.frame.subject.id}' and this one optimizes ${frame.subject.type} '${frame.subject.id}' — a chain follows one subject`,
+      );
+    if (frame.subject.baselineVersion !== outcome.version)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { continues: parent.id, adopted: outcome.version, baseline: frame.subject.baselineVersion },
+        `this campaign baselines ${frame.subject.baselineVersion} and '${parent.id}' adopted ${outcome.version} — a chain starts from what its predecessor proved`,
+      );
+    // 4. The same held-out rows. Different rows are a different exam, the predecessor's tests were spent
+    //    against a population this campaign is not touching, and carrying the count would be arithmetic
+    //    about the wrong thing.
+    if (heldOutKey(parent.frame) !== heldOutKey(frame))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { continues: parent.id },
+        `the held-out scenarios differ from '${parent.id}' — that is a different exam, so its tests do not carry. Open a fresh campaign instead of continuing this one`,
+      );
+    // 5. One pre-registration for the whole chain. Two levels would mean rounds in one walk judged by two
+    //    rules, which is the thing freezing a frame exists to prevent, spread across campaigns.
+    if (
+      parent.frame.significance.fdrAlpha !== frame.significance.fdrAlpha ||
+      parent.frame.significance.heldOutFamilySize !== family
+    )
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { continues: parent.id },
+        `a chain shares one pre-registration — '${parent.id}' declared fdrAlpha ${parent.frame.significance.fdrAlpha ?? "none"} over a family of ${parent.frame.significance.heldOutFamilySize ?? "none"}, and this frame declares ${frame.significance.fdrAlpha ?? "none"} over ${family}`,
+      );
+    // 6. …and the arithmetic. This is the whole point: the chain's rounds all test the same rows, so the
+    //    family has to cover them together.
+    if (spent + frame.budget.maxRounds > family)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { continues: parent.id, spent, budget: frame.budget.maxRounds, family },
+        `this chain has spent ${spent} of its ${family} pre-registered held-out tests and this campaign budgets ${frame.budget.maxRounds} more — raise heldOutFamilySize on a new chain (accepting the smaller per-round level it buys), or start a fresh campaign on held-out rows that have not been asked yet`,
+      );
   }
 
   async get(tenant: string, id: string): Promise<EvolutionCampaignRecord> {

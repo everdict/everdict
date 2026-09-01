@@ -57,6 +57,33 @@ Both are repairable by running one more round through a lane that seals what is 
 than waiving, because the waiver is frozen at open and this halt is telling you the evidence is thin. The
 frame fields that turn each one off are in `frame-design.md`.
 
+## `POST /campaigns` refuses a chain
+
+Only when the frame carries `continues`. Every one of these means "this is not a continuation of that
+campaign", and the honest repair is usually to drop `continues` and open a fresh campaign on held-out rows
+nobody has asked yet.
+
+**"campaign 'X' adopted nothing, so there is no version to continue from"** — the predecessor halted, or is
+still open. A chain continues a result, not an attempt.
+
+**404 on the predecessor** — a chain naming a campaign that does not exist refuses at the read.
+
+**"a chain follows one subject"** — the predecessor optimized a different agent or harness.
+
+**"a chain starts from what its predecessor proved"** — your `baselineVersion` is not the version the
+predecessor adopted.
+
+**"that is a different exam, so its tests do not carry"** — the held-out scenario ids differ. The
+predecessor's tests were spent against a population this campaign is not touching, so carrying the count
+would be arithmetic about the wrong thing.
+
+**"a chain shares one pre-registration"** — the `significance` block differs. Two levels in one walk means
+rounds judged by two rules, chosen after seeing data.
+
+**"this chain has spent N of its F pre-registered held-out tests and this campaign budgets M more"** — the
+arithmetic, and the reason the field exists. Either shorten this campaign's `budget.maxRounds`, or start a
+new chain that pre-registers a larger family and accepts the smaller per-round level that buys.
+
 ## `POST /campaigns/:id/settle` refuses (409)
 
 **"the gate answers continue — the campaign settles only on an adoptable candidate or its own ending"** —

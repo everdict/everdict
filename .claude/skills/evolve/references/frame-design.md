@@ -15,6 +15,22 @@ simply is not adoption evidence.
 family against one fixed baseline. A different baseline is a different question and therefore a different
 campaign.
 
+**`continues`** — the id of the campaign this one continues, when you are chaining. A walk that keeps
+improving is a chain of campaigns, each starting from what the last one adopted; this field is what makes the
+chain honest rather than merely convenient.
+
+It is verified at open, and every part of it is refused rather than assumed: the predecessor must have
+ADOPTED something, of the same subject; this campaign's `baselineVersion` must be the version it adopted; the
+held-out rows must be the same rows; the `significance` block must be identical — one walk, one
+pre-registration — and the chain's rounds so far plus this campaign's `budget.maxRounds` must still fit
+inside the shared `heldOutFamilySize`.
+
+That last one is the whole point and it is what makes a chain cost something: the family is spent across the
+chain, so a five-round predecessor leaves five fewer tests for everyone after it. Plan the chain's total
+length when you pre-register the family, or accept that the walk ends when the family is spent. Omitting
+`continues` is always available and always honest — it just means the new campaign's held-out rows should be
+rows nobody has asked yet.
+
 **`scenarios`** — the exam, named case by case: `[{id, heldOut}]`, unique ids, at least two with
 `heldOut: true` or the frame is refused at creation.
 
