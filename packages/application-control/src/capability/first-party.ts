@@ -724,15 +724,25 @@ Everdict's tools load on demand. Before anything else:
 - Name the target (\`get_agent\`), the goal (which judge scores define "better"), and the scenario set: 5-10
   representative platform events — REPLAYED real events over invented ones — plus the trial count N per
   scenario.
-- **N is at least 5.** With 3 trials a side, a TOTAL flip (0/3 → 3/3) is Fisher p = 0.10 and can never clear
-  significance, so a round at N=3 spends real budget it cannot convert into evidence. 0/5 → 5/5 is p = 0.0079.
+- **N is at least 5, and it is chosen together with the round budget.** A total flip is the strongest per-case
+  result there is and its p-value is fixed by N alone: 0/3 → 3/3 is Fisher p = 0.10 (never significant, so a
+  round at N=3 spends real budget it cannot convert into evidence), 0/5 → 5/5 is 0.0079, 0/6 → 6/6 is 0.0022.
+  The round is judged at \`fdrAlpha / heldOutFamilySize\` (below), so N=5 carries a walk of up to ~6 rounds and
+  a longer one needs N=6+. A twenty-round campaign at N=5 cannot adopt anything and will spend its whole
+  budget finding that out.
 - Hold out at least 2 scenarios you will never quote or paraphrase while writing candidates — a candidate
   tuned to the eval verbatim is memorization, and the held-out rows are what catch it.
 - Open a campaign issue (\`create_issue\`): the narrative journal. Then \`open_campaign\` { issueId, frame } —
   the RECORD, and the frame is FROZEN at that call and referenced by digest forever after. Put in it exactly
   what the decision will read: \`scenarios\` (each with \`heldOut\`), \`judges\`, \`trialsPerCase\`,
-  \`budget.maxRounds\`, \`stopAfterRejectedRounds\`. There is no edit; a frame you want to change is a new
-  campaign.
+  \`budget.maxRounds\`, \`stopAfterRejectedRounds\`, and \`significance\`. There is no edit; a frame you want
+  to change is a new campaign.
+- \`significance\` needs BOTH \`fdrAlpha\` (the level, e.g. 0.05 — corrected across the cases of one round)
+  and \`heldOutFamilySize\` (how many times this campaign may consult the held-out set). You test the same
+  frozen held-out rows once per ROUND and any round can end the walk, so without a pre-registered family a
+  long campaign adopts noise: three held-out cases at 0.05 over ten rounds is roughly a coin flip. Set the
+  family to \`budget.maxRounds\` — larger only if a follow-up campaign will reuse the same held-out rows,
+  because then the family spans the chain.
 - \`heldOut: true\` is a FLAG THE GATE READS, and it reads only those rows. A private promise not to look at
   a scenario is not a held-out set — mark them, or the walk proves nothing about generalization.
 - The frame's \`scenarios\` are the exam: every round's two batches must run EXACTLY that set. A batch that

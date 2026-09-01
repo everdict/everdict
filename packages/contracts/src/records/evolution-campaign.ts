@@ -40,6 +40,29 @@ const CampaignFrameShape = z.object({
     .object({
       fdrAlpha: z.number().gt(0).lt(1).optional(),
       minDelta: z.number().min(0).max(1).optional(),
+      // ── THE HELD-OUT SET IS CONSUMED BY BEING ASKED, AND NOTHING WAS COUNTING ────────────────────
+      //
+      // `fdrAlpha` corrects across the CASES of one round: Benjamini-Hochberg over the family of per-case
+      // tests, which is right and is the whole family the diff can see. A campaign asks a SECOND family of
+      // questions the diff cannot see — the same frozen held-out population, once per round, with any single
+      // round able to end the walk by adopting.
+      //
+      // So a null candidate has ~H x alpha/2 chance of winning a given round (H held-out cases), and a
+      // ten-round campaign at alpha 0.05 over three held-out cases adopts something by chance about half the
+      // time. `budget.maxRounds` bounds that, and a budget is a spending cap, not a statistical statement:
+      // it says when to stop paying, not what the answer means.
+      //
+      // This is the family size, PRE-REGISTERED. The round verdict is derived at `fdrAlpha / this`, so every
+      // round of one campaign is judged by one rule frozen before any data was seen — a level chosen after
+      // the rounds is not a level. It is at least `budget.maxRounds` (every round consults the held-out set,
+      // so the budget IS the minimum family), and larger when the same held-out population will be carried
+      // into follow-up campaigns: chaining reuses the set, so the family spans the chain.
+      //
+      // It costs trials, and that is the honest price rather than a defect: at alpha 0.05 over 10 rounds a
+      // round is judged at 0.005, and 0/5 -> 5/5 is Fisher p = 0.0079, so N=5 no longer clears it. A campaign
+      // that wants ten rounds buys about seven trials a side. The old behaviour bought the rounds and
+      // reported the price as evidence.
+      heldOutFamilySize: z.number().int().min(1).max(10000).optional(),
     })
     .default({}),
   // The RECORDED waiver for adopting over an unverified world-identity axis. Absent/false = the gate
@@ -114,7 +137,11 @@ export type StoredCampaignFrame = z.infer<typeof StoredCampaignFrameSchema>;
 //
 // So the rule is exported as a predicate the creation schema and the decision path both consume. Written
 // twice it would already have diverged (rule `protocol` L3); written once, tightening it tightens both.
-export function campaignFrameDefects(frame: { scenarios: ReadonlyArray<{ id: string; heldOut?: boolean }> }): string[] {
+export function campaignFrameDefects(frame: {
+  scenarios: ReadonlyArray<{ id: string; heldOut?: boolean }>;
+  budget: { maxRounds: number };
+  significance: { fdrAlpha?: number; heldOutFamilySize?: number };
+}): string[] {
   const defects: string[] = [];
   const ids = frame.scenarios.map((s) => s.id);
   if (new Set(ids).size !== ids.length)
@@ -122,6 +149,21 @@ export function campaignFrameDefects(frame: { scenarios: ReadonlyArray<{ id: str
   const held = frame.scenarios.filter((s) => s.heldOut === true).length;
   if (held < 2)
     defects.push(`a campaign needs at least 2 held-out scenarios to have adoption evidence (this frame has ${held})`);
+  // …and the level it is judged at, plus how many times it may be asked. Both are frozen for the same
+  // reason the scenarios are: a threshold chosen after seeing the rounds is not a threshold.
+  if (frame.significance.fdrAlpha === undefined)
+    defects.push(
+      "significance.fdrAlpha must be declared — a campaign whose significance level is whatever the diff defaults to has not frozen the value its verdict depends on",
+    );
+  const family = frame.significance.heldOutFamilySize;
+  if (family === undefined)
+    defects.push(
+      "significance.heldOutFamilySize must be declared — the held-out set is tested once per round and nothing corrects for that unless the family is pre-registered (budget.maxRounds is the floor)",
+    );
+  else if (family < frame.budget.maxRounds)
+    defects.push(
+      `significance.heldOutFamilySize (${family}) is below budget.maxRounds (${frame.budget.maxRounds}) — every round consults the held-out set, so a family smaller than the budget corrects for fewer tests than this campaign is allowed to run`,
+    );
   return defects;
 }
 

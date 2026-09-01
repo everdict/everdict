@@ -250,9 +250,29 @@ export class CampaignService {
     // The verdict is DERIVED from the production diff. A missing/unfinished/invisible scorecard throws
     // inside the read (requireSucceeded, under the caller's team ceiling) and the round is refused with that
     // reason — never logged half-known (L2), never read around the team axis.
+    // ── AND IT IS JUDGED AT THE LEVEL THE FRAME PRE-REGISTERED, DIVIDED BY THE FAMILY ──────────────
+    //
+    // `fdrAlpha` corrects across the CASES of this round — the only family the diff can see. A campaign asks
+    // a second one it cannot: the same frozen held-out population, once per round, any round able to end the
+    // walk. Nothing was correcting for that, so a ten-round campaign at alpha 0.05 over three held-out cases
+    // adopted a null candidate about half the time, and `budget.maxRounds` — a spending cap — was the only
+    // thing bounding it.
+    //
+    // The division happens HERE, at the one seam that derives a verdict, from a size frozen at open. Doing it
+    // at the gate instead would judge rounds already recorded by a level chosen after they ran.
+    const { fdrAlpha, minDelta, heldOutFamilySize } = record.frame.significance;
+    if (fdrAlpha === undefined || heldOutFamilySize === undefined)
+      // Unreachable: `requireEligibleFrame` above refuses a frame declaring neither, on every path that
+      // produces new evidence. An exhaustiveness assertion, not a guard with its own reachable failure —
+      // the refusal that can actually fire is the eligibility one, and that is where its rung belongs.
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: id },
+        "this campaign's frame declares no significance level or held-out family",
+      );
     const snapshot = await this.deps.diffs.diffSnapshot(tenant, input.baselineScorecardId, input.candidateScorecardId, {
-      ...(record.frame.significance.minDelta !== undefined ? { minDelta: record.frame.significance.minDelta } : {}),
-      ...(record.frame.significance.fdrAlpha !== undefined ? { fdrAlpha: record.frame.significance.fdrAlpha } : {}),
+      ...(minDelta !== undefined ? { minDelta } : {}),
+      fdrAlpha: fdrAlpha / heldOutFamilySize,
       ...(access.visibleTeams !== undefined ? { visibleTeams: access.visibleTeams } : {}),
     });
     // IDENTITY is refused, not recorded: a round whose declared coordinates disagree with what the

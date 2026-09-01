@@ -30,7 +30,7 @@ const frame: CampaignFrame = {
   trialsPerCase: 5,
   budget: { maxRounds: 5 },
   stopAfterRejectedRounds: 3,
-  significance: {},
+  significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // frozen: the level, and the family it is corrected over
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
   observationPolicy: { allowDivergent: false },

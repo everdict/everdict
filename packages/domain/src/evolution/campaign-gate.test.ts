@@ -22,7 +22,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame => ({
   trialsPerCase: 5,
   budget: { maxRounds: 10 },
   stopAfterRejectedRounds: 3,
-  significance: {},
+  significance: { fdrAlpha: 0.05, heldOutFamilySize: 10 }, // frozen: the level, and the family it is corrected over
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
   observationPolicy: { allowDivergent: false },

@@ -48,6 +48,15 @@ const legacyFrame = {
   allowLabelOnlyAdoption: false,
 };
 
+// …and the same frame written under the rules in force: the significance level and the held-out family are
+// declarations now, so a frame that states neither is legacy by definition. Every fixture below that is meant
+// to be CONFORMING derives from this one — a fixture defaulting to the weaker shape turns every test that
+// does not care about statistics into a test of the weak branch (rule protocol, the fixture-drift law).
+const conformingFrame = {
+  ...legacyFrame,
+  significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // family >= budget.maxRounds
+};
+
 // A round stored before coverage existed: the observations block has only the two failure counts.
 const legacyRound = {
   seq: 1,
@@ -146,7 +155,7 @@ describe("[R75 COUNTEREXAMPLE] rows written before the rules still decode", () =
 // Seen RED before the eligibility guard, observed:
 //   legacy 1-held-out frame + new round → adopt ADOPTS v1.1.0
 const oneHeldOut = {
-  ...legacyFrame,
+  ...conformingFrame,
   scenarios: [
     { id: "only-one", heldOut: true },
     { id: "train", heldOut: false },
@@ -175,12 +184,41 @@ describe("[R75 COUNTEREXAMPLE] a frame that may be read may not decide", () => {
     expect(campaignFrameDefects(oneHeldOut)[0]).toMatch(/at least 2 held-out/);
     expect(
       campaignFrameDefects({
+        ...conformingFrame,
         scenarios: [
           { id: "d", heldOut: true },
           { id: "d", heldOut: true },
         ],
       }),
     ).toEqual(["scenario ids must be unique — the gate compares the two sides by id set"]);
-    expect(campaignFrameDefects(legacyFrame as unknown as CampaignFrame), "a conforming frame was refused").toEqual([]);
+    expect(campaignFrameDefects(conformingFrame as unknown as CampaignFrame), "a conforming frame was refused").toEqual(
+      [],
+    );
+  });
+
+  // ── …AND THE SAME LAW APPLIED TO THE STATISTICS THE NEXT WAVE FROZE ──────────────────────────────
+  //
+  // `heldOutFamilySize` is the same shape as the two-held-out rule one level down: a frame that never
+  // declared it is READABLE (the row above still decodes) and may not produce NEW adoption evidence, because
+  // its rounds would be judged at a level nobody pre-registered. Asserted here rather than in the new
+  // counterexample so the legacy split stays one file: this is what "may be read, may not decide" now means.
+  it("a frame that pre-dates the pre-registered family is readable and may not decide", async () => {
+    const { campaignFrameDefects } = await import("@everdict/contracts");
+    const defects = campaignFrameDefects(legacyFrame as unknown as CampaignFrame);
+    expect(defects).toHaveLength(2);
+    expect(defects.join("; ")).toMatch(/significance\.fdrAlpha must be declared/);
+    expect(defects.join("; ")).toMatch(/significance\.heldOutFamilySize must be declared/);
+    // …and the row itself still parses, which is the whole point of the split.
+    expect(EvolutionCampaignRecordSchema.safeParse(legacyRow).success).toBe(true);
+  });
+
+  // A family SMALLER than the budget corrects for fewer tests than the campaign may run — the arithmetic
+  // equivalent of not correcting at all, and the easiest way to appear to have done it.
+  it("refuses a family smaller than the rounds it is allowed to spend", async () => {
+    const { campaignFrameDefects } = await import("@everdict/contracts");
+    const understated = { ...conformingFrame, significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 } };
+    const defects = campaignFrameDefects(understated as unknown as CampaignFrame);
+    expect(defects).toHaveLength(1);
+    expect(defects[0]).toMatch(/below budget\.maxRounds \(5\)/);
   });
 });

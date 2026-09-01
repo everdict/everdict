@@ -67,8 +67,10 @@ you settled too early. Ask `GET /campaigns/:id/decision` first; that is what it 
 **"the campaign is closed — open a new one"** — from the ROUND door, on a campaign that already settled.
 
 **"this campaign's frame predates the current adoption rules (…) — it stays readable, but it may not produce
-new adoption evidence"** — an old campaign whose frame would not be creatable today (fewer than two held-out
-scenarios, duplicate ids). It can still be read; it cannot produce new rounds. Open a new campaign.
+new adoption evidence"** — an old campaign whose frame would not be creatable today: fewer than two held-out
+scenarios, duplicate ids, an undeclared `significance.fdrAlpha`, or an undeclared or understated
+`significance.heldOutFamilySize`. It can still be read; it cannot produce new rounds. Open a new campaign.
+The message names every defect, so it tells you exactly what the new frame must declare.
 
 **"a concurrent round landed first — re-read the campaign and log against its current state"** — two drivers
 on one campaign. Re-read and retry; the round sequence is contiguous by construction.

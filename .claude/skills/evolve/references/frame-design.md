@@ -44,7 +44,31 @@ a loop can spend on. Exhausting it halts with `budget_exhausted`.
 that halt outranks the budget one: "the hypothesis well is dry" names what is wrong, where "the budget ran
 out" only names when it stopped mattering.
 
-**`significance`** — optional `fdrAlpha` and `minDelta`, frozen with everything else the verdict depends on.
+**`significance`** — the statistics, frozen with everything else the verdict depends on. `fdrAlpha` and
+`heldOutFamilySize` are both REQUIRED of a new frame; `minDelta` (a practical effect-size floor) is optional.
+
+`fdrAlpha` corrects across the CASES of one round — Benjamini-Hochberg over the per-case tests, which is the
+only family the diff can see. `heldOutFamilySize` is the family it cannot: a campaign asks the same frozen
+held-out population once per round, and any single round can end the walk by adopting. With three held-out
+cases at alpha 0.05, a candidate that changes nothing wins a given round maybe 7% of the time, so a ten-round
+walk adopts noise about half the time. `budget.maxRounds` bounds that and is a spending cap — it says when to
+stop paying, not what the answer means.
+
+So the family is pre-registered and the round is judged at `fdrAlpha / heldOutFamilySize`. It is at least
+`budget.maxRounds` (every round consults the held-out set, so the budget is the floor), and larger when the
+same held-out population will be carried into follow-up campaigns — chaining reuses the set, so the family
+spans the chain and the frames must say so.
+
+**This costs trials, and that is the price rather than a defect.** A total flip is the strongest per-case
+result available, and its p-value is fixed by N alone:
+
+    N=3   0/3 → 3/3   p = 0.10      never significant, at any family size
+    N=5   0/5 → 5/5   p = 0.0079    clears a family up to 6
+    N=6   0/6 → 6/6   p = 0.0022    clears a family up to 23
+    N=7   0/7 → 7/7   p = 0.00058   clears a family up to 86
+
+Pick N and the family together. A twenty-round campaign at N=5 is a campaign that cannot adopt anything, and
+it will spend its whole budget finding that out.
 
 ## What makes a round WIN
 

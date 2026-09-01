@@ -32,7 +32,11 @@ const frame: CampaignFrame = {
   trialsPerCase: 5,
   budget: { maxRounds: 5 },
   stopAfterRejectedRounds: 3,
-  significance: {},
+  // The statistics this campaign is judged by, frozen like everything else the verdict depends on. The
+  // fixture carries the REAL shape rather than `{}` — a default that omits a declaration turns every test
+  // that does not care about statistics into a test of the undeclared branch, which is how a fixture
+  // population drifts onto the weak arm (rule protocol, the fixture-drift law).
+  significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 },
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
   observationPolicy: { allowDivergent: false },
@@ -495,12 +499,53 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
   it("the frame's FROZEN significance reaches the diff, and the caller's team ceiling rides along", async () => {
     const store = new InMemoryEvolutionCampaignStore();
     const svc = service(store);
-    const strict: CampaignFrame = { ...frame, significance: { minDelta: 0.1, fdrAlpha: 0.05 } };
+    const strict: CampaignFrame = {
+      ...frame,
+      significance: { minDelta: 0.1, fdrAlpha: 0.05, heldOutFamilySize: 5 },
+    };
     const rec = await svc.open("acme", { issueId: "iss_1", frame: strict }, "alice");
     snapshots.set("sc-win", snapshot(comparison()));
     diffCalls.length = 0;
     await svc.logRound("acme", rec.id, LOG, "agent:everdict", { visibleTeams: ["team-a"] });
-    expect(diffCalls[0]?.opts).toEqual({ minDelta: 0.1, fdrAlpha: 0.05, visibleTeams: ["team-a"] });
+    // …divided by the pre-registered held-out family: 0.05 over 5 rounds is 0.01 a round.
+    expect(diffCalls[0]?.opts).toEqual({ minDelta: 0.1, fdrAlpha: 0.01, visibleTeams: ["team-a"] });
+  });
+
+  // ── THE HELD-OUT SET IS TESTED ONCE PER ROUND AND NOTHING WAS COUNTING (counterexample) ──────────
+  //
+  // `fdrAlpha` corrects across the CASES of one round — the only family `diffTrials` can see. The campaign
+  // asks a second family it cannot: the same frozen held-out population, once per round, any single round
+  // able to end the walk by adopting. With three held-out cases at alpha 0.05, a null candidate wins a given
+  // round with probability around H x alpha/2, so a ten-round campaign adopted noise about half the time —
+  // and `budget.maxRounds` bounded the SPENDING, which is not a statement about what the answer means.
+  //
+  // Seen RED before the frame carried a family, observed:
+  //   expected { minDelta: 0.1, fdrAlpha: 0.05, … } to deeply equal { …, fdrAlpha: 0.01, … }
+  //
+  // The division lives at the ONE seam that derives a verdict, from a size frozen at open — never at the
+  // gate, which reads rounds already recorded and would be applying a level chosen after they ran.
+  it("[COUNTEREXAMPLE] the round is judged at the frame's level divided by the pre-registered family", async () => {
+    // maxRounds rides along because the family may never be smaller than the rounds it must cover — a
+    // campaign correcting for fewer tests than it is allowed to run has not corrected.
+    const run = async (heldOutFamilySize: number, maxRounds = heldOutFamilySize): Promise<number | undefined> => {
+      const svc = service(new InMemoryEvolutionCampaignStore());
+      const framed: CampaignFrame = {
+        ...frame,
+        budget: { maxRounds },
+        significance: { fdrAlpha: 0.05, heldOutFamilySize },
+      };
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: framed }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      diffCalls.length = 0;
+      await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      return diffCalls[0]?.opts?.fdrAlpha;
+    };
+    // A campaign that plans twice the rounds spends half the alpha on each — the whole point, and the cost.
+    expect(await run(5)).toBeCloseTo(0.01, 12);
+    expect(await run(10)).toBeCloseTo(0.005, 12);
+    // …and a family of one IS the old behaviour, which is why it is a declaration rather than a default:
+    // a campaign may say "one look" out loud, and then it may only take one.
+    expect(await run(1)).toBeCloseTo(0.05, 12);
   });
 
   it("a round whose scorecards evaluated something else is REFUSED, never recorded", async () => {
