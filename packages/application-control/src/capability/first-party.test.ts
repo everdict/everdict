@@ -143,39 +143,58 @@ describe("firstPartySkillExamples", () => {
   // Anchors alone would not have caught it: the four doors that WERE named read as coverage. So the
   // assertion is derived — every campaign door the body names must also be in the `select:` preload, which
   // is the line that decides whether the agent can call it at all. Pre-fix that fails naming all four.
-  it("the agent-evolve example drives the campaign record, and preloads every door it names", () => {
+  // ⚠️ AND IT RUNS OVER EVERY EVOLVE PROCEDURE, NOT THE ONE THAT WAS BROKEN. The defect above was a lane
+  // taught in four of six places; writing its regression for a single skill id would leave the NEXT
+  // procedure — `harness-evolve`, added one wave later against the same doors — free to repeat it exactly,
+  // with nothing to grep because the two skills share no symbol (rule `protocol`, the one-lane-only law).
+  it.each(["agent-evolve", "harness-evolve"])(
+    "the %s example drives the campaign record, and preloads every door it names",
+    (id) => {
+      const skill = examples.find((r) => r.id === id);
+      expect(skill).toBeDefined();
+      if (!skill || skill.spec.type !== "skill") return;
+      const body = skill.spec.instructions;
+
+      // The two the agent procedure was missing are the two that move a campaign: one records the evidence,
+      // the other asks the frozen frame what to do with it.
+      for (const door of [
+        "open_campaign",
+        "log_campaign_round",
+        "campaign_decision",
+        "settle_campaign",
+        "campaign_adoption",
+        "adopt_campaign_candidate",
+      ]) {
+        expect(body, `${id} must name ${door}`).toContain(door);
+      }
+
+      // Everdict's tools load on demand, so a door named in prose and absent from the preload is a door the
+      // agent has to go looking for mid-walk. Derived from the body rather than restated.
+      const select = /select:([a-z_,]+)/.exec(body)?.[1];
+      expect(select, `${id} must open with a ToolSearch preload`).toBeDefined();
+      const preloaded = new Set((select ?? "").split(","));
+      const DOOR =
+        /^(open_campaign|log_campaign_round|settle_campaign|campaign_(decision|adoption)|adopt_campaign_candidate)$/;
+      const named = [...body.matchAll(/\b([a-z_]*campaign[a-z_]*)\b/g)]
+        .map((m) => m[1])
+        .filter((word): word is string => word !== undefined && DOOR.test(word));
+      expect(named.length).toBeGreaterThan(0); // the derivation must actually reach something
+      for (const door of new Set(named)) {
+        expect(preloaded.has(door), `${id}: ${door} is named but not preloaded`).toBe(true);
+      }
+
+      // Both procedures pre-register their statistics: the held-out rows are tested once per ROUND and the
+      // frame declares the family that correction is spread over. A procedure that skips this authors frames
+      // whose rounds a tightened `campaignFrameDefects` refuses.
+      expect(body, `${id} must tell the frame to declare its family`).toContain("heldOutFamilySize");
+    },
+  );
+
+  it("the agent-evolve example asks the gate rather than restating it", () => {
     const skill = examples.find((r) => r.id === "agent-evolve");
     expect(skill).toBeDefined();
     if (!skill || skill.spec.type !== "skill") return;
     const body = skill.spec.instructions;
-
-    // The two the procedure was missing are the two that move a campaign: one records the evidence, the
-    // other asks the frozen frame what to do with it.
-    for (const door of [
-      "open_campaign",
-      "log_campaign_round",
-      "campaign_decision",
-      "settle_campaign",
-      "campaign_adoption",
-      "adopt_campaign_candidate",
-    ]) {
-      expect(body, `the procedure must name ${door}`).toContain(door);
-    }
-
-    // Everdict's tools load on demand, so a door named in prose and absent from the preload is a door the
-    // agent has to go looking for mid-walk. Derived from the body rather than restated.
-    const select = /select:([a-z_,]+)/.exec(body)?.[1];
-    expect(select, "the procedure must open with a ToolSearch preload").toBeDefined();
-    const preloaded = new Set((select ?? "").split(","));
-    const DOOR =
-      /^(open_campaign|log_campaign_round|settle_campaign|campaign_(decision|adoption)|adopt_campaign_candidate)$/;
-    const named = [...body.matchAll(/\b([a-z_]*campaign[a-z_]*)\b/g)]
-      .map((m) => m[1])
-      .filter((word): word is string => word !== undefined && DOOR.test(word));
-    expect(named.length).toBeGreaterThan(0); // the derivation must actually reach something
-    for (const door of new Set(named)) {
-      expect(preloaded.has(door), `${door} is named but not preloaded`).toBe(true);
-    }
 
     // …and the gate is ASKED, not restated. The prose used to carry its own adoption predicate over
     // whole-round counts while the gate reads the held-out ones — a predicate written twice that had
@@ -186,6 +205,47 @@ describe("firstPartySkillExamples", () => {
     // The drill's own arithmetic: at N=3 a total flip is Fisher p = 0.10, so the old "at least 3" default
     // authored rounds that could not produce a significant result whatever the candidate did.
     expect(body).toContain("N is at least 5");
+  });
+
+  // ── THE SUBJECT THIS PRODUCT IS ACTUALLY ABOUT ──────────────────────────────────────────────────────
+  //
+  // `CampaignSubject.type` is `agent | harness` and only the agent half had a procedure, which is backwards:
+  // everdict evaluates harnesses, and the agent loop is the reference owner runtime pointed at itself.
+  //
+  // The load-bearing difference is evidentiary, so that is what is asserted. A harness round is a REAL batch
+  // — submit seals `harness.specDigest` and every case records the image bytes it ran from — so identity is
+  // `exact`, the world axis reads held, and NEITHER waiver belongs on the frame. A procedure that reached for
+  // one would be papering over a broken batch with a frozen declaration nobody can withdraw.
+  it("the harness-evolve example runs real batches, and tells you the waivers are not the repair", () => {
+    const skill = examples.find((r) => r.id === "harness-evolve");
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    const body = skill.spec.instructions;
+
+    // The harness lane's own doors: a candidate is an INSTANCE it registers, and the evaluation is a batch.
+    for (const anchor of [
+      "register_harness",
+      "pin_harness_images",
+      "diff_harness_versions",
+      "run_scorecard",
+      "references/levers.md",
+      "NOISE FLOOR",
+    ]) {
+      expect(body).toContain(anchor);
+    }
+
+    // The waivers are NAMED so the procedure can refuse them, and the refusal names what to fix instead.
+    expect(body).toContain("allowLabelOnlyAdoption");
+    expect(body).toContain("allowUnverifiedIdentity");
+    expect(body).toContain("the BATCH is wrong, not the frame");
+
+    // …and the levers file carries the half that reads like a trap: moving the scaffold is the treatment,
+    // and the world axis compares the TASK container, which no harness pin touches.
+    const levers = skill.spec.files.find((f) => f.path === "references/levers.md");
+    expect(levers).toBeDefined();
+    for (const anchor of ["pins.model", "template.version", "execution_world", "What IS a confound"]) {
+      expect(levers?.content).toContain(anchor);
+    }
   });
 
   it("the memory-consolidation example carries the orient→gather→consolidate→prune pass over memory/", () => {

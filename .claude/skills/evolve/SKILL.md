@@ -76,3 +76,9 @@ So the split to hold in mind, because every mistake below is a confusion of the 
   cause, and the repair. Read when something comes back not-comparable or 409.
 - Rule `protocol` for why the verdict is derived rather than accepted; skill `evaluation` for the scorecard
   and diff semantics the round verdict is built from.
+
+This file is the driver for a human or an outside agent. The product's own agent has the same walk as two
+first-party skills in `packages/application-control/src/capability/first-party.ts` — `agent_evolve` for an
+agent configuration (shadow tries, ingested traces) and `harness_evolve` for a harness (real batches, so no
+identity waiver). They are the same protocol with different subjects; when this file changes, check whether
+they say the same thing.

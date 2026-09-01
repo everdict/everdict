@@ -863,8 +863,184 @@ const AGENT_EVOLVE: CapabilityRecord = {
   createdAt: "2026-08-16T00:00:00.000Z",
 };
 
+// ── THE OTHER SUBJECT, WHICH WAS THE ORIGINAL ONE ───────────────────────────────────────────────────
+//
+// `CampaignSubject.type` is `agent | harness`, and until now only one of the two had a procedure. That is
+// backwards relative to what this product is: everdict evaluates HARNESSES, and the agent loop is the
+// reference owner runtime pointed at its own configuration.
+//
+// It is also the loop with the stronger evidence, which is the thing worth teaching. `agent_evolve` scores
+// INGESTED traces, so its rounds name no registry document and its frames end up carrying
+// `allowLabelOnlyAdoption`. A harness round is a real batch: submit seals `harness.specDigest`, and every case
+// records the image bytes it actually ran from. Identity is `exact`, the world axis reads `held`, and neither
+// waiver has any business on the frame — so "needs no waivers" is this skill's headline rather than a footnote.
+//
+// The asymmetry that makes the levers safe is worth stating too, because it reads like a trap and is not: the
+// campaign's two sides are two VERSIONS of one harness, so the harness is the treatment. `harness_model`
+// abstains when the treatment moved (the delta IS the treatment), and `execution_world` compares what each
+// CASE ran from — `imageProvenance` is the driver's resolution of `evalCase.image`, the task container, which
+// no harness pin touches. Changing a model or an image pin is therefore a hypothesis, not a confound.
+const HARNESS_EVOLVE_INSTRUCTIONS = `
+# Evolve a harness (optimization campaign on the scaffold)
+
+Improve a HARNESS — the scaffold the agent under test runs inside — with the trust harness as the oracle: a
+candidate is adopted only when a statistically significant scorecard diff proves it better on held-out
+scenarios. \`agent_evolve\`'s subject is an agent configuration; this one's subject is the thing being
+evaluated, which is what everdict is for.
+
+Everdict's tools load on demand. Before anything else:
+\`ToolSearch\` with \`select:list_harnesses,get_harness_instance,diff_harness_versions,register_harness,pin_harness_images,run_scorecard,get_scorecard,estimate_scorecard,diff_scorecards,create_issue,update_issue,open_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate\`.
+
+## Why this loop needs no waivers — and what that obliges
+Every round here is a REAL batch, which buys two things the ingested-trace loop cannot have:
+
+- submit seals \`harness.specDigest\`, so an adoption names the BYTES it measured. Identity is \`exact\` and
+  \`allowLabelOnlyAdoption\` has no business on this frame.
+- each case records the image bytes it actually ran from, so the world axis reads held rather than unverified.
+  \`allowUnverifiedIdentity\` has no business here either.
+
+If you find yourself wanting either waiver, the BATCH is wrong, not the frame. Fix the batch.
+
+## 0. Frame the campaign — and freeze it
+- \`subject: { type: "harness", id, baselineVersion }\` — one harness family, one fixed baseline version.
+- \`scenarios\` — the dataset case ids this campaign runs, each with \`heldOut\`. At least two held out, and
+  those rows are the only ones the gate reads: improving where you have been pushing is evidence about your
+  search, not about the scaffold.
+- \`trialsPerCase\` N and \`budget.maxRounds\`, chosen TOGETHER. A total flip is the strongest per-case result
+  there is and its p-value is fixed by N alone: 0/3 → 3/3 is Fisher p = 0.10 (never significant), 0/5 → 5/5 is
+  0.0079, 0/6 → 6/6 is 0.0022. Rounds are judged at \`fdrAlpha / heldOutFamilySize\`, so N=5 carries about six
+  rounds and a longer walk needs N=6+.
+- \`significance: { fdrAlpha, heldOutFamilySize }\` — both required. The held-out rows are tested once per
+  ROUND and any round can end the walk, so the family is pre-registered: set it to \`budget.maxRounds\`, larger
+  only if a follow-up campaign will reuse the same held-out rows.
+- \`judges\` when the goal is a judge score. The frame pins them and both sides must match exactly.
+- \`create_issue\` for the narrative journal, then \`open_campaign { issueId, frame }\` for the RECORD. Frozen
+  at that call; a frame you want to change is a new campaign.
+- Price the walk BEFORE opening it (\`estimate_scorecard\`): a round is cases x N executions, and unlike a
+  shadow try that is compute as well as tokens. The baseline is run once and reused, so steady state is one
+  batch per round.
+
+## 1. Baseline — and its noise floor
+- \`run_scorecard { dataset, harness: <id>@<baselineVersion>, trials: N }\`, then \`get_scorecard\`: the
+  per-case variance and flake rate are the NOISE FLOOR. A delta smaller than this floor is not information,
+  and a baseline flaking above ~0.4 means you are about to evolve on a noisy oracle — fix scenario determinism
+  first.
+- The baseline is reused every round, and a reused baseline AGES. If the dataset's task image is a moving tag,
+  an old baseline and a fresh candidate record different image bytes and every round comes back confounded on
+  \`execution_world\`. Re-run the baseline; never waive it, because a delta measured across two worlds says
+  nothing about the scaffold.
+
+## 2. Mutate — one lever per round
+A candidate is an INSTANCE: \`{ template: {id, version}, id, version, pins, overrides? }\`. The template is the
+structure and the instance fills its slots, so the levers are ordered by how much structure they move:
+\`pins.model\` · \`overrides\` (env/params the template exposes: retries, tool budgets, timeouts) ·
+\`pins.image\` (the scaffold's own bytes) · \`template.version\` (a different structure — the biggest lever,
+and the one that most deserves a fresh baseline). Load \`references/levers.md\` for what each one costs.
+
+- \`register_harness\` with the instance JSON mints an immutable new version; \`pin_harness_images\` does the
+  image-only case headlessly.
+- ONE lever per round, and write the hypothesis to the issue BEFORE running it.
+- \`diff_harness_versions\` between baseline and candidate is how you CHECK you moved one thing. Read it before
+  the batch, not after the surprise.
+- Delete rejected experiment versions (\`delete_harness\`) so the registry stays a record of what shipped.
+
+## 3. Evaluate the candidate, and record the round
+- The same dataset, the same N, the same judges → a second batch on the candidate version.
+- \`diff_scorecards\` is for YOUR reading — what moved, and where to aim next. Read \`comparability\` FIRST:
+  'none' means the comparison does not hold, which is a different fact from "no difference".
+- Then \`log_campaign_round { hypothesis, candidateVersion, baselineScorecardId, candidateScorecardId }\`. You
+  do NOT send a verdict — the platform derives it from that same diff, so the loop cannot write its own report
+  card, and a round you never logged is a round the campaign cannot count.
+- A round recorded as not-comparable still spends a round and counts toward the rejected streak. Read its
+  reason first: a slice the frame does not name, trials below \`trialsPerCase\`, a judge set that differs, or a
+  confound.
+
+## 4. Decide — ask the gate, never re-derive it
+- \`campaign_decision\` answers \`continue\` · \`adopt\` · \`halt\` over the frozen frame and the whole round
+  trace. Ask it; do not re-implement it.
+- \`continue\` → back to step 2. \`halt\` → \`settle_campaign\` and report the reason.
+- \`adopt\` → \`settle_campaign\` writes the authorization, \`campaign_adoption\` reads it back, and
+  \`adopt_campaign_candidate\` spends it. Hand it the INSTANCE spec you registered in step 2 — not the resolved
+  document: the platform resolves, registers, reads back and compares against what the campaign measured.
+- Only the LATEST round is adoptable. If round 4 won and round 5 regressed, re-run round 4's candidate.
+
+## Constraints
+- NEVER weaken the dataset, the judges or the verdict policy mid-campaign — changing the oracle to manufacture
+  a win is the exact failure this procedure prevents. Fix the oracle, then restart with a fresh baseline.
+- Moving the SCAFFOLD is never a confound: the model-closure axis abstains when the harness itself moved, and
+  the world axis reads the TASK container, which your pins do not touch. What IS a confound is the task
+  container moving under you.
+- Adopting changes what every future batch on that harness runs. Present the diff and ask before adopting when
+  working interactively; park it behind an approval in headless automation.
+`.trim();
+
+// The levers, as a supporting file: which knobs a harness instance actually exposes, and — the half that reads
+// like a trap — why moving them is a hypothesis rather than a confound.
+const HARNESS_EVOLVE_LEVERS = `
+# The levers, and what each one is
+
+A harness instance is \`{ template: {id, version}, id, version, pins, overrides? }\`. The TEMPLATE is the
+structure — which commands run, which slots exist — and the instance fills the slots. So the levers below are
+ordered by how much structure they move, which is also roughly the order of how much they move outcomes.
+
+**\`pins.model\`** — which model the scaffold drives. Usually the largest single-variable effect available, and
+the cheapest to author: one pin, one new instance version.
+
+**\`overrides\`** — structure-invariant behaviour the template exposes (env, params, body): retry counts, tool
+budgets, timeouts, the parameters a template deliberately left open. Prefer these over prompt micro-edits;
+wording changes measure as noise, stop conditions and budgets do not.
+
+**\`pins.image\`** — the scaffold's own bytes. \`pin_harness_images\` mints an image-only successor headlessly,
+which is the same door CI re-pins through, so a campaign candidate and a merge re-pin produce the same shape.
+
+**\`template.version\`** — a different STRUCTURE. The biggest lever and the least comparable one: a new template
+changes what runs, so give it a fresh baseline rather than diffing it against a scaffold it no longer resembles.
+
+## Why none of these is a confound
+A campaign's two sides are two VERSIONS of one harness, so the harness IS the treatment, and the identity axes
+are built for exactly that:
+
+- \`harness_model\` applies only under a held treatment — same harness id@version on both sides. In a campaign
+  the version always differs, so the axis claims nothing: the delta is the treatment.
+- \`execution_world\` compares what each CASE ran from. The recorded provenance is the driver's resolution of
+  the eval case's own image — the task container — which no harness pin touches.
+
+## What IS a confound
+- **The task container moving under you.** A mutable dataset image tag means an old baseline and a fresh
+  candidate ran different bytes; the axis says so and the round is not comparable. Re-run the baseline.
+- **Judges differing between the sides.** The frame pins them; the batches must match it exactly.
+- **Resources, network, lane or isolation differing.** Two enforcement mechanisms are two worlds, whether or
+  not the numbers agree.
+
+A confound is never waivable, and that is deliberate: \`allowUnverifiedIdentity\` records that an axis could not
+be VERIFIED, which is a different claim from one the platform verified as different.
+`.trim();
+
+const HARNESS_EVOLVE: CapabilityRecord = {
+  id: "harness-evolve",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "harness_evolve",
+  description:
+    "Run an optimization campaign on a HARNESS — the scaffold under test: baseline it with repeated trials, " +
+    "measure the noise floor, move ONE lever per round (model pin, overrides, image, template), and adopt a new " +
+    "instance version only over a statistically significant diff on held-out scenarios. Real batches, so the " +
+    "adoption names the bytes it measured and needs no identity waiver. Use when a member asks to improve a " +
+    "harness, or when a scorecard trend says the scaffold is the ceiling.",
+  spec: {
+    type: "skill",
+    instructions: HARNESS_EVOLVE_INSTRUCTIONS,
+    files: [{ path: "references/levers.md", content: HARNESS_EVOLVE_LEVERS }],
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["harness", "evolution", "scorecard", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-09-01T00:00:00.000Z",
+};
+
 export function firstPartySkillExamples(): CapabilityRecord[] {
-  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION, DELEGATE_WORK, AGENT_EVOLVE];
+  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION, DELEGATE_WORK, AGENT_EVOLVE, HARNESS_EVOLVE];
 }
 
 // The DELEGATOR's side of a delegation. The delegation profile (CODE_DELEGATE below) is written in the
