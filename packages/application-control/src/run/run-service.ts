@@ -880,8 +880,7 @@ export class RunService {
   > {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    const slice = this.deps.liveTraceEvents?.(RunService.runIdFor(record), after);
-    const pushed = slice?.events ?? [];
+    let slice = this.deps.liveTraceEvents?.(RunService.runIdFor(record), after);
     const pulled = this.deps.readCaseEvents
       ? ((await this.deps
           .readCaseEvents(
@@ -895,6 +894,20 @@ export class RunService {
     // Disjoint sources (a runner pushes, a managed job prints — never both), so concatenation is the merge; the
     // dispatch marks lead, mirroring the sealed layout (TraceRecordingDispatcher prepends the placement plane).
     //
+    // ── A REPLY THAT SAYS "REPLACE" MUST CARRY A WHOLE WINDOW ───────────────────────────────────────
+    //
+    // The two lanes are disjoint in practice — a runner pushes, a managed job prints — but nothing enforces
+    // it: both are wired unconditionally at the composition root, so "never both" is a claim about runtime,
+    // not a structural guarantee. If it were ever wrong, the pulled lane's snapshot would set
+    // `incremental: false` (correctly — a snapshot is re-read whole every poll) while the pushed half was
+    // still the cursor's DELTA, and a reader doing what it was told — replace — would drop every pushed
+    // event it already held.
+    //
+    // So the cursor is honoured only while the answer stays an append. The re-read is an in-memory ring
+    // slice, i.e. free, and it runs only on a pairing that is supposed to be impossible.
+    if (pulled.length > 0 && after !== undefined)
+      slice = this.deps.liveTraceEvents?.(RunService.runIdFor(record), undefined);
+    const pushed = slice?.events ?? [];
     // Incremental only when the pushed lane is the one answering AND the cursor was still inside its window.
     // A `gap` (the ring evicted events this reader never saw) is deliberately NOT incremental: appending onto
     // a hole would render a trace that never happened, which is worse than re-drawing the window.

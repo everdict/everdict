@@ -106,6 +106,36 @@ describe("GET /runs/:id/trajectory/live — the trajectory accumulating while th
     await app.close();
   });
 
+  // ── A REPLY THAT SAYS "REPLACE" MUST CARRY A WHOLE WINDOW ─────────────────────────────────────────
+  //
+  // `incremental` tells the reader whether this page CONTINUES what it holds. The pulled lane is a snapshot
+  // re-read whole every poll, so a pair that carries one answers `false` — and the pushed half was still the
+  // cursor's DELTA, so a reader doing exactly what it was told would drop everything it already held.
+  //
+  // The pairing is supposed to be impossible ("a runner pushes, a managed job prints — never both"), and
+  // that sentence is a comment: both lanes are wired unconditionally at the composition root, so it is a
+  // claim about runtime rather than a structural guarantee. A guarantee nothing enforces is one to test.
+  //
+  // Seen RED before the re-read, observed:
+  //   the second poll returned [STEP, PULLED] — the delta, not the window, under `incremental: false`.
+  it("re-reads the whole pushed window when the pulled lane also answers, so a replace is a real replace", async () => {
+    const PULLED: TraceEvent = { t: 9, kind: "message", role: "assistant", text: "from stdout" };
+    const { app, liveTraces } = await build({ pulled: [PULLED] });
+    liveTraces.append("evd-run-r1", [MARK]);
+    const first = (await app.inject({ method: "GET", url: "/runs/r1/trajectory/live", headers: bearer })).json();
+    expect(first.incremental, "a snapshot lane cannot be an append").toBe(false);
+
+    liveTraces.append("evd-run-r1", [STEP]);
+    const next = (
+      await app.inject({ method: "GET", url: `/runs/r1/trajectory/live?after=${first.next}`, headers: bearer })
+    ).json();
+    // Still a replace…
+    expect(next.incremental).toBe(false);
+    // …and therefore the WHOLE pushed window, not the slice after the cursor.
+    expect(next.events, "a replace carried only the delta — the reader would lose MARK").toEqual([MARK, STEP, PULLED]);
+    await app.close();
+  });
+
   // A reader that fell behind the ring is told so rather than handed a page that does not continue what it
   // holds — appending onto that hole would draw a trace the run never produced.
   it("answers a cursor the ring has passed as NOT incremental, with the window it can still serve", async () => {

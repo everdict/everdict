@@ -142,9 +142,16 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
 // union, and rendered the lot — the read, the parse and the DOM all scaling with the run's DURATION.
 //
 // 500 is chosen against what a reader can actually use rather than what the wire can carry: it is more than
-// any screenful, and small enough that the parse stays imperceptible on a slow machine. `meta.eventCount` is
-// the sealed TOTAL, so a truncated view can say so and page forward instead of pretending it is whole — a
-// silently-cut trace is the worst direction for evidence to fail in.
+// any screenful, and small enough that the parse stays imperceptible on a slow machine. A truncated view says
+// so and pages forward instead of pretending it is whole — a silently-cut trace is the worst direction for
+// evidence to fail in.
+//
+// ⚠️ AND "IS THERE MORE" IS THE STORE'S ANSWER, NOT ARITHMETIC. This first read that question from
+// `from + shown < meta.eventCount`, which is a different question: `meta.eventCount` sums EVERY sealed plane
+// and a page serves ONE, so a service-topology run (an execution plane plus a plane per service emitter)
+// overstated its total and kept offering a next page after the plane it was paging had run out. `nextAfter`
+// was on the wire the whole time and the web schema dropped it — a predicate written twice, already diverged
+// (rule `protocol` L3).
 const TRACE_PAGE = 500
 
 export default async function RunDetailPage({
@@ -197,8 +204,10 @@ export default async function RunDetailPage({
   let trace = run.result?.trace ?? []
   let trajectorySource: string | undefined
   let segments: TrajectorySegment[] = []
-  // What this screen is actually showing, when the sealed trace is longer than one page.
-  let traceWindow: { from: number; shown: number; total: number } | undefined
+  // What this screen is actually showing, when the sealed trace is longer than one page. `nextAfter` is the
+  // STORE's answer to "is there more, and from where" — never re-derived from a count, because
+  // `meta.eventCount` sums every plane while this page serves one.
+  let traceWindow: { from: number; shown: number; total: number; nextAfter?: number } | undefined
   if (trace.length === 0) {
     try {
       const runScoped = trajectoryResponseSchema.parse(
@@ -206,7 +215,17 @@ export default async function RunDetailPage({
       )
       trace = runScoped.events
       trajectorySource = runScoped.meta.source
-      traceWindow = { from: traceFrom, shown: runScoped.events.length, total: runScoped.meta.eventCount }
+      // The total belongs to the plane being paged, not to the trajectory: a service-topology run seals a
+      // plane per emitter and `meta.eventCount` is their SUM, so quoting it here would tell a reader their
+      // window is a fifth of what it is. Falls back to the trajectory's count when nothing names a plane —
+      // which is every single-plane run, i.e. almost all of them.
+      const pagedPlane = runScoped.segments.find((segment) => segment.execution === true)
+      traceWindow = {
+        from: traceFrom,
+        shown: runScoped.events.length,
+        total: pagedPlane?.eventCount ?? runScoped.meta.eventCount,
+        ...(runScoped.nextAfter !== undefined ? { nextAfter: runScoped.nextAfter } : {}),
+      }
       segments =
         runScoped.segments.length > 0
           ? runScoped.segments.map((segment) => ({
@@ -570,7 +589,7 @@ export default async function RunDetailPage({
           )}
           {/* A trace longer than one page says so, and pages — never a silent truncation, which would let a
               reader draw a conclusion from evidence the screen quietly cut. */}
-          {traceWindow !== undefined && traceWindow.total > traceWindow.shown && (
+          {traceWindow !== undefined && (traceWindow.nextAfter !== undefined || traceWindow.from > 0) && (
             <p className="flex items-center gap-3 text-xs text-muted-foreground">
               <span>
                 {t('traceWindow', {
@@ -587,8 +606,8 @@ export default async function RunDetailPage({
                   {t('tracePrev')}
                 </Link>
               )}
-              {traceWindow.from + traceWindow.shown < traceWindow.total && (
-                <Link className="underline" href={`?traceAfter=${traceWindow.from + TRACE_PAGE}`}>
+              {traceWindow.nextAfter !== undefined && (
+                <Link className="underline" href={`?traceAfter=${traceWindow.nextAfter}`}>
                   {t('traceNext')}
                 </Link>
               )}

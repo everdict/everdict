@@ -68,9 +68,21 @@ export const trajectoryResponseSchema = z.object({
         t0: z.string().optional(),
         sealedAt: z.string(),
         events: z.array(z.unknown()).optional(),
+        // Which plane the top-level `events` page belongs to. Without it a reader cannot tell whose count
+        // `meta.eventCount` is measuring against — see `nextAfter` below.
+        execution: z.boolean().optional(),
       })
     )
     .default([]),
+  // ── THE PRODUCER'S OWN ANSWER TO "IS THERE MORE" ────────────────────────────────────────────────
+  //
+  // The store returns this only when the page it just served left something behind, and it is the position
+  // to resume from. It was on the wire and this schema dropped it, so the run detail derived the same
+  // question from `from + shown < meta.eventCount` instead — and those are not the same question:
+  // `meta.eventCount` sums EVERY segment while a page serves ONE plane, so a multi-plane trajectory (a
+  // service-topology harness pushing its own spans) overstated the total and offered a next page after the
+  // plane was exhausted. A predicate written twice had already diverged (rule `protocol` L3).
+  nextAfter: z.number().int().nonnegative().optional(),
 })
 export type TrajectoryResponse = z.infer<typeof trajectoryResponseSchema>
 

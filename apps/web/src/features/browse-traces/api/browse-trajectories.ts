@@ -80,6 +80,9 @@ const trajectoryDetailSchema = z.object({
   meta: trajectoryMetaSchema,
   events: z.array(traceEventSchema).default([]),
   segments: z.array(trajectorySegmentSchema).default([]),
+  // The store's own "there is more, resume here". Read rather than re-derived: `meta.eventCount` sums every
+  // sealed plane while a page serves one, so counting against it offers pages that do not exist.
+  nextAfter: z.number().int().nonnegative().optional(),
 })
 
 export type GetTrajectoryResult =
@@ -92,6 +95,8 @@ export type GetTrajectoryResult =
       // A caller that never reads them still draws a correct (if partial) view; one that does can page.
       from: number
       total: number
+      // Absent = this page exhausted the plane. Present = the position the next read starts from.
+      nextAfter?: number
     }
   | { ok: false; error: string }
 
@@ -125,6 +130,7 @@ export async function getTrajectoryAction(runId: string, after = 0): Promise<Get
       events: detail.events,
       from: after,
       total: detail.meta.eventCount,
+      ...(detail.nextAfter !== undefined ? { nextAfter: detail.nextAfter } : {}),
       // A control plane that predates the multi-plane rung sends no segments — the execution's own stream
       // is then the whole trajectory, and the view reads it as a single plane.
       segments:

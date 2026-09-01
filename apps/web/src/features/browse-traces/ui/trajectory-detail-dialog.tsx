@@ -53,6 +53,8 @@ export function TrajectoryDetailDialog({
   // whole run before it draws anything.
   const [loaded, setLoaded] = useState(0)
   const [total, setTotal] = useState(0)
+  // The store's answer, not ours: absent means this page exhausted the plane.
+  const [nextAfter, setNextAfter] = useState<number | undefined>()
 
   useEffect(() => {
     if (!open) return
@@ -61,6 +63,7 @@ export function TrajectoryDetailDialog({
     setError(undefined)
     setLoaded(0)
     setTotal(0)
+    setNextAfter(undefined)
     start(async () => {
       const res = await getTrajectoryAction(runId)
       if (res.ok) {
@@ -68,6 +71,7 @@ export function TrajectoryDetailDialog({
         setFetchedMeta(res.meta)
         setLoaded(res.events.length)
         setTotal(res.total)
+        setNextAfter(res.nextAfter)
       } else setError(res.error)
     })
   }, [open, runId])
@@ -77,7 +81,7 @@ export function TrajectoryDetailDialog({
   // it had rather than being reset to nothing.
   const loadMore = () => {
     start(async () => {
-      const res = await getTrajectoryAction(runId, loaded)
+      const res = await getTrajectoryAction(runId, nextAfter ?? loaded)
       if (!res.ok) {
         setError(res.error)
         return
@@ -93,6 +97,7 @@ export function TrajectoryDetailDialog({
         return [...merged, ...byEmitter.values()]
       })
       setLoaded((n) => n + res.events.length)
+      setNextAfter(res.nextAfter)
     })
   }
 
@@ -203,7 +208,7 @@ export function TrajectoryDetailDialog({
           <>
             {/* A partial view says so. A trace silently cut is evidence a reader would draw conclusions
                 from without knowing what was left out. */}
-            {total > loaded && (
+            {nextAfter !== undefined && (
               <p className="flex items-center gap-3 px-1 pb-2 text-[12px] text-faint">
                 <span>{t('traceWindow', { shown: loaded, total })}</span>
                 <button className="underline" disabled={pending} onClick={loadMore} type="button">

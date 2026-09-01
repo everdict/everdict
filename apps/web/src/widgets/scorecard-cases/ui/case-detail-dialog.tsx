@@ -72,6 +72,8 @@ export function CaseDetailDialog({
   // How much of the trace this dialog holds, and how much the seal says there is.
   const [traceLoaded, setTraceLoaded] = useState(0)
   const [traceTotal, setTraceTotal] = useState(0)
+  // The store's answer to "is there more, from where" — never counted against a total that sums other planes.
+  const [traceNextAfter, setTraceNextAfter] = useState<number | undefined>()
   const [pending, start] = useTransition()
 
   // Execution evidence and score evidence are fetched for this one case on open: with a child run the
@@ -104,6 +106,7 @@ export function CaseDetailDialog({
         setSegments(trajectory.segments)
         setTraceLoaded(trajectory.events.length)
         setTraceTotal(trajectory.total)
+        setTraceNextAfter(trajectory.nextAfter)
       } else setTraceError(trajectory.error)
     })
   }, [scorecardId, c.key, c.caseId, c.occurrence, c.runId, c.hasTrace])
@@ -115,7 +118,7 @@ export function CaseDetailDialog({
     const runId = c.runId
     if (runId === undefined) return
     start(async () => {
-      const more = await getTrajectoryAction(runId, traceLoaded)
+      const more = await getTrajectoryAction(runId, traceNextAfter ?? traceLoaded)
       if (!more.ok) {
         setTraceError(more.error)
         return
@@ -131,6 +134,7 @@ export function CaseDetailDialog({
         return [...merged, ...byEmitter.values()]
       })
       setTraceLoaded((n) => n + more.events.length)
+      setTraceNextAfter(more.nextAfter)
     })
   }
 
@@ -298,7 +302,7 @@ export function CaseDetailDialog({
             ) : segments !== undefined && segments.length > 0 ? (
               // TrajectoryView 는 호스트가 확정 높이를 줘야 한다 — run 상세의 증거 섹션과 같은 규칙.
               <div className="h-[46vh] min-h-[320px] rounded-lg border border-border bg-card p-3">
-                {traceTotal > traceLoaded && (
+                {traceNextAfter !== undefined && (
                   <p className="flex items-center gap-3 pb-2 text-[12px] text-faint">
                     <span>{t('caseTraceWindow', { shown: traceLoaded, total: traceTotal })}</span>
                     <button
