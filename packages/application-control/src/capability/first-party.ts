@@ -764,7 +764,18 @@ Everdict's tools load on demand. Before anything else:
   outcomes; prompt micro-edits measure as noise (the ExitGuard campaign's lesson).
 - A candidate that only changes instructions rides \`try_agent\`'s \`draft.instructions\` overlay — evaluated
   WITHOUT saving a version. A candidate that changes tools/skills/model must be saved first (\`save_agent\`
-  auto-bumps an immutable version); evaluate that saved id and delete rejected experiment versions after.
+  auto-bumps an immutable version); evaluate that saved id.
+- ⚠️ A REJECTED ROUND IS NOT ALWAYS A DEAD END, and the difference is in its verdict. A round rejected with
+  \`heldOut.regressions > 0\` is worse — abandon that direction. A round rejected while COMPARABLE with zero
+  improvements and zero regressions is NEUTRAL, and neutral is a foundation: keep that version and author the
+  next candidate ON TOP of it. Every round compares against the frame's frozen baseline, never against the
+  previous round, so two neutral steps that only pay off together are measured as one cumulative delta and
+  the walk can reach them. Delete the versions that were WORSE; keep the neutral ones until the campaign
+  closes, then delete what did not ship.
+- This matters more here than elsewhere because the family correction makes neutral rounds MORE common: the
+  round is judged at \`fdrAlpha / heldOutFamilySize\`, so a real but small effect will often not clear it. An
+  honest detection floor produces steps that are genuinely useful and individually unprovable, and throwing
+  them away is throwing away what the honesty cost.
 - One variable per round, and write the hypothesis to the campaign issue BEFORE running it.
 - FIRST read what the walk already knows: \`get_campaign\` returns every round's \`learned\`, the rounds that
   LOST included. A rejected round is the one most likely to know why, and reading nineteen of them is how
@@ -969,7 +980,13 @@ and the one that most deserves a fresh baseline). Load \`references/levers.md\` 
   knowledge to the proposer alone. The oracle rule and this rule are the same rule.
 - \`diff_harness_versions\` between baseline and candidate is how you CHECK you moved one thing. Read it before
   the batch, not after the surprise.
-- Delete rejected experiment versions (\`delete_harness\`) so the registry stays a record of what shipped.
+- ⚠️ Keep a rejected instance until you know WHY it was rejected. Regressions on held-out mean the lever was
+  wrong — abandon it and \`delete_harness\` the version. But a comparable round with zero improvements and
+  zero regressions is NEUTRAL, and a neutral instance is a base to build the next lever on: the comparison is
+  always against the frame's frozen baseline, so a second lever stacked on it is measured as the cumulative
+  delta and a two-step win is reachable. The family correction (\`fdrAlpha / heldOutFamilySize\`) makes these
+  common — a real but small effect often will not clear the round's level — so discarding them wastes exactly
+  what the correction cost. Sweep the registry when the campaign closes, not while it is walking.
 
 ## 3. Evaluate the candidate, and record the round
 - The same dataset, the same N, the same judges → a second batch on the candidate version.

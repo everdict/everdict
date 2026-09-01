@@ -83,6 +83,19 @@ So the split to hold in mind, because every mistake below is a confusion of the 
 - **The exam is the frame's.** The compared cases must be EXACTLY the frame's scenarios (missing and extra
   both reject) and the judges exactly the frame's judges. Run a different dataset slice and every round is
   incomparable, with no error at submit time to warn you.
+- **A rejected round is not always a dead end.** Read WHY it lost. Held-out regressions mean the direction was
+  wrong — abandon it. But a comparable round with zero improvements and zero regressions is NEUTRAL, and a
+  neutral candidate is a foundation: author the next one on top of it and keep its version alive. Every round
+  compares against the frame's FROZEN baseline, never against the previous round, so two steps that only pay
+  off together are measured as one cumulative delta.
+
+  This is where the design differs from the literature it resembles. WikiSkill (arXiv 2608.27454) records
+  "strict validation gating excludes neutral updates" as a limitation, and it is one for them because their
+  loop rolls the skill directory back to the last ACCEPTED state — the neutral step is destroyed. Here the
+  baseline is frozen and the candidate is free, so nothing is destroyed unless the driver deletes it. And the
+  family correction makes neutral rounds MORE common (a round is judged at `fdrAlpha / heldOutFamilySize`, so
+  a real but small effect often will not clear it), which means discarding them wastes precisely what the
+  correction cost.
 - **A finding is advice, never evidence.** `learned` is the one value on a round the loop authors about its
   own walk, so the adoption gate does not read it and must not — the whole reason the verdict is derived is
   that a loop may not write its own report card. It feeds the next proposal, which is a different question
