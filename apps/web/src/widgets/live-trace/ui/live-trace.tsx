@@ -25,11 +25,29 @@ export function LiveTrace({ runId, initialStatus }: { runId: string; initialStat
     if (TERMINAL.has(initialStatus)) return
     let stopped = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    // ── THE POLL CARRIES WHAT CHANGED, NOT WHAT EXISTS ──────────────────────────────────────────────
+    //
+    // This asked for the whole buffer every 3 seconds and re-validated every event through the trace union
+    // before replacing the list. On a five-hour agent run that is the entire cost of the panel, paid twenty
+    // times a minute for hours, while almost nothing has changed between two of them.
+    //
+    // `after` carries the reader's absolute cursor and the reply says whether the page CONTINUES what is
+    // held. It usually does, so the parse and the re-render scale with the new events; when it does not (the
+    // server's ring evicted events this reader never saw) the reply says `incremental: false` and the list
+    // is redrawn — appending onto that hole would render a trace the run never produced.
+    let cursor: number | undefined
     const tick = async () => {
       try {
-        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/trajectory/live`)
+        const qs = cursor === undefined ? '' : `?after=${cursor}`
+        const res = await fetch(`/api/runs/${encodeURIComponent(runId)}/trajectory/live${qs}`)
         if (res.ok) {
-          const body = (await res.json()) as { status: string; found: boolean; events: unknown[] }
+          const body = (await res.json()) as {
+            status: string
+            found: boolean
+            events: unknown[]
+            incremental?: boolean
+            next?: number
+          }
           if (stopped) return
           setStatus(body.status)
           // 페이지의 toEvidence 와 같은 이벤트 단위 엄격 렌즈: 이 빌드가 모르는 kind 는 그 이벤트만
@@ -39,7 +57,11 @@ export function LiveTrace({ runId, initialStatus }: { runId: string; initialStat
             const parsed = traceEventSchema.safeParse(event)
             if (parsed.success) evidence.push(parsed.data)
           }
-          setEvents(evidence)
+          // A server that predates the cursor sends no `incremental`; treating that absence as "replace" keeps
+          // the old behaviour exactly, which is the safe direction for a field that decides append-vs-redraw.
+          const appends = body.incremental === true && cursor !== undefined
+          setEvents((held) => (appends ? (evidence.length > 0 ? [...held, ...evidence] : held) : evidence))
+          if (typeof body.next === 'number') cursor = body.next
           if (TERMINAL.has(body.status)) return // run 종료 — 마지막 읽기를 남기고 폴링 중단
         }
       } catch {

@@ -334,8 +334,29 @@ export const controlPlane = {
     ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   // The run's OWNED trajectory (sealed evidence; embed fallback during dual-read — meta.source says which copy served).
-  getRunTrajectory: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/runs/${encodeURIComponent(id)}/trajectory`),
+  //
+  // ── A FIVE-HOUR AGENT'S TRACE IS NOT A PAGE ─────────────────────────────────────────────────────────
+  //
+  // The route has taken `after` and `limit` since the split-plane read landed, and this caller passed
+  // neither — so opening a long-running agent's run meant fetching every event it had ever emitted, parsing
+  // each one through a discriminated union, and rendering the lot. The bound existed; nobody asked for it,
+  // which is this repo's most-repeated shape (rule `protocol`: a capability the consumer never received).
+  //
+  // `meta.eventCount` is the SEALED total, not the page length, so a caller can always say "N of M" — and
+  // the store refuses a header claiming events it cannot serve, which is what makes that number evidence
+  // rather than decoration.
+  getRunTrajectory: <T>(
+    auth: AuthContext,
+    id: string,
+    query: { after?: number; limit?: number; emitter?: string } = {}
+  ) => {
+    const qs = new URLSearchParams()
+    if (query.after !== undefined) qs.set('after', String(query.after))
+    if (query.limit !== undefined) qs.set('limit', String(query.limit))
+    if (query.emitter) qs.set('emitter', query.emitter)
+    const suffix = qs.toString()
+    return call<T>(auth, `/runs/${encodeURIComponent(id)}/trajectory${suffix ? `?${suffix}` : ''}`)
+  },
   // One sealed trajectory from the owned ledger (meta + events). Opens every source — an otlp arrival or a
   // materialized import has no run row, so the run-scoped read above cannot reach it.
   getTrajectory: <T>(auth: AuthContext, id: string) =>
@@ -360,8 +381,11 @@ export const controlPlane = {
       `/runs/${encodeURIComponent(id)}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ''}`
     ),
   // 라이브 궤적 스냅숏 (LiveTrace 위젯이 폴링) — 실행 중 쌓이는 TraceEvent 전량(봉인 전 미리보기).
-  getRunLiveTrace: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/runs/${encodeURIComponent(id)}/trajectory/live`),
+  getRunLiveTrace: <T>(auth: AuthContext, id: string, after?: number) =>
+    call<T>(
+      auth,
+      `/runs/${encodeURIComponent(id)}/trajectory/live${after === undefined ? '' : `?after=${after}`}`
+    ),
   // 케이스 배치 조회(런타임 디버깅) — 케이스 잡이 클러스터 안에서 어디까지 갔는지(blocked 용량 판정·노드·이벤트 피드).
   getRunPlacement: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/placement`),

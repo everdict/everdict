@@ -46,7 +46,9 @@ async function build(opts?: { pulled?: TraceEvent[] }) {
     service: new RunService({
       dispatcher: unusedDispatcher,
       store,
-      liveTraceEvents: (runId) => liveTraces.get(runId),
+      // The production wiring, cursor included — a double that dropped `after` would answer every poll with
+      // the whole buffer and the incremental contract would be tested against nothing.
+      liveTraceEvents: (runId, after) => liveTraces.page(runId, after),
       ...(opts?.pulled ? { readCaseEvents: async () => opts.pulled } : {}),
     }),
     requireAuth: true,
@@ -63,11 +65,61 @@ describe("GET /runs/:id/trajectory/live — the trajectory accumulating while th
     expect(first).toMatchObject({ status: "queued", found: true });
     expect(first.events).toEqual([MARK]);
 
-    // Snapshot semantics — a later read returns everything collected so far, in arrival order.
+    // A cursorless read still returns everything collected so far, in arrival order.
     liveTraces.append("evd-run-r1", [STEP]);
     const second = (await app.inject({ method: "GET", url: "/runs/r1/trajectory/live", headers: bearer })).json();
     expect(second.events).toEqual([MARK, STEP]);
     await app.close();
+  });
+
+  // ── A THREE-SECOND POLL MAY NOT COST THE WHOLE BUFFER ─────────────────────────────────────────────
+  //
+  // The live panel re-asks every 3s and used to be handed the entire window each time, so a long agent run
+  // re-shipped and re-validated everything it had emitted, forever. The reader's cost has to scale with what
+  // CHANGED, which needs a cursor that survives the ring's eviction — an array index does not, because the
+  // ring shifts under it.
+  //
+  // Seen RED before the cursor existed, observed:
+  //   the second poll returned [MARK, STEP] for `?after=1` — the whole buffer, as though nothing was asked.
+  it("serves only what arrived after the reader's cursor, and says the page continues theirs", async () => {
+    const { app, liveTraces } = await build();
+    liveTraces.append("evd-run-r1", [MARK]);
+    const first = (await app.inject({ method: "GET", url: "/runs/r1/trajectory/live", headers: bearer })).json();
+    expect(first.events).toEqual([MARK]);
+    // A cursorless first poll is trivially continuous: the reader holds nothing, so appending and replacing
+    // are the same act. `incremental` answers "did this page skip anything you needed", not "is this a delta".
+    expect(first).toMatchObject({ incremental: true, from: 0, next: 1, total: 1 });
+
+    liveTraces.append("evd-run-r1", [STEP]);
+    const next = (
+      await app.inject({ method: "GET", url: `/runs/r1/trajectory/live?after=${first.next}`, headers: bearer })
+    ).json();
+    expect(next.events, "the poll re-shipped events the reader already held").toEqual([STEP]);
+    expect(next).toMatchObject({ incremental: true, from: 1, next: 2, total: 2 });
+
+    // …and a poll with nothing new is an EMPTY page, not the buffer again.
+    const idle = (
+      await app.inject({ method: "GET", url: `/runs/r1/trajectory/live?after=${next.next}`, headers: bearer })
+    ).json();
+    expect(idle.events).toEqual([]);
+    expect(idle).toMatchObject({ incremental: true, total: 2 });
+    await app.close();
+  });
+
+  // A reader that fell behind the ring is told so rather than handed a page that does not continue what it
+  // holds — appending onto that hole would draw a trace the run never produced.
+  it("answers a cursor the ring has passed as NOT incremental, with the window it can still serve", async () => {
+    const store = new LiveTraceStore(900_000, 2); // ring of two, so the third append evicts the first
+    store.append("r", [MARK]);
+    store.append("r", [STEP]);
+    store.append("r", [{ ...STEP, t: 9 }]);
+    const stale = store.page("r", 0);
+    expect(stale?.gap, "a cursor older than the buffer was served as an append").toBe(true);
+    expect(stale?.events).toHaveLength(2);
+    expect(stale?.total).toBe(3);
+    // …while a cursor still inside the window keeps appending.
+    expect(store.page("r", 2)?.gap).toBe(false);
+    expect(store.page("r", 2)?.events).toHaveLength(1);
   });
 
   it("merges the managed lane's event-sentinel pull after the dispatch marks", async () => {

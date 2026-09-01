@@ -311,10 +311,19 @@ export interface RunServiceDeps {
   // lifecycle lines (started / completed / failed [class/stage]: reason). Takes precedence over readCaseLogs for the
   // default (stdout) view: a self-hosted runner has no backend the control plane can tail, so it pushes instead.
   pushLogs?: (runId: string) => string | undefined;
+  // (see `liveTraceEvents` below — `LiveTraceSlice` is declared beside the service's public shapes)
   // Live trajectory PUSHED to the control plane while the run executes (observability ⑨), by CP-minted runId —
   // the dispatch account's placement marks plus a self-hosted runner's drained-event batches (report_case_trace).
   // Ephemeral (TTL/cap); the sealed trajectory is the durable record.
-  liveTraceEvents?: (runId: string) => TraceEvent[] | undefined;
+  //
+  // ── SERVED AS A PAGE, BECAUSE A VIEWER POLLS THIS ─────────────────────────────────────────────────
+  //
+  // The run detail's live panel re-asks every three seconds. Returning the whole buffer each time made the
+  // reader's cost scale with the run's LENGTH rather than with what changed — a long agent re-downloaded and
+  // re-validated its entire window, three seconds apart, for hours. `after` is an ABSOLUTE position that
+  // survives the buffer's eviction, so "what is new" is answerable without the reader having to guess which
+  // of the events it already holds are the same ones.
+  liveTraceEvents?: (runId: string, after?: number) => LiveTraceSlice | undefined;
   // The managed twin of liveTraceEvents: decode the EVENT_SENTINEL lines the case job printed to its stdout —
   // resolves the run's runtime lane to a live backend (Backend.caseEvents). Best-effort — absent/miss = no events.
   readCaseEvents?: (
@@ -428,6 +437,17 @@ function withoutCallback<T extends { webhookUrl?: string }>(record: T): T {
   if (record.webhookUrl === undefined) return record;
   const { webhookUrl: _dropped, ...rest } = record;
   return rest as T;
+}
+
+// One poll's worth of a run's LIVE trajectory. `from` is the absolute position of the first event returned and
+// `next` is the cursor for the following poll; `gap` says the reader's cursor fell off the back of the buffer,
+// so what it holds and what this page carries are not contiguous and it must redraw rather than append.
+export interface LiveTraceSlice {
+  events: TraceEvent[];
+  from: number;
+  next: number;
+  total: number;
+  gap: boolean;
 }
 
 export class RunService {
@@ -846,10 +866,22 @@ export class RunService {
   // CP-minted runId) plus the events the managed job printed to its stdout as EVENT_SENTINEL lines (pulled from
   // the orchestrator log, snapshot semantics). events=[] when nothing has arrived yet; the record still
   // scopes/authorizes. The sealed trajectory is the durable record — this read is a preview.
-  async liveTrace(id: string): Promise<{ record: RunRecord; events: TraceEvent[] } | undefined> {
+  //
+  // `after` pages the PUSHED lane. The two sources are disjoint by construction (a runner pushes, a managed
+  // job prints — never both), which is what makes one cursor honest: when the pulled lane answers, there is
+  // no pushed stream for the cursor to be about, and the reply says `incremental: false` so the reader
+  // REPLACES rather than appending onto a snapshot that is re-read whole every time.
+  async liveTrace(
+    id: string,
+    after?: number,
+  ): Promise<
+    | { record: RunRecord; events: TraceEvent[]; from: number; next: number; total: number; incremental: boolean }
+    | undefined
+  > {
     const record = await this.deps.store.get(id);
     if (!record) return undefined;
-    const pushed = this.deps.liveTraceEvents?.(RunService.runIdFor(record)) ?? [];
+    const slice = this.deps.liveTraceEvents?.(RunService.runIdFor(record), after);
+    const pushed = slice?.events ?? [];
     const pulled = this.deps.readCaseEvents
       ? ((await this.deps
           .readCaseEvents(
@@ -862,7 +894,19 @@ export class RunService {
       : [];
     // Disjoint sources (a runner pushes, a managed job prints — never both), so concatenation is the merge; the
     // dispatch marks lead, mirroring the sealed layout (TraceRecordingDispatcher prepends the placement plane).
-    return { record, events: [...pushed, ...pulled] };
+    //
+    // Incremental only when the pushed lane is the one answering AND the cursor was still inside its window.
+    // A `gap` (the ring evicted events this reader never saw) is deliberately NOT incremental: appending onto
+    // a hole would render a trace that never happened, which is worse than re-drawing the window.
+    const incremental = pulled.length === 0 && slice !== undefined && !slice.gap;
+    return {
+      record,
+      events: [...pushed, ...pulled],
+      from: slice?.from ?? 0,
+      next: slice?.next ?? 0,
+      total: slice?.total ?? pushed.length + pulled.length,
+      incremental,
+    };
   }
 
   // Persisted replay recording (docs/architecture/replay.md) — the sealed screen frames + logs + env/runtime tracks of a

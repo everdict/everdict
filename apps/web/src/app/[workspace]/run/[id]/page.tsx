@@ -135,12 +135,28 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
   )
 }
 
+// ── HOW MUCH OF A TRACE ONE SCREEN READS (a five-hour agent's is not a page) ─────────────────────────
+//
+// The sealed read has taken `after`/`limit` since the split-plane store landed and this page asked for
+// neither, so a long agent run downloaded every event it had ever emitted, parsed each through the trace
+// union, and rendered the lot — the read, the parse and the DOM all scaling with the run's DURATION.
+//
+// 500 is chosen against what a reader can actually use rather than what the wire can carry: it is more than
+// any screenful, and small enough that the parse stays imperceptible on a slow machine. `meta.eventCount` is
+// the sealed TOTAL, so a truncated view can say so and page forward instead of pretending it is whole — a
+// silently-cut trace is the worst direction for evidence to fail in.
+const TRACE_PAGE = 500
+
 export default async function RunDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string; id: string }>
+  searchParams: Promise<{ traceAfter?: string }>
 }) {
   const { workspace, id } = await params
+  const { traceAfter } = await searchParams
+  const traceFrom = traceAfter !== undefined && /^\d+$/.test(traceAfter) ? Number(traceAfter) : 0
   const t = await getTranslations('runsPage')
   const timeZone = await getTimeZone()
   const ctx = await authContext()
@@ -181,11 +197,16 @@ export default async function RunDetailPage({
   let trace = run.result?.trace ?? []
   let trajectorySource: string | undefined
   let segments: TrajectorySegment[] = []
+  // What this screen is actually showing, when the sealed trace is longer than one page.
+  let traceWindow: { from: number; shown: number; total: number } | undefined
   if (trace.length === 0) {
     try {
-      const runScoped = trajectoryResponseSchema.parse(await controlPlane.getRunTrajectory(ctx, id))
+      const runScoped = trajectoryResponseSchema.parse(
+        await controlPlane.getRunTrajectory(ctx, id, { after: traceFrom, limit: TRACE_PAGE })
+      )
       trace = runScoped.events
       trajectorySource = runScoped.meta.source
+      traceWindow = { from: traceFrom, shown: runScoped.events.length, total: runScoped.meta.eventCount }
       segments =
         runScoped.segments.length > 0
           ? runScoped.segments.map((segment) => ({
@@ -545,6 +566,32 @@ export default async function RunDetailPage({
           {trajectorySource !== undefined && (
             <p className="text-xs text-muted-foreground">
               {t('sealedEvidence', { source: trajectorySource })}
+            </p>
+          )}
+          {/* A trace longer than one page says so, and pages — never a silent truncation, which would let a
+              reader draw a conclusion from evidence the screen quietly cut. */}
+          {traceWindow !== undefined && traceWindow.total > traceWindow.shown && (
+            <p className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span>
+                {t('traceWindow', {
+                  from: traceWindow.from + 1,
+                  to: traceWindow.from + traceWindow.shown,
+                  total: traceWindow.total,
+                })}
+              </span>
+              {traceWindow.from > 0 && (
+                <Link
+                  className="underline"
+                  href={`?traceAfter=${Math.max(0, traceWindow.from - TRACE_PAGE)}`}
+                >
+                  {t('tracePrev')}
+                </Link>
+              )}
+              {traceWindow.from + traceWindow.shown < traceWindow.total && (
+                <Link className="underline" href={`?traceAfter=${traceWindow.from + TRACE_PAGE}`}>
+                  {t('traceNext')}
+                </Link>
+              )}
             </p>
           )}
           <Card className="h-[68vh] min-h-[420px] p-4">

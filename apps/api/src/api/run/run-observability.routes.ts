@@ -38,8 +38,13 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
 
   // Live trajectory (observability ⑨) — the run's own TraceEvents accumulating while it runs: dispatch placement
   // marks + runner-pushed batches + the managed job's event-sentinel stdout lines. A preview of the evidence that
-  // seals at settle; snapshot semantics (poll-and-replace). Same visibility as every run read (runVisible → 404).
-  app.get<{ Params: { id: string } }>(
+  // seals at settle. Same visibility as every run read (runVisible → 404).
+  //
+  // INCREMENTAL where it can be: the pushed lane is append-only, so `?after=<cursor>` serves what arrived since
+  // and the reply says `incremental: true`. The pulled lane (a managed job's stdout) is re-read whole every
+  // time and says `incremental: false`, so a reader knows to replace instead of append. One poll used to cost
+  // the whole buffer whatever had changed, which on a long agent run is the entire cost of the panel.
+  app.get<{ Params: { id: string }; Querystring: { after?: string } }>(
     "/runs/:id/trajectory/live",
     { schema: runObservabilityDocs.liveTrace },
     async (req, reply) => {
@@ -47,10 +52,25 @@ export function registerRunObservabilityRoutes(app: FastifyInstance, deps: Serve
       if (!principal) return reply;
       try {
         gate(principal, "runs:read");
-        const out = await deps.service.liveTrace(req.params.id);
+        // `after` is the reader's absolute cursor from its previous poll. Absent = first poll (the whole
+        // window); present = "what is new", which is what keeps a three-second poll on a five-hour run from
+        // re-shipping the buffer every time. A non-numeric value is treated as absent rather than refused —
+        // the worst it can cost is one redundant full page, and a live panel should not 400 on a stale link.
+        const rawAfter = (req.query as { after?: string }).after;
+        const after = rawAfter !== undefined && /^\d+$/.test(rawAfter) ? Number(rawAfter) : undefined;
+        const out = await deps.service.liveTrace(req.params.id, after);
         if (!out || !runVisible(out.record, principal))
           return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
-        return reply.send({ status: out.record.status, found: out.events.length > 0, events: out.events });
+        return reply.send({
+          status: out.record.status,
+          found: out.events.length > 0,
+          events: out.events,
+          // The reader appends only when the server says this page continues what it already holds.
+          incremental: out.incremental,
+          from: out.from,
+          next: out.next,
+          total: out.total,
+        });
       } catch (err) {
         return sendError(reply, err);
       }

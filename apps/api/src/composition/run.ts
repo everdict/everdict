@@ -224,7 +224,7 @@ export function buildRun(deps: {
     pushLogs: (runId) => liveLogs.get(runId),
     // Live trajectory (observability ⑨) — the dispatch marks + runner-pushed batches, plus the managed lane's
     // event-sentinel pull. RunService.liveTrace() merges both.
-    liveTraceEvents: (runId) => liveTraces.get(runId),
+    liveTraceEvents: (runId, after) => liveTraces.page(runId, after),
     readCaseEvents: (tenant, runtimeList, caseId) => readCaseEventsFn(tenant, runtimeList, caseId),
     openTerminalStream: (tenant, runtimeList, caseId) => openTerminalStreamFn(tenant, runtimeList, caseId),
     // Case-scoped placement read (runtime debugging) — where the case's job stands inside its cluster.
