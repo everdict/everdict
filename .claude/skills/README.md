@@ -1,6 +1,11 @@
 # Convention system — the map
 
-Everdict's build knowledge is split by **how the knowledge fails**, not by topic. Two layers, one guard.
+Everdict's build knowledge is split by **how the knowledge fails**, not by topic. Three layers, one guard.
+
+The two below are the CONVENTION layers, and they are what the guards police. The third is `docs/` — the
+RECORD layer, whose failure is a different one: not a convention forgotten or a context missed, but a reason
+lost, so the same argument is had again. Choosing between the three is skill `documenting`; it is a choice,
+and writing into all three is how they diverge.
 
 | | PUSH — `.claude/rules/*.md` | PULL — `.claude/skills/*/` |
 |---|---|---|
@@ -75,7 +80,7 @@ two reviews after it was deleted). A name that is gone may still be written — 
 
 ---
 
-## PULL — the 18 skills, by what they answer
+## PULL — the 19 skills, by what they answer
 
 - `code-review/` — **how to review**: the seven passes a diff cannot do (authorship / blast radius / the
   neighbour you now lean on / composition of bounds / adversarial counterexample / adapter certification and
@@ -84,6 +89,9 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `protocol/` — **effects and authority**: the five laws in full, the design checklist to run BEFORE writing
   an effect path, the **case law** (every recurring defect with file, line, and the wrong reasoning verbatim),
   and the verification protocol (mutation-first, non-vacuous fixtures, when a scanner is legitimate).
+- `documenting/` — **which layer knowledge goes in**: a doc, a rule or a skill, chosen by the failure each
+  one prevents; what a design record owes (the alternative it rejected, counted rather than adjectival); and
+  the three things the gates above cannot see. Read before writing or moving any of the three.
 - `foundation/` — module dependencies, the spine, the error model, repo-wide conventions.
 - `core-contracts/` — the interfaces, Zod schemas and `AppError` model in `packages/contracts` (the dependency
   root) and the kernel in `packages/domain`.
