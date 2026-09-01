@@ -22,14 +22,30 @@ import { type ForwardHeaders, forwardHeaderRecord } from "./principal.js";
 // base surface is; see isDefaultBaseTool). A workspace MCP server registered without write remains read-only-bridged.
 const READ_PREFIXES = ["get_", "list_", "inspect_", "diff_", "estimate_", "leaderboard_", "search_", "hf_", "preview_"];
 
-// Knowledge-graph READ tools whose names don't match the read prefixes but are pure reads (a node's ranked
-// relationships, a multi-hop neighbourhood, a node's authored notes). Bridged read-only, exactly like a read verb — so
-// the agent can consult the workspace's knowledge before analyzing or contributing. (get_knowledge_node /
-// get_knowledge_graph already match `get_`.)
-const KNOWLEDGE_READS = new Set<string>(["knowledge_related", "knowledge_subgraph", "knowledge_notes"]);
+// Pure READS whose names do not match a prefix. The convention is a verb prefix and these are the places the
+// control plane named a tool after its SUBJECT instead — so the list is the exception log, not a policy.
+//
+// Each entry is a tool whose handler gates `…:read` and declares `readOnlyHint`. Getting one wrong in the
+// permissive direction is the real cost, so the test beside this asserts the membership rather than trusting
+// the name.
+const NAMED_READS = new Set<string>([
+  // Knowledge graph: a node's ranked relationships, a multi-hop neighbourhood, a node's authored notes — so the
+  // agent can consult the workspace's knowledge before analyzing or contributing. (get_knowledge_node /
+  // get_knowledge_graph already match `get_`.)
+  "knowledge_related",
+  "knowledge_subgraph",
+  "knowledge_notes",
+  // The evolution campaign's two reads. `campaign_decision` asks the frozen frame whether to continue, adopt
+  // or halt, and `campaign_adoption` reads back what a close authorized — both gate `scorecards:read`, neither
+  // touches anything. Missing here they were classified as MUTATIONS, so an agent walking a campaign had to
+  // ask permission in order to ask whether it should keep walking, once per round. The loop is the one place
+  // where a read gated like a write turns a procedure into an interrogation.
+  "campaign_decision",
+  "campaign_adoption",
+]);
 
 function isReadOnlyToolName(name: string): boolean {
-  return READ_PREFIXES.some((p) => name.startsWith(p)) || KNOWLEDGE_READS.has(name);
+  return READ_PREFIXES.some((p) => name.startsWith(p)) || NAMED_READS.has(name);
 }
 
 // Read-prefixed tools that actually MINT credentials — they must not skip the permission gate despite the get_ verb.

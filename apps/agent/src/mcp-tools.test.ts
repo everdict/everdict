@@ -75,6 +75,11 @@ describe("base tool default wiring", () => {
       "knowledge_related",
       "knowledge_subgraph",
       "knowledge_notes",
+      // …and the campaign's two subject-named reads. Both gate `scorecards:read` and neither writes; before
+      // they were named here an agent walking a campaign needed an approval to ASK the gate whether to keep
+      // walking — once per round, which is the difference between a procedure and an interrogation.
+      "campaign_decision",
+      "campaign_adoption",
       // knowledge-layer reads: context assembly + entry reads (get_/list_ verbs)
       "get_task_context",
       "list_knowledge_entries",
