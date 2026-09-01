@@ -3416,6 +3416,9 @@
     "submit": "추이 보기"
   },
   "ui": {
+    "screenErrorBody": "이 화면을 그리지 못했습니다. 잠시 후 다시 시도해 주세요 — 문제가 계속되면 이 화면의 주소와 아래 코드를 함께 알려 주세요.",
+    "retry": "다시 시도",
+    "errorDigest": "오류 코드 {digest}",
     "comboboxPlaceholder": "선택…",
     "comboboxEmpty": "항목이 없습니다",
     "comboboxSearch": "검색…",

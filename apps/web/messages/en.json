@@ -3416,6 +3416,9 @@
     "submit": "View trend"
   },
   "ui": {
+    "screenErrorBody": "This screen could not be drawn. Try again in a moment — if it keeps happening, report this address together with the code below.",
+    "retry": "Try again",
+    "errorDigest": "Error code {digest}",
     "comboboxPlaceholder": "Select…",
     "comboboxEmpty": "No items",
     "comboboxSearch": "Search…",

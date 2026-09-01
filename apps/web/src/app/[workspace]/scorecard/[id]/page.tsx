@@ -395,49 +395,41 @@ export default async function ScorecardDetailPage({
     record.runtime.startsWith('self:') &&
     record.runtime !== 'self:ws'
   const runnerById = new Map<string, RunnerMeta>()
-  if (
-    runtimeNeedsRoster ||
-    results.some((r) => r.failure?.runnerId && r.failure.runnerId !== '*')
-  ) {
-    try {
-      const roster = runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
-      for (const m of roster.runners) runnerById.set(m.id, m)
-    } catch {
-      // roster fetch failed → no live badge; the static hint still renders
-    }
-  }
-  // Re-run choices — the re-run dialog lets the viewer adjust the two run-config choices made at submit time (the
-  // selected judges + the execution runtime), pre-filled from this batch. Fetch the pickable judges/runtimes/runners
-  // only for a terminal batch the viewer can re-run (all optional — a failed fetch just narrows the picker, the
-  // original selection is still reproduced).
+  // ── FIVE READS THAT DO NOT DEPEND ON EACH OTHER USED TO QUEUE, AND ONE RAN TWICE ─────────────────
+  //
+  // The roster, the judges, the runtimes and the personal runners are four independent questions, awaited one
+  // after another — so the page's latency was their SUM, and every one of them is a full control-plane round
+  // trip on a `no-store` client. The workspace roster was fetched twice on top of that: once for the failure
+  // badges and again, three blocks down, only to ask whether the list was non-empty.
+  //
+  // Each keeps its own soft failure: a picker read that fails narrows the dialog and never fails the page,
+  // which is why the catch is per-read rather than around the whole group.
   const canRun = !live && can(principal?.roles, 'scorecards:run')
-  let judgeChoices: JudgePickerChoice[] = []
-  let runtimeChoices: { id: string }[] = []
-  let myRunners: { id: string; label: string }[] = []
-  let hasWorkspaceRunners = false
-  if (canRun) {
+  const needsRoster =
+    runtimeNeedsRoster || results.some((r) => r.failure?.runnerId && r.failure.runnerId !== '*')
+  const optional = async <T,>(enabled: boolean, read: () => Promise<T>): Promise<T | undefined> => {
+    if (!enabled) return undefined
     try {
-      judgeChoices = judgesSchema.parse(await controlPlane.listJudges(ctx))
+      return await read()
     } catch {
-      // Judge list failed → the dialog keeps the original judges, it just can't add new ones
-    }
-    try {
-      runtimeChoices = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
-    } catch {
-      // Runtime list failed → the dialog keeps the original runtime, it just can't switch registered runtimes
-    }
-    try {
-      myRunners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
-    } catch {
-      // Runner list failed → the dialog omits personal-runner options
-    }
-    try {
-      hasWorkspaceRunners =
-        runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0
-    } catch {
-      // Roster failed → the dialog hides the shared team-runner pool option
+      return undefined
     }
   }
+  const [roster, judgeList, runtimeList, personalRunners] = await Promise.all([
+    optional(needsRoster || canRun, async () =>
+      runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx))
+    ),
+    optional(canRun, async () => judgesSchema.parse(await controlPlane.listJudges(ctx))),
+    optional(canRun, async () => runtimesSchema.parse(await controlPlane.listRuntimes(ctx))),
+    optional(canRun, async () => runnersResponseSchema.parse(await controlPlane.listRunners(ctx))),
+  ])
+  if (needsRoster && roster) for (const m of roster.runners) runnerById.set(m.id, m)
+  // Re-run choices — the re-run dialog lets the viewer adjust the two run-config choices made at submit time
+  // (the selected judges + the execution runtime), pre-filled from this batch.
+  const judgeChoices: JudgePickerChoice[] = judgeList ?? []
+  const runtimeChoices: { id: string }[] = runtimeList ?? []
+  const myRunners: { id: string; label: string }[] = personalRunners?.runners ?? []
+  const hasWorkspaceRunners = canRun && (roster?.runners.length ?? 0) > 0
   const locale = await getLocale()
   const timeZone = await getTimeZone()
   const runnerOnline = (lastSeenAt?: string) =>
