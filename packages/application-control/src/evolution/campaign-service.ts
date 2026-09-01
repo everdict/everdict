@@ -145,6 +145,10 @@ export interface NewRoundInput {
   candidateVersion: string;
   baselineScorecardId: string;
   candidateScorecardId: string;
+  // What this round taught — carried onto the round and read by the NEXT proposal, never by the gate.
+  // Optional on this port because a round written before the field existed has none; the transport's DTO is
+  // what requires it of new rounds (see `log-campaign-round.ts`).
+  learned?: string;
 }
 
 // How far a `continues` walk will follow caller-authored links before refusing. A chain this long is not a
@@ -420,6 +424,9 @@ export class CampaignService {
       candidateVersion: input.candidateVersion,
       baselineScorecardId: input.baselineScorecardId,
       candidateScorecardId: input.candidateScorecardId,
+      // Recorded BEFORE the verdict is derived, and recorded whatever the verdict turns out to be — a round
+      // the platform judges incomparable keeps its lesson, which is the case the layer exists for.
+      ...(input.learned !== undefined ? { learned: input.learned } : {}),
       verdict: verdictOf(snapshot, record.frame),
       at: this.now(),
       by,

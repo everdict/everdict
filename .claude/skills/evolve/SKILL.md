@@ -36,17 +36,36 @@ So the split to hold in mind, because every mistake below is a confusion of the 
    and how to choose each field, is `references/frame-design.md`.
 2. **Author a candidate.** Register a new version of the subject through its ordinary door — a harness
    instance, or `save_agent`. Nothing in the campaign does this for you.
+
+   Before you choose what to change, read what the walk already knows: `GET /campaigns/:id` carries every
+   round's `learned`, the rounds that LOST included, and a rejected round is the one most likely to know why.
+   Then open the failing cases' traces — they read a page at a time, so a long run costs a window rather than
+   the whole thing, and a hypothesis formed from scores alone is a guess about a mechanism nobody looked at.
+
+   ⚠️ **The candidate never receives the findings.** They shape your proposal; they do not go into the thing
+   being measured. A subject told what its evaluators concluded stops producing traces that show how it
+   actually behaves, and the next round loses its evidence. This is measured: WikiSkill (arXiv 2608.27454)
+   gave the same knowledge to the proposer for +15.0 points and then also to the executing agent, and it went
+   down 2.8. It is the oracle rule wearing a different coat.
 3. **Run both sides.** `POST /scorecards` for baseline and candidate, each with `trials` at least the
    frame's `trialsPerCase`. Statistics need repeats; one trial per case produces no signal at all.
 4. **Wait.** Scorecards are async. Poll `GET /scorecards/:id`, or subscribe to `scorecard.completed` —
    it is a triggerable kind, so a subscription can wake an agent when a side lands. The campaign's own
    facts (`campaign.round_logged`, `campaign.closed`) are feed facts and are NOT triggerable: the loop
    cannot wake itself on its own progress.
-5. **Log the round.** `POST /campaigns/:id/rounds` `{hypothesis, candidateVersion, baselineScorecardId,
-   candidateScorecardId}` (MCP: `log_campaign_round`). **You do not send a verdict.** The service derives it
-   from the production scorecard diff — trial significance plus experiment identity — so the loop cannot
-   write its own report card. A round that could not be compared is recorded as such and counts as rejected;
-   `references/rejection-catalogue.md` is every reason, and what causes it.
+5. **Log the round.** `POST /campaigns/:id/rounds` `{hypothesis, learned, candidateVersion,
+   baselineScorecardId, candidateScorecardId}` (MCP: `log_campaign_round`). **You do not send a verdict.**
+
+   `learned` is required and it is the half that survives the round. The verdict is derived and the budget is
+   spent either way; what the round TAUGHT is the only thing round N+1 can use. Write the MECHANISM, not the
+   outcome — "the tool budget was the binding constraint, not the prompt" is a finding, "it did not improve"
+   is the verdict restated. A round the platform could not compare has no verdict at all and still has a
+   finding, which is precisely the round this field exists for.
+
+   The VERDICT, by contrast, is the platform's: the service derives it from the production scorecard diff —
+   trial significance plus experiment identity — so the loop cannot write its own report card. A round that
+   could not be compared is recorded as such and counts as rejected; `references/rejection-catalogue.md` is
+   every reason, and what causes it.
 6. **Ask.** `GET /campaigns/:id/decision` (MCP: `campaign_decision`) returns `CampaignGateAnswer` without
    touching anything: `continue` (go to 2), `adopt`, or `halt` with a reason. Ask this rather than counting
    rounds yourself — the arithmetic is the frame's, not yours.
@@ -64,6 +83,10 @@ So the split to hold in mind, because every mistake below is a confusion of the 
 - **The exam is the frame's.** The compared cases must be EXACTLY the frame's scenarios (missing and extra
   both reject) and the judges exactly the frame's judges. Run a different dataset slice and every round is
   incomparable, with no error at submit time to warn you.
+- **A finding is advice, never evidence.** `learned` is the one value on a round the loop authors about its
+  own walk, so the adoption gate does not read it and must not — the whole reason the verdict is derived is
+  that a loop may not write its own report card. It feeds the next proposal, which is a different question
+  from what decides.
 - **Held-out is what decides.** Whole-round improvements are feedback about your SEARCH; the gate reads the
   held-out block, and a frame needs at least two held-out scenarios to be created at all.
 

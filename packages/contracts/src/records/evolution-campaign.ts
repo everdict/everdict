@@ -194,6 +194,27 @@ export type CampaignFrame = z.infer<typeof CampaignFrameSchema>;
 export const CampaignRoundSchema = z.object({
   seq: z.number().int().min(1), // 1-based append position; the store enforces contiguity
   hypothesis: z.string().min(1).max(2000),
+  // ── WHAT THE ROUND TAUGHT, WHICH IS NOT WHAT IT SCORED ──────────────────────────────────────────
+  //
+  // The trace recorded what was TRIED (`hypothesis`) and what the platform DERIVED (`verdict`), and nothing
+  // recorded what the walk now knows. So a rejected round was pure spend: its budget was gone and its lesson
+  // lived only in whatever prose a human wrote beside it. A campaign that rejects nineteen candidates has
+  // learned nineteen things and could not hand one of them to round twenty.
+  //
+  // WikiSkill (arXiv 2608.27454) measured what that costs. Giving the PROPOSER a knowledge layer that
+  // survives rollback moved their benchmark from 43.8% to 63.7% — the single largest effect in the paper,
+  // larger than the skill evolution it was supporting. Their layer is a patch-edited wiki; ours is this
+  // field, append-only with the round, because a document the loop may rewrite is a document the loop can
+  // use to revise its own history (L4), and we already have an append-only trace to hang it on.
+  //
+  // ⚠️ IT IS ADVICE, NEVER EVIDENCE. `campaignAdoption` does not read it and must not: this is the one value
+  // on the round the LOOP authors about itself, and the whole point of deriving the verdict is that the loop
+  // cannot write its own report card (L3). The counterexample pins that — the gate's answer is identical with
+  // it and without it. What it feeds is the next PROPOSAL, which is a different question from what decides.
+  //
+  // Most valuable on a round that could not be compared at all: that round scores nothing, spends a round of
+  // the budget, and is the one most likely to know why.
+  learned: z.string().max(4000).optional(),
   candidateVersion: z.string().min(1).max(100),
   baselineScorecardId: z.string().min(1),
   candidateScorecardId: z.string().min(1),

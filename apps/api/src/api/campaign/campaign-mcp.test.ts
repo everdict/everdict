@@ -157,6 +157,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       arguments: {
         id,
         hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidate_version: "1.0.1",
         baseline_scorecard_id: "sc-b",
         candidate_scorecard_id: "sc-c",
@@ -190,6 +191,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       arguments: {
         id,
         hypothesis: "h",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidate_version: "1.0.1",
         baseline_scorecard_id: "sc-b",
         candidate_scorecard_id: "sc-c",
@@ -282,6 +284,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       arguments: {
         id: foreign.id,
         hypothesis: "h",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidate_version: "1.0.1",
         baseline_scorecard_id: "sc-b",
         candidate_scorecard_id: "sc-c",

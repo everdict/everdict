@@ -766,6 +766,18 @@ Everdict's tools load on demand. Before anything else:
   WITHOUT saving a version. A candidate that changes tools/skills/model must be saved first (\`save_agent\`
   auto-bumps an immutable version); evaluate that saved id and delete rejected experiment versions after.
 - One variable per round, and write the hypothesis to the campaign issue BEFORE running it.
+- FIRST read what the walk already knows: \`get_campaign\` returns every round's \`learned\`, the rounds that
+  LOST included. A rejected round is the one most likely to know why, and reading nineteen of them is how
+  round twenty stops repeating them. Name which finding you are acting on.
+- Open the FAILING cases' traces before hypothesising, not after the surprise — the trace reads take a page,
+  so a long run costs a window rather than the whole thing. A hypothesis formed from scores alone is a guess
+  about a mechanism nobody looked at.
+- ⚠️ THE CANDIDATE NEVER RECEIVES THE FINDINGS. They are input to YOUR proposal, never to the agent being
+  measured; do not paste them into the candidate's instructions. A subject told what its evaluators concluded
+  stops producing traces that show how the configuration actually behaves, and the next round loses its
+  evidence. Measured, not theoretical: WikiSkill (arXiv 2608.27454) gave that knowledge to the proposer for
+  +15.0 points, then also to the executing agent and lost 2.8. Same law as never touching the oracle
+  mid-campaign — the thing under measurement may not read the measurement's notes.
 
 ## 3. Evaluate the candidate
 - Same scenarios, same N, same judges → a second ingested scorecard (candidate version label in \`harness\`).
@@ -773,8 +785,12 @@ Everdict's tools load on demand. Before anything else:
   hypothesis. Read \`comparability\` FIRST — 'none' means the comparison does not hold, which is a different
   fact from "no difference". The trials diff carries per-case Fisher/z significance with the FDR correction
   and the practical minDelta floor already applied.
-- Then RECORD the round: \`log_campaign_round\` { hypothesis, candidateVersion, baselineScorecardId,
-  candidateScorecardId }. **You do not send a verdict.** The platform derives it from that same diff, so the
+- Then RECORD the round: \`log_campaign_round\` { hypothesis, learned, candidateVersion,
+  baselineScorecardId, candidateScorecardId }. **You do not send a verdict.**
+- \`learned\` is required, and it is the half that survives: the verdict is derived and the budget is spent,
+  but what the round TAUGHT is the only thing round N+1 can use. Write the MECHANISM, not the outcome — "the
+  tool budget was the binding constraint, not the prompt" is a finding; "it did not improve" is the verdict
+  restated. A round the platform could not compare has no verdict at all and still has a finding. The platform derives it from that same diff, so the
   loop cannot write its own report card — and a round you never logged is a round the campaign cannot count.
 - A round the platform records as not-comparable still spends a round and counts toward the rejected streak.
   Read its reason before spending another one: the usual causes are a batch that ran a slice the frame does
@@ -944,7 +960,13 @@ and the one that most deserves a fresh baseline). Load \`references/levers.md\` 
 
 - \`register_harness\` with the instance JSON mints an immutable new version; \`pin_harness_images\` does the
   image-only case headlessly.
-- ONE lever per round, and write the hypothesis to the issue BEFORE running it.
+- ONE lever per round, and write the hypothesis to the issue BEFORE running it — after reading what the walk
+  already knows (\`get_campaign\` carries every round's \`learned\`, the losing ones included) and after
+  opening the failing cases' traces, which read a page at a time so a long run costs a window.
+- ⚠️ THE CANDIDATE NEVER RECEIVES THE FINDINGS. They shape YOUR next lever; they do not go into the harness's
+  prompt, env or pins. A scaffold told what its evaluators concluded stops producing traces that show how it
+  behaves — measured at −2.8 points in WikiSkill (arXiv 2608.27454) against +15.0 for giving the same
+  knowledge to the proposer alone. The oracle rule and this rule are the same rule.
 - \`diff_harness_versions\` between baseline and candidate is how you CHECK you moved one thing. Read it before
   the batch, not after the surprise.
 - Delete rejected experiment versions (\`delete_harness\`) so the registry stays a record of what shipped.
@@ -953,7 +975,9 @@ and the one that most deserves a fresh baseline). Load \`references/levers.md\` 
 - The same dataset, the same N, the same judges → a second batch on the candidate version.
 - \`diff_scorecards\` is for YOUR reading — what moved, and where to aim next. Read \`comparability\` FIRST:
   'none' means the comparison does not hold, which is a different fact from "no difference".
-- Then \`log_campaign_round { hypothesis, candidateVersion, baselineScorecardId, candidateScorecardId }\`. You
+- Then \`log_campaign_round { hypothesis, learned, candidateVersion, baselineScorecardId,
+  candidateScorecardId }\`. \`learned\` is required — the mechanism this round established, not its outcome;
+  it is what the next round reads and the only thing a REJECTED round leaves behind. You
   do NOT send a verdict — the platform derives it from that same diff, so the loop cannot write its own report
   card, and a round you never logged is a round the campaign cannot count.
 - A round recorded as not-comparable still spends a round and counts toward the rejected streak. Read its

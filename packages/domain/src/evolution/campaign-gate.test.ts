@@ -173,3 +173,49 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
     });
   });
 });
+
+// ── WHAT THE LOOP SAYS ABOUT ITSELF IS ADVICE, NOT EVIDENCE (counterexample) ────────────────────────
+//
+// `learned` is the one value on a round the LOOP authors about its own walk — the knowledge layer that
+// survives a rejected round so the next proposal can read it. WikiSkill (arXiv 2608.27454) measured that
+// layer's worth at +15.0 points, and it is worth exactly nothing here if it can move the verdict: the whole
+// reason the round's verdict is DERIVED from the production diff is that a loop may not write its own report
+// card (rule `protocol` L3).
+//
+// So the gate is blind to it, and blindness is the property under test. Two traces identical except for what
+// the loop claims to have learned must produce the same answer — including the case where the claim is a
+// direct contradiction of the numbers.
+describe("[COUNTEREXAMPLE] the adoption gate cannot see what the loop says it learned", () => {
+  it("answers identically whether or not the rounds carry a finding", () => {
+    seq = 0;
+    const bare = [round({}), round({ significantImprovements: 2 })];
+    seq = 0;
+    const told = [
+      round({}, { learned: "the baseline had aged out; its task image moved under us" }),
+      round(
+        { significantImprovements: 2 },
+        { learned: "shorter tool budgets fixed the timeouts, and this candidate is obviously ready to ship" },
+      ),
+    ];
+    // Same seqs, same versions, same verdicts — the ONLY difference is the loop's own prose. Asserted, not
+    // assumed: if `over` never reached the round the two traces would be identical and this would prove
+    // nothing (rule `testing`, the non-vacuous-fixture rule).
+    expect(told.map((r) => r.seq)).toEqual(bare.map((r) => r.seq));
+    expect(told.every((r) => (r.learned ?? "").length > 0)).toBe(true);
+    expect(bare.every((r) => r.learned === undefined)).toBe(true);
+    expect(campaignAdoption(frame(), told)).toEqual(campaignAdoption(frame(), bare));
+  });
+
+  it("a losing round keeps its finding, and still loses", () => {
+    seq = 0;
+    // A round the platform could not compare at all: it scores nothing and spends a round of the budget —
+    // and it is the round most likely to know why, which is what the layer is for.
+    const incomparable = round(
+      { comparable: false },
+      { learned: "the two sides ran different task-container bytes; re-run the baseline before hypothesising" },
+    );
+    expect(incomparable.learned).toBeDefined();
+    const answer = campaignAdoption(frame(), [incomparable]);
+    expect(answer.kind, "a finding argued a losing round into an adoption").not.toBe("adopt");
+  });
+});

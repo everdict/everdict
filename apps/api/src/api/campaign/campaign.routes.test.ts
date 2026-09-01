@@ -152,6 +152,7 @@ describe("campaign routes — the settlement over HTTP", () => {
       headers: H,
       payload: {
         hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",
@@ -202,6 +203,7 @@ describe("campaign routes — the settlement over HTTP", () => {
       headers: H,
       payload: {
         hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",
@@ -262,6 +264,7 @@ describe("campaign routes — the settlement over HTTP", () => {
       headers: H,
       payload: {
         hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",
@@ -340,6 +343,7 @@ describe("campaign routes — the settlement over HTTP", () => {
       headers: H,
       payload: {
         hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",
@@ -394,6 +398,7 @@ describe("campaign routes — the settlement over HTTP", () => {
       headers: H,
       payload: {
         hypothesis: "h",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",
@@ -631,6 +636,7 @@ describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team ca
       headers: H,
       payload: {
         hypothesis: "h",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",
@@ -765,6 +771,7 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
       headers: A,
       payload: {
         hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
         candidateVersion: "1.0.1",
         baselineScorecardId: "sc-b",
         candidateScorecardId: "sc-c",

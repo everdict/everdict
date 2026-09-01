@@ -85,12 +85,21 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       inputSchema: {
         id: z.string(),
         hypothesis: z.string().describe("One variable per round — what this candidate changes and why"),
+        // The knowledge layer, required here exactly as it is on the HTTP twin. What the round TAUGHT is a
+        // different question from what it scored, and it is the half a rejected round is otherwise pure
+        // spend for — the next proposal reads it, the adoption gate never does.
+        learned: z
+          .string()
+          .min(10)
+          .describe(
+            "What this round taught the walk — the failure mode or the confirmed mechanism, not the outcome. Read by the next proposal; never by the adoption gate.",
+          ),
         candidate_version: z.string(),
         baseline_scorecard_id: z.string(),
         candidate_scorecard_id: z.string(),
       },
     },
-    ({ id, hypothesis, candidate_version, baseline_scorecard_id, candidate_scorecard_id }) =>
+    ({ id, hypothesis, learned, candidate_version, baseline_scorecard_id, candidate_scorecard_id }) =>
       run(principal, "scorecards:run", async () => {
         const record = await campaigns.get(ws, id);
         await assertTeamVisible(deps, principal, record.teamId, "Campaign");
@@ -101,6 +110,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
             id,
             {
               hypothesis,
+              learned,
               candidateVersion: candidate_version,
               baselineScorecardId: baseline_scorecard_id,
               candidateScorecardId: candidate_scorecard_id,

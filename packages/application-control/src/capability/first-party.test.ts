@@ -187,6 +187,16 @@ describe("firstPartySkillExamples", () => {
       // frame declares the family that correction is spread over. A procedure that skips this authors frames
       // whose rounds a tightened `campaignFrameDefects` refuses.
       expect(body, `${id} must tell the frame to declare its family`).toContain("heldOutFamilySize");
+
+      // ── AND BOTH CARRY THE KNOWLEDGE LAYER, WITH ITS ONE PROHIBITION ─────────────────────────────
+      //
+      // `learned` is required by both doors, so a procedure that never mentions it authors 400s. The
+      // prohibition matters more than the field: findings feed the PROPOSAL and must not reach the subject
+      // being measured. WikiSkill measured that inversion at −2.8 points against +15.0 for the proposer
+      // alone, and it is the same law as never touching the oracle mid-campaign — which is exactly why it
+      // is asserted on both procedures rather than on the one that happened to be written first.
+      expect(body, `${id} must name the required finding`).toContain("learned");
+      expect(body, `${id} must forbid feeding findings to the subject`).toContain("NEVER RECEIVES THE FINDINGS");
     },
   );
 
