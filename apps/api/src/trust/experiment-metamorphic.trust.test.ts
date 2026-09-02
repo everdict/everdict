@@ -3,7 +3,7 @@ import type { Dispatcher } from "@everdict/backends";
 import type { Dataset, JudgeSpec } from "@everdict/contracts";
 import { InMemoryScorecardStore } from "@everdict/db";
 import { EXPERIMENT_AXES, experimentIdentity } from "@everdict/domain";
-import { InMemoryDatasetRegistry, InMemoryJudgeRegistry } from "@everdict/registry";
+import { InMemoryDatasetRegistry, InMemoryEnvironmentRegistry, InMemoryJudgeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { TRUST_SUITE_ENABLED } from "./trust-context.js";
 
@@ -62,7 +62,11 @@ const bundle = (version: string, over: { taskA?: string; gradersA?: Array<{ id: 
   cases: [
     {
       id: "a",
-      env: { kind: "prompt" },
+      // Case `a` names its ENVIRONMENT by reference, so submit seals which world it ran against
+      // (harness-definability-spec.md §2) and the `environment` axis has something to verify. An axis that
+      // ABSTAINS cannot appear in "every axis holds", so a fixture with no referenced environment would
+      // quietly narrow the vocabulary this scenario is derived from.
+      env: { kind: "ref", id: "shop" },
       task: over.taskA ?? "translate the file",
       graders: over.gradersA ?? [{ id: "tests" }],
       timeoutSec: 60,
@@ -91,12 +95,20 @@ describeTrust("TRUST-34 — vary one input, move one axis (production seal, subm
     await datasets.register("acme", bundle("3.0.0", { taskA: "translate the WHOLE file" })); // content-only edit
     const judges = new InMemoryJudgeRegistry();
     await judges.register("acme", judge);
+    // The world case `a` references — registered, so submit RESOLVES and seals it exactly as production does.
+    const environments = new InMemoryEnvironmentRegistry();
+    await environments.register("acme", {
+      id: "shop",
+      version: "1.0.0",
+      env: { kind: "repo", source: { path: "/app" } },
+    });
     let n = 0;
     const service = new ScorecardService({
       dispatcher: okDispatch,
       store: new InMemoryScorecardStore(),
       datasets,
       judges,
+      environments,
       newId: () => `meta-${++n}`,
     });
     const submit = async (over: Record<string, unknown> = {}) =>
@@ -160,6 +172,14 @@ describeTrust("TRUST-34 — vary one input, move one axis (production seal, subm
     // seal pins the resolution; identity reads the drift as apparatus, never as the treatment.
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", bundle("1.0.0"));
+    // The same shared bundle, so the same referenced environment: a deployment whose cases name a world and
+    // whose service has no environment registry is REFUSED, which is the behaviour under test elsewhere.
+    const environments = new InMemoryEnvironmentRegistry();
+    await environments.register("acme", {
+      id: "shop",
+      version: "1.0.0",
+      env: { kind: "repo", source: { path: "/app" } },
+    });
     const commandSpec = {
       kind: "command",
       id: "cli",
@@ -176,6 +196,7 @@ describeTrust("TRUST-34 — vary one input, move one axis (production seal, subm
       dispatcher: okDispatch,
       store: new InMemoryScorecardStore(),
       datasets,
+      environments,
       harnesses: { get: async () => commandSpec } as unknown as ConstructorParameters<
         typeof ScorecardService
       >[0]["harnesses"],

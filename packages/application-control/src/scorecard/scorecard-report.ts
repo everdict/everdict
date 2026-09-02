@@ -1,5 +1,6 @@
 import { BadRequestError, type Dataset, NotFoundError, type ScorecardRecord, isMeasured } from "@everdict/contracts";
 import { caseVerdict, ownedByVisibleTeam, summarizeScorecard } from "@everdict/domain";
+import { ExecutionPlan } from "./execution-plan.js";
 
 // ── EXPORT WHAT IS CITABLE, REFUSE WHAT IS NOT (docs/architecture/benchmark-evidence-spec.md §4) ──────
 //
@@ -76,6 +77,10 @@ export async function citableReport(
     );
   const results = record.scorecard?.results ?? [];
   const sc = record.scorecard;
+  // The sealed facets this citation quotes, read through the ONE owner of sealed reads (TRUST-120). A
+  // report that re-read `manifest.*` itself would be the fifth spelling of four facets.
+  const cited = ExecutionPlan.of(record).citation;
+
   return {
     kind: "everdict-scorecard-report",
     exportedAt: (opts.now ?? (() => new Date().toISOString()))(),
@@ -84,7 +89,7 @@ export async function citableReport(
       dataset: {
         id: record.dataset.id,
         version: record.dataset.version,
-        ...(record.manifest?.dataset.digest !== undefined ? { digest: record.manifest.dataset.digest } : {}),
+        ...(cited.datasetDigest !== undefined ? { digest: cited.datasetDigest } : {}),
       },
       scoring,
       ...(dataset.producedBy?.origin !== undefined ? { origin: dataset.producedBy.origin } : {}),
@@ -92,15 +97,13 @@ export async function citableReport(
     harness: {
       id: record.harness.id,
       version: record.harness.version,
-      ...(record.manifest?.harness.specDigest !== undefined ? { specDigest: record.manifest.harness.specDigest } : {}),
+      ...(cited.harnessSpecDigest !== undefined ? { specDigest: cited.harnessSpecDigest } : {}),
     },
-    ...(record.manifest !== undefined
+    ...(cited.identityVersion !== undefined || cited.grading !== undefined
       ? {
           manifest: {
-            ...(record.manifest.identityVersion !== undefined
-              ? { identityVersion: record.manifest.identityVersion }
-              : {}),
-            ...(record.manifest.grading !== undefined ? { grading: record.manifest.grading } : {}),
+            ...(cited.identityVersion !== undefined ? { identityVersion: cited.identityVersion } : {}),
+            ...(cited.grading !== undefined ? { grading: cited.grading } : {}),
           },
         }
       : {}),

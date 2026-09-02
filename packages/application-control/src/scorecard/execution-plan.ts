@@ -144,6 +144,29 @@ export class ExecutionPlan {
 
   // The submit-time judge closure — the concretization SOURCE for judging, so a re-read judge executes the
   // documents this batch sealed rather than whatever the registry answers now.
+  // ── WHAT A CITATION QUOTES (benchmark-evidence-spec.md §4) ─────────────────────────────────────
+  //
+  // A report does not EXECUTE the plan — it quotes what the batch sealed, so a reader can check the claim
+  // against the bytes rather than against a version label. That is still a read of a sealed facet, and this
+  // class owns those reads: four of them spelled at a fifth call site is how the facets came apart before
+  // (TRUST-120). Absent = the batch sealed nothing, which a citation must render as "unsealed" and never as
+  // agreement.
+  get citation(): {
+    identityVersion?: number;
+    datasetDigest?: string;
+    harnessSpecDigest?: string;
+    grading?: string;
+  } {
+    const m = this.manifest;
+    if (m === undefined) return {};
+    return {
+      ...(m.identityVersion !== undefined ? { identityVersion: m.identityVersion } : {}),
+      ...(m.dataset.digest !== undefined ? { datasetDigest: m.dataset.digest } : {}),
+      ...(m.harness.specDigest !== undefined ? { harnessSpecDigest: m.harness.specDigest } : {}),
+      ...(m.grading !== undefined ? { grading: m.grading } : {}),
+    };
+  }
+
   get sealedJudges(): SealedJudgeEntry[] | undefined {
     return this.manifest?.judges;
   }

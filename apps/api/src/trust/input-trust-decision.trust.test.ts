@@ -79,7 +79,12 @@ describeTrust("TRUST-179 — what the judges read reaches the gate, and doubt it
             harness: "scripted@0",
             trace: [],
             snapshot: { kind: "prompt", output: `ran ${job.evalCase.id}` },
-            scores: [{ graderId: "t", metric: "tests_pass", value: 1, pass: true }],
+            // NOT a reserved authority name. `tests_pass` belongs to the built-in grader that produces it,
+            // so a scripted producer emitting it has its score marked `invalid` at the boundary (rule
+            // `suite`: declaring an authority does not grant another producer's name). This fixture then
+            // carried a plane with no MEASURED score, the diff found no metrics, and the gate answered
+            // `not_comparable` for a reason that had nothing to do with what this scenario is about.
+            scores: [{ graderId: "t", metric: "scripted_pass", value: 1, pass: true }],
           };
         },
       },
