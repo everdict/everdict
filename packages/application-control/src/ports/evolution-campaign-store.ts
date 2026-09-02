@@ -5,7 +5,10 @@ import type {
   CampaignRound,
   CampaignState,
   EvolutionCampaignRecord,
+  HarnessSeeds,
+  ReadResult,
 } from "@everdict/contracts";
+import type { SeedEvidence } from "@everdict/domain";
 import type { OutboxEvent } from "./run-store.js";
 
 // ── THE CAMPAIGN STORE (docs/architecture/evolution-lineage.md, Track D) ─────────────────────────────
@@ -167,6 +170,16 @@ export interface AdoptionOperationStore {
     outcome: "open" | "unknown" | "orphaned";
     nextAttemptAt: string;
   }): Promise<boolean>;
+}
+
+// ── WHAT A CANDIDATE'S SEEDS WERE BORN FROM (docs/architecture/harness-identity-and-seeds-spec.md §4) ──
+//
+// The round asks two things of the candidate version: which seeds it ships with (the resolved spec's `seeds`),
+// and which scorecards those seeds' evidence names, with the cases each scorecard covered. Both are READS a
+// decision rests on, so both answer `ReadResult` — `unknown` makes the round unverifiable, never clean (L2).
+export interface SeedProvenanceReader {
+  seedsOf(tenant: string, harness: { id: string; version: string }): Promise<ReadResult<HarnessSeeds | undefined>>;
+  evidenceOf(tenant: string, seeds: HarnessSeeds): Promise<ReadResult<SeedEvidence[]>>;
 }
 
 // ── THE ROUND'S EVIDENCE, AS IMMUTABLE BYTES (docs/architecture/benchmark-evidence-spec.md §3) ───────

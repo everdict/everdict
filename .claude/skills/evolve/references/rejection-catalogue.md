@@ -43,6 +43,16 @@ pull request changed the exam (`oracleScope`). The round is not a candidate, wha
 on the verdict as `oracleTouched`. Close that pull request, re-brief the delegate with the paths named as a
 constraint, and spend a new round.
 
+**"the candidate was seeded with the exam's findings — <seeds> carry evidence over the frame's held-out
+scenarios"** — a skill or knowledge seed the candidate version ships with was born from a scorecard over the
+frame's held-out cases: the exam mounted into the candidate (`seedLeak` names the seeds on the verdict). Register a
+candidate version without those seeds; knowledge derived from THIS campaign's evidence feeds the proposer, never
+the candidate.
+
+**"the candidate's seeds could not be checked against the frame's held-out scenarios: …"** — the candidate
+version is not registered, or the seeds' provenance (skill versions, knowledge entries, their scorecards) could
+not be read. "Could not check" is not "clean".
+
 **"the frame declares an oracle scope and the candidate's change could not be checked against it: …"** —
 neither Everdict's build record nor the scorecard's origin names a pull request, the listing was truncated, or
 the repository could not be asked (no GitHub App on it, a failed read). "Could not check" is not "clean". The

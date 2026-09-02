@@ -33,6 +33,7 @@ import {
   oracleTouched,
   roundEvidenceKey,
   roundEvidenceOf,
+  seedLeakOf,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type {
@@ -40,6 +41,7 @@ import type {
   CampaignEvidenceStore,
   CampaignSubjectRef,
   EvolutionCampaignStore,
+  SeedProvenanceReader,
 } from "../ports/evolution-campaign-store.js";
 
 // ── THE CAMPAIGN SERVICE (docs/architecture/evolution-lineage.md, Track D) ───────────────────────────
@@ -218,6 +220,9 @@ export interface CampaignServiceDeps {
       links?: ReadonlyArray<{ type: string; id: string; version?: string; dataset?: string }>;
     }>;
   };
+  // What the candidate's seeds were born from (harness-identity-and-seeds-spec.md §4): a seed whose evidence
+  // names a scorecard over the frame's held-out scenarios is the exam mounted into the candidate. REQUIRED.
+  seedProvenance: SeedProvenanceReader;
   // Where a round's evidence record is staged before the round is appended (benchmark-evidence-spec.md §3).
   // REQUIRED: a round without its evidence is a round whose next brief is built from raw reads again.
   evidence: CampaignEvidenceStore;
@@ -298,6 +303,8 @@ export interface CampaignServiceDeps {
 
 // What the oracle check found about one candidate pull request. `undefined` from the caller means the frame
 // declared no scope, and the question was never asked.
+type SeedLeakCheck = { kind: "clean" } | { kind: "leak"; seeds: string[] } | { kind: "unverifiable"; reason: string };
+
 export type OracleCheck =
   | { kind: "clean" }
   | { kind: "touched"; paths: string[] }
@@ -773,11 +780,14 @@ export class CampaignService {
     // asks what the candidate's pull request changed — the pull request Everdict's build record names, else
     // the one the scorecard's origin names.
     const oracle = await this.oracleCheck(tenant, record.frame, snapshot, builtSource);
+    // …and whether the candidate was SEEDED with the exam (harness-identity-and-seeds-spec.md §4) — the same
+    // door, the same treatment as a candidate that edited the dataset.
+    const seedLeak = await this.seedLeakCheck(tenant, record.frame, input.candidateVersion);
     // …and the delegation the round names, read off the run ledger and held to the frame's budget.
     const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
     const seq = record.rounds.length + 1;
     const at = this.now();
-    const verdict = verdictOf(snapshot, record.frame, oracle, builtSource);
+    const verdict = verdictOf(snapshot, record.frame, oracle, builtSource, seedLeak);
     // ── THE ROUND'S EVIDENCE IS STAGED BEFORE THE ROUND EXISTS (benchmark-evidence-spec.md §3) ──────
     //
     // Derived from what this method already read — the diff's per-case trials, the frame's flags, each side's
@@ -890,6 +900,40 @@ export class CampaignService {
       baseImage: built.base.image,
       buildId: built.id,
     };
+  }
+
+  // ── WAS THE CANDIDATE SEEDED WITH ITS OWN EXAM (harness-identity-and-seeds-spec.md §4) ──────────
+  //
+  // Only a harness subject ships seeds. Three answers, never two: clean, leak (with the seeds), or unverifiable
+  // — the candidate's seeds could not be read, or their provenance could not. "Could not check" is not "clean".
+  private async seedLeakCheck(tenant: string, frame: CampaignFrame, candidateVersion: string): Promise<SeedLeakCheck> {
+    if (frame.subject.type !== "harness") return { kind: "clean" };
+    const seeds = await this.deps.seedProvenance.seedsOf(tenant, { id: frame.subject.id, version: candidateVersion });
+    switch (seeds.kind) {
+      case "unknown":
+        return { kind: "unverifiable", reason: `the candidate's seeds could not be read: ${seeds.reason}` };
+      case "absent":
+        return {
+          kind: "unverifiable",
+          reason: `candidate ${frame.subject.id}@${candidateVersion} is not registered, so its seeds cannot be read`,
+        };
+      case "read": {
+        const declared = seeds.value;
+        if (declared === undefined || (declared.skills.length === 0 && declared.knowledge.length === 0))
+          return { kind: "clean" };
+        const evidence = await this.deps.seedProvenance.evidenceOf(tenant, declared);
+        if (evidence.kind !== "read")
+          return {
+            kind: "unverifiable",
+            reason: `the candidate's seeds' provenance could not be read: ${evidence.kind === "unknown" ? evidence.reason : "absent"}`,
+          };
+        const heldOut = new Set(frame.scenarios.filter((sc) => sc.heldOut).map((sc) => sc.id));
+        const leaking = seedLeakOf(evidence.value, heldOut);
+        return leaking.length > 0 ? { kind: "leak", seeds: leaking } : { kind: "clean" };
+      }
+      default:
+        return assertNever(seeds);
+    }
   }
 
   // ── DID THE CANDIDATE TOUCH ITS OWN EXAM (docs/architecture/code-evolution-loop.md, D3) ─────────
@@ -1174,7 +1218,8 @@ function verdictOf(
   snapshot: CampaignSnapshot,
   frame: CampaignFrame,
   oracle: OracleCheck | undefined,
-  builtSource?: CandidateSource,
+  builtSource: CandidateSource | undefined,
+  seedLeak: SeedLeakCheck,
 ): CampaignRound["verdict"] {
   const comparison = snapshot.diff;
   // Identity coverage first: an absent identity read is NOT "verified" (L2) — it blocks like an unverified
@@ -1203,6 +1248,19 @@ function verdictOf(
     return rejected("the pair is not comparable (verdict-policy mismatch or an unresolvable stamp)");
   if (confoundedAxes.length > 0)
     return rejected(`the comparison is confounded — ${confoundedAxes.join(", ")} verifiably differ between the sides`);
+  // THE EXAM WAS MOUNTED INTO THE CANDIDATE (harness-identity-and-seeds-spec.md §4): a seed born from the
+  // frame's held-out scenarios is the findings handed to the thing being measured.
+  if (seedLeak.kind === "leak")
+    return {
+      ...rejected(
+        `the candidate was seeded with the exam's findings — ${seedLeak.seeds.join(", ")} carry evidence over the frame's held-out scenarios`,
+      ),
+      seedLeak: seedLeak.seeds,
+    };
+  if (seedLeak.kind === "unverifiable")
+    return rejected(
+      `the candidate's seeds could not be checked against the frame's held-out scenarios: ${seedLeak.reason}`,
+    );
   // THE EXAM MOVED (D3): a candidate whose pull request touched the frame's oracle paths is not a candidate,
   // whatever it scored — the same refusal a drifted scenario set gets, applied to the exam's source. The paths
   // ride the verdict so the next brief can name what must not be touched again.

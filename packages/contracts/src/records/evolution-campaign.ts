@@ -366,6 +366,12 @@ export const CampaignRoundSchema = z.object({
         regressions: z.number().int().min(0),
       })
       .optional(),
+    // ── THE CANDIDATE WAS SEEDED WITH THE EXAM (harness-identity-and-seeds-spec.md §4) ─────────────
+    //
+    // The seeds (skill ids / knowledge entry ids) whose evidence names a scorecard over the frame's held-out
+    // scenarios. Present only on a round refused for it — the oracle rule applied to what the candidate SHIPS
+    // WITH rather than what it changed.
+    seedLeak: z.array(z.string().min(1)).optional(),
     // ── THE ROUND'S EVIDENCE, BY KEY AND DIGEST (docs/architecture/benchmark-evidence-spec.md §3) ────
     //
     // What this round saw, case by case, staged as an immutable object BEFORE the round was appended and named

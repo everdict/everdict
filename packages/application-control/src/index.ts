@@ -485,6 +485,7 @@ export type {
   CampaignBuildStore,
   CampaignEvidenceStore,
   CampaignSubjectRef,
+  SeedProvenanceReader,
   EvolutionCampaignStore,
 } from "./ports/evolution-campaign-store.js";
 export {

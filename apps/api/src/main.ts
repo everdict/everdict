@@ -119,6 +119,7 @@ import { buildRuntimeCompute } from "./composition/runtime-compute.js";
 import { buildSandboxSessions } from "./composition/sandbox.js";
 import { ScheduleServiceRef, wireScheduleService } from "./composition/schedule.js";
 import { buildScorecard, modelBindingResolver } from "./composition/scorecard.js";
+import { buildSeedProvenance } from "./composition/seed-provenance.js";
 import {
   buildBrowserProfile,
   buildCatalog,
@@ -1323,6 +1324,13 @@ async function main(): Promise<void> {
     datasets: datasetRegistry,
     // Where a round's evidence record is staged before the round is appended (benchmark-evidence-spec.md §3).
     evidence: campaignEvidenceStore,
+    // What the candidate's seeds were born from (harness-identity-and-seeds-spec.md §4).
+    seedProvenance: buildSeedProvenance({
+      harnesses: harnessInstanceRegistry,
+      skillVersions: skillVersionStore,
+      knowledgeEntries: knowledgeEntryStore,
+      scorecards: scorecardStore,
+    }),
     diffs: scorecardService,
     // The authorization an adopted close writes, readable through the campaign's own surface — without it
     // the operation was durable and unreachable from every transport (arch-review 73).

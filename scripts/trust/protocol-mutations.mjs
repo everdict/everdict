@@ -2890,6 +2890,16 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // harness-identity-and-seeds-spec.md §4. A candidate seeded with knowledge born from the frame's held-out
+    // cases is not comparable; neutralizing the refusal logs it as a win, and the db campaign suite must notice.
+    name: "Evolve — a candidate seeded with the exam's findings is filed as comparable",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: '  if (seedLeak.kind === "leak")',
+    to: '  if (seedLeak.kind === "leak" && seedLeak.seeds.length < 0)',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

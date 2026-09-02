@@ -24,6 +24,11 @@ const noDatasets = {
     throw new NotFoundError("NOT_FOUND", {}, "no dataset registry in this fixture");
   },
 };
+// A harness with no seeds: the leak check reads "nothing to check", never "clean by default".
+const noSeedProvenance = {
+  seedsOf: async () => ({ kind: "read" as const, value: undefined }),
+  evidenceOf: async () => ({ kind: "read" as const, value: [] }),
+};
 
 // The campaign settlement over the HTTP transport — thin-route behavior (gate order, DTO refusal, error
 // mapping) over the same service the MCP twin drives. The diff is faked at the service seam: transport
@@ -63,6 +68,7 @@ function build(snapshot: CampaignSnapshot) {
     changes: noChanges,
     runs: noRuns,
     datasets: noDatasets,
+    seedProvenance: noSeedProvenance,
     evidence: new InMemoryCampaignEvidenceStore(),
     issues: {
       async get(_t: string, ref: string) {
@@ -516,6 +522,7 @@ function crossTeam() {
     changes: noChanges,
     runs: noRuns,
     datasets: noDatasets,
+    seedProvenance: noSeedProvenance,
     evidence: new InMemoryCampaignEvidenceStore(),
     // Both issues exist; they belong to different teams. Knowing the id is exactly what used to be enough.
     issues: {
@@ -587,6 +594,7 @@ describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team ca
         changes: noChanges,
         runs: noRuns,
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs: { diffSnapshot: async () => winning },
@@ -733,6 +741,7 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
@@ -905,6 +914,7 @@ describe("[COUNTEREXAMPLE] adopt gates the campaign's OWN team, whatever the pre
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
@@ -1056,6 +1066,7 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
@@ -1200,6 +1211,7 @@ describe("POST /campaigns with frame.fromIssue — the issue's case links become
       changes: noChanges,
       runs: noRuns,
       datasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs: { diffSnapshot: async () => winning },

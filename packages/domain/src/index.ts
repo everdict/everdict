@@ -540,6 +540,7 @@ export {
   campaignRoundRefusal,
   campaignStoppedAt,
 } from "./evolution/campaign-gate.js";
+export { type SeedEvidence, seedLeakOf } from "./evolution/seed-leak.js";
 export {
   type RoundEvidenceInput,
   type RoundEvidenceSide,

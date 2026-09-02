@@ -71,7 +71,7 @@ claims ABOUT an entity version's validity interval (`packages/contracts/src/know
 | G2.1 | **No fork, no family.** `succeeds` is same-id only. A harness derived from another id — a Codex variant of the Claude scaffold, a workspace copy of a `_shared` template — records nothing about where it came from. | `harness-identity-and-seeds-spec.md` §1 |
 | G2.2 | **Seeds hang off nothing.** A `KnowledgePin` is a claim about a version; it is not a declaration that a harness version SHIPS with a skill or a wiki page. No field on the instance names its seeds, so they are outside `specDigest`, outside the manifest seal, and nothing materializes them into the sandbox. Two runs of "the same version" can run with different skills. | `harness-identity-and-seeds-spec.md` §2 — **landed 2026-09-02** |
 | G2.3 | **Lineage is three reads.** Origins live on the registry record, the version diff is a separate read, the graph edges a third; nobody composes "where did this version come from, what changed, and what did it ship with". | `harness-identity-and-seeds-spec.md` §3 |
-| G2.4 | **Seed leakage is a rule nobody enforces.** The evolve skill says the candidate never receives the findings; a knowledge seed born from THIS campaign's evidence is exactly that leak, and nothing refuses it. | `harness-identity-and-seeds-spec.md` §4 |
+| G2.4 | **Seed leakage is a rule nobody enforces.** The evolve skill says the candidate never receives the findings; a knowledge seed born from THIS campaign's evidence is exactly that leak, and nothing refuses it. | `harness-identity-and-seeds-spec.md` §4 — **landed 2026-09-02** |
 
 ## Pillar 3 — honest benchmarks, exact evidence
 

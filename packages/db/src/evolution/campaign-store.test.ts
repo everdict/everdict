@@ -6,6 +6,7 @@ import {
   type EvolutionCampaignStore,
   type OutboxEvent,
 } from "@everdict/application-control";
+import type { SeedProvenanceReader } from "@everdict/application-control";
 import type { CampaignFrame, CampaignRound, EvolutionCampaignRecord, Score } from "@everdict/contracts";
 import {
   BadRequestError,
@@ -32,6 +33,11 @@ const noDatasets = {
   get: async (): Promise<never> => {
     throw new NotFoundError("NOT_FOUND", {}, "no dataset registry in this fixture");
   },
+};
+// A harness with no seeds: the leak check reads "nothing to check", never "clean by default".
+const noSeedProvenance = {
+  seedsOf: async () => ({ kind: "read" as const, value: undefined }),
+  evidenceOf: async () => ({ kind: "read" as const, value: [] }),
 };
 
 // ── The campaign settlement: store guards + the service's derived verdicts (Track D) ─────────────────
@@ -304,6 +310,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs,
@@ -382,6 +389,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
@@ -435,6 +443,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         // The transport read team-a; by the time `open` reads it, the issue has moved.
@@ -981,6 +990,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs,
@@ -1273,6 +1283,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes: noChanges,
         runs: noRuns,
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence: new InMemoryCampaignEvidenceStore(),
         builds,
         issues,
@@ -1350,6 +1361,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes,
         runs: noRuns,
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence: new InMemoryCampaignEvidenceStore(),
         builds,
         issues,
@@ -1488,6 +1500,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes: noChanges,
         runs: noRuns,
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence,
         issues,
         diffs,
@@ -1577,6 +1590,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes: noChanges,
         runs: noRuns,
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence: {
           put: async (): Promise<never> => {
             throw new Error("object store down");
@@ -1594,6 +1608,81 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-no-evidence" }, "agent:everdict", {}),
       ).rejects.toThrow(/object store down/);
       expect((await store.get("acme", rec.id))?.rounds).toHaveLength(0);
+    });
+
+    // ── A SEED BORN FROM THE EXAM IS A LEAK (harness-identity-and-seeds-spec.md §4) ─────────────────
+    //
+    // RED before the check: a candidate seeded with a knowledge entry whose evidence named the frame's own
+    // held-out cases logged as a comparable win.
+    it("[§4] a candidate seeded with knowledge born from the held-out cases is not comparable, and the seeds are named", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const harnessFrame: CampaignFrame = {
+        ...frame,
+        subject: { type: "harness", id: "shop", baselineVersion: "1.0.0" },
+      };
+      const seeds = { skills: [], knowledge: [{ id: "k-exam", digest: "sha256:k" }] };
+      const provenance = (caseIds: string[]) => ({
+        seedsOf: async () => ({ kind: "read" as const, value: seeds }),
+        evidenceOf: async () => ({
+          kind: "read" as const,
+          value: [{ seed: "knowledge:k-exam", scorecardId: "sc-older", caseIds }],
+        }),
+      });
+      const build = (seedProvenance: SeedProvenanceReader) =>
+        new CampaignService({
+          store,
+          operations: store,
+          changes: noChanges,
+          runs: noRuns,
+          datasets: noDatasets,
+          seedProvenance,
+          evidence: new InMemoryCampaignEvidenceStore(),
+          issues,
+          diffs,
+          newId: () => `id_${++n}`,
+          now: () => "2026-09-02T02:00:00.000Z",
+        });
+      const shopSide = (version: string) => ({ record: { ...side(version).record, harness: { id: "shop", version } } });
+      snapshots.set("sc-seeded", snapshot(comparison(), { baseline: shopSide("1.0.0"), candidate: shopSide("1.0.1") }));
+      const leaking = build(provenance(["c2", "zz"])); // c2 is held-out in `frame`
+      const rec = await leaking.open("acme", { issueId: "iss_1", frame: harnessFrame }, "alice");
+      const { round: logged } = await leaking.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-seeded" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable, "a candidate seeded with the exam logged as comparable").toBe(false);
+      expect(logged.verdict.seedLeak).toEqual(["knowledge:k-exam"]);
+      expect(logged.verdict.detail).toMatch(/seeded with the exam/);
+      // The same seeds under a frame whose held-out cases the evidence never touched: clean, comparable.
+      const clean = build(provenance(["zz"]));
+      const rec2 = await clean.open("acme", { issueId: "iss_1", frame: harnessFrame }, "alice");
+      const { round: r2 } = await clean.logRound(
+        "acme",
+        rec2.id,
+        { ...LOG, candidateScorecardId: "sc-seeded" },
+        "agent:everdict",
+        {},
+      );
+      expect(r2.verdict.comparable, r2.verdict.detail).toBe(true);
+      expect(r2.verdict.seedLeak).toBeUndefined();
+      // …and provenance that could not be read is unverifiable, never clean.
+      const unknown = build({
+        ...provenance([]),
+        evidenceOf: async () => ({ kind: "unknown" as const, reason: "knowledge store down" }),
+      });
+      const rec3 = await unknown.open("acme", { issueId: "iss_1", frame: harnessFrame }, "alice");
+      const { round: r3 } = await unknown.logRound(
+        "acme",
+        rec3.id,
+        { ...LOG, candidateScorecardId: "sc-seeded" },
+        "agent:everdict",
+        {},
+      );
+      expect(r3.verdict.comparable).toBe(false);
+      expect(r3.verdict.detail).toMatch(/could not be checked/);
     });
 
     it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {
@@ -1651,6 +1740,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes,
         runs: noRuns,
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs,
@@ -1768,6 +1858,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes: noChanges,
         runs: ledger(runs),
         datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
         evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs,

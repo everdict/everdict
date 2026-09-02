@@ -26,6 +26,11 @@ const noDatasets = {
     throw new NotFoundError("NOT_FOUND", {}, "no dataset registry in this fixture");
   },
 };
+// A harness with no seeds: the leak check reads "nothing to check", never "clean by default".
+const noSeedProvenance = {
+  seedsOf: async () => ({ kind: "read" as const, value: undefined }),
+  evidenceOf: async () => ({ kind: "read" as const, value: [] }),
+};
 
 // BFF↔MCP parity for the campaign settlement: the agent-evolve loop drives the SAME service over MCP that
 // the HTTP routes serve — open, derived round, gate decision, settle. Role gating rides `scorecards:*`.
@@ -118,6 +123,7 @@ function makeDeps(
     changes: noChanges,
     runs: noRuns,
     datasets: noDatasets,
+    seedProvenance: noSeedProvenance,
     evidence: new InMemoryCampaignEvidenceStore(),
     issues: { get: async () => ({ id: "iss_1" }) },
     diffs: { diffSnapshot: async () => snapshot },
@@ -271,6 +277,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      seedProvenance: noSeedProvenance,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs: { diffSnapshot: async () => winning },

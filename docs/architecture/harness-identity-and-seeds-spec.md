@@ -108,6 +108,12 @@ round and the scorecard that proved it, the slot the round moved, and the versio
 
 ## §4 — A seed born from the exam is a leak, and the round refuses it (G2.4)
 
+> **Landed 2026-09-02.** `seedLeakOf` (`packages/domain/src/evolution/seed-leak.ts`) over a `SeedProvenanceReader`
+> (the candidate version's `seeds`, and the scorecards each seed's evidence names with the cases they covered —
+> `apps/api/src/composition/seed-provenance.ts`, every read a `ReadResult`); `CampaignService.logRound` asks it
+> beside the oracle check and records a leaking round `comparable: false` with the seeds on the verdict as
+> `seedLeak`; provenance that cannot be read is "unverifiable", never clean.
+
 **The gap.** The evolve skill's rule — the candidate never receives the findings — is measured (WikiSkill,
 arXiv 2608.27454: the same knowledge given to the proposer, +15.0; given also to the executing agent, −2.8)
 and unenforced. Once §2 exists a candidate can ship a knowledge seed whose `evidence` names THIS campaign's
