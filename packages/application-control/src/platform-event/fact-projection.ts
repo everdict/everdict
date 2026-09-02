@@ -88,6 +88,8 @@ function template(fact: DomainFact): string | undefined {
       return p?.created === true
         ? `Adopted ${s(p, "candidateType")} ${s(p, "candidateId")}@${s(p, "version")} registered — proved by scorecard ${s(p, "provingScorecardId")}`
         : `Adopted ${s(p, "candidateType")} ${s(p, "candidateId")}@${s(p, "version")} confirmed against the bytes it already held — proved by scorecard ${s(p, "provingScorecardId")}`;
+    case "campaign.adoption_merged":
+      return `Adopted ${s(p, "candidateId")}@${s(p, "version")} merged — pull request #${s(p, "prNumber")} of ${s(p, "repo")} at ${s(p, "mergedSha")}`;
     case "campaign.adoption_completed":
       return `Adoption of ${s(p, "candidateId")}@${s(p, "version")} settled its issue ${s(p, "issueId")}`;
     case "issue_label.created":

@@ -1,7 +1,7 @@
 import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
-import { AgentSpecSchema, type CampaignFrame } from "@everdict/contracts";
+import { AgentSpecSchema, type CampaignFrame, readUnknown } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
 import { InMemoryAgentRegistry } from "@everdict/registry";
@@ -10,6 +10,15 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { buildCampaignAdoption } from "../../composition/campaign-adoption.js";
 import { type McpDeps, buildMcpServer } from "../../mcp.js";
+
+// The two reads a campaign service now REQUIRES and these cases do not exercise: a pull-request listing (the
+// frame's oracle scope) and a delegation session (the frame's delegation budget). Stated as unavailable rather
+// than omitted — an optional dep would let "not wired" read as "clean" (rule `protocol`).
+const noChanges = {
+  pullRequestFiles: async () =>
+    readUnknown<{ paths: string[]; complete: boolean }>("no pull-request reader in this fixture"),
+};
+const noRuns = { get: async () => undefined };
 
 // BFF↔MCP parity for the campaign settlement: the agent-evolve loop drives the SAME service over MCP that
 // the HTTP routes serve — open, derived round, gate decision, settle. Role gating rides `scorecards:*`.
@@ -33,6 +42,7 @@ const frame: CampaignFrame = {
   significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // frozen: the level, and the family it is corrected over
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
+  oracleScope: [],
   observationPolicy: { allowDivergent: false },
 };
 
@@ -97,6 +107,8 @@ function makeDeps(
   const campaignService = new CampaignService({
     store,
     operations: store,
+    changes: noChanges,
+    runs: noRuns,
     issues: { get: async () => ({ id: "iss_1" }) },
     diffs: { diffSnapshot: async () => snapshot },
     newId: () => "evc_mcp",
@@ -246,6 +258,8 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
     const campaignService = new CampaignService({
       store,
       operations: store,
+      changes: noChanges,
+      runs: noRuns,
       issues,
       diffs: { diffSnapshot: async () => winning },
       newId: () => "camp_foreign",
@@ -341,3 +355,65 @@ function openIssue() {
     },
   };
 }
+
+// ── THE MCP DOOR CARRIES THE RECORD'S BOUNDS (review of the loop's input seams) ──────────────────────
+//
+// The HTTP DTO bounded `hypothesis` (1..2000), `learned` (10..4000) and `candidateVersion` (1..100) and this
+// twin did not — and the service appended the round unparsed. Postgres reads every campaign row back through
+// `EvolutionCampaignRecordSchema`, so one round logged over MCP with an empty hypothesis or a 4001-character
+// finding made that campaign unreadable and, through `list()`, took the workspace's whole campaign list with
+// it. The agent loop drives THIS door. RED before the fix: every call below answered a logged round.
+describe("[COUNTEREXAMPLE] log_campaign_round refuses what the stored row could not read back", () => {
+  it("an empty hypothesis, an over-long finding and an over-long version are refused, and the campaign stays readable", async () => {
+    const client = await connect(makeDeps(), ["member"]);
+    const opened = await client.callTool({ name: "open_campaign", arguments: { issue_id: "iss_1", frame } });
+    const { id } = JSON.parse(textOf(opened)) as { id: string };
+    const good = {
+      id,
+      hypothesis: "structure over phrasing",
+      learned: "the shorter instructions cut tool calls but the win sat on training rows only",
+      candidate_version: "1.0.1",
+      baseline_scorecard_id: "sc-b",
+      candidate_scorecard_id: "sc-c",
+    };
+    for (const bad of [{ hypothesis: "" }, { learned: "x".repeat(4001) }, { candidate_version: "9".repeat(101) }]) {
+      const res = await client.callTool({ name: "log_campaign_round", arguments: { ...good, ...bad } });
+      expect(res.isError, `MCP logged a round with ${Object.keys(bad).join()} the record schema refuses`).toBe(true);
+    }
+    const read = await client.callTool({ name: "get_campaign", arguments: { id } });
+    expect(read.isError).toBeFalsy();
+    expect(JSON.parse(textOf(read)).rounds).toHaveLength(0);
+  });
+});
+
+// ── THE CODE HALF, OVER MCP (parity with POST /campaigns/:id/merge) ─────────────────────────────────
+describe("merge_campaign_candidate — the same authorization, its second effect", () => {
+  it("refuses before the bytes are registered, and refuses an adoption that carries no code debt", async () => {
+    // makeDeps' snapshot names no pull request, so the close records no code debt: the refusal it reaches
+    // says so by name, which is the deployment-shaped case (a pin-only campaign has no code to land).
+    const client = await connect(makeDeps(), ["member"]);
+    const opened = await client.callTool({ name: "open_campaign", arguments: { issue_id: "iss_1", frame } });
+    const { id } = JSON.parse(textOf(opened)) as { id: string };
+    await client.callTool({
+      name: "log_campaign_round",
+      arguments: {
+        id,
+        hypothesis: "h",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
+        candidate_version: "1.0.1",
+        baseline_scorecard_id: "sc-b",
+        candidate_scorecard_id: "sc-c",
+      },
+    });
+    await client.callTool({ name: "settle_campaign", arguments: { id } });
+    const read = await client.callTool({ name: "campaign_adoption", arguments: { id } });
+    const operation = JSON.parse(textOf(read)).operation as { proof: unknown; code?: unknown };
+    expect(operation.code).toBeUndefined();
+    const merged = await client.callTool({
+      name: "merge_campaign_candidate",
+      arguments: { id, proof: JSON.stringify(operation.proof) },
+    });
+    expect(merged.isError).toBe(true);
+    expect(textOf(merged)).toMatch(/not registered yet|no code debt/);
+  });
+});

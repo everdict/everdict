@@ -7,7 +7,7 @@ import type {
   GithubVersionReader,
   GithubVersionReaderFactory,
 } from "@everdict/application-control";
-import { UpstreamError } from "@everdict/contracts";
+import { ConflictError, UpstreamError } from "@everdict/contracts";
 import { z } from "zod";
 
 // The fetch-backed GitHub repo-write adapter — owns the REST endpoints, response parsing, and the
@@ -232,6 +232,47 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
               ...(r.patch ? { patch: r.patch } : {}),
             })),
           };
+        },
+        async mergePr(repository, pullNumber, opts) {
+          // The head sha travels as GitHub's own precondition: a 409 here means the branch moved after the round
+          // measured it, and the commit that would land is not the one the campaign proved.
+          const res = await doFetch(`${base}/repos/${repository}/pulls/${pullNumber}/merge`, {
+            method: "PUT",
+            headers: headers(token),
+            body: JSON.stringify({
+              merge_method: opts.method ?? "merge",
+              ...(opts.sha !== undefined ? { sha: opts.sha } : {}),
+              ...(opts.message !== undefined ? { commit_message: opts.message } : {}),
+            }),
+          });
+          if (res.ok) {
+            const merged = z.object({ sha: z.string(), merged: z.boolean() }).parse(await res.json());
+            if (!merged.merged) throw await upstream(res, "PR merge did not land");
+            return { sha: merged.sha, alreadyMerged: false };
+          }
+          // 405 = not mergeable — which includes "already merged". Read the pull request back: a merged one is
+          // this same effect having landed earlier (an at-least-once retry), anything else is a real refusal.
+          if (res.status === 405) {
+            const pr = z
+              .object({ merged: z.boolean(), merge_commit_sha: z.string().nullish() })
+              .parse(await (await gh(`${base}/repos/${repository}/pulls/${pullNumber}`)).json());
+            if (pr.merged && pr.merge_commit_sha) return { sha: pr.merge_commit_sha, alreadyMerged: true };
+            const text = await res.text().catch(() => "");
+            throw new ConflictError(
+              "CONFLICT",
+              { repository, pullNumber, status: res.status },
+              `pull request #${pullNumber} is not mergeable: ${text.slice(0, 200)}`,
+            );
+          }
+          if (res.status === 409) {
+            const text = await res.text().catch(() => "");
+            throw new ConflictError(
+              "CONFLICT",
+              { repository, pullNumber, sha: opts.sha ?? null },
+              `pull request #${pullNumber}'s head moved after the round measured it: ${text.slice(0, 200)}`,
+            );
+          }
+          throw await upstream(res, "PR merge failed");
         },
         async updateIssue(repository, issueNumber, patch) {
           const res = await doFetch(`${base}/repos/${repository}/issues/${issueNumber}`, {

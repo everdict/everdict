@@ -2708,6 +2708,122 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // Review of the evolution loop (2026-09-02). The frame's two endings — budget spent, rejected streak — were
+    // ANSWERED by the gate and enforced by nobody: `logRound` appended past both, and the gate read the latest
+    // round for a win before either ending, so a driver that never asked `decision` could log until a round
+    // happened to win and adopt at a level the pre-registered family never covered. The write refuses now;
+    // handing the refusal an empty trace is the neutralization, and the service suite must notice.
+    name: "Evolve — a round past the frame's own ending is appended",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    const ended = campaignRoundRefusal(record.frame, record.rounds);",
+    to: "    const ended = campaignRoundRefusal(record.frame, record.rounds.slice(0, 0));",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // …and the gate's half: a round logged after the ending is not evidence, whatever it scored.
+    name: "Evolve — the gate reads a win before it reads the frame's ending",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "  const ended = campaignStoppedAt(frame, rounds);",
+    to: "  const ended = campaignStoppedAt(frame, rounds.slice(0, 0));",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
+  },
+  {
+    // …and a trace whose LAST budgeted round won, followed by rounds the write should have refused (rows from
+    // before the refusal existed): the over-budget tail is not evidence either.
+    name: "Evolve — the gate adopts over a trace that exceeds the budget",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "  if (rounds.length > frame.budget.maxRounds)",
+    to: "  if (rounds.length > frame.budget.maxRounds + 9999)",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
+  },
+  {
+    // Caller-authored round fields are bounded by the RECORD's schema at the write, whichever door they came
+    // through — the MCP tool carried no bounds and Postgres decodes every row on read, so one over-long finding
+    // made a workspace's campaign list unreadable. Neutralized by parsing nothing.
+    name: "Evolve — a round the stored row cannot decode is appended",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    const bounded = CampaignRoundInputSchema.safeParse(input);",
+    to: "    const bounded = CampaignRoundInputSchema.partial().safeParse({});",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // The judges that SCORED a side are read from the scoring ledger's current revision; reading only the
+    // batch-only submit pin rejected every ingested round under a frame that pinned its judges.
+    name: "Evolve — the judge check reads the submit pin an ingested record never has",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "      (side.record.scoring?.at(-1)?.judges ?? side.record.orchestration?.judges ?? [])",
+    to: "      (side.record.orchestration?.judges ?? [])",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // Coverage's denominator is the judge family: a cost or a step count cannot carry an assessment, and
+    // counting them made `minimumCoverage` unreachable for the loop the policy was written for.
+    name: "Evolve — observation coverage counts scores no judge could have assessed",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "      if (!isJudgeFamilyMetric(sc.metric)) continue;",
+    to: '      if (sc.metric === "" && !isJudgeFamilyMetric(sc.metric)) continue;',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // A halted sibling's rounds were spent against the same held-out rows; a family arithmetic that counted
+    // ancestors only let a second successor of the same predecessor overspend it.
+    name: "Evolve — the chain's family forgets a sibling branch",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    for (const c of everyCampaign) if (tree.has(c.id) && !seen.has(c.id)) spent += c.rounds.length;",
+    to: "    for (const c of everyCampaign) if (tree.has(c.id) && !seen.has(c.id)) spent += 0 * c.rounds.length;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // The adopt route gates the campaign's OWN team; gating on the proof's copy let a proof with the field
+    // stripped skip the gate and fail on its digest as a 409 where a member of another team owes a 403.
+    name: "Evolve — the adopt route gates the team the caller wrote on the proof",
+    file: "apps/api/src/api/campaign/campaign.routes.ts",
+    from: '      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});',
+    to: '      gate(principal, "scorecards:run", body.proof.teamId !== undefined ? { teamId: body.proof.teamId } : {});',
+    suite: ["--root", "apps/api", "src/api/campaign/campaign.routes.test.ts"],
+  },
+  {
+    // code-evolution-loop.md D3. A candidate whose pull request touched the frame's oracle paths rewrote its own
+    // exam; the round is non-comparable whatever it scored. Neutralizing the refusal files it as a win, and the
+    // service suite must notice.
+    name: "Evolve — a candidate that touched the oracle scope is filed as comparable",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: '  if (oracle?.kind === "touched")',
+    to: '  if (oracle?.kind === "touched" && oracle.paths.length < 0)',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // code-evolution-loop.md D5. A chain continues a result; an adoption whose pull request is still a branch
+    // has registered bytes the default branch does not hold. Neutralizing the guard lets the successor open,
+    // and the service suite must notice.
+    name: "Evolve — a chain continues an adoption whose code is still a branch",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: '    if (parentOperation?.code !== undefined && parentOperation.code.state !== "merged")',
+    // `state` is `owed | merged`, so excluding both is a condition that never fires and still type-checks — the
+    // SUITE is what refuses, not the compiler (rule `ci`, the two kinds of uncompilable rung).
+    to: '    if (parentOperation?.code !== undefined && parentOperation.code.state !== "merged" && parentOperation.code.state !== "owed")',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // code-evolution-loop.md D6. A round under a budgeted frame is refused when its delegation session ran past
+    // the TTL the frame allows; neutralizing the bound logs it, and the service suite must notice.
+    name: "Evolve — a delegation past the frame's budget is logged",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "      if (ttlSec > budget.ttlSec)",
+    to: "      if (ttlSec > budget.ttlSec * 1e9)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

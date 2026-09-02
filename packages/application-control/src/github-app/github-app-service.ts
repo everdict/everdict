@@ -254,6 +254,27 @@ export class GithubAppService {
     return { changedFiles, files, truncated: files.length < changedFiles };
   }
 
+  // ── MERGE A PULL REQUEST (docs/architecture/code-evolution-loop.md, D5) ─────────────────────────
+  //
+  // The code half of a campaign adoption: the pull request the adopted bytes were built from lands on the
+  // default branch. `sha` is the head the round measured — GitHub refuses when it moved. A repository-scoped
+  // token with `contents: write` + `pull_requests: write`, minted for this call like every other write here.
+  async mergePullRequest(
+    workspace: string,
+    repository: string,
+    pullNumber: number,
+    opts: { sha?: string; method?: "merge" | "squash" | "rebase"; message?: string },
+    host?: string,
+  ): Promise<{ sha: string; alreadyMerged: boolean }> {
+    const { token, host: resolved } = await this.tokenForRepository(
+      workspace,
+      repository,
+      { contents: "write", pull_requests: "write" },
+      host,
+    );
+    return await this.repoOps.for(token, resolved).mergePr(repository, pullNumber, opts);
+  }
+
   // Commit file changes STRAIGHT to a branch, with no pull request (the agent's commit_github_files tool). The
   // sibling of openPullRequest, and deliberately a separate use-case rather than a flag on it: opening a PR
   // PROPOSES a change to reviewers, while this one lands it — including on the default branch, if that is the

@@ -264,9 +264,22 @@ change — so a hundred unfinishable rows stop holding the head of the list whil
 never read. The deferral is itself a conditional write and its answer is CONSUMED: a row the statement did
 not move is counted (`undeferred`), because a deferral that never landed reads exactly like one that did. The campaign carries its
 > own `teamId` (frozen at open from the issue it journals into, mig 0198), every read is team-filtered and
-> every mutation is team-gated on both transports. Still open on this track: an ingested scorecard resolves
-> no registry document, so a loop running on ingested traces needs `allowLabelOnlyAdoption` on the frame —
-> the stronger answer is for ingest to seal the digest of the agent document it evaluated.
+> every mutation is team-gated on both transports. **The loop review of 2026-09-02** closed four seams the
+> settlement had left to the driver: the frame's endings (budget spent, rejected streak) are enforced at the
+> WRITE — `logRound` refuses a round past either, race-safe on the append CAS, and the gate reads the ending
+> before it reads a win, so a round logged past it is not evidence whatever it scored; the caller-authored
+> round fields are bounded by the record schema on every door (the MCP tool carried none, and one over-long
+> finding made a Postgres-backed workspace's campaign list unreadable); the frame's judge check reads who
+> SCORED each side from the scoring ledger's current revision (the batch-only submit pin rejected every
+> ingested round under a pinned frame); observation coverage's denominator is the judge family; and the
+> chain's family arithmetic counts the whole tree the chain roots, halted siblings included. Still open on
+> this track: an ingested scorecard seals no manifest and resolves no registry document, so a loop running on
+> ingested traces needs BOTH `allowUnverifiedIdentity` and `allowLabelOnlyAdoption` on the frame (every
+> identity axis reads unverified, and the adoption can name only a label) — the stronger answer is for ingest
+> to seal the digest of the agent document it evaluated, and the world it ran in. The CODE loop — a delegated
+> coding agent changes the harness repository, CI builds the image, the round pins that digest — is its own
+> record, `docs/architecture/code-evolution-loop.md`; its first rung here is `verdict.candidateSource`, the
+> candidate scorecard's origin coordinates copied onto the round, the adopted close and the proof.
 
 **The gap.** Everything the `agent-evolve` skill mandates — frozen frame, N ≥ 3 trials, budget cap stated
 up front, stop after 3 rejected rounds, adoption only on significant-improvement-zero-regressions — is

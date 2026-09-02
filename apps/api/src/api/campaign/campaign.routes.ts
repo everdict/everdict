@@ -6,6 +6,7 @@ import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-con
 import { campaignDocs } from "./campaign.docs.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
+import { MergeCampaignBodySchema } from "./request/merge-campaign.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 
 // Evolution campaigns — the settlement behind the agent-evolve loop (docs/architecture/evolution-lineage.md,
@@ -242,9 +243,14 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
           .send({ code: "NOT_FOUND", message: "campaign service not configured — an adoption cannot be authorized" });
       const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
       // Two authorities, both required: the campaign this proof came from, and the entity being written.
-      // The proof carries the team frozen at open, so a later ownership move cannot widen what it authorizes.
+      // The campaign's team is frozen at open, so a later ownership move cannot widen what it authorizes.
       await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-      if (body.proof.teamId !== undefined) gate(principal, "scorecards:run", { teamId: body.proof.teamId });
+      // ⚠️ THE CAMPAIGN'S team, off the record read above — not `body.proof.teamId`. The proof's copy is the
+      // caller's bytes: equal to the record's on a genuine proof (the proof is minted from the record), and
+      // only a FORGED proof can differ — a proof with the field stripped skipped this gate entirely and was
+      // refused several reads later on its digest, as a 409 where a member of another team owes a 403. A
+      // caller-authored value deciding whether a team gate runs is rule `protocol` L3's shape exactly.
+      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
       const candidate = body.proof.candidate;
       const owner =
         candidate.type === "agent"
@@ -292,6 +298,62 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       );
     } catch (err) {
       return sendError(reply, err); // no authorization → 404 · forged proof / wrong candidate / already spent → 409
+    }
+  });
+
+  // ── PAY THE CODE DEBT (docs/architecture/code-evolution-loop.md, D5) ─────────────────────────────
+  //
+  // The other half of `adopt`: the pull request the adopted bytes were built from lands on the default branch.
+  // Gated exactly like adopt — the campaign's own team, and the candidate family's write action against the
+  // entity's owner — because it is the same authorization being spent on its second effect. The repository and
+  // pull request are read off the STORED operation by the service; the body carries only the proof.
+  app.post<{ Params: { id: string } }>("/campaigns/:id/merge", { schema: campaignDocs.merge }, async (req, reply) => {
+    if (!deps.campaignAdoption)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "campaign adoption not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const actingAgent = agentAttributionFrom(req.headers);
+    let body: z.infer<typeof MergeCampaignBodySchema>;
+    try {
+      body = MergeCampaignBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      if (!deps.campaignService)
+        return reply
+          .code(404)
+          .send({ code: "NOT_FOUND", message: "campaign service not configured — a merge cannot be authorized" });
+      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
+      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      const candidate = body.proof.candidate;
+      const owner =
+        candidate.type === "agent"
+          ? await teamOfEntity(deps.agentRegistry, principal.workspace, candidate.id)
+          : await teamOfEntity(deps.harnessInstances, principal.workspace, candidate.id);
+      gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      return reply.send(
+        await deps.campaignAdoption.merge({
+          tenant: principal.workspace,
+          campaignId: req.params.id,
+          proof: body.proof,
+          by: principal.subject,
+          via: "web",
+          ...(actingAgent !== undefined ? { agent: actingAgent } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err); // no authorization → 404 · forged proof / unregistered / no debt → 409
     }
   });
 

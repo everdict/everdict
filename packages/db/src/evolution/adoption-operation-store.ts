@@ -15,6 +15,7 @@ interface OperationRow {
   campaign_id: string;
   proof: unknown;
   state: string;
+  code: unknown; // the code debt (mig 0203) — null when the candidate named no pull request
   registered_version: string | null;
   created_at: string | Date;
   updated_at: string | Date;
@@ -26,6 +27,7 @@ const toOperation = (row: OperationRow): AdoptionOperation =>
     tenant: row.tenant,
     proof: row.proof,
     state: row.state,
+    ...(row.code !== null && row.code !== undefined ? { code: row.code } : {}),
     ...(row.registered_version !== null ? { registeredVersion: row.registered_version } : {}),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date(row.updated_at).toISOString(),
@@ -98,6 +100,51 @@ export class PgAdoptionOperationStore implements AdoptionOperationStore {
     // Zero rows now means somebody else spent it between the read and the write — which is the ordinary
     // at-least-once convergence, not a failure.
     return rows.length > 0 ? "registered" : "already_registered";
+  }
+
+  // ── THE CODE DEBT, PAID (docs/architecture/code-evolution-loop.md, D5) ───────────────────────────
+  //
+  // Same shape as the spend: the proof compared here (our digest, which Postgres cannot compute), the three
+  // conditions that need atomicity in the statement — still owed, bytes registered, this campaign — and the
+  // whole `code` document rewritten from the one just read, so a merged debt carries the commit GitHub named.
+  async markMerged(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+    merged: { sha: string; at: string },
+    events?: OutboxEvent[],
+  ): Promise<"merged" | "already_merged" | "no_code_debt" | "not_registered" | "no_such_operation" | "proof_mismatch"> {
+    const existing = await this.forCampaign(tenant, campaignId);
+    if (existing === undefined) return "no_such_operation";
+    if (contentDigest(existing.proof) !== proofDigest) return "proof_mismatch";
+    if (existing.code === undefined) return "no_code_debt";
+    if (existing.code.state === "merged") return "already_merged";
+    if (existing.state === "decided") return "not_registered";
+    const paid = { ...existing.code, state: "merged" as const, mergedSha: merged.sha, mergedAt: merged.at };
+    const base = [tenant, campaignId, JSON.stringify(paid)];
+    const ev = events && events.length > 0 ? eventValuesClause(events, base.length + 1) : undefined;
+    const { rows } = await this.client.query<{ operation_id: string }>(
+      `WITH upd AS (
+         UPDATE everdict_adoption_operations
+            SET code = $3::jsonb, updated_at = now()
+          WHERE tenant = $1 AND campaign_id = $2
+            AND state IN ('registered', 'completed')
+            AND code IS NOT NULL AND code ->> 'state' = 'owed'
+          RETURNING operation_id
+       )${
+         ev !== undefined
+           ? `, ev AS (
+         INSERT INTO everdict_platform_events ${EVENT_COLUMNS}
+         SELECT * FROM (VALUES ${ev.sql}) AS v
+         WHERE EXISTS (SELECT 1 FROM upd)
+       )`
+           : ""
+       }
+       SELECT operation_id FROM upd`,
+      ev !== undefined ? [...base, ...ev.params] : base,
+    );
+    // Zero rows now = another merge landed between the read and the write: at-least-once convergence.
+    return rows.length > 0 ? "merged" : "already_merged";
   }
 
   // ── THE OPERATIONS AN ISSUE AUTHORIZED (arch-review 73) ──────────────────────────────────────────

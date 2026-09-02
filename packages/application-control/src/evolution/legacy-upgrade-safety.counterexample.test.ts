@@ -55,6 +55,7 @@ const legacyFrame = {
 const conformingFrame = {
   ...legacyFrame,
   significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // family >= budget.maxRounds
+  oracleScope: [], // …and every key a frame written today carries
 };
 
 // A round stored before coverage existed: the observations block has only the two failure counts.

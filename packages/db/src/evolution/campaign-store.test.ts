@@ -6,11 +6,27 @@ import {
   type EvolutionCampaignStore,
   type OutboxEvent,
 } from "@everdict/application-control";
-import type { CampaignFrame, CampaignRound, EvolutionCampaignRecord } from "@everdict/contracts";
-import { BadRequestError, ConflictError, NotFoundError } from "@everdict/contracts";
+import type { CampaignFrame, CampaignRound, EvolutionCampaignRecord, Score } from "@everdict/contracts";
+import {
+  BadRequestError,
+  ConflictError,
+  EvolutionCampaignRecordSchema,
+  NotFoundError,
+  readUnknown,
+} from "@everdict/contracts";
+import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
 import { InMemoryEvolutionCampaignStore, PgEvolutionCampaignStore } from "./campaign-store.js";
+
+// The two reads a campaign service now REQUIRES and these cases do not exercise: a pull-request listing (the
+// frame's oracle scope) and a delegation session (the frame's delegation budget). Stated as unavailable rather
+// than omitted — an optional dep would let "not wired" read as "clean" (rule `protocol`).
+const noChanges = {
+  pullRequestFiles: async () =>
+    readUnknown<{ paths: string[]; complete: boolean }>("no pull-request reader in this fixture"),
+};
+const noRuns = { get: async () => undefined };
 
 // ── The campaign settlement: store guards + the service's derived verdicts (Track D) ─────────────────
 //
@@ -39,6 +55,7 @@ const frame: CampaignFrame = {
   significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 },
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
+  oracleScope: [],
   observationPolicy: { allowDivergent: false },
 };
 
@@ -269,6 +286,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     new CampaignService({
       store,
       operations: store,
+      changes: noChanges,
+      runs: noRuns,
       issues,
       diffs,
       newId: () => `id_${++n}`,
@@ -343,6 +362,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const teamed = new CampaignService({
       store,
       operations: store,
+      changes: noChanges,
+      runs: noRuns,
       issues: {
         async get(_t: string, ref: string) {
           return { id: ref, teamId: ref === "iss_a" ? "team-a" : "team-b" };
@@ -392,6 +413,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const moving = new CampaignService({
       store,
       operations: store,
+      changes: noChanges,
+      runs: noRuns,
       issues: {
         // The transport read team-a; by the time `open` reads it, the issue has moved.
         async get(_t: string, ref: string) {
@@ -803,6 +826,103 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         /a chain shares one pre-registration/,
       );
     });
+
+    // ── A SIBLING SPENDS THE SAME ROWS (review of the chain arithmetic) ──────────────────────────────
+    //
+    // The walk only ever counted ANCESTORS. A successor that halts adopted nothing, so it cannot be
+    // continued — the natural next move is a second successor of the same adopted predecessor, and that one
+    // read `spent` as the predecessor's rounds alone. Every round the halted sibling logged consulted the
+    // same held-out rows (its frame passed the same-exam check to open at all), and the family forgot them.
+    //
+    // RED before the fix: the third campaign opened with 1 + 4 = 5 inside a family of 5, over rows that had
+    // already been asked 1 + 3 = 4 times.
+    // ── A CHAIN STARTS FROM WHAT IS ON THE DEFAULT BRANCH (code-evolution-loop.md, D5) ──────────────
+    //
+    // An adoption whose candidate came from a pull request has registered bytes the next campaign's baseline
+    // image will carry while the repository's default branch does not. A successor opened over that starts
+    // from bytes whose source nobody can check out. RED before the fix: the successor opened.
+    it("[COUNTEREXAMPLE] REFUSES to continue an adoption whose code debt is still owed, and allows it once merged", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      const origin = { source: "github-actions", repo: "acme/harness", sha: "abc123", prNumber: 7 };
+      snapshots.set("sc-pr", snapshot(comparison(), { candidate: { record: { ...side("1.0.1").record, origin } } }));
+      await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-pr" }, "agent:everdict", {});
+      await svc.settle("acme", rec.id, "alice");
+      const operation = await store.forCampaign("acme", rec.id);
+      expect(operation?.code?.state, "the fixture recorded no code debt, so the case measures nothing").toBe("owed");
+
+      await expect(svc.open("acme", { issueId: "iss_1", frame: successor(rec.id) }, "alice")).rejects.toThrow(
+        /adopted code that is not merged/,
+      );
+      // The bytes must be registered before the code can be promoted — the in-memory twin refuses like Pg.
+      const digest = contentDigest((operation as NonNullable<typeof operation>).proof);
+      expect(await store.markMerged("acme", rec.id, digest, { sha: "m1", at: "2026-09-02T03:00:00.000Z" })).toBe(
+        "not_registered",
+      );
+      expect(await store.markRegistered("acme", rec.id, digest, "1.0.1")).toBe("registered");
+      expect(
+        await store.markMerged("acme", rec.id, "sha256:forged", { sha: "m1", at: "2026-09-02T03:00:00.000Z" }),
+      ).toBe("proof_mismatch");
+      expect(await store.markMerged("acme", rec.id, digest, { sha: "m1", at: "2026-09-02T03:00:00.000Z" })).toBe(
+        "merged",
+      );
+      expect(await store.markMerged("acme", rec.id, digest, { sha: "m1", at: "2026-09-02T03:00:00.000Z" })).toBe(
+        "already_merged",
+      );
+      expect((await store.forCampaign("acme", rec.id))?.code).toMatchObject({ state: "merged", mergedSha: "m1" });
+      // …and now the walk may continue.
+      expect((await svc.open("acme", { issueId: "iss_1", frame: successor(rec.id) }, "alice")).frame.continues).toBe(
+        rec.id,
+      );
+    });
+
+    it("an adoption whose candidate named no pull request owes no code — a chain over it is not refused for one", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { id } = await adoptedPredecessor(store);
+      expect((await store.forCampaign("acme", id))?.code).toBeUndefined();
+      expect(
+        await store.markMerged("acme", id, contentDigest((await store.forCampaign("acme", id))?.proof), {
+          sha: "m1",
+          at: "2026-09-02T03:00:00.000Z",
+        }),
+      ).toBe("no_code_debt");
+    });
+
+    it("[COUNTEREXAMPLE] a halted SIBLING's rounds are spent against the same rows, and the family covers them", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const { svc, id } = await adoptedPredecessor(store); // 1 round spent, family 5, adopted 1.0.1
+      const sibling = await svc.open(
+        "acme",
+        { issueId: "iss_1", frame: successor(id, { budget: { maxRounds: 3 } }) },
+        "alice",
+      );
+      // Three rejected rounds from the adopted baseline — the streak fires and the sibling halts.
+      const nothing = comparison({
+        trials: {
+          baseline: "b",
+          candidate: "c",
+          zThreshold: 1.96,
+          minDelta: 0,
+          cases: [trialCase("c1", 0, false), trialCase("c2", 0, false)],
+        } as CampaignComparison["trials"],
+      });
+      snapshots.set("sc-sibling", snapshot(nothing, { baseline: side("1.0.1"), candidate: side("1.0.2") }));
+      const log = { ...LOG, candidateVersion: "1.0.2", candidateScorecardId: "sc-sibling" };
+      for (let i = 0; i < 3; i += 1) await svc.logRound("acme", sibling.id, log, "agent:everdict", {});
+      const halted = await svc.settle("acme", sibling.id, "alice");
+      expect(halted.record.state, "the sibling did not halt, so the case measures nothing").toBe("no_improvement");
+
+      // The predecessor is the only campaign that can be continued. 1 + 3 rounds have consulted these rows;
+      // 4 more would make 8 against a family of 5.
+      const again = successor(id, { budget: { maxRounds: 4 } });
+      await expect(svc.open("acme", { issueId: "iss_1", frame: again }, "alice")).rejects.toThrow(
+        /spent 4 of its 5 pre-registered held-out tests/,
+      );
+      // …and the arithmetic still lets a successor that FITS open: 1 + 3 spent, 1 more is 5.
+      const fits = successor(id, { budget: { maxRounds: 1 } });
+      expect((await svc.open("acme", { issueId: "iss_1", frame: fits }, "alice")).frame.continues).toBe(id);
+    });
   });
 
   it("a round landing between the gate's read and the close makes the settle CONFLICT — the answer was stale", async () => {
@@ -826,6 +946,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       },
       forCampaign: store.forCampaign.bind(store),
       markRegistered: store.markRegistered.bind(store),
+      markMerged: store.markMerged.bind(store),
       forIssue: store.forIssue.bind(store),
       markCompleted: store.markCompleted.bind(store),
       registeredOlderThan: store.registeredOlderThan.bind(store),
@@ -835,6 +956,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const svc2 = new CampaignService({
       store: raced,
       operations: raced,
+      changes: noChanges,
+      runs: noRuns,
       issues,
       diffs,
       newId: () => "x",
@@ -867,5 +990,477 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     );
     expect(logged.verdict.comparable).toBe(false);
     expect((await svc.decision("acme", rec.id)).kind).toBe("continue");
+  });
+
+  // ── THE RECORD ENFORCES ITS OWN FRAME — THE DRIVER DOES NOT HAVE TO ASK ─────────────────────────────
+  //
+  // The budget and the rejected streak were answered by `decision` and enforced by nobody: `logRound` appended
+  // whatever came, and the gate checked the LATEST round for a win before it checked either ending. A driver
+  // that never asked (or ignored a halt) could log past the budget until a round happened to win, and adopt
+  // at a level the pre-registered family never covered. The write is the seam that can refuse — the append
+  // CAS on the round count is what makes the refusal race-safe.
+  describe("[COUNTEREXAMPLE] a round past the frame's own ending is refused at the write", () => {
+    const nothing = (): CampaignComparison =>
+      comparison({
+        trials: {
+          baseline: "b",
+          candidate: "c",
+          zThreshold: 1.96,
+          minDelta: 0,
+          cases: [trialCase("c1", 0, false), trialCase("c2", 0, false)],
+        } as CampaignComparison["trials"],
+      });
+
+    it("REFUSES a round once the budget is spent — a WINNING one included — before the diff runs", async () => {
+      // A streak rule that cannot fire before the budget, so the two endings are told apart.
+      const budgeted: CampaignFrame = {
+        ...frame,
+        budget: { maxRounds: 2 },
+        stopAfterRejectedRounds: 10,
+        significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 },
+      };
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: budgeted }, "alice");
+      snapshots.set("sc-lose", snapshot(nothing()));
+      snapshots.set("sc-win", snapshot(comparison()));
+      const lose = { ...LOG, candidateScorecardId: "sc-lose" };
+      await svc.logRound("acme", rec.id, lose, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, lose, "agent:everdict", {});
+      expect(await svc.decision("acme", rec.id)).toMatchObject({ kind: "halt", reason: "budget_exhausted" });
+      const before = diffCalls.length;
+      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toThrow(/budget/);
+      expect(diffCalls.length, "the diff ran for a round the frame does not admit").toBe(before);
+      expect((await svc.get("acme", rec.id)).rounds).toHaveLength(2);
+    });
+
+    it("REFUSES a round after the rejected streak fired — the campaign ended by its own rule", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice"); // K = 3 of 5
+      snapshots.set("sc-lose", snapshot(nothing()));
+      snapshots.set("sc-win", snapshot(comparison()));
+      const lose = { ...LOG, candidateScorecardId: "sc-lose" };
+      for (let i = 0; i < 3; i += 1) await svc.logRound("acme", rec.id, lose, "agent:everdict", {});
+      expect(await svc.decision("acme", rec.id)).toMatchObject({ kind: "halt", reason: "no_improvement" });
+      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(ConflictError);
+      expect((await svc.get("acme", rec.id)).rounds).toHaveLength(3);
+      // …and the settle still closes it as the ending it reached.
+      expect((await svc.settle("acme", rec.id, "alice")).record.state).toBe("no_improvement");
+    });
+  });
+
+  // ── WHAT IS WRITTEN IS WHAT CAN BE READ BACK ──────────────────────────────────────────────────────
+  //
+  // The HTTP DTO bounded the caller's fields and the MCP twin did not, and the service appended the round
+  // literal unparsed. `PgEvolutionCampaignStore` reads every row through `EvolutionCampaignRecordSchema`, so
+  // one empty hypothesis or one 4001-character finding made that campaign — and, through `list()`, the
+  // workspace's whole campaign list — unreadable. The in-memory twin never parses on read, which is why no
+  // unit test saw it. The bounds are the RECORD's, applied once at the write, whichever door the round came
+  // through.
+  describe("[COUNTEREXAMPLE] a round the stored row could not decode is refused at the write", () => {
+    it("refuses an empty hypothesis, an over-long finding and an over-long version as BAD_REQUEST, before the diff", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      const before = diffCalls.length;
+      for (const bad of [
+        { ...LOG, hypothesis: "" },
+        { ...LOG, learned: "x".repeat(4001) },
+        { ...LOG, candidateVersion: "9".repeat(101) },
+      ]) {
+        await expect(svc.logRound("acme", rec.id, bad, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+      }
+      expect(diffCalls.length, "the diff ran for a round that could never be stored").toBe(before);
+      const stored = await svc.get("acme", rec.id);
+      expect(stored.rounds).toHaveLength(0);
+      // …and a round that IS accepted decodes through the schema the Postgres read applies.
+      await svc.logRound("acme", rec.id, { ...LOG, learned: "y".repeat(4000) }, "agent:everdict", {});
+      expect(EvolutionCampaignRecordSchema.safeParse(await svc.get("acme", rec.id)).success).toBe(true);
+    });
+  });
+
+  // ── THE JUDGES THAT SCORED A SIDE ARE READ FROM THE SCORING LEDGER ─────────────────────────────────
+  //
+  // `verdictOf` compared the frame's judges to `record.orchestration.judges` — the SUBMIT-time pin a real
+  // batch carries. An ingested scorecard has no orchestration at all, so a loop over ingested traces that
+  // pinned its judges (as the agent-evolve skill told it to) had every round rejected "judges are not the
+  // frame's (baseline: none; candidate: none)". The judges that produced the plane being compared are
+  // stamped on the scoring ledger's current revision, on both kinds of record; that is the source.
+  describe("[COUNTEREXAMPLE] the judge conformance check reads who SCORED the plane, not who was pinned at submit", () => {
+    const pinned: CampaignFrame = { ...frame, judges: ["drill"] };
+    // The ingest shape: a harness LABEL, a scoring ledger, no manifest and no orchestration.
+    const ingested = (version: string, judges: string[]) => ({
+      record: {
+        harness: { id: "agent:everdict", version },
+        scoring: [{ judges: judges.map((id) => ({ id, version: "1.0.0" })) }],
+      },
+    });
+
+    it("a frame that froze judges accepts an ingested pair whose ledger names exactly them", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: pinned }, "alice");
+      snapshots.set(
+        "sc-ledger",
+        snapshot(comparison(), { baseline: ingested("1.0.0", ["drill"]), candidate: ingested("1.0.1", ["drill"]) }),
+      );
+      const { round: ok } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-ledger" },
+        "agent:everdict",
+        {},
+      );
+      expect(ok.verdict.comparable, ok.verdict.detail).toBe(true);
+    });
+
+    it("…and rejects a side whose CURRENT revision was scored by somebody else", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: pinned }, "alice");
+      snapshots.set(
+        "sc-drift",
+        snapshot(comparison(), { baseline: ingested("1.0.0", ["drill"]), candidate: ingested("1.0.1", ["other"]) }),
+      );
+      const { round: drifted } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-drift" },
+        "agent:everdict",
+        {},
+      );
+      expect(drifted.verdict.comparable).toBe(false);
+      expect(drifted.verdict.detail).toMatch(/judges are not the frame's/);
+    });
+  });
+
+  // ── COVERAGE IS A FRACTION OF WHAT COULD HAVE BEEN ASSESSED ────────────────────────────────────────
+  //
+  // `eligible` counted every measured score, and only a judge can carry an observation assessment — a cost
+  // or a step count structurally cannot. Ingest always derives steps/cost/latency beside the judge scores, so
+  // one judge per case put the coverage ceiling at 0.25 and `minimumCoverage: 0.5` was unreachable for the
+  // exact loop the policy was written for. The denominator is the judge family.
+  describe("[COUNTEREXAMPLE] observation coverage counts only the scores a judge could have assessed", () => {
+    it("a judge verdict is eligible; a cost and a step count are not", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      const scores: Score[] = [
+        {
+          graderId: "judge:drill",
+          metric: "judge:drill",
+          value: 1,
+          pass: true,
+          observationAssessment: { status: "consistent" },
+        },
+        { graderId: "cost", metric: "cost_usd", value: 0.2 },
+        { graderId: "steps", metric: "steps", value: 12 },
+      ];
+      snapshots.set(
+        "sc-cov",
+        snapshot(comparison(), {
+          candidate: { record: { ...side("1.0.1").record, scorecard: { results: [{ scores }, { scores }] } } },
+        }),
+      );
+      const { round: r } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-cov" },
+        "agent:everdict",
+        {},
+      );
+      expect(r.verdict.observations).toEqual({ divergent: 0, unclear: 0, assessed: 2, eligible: 2 });
+    });
+  });
+
+  // ── WHERE THE CANDIDATE CAME FROM (docs/architecture/code-evolution-loop.md, D4) ──────────────────
+  //
+  // A round named a version and nothing else; the pull request, the sha and the image swap that produced it
+  // sat on the candidate scorecard's `origin`. The service copies them onto the round — from the RECORD, not
+  // from the caller's input — and an adopted close and its proof carry them forward.
+  describe("the round records where its candidate came from — from the scorecard, never from the caller", () => {
+    const origin = {
+      source: "github-actions",
+      repo: "acme/harness",
+      sha: "abc123",
+      ref: "refs/pull/7/head",
+      prNumber: 7,
+      runUrl: "https://ci/run/9",
+      pinOverrides: { web: "ghcr.io/acme/web@sha256:feed" },
+    };
+    const built = (version: string) => ({ record: { ...side(version).record, origin } });
+
+    it("copies the candidate scorecard's origin onto the verdict, and onto an adopted close and its proof", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-built", snapshot(comparison(), { candidate: built("1.0.1") }));
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-built" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.candidateSource).toEqual(origin);
+      const settled = await svc.settle("acme", rec.id, "alice");
+      expect(settled.record.close?.outcome).toMatchObject({
+        kind: "adopted",
+        candidateSource: { sha: "abc123", prNumber: 7 },
+      });
+      const operation = await store.forCampaign("acme", rec.id);
+      expect(operation?.proof.candidateSource?.sha).toBe("abc123");
+      // …and the CODE DEBT the close owes (D5): born from the proof, owed until the merge effect pays it.
+      expect(operation?.code).toEqual({ repo: "acme/harness", prNumber: 7, sha: "abc123", state: "owed" });
+      // …and the fact says which commit was adopted, for a feed or a merge reaction to read.
+      const closed = store.outbox().find((e) => e.kind === "campaign.closed");
+      expect(closed?.payload).toMatchObject({
+        candidateRepo: "acme/harness",
+        candidateSha: "abc123",
+        candidatePrNumber: 7,
+      });
+    });
+
+    it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      const { round: logged } = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      expect(logged.verdict.candidateSource).toBeUndefined();
+    });
+
+    it("a rejected round keeps its candidate's source — the next brief reads which pull request lost", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-built-bad", snapshot(comparison({ comparability: "none" }), { candidate: built("1.0.1") }));
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-built-bad" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable).toBe(false);
+      expect(logged.verdict.candidateSource?.prNumber).toBe(7);
+    });
+  });
+
+  // ── THE CANDIDATE MAY NOT TOUCH ITS OWN EXAM (docs/architecture/code-evolution-loop.md, D3) ────────
+  //
+  // A coding agent with a checkout can edit the dataset, the judge rubric or the graders' tests as easily as
+  // the scaffold. The frame freezes those paths; the service reads what the candidate's pull request changed
+  // from the repository its scorecard names, and a hit — or a change it could not read — is a round that is
+  // not comparable, whatever it scored. RED before the fix: every round below logged as a comparable win.
+  describe("[COUNTEREXAMPLE] a candidate that touched the oracle scope is not comparable", () => {
+    const scoped: CampaignFrame = { ...frame, oracleScope: ["tests/", "datasets/**", "judges/rubric-*.md"] };
+    const origin = { source: "github-actions", repo: "acme/harness", sha: "abc123", prNumber: 7 };
+    const built = (version: string, over: Partial<typeof origin> = {}) => ({
+      record: { ...side(version).record, origin: { ...origin, ...over } },
+    });
+    const reader = (files: Record<number, { paths: string[]; complete: boolean } | "absent" | "unknown">) => ({
+      calls: [] as Array<{ repo: string; pr: number }>,
+      async pullRequestFiles(_tenant: string, repo: string, pr: number) {
+        this.calls.push({ repo, pr });
+        const answer = files[pr];
+        if (answer === undefined || answer === "absent") return { kind: "absent" as const };
+        if (answer === "unknown") return readUnknown<{ paths: string[]; complete: boolean }>("github said 502");
+        return { kind: "read" as const, value: answer };
+      },
+    });
+    const withReader = (store: InMemoryEvolutionCampaignStore, changes: ReturnType<typeof reader>) =>
+      new CampaignService({
+        store,
+        operations: store,
+        changes,
+        runs: noRuns,
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+
+    it("REJECTS a winning candidate whose pull request touched a scoped path, naming the paths", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const changes = reader({
+        7: { paths: ["src/loop.ts", "tests/unit/loop.test.ts", "datasets/tb.json"], complete: true },
+      });
+      const svc = withReader(store, changes);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
+      snapshots.set("sc-oracle", snapshot(comparison(), { candidate: built("1.0.1") }));
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-oracle" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable, "a candidate that rewrote its exam logged as a win").toBe(false);
+      expect(logged.verdict.oracleTouched).toEqual(["datasets/tb.json", "tests/unit/loop.test.ts"]);
+      expect(logged.verdict.detail).toMatch(/touched the oracle/);
+      expect(changes.calls).toEqual([{ repo: "acme/harness", pr: 7 }]);
+      expect((await svc.decision("acme", rec.id)).kind).toBe("continue");
+    });
+
+    it("ACCEPTS a candidate whose pull request stayed off the scope — the control", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = withReader(store, reader({ 7: { paths: ["src/loop.ts", "README.md"], complete: true } }));
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
+      snapshots.set("sc-clean", snapshot(comparison(), { candidate: built("1.0.1") }));
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-clean" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable, logged.verdict.detail).toBe(true);
+      expect(logged.verdict.oracleTouched).toBeUndefined();
+    });
+
+    it("REJECTS as unverifiable when the change cannot be read — no pull request, a truncated listing, a failed read", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const changes = reader({
+        8: { paths: ["src/loop.ts"], complete: false },
+        9: "unknown",
+      });
+      const svc = withReader(store, changes);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
+      // No pull request named at all: nothing to read.
+      snapshots.set("sc-nopr", snapshot(comparison()));
+      const noPr = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-nopr" },
+        "agent:everdict",
+        {},
+      );
+      expect(noPr.round.verdict.comparable).toBe(false);
+      expect(noPr.round.verdict.detail).toMatch(/names no pull request/);
+      // A listing the reader could not complete is not a listing.
+      snapshots.set("sc-trunc", snapshot(comparison(), { candidate: built("1.0.1", { prNumber: 8 }) }));
+      const trunc = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-trunc" },
+        "agent:everdict",
+        {},
+      );
+      expect(trunc.round.verdict.comparable).toBe(false);
+      expect(trunc.round.verdict.detail).toMatch(/more files than could be listed/);
+      // A read that failed is UNKNOWN, never clean.
+      snapshots.set("sc-unk", snapshot(comparison(), { candidate: built("1.0.1", { prNumber: 9 }) }));
+      const unk = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-unk" }, "agent:everdict", {});
+      expect(unk.round.verdict.comparable).toBe(false);
+      expect(unk.round.verdict.detail).toMatch(/github said 502/);
+    });
+
+    it("never asks the reader when the frame declared no scope", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const changes = reader({ 7: { paths: ["tests/unit/loop.test.ts"], complete: true } });
+      const svc = withReader(store, changes);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-unscoped", snapshot(comparison(), { candidate: built("1.0.1") }));
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-unscoped" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable).toBe(true);
+      expect(changes.calls).toEqual([]);
+    });
+  });
+
+  // ── THE DELEGATE IS BUDGETED TOO (docs/architecture/code-evolution-loop.md, delegation budget) ────────
+  //
+  // Rounds are bounded; the coding agent a round delegates to was not. A frame that budgets the delegation
+  // makes the round name its sandbox session, and the service reads what that session cost off the RUN LEDGER
+  // — never from the caller — refusing a round whose session ran past the budget. RED before the fix: the
+  // field did not exist and every round below logged.
+  describe("[COUNTEREXAMPLE] a round names its delegation session, and the ledger holds it to the frame's budget", () => {
+    const budgeted: CampaignFrame = { ...frame, delegation: { ttlSec: 900, maxUsd: 2 } };
+    type Run = { tenant: string; kind?: string; session?: { ttlSec: number }; usage?: { usd: number } };
+    const ledger = (runs: Record<string, Run>) => ({ get: async (id: string) => runs[id] });
+    const withRuns = (store: InMemoryEvolutionCampaignStore, runs: Record<string, Run>) =>
+      new CampaignService({
+        store,
+        operations: store,
+        changes: noChanges,
+        runs: ledger(runs),
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+    const sandbox = (ttlSec: number, usd?: number): Run => ({
+      tenant: "acme",
+      kind: "sandbox",
+      session: { ttlSec },
+      ...(usd !== undefined ? { usage: { usd } } : {}),
+    });
+
+    it("REQUIRES the session under a budgeted frame, and records what the ledger says it cost", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = withRuns(store, { "run-ok": sandbox(600, 0.75) });
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: budgeted }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, delegationRunId: "run-ok" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.delegation).toEqual({ runId: "run-ok", ttlSec: 600, usd: 0.75 });
+    });
+
+    it("REFUSES a session the ledger does not know, another workspace's, or one that is not a sandbox", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = withRuns(store, {
+        "run-theirs": { ...sandbox(600), tenant: "other" },
+        "run-case": { tenant: "acme", kind: "eval" },
+      });
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: budgeted }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      for (const runId of ["run-ghost", "run-theirs"])
+        await expect(
+          svc.logRound("acme", rec.id, { ...LOG, delegationRunId: runId }, "agent:everdict", {}),
+        ).rejects.toBeInstanceOf(NotFoundError);
+      await expect(
+        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-case" }, "agent:everdict", {}),
+      ).rejects.toBeInstanceOf(BadRequestError);
+      expect((await svc.get("acme", rec.id)).rounds).toHaveLength(0);
+    });
+
+    it("REFUSES a session granted more time, or one that spent more, than the frame budgets — and never scores it", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = withRuns(store, { "run-long": sandbox(3600, 0.1), "run-dear": sandbox(600, 2.5) });
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: budgeted }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      await expect(
+        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-long" }, "agent:everdict", {}),
+      ).rejects.toThrow(/frame budgets 900s/);
+      await expect(
+        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-dear" }, "agent:everdict", {}),
+      ).rejects.toThrow(/frame budgets \$2 per round/);
+      expect((await svc.get("acme", rec.id)).rounds).toHaveLength(0);
+    });
+
+    it("records a named session without a budget, and needs none when the frame declares none", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = withRuns(store, { "run-any": sandbox(7200, 9) });
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-win", snapshot(comparison()));
+      const bare = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      expect(bare.round.delegation).toBeUndefined();
+      const named = await svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-any" }, "agent:everdict", {});
+      expect(named.round.delegation).toEqual({ runId: "run-any", ttlSec: 7200, usd: 9 });
+    });
   });
 });

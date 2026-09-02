@@ -74,6 +74,14 @@ export function builtInOwnedMetrics(graderId: string): readonly string[] {
 // strips and replaces, so the row would survive every later pass of the judge whose name it wears.
 export const JUDGE_METRIC_ROOT = "judge";
 
+// Is this metric in the judge family — `judge`, `judge:<id>`, `judge:<id>:<criterion>`? One owner: the
+// constitution check below, the producer boundary and the campaign's observation-coverage denominator all
+// ask this same question, and a second `startsWith("judge:")` is a predicate that has already diverged
+// (rule `protocol` L3).
+export function isJudgeFamilyMetric(metric: string): boolean {
+  return metric === JUDGE_METRIC_ROOT || metric.startsWith(`${JUDGE_METRIC_ROOT}:`);
+}
+
 // Is this a name the CONSTITUTION already owns? (arch-review 20 P0-1)
 //
 // The reserved authority metrics and the whole judge family. A user declaration may describe the semantics of
@@ -81,11 +89,7 @@ export const JUDGE_METRIC_ROOT = "judge";
 // "declaring" a metric is a way to be READ as ground truth without ever asking for ground truth, which is the
 // admin gate's whole subject.
 export function isConstitutionalMetric(metric: string): boolean {
-  return (
-    RESERVED_AUTHORITY_METRICS.includes(metric) ||
-    metric === JUDGE_METRIC_ROOT ||
-    metric.startsWith(`${JUDGE_METRIC_ROOT}:`)
-  );
+  return RESERVED_AUTHORITY_METRICS.includes(metric) || isJudgeFamilyMetric(metric);
 }
 
 // WHO produced a score — supplied by the collection boundary, never by the producer. This is the whole point:
@@ -118,7 +122,7 @@ export type ScoreProducer =
 
 // May this producer emit this metric? Pure and total — the reason, or undefined when it may.
 export function forgedMetricReason(metric: string, producer: ScoreProducer): string | undefined {
-  const inJudgeFamily = metric === JUDGE_METRIC_ROOT || metric.startsWith(`${JUDGE_METRIC_ROOT}:`);
+  const inJudgeFamily = isJudgeFamilyMetric(metric);
   if (producer.kind === "judge") {
     // A judge owns exactly its OWN family. The code-judge path rewrites a leading `judge` into `judge:<id>`,
     // so a raw metric of anything else (`state`, say) passed through untouched and arrived carrying whatever

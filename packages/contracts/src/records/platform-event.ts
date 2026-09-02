@@ -126,6 +126,10 @@ export const PLATFORM_EVENT_KINDS = [
   // and never showed the capability arriving, and a subscription could react to the decision but not to the
   // effect — which is precisely the gap between them this whole feature exists to close.
   "campaign.adoption_registered",
+  // …and the CODE half landing: the pull request the adopted bytes were built from was merged into the
+  // default branch (docs/architecture/code-evolution-loop.md, D5). Its own fact, because "the bytes are
+  // registered" and "the code is on main" are two effects a reader can want separately.
+  "campaign.adoption_merged",
   "campaign.adoption_completed",
   // A team's iteration was planned, or closed with whatever was left. `cycle.completed` carries `carriedOver`,
   // which is the number a retro actually asks for — and the wake signal for "write the iteration summary".

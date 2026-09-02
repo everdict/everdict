@@ -1,15 +1,31 @@
-import type { CampaignFrame, CampaignRound, DomainFact, EvolutionCampaignRecord } from "@everdict/contracts";
+import type {
+  CampaignFrame,
+  CampaignRound,
+  CandidateSource,
+  DomainFact,
+  EvolutionCampaignRecord,
+  ReadResult,
+} from "@everdict/contracts";
 import {
   type AdoptionOperation,
   BadRequestError,
+  CampaignRoundInputSchema,
   ConflictError,
   NotFoundError,
   type Score,
+  isJudgeFamilyMetric,
   isMeasured,
 } from "@everdict/contracts";
 import { campaignFrameDefects } from "@everdict/contracts";
 import type { ExperimentIdentity, TrialDiff } from "@everdict/domain";
-import { type CampaignGateAnswer, adoptionProofOf, campaignAdoption, contentDigest } from "@everdict/domain";
+import {
+  type CampaignGateAnswer,
+  adoptionProofOf,
+  campaignAdoption,
+  campaignRoundRefusal,
+  contentDigest,
+  oracleTouched,
+} from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { AdoptionOperationStore, EvolutionCampaignStore } from "../ports/evolution-campaign-store.js";
 
@@ -34,7 +50,18 @@ export interface CampaignComparison {
 export interface CampaignComparisonSide {
   record: {
     harness: { id: string; version: string };
+    // The SUBMIT-time judge pins a real batch carries. Kept as the fallback for a record settled before the
+    // scoring ledger existed; the ledger below is the source (see `judgesOf` in `verdictOf`).
     orchestration?: { judges?: Array<{ id: string }> };
+    // ── WHO SCORED THE PLANE BEING COMPARED (review of the loop's judge check) ─────────────────────
+    //
+    // The scoring ledger's CURRENT revision names the judges whose verdicts are in the score plane — stamped
+    // by the pass that applied them, on an ingested batch and a dispatched one alike. `orchestration` is a
+    // batch-only field (re-drive inputs), so an ingested scorecard never has it: a frame that pinned its
+    // judges rejected every ingested round as "judges are not the frame's (none; none)" while the pins sat
+    // one field over in `scoring`. Two readers of one fact, one of them reading a field the other kind of
+    // record does not carry (rule `protocol` L3).
+    scoring?: ReadonlyArray<{ judges: ReadonlyArray<{ id: string }> }>;
     // ── WHAT THE JUDGES SAID ABOUT THIS SIDE'S ACCOUNT OF ITSELF (arch-review 71 P1-evolution) ──────
     //
     // The per-case scores, for the one thing the round verdict cannot derive from a trials comparison: a
@@ -48,6 +75,36 @@ export interface CampaignComparisonSide {
     // adoption proof rests on: a version label cannot tell an evaluated C1 from a saved C2 (arch-review 71
     // P0-evolution).
     manifest?: { harness?: { specDigest?: string } };
+    // ── WHERE THE BATCH SAYS IT CAME FROM (docs/architecture/code-evolution-loop.md, D4) ──────────
+    //
+    // The scorecard's trigger provenance: `source` is stamped server-side from the submitter's credential, the
+    // coordinates are the client's (for a `github-actions` source, the CI runner's under OIDC). Copied onto
+    // the round as `candidateSource` — from THIS record, never from the caller's round input (L3).
+    origin?: {
+      source: string;
+      repo?: string;
+      sha?: string;
+      ref?: string;
+      prNumber?: number;
+      runUrl?: string;
+      pinOverrides?: Record<string, string>;
+    };
+  };
+}
+
+// The candidate's origin, projected to the fields the round records — and only when the record carries one.
+// A batch with no origin is not "from nowhere"; it is a round that cannot say, which the field's absence states.
+function candidateSourceOf(side: CampaignComparisonSide): CandidateSource | undefined {
+  const origin = side.record.origin;
+  if (origin === undefined) return undefined;
+  return {
+    source: origin.source,
+    ...(origin.repo !== undefined ? { repo: origin.repo } : {}),
+    ...(origin.sha !== undefined ? { sha: origin.sha } : {}),
+    ...(origin.ref !== undefined ? { ref: origin.ref } : {}),
+    ...(origin.prNumber !== undefined ? { prNumber: origin.prNumber } : {}),
+    ...(origin.runUrl !== undefined ? { runUrl: origin.runUrl } : {}),
+    ...(origin.pinOverrides !== undefined ? { pinOverrides: origin.pinOverrides } : {}),
   };
 }
 
@@ -70,6 +127,12 @@ function observationsOf(
   let eligible = 0;
   for (const r of results)
     for (const sc of r.scores.filter(isMeasured)) {
+      // Only a JUDGE can carry an assessment: the observation channel is handed to the judge prompt, and a
+      // cost or a step count structurally never answers it. Counting every measured score made the
+      // denominator a function of how many trace graders ran beside the judge — ingest always derives three
+      // — so one judge per case put the coverage ceiling at 0.25 and a frame demanding 0.5 could never adopt.
+      // The family predicate is the contracts' one owner, not a second `startsWith("judge:")`.
+      if (!isJudgeFamilyMetric(sc.metric)) continue;
       eligible += 1;
       if (sc.observationAssessment !== undefined) assessed += 1;
       if (sc.observationAssessment?.status === "divergent") divergent += 1;
@@ -120,9 +183,39 @@ export interface CampaignServiceDeps {
   // REQUIRED, not optional: an operation nobody can read is the same defect as one nobody can spend, and
   // an optional dep is the shape that hides it (rule `protocol`, the optional-dependency law).
   operations: AdoptionOperationStore;
+  // ── WHAT A CANDIDATE'S PULL REQUEST CHANGED (docs/architecture/code-evolution-loop.md, D3) ────────
+  //
+  // The read behind the frame's `oracleScope`: the files one pull request touches, from the repository the
+  // candidate scorecard's origin names. REQUIRED, not optional — a deployment with no reader answers
+  // `unknown` with its reason, and a frame that declared a scope then rejects every round as unverifiable,
+  // which is the fail-closed answer (rule `protocol` L2). An optional dep would make "no GitHub App" read as
+  // "the change was clean".
+  changes: {
+    pullRequestFiles(
+      tenant: string,
+      repository: string,
+      pullNumber: number,
+    ): Promise<ReadResult<{ paths: string[]; complete: boolean }>>;
+  };
+  // ── THE DELEGATION SESSION A ROUND NAMES (code-evolution-loop.md, delegation budget) ────────────
+  //
+  // The sandbox run the frame's `delegation` budget is checked against. Same law as `changes`: required, and
+  // a run that cannot be read is a round that cannot be logged under a budgeted frame.
+  runs: {
+    get(
+      id: string,
+    ): Promise<{ tenant: string; kind?: string; session?: { ttlSec: number }; usage?: { usd: number } } | undefined>;
+  };
   newId?: () => string;
   now?: () => string;
 }
+
+// What the oracle check found about one candidate pull request. `undefined` from the caller means the frame
+// declared no scope, and the question was never asked.
+export type OracleCheck =
+  | { kind: "clean" }
+  | { kind: "touched"; paths: string[] }
+  | { kind: "unverifiable"; reason: string };
 
 export interface NewCampaignInput {
   issueId: string;
@@ -149,6 +242,9 @@ export interface NewRoundInput {
   // Optional on this port because a round written before the field existed has none; the transport's DTO is
   // what requires it of new rounds (see `log-campaign-round.ts`).
   learned?: string;
+  // The sandbox session that produced the candidate (code-evolution-loop.md, delegation budget). Required by
+  // the write when the frame declares a delegation budget; recorded from the run ledger whenever named.
+  delegationRunId?: string;
 }
 
 // How far a `continues` walk will follow caller-authored links before refusing. A chain this long is not a
@@ -261,6 +357,29 @@ export class CampaignService {
       spent += ancestor.rounds.length;
       cursor = ancestor.frame.continues;
     }
+    // ── …AND EVERY BRANCH OFF THE CHAIN, NOT ONLY THE LINE ABOVE IT ────────────────────────────────
+    //
+    // The walk above counts ANCESTORS. A successor that halted adopted nothing, so nobody can continue it —
+    // the natural next move is a second successor of the same adopted predecessor, and that one read `spent`
+    // as the predecessor's rounds alone. Every round the halted sibling logged consulted the same held-out
+    // rows (its frame passed the same-exam check to open at all), and the family forgot them.
+    //
+    // So the population is the whole tree the chain's members root: every campaign whose `continues` names a
+    // member, transitively. Read across the tenant WITHOUT the caller's team ceiling on purpose — a private
+    // team's sibling spent the rows just the same, and only a count leaves this function.
+    const everyCampaign = await this.deps.store.list(tenant);
+    const tree = new Set(seen);
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const c of everyCampaign) {
+        const from = c.frame.continues;
+        if (from !== undefined && tree.has(from) && !tree.has(c.id)) {
+          tree.add(c.id);
+          grew = true;
+        }
+      }
+    }
+    for (const c of everyCampaign) if (tree.has(c.id) && !seen.has(c.id)) spent += c.rounds.length;
 
     // 1. It continues a RESULT. A campaign that halted proved nothing to carry forward, and one still open
     //    has not finished spending its own share of the family.
@@ -270,6 +389,18 @@ export class CampaignService {
         "CONFLICT",
         { continues: parent.id, state: parent.state },
         `campaign '${parent.id}' adopted nothing, so there is no version to continue from — a chain continues a result, not an attempt`,
+      );
+    // 1b. …and the CODE that result was built from is on the default branch (code-evolution-loop.md, D5). An
+    //     adoption whose pull request is still a branch has registered bytes the next campaign's baseline image
+    //     will carry while the repository's default branch does not — a successor opened over that starts from
+    //     bytes whose source nobody can check out. Absence of a debt means the candidate named no pull request,
+    //     which is the honest "nothing owed", not a merge.
+    const parentOperation = await this.deps.operations.forCampaign(tenant, parent.id);
+    if (parentOperation?.code !== undefined && parentOperation.code.state !== "merged")
+      throw new ConflictError(
+        "CONFLICT",
+        { continues: parent.id, repo: parentOperation.code.repo, prNumber: parentOperation.code.prNumber },
+        `campaign '${parent.id}' adopted code that is not merged — pull request #${parentOperation.code.prNumber} of ${parentOperation.code.repo} is still a branch. Merge it through the campaign (POST /campaigns/${parent.id}/merge) and open the successor again; a chain starts from what is on the default branch`,
       );
     // 2. …of the same subject, and 3. from the version that result named. A "chain" starting somewhere else
     //    is two campaigns sharing an exam, which is exactly the thing the family cannot account for.
@@ -365,6 +496,41 @@ export class CampaignService {
     // …and the frame still has to satisfy the rules in force, or this round would MANUFACTURE the held-out
     // block a legacy frame could never have produced before the upgrade (arch-review 75 P1-high).
     this.requireEligibleFrame(record);
+    // ── WHAT IS WRITTEN IS WHAT CAN BE READ BACK ───────────────────────────────────────────────────
+    //
+    // The row is decoded through `EvolutionCampaignRecordSchema` on every Postgres read — `get` and, row by
+    // row, `list` — so a caller-authored field the record schema refuses is a campaign nobody can read and a
+    // workspace list that 500s. The HTTP DTO bounded these fields; the MCP twin did not; and this service
+    // appended the literal unparsed. The bounds are the record's own projection (`CampaignRoundInputSchema`),
+    // checked HERE so every door inherits them, and remapped to our error model (rule `typescript`).
+    const bounded = CampaignRoundInputSchema.safeParse(input);
+    if (!bounded.success)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { issues: bounded.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) },
+        `the round cannot be stored as sent: ${bounded.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`,
+      );
+    // ── …AND A ROUND PAST THE FRAME'S OWN ENDING IS REFUSED, NOT SCORED ───────────────────────────
+    //
+    // The budget and the rejected streak were answered by `decision` and enforced by nobody: a driver that
+    // never asked, or ignored a halt, could log past either until a round happened to win — and the gate,
+    // reading the latest round first, adopted it at a level the pre-registered family never covered. The
+    // predicate is the domain's (`campaignRoundRefusal`, the same owner the gate reads), and the refusal is
+    // race-safe because `appendRound` CASes on the round count this answer was computed over: two writers at
+    // the last budgeted slot cannot both land.
+    const ended = campaignRoundRefusal(record.frame, record.rounds);
+    if (ended !== undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        {
+          campaign: id,
+          reason: ended.reason,
+          atRound: ended.atRound,
+          rounds: record.rounds.length,
+          budget: record.frame.budget.maxRounds,
+        },
+        ended.detail,
+      );
     // The verdict is DERIVED from the production diff. A missing/unfinished/invisible scorecard throws
     // inside the read (requireSucceeded, under the caller's team ceiling) and the round is refused with that
     // reason — never logged half-known (L2), never read around the team axis.
@@ -418,6 +584,11 @@ export class CampaignService {
         `the baseline scorecard evaluated ${expectedId}@${baselineHarness.version}, not the frame's baseline ${record.frame.subject.baselineVersion}`,
         { frame: record.frame.subject.baselineVersion, actual: baselineHarness.version },
       );
+    // The oracle boundary, read AFTER the identity checks and BEFORE the verdict: a frame that froze a scope
+    // asks what the candidate's pull request changed, from the repository the scorecard's origin names.
+    const oracle = await this.oracleCheck(tenant, record.frame, snapshot);
+    // …and the delegation the round names, read off the run ledger and held to the frame's budget.
+    const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
     const round: CampaignRound = {
       seq: record.rounds.length + 1,
       hypothesis: input.hypothesis,
@@ -427,7 +598,8 @@ export class CampaignService {
       // Recorded BEFORE the verdict is derived, and recorded whatever the verdict turns out to be — a round
       // the platform judges incomparable keeps its lesson, which is the case the layer exists for.
       ...(input.learned !== undefined ? { learned: input.learned } : {}),
-      verdict: verdictOf(snapshot, record.frame),
+      ...(delegation !== undefined ? { delegation } : {}),
+      verdict: verdictOf(snapshot, record.frame, oracle),
       at: this.now(),
       by,
     };
@@ -471,6 +643,103 @@ export class CampaignService {
     }
   }
 
+  // ── DID THE CANDIDATE TOUCH ITS OWN EXAM (docs/architecture/code-evolution-loop.md, D3) ─────────
+  //
+  // Answered from the candidate scorecard's own origin (the pull request it names) and the repository's own
+  // listing of what that pull request changed. Three answers, never two: clean, touched (with the paths), or
+  // unverifiable — a candidate that names no pull request, a listing the reader could not complete, or a read
+  // that failed. The last is refused rather than waved through: "we could not check" is not "clean" (L2).
+  private async oracleCheck(
+    tenant: string,
+    frame: CampaignFrame,
+    snapshot: CampaignSnapshot,
+  ): Promise<OracleCheck | undefined> {
+    if (frame.oracleScope.length === 0) return undefined;
+    const source = candidateSourceOf(snapshot.candidate);
+    if (source?.repo === undefined || source.prNumber === undefined)
+      return {
+        kind: "unverifiable",
+        reason:
+          "the candidate scorecard names no pull request (origin.repo / origin.prNumber), so what the candidate changed cannot be read against the frame's oracle scope",
+      };
+    const read = await this.deps.changes.pullRequestFiles(tenant, source.repo, source.prNumber);
+    switch (read.kind) {
+      case "read": {
+        if (!read.value.complete)
+          return {
+            kind: "unverifiable",
+            reason: `pull request #${source.prNumber} of ${source.repo} changes more files than could be listed, so the oracle scope cannot be checked against the whole change`,
+          };
+        const touched = oracleTouched(read.value.paths, frame.oracleScope);
+        return touched.length > 0 ? { kind: "touched", paths: touched } : { kind: "clean" };
+      }
+      case "absent":
+        return {
+          kind: "unverifiable",
+          reason: `pull request #${source.prNumber} was not found in ${source.repo}`,
+        };
+      case "unknown":
+        return { kind: "unverifiable", reason: read.reason };
+      default:
+        return assertNever(read);
+    }
+  }
+
+  // ── WHAT THE DELEGATE COST, AS THE LEDGER SAYS (code-evolution-loop.md, delegation budget) ───────
+  //
+  // A frame that budgets the delegation requires every round to name the sandbox session that produced its
+  // candidate, and the round is refused — not scored — when that session ran past the budget: the TTL the
+  // ledger granted it, or the spend the ledger metered. Both are read from the RUN, never from the caller's
+  // input (L3), and a session that cannot be read is a round that cannot be logged under such a frame (L2).
+  // Without a budget the session is still recorded when named, so the trace says who wrote the candidate.
+  private async delegationOf(
+    tenant: string,
+    frame: CampaignFrame,
+    runId: string | undefined,
+  ): Promise<CampaignRound["delegation"]> {
+    const budget = frame.delegation;
+    if (runId === undefined) {
+      if (budget === undefined) return undefined;
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { budget },
+        "this campaign's frame budgets the delegation, so the round must name the sandbox session that produced its candidate (delegationRunId)",
+      );
+    }
+    const run = await this.deps.runs.get(runId);
+    if (run === undefined || run.tenant !== tenant)
+      throw new NotFoundError("NOT_FOUND", { runId }, `delegation session '${runId}' not found`);
+    if (run.kind !== "sandbox")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { runId, kind: run.kind ?? "eval" },
+        `run '${runId}' is not a sandbox session — a delegation is a session run, not a case`,
+      );
+    const ttlSec = run.session?.ttlSec;
+    const usd = run.usage?.usd;
+    if (budget !== undefined) {
+      if (ttlSec === undefined)
+        throw new ConflictError(
+          "CONFLICT",
+          { runId },
+          `delegation session '${runId}' records no TTL, so the frame's delegation budget cannot be checked against it`,
+        );
+      if (ttlSec > budget.ttlSec)
+        throw new ConflictError(
+          "CONFLICT",
+          { runId, ttlSec, budget: budget.ttlSec },
+          `delegation session '${runId}' was granted ${ttlSec}s and the frame budgets ${budget.ttlSec}s per round — the round is refused; open the next session within the budget`,
+        );
+      if (budget.maxUsd !== undefined && usd !== undefined && usd > budget.maxUsd)
+        throw new ConflictError(
+          "CONFLICT",
+          { runId, usd, budget: budget.maxUsd },
+          `delegation session '${runId}' spent $${usd.toFixed(4)} and the frame budgets $${budget.maxUsd} per round — the round is refused`,
+        );
+    }
+    return { runId, ...(ttlSec !== undefined ? { ttlSec } : {}), ...(usd !== undefined ? { usd } : {}) };
+  }
+
   // Settle per the gate's answer: adopt closes as adopted, a campaign-ending halt closes as that halt, and
   // everything else REFUSES — `continue` because the loop is not done, `identity_unverified` because the fix
   // is another round (pin the image / verified lane), not an ending. The caller receives the gate's answer
@@ -500,6 +769,22 @@ export class CampaignService {
     // minted from the round that proved it and the frozen frame, and the operation carrying it is written in
     // the SAME statement as the close, so `adopted` and "somebody owes a registration" are one durable fact.
     const proof = adoptionProofOf(answer, record, record.rounds);
+    // ── …AND THE CODE THE CLOSE OWES (docs/architecture/code-evolution-loop.md, D5) ─────────────────
+    //
+    // When the proved bytes were built from a pull request, the registry write is half the adoption: the code
+    // is still a branch until it is merged, and the next campaign's baseline and the default branch diverge
+    // until then. Born here, from the PROOF's own source coordinates — never from the caller — as an owed
+    // sub-lifecycle the merge effect pays and the chain check reads.
+    const source = proof?.candidateSource;
+    const code =
+      source?.repo !== undefined && source.prNumber !== undefined
+        ? {
+            repo: source.repo,
+            prNumber: source.prNumber,
+            ...(source.sha !== undefined ? { sha: source.sha } : {}),
+            state: "owed" as const,
+          }
+        : undefined;
     const adoption: AdoptionOperation | undefined =
       proof === undefined
         ? undefined
@@ -508,6 +793,7 @@ export class CampaignService {
             tenant: record.tenant,
             proof,
             state: "decided",
+            ...(code !== undefined ? { code } : {}),
             createdAt: this.now(),
             updatedAt: this.now(),
           };
@@ -542,6 +828,8 @@ export class CampaignService {
           // cannot be checked against whatever a registry later holds under that label, so a candidate
           // substituted between the evaluation and the save is undetectable.
           ...(answer.candidateSpecDigest !== undefined ? { candidateSpecDigest: answer.candidateSpecDigest } : {}),
+          // …and the commit / pull request they were built from, so the close names what a merge is about (D4).
+          ...(answer.candidateSource !== undefined ? { candidateSource: answer.candidateSource } : {}),
         },
         at: this.now(),
         by,
@@ -565,6 +853,17 @@ export class CampaignService {
         state,
         subjectId: record.frame.subject.id,
         ...(answer.kind === "adopt" ? { version: answer.version, provingScorecardId: answer.provingScorecardId } : {}),
+        // The adopted candidate's source coordinates, for the feed and for a subscription that wants to merge
+        // the pull request an adoption proved (docs/architecture/code-evolution-loop.md, D5).
+        ...(answer.kind === "adopt" && answer.candidateSource?.repo !== undefined
+          ? { candidateRepo: answer.candidateSource.repo }
+          : {}),
+        ...(answer.kind === "adopt" && answer.candidateSource?.sha !== undefined
+          ? { candidateSha: answer.candidateSource.sha }
+          : {}),
+        ...(answer.kind === "adopt" && answer.candidateSource?.prNumber !== undefined
+          ? { candidatePrNumber: answer.candidateSource.prNumber }
+          : {}),
       },
     };
     const outcome = await this.deps.store.close(
@@ -619,7 +918,11 @@ export class CampaignService {
 // frozen exam. `comparable: false` marks a pair that produced no usable signal for THIS campaign: no
 // statistics, a confounded world, or a run that drifted off the frame's scenarios/trials/judges. Such a
 // round can never adopt and counts as rejected; the detail names why, so the trace explains itself.
-function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRound["verdict"] {
+function verdictOf(
+  snapshot: CampaignSnapshot,
+  frame: CampaignFrame,
+  oracle: OracleCheck | undefined,
+): CampaignRound["verdict"] {
   const comparison = snapshot.diff;
   // Identity coverage first: an absent identity read is NOT "verified" (L2) — it blocks like an unverified
   // axis until the diff can say what it compared.
@@ -630,18 +933,34 @@ function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRo
   // Axes VERIFIED different — stronger than unverified, never waivable: a delta across different worlds is
   // not evidence about the change under test (the axis's own sentence).
   const confoundedAxes = comparison.experiment === undefined ? [] : comparison.experiment.confounds.map((c) => c.axis);
+  // Where the candidate came from rides EVERY verdict, rejected ones included: a round the platform could not
+  // compare still names the pull request that produced its candidate, which is what the next brief reads.
+  const candidateSource = candidateSourceOf(snapshot.candidate);
   const rejected = (detail: string): CampaignRound["verdict"] => ({
     comparable: false,
     significantImprovements: 0,
     significantRegressions: 0,
     unverifiedAxes,
     confoundedAxes,
+    ...(candidateSource !== undefined ? { candidateSource } : {}),
     detail,
   });
   if (comparison.comparability === "none")
     return rejected("the pair is not comparable (verdict-policy mismatch or an unresolvable stamp)");
   if (confoundedAxes.length > 0)
     return rejected(`the comparison is confounded — ${confoundedAxes.join(", ")} verifiably differ between the sides`);
+  // THE EXAM MOVED (D3): a candidate whose pull request touched the frame's oracle paths is not a candidate,
+  // whatever it scored — the same refusal a drifted scenario set gets, applied to the exam's source. The paths
+  // ride the verdict so the next brief can name what must not be touched again.
+  if (oracle?.kind === "touched")
+    return {
+      ...rejected(`the candidate touched the oracle — ${oracle.paths.join(", ")} fall inside the frame's oracle scope`),
+      oracleTouched: oracle.paths,
+    };
+  if (oracle?.kind === "unverifiable")
+    return rejected(
+      `the frame declares an oracle scope and the candidate's change could not be checked against it: ${oracle.reason}`,
+    );
   if (comparison.trials === undefined)
     return rejected("no trial signal — campaign statistics need repeated trials on both sides");
   // FRAME CONFORMANCE — the exam is the frame's, not the round's (the reason the frame is frozen at open):
@@ -666,8 +985,12 @@ function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRo
     );
   if (frame.judges.length > 0) {
     const want = [...frame.judges].sort().join(",");
+    // Who SCORED the plane, read from the scoring ledger's current revision — the pass that applied the judges
+    // stamped them there, on an ingested batch and a dispatched one alike. `orchestration.judges` is the
+    // batch-only submit pin and stays as the fallback for a record settled before the ledger existed; reading
+    // it FIRST is what rejected every ingested round under a frame that pinned its judges.
     const judgesOf = (side: CampaignComparisonSide): string =>
-      (side.record.orchestration?.judges ?? [])
+      (side.record.scoring?.at(-1)?.judges ?? side.record.orchestration?.judges ?? [])
         .map((j) => j.id)
         .sort()
         .join(",");
@@ -698,6 +1021,8 @@ function verdictOf(snapshot: CampaignSnapshot, frame: CampaignFrame): CampaignRo
     ...(snapshot.candidate.record.manifest?.harness?.specDigest !== undefined
       ? { candidateSpecDigest: snapshot.candidate.record.manifest.harness.specDigest }
       : {}),
+    // …and where those bytes were built from (docs/architecture/code-evolution-loop.md, D4).
+    ...(candidateSource !== undefined ? { candidateSource } : {}),
     // …and the candidate's own judges on whether its account holds up (arch-review 71 P1-evolution).
     ...(observationsOf(snapshot.candidate) !== undefined ? { observations: observationsOf(snapshot.candidate) } : {}),
     unverifiedAxes,

@@ -1,9 +1,10 @@
 # Every refusal, what it means, and the repair
 
-A campaign refuses in three places, and they fail differently on purpose. A ROUND is never refused for being
+A campaign refuses in four places, and they fail differently on purpose. A ROUND is never refused for being
 bad — a round that could not be compared is RECORDED as `comparable: false` with a reason, and counts as
-rejected. The settle and the adopt doors refuse with a 409 instead, because there the caller is asking to
-spend something.
+rejected; the round door refuses only when the campaign is already over by its own rule, or when the row
+could not hold what was sent. The settle and the adopt doors refuse with a 409 instead, because there the
+caller is asking to spend something.
 
 Read this file when a round comes back not-comparable and you are about to change something at random.
 
@@ -37,6 +38,43 @@ Check those cases before assuming the trial count was the problem.
 **"the judges are not the frame's (frame: …; baseline: …; candidate: …)"** — the frame pinned a judge set and
 one of the sides ran a different one. Same repair as the scenarios: fix the batch, not the frame.
 
+**"the candidate touched the oracle — <paths> fall inside the frame's oracle scope"** — the candidate's
+pull request changed the exam (`oracleScope`). The round is not a candidate, whatever it scored; the paths are
+on the verdict as `oracleTouched`. Close that pull request, re-brief the delegate with the paths named as a
+constraint, and spend a new round.
+
+**"the frame declares an oracle scope and the candidate's change could not be checked against it: …"** —
+the scorecard names no pull request (`origin.repo` / `origin.prNumber`), the listing was truncated, or the
+repository could not be asked (no GitHub App on it, a failed read). "Could not check" is not "clean". Run the
+candidate through the CI-fired path so its scorecard carries the pull request, or fix the App installation.
+
+## `POST /campaigns/:id/rounds` refuses (409 / 400)
+
+A round is never refused for being BAD — but it is refused when the campaign is over, or when the row could
+not hold it.
+
+**"all N budgeted rounds are logged …"** (409) — the budget is spent. The record enforces its own ending:
+a round past the budget would be judged at a level the pre-registered family does not cover. Ask the
+decision and settle; a longer walk is a new campaign (or a chain).
+
+**"K consecutive rounds were rejected by round N — the campaign ended by its own rule"** (409) — the
+rejected streak fired. Same repair: ask the decision, settle.
+
+**"this campaign's frame budgets the delegation, so the round must name the sandbox session …"** (400) —
+the frame has `delegation` and the round came without `delegationRunId`. Name the session (its run id).
+
+**404 "delegation session '…' not found" / 400 "run '…' is not a sandbox session"** — the named run is not
+in this workspace's ledger, or is a case run rather than a session.
+
+**"delegation session '…' was granted Ns and the frame budgets Ms per round" / "spent $X and the frame
+budgets $Y"** (409) — the session ran past the frame's delegation budget; the round is refused, not scored.
+Open the next session within the budget (`create_sandbox` with `ttlSec` at most the frame's).
+
+**"the round cannot be stored as sent: …"** (400) — a caller field the row cannot hold: `hypothesis` 1 to
+2000 characters, `learned` up to 4000 (a new round needs at least 10 on either transport), `candidateVersion`
+1 to 100. The bounds are the record's, applied at the write on both doors, so a stored campaign always
+reads back.
+
 ## `GET /campaigns/:id/decision` says `halt`
 
 Not a refusal — an answer. Settle it and stop.
@@ -55,7 +93,12 @@ causes, and the detail says which:
 
 Both are repairable by running one more round through a lane that seals what is missing — which is better
 than waiving, because the waiver is frozen at open and this halt is telling you the evidence is thin. The
-frame fields that turn each one off are in `frame-design.md`.
+frame fields that turn each one off are in `frame-design.md`, and the detail names the one that applies.
+
+⚠️ For a loop over INGESTED scorecards both causes are permanent: an ingested batch seals no manifest (every
+axis unverified) and names no registry document (label-only), and there is no lane to re-run it through.
+Such a frame declares `allowUnverifiedIdentity` and `allowLabelOnlyAdoption` at open; one that did not is
+a campaign that can neither adopt nor settle on a win — abandon it in its issue and open a new one.
 
 ## `POST /campaigns` refuses a chain
 
@@ -81,8 +124,10 @@ would be arithmetic about the wrong thing.
 rounds judged by two rules, chosen after seeing data.
 
 **"this chain has spent N of its F pre-registered held-out tests and this campaign budgets M more"** — the
-arithmetic, and the reason the field exists. Either shorten this campaign's `budget.maxRounds`, or start a
-new chain that pre-registers a larger family and accepts the smaller per-round level that buys.
+arithmetic, and the reason the field exists. N counts every campaign in the TREE the predecessor roots —
+a halted sibling that continued the same campaign spent its rounds against the same rows. Either shorten
+this campaign's `budget.maxRounds`, or start a new chain that pre-registers a larger family and accepts the
+smaller per-round level that buys.
 
 ## `POST /campaigns/:id/settle` refuses (409)
 
@@ -124,6 +169,33 @@ ledger did not record it. The operation stays owed and is re-drivable: read `GET
 see where it stopped, and present the same proof again. Registry versions are immutable, so re-registering
 identical bytes is an idempotent no-op — this is safe to retry and must not be worked around by registering
 a different version.
+
+## `POST /campaigns/:id/merge` refuses
+
+The code half of an adoption. Only when the adopted candidate's scorecard named a pull request does the close
+record a code debt; this door pays it through the workspace GitHub App.
+
+**404 "this campaign never authorized an adoption"** — settle first.
+
+**409 "the proof presented is not the one this campaign recorded"** — read it from
+`GET /campaigns/:id/adoption`.
+
+**409 "this adoption carries no code debt"** — the candidate scorecard named no pull request (a pin-only
+campaign, or a batch submitted outside the CI path). Nothing to merge.
+
+**409 "the adopted bytes are not registered yet"** — adopt first. Code is promoted only behind an adoption that
+landed.
+
+**409 from GitHub, "head moved after the round measured it" / "not mergeable"** — the pull request changed
+after the round, or has conflicts. Re-run the round on the new head, or resolve the pull request and merge
+again; the debt stays owed.
+
+**404 "no workspace GitHub App is configured on this deployment"** — the deployment cannot merge from here.
+Merge in GitHub; the debt is recorded as owed and a chain over this adoption stays refused until an
+operator with the App pays it.
+
+**A chain refused with "adopted code that is not merged"** — `POST /campaigns` with `continues` over an
+adoption whose code debt is owed. Merge it and open again; a chain starts from what is on the default branch.
 
 ## The state that is not a failure
 

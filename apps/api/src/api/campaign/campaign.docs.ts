@@ -4,6 +4,7 @@ import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
+import { MergeCampaignBodySchema } from "./request/merge-campaign.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 
 // OpenAPI descriptors for the evolution-campaign routes (doc-only — never validates/serializes; see
@@ -12,7 +13,7 @@ import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 // pure adoption gate's answer. Authz reuses the scorecard actions (no new action): read = scorecards:read,
 // write = scorecards:run. Design: docs/architecture/evolution-lineage.md (Track D).
 export const campaignDocs: Record<
-  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption" | "adopt",
+  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption" | "adopt" | "merge",
   FastifySchema
 > = {
   open: {
@@ -51,7 +52,11 @@ export const campaignDocs: Record<
       "Record one tested hypothesis. The round's verdict is derived from the production scorecard diff — " +
       "trial statistics (Fisher/z + FDR + minDelta as frozen in the frame) and experiment identity — so the " +
       "loop cannot write its own report card. Appending CASes on the round count: a concurrent round " +
-      "answers 409, re-read and retry. The response carries the pure gate's answer over the new trace.",
+      "answers 409, re-read and retry. A round past the frame's own ending — the budget spent, or the " +
+      "rejected streak reached — also answers 409: the campaign is over by its own rule, ask the decision " +
+      "and settle it. Caller fields are bounded by the record schema (400). Under a frame with a delegation " +
+      "budget the round names its sandbox session (delegationRunId) and is refused (409) when the ledger says " +
+      "that session ran past the budget. The response carries the pure gate's answer over the new trace.",
     tags: ["campaign"],
     params: toJsonSchema(z.object({ id: z.string() })),
     body: toJsonSchema(LogCampaignRoundBodySchema),
@@ -102,6 +107,23 @@ export const campaignDocs: Record<
     },
   },
 
+  merge: {
+    summary: "Pay the adoption's code debt — merge the pull request the adopted bytes were built from",
+    description:
+      "Present the proof the settle recorded. When the adopted candidate's scorecard named a pull request, the " +
+      "close recorded a code debt on the operation (repository, pull request, the head the round measured); " +
+      "this merges that pull request through the workspace GitHub App, asserting the head when it is known, " +
+      "and records the merge commit. Requires the bytes to be registered first (adopt), refuses a proof that " +
+      "is not the recorded one, and converges on a retry (already_merged). A chain cannot continue from an " +
+      "adoption whose code debt is still owed.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(MergeCampaignBodySchema),
+    response: {
+      200: { description: "The paid code debt: the merge commit and the operation" },
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
   adopt: {
     summary: "Spend the campaign's adoption authorization on a registry write",
     description:

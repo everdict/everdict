@@ -38,6 +38,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // frozen: the level, and the family it is corrected over
       allowUnverifiedIdentity: false,
       allowLabelOnlyAdoption: false,
+      oracleScope: [],
       observationPolicy: { allowDivergent: false },
     };
 

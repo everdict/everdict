@@ -1,6 +1,6 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { campaignAdoption } from "./campaign-gate.js";
+import { adoptionProofOf, campaignAdoption, campaignRoundRefusal, campaignStoppedAt } from "./campaign-gate.js";
 
 // ── THE ADOPTION GATE IS CODE, NOT PROSE (docs/architecture/evolution-lineage.md, Track D) ───────────
 //
@@ -25,6 +25,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame => ({
   significance: { fdrAlpha: 0.05, heldOutFamilySize: 10 }, // frozen: the level, and the family it is corrected over
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
+  oracleScope: [],
   observationPolicy: { allowDivergent: false },
   ...over,
 });
@@ -217,5 +218,135 @@ describe("[COUNTEREXAMPLE] the adoption gate cannot see what the loop says it le
     expect(incomparable.learned).toBeDefined();
     const answer = campaignAdoption(frame(), [incomparable]);
     expect(answer.kind, "a finding argued a losing round into an adoption").not.toBe("adopt");
+  });
+});
+
+// ── THE STOPPING RULE IS A FACT ABOUT THE TRACE, NOT A QUESTION THE DRIVER HAS TO ASK ─────────────────
+//
+// The frame pre-registers two endings — a spent budget and a rejected streak — and the round is judged at
+// `fdrAlpha / heldOutFamilySize` on the promise that at most `family` rounds will ever consult the held-out
+// rows. The gate used to check the LATEST round for a win before it checked either ending, and nothing
+// refused an append past them. So a driver that never asked `decision` (or ignored a halt) could keep
+// logging until a round happened to win, and the gate adopted it: optional stopping, at a level the
+// pre-registered family never covered. The skill's "the gate stops the walk, you do not have to count" was a
+// sentence about a driver.
+//
+// RED before the fix: `adopt` for both traces below, and `campaignRoundRefusal is not a function`.
+describe("[COUNTEREXAMPLE] the frame's endings bind the trace, whatever was logged after them", () => {
+  it("a winning round logged PAST the budget is not adoption evidence", () => {
+    seq = 0;
+    const rounds = [round({}), round({}), round({ significantImprovements: 1 })];
+    const over = frame({ budget: { maxRounds: 2 }, significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 } });
+    expect(campaignAdoption(over, rounds)).toMatchObject({ kind: "halt", reason: "budget_exhausted" });
+  });
+
+  it("a win logged AFTER the rejected streak fired is not adoption evidence", () => {
+    seq = 0;
+    const rounds = [round({}), round({}), round({}), round({ significantImprovements: 1 })];
+    expect(campaignAdoption(frame(), rounds)).toMatchObject({ kind: "halt", reason: "no_improvement" });
+    expect(campaignStoppedAt(frame(), rounds)).toEqual({ reason: "no_improvement", atRound: 3 });
+  });
+
+  it("a trace whose LAST budgeted round won and then kept going is not adoption evidence either", () => {
+    // The write refuses this now; rows from before it existed can still hold the shape. No ending fired (the
+    // last budgeted round won), so this is the over-budget guard on its own.
+    seq = 0;
+    const rounds = [round({}), round({ significantImprovements: 1 }), round({ significantImprovements: 1 })];
+    const over = frame({ budget: { maxRounds: 2 }, significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 } });
+    expect(campaignStoppedAt(over, rounds)).toBeUndefined();
+    expect(campaignAdoption(over, rounds)).toMatchObject({ kind: "halt", reason: "budget_exhausted" });
+  });
+
+  it("campaignRoundRefusal names why a new round may not be appended — and answers nothing while the walk is live", () => {
+    seq = 0;
+    expect(campaignRoundRefusal(frame({ budget: { maxRounds: 2 } }), [round({}), round({})])).toMatchObject({
+      reason: "budget_exhausted",
+    });
+    // …even when the last budgeted round WON: adoption is the exit, not another round.
+    seq = 0;
+    expect(
+      campaignRoundRefusal(frame({ budget: { maxRounds: 2 } }), [round({}), round({ significantImprovements: 1 })]),
+    ).toMatchObject({ reason: "budget_exhausted" });
+    seq = 0;
+    expect(campaignRoundRefusal(frame(), [round({}), round({}), round({})])).toMatchObject({
+      reason: "no_improvement",
+    });
+    seq = 0;
+    expect(campaignRoundRefusal(frame(), [round({}), round({})])).toBeUndefined();
+    expect(campaignRoundRefusal(frame(), [])).toBeUndefined();
+  });
+
+  it("the endings do not move an honest trace: a win inside the budget still adopts, and a live walk continues", () => {
+    seq = 0;
+    expect(
+      campaignAdoption(frame({ budget: { maxRounds: 3 } }), [
+        round({}),
+        round({}),
+        round({ significantImprovements: 1 }),
+      ]),
+    ).toMatchObject({
+      kind: "adopt",
+    });
+    seq = 0;
+    expect(campaignAdoption(frame(), [round({}), round({})])).toMatchObject({
+      kind: "continue",
+      consecutiveRejected: 2,
+    });
+  });
+});
+
+// ── THE IDENTITY HALT NAMES THE FIELD THAT WOULD HAVE WAIVED IT ─────────────────────────────────────
+//
+// A loop over INGESTED scorecards never has a manifest, so every axis is unverified on every round and the
+// first winning round halts here. The detail used to say "unless the frame recorded the waiver at open"
+// without naming which of the frame's three waivers — and the only waiver the agent-evolve skill taught was
+// the other one. A halt whose remedy is a frame field names the field.
+describe("the identity halt is actionable", () => {
+  it("names allowUnverifiedIdentity for an unverified axis, and allowLabelOnlyAdoption for a label-only candidate", () => {
+    seq = 0;
+    const unverified = campaignAdoption(frame(), [
+      round({ significantImprovements: 1, unverifiedAxes: ["dataset_content", "execution_world"] }),
+    ]);
+    expect(unverified).toMatchObject({ kind: "halt", reason: "identity_unverified" });
+    expect((unverified as { detail: string }).detail).toContain("allowUnverifiedIdentity");
+    seq = 0;
+    const labelOnly = campaignAdoption(frame(), [
+      round({ significantImprovements: 1, candidateSpecDigest: undefined }),
+    ]);
+    expect(labelOnly).toMatchObject({ kind: "halt", reason: "identity_unverified" });
+    expect((labelOnly as { detail: string }).detail).toContain("allowLabelOnlyAdoption");
+  });
+});
+
+// ── THE CANDIDATE'S SOURCE RIDES THE ANSWER AND IS NEVER WEIGHED (code-evolution-loop.md, D4) ────────
+describe("the adopt answer carries where the candidate came from, and the gate does not read it", () => {
+  it("copies the latest round's candidateSource onto the adopt answer and the proof", () => {
+    seq = 0;
+    const source = { source: "github-actions", repo: "acme/harness", sha: "abc123", prNumber: 7 };
+    const rounds = [round({}), round({ significantImprovements: 1, candidateSource: source })];
+    const answer = campaignAdoption(frame(), rounds);
+    expect(answer).toMatchObject({ kind: "adopt", candidateSource: source });
+    const proof = adoptionProofOf(
+      answer,
+      { id: "evc", frameDigest: "sha256:f", issueId: "iss", frame: frame() },
+      rounds,
+    );
+    expect(proof?.candidateSource).toEqual(source);
+  });
+
+  it("answers identically with and without a source — provenance is carried, not weighed", () => {
+    seq = 0;
+    const bare = [round({}), round({ significantImprovements: 1 })];
+    seq = 0;
+    const sourced = [
+      round({}),
+      round({ significantImprovements: 1, candidateSource: { source: "api", repo: "acme/harness", sha: "def" } }),
+    ];
+    const strip = (a: ReturnType<typeof campaignAdoption>) =>
+      a.kind === "adopt" ? { ...a, candidateSource: undefined } : a;
+    expect(strip(campaignAdoption(frame(), sourced))).toEqual(strip(campaignAdoption(frame(), bare)));
+    seq = 0;
+    const losing = [round({ candidateSource: { source: "api", sha: "def" } })];
+    expect(campaignAdoption(frame(), losing).kind).toBe("continue");
   });
 });

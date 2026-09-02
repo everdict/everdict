@@ -287,6 +287,13 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
     const machine = ScorecardBatch.from({ ...queued(), status: "running" }).succeed({ summary }, "t2").facts[0];
     expect(machine?.kind).toBe("scorecard.completed");
     expect(machine?.actor).toBeUndefined();
+    // …and a batch run FOR a campaign says so on its completion, so a subscription filtered on the campaign
+    // wakes its driver on exactly this batch (docs/architecture/code-evolution-loop.md, D2).
+    const forCampaign = ScorecardBatch.from({
+      ...queued({ createdBy: "alice", origin: { source: "github-actions", campaignId: "evc_7" } }),
+      status: "running",
+    }).succeed({ summary }, "t2").facts[0];
+    expect(forCampaign?.payload).toMatchObject({ origin: "github-actions", campaignId: "evc_7" });
   });
 
   it("every terminal state rejects succeed/fail/start/supersede/cancel — first terminal write wins", () => {
@@ -384,6 +391,14 @@ describe("ScorecardBatch — transitions (guard, then return {patch, facts})", (
     for (const status of ["queued", "running", "failed", "cancelled", "superseded"] as const) {
       expect(() => ScorecardBatch.from({ ...queued(), status }).rescore({}, {}, "t5")).toThrow(ConflictError);
     }
+  });
+
+  it("creationFacts carries the campaign a batch was run for, so a subscription can wake its driver", () => {
+    const record = queued({ createdBy: "alice", origin: { source: "github-actions", campaignId: "evc_7" } });
+    const [fact] = ScorecardBatch.creationFacts(record, 3);
+    expect(fact?.payload).toMatchObject({ origin: "github-actions", campaignId: "evc_7" });
+    const [plain] = ScorecardBatch.creationFacts(queued({ createdBy: "alice", origin: { source: "api" } }), 3);
+    expect(plain?.payload).not.toHaveProperty("campaignId");
   });
 
   it("creationFacts records the submitted fact with the case count and origin provenance", () => {

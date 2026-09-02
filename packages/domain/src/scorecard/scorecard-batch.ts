@@ -154,6 +154,9 @@ function batchTerminalFact(
         harness,
         ...(passRate !== undefined ? { passRate } : {}),
         ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
+        // The campaign this batch was run for, so a subscription can wake the driver on exactly its round's
+        // batch and nobody else's (docs/architecture/code-evolution-loop.md, D2).
+        ...(record.origin?.campaignId !== undefined ? { campaignId: record.origin.campaignId } : {}),
       },
     },
   ];
@@ -225,6 +228,7 @@ export class ScorecardBatch {
           cases,
           ...(record.origin?.source !== undefined ? { origin: record.origin.source } : {}),
           ...(record.origin?.scheduleId !== undefined ? { scheduleId: record.origin.scheduleId } : {}),
+          ...(record.origin?.campaignId !== undefined ? { campaignId: record.origin.campaignId } : {}),
         },
       },
     ];

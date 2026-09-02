@@ -36,6 +36,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame =>
     significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // frozen: the level, and the family it is corrected over
     allowUnverifiedIdentity: false,
     allowLabelOnlyAdoption: false,
+    oracleScope: [],
     observationPolicy: { allowDivergent: false },
     ...over,
   }) as unknown as CampaignFrame;

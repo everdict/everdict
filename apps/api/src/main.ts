@@ -72,7 +72,7 @@ import type {
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
-import { UpstreamError } from "@everdict/contracts";
+import { UpstreamError, readOrUnknown, readUnknown } from "@everdict/contracts";
 import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
@@ -1309,6 +1309,29 @@ async function main(): Promise<void> {
     // The authorization an adopted close writes, readable through the campaign's own surface — without it
     // the operation was durable and unreachable from every transport (arch-review 73).
     operations: adoptionOperationStore,
+    // ── WHAT A CANDIDATE'S PULL REQUEST CHANGED (docs/architecture/code-evolution-loop.md, D3) ──────
+    //
+    // The frame's `oracleScope` is checked against the files the candidate's pull request touched, read through
+    // the workspace GitHub App. A deployment without the App answers UNKNOWN with the reason — the frame that
+    // declared a scope then rejects every round as unverifiable, which is the fail-closed answer (L2) — never
+    // an empty listing that would read as "the change was clean".
+    changes: {
+      pullRequestFiles: async (tenant, repository, pullNumber) => {
+        if (githubAppService === undefined)
+          return readUnknown(
+            "no workspace GitHub App is configured on this deployment, so a pull request's changed files cannot be read",
+          );
+        return readOrUnknown(async () => {
+          const listing = await githubAppService.listPullRequestChanges(tenant, repository, pullNumber, {
+            maxFiles: 100,
+          });
+          return { paths: listing.files.map((f) => f.filename), complete: !listing.truncated };
+        }, `pull request #${pullNumber} of ${repository}`);
+      },
+    },
+    // The delegation session a budgeted round names — the run ledger, read by id and checked for the tenant
+    // inside the service.
+    runs: store,
   });
   // …and the consumer of what it authorized. The registry effect lives in `composition/campaign-adoption.ts`
   // as a named function so its counterexample drives the production closure rather than one of its own
@@ -1319,6 +1342,8 @@ async function main(): Promise<void> {
     harnesses: harnessInstanceRegistry,
     templates: harnessTemplateRegistry,
     issues: issueService,
+    // …and the code half's effect (docs/architecture/code-evolution-loop.md, D5), through the workspace App.
+    ...(githubAppService !== undefined ? { github: githubAppService } : {}),
   });
 
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.

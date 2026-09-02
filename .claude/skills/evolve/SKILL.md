@@ -56,6 +56,14 @@ So the split to hold in mind, because every mistake below is a confusion of the 
 5. **Log the round.** `POST /campaigns/:id/rounds` `{hypothesis, learned, candidateVersion,
    baselineScorecardId, candidateScorecardId}` (MCP: `log_campaign_round`). **You do not send a verdict.**
 
+   A frame that budgets the delegation (`delegation {ttlSec, maxUsd}`) makes the round name the sandbox
+   session that produced its candidate (`delegationRunId`); the platform reads what it cost off the run
+   ledger and refuses (409) a round whose session ran past the budget.
+
+   The round also records where its candidate came from (`verdict.candidateSource`: the candidate
+   scorecard's origin — repo, sha, pull request, pin override — copied by the platform, never sent by you).
+   An adopted close and its proof carry the same block, so a merge can name the pull request it is about.
+
    `learned` is required and it is the half that survives the round. The verdict is derived and the budget is
    spent either way; what the round TAUGHT is the only thing round N+1 can use. Write the MECHANISM, not the
    outcome — "the tool budget was the binding constraint, not the prompt" is a finding, "it did not improve"
@@ -66,6 +74,11 @@ So the split to hold in mind, because every mistake below is a confusion of the 
    trial significance plus experiment identity — so the loop cannot write its own report card. A round that
    could not be compared is recorded as such and counts as rejected; `references/rejection-catalogue.md` is
    every reason, and what causes it.
+
+   The round door REFUSES (409) once the frame's own ending has fired — the budget is spent, or the rejected
+   streak was reached. The record enforces its endings; you do not count, and you cannot overrun them. Ask
+   step 6 and settle. It also refuses (400) a round the row could not hold: `hypothesis` up to 2000
+   characters, `learned` 10 to 4000, `candidateVersion` up to 100 — the same bounds on both transports.
 6. **Ask.** `GET /campaigns/:id/decision` (MCP: `campaign_decision`) returns `CampaignGateAnswer` without
    touching anything: `continue` (go to 2), `adopt`, or `halt` with a reason. Ask this rather than counting
    rounds yourself — the arithmetic is the frame's, not yours.
@@ -74,6 +87,10 @@ So the split to hold in mind, because every mistake below is a confusion of the 
 8. **Spend it.** A close that adopted leaves a durable authorization; read it with
    `GET /campaigns/:id/adoption` (MCP: `campaign_adoption`) and present it to `POST /campaigns/:id/adopt`
    `{proof, spec}` (MCP: `adopt_campaign_candidate`), which registers the version and reads it back.
+   When the candidate came from a pull request (its scorecard's origin named one), the same close also
+   recorded a CODE debt: `POST /campaigns/:id/merge` `{proof}` (MCP: `merge_campaign_candidate`) merges that
+   pull request at the head the round measured, after the bytes are registered. A chain (`continues`) is
+   refused over an adoption whose code is still owed.
 
 ## The three things that surprise every first driver
 
@@ -89,6 +106,9 @@ So the split to hold in mind, because every mistake below is a confusion of the 
   compares against the frame's FROZEN baseline, never against the previous round, so two steps that only pay
   off together are measured as one cumulative delta.
 
+  And the family a chain pre-registers covers the whole TREE the chain roots — a halted sibling that continued
+  the same predecessor spent its rounds against the same held-out rows, and the open counts them.
+
   This is where the design differs from the literature it resembles. WikiSkill (arXiv 2608.27454) records
   "strict validation gating excludes neutral updates" as a limitation, and it is one for them because their
   loop rolls the skill directory back to the last ACCEPTED state — the neutral step is destroyed. Here the
@@ -96,6 +116,12 @@ So the split to hold in mind, because every mistake below is a confusion of the 
   family correction makes neutral rounds MORE common (a round is judged at `fdrAlpha / heldOutFamilySize`, so
   a real but small effect often will not clear it), which means discarding them wastes precisely what the
   correction cost.
+- **Ingested rounds are unverified on every axis, and label-only.** An ingested scorecard seals no
+  manifest and names no registry document, so a round over one carries every identity axis as unverified and
+  no candidate spec digest. Both are refused by default, and both are repairable only at OPEN: a frame for a
+  loop over ingested traces (`agent_evolve`) declares `allowUnverifiedIdentity` AND `allowLabelOnlyAdoption`,
+  or its first winning round halts `identity_unverified` with nothing to settle. The halt's detail names the
+  field. `harness_evolve` runs real batches and needs neither.
 - **A finding is advice, never evidence.** `learned` is the one value on a round the loop authors about its
   own walk, so the adoption gate does not read it and must not — the whole reason the verdict is derived is
   that a loop may not write its own report card. It feeds the next proposal, which is a different question
@@ -113,8 +139,10 @@ So the split to hold in mind, because every mistake below is a confusion of the 
 - Rule `protocol` for why the verdict is derived rather than accepted; skill `evaluation` for the scorecard
   and diff semantics the round verdict is built from.
 
-This file is the driver for a human or an outside agent. The product's own agent has the same walk as two
+This file is the driver for a human or an outside agent. The product's own agent has the same walk as three
 first-party skills in `packages/application-control/src/capability/first-party.ts` — `agent_evolve` for an
-agent configuration (shadow tries, ingested traces) and `harness_evolve` for a harness (real batches, so no
-identity waiver). They are the same protocol with different subjects; when this file changes, check whether
-they say the same thing.
+agent configuration (shadow tries, ingested traces), `harness_evolve` for a harness (real batches, so no
+identity waiver), and `code_evolve` for a harness whose CODE changes: a delegated coding agent in a sandbox
+makes the change, the repository's CI builds the image, and the driver pins that digest into the candidate
+version (`docs/architecture/code-evolution-loop.md`). They are the same protocol with different subjects;
+when this file changes, check whether they say the same thing.

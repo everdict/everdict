@@ -582,6 +582,11 @@ export const ScorecardOriginSchema = z.object({
   prNumber: z.number().int().optional(),
   runUrl: z.string().optional(), // CI run link
   pinOverrides: z.record(z.string()).optional(), // submit-time ephemeral pins (slot→image) — records the PR image swap
+  // The evolution campaign this batch was run FOR, when a driver (or the CI workflow it set up) says so
+  // (docs/architecture/code-evolution-loop.md, D2). A finding key, not an authority: the campaign still
+  // verifies the batch's identity when the round is logged; this only lets a `scorecard.completed`
+  // subscription filter on it, so the driver is woken by the batch it is waiting for.
+  campaignId: z.string().min(1).max(200).optional(),
   // Product-timeline provenance (source === "product", records/product.ts): the product whose service version
   // import fanned this batch out, the watch series it belongs to, and — when a planned release scoped the run —
   // the release. `seriesKey` is the trend's x-axis key: "how did this series move" is a list filter over these

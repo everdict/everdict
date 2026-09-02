@@ -1,4 +1,4 @@
-import type { CampaignAdoptionProof, CampaignFrame, CampaignRound } from "@everdict/contracts";
+import type { CampaignAdoptionProof, CampaignFrame, CampaignRound, CandidateSource } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
 
 // ── THE PURE ADOPTION GATE (docs/architecture/evolution-lineage.md, Track D) ─────────────────────────
@@ -23,6 +23,11 @@ export type CampaignGateAnswer =
       // what was actually proved — and `undefined` says plainly that this round could not name them, which
       // is a weaker adoption an operator can see rather than one that reads the same as a strong one.
       candidateSpecDigest?: string;
+      // …and where those bytes were built from — the round's platform-copied origin coordinates
+      // (docs/architecture/code-evolution-loop.md, D4). Carried, never weighed: the gate decides on the
+      // held-out counts and the identity axes, and this rides to the close and the proof so a merge can name
+      // the pull request it is about.
+      candidateSource?: CandidateSource;
     }
   | { kind: "continue"; roundsLeft: number; consecutiveRejected: number }
   | { kind: "halt"; reason: "no_improvement" | "budget_exhausted" | "identity_unverified"; detail: string };
@@ -111,6 +116,7 @@ export function adoptionProofOf(
       ...(answer.candidateSpecDigest !== undefined ? { specDigest: answer.candidateSpecDigest } : {}),
     },
     provingScorecardId: answer.provingScorecardId,
+    ...(answer.candidateSource !== undefined ? { candidateSource: answer.candidateSource } : {}),
     issueId: campaign.issueId,
     // …and the authority this campaign decided under. Carried so a registry write is gated against the team
     // frozen at open rather than whatever the entity's team happens to be when somebody spends it
@@ -120,7 +126,93 @@ export function adoptionProofOf(
   };
 }
 
+// ── THE FRAME'S ENDINGS ARE FACTS ABOUT THE TRACE, NOT QUESTIONS THE DRIVER HAS TO ASK ──────────────
+//
+// The frame pre-registers two ways a campaign ends without adopting — the budget is spent, or K rounds in a
+// row were rejected — and every round is judged at `fdrAlpha / heldOutFamilySize` on the promise that at
+// most `family` rounds ever consult the held-out rows. Both endings used to be ANSWERED here and enforced by
+// nobody: this function looked at the LATEST round for a win before it looked at either ending, and nothing
+// refused an append past them. So a driver that never asked `decision`, or ignored a halt, could keep
+// logging until a round happened to win, and the gate adopted it — optional stopping, at a level the
+// pre-registered family never covered. The skill's "the gate stops the walk, you do not have to count" was
+// a sentence about a driver.
+//
+// This is the one owner of "where did this campaign end". The service refuses an append past it (through
+// `campaignRoundRefusal`, race-safe because the store CASes on the round count), and the gate reads it
+// BEFORE it reads a win, so a round logged past the ending is not evidence whatever it scored.
+export interface CampaignStop {
+  reason: "no_improvement" | "budget_exhausted";
+  atRound: number; // 1-based position of the round at which the frame's rule fired
+}
+
+export function campaignStoppedAt(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignStop | undefined {
+  let consecutiveRejected = 0;
+  for (let i = 0; i < rounds.length; i += 1) {
+    const r = rounds[i];
+    if (r === undefined) continue;
+    const won = winning(r, frame);
+    consecutiveRejected = won ? 0 : consecutiveRejected + 1;
+    // The streak halt outranks the budget halt: "K straight rejections" names what is wrong (the hypothesis
+    // well is dry), where "the budget ran out" only names when it stopped mattering.
+    if (consecutiveRejected >= frame.stopAfterRejectedRounds) return { reason: "no_improvement", atRound: i + 1 };
+    // The last budgeted round ends the campaign unless it is the one being adopted.
+    if (i + 1 >= frame.budget.maxRounds && !won) return { reason: "budget_exhausted", atRound: i + 1 };
+  }
+  return undefined;
+}
+
+// Why one more round may NOT be appended — the write-side half of the same rule, `undefined` while the walk
+// is live. A spent budget refuses even after a WIN on the last budgeted round: adoption is that campaign's
+// exit, and another round would be a test the pre-registered family does not cover.
+export function campaignRoundRefusal(
+  frame: CampaignFrame,
+  rounds: readonly CampaignRound[],
+): (CampaignStop & { detail: string }) | undefined {
+  const stopped = campaignStoppedAt(frame, rounds);
+  if (stopped !== undefined)
+    return {
+      ...stopped,
+      detail:
+        stopped.reason === "no_improvement"
+          ? `${frame.stopAfterRejectedRounds} consecutive rounds were rejected by round ${stopped.atRound} — the campaign ended by its own rule; ask the gate and settle it`
+          : `all ${frame.budget.maxRounds} budgeted rounds are logged and the last is not adoptable — the campaign ended by its own rule; ask the gate and settle it`,
+    };
+  if (rounds.length >= frame.budget.maxRounds)
+    return {
+      reason: "budget_exhausted",
+      atRound: rounds.length,
+      detail: `all ${frame.budget.maxRounds} budgeted rounds are logged — a round past the budget would be judged at a level the pre-registered held-out family does not cover; ask the gate and settle`,
+    };
+  return undefined;
+}
+
 export function campaignAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {
+  // The ending first: a round logged after the frame's own rule fired is not evidence, whatever it scored.
+  const ended = campaignStoppedAt(frame, rounds);
+  if (ended !== undefined) {
+    const after = rounds.length - ended.atRound;
+    const tail = after > 0 ? ` — the ${after} round(s) logged after it are not adoption evidence` : "";
+    return ended.reason === "no_improvement"
+      ? {
+          kind: "halt",
+          reason: "no_improvement",
+          detail: `${frame.stopAfterRejectedRounds} consecutive rounds were rejected by round ${ended.atRound} (frame stops after ${frame.stopAfterRejectedRounds})${tail}`,
+        }
+      : {
+          kind: "halt",
+          reason: "budget_exhausted",
+          detail: `${Math.min(ended.atRound, frame.budget.maxRounds)} of ${frame.budget.maxRounds} budgeted rounds are spent and the latest budgeted candidate is not adoptable${tail}`,
+        };
+  }
+  // Not stopped and still over budget: only a trace whose LAST budgeted round won can get here, followed by
+  // rounds the write should have refused (rows from before the refusal existed). Those are not evidence
+  // either — the level they were judged at assumed they would never be asked.
+  if (rounds.length > frame.budget.maxRounds)
+    return {
+      kind: "halt",
+      reason: "budget_exhausted",
+      detail: `${rounds.length} rounds exceed the budget of ${frame.budget.maxRounds} — rounds past the budget were judged at a level the pre-registered held-out family does not cover, and are not adoption evidence`,
+    };
   const latest = rounds.at(-1);
   // Only the LATEST round's candidate is on the table: adoption is of the current variant, and a stale win
   // followed by a worse attempt is a loop that returns to the winner explicitly, never a gate doing
@@ -128,10 +220,13 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
   if (latest !== undefined && winning(latest, frame)) {
     const unverified = latest.verdict.unverifiedAxes;
     if (unverified.length > 0 && !frame.allowUnverifiedIdentity) {
+      // The remedy is a frame field, so the halt NAMES it. A loop over INGESTED scorecards never has a
+      // manifest, so every axis reads unverified on every round and its first win lands here — and the only
+      // waiver the agent-evolve skill used to teach was the other one.
       return {
         kind: "halt",
         reason: "identity_unverified",
-        detail: `the winning round's comparison could not verify ${unverified.join(", ")} — an optimization verdict over an unverifiable world is refused unless the frame recorded the waiver at open`,
+        detail: `the winning round's comparison could not verify ${unverified.join(", ")} — an optimization verdict over an unverifiable world is refused unless the frame recorded allowUnverifiedIdentity at open. Run a round through a lane that seals a manifest, or — for a loop over ingested scorecards, which seal none and read unverified on every axis — open the campaign with that waiver declared`,
       };
     }
     // ── …AND THE ADOPTION HAS TO BE ABLE TO NAME ITS BYTES (arch-review 73 P0) ──────────────────────
@@ -163,30 +258,16 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
       ...(latest.verdict.candidateSpecDigest !== undefined
         ? { candidateSpecDigest: latest.verdict.candidateSpecDigest }
         : {}),
+      ...(latest.verdict.candidateSource !== undefined ? { candidateSource: latest.verdict.candidateSource } : {}),
     };
   }
 
+  // Live: the latest is not a win (or the trace is empty), and neither ending has fired.
   let consecutiveRejected = 0;
   for (let i = rounds.length - 1; i >= 0; i -= 1) {
     const r = rounds[i];
     if (r === undefined || winning(r, frame)) break;
     consecutiveRejected += 1;
-  }
-  // The streak halt outranks the budget halt: "K straight rejections" names what is wrong (the hypothesis
-  // well is dry), where "the budget ran out" only names when it stopped mattering.
-  if (consecutiveRejected >= frame.stopAfterRejectedRounds) {
-    return {
-      kind: "halt",
-      reason: "no_improvement",
-      detail: `${consecutiveRejected} consecutive rounds were rejected (frame stops after ${frame.stopAfterRejectedRounds})`,
-    };
-  }
-  if (rounds.length >= frame.budget.maxRounds) {
-    return {
-      kind: "halt",
-      reason: "budget_exhausted",
-      detail: `${rounds.length} of ${frame.budget.maxRounds} budgeted rounds are spent and the latest candidate is not adoptable`,
-    };
   }
   return { kind: "continue", roundsLeft: frame.budget.maxRounds - rounds.length, consecutiveRejected };
 }

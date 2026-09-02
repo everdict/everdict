@@ -7,6 +7,12 @@ const deferred: string[] = [];
 import type { AdoptionOperationStore } from "../ports/evolution-campaign-store.js";
 import { type CampaignAdoptionDeps, CampaignAdoptionService } from "./campaign-adoption-service.js";
 
+// The code half's effect, REQUIRED by the service and not exercised by these cases — stated as refusing rather
+// than omitted, so a case that reaches it fails loudly instead of merging nothing.
+const unusedMerge = async (): Promise<{ sha: string; alreadyMerged: boolean }> => {
+  throw new Error("merge is not exercised by these cases");
+};
+
 // ── AN AUTHORIZATION NOBODY SPENDS IS DECORATION (arch-review 72 P0) ────────────────────────────────
 //
 // arch-review 71 built `CampaignAdoptionProof` and a durable `AdoptionOperation` written atomically with the
@@ -76,6 +82,9 @@ function operations(over: Partial<AdoptionOperation> = {}) {
       deferred.push(`${input.campaignId}:${input.outcome}`);
       return true;
     },
+    async markMerged() {
+      return "no_code_debt" as const; // these doubles hold no code debt (code-evolution-loop.md, D5)
+    },
     async markCompleted(_t, _c, proofDigest) {
       if (op === undefined) return "no_such_operation";
       if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
@@ -124,6 +133,7 @@ const serviceOver = (
 ) =>
   new CampaignAdoptionService({
     operations: store,
+    merge: unusedMerge,
     // An issue nobody resolved — the ordinary path, which leaves the completion join to the watcher.
     issues: { get: async () => ({ status: "in_progress" }) },
     register: async ({ proof }) => {
@@ -260,6 +270,9 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       async deferCompletion(input: { tenant: string; campaignId: string; outcome: string; nextAttemptAt: string }) {
         deferred.push(`${input.campaignId}:${input.outcome}`);
         return true;
+      },
+      async markMerged() {
+        return "no_code_debt" as const; // these doubles hold no code debt (code-evolution-loop.md, D5)
       },
       async markCompleted() {
         return "no_such_operation";
@@ -444,6 +457,7 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     const { store, current } = operations();
     const service = new CampaignAdoptionService({
       operations: store,
+      merge: unusedMerge,
       // The issue closed first — before anybody registered anything.
       issues: { get: async () => ({ status: "done", resolution: { scorecardId: "sc-cand" } }) },
       register: landsAsAuthorized,
@@ -479,6 +493,7 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       const { store, current } = operations();
       const service = new CampaignAdoptionService({
         operations: store,
+        merge: unusedMerge,
         issues: { get },
         register: landsAsAuthorized,
       });
@@ -545,6 +560,7 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
       const { store, facts } = operationsWithFacts();
       await new CampaignAdoptionService({
         operations: store,
+        merge: unusedMerge,
         issues: { get: async () => ({ status: "in_progress" }) },
         register: async ({ proof }) => ({
           kind,
@@ -594,6 +610,7 @@ describe("[R72 COUNTEREXAMPLE] the registry effect spends the authorization it w
     const { store, current } = operations();
     const svc = new CampaignAdoptionService({
       operations: store,
+      merge: unusedMerge,
       issues: { get: async () => ({ status: "in_progress" }) },
       register: async () => {
         throw new Error("the registry refused the write");
@@ -630,6 +647,7 @@ describe("[R115 COUNTEREXAMPLE] an at-least-once retry finishes an adoption whos
     const { store, current } = operations({ state: "registered", registeredVersion: "1.0.1" });
     const service = new CampaignAdoptionService({
       operations: store,
+      merge: unusedMerge,
       // The issue closed on THIS adoption's evidence while the join was lost.
       issues: { get: async () => ({ status: "done", resolution: { scorecardId: PROOF.provingScorecardId } }) },
       register: async () => {
@@ -655,6 +673,7 @@ describe("[R115 COUNTEREXAMPLE] an at-least-once retry finishes an adoption whos
     const { store, current } = operations({ state: "registered", registeredVersion: "1.0.1" });
     const service = new CampaignAdoptionService({
       operations: store,
+      merge: unusedMerge,
       issues: { get: async () => ({ status: "done", resolution: { scorecardId: "sc-somebody-else" } }) },
       register: async () => {
         throw new Error("the effect must not run again on a spent authorization");

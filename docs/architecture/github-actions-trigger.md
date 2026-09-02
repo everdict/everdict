@@ -132,7 +132,7 @@ Two lifecycles, two registry treatments:
 
 | event | semantics | registry | reproducibility anchor |
 |---|---|---|---|
-| `pull_request` | evaluate topology with *this* PR's image in one slot | **untouched** | `origin.pinOverrides` on the scorecard |
+| `pull_request` | evaluate topology with *this* PR's image in one slot | **untouched** | `origin.pinOverrides` on the scorecard (+ `origin.campaignId` when the run is a campaign round — a finding key for the driver's `scorecard.completed` subscription, see `code-evolution-loop.md`) |
 | `issue_comment` `/evaluate` | re-run the PR eval **on demand** (same ephemeral pins; PR head resolved explicitly) | **untouched** | `origin.pinOverrides` + `origin.prNumber`/`sha` |
 | `push` to dev/main | advance the "dev channel" | **new instance version** (re-pin) | immutable instance version vN+1 |
 

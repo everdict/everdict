@@ -24,6 +24,7 @@ import {
   UpstreamError,
   type WorkPresence,
   isConstitutionalMetric,
+  isJudgeFamilyMetric,
   killConverged,
   presenceConverged,
 } from "@everdict/contracts";
@@ -760,9 +761,8 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         `scorecard '${input.id}' has no per-case results to re-score (status=${record.status}).`,
       );
     const work = retryableUnmeasured(record.scorecard);
-    const isJudgeMetric = (metric: string): boolean => metric === "judge" || metric.startsWith("judge:");
-    const judgeIds = [...new Set(work.filter((w) => isJudgeMetric(w.metric)).map((w) => w.graderId))];
-    const skipped = work.filter((w) => !isJudgeMetric(w.metric));
+    const judgeIds = [...new Set(work.filter((w) => isJudgeFamilyMetric(w.metric)).map((w) => w.graderId))];
+    const skipped = work.filter((w) => !isJudgeFamilyMetric(w.metric));
     if (judgeIds.length === 0) return { id: record.id, rescoredJudges: [], skipped };
     // Versions from the batch's own orchestration pins — the SAME judge version that failed, never a silent
     // upgrade to whatever "latest" resolves to now (that would change the verdict, not recover it).

@@ -7,4 +7,5 @@ export const ScorecardOriginBodySchema = z.object({
   ref: z.string().optional(),
   prNumber: z.number().int().optional(),
   runUrl: z.string().optional(),
+  campaignId: z.string().min(1).max(200).optional(), // the evolution campaign this batch is a round of (a finding key)
 });

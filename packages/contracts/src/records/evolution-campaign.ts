@@ -88,6 +88,28 @@ const CampaignFrameShape = z.object({
   // Default FALSE: a scorecard that sealed no spec digest cannot prove which bytes it measured, and adopting
   // on that is exactly the C1-evaluated/C2-saved substitution with nothing to catch it.
   allowLabelOnlyAdoption: z.boolean().default(false),
+  // ── THE ORACLE IS A SET OF REPOSITORY PATHS (docs/architecture/code-evolution-loop.md, D3) ────────
+  //
+  // A candidate produced by a coding agent with a checkout can edit the dataset, the judge rubric or the
+  // graders' tests as easily as the scaffold — the candidate rewriting its own exam. These path patterns
+  // (`tests/`, `evals/**`, `judges/rubric-*.md`; the language is `pathMatchesPattern` in `@everdict/domain`)
+  // freeze the boundary at open. Non-empty means every round's candidate pull request is read and a change
+  // inside the scope makes the round non-comparable ("oracle touched"); a change that cannot be read makes it
+  // non-comparable too, because "could not check" is not "clean". Empty = no boundary declared, which is what
+  // every campaign before this had.
+  oracleScope: z.array(z.string().min(1).max(300)).max(100).default([]),
+  // ── THE DELEGATION BUDGET (docs/architecture/code-evolution-loop.md, delegation budget) ──────────
+  //
+  // Rounds are bounded; the coding agent a round delegates to was not. Declared, the round door requires the
+  // sandbox session that produced the candidate (`delegationRunId`) and refuses the round when that session's
+  // TTL exceeded `ttlSec` or its metered spend exceeded `maxUsd` — read off the RUN LEDGER, never from the
+  // caller. Absent = no delegation budget, which is what every campaign before this had.
+  delegation: z
+    .object({
+      ttlSec: z.number().int().positive(),
+      maxUsd: z.number().nonnegative().optional(),
+    })
+    .optional(),
   // ── WHAT A JUDGE'S OBSERVATION VERDICT COSTS THIS CAMPAIGN (arch-review 71 P1-evolution) ────────
   //
   // A judge shown the platform's own observation account answers whether the trace's claims and that
@@ -188,6 +210,25 @@ export const CampaignFrameSchema = CampaignFrameShape.superRefine((frame, ctx) =
 });
 export type CampaignFrame = z.infer<typeof CampaignFrameSchema>;
 
+// ── WHERE A CANDIDATE CAME FROM (docs/architecture/code-evolution-loop.md, D4) ───────────────────────
+//
+// A round named a `candidateVersion` and nothing else, so the chain "delegation session → pull request → sha
+// → image → scorecard → round" lived in four records and was joined in none. These are the candidate
+// SCORECARD's origin coordinates, copied by the service from that record — never accepted from the caller
+// (L3). `source` rides along because it says who authored them: a `github-actions` origin is CI's word under
+// OIDC federation, an `api` or `mcp` one is the submitter's. Optional wherever it appears: rows written before
+// this existed, and candidates whose scorecard carried no origin, have none.
+export const CandidateSourceSchema = z.object({
+  source: z.string().min(1),
+  repo: z.string().optional(), // "owner/name"
+  sha: z.string().optional(),
+  ref: z.string().optional(), // refs/heads/… | refs/pull/…
+  prNumber: z.number().int().optional(),
+  runUrl: z.string().optional(), // the CI run that built and evaluated it
+  pinOverrides: z.record(z.string()).optional(), // submit-time ephemeral pins (slot → image), when the batch swapped one
+});
+export type CandidateSource = z.infer<typeof CandidateSourceSchema>;
+
 // One hypothesis tested. The verdict is DERIVED by the service from the one production diff predicate
 // (trials significance + experiment identity) — never accepted from the caller, which would let the loop
 // write its own report card (L3).
@@ -250,6 +291,11 @@ export const CampaignRoundSchema = z.object({
     // Optional because a built-in harness has no declarative spec to digest, and for the rows written
     // before this existed; `campaignAdoption` decides what an absent one is worth.
     candidateSpecDigest: z.string().optional(),
+    // …and where those bytes came from — the candidate scorecard's origin, platform-copied (D4 above).
+    candidateSource: CandidateSourceSchema.optional(),
+    // …and which oracle paths the candidate's pull request touched, when the frame declared a scope and the
+    // change fell inside it (D3). Present only on such a round; the round is then `comparable: false`.
+    oracleTouched: z.array(z.string().max(300)).optional(),
     // …and what the judges said about the candidate's account of itself (arch-review 71 P1-evolution).
     // Counted over the CANDIDATE side: the question is whether the thing being adopted tells the truth about
     // what it did. Optional for the rows written before this existed.
@@ -287,10 +333,48 @@ export const CampaignRoundSchema = z.object({
     confoundedAxes: z.array(z.string().max(100)).default([]),
     detail: z.string().max(1000).optional(),
   }),
+  // ── THE DELEGATION SESSION THAT PRODUCED THE CANDIDATE, AS THE LEDGER RECORDS IT ─────────────────
+  //
+  // The caller names the sandbox run; the platform copies what the run ledger says about it — its TTL and its
+  // metered spend — so the round's account of what the delegate cost is the ledger's, not the loop's (L3).
+  // Present when the round named a session; REQUIRED by the write when the frame declared a delegation budget.
+  delegation: z
+    .object({
+      runId: z.string().min(1).max(200),
+      ttlSec: z.number().int().positive().optional(),
+      usd: z.number().nonnegative().optional(),
+    })
+    .optional(),
   at: z.string(),
   by: z.string().min(1),
 });
 export type CampaignRound = z.infer<typeof CampaignRoundSchema>;
+
+// ── THE CALLER-AUTHORED HALF OF A ROUND, WITH THE RECORD'S BOUNDS ────────────────────────────────────
+//
+// The HTTP DTO bounded these fields and the MCP twin did not, and the service appended the round literal
+// unparsed. Rows are read back through `EvolutionCampaignRecordSchema` — `PgEvolutionCampaignStore` parses
+// every row, and `list()` maps every row — so one empty hypothesis or one 4001-character finding logged over
+// MCP made that campaign, and the workspace's whole campaign list, unreadable. The same "a rule applied at
+// decode time is a data outage" shape arch-review 72/75 closed, entered through the door the agent loop
+// actually drives.
+//
+// So the bounds are declared ONCE, as a projection of the record schema, and the write validates against
+// them whichever door the round came through. A transport may tighten (the DTO requires `learned` of a new
+// round); it may not loosen, because this is what the row can hold.
+export const CampaignRoundInputSchema = CampaignRoundSchema.pick({
+  hypothesis: true,
+  learned: true,
+  candidateVersion: true,
+  baselineScorecardId: true,
+  candidateScorecardId: true,
+}).extend({
+  // The sandbox session that produced this candidate — the caller NAMES it; what it cost is read off the run
+  // ledger by the service and recorded as `round.delegation`. Required by the write when the frame budgets
+  // the delegation.
+  delegationRunId: z.string().min(1).max(200).optional(),
+});
+export type CampaignRoundInput = z.infer<typeof CampaignRoundInputSchema>;
 
 export const CAMPAIGN_STATES = ["open", "adopted", "no_improvement", "budget_exhausted"] as const;
 export const CampaignStateSchema = z.enum(CAMPAIGN_STATES);
@@ -307,6 +391,8 @@ export const CampaignCloseSchema = z.object({
       // …and WHICH BYTES that version was when it was proved (arch-review 71 P0-evolution). A close that
       // names only a label cannot be checked against what a registry later holds under that label.
       candidateSpecDigest: z.string().optional(),
+      // …and which commit / pull request those bytes were built from, when the round's scorecard said (D4).
+      candidateSource: CandidateSourceSchema.optional(),
       // Identity axes adoption proceeded over under the frame's recorded waiver — empty on a clean adopt.
       waivedAxes: z.array(z.string().max(100)).default([]),
     }),
@@ -383,6 +469,9 @@ export const CampaignAdoptionProofSchema = z.object({
   roundSeq: z.number().int().min(1),
   candidate: AdoptionCandidateSchema,
   provingScorecardId: z.string().min(1),
+  // Where the proved bytes were built from (D4) — what a later MERGE effect will need to name the pull request
+  // it merges (docs/architecture/code-evolution-loop.md, D5). Optional: a candidate without an origin has none.
+  candidateSource: CandidateSourceSchema.optional(),
   // The issue this campaign was opened against, carried so the effect and the intent cannot come apart.
   issueId: z.string().min(1),
   // …and the team that owned the campaign when it decided. Carried on the PROOF so a registry write can be
@@ -404,11 +493,34 @@ export type CampaignAdoptionProof = z.infer<typeof CampaignAdoptionProofSchema>;
 export const AdoptionOperationStateSchema = z.enum(["decided", "registered", "completed"]);
 export type AdoptionOperationState = z.infer<typeof AdoptionOperationStateSchema>;
 
+// ── THE CODE HALF OF AN ADOPTION (docs/architecture/code-evolution-loop.md, D5) ──────────────────────
+//
+// An adoption registers the BYTES the round measured. When those bytes were built from a pull request (the
+// proof's `candidateSource` names it), the code that produced them is still a branch, and the next campaign's
+// baseline image and the default branch diverge until it is merged. That merge is a second effect the close
+// owes, tracked here as its own sub-lifecycle rather than a fourth operation state: `completed` is about the
+// ISSUE, this is about the REPOSITORY, and folding them would make "issue closed" and "code landed" one word.
+//
+// Born `owed` at settle, from the proof — never from the caller; `merged` is written by the merge effect with
+// the commit GitHub reports. A chain may not continue from an adoption whose code is still owed.
+export const AdoptionCodeDebtSchema = z.object({
+  repo: z.string().min(1), // "owner/name"
+  prNumber: z.number().int(),
+  sha: z.string().optional(), // the head the round measured, asserted at merge when known
+  state: z.enum(["owed", "merged"]),
+  mergedSha: z.string().optional(),
+  mergedAt: z.string().optional(),
+});
+export type AdoptionCodeDebt = z.infer<typeof AdoptionCodeDebtSchema>;
+
 export const AdoptionOperationSchema = z.object({
   operationId: z.string().min(1),
   tenant: z.string().min(1),
   proof: CampaignAdoptionProofSchema,
   state: AdoptionOperationStateSchema,
+  // The merge the close owes when the candidate came from a pull request (D5). Absent = no code debt: the
+  // candidate named no pull request, or the row predates this.
+  code: AdoptionCodeDebtSchema.optional(),
   // What actually consumed it, stamped when the registry write landed — so "registered" names a version
   // somebody can go look at rather than asserting one happened.
   registeredVersion: z.string().max(100).optional(),

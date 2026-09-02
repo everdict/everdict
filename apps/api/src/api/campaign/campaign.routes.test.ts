@@ -2,13 +2,22 @@ import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/ap
 import type { Dispatcher } from "@everdict/backends";
 import type { CampaignFrame } from "@everdict/contracts";
 import { AgentSpecSchema } from "@everdict/contracts";
-import { NotFoundError } from "@everdict/contracts";
+import { NotFoundError, readUnknown } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
 import { InMemoryAgentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildCampaignAdoption } from "../../composition/campaign-adoption.js";
 import { buildServer } from "../../server.js";
+
+// The two reads a campaign service now REQUIRES and these cases do not exercise: a pull-request listing (the
+// frame's oracle scope) and a delegation session (the frame's delegation budget). Stated as unavailable rather
+// than omitted — an optional dep would let "not wired" read as "clean" (rule `protocol`).
+const noChanges = {
+  pullRequestFiles: async () =>
+    readUnknown<{ paths: string[]; complete: boolean }>("no pull-request reader in this fixture"),
+};
+const noRuns = { get: async () => undefined };
 
 // The campaign settlement over the HTTP transport — thin-route behavior (gate order, DTO refusal, error
 // mapping) over the same service the MCP twin drives. The diff is faked at the service seam: transport
@@ -35,6 +44,7 @@ const frame: CampaignFrame = {
   significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // frozen: the level, and the family it is corrected over
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
+  oracleScope: [],
   observationPolicy: { allowDivergent: false },
 };
 
@@ -43,6 +53,8 @@ function build(snapshot: CampaignSnapshot) {
   const campaignService = new CampaignService({
     store,
     operations: store,
+    changes: noChanges,
+    runs: noRuns,
     issues: {
       async get(_t: string, ref: string) {
         if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -492,6 +504,8 @@ function crossTeam() {
   const campaignService = new CampaignService({
     store,
     operations: store,
+    changes: noChanges,
+    runs: noRuns,
     // Both issues exist; they belong to different teams. Knowing the id is exactly what used to be enough.
     issues: {
       async get(_t: string, ref: string) {
@@ -559,6 +573,8 @@ describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team ca
       campaignService: new CampaignService({
         store,
         operations: store,
+        changes: noChanges,
+        runs: noRuns,
         issues,
         diffs: { diffSnapshot: async () => winning },
         newId: () => "camp_open",
@@ -701,6 +717,8 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
     const campaignService = new CampaignService({
       store,
       operations: store,
+      changes: noChanges,
+      runs: noRuns,
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -822,6 +840,316 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
     // fixture that never reaches the effect certifies a gate it never exercised.
     expect(res.statusCode, "the agent's own team was refused its adoption").toBe(200);
     expect((res.json() as { kind: string }).kind).toBe("adopted");
+    await app.close();
+  });
+});
+
+// ── THE CAMPAIGN'S TEAM IS READ FROM THE CAMPAIGN, NOT FROM THE PROOF THE CALLER HANDED OVER ─────────
+//
+// The adopt route gated `scorecards:run` against `body.proof.teamId`. The campaign record — already read two
+// lines above for the visibility check — carries the same team, frozen at open, and it is the platform's
+// value; the proof's copy is whatever the caller sent. A proof with the field STRIPPED skipped the gate
+// entirely, and only the service's digest comparison, several reads later, turned that into a 409 — a
+// caller-authored value deciding whether a team gate runs at all (rule `protocol` L3). The residue class of
+// that guard is "a proof that omits the team", and nobody had written it (skill `code-review`, pass 5).
+//
+// RED before the fix: 409 (the digest refused it) where a member of another team owes a 403.
+describe("[COUNTEREXAMPLE] adopt gates the campaign's OWN team, whatever the presented proof says", () => {
+  const agentSpec = (id: string, version: string) => ({
+    id,
+    version,
+    description: "the agent under evolution",
+    instructions: "be brief",
+    mcpServers: [],
+    capabilities: [],
+    tags: [],
+    disabledDefaults: [],
+    toolSecretBindings: {},
+    triggers: [],
+    enabled: true,
+  });
+  const candidateSpec = agentSpec("everdict", "1.0.1");
+  const sealed: CampaignSnapshot = {
+    ...winning,
+    candidate: {
+      record: {
+        harness: { id: "agent:everdict", version: "1.0.1" },
+        manifest: { harness: { specDigest: contentDigest(candidateSpec) } },
+      },
+    },
+  } as CampaignSnapshot;
+
+  // The campaign belongs to team-a (its issue's team); the agent under evolution belongs to team-b. A caller on
+  // team-b only passes the ENTITY gate, so the only thing standing between them and the effect is the
+  // campaign's own team gate — which is the gate under test.
+  function teamedCampaign(callerTeams: string[]) {
+    const store = new InMemoryEvolutionCampaignStore();
+    const campaignService = new CampaignService({
+      store,
+      operations: store,
+      changes: noChanges,
+      runs: noRuns,
+      issues: {
+        async get(_t: string, ref: string) {
+          if (ref !== "iss_a") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
+          return { id: "iss_a", teamId: "team-a" };
+        },
+      },
+      diffs: { diffSnapshot: async () => sealed },
+      newId: () => "evc_teamed",
+      now: () => "2026-09-02T03:00:00.000Z",
+    });
+    const agents = new InMemoryAgentRegistry();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      campaignService,
+      issueService: {
+        async get(_t: string, ref: string) {
+          return ref === "iss_a" ? { id: "iss_a", teamId: "team-a" } : undefined;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+      agentRegistry: agents,
+      campaignAdoption: buildCampaignAdoption({
+        operations: store,
+        agents,
+        harnesses: unusedHarnesses(),
+        templates: unusedTemplates(),
+        issues: openIssue(),
+      }),
+      teamService: {
+        async list() {
+          return callerTeams.map((id) => ({ id }));
+        },
+        async defaultTeam() {
+          return undefined;
+        },
+        async visibleTeamIds() {
+          return undefined; // team-a is visible to everybody — this is about WRITING into it
+        },
+        async canSeeTeam() {
+          return true;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
+      requireAuth: true,
+      authenticator: {
+        async authenticate() {
+          return { subject: "u", workspace: "acme", roles: ["member"], teams: callerTeams, via: "oidc" as const };
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
+    });
+    return { app, agents, store, campaignService };
+  }
+
+  // Seeded through the service by someone on team-a, so the row is exactly what an open in team-a produces —
+  // and settled the same way, so the operation is the one a real close writes.
+  async function adoptedInTeamA(campaignService: CampaignService, store: InMemoryEvolutionCampaignStore) {
+    const opened = await campaignService.open("acme", { issueId: "iss_a", frame }, "someone-on-team-a");
+    expect(opened.teamId).toBe("team-a");
+    await campaignService.logRound(
+      "acme",
+      opened.id,
+      {
+        hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+      "someone-on-team-a",
+      {},
+    );
+    const settled = await campaignService.settle("acme", opened.id, "someone-on-team-a");
+    expect(settled.record.state).toBe("adopted");
+    const operation = await store.forCampaign("acme", opened.id);
+    expect(operation?.proof.teamId, "the proof carries no team, so the case cannot strip one").toBe("team-a");
+    return { id: opened.id, proof: operation?.proof as Record<string, unknown> };
+  }
+
+  it("REFUSES (403) a team-b member presenting the campaign's proof with its team stripped", async () => {
+    const { app, agents, store, campaignService } = teamedCampaign(["team-b"]);
+    await agents.register("acme", agentSpec("everdict", "1.0.0") as never, "u-b", "team-b");
+    const { id, proof } = await adoptedInTeamA(campaignService, store);
+    const { teamId: _stripped, ...forged } = proof;
+    const res = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: { authorization: "Bearer t" },
+      payload: { proof: forged, spec: candidateSpec },
+    });
+    expect(res.statusCode, "a caller outside the campaign's team reached past its team gate").toBe(403);
+    await app.close();
+  });
+
+  it("ALLOWS a member of both teams with the genuine proof — the control", async () => {
+    const { app, agents, store, campaignService } = teamedCampaign(["team-a", "team-b"]);
+    await agents.register("acme", agentSpec("everdict", "1.0.0") as never, "u-b", "team-b");
+    const { id, proof } = await adoptedInTeamA(campaignService, store);
+    const res = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: { authorization: "Bearer t" },
+      payload: { proof, spec: candidateSpec },
+    });
+    expect(res.statusCode, "the campaign's own team was refused its adoption").toBe(200);
+    expect((res.json() as { kind: string }).kind).toBe("adopted");
+    await app.close();
+  });
+});
+
+// ── THE CODE HALF, OVER HTTP (docs/architecture/code-evolution-loop.md, D5) ──────────────────────────
+//
+// `POST /campaigns/:id/merge` spends the same authorization `adopt` does, on its second effect: the pull request
+// the adopted bytes were built from lands on the default branch through the workspace GitHub App. Pinned here:
+// the ordering (bytes first), the effect's inputs (the STORED pull request and the measured head, never a body
+// field), and the deployment with no App answering by name rather than by silence.
+describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
+  const agentSpec = (id: string, version: string) => ({
+    id,
+    version,
+    description: "the agent under evolution",
+    instructions: "be brief",
+    mcpServers: [],
+    capabilities: [],
+    tags: [],
+    disabledDefaults: [],
+    toolSecretBindings: {},
+    triggers: [],
+    enabled: true,
+  });
+  const candidateSpec = agentSpec("everdict", "1.0.1");
+  // A candidate built from a pull request: the scorecard's origin names it, so the close records a code debt.
+  const fromPr: CampaignSnapshot = {
+    ...winning,
+    candidate: {
+      record: {
+        harness: { id: "agent:everdict", version: "1.0.1" },
+        manifest: { harness: { specDigest: contentDigest(candidateSpec) } },
+        origin: { source: "github-actions", repo: "acme/agent", sha: "abc123", prNumber: 7 },
+      },
+    },
+  } as CampaignSnapshot;
+
+  function build(
+    github: { mergePullRequest: (...args: unknown[]) => Promise<{ sha: string; alreadyMerged: boolean }> } | undefined,
+  ) {
+    const store = new InMemoryEvolutionCampaignStore();
+    const campaignService = new CampaignService({
+      store,
+      operations: store,
+      changes: noChanges,
+      runs: noRuns,
+      issues: {
+        async get(_t: string, ref: string) {
+          if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
+          return { id: "iss_1" };
+        },
+      },
+      diffs: { diffSnapshot: async () => fromPr },
+      newId: () => "evc_code",
+      now: () => "2026-09-02T03:00:00.000Z",
+    });
+    const agents = new InMemoryAgentRegistry();
+    const merges: unknown[][] = [];
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      campaignService,
+      issueService: {
+        async get(_t: string, ref: string) {
+          return ref === "iss_1" ? { id: "iss_1" } : undefined;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+      agentRegistry: agents,
+      campaignAdoption: buildCampaignAdoption({
+        operations: store,
+        agents,
+        harnesses: unusedHarnesses(),
+        templates: unusedTemplates(),
+        issues: openIssue(),
+        ...(github !== undefined
+          ? {
+              github: {
+                mergePullRequest: async (...args: unknown[]) => {
+                  merges.push(args);
+                  return await github.mergePullRequest(...args);
+                },
+              } as unknown as NonNullable<Parameters<typeof buildCampaignAdoption>[0]["github"]>,
+            }
+          : {}),
+      }),
+    });
+    return { app, store, merges };
+  }
+
+  async function settled(app: ReturnType<typeof build>["app"]) {
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const { id } = opened.json() as { id: string };
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "structure over phrasing",
+        learned: "the shorter instructions cut tool calls but the win sat on training rows only",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    const settledRes = await app.inject({ method: "POST", url: `/campaigns/${id}/settle`, headers: H });
+    expect(settledRes.statusCode, "the fixture did not adopt, so the case measures nothing").toBe(200);
+    const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    const operation = (read.json() as { operation: { proof: unknown; code?: { state: string } } }).operation;
+    expect(operation.code?.state, "the close recorded no code debt").toBe("owed");
+    return { id, proof: operation.proof };
+  }
+
+  it("REFUSES to merge before the bytes are registered, then merges the STORED pull request at the measured head", async () => {
+    const { app, merges } = build({ mergePullRequest: async () => ({ sha: "m1", alreadyMerged: false }) });
+    const { id, proof } = await settled(app);
+    const early = await app.inject({ method: "POST", url: `/campaigns/${id}/merge`, headers: H, payload: { proof } });
+    expect(early.statusCode, "code was promoted before its bytes were registered").toBe(409);
+    expect(merges).toEqual([]);
+
+    const adopted = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof, spec: candidateSpec },
+    });
+    expect(adopted.statusCode, JSON.stringify(adopted.json())).toBe(200);
+    const merged = await app.inject({ method: "POST", url: `/campaigns/${id}/merge`, headers: H, payload: { proof } });
+    expect(merged.statusCode, JSON.stringify(merged.json())).toBe(200);
+    expect((merged.json() as { kind: string; sha: string }).sha).toBe("m1");
+    // The effect saw the repository, pull request and head the ROUND recorded — nothing the caller sent.
+    expect(merges[0]?.slice(0, 3)).toEqual(["acme", "acme/agent", 7]);
+    expect(merges[0]?.[3]).toMatchObject({ sha: "abc123" });
+    const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    expect((read.json() as { operation: { code: unknown } }).operation.code).toMatchObject({
+      state: "merged",
+      mergedSha: "m1",
+    });
+    await app.close();
+  });
+
+  it("a deployment with no GitHub App answers by name — the debt stays owed, nothing pretends to have merged", async () => {
+    const { app } = build(undefined);
+    const { id, proof } = await settled(app);
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/adopt`,
+      headers: H,
+      payload: { proof, spec: candidateSpec },
+    });
+    const merged = await app.inject({ method: "POST", url: `/campaigns/${id}/merge`, headers: H, payload: { proof } });
+    expect(merged.statusCode).toBe(404);
+    expect((merged.json() as { message: string }).message).toMatch(/no workspace GitHub App/);
+    const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
+    expect((read.json() as { operation: { code: { state: string } } }).operation.code.state).toBe("owed");
     await app.close();
   });
 });

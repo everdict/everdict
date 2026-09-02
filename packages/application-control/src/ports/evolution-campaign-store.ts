@@ -125,6 +125,19 @@ export interface AdoptionOperationStore {
   // ⚠️ An E1 consumer is NOT that owner on its own. This deployment's runner retries a throwing handler
   // three times inside one delivery and then DEAD-LETTERS, advancing the cursor — so an outage outlasting
   // three immediate attempts loses the join. The consumer buys latency; this buys convergence.
+  // ── THE CODE DEBT, PAID (docs/architecture/code-evolution-loop.md, D5) ───────────────────────────
+  //
+  // The merge effect landed and this records it — conditional on the operation still owing code (`code.state
+  // = 'owed'`), on the bytes being registered already (an adoption whose registry write never landed has no
+  // code to promote), and on the proof being the recorded one. Answers what happened rather than void: an
+  // at-least-once retry must tell "I paid it" from "it was already paid" without either being an error (L1).
+  markMerged(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+    merged: { sha: string; at: string },
+    events?: OutboxEvent[],
+  ): Promise<"merged" | "already_merged" | "no_code_debt" | "not_registered" | "no_such_operation" | "proof_mismatch">;
   registeredOlderThan(olderThan: string, limit: number): Promise<AdoptionOperation[]>;
   // ── …AND A TURN FOR EACH OF THEM (arch-review 120) ───────────────────────────────────────────────
   //

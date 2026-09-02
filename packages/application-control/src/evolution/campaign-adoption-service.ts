@@ -92,6 +92,30 @@ export interface CampaignAdoptionDeps {
     // one that found it already there — both are success under an idempotent registry, and telling them
     // apart is what makes an at-least-once retry legible instead of ambiguous.
   }) => Promise<RegistrationOutcome>;
+  // ── THE CODE HALF'S EFFECT (docs/architecture/code-evolution-loop.md, D5) ───────────────────────
+  //
+  // Merge one pull request into its repository's default branch, asserting the head the round measured when
+  // the proof knows it — GitHub refuses a moved head, which is the L1 precondition: the commit that lands is
+  // the one the campaign proved. REQUIRED like `register`: a deployment without a GitHub App binds a merge
+  // that refuses with a named error, never an optional dep that reads as "nothing to merge".
+  merge: (input: {
+    tenant: string;
+    by: string;
+    repo: string;
+    prNumber: number;
+    expectedSha?: string;
+  }) => Promise<{ sha: string; alreadyMerged: boolean }>;
+}
+
+export type MergeOutcome = { kind: "merged" | "already_merged"; sha: string; operation: AdoptionOperation };
+
+export interface MergeRequest {
+  tenant: string;
+  campaignId: string;
+  proof: CampaignAdoptionProof;
+  by: string;
+  via: CapabilityOriginChannel;
+  agent?: { agentId?: string; conversationId?: string };
 }
 
 // What the registry now holds at the adopted label, reported by the effect rather than assumed by its
@@ -332,6 +356,97 @@ export class CampaignAdoptionService {
     // the reverse: reporting a failure for an adoption that landed.
     const completed = await this.completeIfIntentSettled(input.tenant, operation, causedByOf(input.agent));
     return { kind: "adopted", operation: completed ?? operation, version: landedCandidate.version };
+  }
+
+  // ── PAY THE CODE DEBT (docs/architecture/code-evolution-loop.md, D5) ─────────────────────────────
+  //
+  // Same discipline as `adopt`, for the other half of the same authorization: the STORED proof is the authority
+  // (digest compare), the bytes must already be registered (a merge promotes code whose image nobody has
+  // adopted otherwise), the effect runs before the spend (a merge that landed and could not be recorded is
+  // owed, and a merge recorded that never landed is a lie), and a retry converges. The merge asserts the head
+  // the round measured when the proof carries a sha — GitHub refuses a moved head.
+  async merge(input: MergeRequest): Promise<MergeOutcome> {
+    const recorded = await this.deps.operations.forCampaign(input.tenant, input.campaignId);
+    if (recorded === undefined)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { campaign: input.campaignId },
+        "this campaign never authorized an adoption — settle it through the gate first",
+      );
+    const authorized = contentDigest(recorded.proof);
+    if (contentDigest(input.proof) !== authorized)
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: input.campaignId },
+        "the proof presented is not the one this campaign recorded",
+      );
+    const debt = recorded.code;
+    if (debt === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: input.campaignId },
+        "this adoption carries no code debt — its candidate scorecard named no pull request, so there is nothing to merge",
+      );
+    if (recorded.state === "decided")
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: input.campaignId, state: recorded.state },
+        "the adopted bytes are not registered yet — spend the adoption (adopt) before merging the code that built them",
+      );
+    if (debt.state === "merged" && debt.mergedSha !== undefined)
+      return { kind: "already_merged", sha: debt.mergedSha, operation: recorded };
+    // THE EFFECT FIRST, THEN THE SPEND — the same ordering `adopt` uses and for the same reason: a merge that
+    // landed and was not recorded stays owed and converges on the retry (GitHub answers "already merged" with
+    // the same commit); a merge recorded that never landed could not be repaired by anything.
+    const landed = await this.deps.merge({
+      tenant: input.tenant,
+      by: input.by,
+      repo: debt.repo,
+      prNumber: debt.prNumber,
+      ...(debt.sha !== undefined ? { expectedSha: debt.sha } : {}),
+    });
+    const mergedFact: DomainFact = {
+      kind: "campaign.adoption_merged",
+      subject: { type: "campaign", id: input.campaignId },
+      actor: input.by,
+      ...(causedByOf(input.agent) !== undefined ? { causedBy: causedByOf(input.agent) } : {}),
+      payload: {
+        campaignId: input.campaignId,
+        candidateType: recorded.proof.candidate.type,
+        candidateId: recorded.proof.candidate.id,
+        version: recorded.proof.candidate.version,
+        repo: debt.repo,
+        prNumber: debt.prNumber,
+        mergedSha: landed.sha,
+        issueId: recorded.proof.issueId,
+        ...(recorded.proof.teamId !== undefined ? { teamId: recorded.proof.teamId } : {}),
+      },
+    };
+    const paid = await this.deps.operations.markMerged(
+      input.tenant,
+      input.campaignId,
+      authorized,
+      { sha: landed.sha, at: this.now() },
+      this.stamped(input.tenant, [mergedFact]),
+    );
+    if (paid !== "merged" && paid !== "already_merged")
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: input.campaignId, outcome: paid, mergedSha: landed.sha },
+        `the merge landed at ${landed.sha} but the code debt could not be recorded as paid (${paid}) — the operation stays owed; re-drive it`,
+      );
+    const operation = await this.deps.operations.forCampaign(input.tenant, input.campaignId);
+    if (operation === undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: input.campaignId },
+        "the authorization vanished between paying its code debt and reading it back",
+      );
+    return {
+      kind: paid === "merged" && !landed.alreadyMerged ? "merged" : "already_merged",
+      sha: landed.sha,
+      operation,
+    };
   }
 
   private async completeIfIntentSettled(

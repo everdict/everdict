@@ -101,6 +101,15 @@ export interface GithubRepoWriter {
     pullNumber: number,
     opts: { maxFiles: number },
   ): Promise<{ changedFiles: number; files: GithubPullRequestFile[] }>;
+  // Merge one pull request into its base. `sha` is the head the caller MEASURED: GitHub refuses the merge when
+  // the head has moved since, which is the L1 precondition a code adoption needs (the commit that lands is the
+  // one the round evaluated). Idempotent on a pull request that is already merged — answers its merge commit
+  // with `alreadyMerged: true` rather than failing a retry of the same adoption.
+  mergePr(
+    repository: string,
+    pullNumber: number,
+    opts: { sha?: string; method?: "merge" | "squash" | "rebase"; message?: string },
+  ): Promise<{ sha: string; alreadyMerged: boolean }>;
   // Create an issue; returns its number + html_url.
   createIssue(repository: string, opts: { title: string; body?: string }): Promise<{ number: number; url: string }>;
   // Add a comment to an issue or PR (PRs are issues via the issues API); returns the comment's html_url.

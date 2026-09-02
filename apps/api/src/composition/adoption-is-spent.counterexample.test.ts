@@ -108,6 +108,9 @@ function operations(proof: CampaignAdoptionProof) {
     async deferCompletion() {
       throw new Error("the adopt path never reschedules a sweep");
     },
+    async markMerged() {
+      return "no_code_debt" as const; // this double holds no code debt (code-evolution-loop.md, D5)
+    },
     async markCompleted(_t, _c, proofDigest) {
       if (op === undefined) return "no_such_operation";
       if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";

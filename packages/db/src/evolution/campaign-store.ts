@@ -100,6 +100,29 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     return "registered";
   }
 
+  // The code debt, paid — the same decisions the Pg statement makes, so a unit test sees the refusal production
+  // would give: owed only, registered bytes only, this proof only.
+  async markMerged(
+    tenant: string,
+    campaignId: string,
+    proofDigest: string,
+    merged: { sha: string; at: string },
+    events?: OutboxEvent[],
+  ): Promise<"merged" | "already_merged" | "no_code_debt" | "not_registered" | "no_such_operation" | "proof_mismatch"> {
+    const op = await this.forCampaign(tenant, campaignId);
+    if (op === undefined) return "no_such_operation";
+    if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
+    if (op.code === undefined) return "no_code_debt";
+    if (op.code.state === "merged") return "already_merged";
+    if (op.state === "decided") return "not_registered";
+    this.adoptions.set(campaignId, {
+      ...op,
+      code: { ...op.code, state: "merged", mergedSha: merged.sha, mergedAt: merged.at },
+    });
+    if (events) this.events.push(...events);
+    return "merged";
+  }
+
   // Scheduling lives beside the operation rather than inside it, because it is not a thing the adoption did
   // — the lifecycle vocabulary stays `decided | registered | completed` (migration 0201 says why).
   private readonly nextAttemptAt = new Map<string, string>();
@@ -356,7 +379,13 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
     // `ON CONFLICT DO NOTHING` on (tenant, campaign_id): a campaign adopts ONCE, so an at-least-once settle
     // converges rather than minting a second authorization.
     const adoptParams = adoption
-      ? [adoption.operationId, JSON.stringify(adoption.proof), adoption.state, adoption.createdAt]
+      ? [
+          adoption.operationId,
+          JSON.stringify(adoption.proof),
+          adoption.state,
+          adoption.createdAt,
+          adoption.code !== undefined ? JSON.stringify(adoption.code) : null,
+        ]
       : [];
     const adoptOffset = base.length + (ev?.params.length ?? 0);
     const { rows } = await this.client.query<{ id: string }>(
@@ -377,9 +406,9 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
          adoption !== undefined
            ? `, adopt AS (
          INSERT INTO everdict_adoption_operations
-           (operation_id, tenant, campaign_id, proof, state, created_at, updated_at)
+           (operation_id, tenant, campaign_id, proof, state, created_at, updated_at, code)
          SELECT $${adoptOffset + 1}, $1, $2, $${adoptOffset + 2}::jsonb, $${adoptOffset + 3},
-                $${adoptOffset + 4}::timestamptz, $${adoptOffset + 4}::timestamptz
+                $${adoptOffset + 4}::timestamptz, $${adoptOffset + 4}::timestamptz, $${adoptOffset + 5}::jsonb
          WHERE EXISTS (SELECT 1 FROM upd)
          ON CONFLICT (tenant, campaign_id) DO NOTHING
        )`

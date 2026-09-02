@@ -26,10 +26,11 @@ pre-registration — and the chain's rounds so far plus this campaign's `budget.
 inside the shared `heldOutFamilySize`.
 
 That last one is the whole point and it is what makes a chain cost something: the family is spent across the
-chain, so a five-round predecessor leaves five fewer tests for everyone after it. Plan the chain's total
-length when you pre-register the family, or accept that the walk ends when the family is spent. Omitting
-`continues` is always available and always honest — it just means the new campaign's held-out rows should be
-rows nobody has asked yet.
+chain, so a five-round predecessor leaves five fewer tests for everyone after it. "The chain" is the whole
+tree the predecessor roots — a sibling that continued the same campaign and halted spent its rounds against
+the same held-out rows, and the open counts them too. Plan the chain's total length when you pre-register
+the family, or accept that the walk ends when the family is spent. Omitting `continues` is always available
+and always honest — it just means the new campaign's held-out rows should be rows nobody has asked yet.
 
 **`scenarios`** — the exam, named case by case: `[{id, heldOut}]`, unique ids, at least two with
 `heldOut: true` or the frame is refused at creation.
@@ -44,9 +45,10 @@ produces by chance; the number exists so a held-out result cannot be a coin flip
 Pick held-out cases the loop will never be shown, and prefer more of them than feels necessary — they are
 the only population the gate actually reads.
 
-**`judges`** — judge ids, defaulting to none. If non-empty, both sides' judges must match this set exactly,
-so it pins the grading semantics the same way `scenarios` pins the exam. Leave it empty only when you
-genuinely do not care which judges ran.
+**`judges`** — judge ids, defaulting to none. If non-empty, the judges that SCORED each side — read from the
+scorecard's scoring ledger, so an ingested batch's applied judges count exactly like a dispatched batch's —
+must match this set exactly, so it pins the grading semantics the same way `scenarios` pins the exam. Leave
+it empty only when you genuinely do not care which judges ran.
 
 **`trialsPerCase`** — the statistical floor. Both scorecards must have run at least this many trials for
 every case; a thinner side rejects the round and names the cases. One trial produces no significance signal
@@ -54,11 +56,14 @@ at all, so a campaign with `trialsPerCase: 1` can never adopt. Repeats are what 
 distinguish a real change from a flaky one.
 
 **`budget.maxRounds`** — the runaway bound. Scenarios and trials are fixed above, so rounds is the only axis
-a loop can spend on. Exhausting it halts with `budget_exhausted`.
+a loop can spend on. Exhausting it halts with `budget_exhausted`, and the round door REFUSES to append past
+it — a round logged past the budget would be judged at a level the pre-registered family does not cover, so
+the record enforces the bound rather than trusting the driver to ask.
 
 **`stopAfterRejectedRounds`** — default 3. K consecutive rejected rounds halt with `no_improvement`, and
 that halt outranks the budget one: "the hypothesis well is dry" names what is wrong, where "the budget ran
-out" only names when it stopped mattering.
+out" only names when it stopped mattering. Once it has fired the round door refuses further rounds, and a
+round logged after it (rows from before the refusal existed) is not adoption evidence.
 
 **`significance`** — the statistics, frozen with everything else the verdict depends on. `fdrAlpha` and
 `heldOutFamilySize` are both REQUIRED of a new frame; `minDelta` (a practical effect-size floor) is optional.
@@ -104,6 +109,25 @@ That round wins when all of these hold:
 Note the last line reads the HELD-OUT counts, not the whole round's. Improving where the loop has been
 pushing is evidence about the search, not about the capability.
 
+**`oracleScope`** — repository path patterns that ARE the exam: the dataset, the judge rubrics, the eval
+configs, the tests the graders run. Default empty. Non-empty means the round door reads what the candidate's
+pull request changed (from the repository the candidate scorecard's origin names) and a change inside the
+scope makes the round `comparable: false` — "the candidate touched the oracle", with the paths on the verdict
+as `oracleTouched`. A change that CANNOT be read — the scorecard names no pull request, the listing was
+truncated, the repository could not be asked — is non-comparable too: "could not check" is not "clean".
+
+The pattern language is small: `*` within a segment, `?` one character, `**` across segments, a trailing `/`
+for a directory and its subtree, and a bare path for itself or its subtree (`pathMatchesPattern` in
+`@everdict/domain`). This is the field that makes a code-changing campaign honest; a frame for a loop that
+only moves pins can leave it empty.
+
+**`delegation`** — `{ttlSec, maxUsd?}`, the per-round budget for the coding agent a round delegates to
+(`code_evolve`). Default absent. Declared, every round must name the sandbox session that produced its
+candidate (`delegationRunId`), and the round door reads what that session cost off the run ledger — the TTL
+it was granted, the spend it metered — refusing (409) a round whose session ran past either. A session the
+ledger cannot read, another workspace's, or one that is not a sandbox is refused too. Without the field a
+named session is still recorded on the round, so the trace says who wrote the candidate.
+
 ## The three waivers, and the refusal each one turns off
 
 All three default to refusing. Each is a recorded decision made at open, in the frame, where it is frozen —
@@ -112,6 +136,10 @@ which is the only place a waiver means anything.
 **`allowUnverifiedIdentity`** — turns off the `identity_unverified` halt raised when the winning round's
 comparison could not verify some world-identity axis. The axes are recorded either way, and an adoption that
 proceeds over them says so durably in its proof.
+
+**A loop over INGESTED scorecards needs this.** An ingested batch seals no manifest, so every axis reads
+unverified on every round — there is no lane to re-run through that would seal one. The halt's detail says
+so and names this field; the frame that omits it cannot be repaired in place.
 
 This is not the same as a CONFOUND. An axis the diff verified as actually DIFFERENT between the two sides —
 two different resolved image digests, say — makes the round not comparable, and no frame field waives it: a
@@ -131,7 +159,8 @@ the strongest negative evidence this system can produce. Waive it only when you 
 that you are optimizing through known noise.
 
 `observationPolicy` also carries `minimumCoverage` (how much of the round must actually have been assessed,
-as a fraction of the scores that could carry an assessment) and `maxUnclear`. Both are absent by default,
+as a fraction of the JUDGE scores — the only scores that can carry an assessment; a cost or a step count
+never enters the denominator) and `maxUnclear`. Both are absent by default,
 which is what every campaign had. Set `minimumCoverage` only once observations are genuinely being produced:
 the policy is read from the POLICY, not from the data, so a frame demanding coverage refuses a round that
 carries no observation block at all — which is correct, and will stop a first campaign dead if the

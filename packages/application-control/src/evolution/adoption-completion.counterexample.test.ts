@@ -62,6 +62,9 @@ function operations(state: "decided" | "registered" | "completed", proof: Campai
       deferred.push(`${input.campaignId}:${input.outcome}`);
       return true;
     },
+    async markMerged() {
+      return "no_code_debt" as const; // these doubles hold no code debt (code-evolution-loop.md, D5)
+    },
     async markCompleted(_t, _c, proofDigest) {
       if (contentDigest(op.proof) !== proofDigest) return "proof_mismatch";
       if (op.state === "completed") return "already_completed";
@@ -189,6 +192,9 @@ describe("[R73 COUNTEREXAMPLE] an adoption completes when its own evidence close
       async deferCompletion(input: { tenant: string; campaignId: string; outcome: string; nextAttemptAt: string }) {
         deferred.push(`${input.campaignId}:${input.outcome}`);
         return true;
+      },
+      async markMerged() {
+        return "no_code_debt" as const; // these doubles hold no code debt (code-evolution-loop.md, D5)
       },
       async markCompleted() {
         return "proof_mismatch";

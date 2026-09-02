@@ -59,6 +59,9 @@ function build(opts: { issues?: GithubIssue[]; tokenError?: Error } = {}) {
     async getFile() {
       throw new Error("unused");
     },
+    async mergePr() {
+      throw new Error("mergePr is not exercised by these cases");
+    },
     async listPullRequestFiles() {
       throw new Error("unused");
     },

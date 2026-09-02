@@ -5,7 +5,8 @@ import {
   type HarnessTemplateRegistry,
   type IssueResolutionView,
 } from "@everdict/application-control";
-import type { AgentRegistry } from "@everdict/application-control";
+import type { AgentRegistry, GithubAppService } from "@everdict/application-control";
+import { NotFoundError } from "@everdict/contracts";
 import {
   AgentSpecSchema,
   BadRequestError,
@@ -37,12 +38,31 @@ export interface CampaignAdoptionWiring {
   // write and a harness cannot be resolved without it — an optional one would silently degrade the check to
   // the post-write shape this whole finding is about (arch-review 76).
   templates: HarnessTemplateRegistry;
+  // The workspace GitHub App, for the CODE half of an adoption (docs/architecture/code-evolution-loop.md, D5).
+  // Optional at the ROOT because a deployment may run without GitHub; the service's dependency stays required
+  // and is bound to a merge that refuses by name, so "no App" is a 404 the caller reads, never a silent skip.
+  github?: Pick<GithubAppService, "mergePullRequest">;
 }
 
 export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdoptionService {
   return new CampaignAdoptionService({
     operations: deps.operations,
     issues: deps.issues,
+    // The code debt's effect: merge the pull request the proof names, asserting the head the round measured.
+    // The repository and pull request come from the STORED operation (the service reads them), never from the
+    // caller — what lands on the default branch is what the campaign proved.
+    merge: async ({ tenant, repo, prNumber, expectedSha }) => {
+      if (deps.github === undefined)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { repo, prNumber },
+          "no workspace GitHub App is configured on this deployment, so the adopted pull request cannot be merged from here — merge it in GitHub and the debt stays recorded as owed",
+        );
+      return await deps.github.mergePullRequest(tenant, repo, prNumber, {
+        ...(expectedSha !== undefined ? { sha: expectedSha } : {}),
+        message: "Adopted by everdict campaign — proved by an evolution round",
+      });
+    },
     // ── THE DIGEST IS PROVED BEFORE THE WRITE, NOT AFTER IT (arch-review 76 P0) ─────────────────────
     //
     // The first version registered, read back, and threw on a mismatch. That is the right ANSWER at the

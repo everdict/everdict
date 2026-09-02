@@ -748,13 +748,21 @@ Everdict's tools load on demand. Before anything else:
 - The frame's \`scenarios\` are the exam: every round's two batches must run EXACTLY that set. A batch that
   ran a different slice makes the round incomparable, with no error at submit time to warn you.
 - State the budget cap up front (rounds x scenarios x N tries, \`try_agent\` spends real LLM budget). The
-  frame's \`budget.maxRounds\` is the hard one — the gate stops the walk, you do not have to count.
+  frame's \`budget.maxRounds\` is the hard one: the RECORD refuses a round past it, and a round after the
+  rejected streak has fired, with CONFLICT — you do not have to count, and you cannot overrun it.
+- **Two waivers, declared at open, because this loop scores INGESTED traces.** An ingested scorecard seals no
+  manifest, so every identity axis reads unverified on every round; and it names no registry document, so an
+  adoption over it can name only a version LABEL. The gate refuses both by default, so the frame carries
+  \`allowUnverifiedIdentity: true\` AND \`allowLabelOnlyAdoption: true\`. Without them the first WINNING
+  round halts \`identity_unverified\` and the campaign can neither adopt nor settle. That is the honest price
+  of shadow tries; \`harness_evolve\` runs real batches and needs neither.
 
 ## 1. Baseline — and its noise floor
 - For each scenario run \`try_agent\` { agentId } N times; collect each result's \`trace\`.
 - Ingest ONE scorecard (\`ingest_scorecard\`): \`harness: { id: "agent:<agentId>", version: <its version> }\`,
   one \`traces[]\` entry PER TRY with \`caseId\` = the scenario id (repeated caseIds ARE the trials), and the
-  goal judges in \`judges\`.
+  goal judges in \`judges\`. The frame's \`judges\` are checked against the judges that SCORED each side (the
+  scoring ledger), so the same set goes into every ingest on both sides.
 - Read the batch's trial summary (\`get_scorecard\`): the per-case variance and flake rate are the NOISE FLOOR.
   A delta smaller than this floor is not information. If the baseline itself is wildly flaky (flake rate
   above ~0.4), stop and fix scenario determinism first — evolution on a noisy oracle adopts noise.
@@ -807,6 +815,8 @@ Everdict's tools load on demand. Before anything else:
   Read its reason before spending another one: the usual causes are a batch that ran a slice the frame does
   not name, thinner trials than \`trialsPerCase\`, a judge set that differs from the frame's, or a confound —
   an axis the diff proved actually different between the two sides, which no waiver forgives.
+- The record REFUSES (CONFLICT) a round once the frame's own ending has fired — the budget is spent, or the
+  rejected streak was reached. That is not an error to work around: ask \`campaign_decision\` and settle.
 
 ## 4. Decide — ask the gate, never re-derive it
 - \`campaign_decision\` answers \`continue\` · \`adopt\` · \`halt\`, reading the frozen frame and the whole
@@ -823,11 +833,13 @@ Everdict's tools load on demand. Before anything else:
   having been measured.
 - Only the LATEST round is adoptable. If round 4 won and round 5 regressed, re-run round 4's candidate to
   adopt it — the gate does no archaeology over the trace.
-- ⚠️ An INGESTED scorecard names no registry document, so its rounds carry no candidate spec digest and the
-  gate can authorize only the version LABEL. It refuses that by default: record
-  \`allowLabelOnlyAdoption: true\` on the frame at open when the loop runs on ingested traces, or run the
-  candidate through a batch that seals a manifest. The refusal reads \`identity_unverified\` and keeps the
-  campaign open — it is asking which bytes you measured, not ending the walk.
+- ⚠️ An INGESTED scorecard seals no manifest and names no registry document, so a round over one carries every
+  identity axis as unverified and no candidate spec digest. The gate refuses that by default, twice: record
+  \`allowUnverifiedIdentity: true\` AND \`allowLabelOnlyAdoption: true\` on the frame at open when the loop
+  runs on ingested traces, or run the candidate through a batch that seals a manifest. Either refusal reads
+  \`identity_unverified\` and keeps the campaign open — it is asking which bytes you measured, in which world,
+  not ending the walk — and its detail names the frame field that would have waived it. A frame missing one
+  cannot be repaired in place: open a new campaign with both.
 - Present the diff and ask the member BEFORE adopting when working interactively; in headless automation park
   it behind an approval — never silently swap a live configuration.
 - Rejection changes nothing about the agent: the round is already recorded, so write the hypothesis and what
@@ -1004,7 +1016,9 @@ and the one that most deserves a fresh baseline). Load \`references/levers.md\` 
 ## 4. Decide — ask the gate, never re-derive it
 - \`campaign_decision\` answers \`continue\` · \`adopt\` · \`halt\` over the frozen frame and the whole round
   trace. Ask it; do not re-implement it.
-- \`continue\` → back to step 2. \`halt\` → \`settle_campaign\` and report the reason.
+- \`continue\` → back to step 2. \`halt\` → \`settle_campaign\` and report the reason. The record refuses
+  (CONFLICT) a round past the budget or after the rejected streak — a campaign that has ended by its own rule
+  is settled, not extended.
 - \`adopt\` → \`settle_campaign\` writes the authorization, \`campaign_adoption\` reads it back, and
   \`adopt_campaign_candidate\` spends it. Hand it the INSTANCE spec you registered in step 2 — not the resolved
   document: the platform resolves, registers, reads back and compares against what the campaign measured.
@@ -1089,8 +1103,203 @@ const HARNESS_EVOLVE: CapabilityRecord = {
   createdAt: "2026-09-01T00:00:00.000Z",
 };
 
+// ── THE THIRD SUBJECT IS A REPOSITORY (docs/architecture/code-evolution-loop.md) ────────────────────
+//
+// `harness_evolve` moves a LEVER — a pin, an override, a template version — and leaves the author of that lever
+// to the driver. The loop the maintainer actually wants changes the harness's CODE: a coding agent, in an
+// isolated sandbox with the repository checked out, proposes the change; the repository's own CI builds the
+// image; the campaign decides. Every part of that existed as a separate skill or door (`delegate_work`, the
+// GitHub Actions trigger, `pin_harness_images`, the campaign) and nothing composed them, so this is the
+// composition — a SKILL, not code, for the same reason the other two are: each step is a tool the agent has.
+//
+// Two facts shape the procedure and are stated in it rather than hidden. Only a CONVERSATIONAL harness can be a
+// delegation profile today (`ClaudeCodeHarness` carries the marker; `CommandHarness` does not), so Codex and
+// its kin ride the playground's `harness` boot mode one prompt at a time. And the CI-fired PR evaluation runs
+// against the BASE version with an ephemeral pin override, so its record names the base version and cannot be
+// a round's candidate as-is: the driver pins the CI-built digest into a REAL instance version and runs the
+// round's batch on that — which is also what keeps the adoption's identity exact.
+const CODE_EVOLVE_INSTRUCTIONS = `
+# Evolve a harness by changing its code (delegated, sandboxed, CI-built)
+
+Improve a HARNESS by changing the code in its repository — not a pin, the code — with the trust harness as the
+oracle. A coding agent you DELEGATE to makes the change in an isolated sandbox; the repository's CI builds the
+image; you pin that image into a candidate version, run the round, and let the campaign gate decide. You never
+write the harness's code yourself, you never touch the oracle, and you never merge on your own authority.
+
+Everdict's tools load on demand. Before anything else:
+\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,diff_harness_versions,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,open_campaign,get_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
+
+## 0. Frame the campaign — the exam, the repository, the delegate, the oracle's paths
+- Everything \`harness_evolve\` freezes, frozen the same way: \`subject: { type: "harness", id, baselineVersion }\`,
+  \`scenarios\` with at least two held out, \`trialsPerCase\` and \`budget.maxRounds\` chosen together,
+  \`significance: { fdrAlpha, heldOutFamilySize }\`, \`judges\`. Real batches: no identity waiver belongs on this frame.
+- **The repository.** The harness's source repo and its default branch, and a CI link for it (Settings › CI): on a
+  pull request the repository's own workflow builds the service image and pushes it. Without that link no PR
+  produces an image and this loop has nothing to pin — stop and have the member link the repository first.
+- **The delegate.** A delegation profile (\`list_public_capabilities\` / \`list_capabilities\`, type \`delegation\`)
+  whose harness is a CONVERSATIONAL coding agent: Claude Code (built in), or any CLI registered as a \`command\`
+  harness with a \`conversation\` block (how it resumes, how its next token is read) — Codex, claude-code-router.
+  A CLI registered without that block is one-shot and can only be driven through \`create_sandbox { harness }\`
+  one prompt at a time. The profile also decides the delegate's BOX: its \`network\` (\`allowlist\` with the
+  repository host and the model endpoint), and \`create_sandbox { runtime }\` places the session on a workspace
+  runtime that can enforce it rather than the control plane's docker. The agent runs in ITS image with ITS model
+  binding, and it never sees your tools or the workspace.
+- **The oracle's paths.** Name the repository paths that ARE the exam — the dataset, judge rubrics, eval configs,
+  the tests the graders run — as the frame's \`oracleScope\` (patterns: \`tests/\`, \`evals/**\`,
+  \`judges/rubric-*.md\`). The record reads every candidate pull request's changed files against it and rejects a
+  round that touched one ("the candidate touched the oracle", paths on the verdict), or that could not be
+  checked. Put the same paths into every brief as a constraint WITH the reason, so the delegate is told before
+  it is refused.
+- **The delegation budget.** \`delegation: { ttlSec, maxUsd }\` on the frame caps the coding agent per round. Every
+  round then names its sandbox session (\`delegation_run_id\`), and the record reads what that session cost off
+  the run ledger and refuses a round whose session ran past the budget — so open each session with \`ttlSec\`
+  at most the frame's.
+- \`create_issue\` for the journal, then \`open_campaign { issueId, frame }\`. Frozen at that call.
+
+## 1. Baseline — and its noise floor
+- \`run_scorecard { dataset, harness: <id>@<baselineVersion>, trials: N }\`, then \`get_scorecard\`: per-case variance
+  and flake rate are the NOISE FLOOR. A baseline flaking above ~0.4 means fix scenario determinism first.
+- Note the baseline's source: the commit its pinned image was built from. The chain check will want the next
+  campaign to start from what this one adopts, in code as well as in bytes.
+
+## 2. Delegate the mutation — one hypothesis, one PR
+- Read what the walk knows: \`get_campaign\` for every round's \`learned\`, then the failing cases' traces. Form ONE
+  hypothesis about the CODE — a mechanism, not a wish.
+- Open the session: \`create_sandbox { profile, repo: { git, ref: <default branch> }, brief, ttlSec }\` with
+  \`ttlSec\` inside the frame's delegation budget, and keep its run id — the round names it. The brief follows
+  \`references/round-brief.md\` — \`goal\` as a condition on the harness's behavior on the failing scenarios,
+  \`context\` with the hypothesis and what is already ruled out, \`references\` to the scorecard and traces with a
+  note each, \`constraints\` that name the oracle's paths and the one lever, \`doneWhen\` as the repository's own
+  tests and build.
+- Supervise: \`submit_sandbox_task\` one turn at a time, \`read_sandbox_task_trace\` until done, and read what it DID.
+  Push back when it drifts from the one lever. If it reports the hypothesis is wrong, believe it and re-scope.
+- Verify yourself with \`sandbox_exec\`: the tests, the build, and \`git diff --stat\` against the oracle's paths.
+- Land the candidate: commit inside the session, then \`sandbox_git_push\` with a pull request. That push is a
+  GUARDED action — it pauses for the member — so say what is about to land before you call it. Do NOT merge.
+- ⚠️ The findings shape the BRIEF, never the HARNESS. A delegate that writes the judges' conclusions into the
+  scaffold's prompts or config has made the candidate read its own exam; that is the oracle rule and the
+  reason step 3 reads the diff before it reads the score.
+- \`close_sandbox\` when the PR is open; the session's trajectory stays on the ledger.
+
+## 3. Let CI build it, pin it, run the round
+- The PR's CI builds the image and pushes it to the registry the repository publishes to; the CI run names the
+  pushed digest. The CI-fired PR evaluation is a smoke signal for YOU — it ran the BASE version with an
+  ephemeral pin override, so its scorecard names the base version and cannot be the round's candidate.
+- Read the PR's changed files against the oracle's paths yourself before you spend a batch on it. The record
+  will refuse the round anyway (\`oracleScope\`), but a batch you did not run is budget you did not spend: a PR
+  that touched the exam is closed, noted in the issue, and re-briefed.
+- Pin the built digest into a REAL candidate version: \`pin_harness_images { id, pins: { <slot>: <image>@sha256:… } }\`
+  mints an immutable successor of the baseline with lineage recorded. \`diff_harness_versions\` between baseline and
+  candidate is how you check you moved one thing.
+- \`run_scorecard\` on \`<id>@<candidateVersion>\` with the same dataset, N and judges, and pass
+  \`origin: { campaignId, repo, sha, prNumber }\` so the batch says which round it is and where its code came
+  from; a \`scorecard.completed\` subscription filtered on \`campaignId\` wakes you when it lands. Then
+  \`log_campaign_round { hypothesis, learned, candidateVersion, baselineScorecardId, candidateScorecardId,
+  delegation_run_id }\`. The round records where the candidate came from (the scorecard's origin: repo, sha, PR,
+  pin override) and what the delegate cost (from the run ledger) beside the verdict the platform derives. You do
+  NOT send a verdict, and \`learned\` is the mechanism this round established — write it whatever the verdict.
+
+## 4. Decide — ask the gate; adopt spends an authorization; the merge is the member's
+- \`campaign_decision\`: \`continue\` → step 2 with the next hypothesis (a neutral round is a foundation: brief the
+  next delegate on top of its branch). \`halt\` → \`settle_campaign\` and report. The record refuses a round past the
+  budget or after the rejected streak.
+- \`adopt\` → \`settle_campaign\`, \`campaign_adoption\`, \`adopt_campaign_candidate\` with the INSTANCE spec of the
+  candidate version (\`get_harness_instance\`) — the platform compares the resolved document against what the
+  campaign measured before it writes.
+- Then the code: \`merge_campaign_candidate\` with the same proof pays the adoption's CODE debt — it merges the
+  pull request the candidate scorecard named, at the head the round measured, through the workspace GitHub App.
+  It is a GUARDED action (a member approves), it requires the bytes to be registered first, and the record
+  refuses a \`continues\` chain over an adoption whose code is still owed. Adoption registered the bytes; the
+  merge is what makes the next campaign's baseline source agree with them.
+- Close the issue naming the adopted version, the proving scorecard and the merged PR — or the halt reason with
+  the strongest rejected hypothesis. Delete the instance versions that were WORSE; keep neutral ones until the
+  campaign closes.
+
+## Constraints
+- NEVER touch the oracle — dataset, judges, verdict policy, the graders' tests — in a brief, in a PR, or by hand.
+- One hypothesis per round, one PR per hypothesis, one lever per PR.
+- Do not paste secrets into a brief; the profile carries the delegate's credentials. Do not paste your tool names;
+  the delegate cannot call them.
+- Never report a candidate as built, evaluated or adopted on the delegate's word — the CI run, the scorecard and
+  the gate's answer are the evidence.
+- Load \`references/round-brief.md\` (via \`read_skill_file\`) before writing any brief.
+`.trim();
+
+// The round's brief — a supporting file (progressive disclosure): the delegation brief's quality bar,
+// specialized to an evolution round, and the oracle-path checklist the driver runs against the PR.
+const CODE_EVOLVE_ROUND_BRIEF = `
+# The round brief — what a delegate needs to change the harness, and nothing more
+
+The general brief rules are \`delegate_work\`'s (\`references/brief.md\` there). An evolution round adds three
+things: the hypothesis is the whole brief, the oracle's paths are a hard constraint, and the finish line is the
+repository's own build and tests — never the scorecard, which the delegate cannot run and must not aim at.
+
+## goal — the behavior, on the failing scenarios, as a condition
+- Bad: "make the eval pass" (aims the delegate at the exam).
+- Bad: "raise the tool budget to 40" (your solution; the delegate may find the mechanism is elsewhere).
+- Good: "on tasks that need more than 20 tool calls the scaffold stops early because the turn budget is per
+  session, not per task — make the budget per task without changing what a turn costs".
+
+## context — the hypothesis and what is ruled out
+Say which round this is, what earlier rounds LEARNED (the mechanism, not the score), which failing cases show it,
+and what has already been tried. A delegate that re-derives your investigation spends its budget repeating you.
+
+## references — evidence, each with a reason
+The candidate scorecard and the specific runs whose traces show the mechanism, each with a \`note\` saying what
+to look at. The delegate cannot open them with your tools; put the relevant excerpt in the brief.
+
+## constraints — the oracle's paths, with the reason
+- Name the paths: the dataset, judge rubrics, eval configs, the tests the graders run.
+- Give the reason: "changing these changes the exam, and a candidate that changed its exam is not a candidate —
+  the round is discarded, whatever it scores".
+- Name the one lever, and say the change is one pull request against the default branch, no merge.
+
+## doneWhen — checks you will run yourself with sandbox_exec
+- The repository's own tests and build pass.
+- \`git diff --stat <default branch>\` touches none of the oracle's paths.
+- The diff is one lever: if it changed two mechanisms, split it or drop one.
+
+## Before you log the round — the checklist
+1. The PR's changed files against the oracle's paths: any hit → not a candidate.
+2. The CI run built and pushed an image, and you have its DIGEST (a tag pins nothing).
+3. The candidate version was minted from that digest with \`pin_harness_images\`, and \`diff_harness_versions\`
+   shows one slot moved.
+4. The candidate batch ran the frame's exact scenarios, N trials, the frame's judges.
+5. \`learned\` says what this round established about the MECHANISM — written before you read the verdict.
+`.trim();
+
+const CODE_EVOLVE: CapabilityRecord = {
+  id: "code-evolve",
+  tenant: FIRST_PARTY_TENANT,
+  version: "1.0.0",
+  name: "code_evolve",
+  description:
+    "Run an evolution campaign that changes a HARNESS's code: delegate one hypothesis per round to a coding agent " +
+    "in an isolated sandbox with the repository checked out, let the repository's CI build the image, pin that " +
+    "digest into a candidate version, run the round, and adopt only over a statistically significant diff on " +
+    "held-out scenarios. Use when a scorecard trend says the scaffold's code is the ceiling and a pin cannot fix it.",
+  spec: {
+    type: "skill",
+    instructions: CODE_EVOLVE_INSTRUCTIONS,
+    files: [{ path: "references/round-brief.md", content: CODE_EVOLVE_ROUND_BRIEF }],
+  },
+  visibility: "public",
+  sharedWith: [],
+  tags: ["harness", "evolution", "delegation", "scorecard", "example"],
+  createdBy: "everdict",
+  createdAt: "2026-09-02T00:00:00.000Z",
+};
+
 export function firstPartySkillExamples(): CapabilityRecord[] {
-  return [SCORECARD_FIX_PR, TRACE_ANALYSIS, MEMORY_CONSOLIDATION, DELEGATE_WORK, AGENT_EVOLVE, HARNESS_EVOLVE];
+  return [
+    SCORECARD_FIX_PR,
+    TRACE_ANALYSIS,
+    MEMORY_CONSOLIDATION,
+    DELEGATE_WORK,
+    AGENT_EVOLVE,
+    HARNESS_EVOLVE,
+    CODE_EVOLVE,
+  ];
 }
 
 // The DELEGATOR's side of a delegation. The delegation profile (CODE_DELEGATE below) is written in the

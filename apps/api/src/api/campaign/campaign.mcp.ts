@@ -4,6 +4,7 @@ import { z } from "zod";
 import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 import { gate } from "../route-context.js";
+import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
 
 // Evolution campaigns — MCP twin of the /campaigns routes (BFF↔MCP parity: same service, second transport).
 // This is the surface the agent-evolve loop drives; the tools' descriptions teach the settlement's rules.
@@ -81,25 +82,44 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         "Record one tested hypothesis. The verdict is DERIVED from the production scorecard diff (trial " +
         "statistics under the frame's frozen significance + experiment identity) — it is never accepted " +
         "from the caller. Answers the round plus the adoption gate's verdict over the new trace. A " +
-        "concurrent round answers CONFLICT: re-read the campaign and log against its current state.",
+        "concurrent round answers CONFLICT: re-read the campaign and log against its current state. Also " +
+        "CONFLICT once the frame's own ending has fired — the budget is spent, or the rejected streak was " +
+        "reached: the campaign is over by its own rule, ask campaign_decision and settle it.",
+      // ── THE SAME BOUNDS AS THE HTTP TWIN, FROM THE SAME SCHEMA ────────────────────────────────────
+      //
+      // This tool declared bare `z.string()`s while the DTO bounded every field, and the service appended
+      // the round unparsed — so a round logged here with an empty hypothesis or a 4001-character finding was
+      // stored, and the Postgres read (which decodes rows through the record schema) then failed for that
+      // campaign and for the workspace's whole list. The service now refuses such a round on every door;
+      // declaring the bounds here too means the agent is told at the tool boundary, with the field named.
       inputSchema: {
         id: z.string(),
-        hypothesis: z.string().describe("One variable per round — what this candidate changes and why"),
+        hypothesis: LogCampaignRoundBodySchema.shape.hypothesis.describe(
+          "One variable per round — what this candidate changes and why",
+        ),
         // The knowledge layer, required here exactly as it is on the HTTP twin. What the round TAUGHT is a
         // different question from what it scored, and it is the half a rejected round is otherwise pure
         // spend for — the next proposal reads it, the adoption gate never does.
-        learned: z
-          .string()
-          .min(10)
-          .describe(
-            "What this round taught the walk — the failure mode or the confirmed mechanism, not the outcome. Read by the next proposal; never by the adoption gate.",
-          ),
-        candidate_version: z.string(),
-        baseline_scorecard_id: z.string(),
-        candidate_scorecard_id: z.string(),
+        learned: LogCampaignRoundBodySchema.shape.learned.describe(
+          "What this round taught the walk — the failure mode or the confirmed mechanism, not the outcome. Read by the next proposal; never by the adoption gate.",
+        ),
+        candidate_version: LogCampaignRoundBodySchema.shape.candidateVersion,
+        baseline_scorecard_id: LogCampaignRoundBodySchema.shape.baselineScorecardId,
+        candidate_scorecard_id: LogCampaignRoundBodySchema.shape.candidateScorecardId,
+        delegation_run_id: LogCampaignRoundBodySchema.shape.delegationRunId.describe(
+          "The sandbox session (its run id) whose delegate produced this candidate. Required when the frame budgets the delegation; the platform records what the session cost from the run ledger.",
+        ),
       },
     },
-    ({ id, hypothesis, learned, candidate_version, baseline_scorecard_id, candidate_scorecard_id }) =>
+    ({
+      id,
+      hypothesis,
+      learned,
+      candidate_version,
+      baseline_scorecard_id,
+      candidate_scorecard_id,
+      delegation_run_id,
+    }) =>
       run(principal, "scorecards:run", async () => {
         const record = await campaigns.get(ws, id);
         await assertTeamVisible(deps, principal, record.teamId, "Campaign");
@@ -114,6 +134,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
               candidateVersion: candidate_version,
               baselineScorecardId: baseline_scorecard_id,
               candidateScorecardId: candidate_scorecard_id,
+              ...(delegation_run_id !== undefined ? { delegationRunId: delegation_run_id } : {}),
             },
             principal.subject,
             await teamCeiling(deps, principal),
@@ -198,7 +219,11 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         // same service (arch-review 78: this transport checked the entity's team and not the campaign's).
         const campaign = await campaigns.get(ws, id);
         await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-        if (checked.data.teamId !== undefined) gate(principal, "scorecards:run", { teamId: checked.data.teamId });
+        // The campaign's OWN team, off the record just read — never the copy on the proof the caller handed
+        // over. The two are equal on a genuine proof (the proof is minted from the record), and only a forged
+        // one can differ; gating on the presented copy let a proof with the field STRIPPED skip this gate and
+        // fail several reads later on its digest instead, as a 409 (rule `protocol` L3). Same as the route.
+        gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
         const candidate = checked.data.candidate;
         const owner =
           candidate.type === "agent"
@@ -227,6 +252,58 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
             ...(owner.teamId !== undefined ? { expectedOwnerTeamId: owner.teamId } : {}),
             // The agent that acted, so the fact this write emits carries the loop guard's key — without it
             // the agent that adopted a candidate is woken by its own adoption (arch-review 85).
+            ...(ctx.agent !== undefined ? { agent: ctx.agent } : {}),
+          }),
+        );
+      }),
+  );
+
+  server.registerTool(
+    "merge_campaign_candidate",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Pay a settled campaign's CODE debt: merge the pull request the adopted bytes were built from into its " +
+        "repository's default branch, through the workspace GitHub App, asserting the head the round measured. " +
+        "The repository and pull request come from the stored operation (the candidate scorecard's origin), never " +
+        "from you; present the proof from campaign_adoption. Requires the bytes to be registered first " +
+        "(adopt_campaign_candidate). Refuses when the adoption carries no code debt or the proof is not the " +
+        "recorded one; a retry converges (already_merged). A chain (`continues`) cannot start from an adoption " +
+        "whose code is still owed. Requires scorecards:run and the candidate family's write action.",
+      inputSchema: {
+        id: z.string().describe("campaign id"),
+        proof: z.string().describe("CampaignAdoptionProof JSON, exactly as campaign_adoption returned it"),
+      },
+    },
+    ({ id, proof }) =>
+      run(principal, "scorecards:run", async () => {
+        if (!deps.campaignAdoption) return fail("NOT_FOUND: campaign adoption is not configured.");
+        let parsedProof: unknown;
+        try {
+          parsedProof = JSON.parse(proof);
+        } catch {
+          return fail("BAD_REQUEST: proof must be valid JSON.");
+        }
+        const checked = CampaignAdoptionProofSchema.safeParse(parsedProof);
+        if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
+        // The same two gates adopt carries — the campaign's own team and the entity's owner — because this is the
+        // same authorization spent on its second effect (parity with the route).
+        const campaign = await campaigns.get(ws, id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+        gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        const candidate = checked.data.candidate;
+        const owner =
+          candidate.type === "agent"
+            ? await teamOfEntity(deps.agentRegistry, ws, candidate.id)
+            : await teamOfEntity(deps.harnessInstances, ws, candidate.id);
+        gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+        return ok(
+          await deps.campaignAdoption.merge({
+            tenant: ws,
+            campaignId: id,
+            proof: checked.data,
+            by: principal.subject,
+            via: "mcp",
             ...(ctx.agent !== undefined ? { agent: ctx.agent } : {}),
           }),
         );

@@ -52,6 +52,9 @@ const GUARDED_NAMES = new Set<string>([
   // code on a real remote. `sandbox_exec` stays unguarded — a container is the agent's own scratch space —
   // but the moment its contents leave for a repository, that is a governed write like any other.
   "sandbox_git_push",
+  // Merging the pull request an evolution campaign adopted lands code on the repository's DEFAULT branch — the
+  // gate proved the bytes, and a member still decides that the code ships (code-evolution-loop.md, D5).
+  "merge_campaign_candidate",
   // Same reasoning one step earlier in the pipeline: committing straight to a branch lands code on a real
   // repository with NO review step in between (open_github_pr stays unguarded precisely because a PR is a
   // proposal somebody still has to accept). Naming the default branch here ships to production's source.

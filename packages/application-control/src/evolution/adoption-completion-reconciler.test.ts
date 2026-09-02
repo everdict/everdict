@@ -70,6 +70,9 @@ function store(rows: AdoptionOperation[]) {
       deferred.push(`${input.campaignId}:${input.outcome}`);
       return true;
     },
+    async markMerged() {
+      return "no_code_debt" as const; // these doubles hold no code debt (code-evolution-loop.md, D5)
+    },
     async markCompleted(_t, campaignId, proofDigest, events) {
       const row = state.get(campaignId);
       if (!row) return "no_such_operation";
@@ -285,6 +288,9 @@ describe("[R120 COUNTEREXAMPLE] a blocked worklist does not starve a completable
       async deferCompletion(input) {
         nextAt.set(input.campaignId, input.nextAttemptAt);
         return true;
+      },
+      async markMerged() {
+        return "no_code_debt" as const; // these doubles hold no code debt (code-evolution-loop.md, D5)
       },
       async markCompleted(_t, campaignId) {
         const row = rows.get(campaignId);

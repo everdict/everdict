@@ -381,3 +381,38 @@ describe("firstPartyCatalogExtras", () => {
     expect(pw.spec.write).toBe(true); // navigate/click/type are actions → bridged only on enableWrite
   });
 });
+
+// The code loop composes delegation and the campaign; what the test pins is that every door it drives exists by
+// name in the body, that the two disciplines it adds to harness_evolve are stated (the oracle's PATHS as a
+// constraint the driver checks against the PR, and the CI-built digest pinned into a REAL candidate version
+// because a PR-mode scorecard names the base version), and that its brief reference travels with it.
+describe("the code-evolve example composes delegation into the campaign", () => {
+  const skill = firstPartySkillExamples().find((r) => r.id === "code-evolve");
+
+  it("names every door it drives and the two disciplines that make a delegated change a candidate", () => {
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    for (const anchor of [
+      "create_sandbox",
+      "submit_sandbox_task",
+      "sandbox_git_push",
+      "pin_harness_images",
+      "run_scorecard",
+      "log_campaign_round",
+      "campaign_decision",
+      "adopt_campaign_candidate",
+      "merge_campaign_candidate",
+      "oracle",
+      "changed files",
+      "Do NOT merge",
+      "references/round-brief.md",
+    ]) {
+      expect(skill.spec.instructions).toContain(anchor);
+    }
+    const brief = skill.spec.files.find((f) => f.path === "references/round-brief.md");
+    expect(brief).toBeDefined();
+    for (const anchor of ["goal", "constraints", "doneWhen", "oracle", "DIGEST"]) {
+      expect(brief?.content).toContain(anchor);
+    }
+  });
+});
