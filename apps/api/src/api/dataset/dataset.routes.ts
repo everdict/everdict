@@ -11,6 +11,7 @@ import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
   type ServerDeps,
   assertDatasetConstitution,
+  datasetImageWarnings,
   gate,
   publishDataset,
   resolvePrincipal,
@@ -58,7 +59,14 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       const constitutional = assertDatasetConstitution(principal, parsed.data);
       // Bytes + receipt + capability generation, as ONE publication (creator = subject, for delete rights).
       await publishDataset(deps, principal, parsed.data, constitutional, { teamId: owner.teamId, origin });
-      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+      // What the registered cases will actually pull — advice, never a refusal (see `datasetImageWarnings`).
+      const warnings = await datasetImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
+      return reply.code(201).send({
+        workspace: principal.workspace,
+        id: parsed.data.id,
+        version: parsed.data.version,
+        ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+      });
     } catch (err) {
       return sendError(reply, err); // immutable 409
     }
@@ -92,11 +100,13 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       );
       const constitutional = assertDatasetConstitution(principal, dataset); // an imported set declares like any other
       await publishDataset(deps, principal, dataset, constitutional);
+      const warnings = await datasetImageWarnings(deps, principal.workspace, dataset.id, dataset.version);
       return reply.code(201).send({
         workspace: principal.workspace,
         id: dataset.id,
         version: dataset.version,
         cases: dataset.cases.length,
+        ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
       });
     } catch (err) {
       return sendError(reply, err); // unresolved image 400 / immutable 409

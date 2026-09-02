@@ -14,7 +14,7 @@ import {
   declaredOriginFromIssue,
 } from "../capability-origin.js";
 import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
-import { assertDatasetConstitution, publishDataset } from "../route-context.js";
+import { assertDatasetConstitution, datasetImageWarnings, publishDataset } from "../route-context.js";
 import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
 
 // Dataset MCP tools — the MCP twin of dataset.routes.ts.
@@ -169,7 +169,14 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             ...(teamId ? { teamId } : {}),
             origin,
           });
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+          const warnings = await datasetImageWarnings(ctx.deps, ws, result.data.id, result.data.version);
+          return ok({
+            workspace: ws,
+            id: result.data.id,
+            version: result.data.version,
+            ...(teamId ? { teamId } : {}),
+            ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+          });
         }),
     );
 
@@ -228,7 +235,14 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           );
           const constitutional = assertDatasetConstitution(principal, dataset);
           await publishDataset(ctx.deps, { ...principal, workspace: ws }, dataset, constitutional);
-          return ok({ workspace: ws, id: dataset.id, version: dataset.version, cases: dataset.cases.length });
+          const warnings = await datasetImageWarnings(ctx.deps, ws, dataset.id, dataset.version);
+          return ok({
+            workspace: ws,
+            id: dataset.id,
+            version: dataset.version,
+            cases: dataset.cases.length,
+            ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+          });
         }),
     );
 

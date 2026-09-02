@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema } from "../../core/benchmark/benchmark-service.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
+import { datasetImageWarnings } from "../route-context.js";
 
 // Benchmark MCP tools — the MCP twin of benchmark.routes.ts.
 export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): void {
@@ -97,7 +98,10 @@ export function registerBenchmarkTools(server: McpServer, ctx: McpToolContext): 
           }
           const result = BenchmarkImportBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await benchmarks.import({ tenant: ws, createdBy: principal.subject, ...result.data }));
+          const rec = await benchmarks.import({ tenant: ws, createdBy: principal.subject, ...result.data });
+          // HTTP parity: the same read-back image advice its twin gives.
+          const warnings = await datasetImageWarnings(ctx.deps, ws, rec.id, rec.version);
+          return ok(warnings.length > 0 ? { ...rec, imageWarnings: warnings } : rec);
         }),
     );
   }

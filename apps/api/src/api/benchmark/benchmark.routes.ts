@@ -1,7 +1,14 @@
 import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type { FastifyInstance } from "fastify";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema } from "../../core/benchmark/benchmark-service.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
+import {
+  type ServerDeps,
+  datasetImageWarnings,
+  gate,
+  resolvePrincipal,
+  sendError,
+  zodIssues,
+} from "../route-context.js";
 import { benchmarkDocs } from "./benchmark.docs.js";
 
 // benchmarks (first-party catalog → ingest into tenant-owned datasets; user self-serve) + benchmark-recipes
@@ -138,7 +145,10 @@ export function registerBenchmarkRoutes(app: FastifyInstance, deps: ServerDeps):
         roles: principal.roles, // the constitutional gate on the produced dataset's declarations
         ...parsed.data,
       });
-      return reply.code(201).send(rec);
+      // …and the same image advice the dataset doors give, because an import registers cases like any other
+      // write (standard-task-formats.md, slice 4). Read back, never echoed.
+      const warnings = await datasetImageWarnings(deps, principal.workspace, rec.id, rec.version);
+      return reply.code(201).send(warnings.length > 0 ? { ...rec, imageWarnings: warnings } : rec);
     } catch (err) {
       return sendError(reply, err); // BadRequest (unsupported id) / immutable 409 / HF fetch failure
     }

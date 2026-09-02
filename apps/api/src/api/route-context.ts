@@ -57,6 +57,7 @@ import type { CapabilityService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import type { CampaignService } from "@everdict/application-control";
 import { type Action, type Authenticator, type Principal, type ResourceScope, authorize } from "@everdict/auth";
+import type { ImageWarning } from "@everdict/contracts";
 import {
   AppError,
   type Dataset,
@@ -68,7 +69,7 @@ import {
 } from "@everdict/contracts";
 import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
 import type { SecretStore, TenantKeyStore, WorkspaceSettingsStore, WorkspaceStore } from "@everdict/db";
-import { SHARED_TENANT, canReadRun, contentDigest, groundTruthDeclarations } from "@everdict/domain";
+import { SHARED_TENANT, canReadRun, contentDigest, groundTruthDeclarations, imageWarnings } from "@everdict/domain";
 import type { UsageMeter } from "@everdict/domain";
 import type { ImageTokenService } from "@everdict/images";
 import type {
@@ -556,6 +557,35 @@ export function assertDatasetConstitution(principal: Principal, dataset: Pick<Da
 // So a constitutional dataset publishes through the transactional path or NOT AT ALL. A deployment that
 // cannot commit both is one that cannot publish one: refusing is recoverable, and a signed constitution whose
 // signature is about other bytes is not.
+// ── WHAT A REGISTERED DATASET'S CASE IMAGES ARE (standard-task-formats.md, slice 4) ─────────────────
+//
+// The harness doors have classified their images since the workspace registry landed; the dataset doors never
+// did, so a task set imported with `tb-hello:v1` (unqualified) or a local-only ref registered without a word
+// and the operator met it one case at a time at DISPATCH. Same predicate, same shape as
+// `harnessImageWarnings`: read back what was actually registered — not the caller's echo — and classify it.
+//
+// Warn, never block. An unqualified ref is wrong for a MANAGED run and perfectly right for a self-hosted
+// runner pulling from its own daemon, and a door that refused it would be deciding a deployment question the
+// author is better placed to answer.
+export async function datasetImageWarnings(
+  deps: ServerDeps,
+  workspace: string,
+  id: string,
+  version: string,
+): Promise<ImageWarning[]> {
+  if (!deps.datasetRegistry) return [];
+  try {
+    const dataset = await deps.datasetRegistry.get(workspace, id, version);
+    const images = [...new Set(dataset.cases.map((c) => c.image).filter((i): i is string => typeof i === "string"))];
+    if (images.length === 0) return [];
+    // Classification runs against *all* registered registries — belonging to any one makes it the workspace class.
+    const coords = await deps.imageRegistryService?.coordinates(workspace);
+    return imageWarnings(images, coords);
+  } catch {
+    return []; // advice, never a failure: a dataset that registered is registered
+  }
+}
+
 export async function publishDataset(
   deps: ServerDeps,
   principal: Principal,
