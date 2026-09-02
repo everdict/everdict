@@ -183,6 +183,29 @@ export interface CampaignServiceDeps {
   // REQUIRED, not optional: an operation nobody can read is the same defect as one nobody can spend, and
   // an optional dep is the shape that hides it (rule `protocol`, the optional-dependency law).
   operations: AdoptionOperationStore;
+  // ── EVERDICT'S OWN ACCOUNT OF A CANDIDATE IT BUILT (docs/architecture/code-evolution-loop.md, D2) ──
+  //
+  // When Everdict built the candidate's image itself (a `campaign.candidate_built` record whose
+  // `candidateVersion` is the round's candidate), the round's `candidateSource` is filled from THAT — the
+  // commit the build observed, the image the registry stored, the base it extended — which outranks a
+  // scorecard origin's caller-authored coordinates. Optional: a campaign that pins rather than builds has no
+  // build store, and the scorecard origin stands. Richer PROVENANCE, not a decision input — the round still
+  // verifies the batch's harness identity against the frame either way.
+  builds?: {
+    forCampaign(
+      tenant: string,
+      campaignId: string,
+    ): Promise<
+      Array<{
+        state: string;
+        candidateVersion?: string;
+        source: { git: string; repo?: string; ref?: string; sha?: string; prNumber?: number };
+        image?: { ref: string };
+        base: { image: string };
+        id: string;
+      }>
+    >;
+  };
   // ── WHAT A CANDIDATE'S PULL REQUEST CHANGED (docs/architecture/code-evolution-loop.md, D3) ────────
   //
   // The read behind the frame's `oracleScope`: the files one pull request touches, from the repository the
@@ -589,6 +612,9 @@ export class CampaignService {
     const oracle = await this.oracleCheck(tenant, record.frame, snapshot);
     // …and the delegation the round names, read off the run ledger and held to the frame's budget.
     const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
+    // …and Everdict's own account of the candidate, when it BUILT it (D2): the `built` record whose minted
+    // version is this round's candidate. Its coordinates outrank the scorecard origin's.
+    const builtSource = await this.builtSourceFor(tenant, id, input.candidateVersion);
     const round: CampaignRound = {
       seq: record.rounds.length + 1,
       hypothesis: input.hypothesis,
@@ -599,7 +625,7 @@ export class CampaignService {
       // the platform judges incomparable keeps its lesson, which is the case the layer exists for.
       ...(input.learned !== undefined ? { learned: input.learned } : {}),
       ...(delegation !== undefined ? { delegation } : {}),
-      verdict: verdictOf(snapshot, record.frame, oracle),
+      verdict: verdictOf(snapshot, record.frame, oracle, builtSource),
       at: this.now(),
       by,
     };
@@ -641,6 +667,33 @@ export class CampaignService {
       default:
         return assertNever(outcome);
     }
+  }
+
+  // ── EVERDICT'S OWN ACCOUNT OF A CANDIDATE IT BUILT (docs/architecture/code-evolution-loop.md, D2) ──
+  //
+  // The `built` build record whose minted version is this round's candidate, projected to the round's source
+  // fields. `source: "everdict-build"` says these coordinates are Everdict's own — the commit the session
+  // observed, the image the registry stored. `undefined` when no build store is wired, or no build produced
+  // this version: the scorecard origin then stands.
+  private async builtSourceFor(
+    tenant: string,
+    campaignId: string,
+    candidateVersion: string,
+  ): Promise<CandidateSource | undefined> {
+    if (this.deps.builds === undefined) return undefined;
+    const builds = await this.deps.builds.forCampaign(tenant, campaignId).catch(() => []);
+    const built = builds.find((b) => b.state === "built" && b.candidateVersion === candidateVersion);
+    if (built === undefined) return undefined;
+    return {
+      source: "everdict-build",
+      ...(built.source.repo !== undefined ? { repo: built.source.repo } : {}),
+      ...(built.source.sha !== undefined ? { sha: built.source.sha } : {}),
+      ...(built.source.ref !== undefined ? { ref: built.source.ref } : {}),
+      ...(built.source.prNumber !== undefined ? { prNumber: built.source.prNumber } : {}),
+      ...(built.image?.ref !== undefined ? { image: built.image.ref } : {}),
+      baseImage: built.base.image,
+      buildId: built.id,
+    };
   }
 
   // ── DID THE CANDIDATE TOUCH ITS OWN EXAM (docs/architecture/code-evolution-loop.md, D3) ─────────
@@ -922,6 +975,7 @@ function verdictOf(
   snapshot: CampaignSnapshot,
   frame: CampaignFrame,
   oracle: OracleCheck | undefined,
+  builtSource?: CandidateSource,
 ): CampaignRound["verdict"] {
   const comparison = snapshot.diff;
   // Identity coverage first: an absent identity read is NOT "verified" (L2) — it blocks like an unverified
@@ -935,7 +989,8 @@ function verdictOf(
   const confoundedAxes = comparison.experiment === undefined ? [] : comparison.experiment.confounds.map((c) => c.axis);
   // Where the candidate came from rides EVERY verdict, rejected ones included: a round the platform could not
   // compare still names the pull request that produced its candidate, which is what the next brief reads.
-  const candidateSource = candidateSourceOf(snapshot.candidate);
+  // Everdict's OWN build account (D2) outranks the scorecard origin whenever it built the candidate.
+  const candidateSource = builtSource ?? candidateSourceOf(snapshot.candidate);
   const rejected = (detail: string): CampaignRound["verdict"] => ({
     comparable: false,
     significantImprovements: 0,

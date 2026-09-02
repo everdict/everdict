@@ -14,6 +14,7 @@ import type { KnowledgeEntryService, KnowledgeService } from "@everdict/applicat
 import type { GithubAppService } from "@everdict/application-control";
 import type {
   CampaignAdoptionService,
+  CampaignBuildService,
   EnvironmentAdoptionService,
   ImageRegistryService,
   WorkspaceImages,
@@ -138,6 +139,8 @@ export interface ServerDeps {
   // "this registry write is that version". Separate from the settlement because its dependency is the
   // REGISTRY, not the campaign store (arch-review 72 P0: the port existed and no production path reached it).
   campaignAdoption?: CampaignAdoptionService;
+  // Everdict builds a code-evolution candidate image into its own managed store (code-evolution-loop.md, D2).
+  campaignBuild?: CampaignBuildService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/read (routes disabled if absent)
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).

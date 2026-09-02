@@ -89,6 +89,7 @@ import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
 import { buildCampaignAdoption } from "./composition/campaign-adoption.js";
+import { buildCampaignBuild } from "./composition/campaign-build.js";
 import { deploymentCompute } from "./composition/compute-env.js";
 import { buildDispatch } from "./composition/dispatch.js";
 import {
@@ -261,6 +262,7 @@ async function main(): Promise<void> {
     projectUpdateStore,
     issueStore,
     campaignStore,
+    campaignBuildStore,
     adoptionOperationStore,
     issueLabelStore,
     projectStore,
@@ -1309,6 +1311,9 @@ async function main(): Promise<void> {
     // The authorization an adopted close writes, readable through the campaign's own surface — without it
     // the operation was durable and unreachable from every transport (arch-review 73).
     operations: adoptionOperationStore,
+    // Everdict's own account of a candidate it BUILT (code-evolution-loop.md, D2): the round's candidateSource
+    // comes from the `built` record whose minted version is the round's candidate.
+    builds: campaignBuildStore,
     // ── WHAT A CANDIDATE'S PULL REQUEST CHANGED (docs/architecture/code-evolution-loop.md, D3) ──────
     //
     // The frame's `oracleScope` is checked against the files the candidate's pull request touched, read through
@@ -1894,6 +1899,24 @@ async function main(): Promise<void> {
           console.error(`[sandbox-orphans] boot sweep failed: ${err instanceof Error ? err.message : String(err)}`);
         });
   }
+
+  // ── EVERDICT BUILDS THE CANDIDATE (docs/architecture/code-evolution-loop.md, D2) ─────────────────
+  //
+  // A build session boots the harness slot's base image, checks out the commit, runs the template's frozen
+  // build steps, and publishes the result as a layer in the managed store — no outside CI. Wired only where
+  // both a container lane and a managed image store exist; absent, the build routes answer 404 and a campaign
+  // evolves by pinning rather than building.
+  const campaignBuildService =
+    sandboxSessions !== undefined && workspaceImages !== undefined
+      ? buildCampaignBuild({
+          builds: campaignBuildStore,
+          campaigns: campaignService,
+          instances: harnessInstanceRegistry,
+          templates: harnessTemplateRegistry,
+          sessions: sandboxSessions,
+          images: workspaceImages,
+        })
+      : undefined;
   // Session rows whose lane is NOT configured here still share this ledger (another process — a dev host
   // stack, a dead replica — may have written and abandoned them). Settle those from the ledger alone; lanes
   // configured above exclude their trigger because their own sweep owns the full container teardown.
@@ -1958,6 +1981,7 @@ async function main(): Promise<void> {
     viewService,
     campaignService,
     campaignAdoption: campaignAdoptionService,
+    ...(campaignBuildService !== undefined ? { campaignBuild: campaignBuildService } : {}),
     checkpointService,
     taskService,
     teamService,

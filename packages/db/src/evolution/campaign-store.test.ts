@@ -1223,6 +1223,67 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       });
     });
 
+    it("[D2] Everdict's own build account outranks the scorecard origin — source everdict-build with the observed commit", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const builds = {
+        forCampaign: async () => [
+          {
+            id: "bld_1",
+            state: "built",
+            candidateVersion: "1.0.1",
+            source: {
+              git: "https://github.com/acme/scaffold.git",
+              repo: "acme/scaffold",
+              ref: "pr-7",
+              sha: "observed-sha",
+              prNumber: 7,
+            },
+            image: { ref: "reg/ns/scaffold-image:sha-observed@sha256:beef" },
+            base: { image: "reg/scaffold:1.0.0" },
+          },
+        ],
+      };
+      const svc = new CampaignService({
+        store,
+        operations: store,
+        changes: noChanges,
+        runs: noRuns,
+        builds,
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      // The scorecard also carries a (caller-authored) github-actions origin; the BUILD account wins.
+      snapshots.set(
+        "sc-built",
+        snapshot(comparison(), {
+          candidate: {
+            record: {
+              ...side("1.0.1").record,
+              origin: { source: "github-actions", repo: "acme/scaffold", sha: "caller-sha" },
+            },
+          },
+        }),
+      );
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-built" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.candidateSource).toMatchObject({
+        source: "everdict-build",
+        sha: "observed-sha",
+        prNumber: 7,
+        image: "reg/ns/scaffold-image:sha-observed@sha256:beef",
+        baseImage: "reg/scaffold:1.0.0",
+        buildId: "bld_1",
+      });
+    });
+
     it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const svc = service(store);

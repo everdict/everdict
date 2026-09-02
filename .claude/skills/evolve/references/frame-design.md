@@ -15,6 +15,10 @@ simply is not adoption evidence.
 family against one fixed baseline. A different baseline is a different question and therefore a different
 campaign.
 
+For a `code_evolve` campaign (evolving a harness's CODE), the subject's harness TEMPLATE must declare the
+slot's `source {git, repo}` and `build {steps, workDir, capture}` — Everdict builds the candidate image into
+its own managed store from those. A template with no recipe can be evolved by pinning, not by building.
+
 **`continues`** — the id of the campaign this one continues, when you are chaining. A walk that keeps
 improving is a chain of campaigns, each starting from what the last one adopted; this field is what makes the
 chain honest rather than merely convenient.

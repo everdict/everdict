@@ -37,7 +37,8 @@ Almost every part exists. What does not exist is the seam between them.
   `read_sandbox_task_trace` shows what the delegate actually did, `sandbox_exec` runs the driver's own
   checks, and `sandbox_git_push` publishes the branch with a token minted for that one call and never
   stored. The push is a guarded action (`apps/agent/src/action-policy.ts`): it pauses for a member.
-- **Building happens in CI, and Everdict already consumes the result.** `docs/architecture/github-actions-trigger.md`:
+- **Everdict builds the candidate itself** (D2 below); a workspace that prefers its own CI can still feed a
+prebuilt image. `docs/architecture/github-actions-trigger.md`:
   a PR fires an evaluation with the PR's image swapped into one slot as an ephemeral pin override, recorded on
   the scorecard as `origin.pinOverrides` beside `origin.repo` / `origin.sha` / `origin.prNumber`; a merge
   fires a durable re-pin that registers a new harness-instance version. `origin.source` is decided server-side
@@ -63,20 +64,48 @@ oracle itself. That is D3.
 under test and evolve its configuration; that is `agent_evolve`, and it answers a different question. Here
 the harness is a repository and the coding agent is a tool.
 
-### D2 — Everdict does not build the image; CI does, and the campaign waits for it
+### D2 — Everdict builds the candidate itself, into its own managed store
 
-**Rejected: a build step inside Everdict.** The platform's stated contract is that it REFERENCES images and
-never builds them (`packages/datasets/src/terminal-bench.ts`, `resolveImage`). No sandbox lane carries
-docker or buildkit, and adding one would make the control plane a build farm with a registry credential.
+**The dataset case's images are still the author's** (`packages/datasets/src/terminal-bench.ts`,
+`resolveImage` throws) — Everdict references a TASK container, it does not build one. The candidate SCAFFOLD
+image is different: it is the thing under evolution, it must extend the slot's own base, and it must live
+where Everdict can vouch for it. So Everdict builds it — **into its own managed image store, never an outside
+CI, never a Dockerfile builder.**
 
-**Rejected: `snapshot_sandbox` as the candidate image.** A world snapshot commits a live container's
-filesystem and registers it as an environment capability version. It is not a Dockerfile build of a commit:
-it has no source coordinate, cannot be reproduced from a sha, and lands as a world, not a harness pin.
+The mechanism already existed: a world snapshot publishes "a base image + one captured layer" through the
+Docker Registry v2 protocol (`packages/images/src/layer-append.ts`, `packages/images/src/copy-image.ts`) — no daemon, no build
+service. A candidate build reuses that path. `CampaignBuildService`:
 
-So the loop is: delegate → PR → the repository's own CI builds and pushes the image (the RepoLink's workflow
-already does this for `pull_request`) → the CI-fired evaluation lands as a scorecard whose `origin` names the
-PR, the sha and the pin override → the driver logs the round against it. The build is owned by the repository
-that owns the code, which is where a build belongs.
+1. reads the build RECIPE off the harness template — `source {git, repo}` and `build {steps, workDir,
+   capture}` on the slot, frozen with the template version, so "how this harness is made" is part of its
+   identity;
+2. boots a build session on the slot's current base image with the repository cloned at the commit
+   (`SandboxSessionService`, the same isolated lane a delegation uses);
+3. records the commit the session OBSERVED (`git rev-parse HEAD`) — Everdict's own account, not the caller's
+   `ref`;
+4. runs the recipe's steps, captures the declared paths as ONE layer on that base
+   (`SandboxSessionService.publishBuildLayer` → `publishLayerSnapshot`), reads the digest the store stored;
+5. mints a candidate harness instance version through the SAME re-pin door a merge uses (`repinHarnessImages`);
+6. settles a `CampaignBuildRecord` (`built` with the image, digest, minted version and a receipt naming the
+   steps and their digest; or `failed` with the reason), emitting `campaign.candidate_built`.
+
+`POST /campaigns/:id/builds` and `build_campaign_candidate` open a build; the heavy work runs in the
+background and the driver waits on `campaign.candidate_built`. The round then logs that minted version as its
+candidate, and `logRound` fills `candidateSource` from the `built` record — `source: "everdict-build"`, the
+observed commit, the image, the base — which OUTRANKS a scorecard origin's caller-authored coordinates.
+Because Everdict produced and observed the bytes, `execution_world` reads held and the round needs no identity
+waiver.
+
+**Rejected: an outside CI builds and pushes the image.** That was the first design here, and it is wrong for
+this product: the candidate would live in a registry Everdict does not own, its provenance would be the CI
+runner's word rather than Everdict's own observation, and it would make the loop depend on a GitHub Actions
+workflow being wired. The `origin.campaignId` finding-key seam still exists for a workspace that DOES prefer
+its own CI, but the first-party path is Everdict's build.
+
+**Rejected: a Dockerfile builder (kaniko/buildkit) as the build lane.** The base + captured-layer path needs
+no privileged tooling and no build farm — the author's Dockerfile stays the base's, and Everdict only adds
+the layer the commit produces. A general builder would reopen the "control plane is not a build service"
+stance the managed store deliberately took.
 
 **Landed:** `origin.campaignId` — a submitter (the CI workflow the driver set up, or the driver itself) may
 name the campaign a batch is a round of; it rides the `scorecard.submitted` and `scorecard.completed` facts,
@@ -149,7 +178,6 @@ Only a CONVERSATIONAL harness can be a delegation profile: a profile session is 
 
 | rung | seam | closes |
 |---|---|---|
-| the round keyed on the candidate's resolved digest, so a PR-mode scorecard can be the round's candidate | a batch per round on a version minted only to be measured | D2 |
 | a session lane that ENFORCES `allowlist` egress (the docker lane refuses it honestly; K8s needs a policy per session) | a delegate whose declared network the runtime cannot hold | — |
 
 ### D6 — the delegate is budgeted too

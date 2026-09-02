@@ -5,6 +5,7 @@ import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
+import { BuildCampaignBodySchema } from "./request/build-campaign.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
 import { MergeCampaignBodySchema } from "./request/merge-campaign.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
@@ -298,6 +299,75 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       );
     } catch (err) {
       return sendError(reply, err); // no authorization → 404 · forged proof / wrong candidate / already spent → 409
+    }
+  });
+
+  // ── BUILD THE CANDIDATE, INTO EVERDICT'S OWN STORE (docs/architecture/code-evolution-loop.md, D2) ──
+  //
+  // A build session boots the harness slot's base image, checks out the commit, runs the template's frozen
+  // build steps, and publishes the result as one layer in the managed registry — Everdict builds it, no outside
+  // CI. Gated like a re-pin: the campaign's own team, and the harness family's write action, because the build
+  // mints a new harness instance version. The heavy work runs in the BACKGROUND after the record is created;
+  // the caller gets the `building` record and waits on `campaign.candidate_built`.
+  app.post<{ Params: { id: string } }>("/campaigns/:id/builds", { schema: campaignDocs.build }, async (req, reply) => {
+    if (!deps.campaignBuild || !deps.campaignService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "campaign build is not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof BuildCampaignBodySchema>;
+    try {
+      body = BuildCampaignBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
+      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      // Minting the candidate version is a harness register, so the harness family's write action is required
+      // too — a build is a re-pin that also compiles.
+      gate(principal, "harnesses:register", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      const record = await deps.campaignBuild.start(
+        principal.workspace,
+        {
+          campaignId: req.params.id,
+          ref: body.ref,
+          ...(body.repo !== undefined ? { repo: body.repo } : {}),
+          ...(body.prNumber !== undefined ? { prNumber: body.prNumber } : {}),
+          ...(body.slot !== undefined ? { slot: body.slot } : {}),
+        },
+        principal.subject,
+      );
+      // The build runs after the response — its outcome is the record's settle and the fact, read via GET.
+      const build = deps.campaignBuild;
+      void build.run(principal.workspace, record.id).catch(() => undefined);
+      return reply.code(202).send(record);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/campaigns/:id/builds", { schema: campaignDocs.builds }, async (req, reply) => {
+    if (!deps.campaignBuild || !deps.campaignService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "campaign build is not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
+      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+      return reply.send(await deps.campaignBuild.forCampaign(principal.workspace, req.params.id));
+    } catch (err) {
+      return sendError(reply, err);
     }
   });
 

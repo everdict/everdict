@@ -74,6 +74,8 @@ const ACTIVITY_AXIS_BY_KIND = {
   // The adopted capability arriving is evaluation news like the decision that authorized it.
   "campaign.adoption_registered": "evaluation",
   "campaign.adoption_merged": "evaluation",
+  "campaign.candidate_built": "evaluation",
+  "campaign.candidate_build_failed": "evaluation",
   "campaign.adoption_completed": "evaluation",
   "scorecard.failed": "evaluation",
   "scorecard.cancelled": "evaluation",

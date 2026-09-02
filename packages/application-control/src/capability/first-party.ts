@@ -1127,15 +1127,16 @@ image; you pin that image into a candidate version, run the round, and let the c
 write the harness's code yourself, you never touch the oracle, and you never merge on your own authority.
 
 Everdict's tools load on demand. Before anything else:
-\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,diff_harness_versions,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,open_campaign,get_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
+\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,open_campaign,get_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
 
 ## 0. Frame the campaign — the exam, the repository, the delegate, the oracle's paths
 - Everything \`harness_evolve\` freezes, frozen the same way: \`subject: { type: "harness", id, baselineVersion }\`,
   \`scenarios\` with at least two held out, \`trialsPerCase\` and \`budget.maxRounds\` chosen together,
   \`significance: { fdrAlpha, heldOutFamilySize }\`, \`judges\`. Real batches: no identity waiver belongs on this frame.
-- **The repository.** The harness's source repo and its default branch, and a CI link for it (Settings › CI): on a
-  pull request the repository's own workflow builds the service image and pushes it. Without that link no PR
-  produces an image and this loop has nothing to pin — stop and have the member link the repository first.
+- **The repository and build recipe, on the harness template.** The slot's \`source { git, repo }\` and
+  \`build { steps, workDir, capture }\` say where the code lives and how Everdict builds its image. A harness
+  whose template has no recipe cannot run this loop — add it (a new template version) before opening the
+  campaign. Everdict builds into its own managed store; you do not need an outside CI or a registry of your own.
 - **The delegate.** A delegation profile (\`list_public_capabilities\` / \`list_capabilities\`, type \`delegation\`)
   whose harness is a CONVERSATIONAL coding agent: Claude Code (built in), or any CLI registered as a \`command\`
   harness with a \`conversation\` block (how it resumes, how its next token is read) — Codex, claude-code-router.
@@ -1181,17 +1182,20 @@ Everdict's tools load on demand. Before anything else:
   reason step 3 reads the diff before it reads the score.
 - \`close_sandbox\` when the PR is open; the session's trajectory stays on the ledger.
 
-## 3. Let CI build it, pin it, run the round
-- The PR's CI builds the image and pushes it to the registry the repository publishes to; the CI run names the
-  pushed digest. The CI-fired PR evaluation is a smoke signal for YOU — it ran the BASE version with an
-  ephemeral pin override, so its scorecard names the base version and cannot be the round's candidate.
-- Read the PR's changed files against the oracle's paths yourself before you spend a batch on it. The record
-  will refuse the round anyway (\`oracleScope\`), but a batch you did not run is budget you did not spend: a PR
-  that touched the exam is closed, noted in the issue, and re-briefed.
-- Pin the built digest into a REAL candidate version: \`pin_harness_images { id, pins: { <slot>: <image>@sha256:… } }\`
-  mints an immutable successor of the baseline with lineage recorded. \`diff_harness_versions\` between baseline and
-  candidate is how you check you moved one thing.
-- \`run_scorecard\` on \`<id>@<candidateVersion>\` with the same dataset, N and judges, and pass
+## 3. Let EVERDICT build it, then run the round
+- \`build_campaign_candidate { id, ref: <pr head sha>, repo, pr_number }\` — Everdict boots the harness slot's
+  base image, checks out the commit, runs the template's frozen build steps, and publishes the result as one
+  layer in ITS OWN managed store. No outside CI, no registry you have to own. It returns a \`building\` record;
+  wait on \`campaign.candidate_built\` (or poll \`get_campaign_builds\`), which names the minted candidate
+  version. A \`campaign.candidate_build_failed\` carries the build's error — read it, fix the code, build again.
+- This needs the harness TEMPLATE to declare the slot's \`source { git, repo }\` and \`build { steps, workDir,
+  capture }\`. A template with no recipe cannot be built — evolve it by pinning, or add the recipe to the
+  template first (a template change is a new template version).
+- Read the PR's changed files against the oracle's paths yourself before you spend a build and a batch on it.
+  The record refuses the round anyway (\`oracleScope\`), but a build you did not start is budget you did not
+  spend: a PR that touched the exam is closed, noted in the issue, and re-briefed.
+- \`diff_harness_versions\` between baseline and the built candidate is how you check you moved one thing.
+- \`run_scorecard\` on \`<id>@<candidateVersion>\` (the version the build minted) with the same dataset, N and judges, and pass
   \`origin: { campaignId, repo, sha, prNumber }\` so the batch says which round it is and where its code came
   from; a \`scorecard.completed\` subscription filtered on \`campaignId\` wakes you when it lands. Then
   \`log_campaign_round { hypothesis, learned, candidateVersion, baselineScorecardId, candidateScorecardId,

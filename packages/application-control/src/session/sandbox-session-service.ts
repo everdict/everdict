@@ -1605,35 +1605,7 @@ export class SandboxSessionService {
     },
   ): Promise<void> {
     const live = { handle: ctx.handle, bootImage: ctx.bootImage };
-    const dir = CAPTURE_DIR;
-    const limit = this.deps.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
-    // The tar is rooted at `/` and names the directory, NOT taken from inside it. An image layer's paths are
-    // root-relative, so `tar -C /everdict .` produces `./proj/…`, which unpacks to `/proj/…` — the files
-    // land beside the place they came from and the world boots looking untouched. Found by a live drill,
-    // where the snapshot published cleanly and the next session read the OLD file.
-    const captureRoot = dir.replace(/^\/+/, "");
-    // `tar | gzip | base64 -w0` — one pipeline, so nothing lands on the container's disk. The size check runs
-    // in the container too: refusing after transferring 4 GiB would be a refusal that already cost the money.
-    const sized = await live.handle.exec(`tar -C / -czf - ${shq(captureRoot)} | wc -c`, {
-      timeoutSec: CAPTURE_TIMEOUT_SEC,
-    });
-    const bytes = Number.parseInt(sized.stdout.trim(), 10);
-    if (Number.isFinite(bytes) && bytes > limit)
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { run: input.runId, bytes, limit },
-        `This world's ${dir} is ${bytes} bytes compressed, past the ${limit}-byte capture bound — snapshot from a host-attached driver, or set EVERDICT_WORLD_MAX_CAPTURE_BYTES.`,
-      );
-    const captured = await live.handle.exec(`tar -C / -czf - ${shq(captureRoot)} | base64 -w0`, {
-      timeoutSec: CAPTURE_TIMEOUT_SEC,
-    });
-    if (captured.exitCode !== 0)
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { run: input.runId, dir },
-        `Could not capture ${dir}: ${clamp(captured.stderr || captured.stdout)}`,
-      );
-    const layerGzip = Buffer.from(captured.stdout.trim(), "base64");
+    const layerGzip = await this.captureRoots(live.handle, [CAPTURE_DIR], input.runId);
     await ctx.publishLayer({
       tenant: input.tenant,
       world: input.world,
@@ -1642,8 +1614,85 @@ export class SandboxSessionService {
       baseReference: baseReferenceOf(live.bootImage),
       baseImage: live.bootImage,
       layerGzip,
-      createdBy: `everdict snapshot of ${dir} (session ${input.runId})`,
+      createdBy: `everdict snapshot of ${CAPTURE_DIR} (session ${input.runId})`,
     });
+  }
+
+  // ── THE ONE CAPTURE PIPELINE (a world's snapshot and a campaign's candidate build share it) ───────────
+  //
+  // The tar is rooted at `/` and names the directories, NOT taken from inside them. An image layer's paths are
+  // root-relative, so `tar -C /everdict .` produces `./proj/…`, which unpacks to `/proj/…` — the files land
+  // beside the place they came from and the image boots looking untouched. Found by a live drill, where the
+  // snapshot published cleanly and the next session read the OLD file.
+  //
+  // `tar | gzip | base64 -w0` — one pipeline, so nothing lands on the container's disk. The size check runs in
+  // the container too: refusing after transferring 4 GiB would be a refusal that already cost the money.
+  private async captureRoots(handle: ComputeHandle, roots: readonly string[], runId: string): Promise<Buffer> {
+    const limit = this.deps.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
+    const relative = roots.map((r) => shq(r.replace(/^\/+/, ""))).join(" ");
+    const label = roots.join(", ");
+    const sized = await handle.exec(`tar -C / -czf - ${relative} | wc -c`, { timeoutSec: CAPTURE_TIMEOUT_SEC });
+    const bytes = Number.parseInt(sized.stdout.trim(), 10);
+    if (Number.isFinite(bytes) && bytes > limit)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId, bytes, limit },
+        `${label} is ${bytes} bytes compressed, past the ${limit}-byte capture bound — snapshot from a host-attached driver, or set EVERDICT_WORLD_MAX_CAPTURE_BYTES.`,
+      );
+    const captured = await handle.exec(`tar -C / -czf - ${relative} | base64 -w0`, { timeoutSec: CAPTURE_TIMEOUT_SEC });
+    if (captured.exitCode !== 0)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { run: runId, roots },
+        `Could not capture ${label}: ${clamp(captured.stderr || captured.stdout)}`,
+      );
+    return Buffer.from(captured.stdout.trim(), "base64");
+  }
+
+  // ── PUBLISH A BUILD AS A LAYER ON THE IMAGE THIS SESSION BOOTED (code-evolution-loop.md, D2) ─────────
+  //
+  // The campaign's candidate build: a session booted from a harness slot's image ran the template's build
+  // steps, and the declared roots are published as ONE layer on that base into the caller's repository in the
+  // managed store — the same registry-protocol path a world snapshot takes, with the repository and tag the
+  // BUILD chooses rather than the world's `v<n>`. Nothing here registers a capability; the build service that
+  // called it mints the harness version from the digest it gets back.
+  async publishBuildLayer(
+    actor: SandboxActor,
+    runId: string,
+    input: { repository: string; tag: string; roots: string[]; createdBy: string },
+  ): Promise<{ digest: string }> {
+    this.sweep();
+    const live = this.sessions.get(runId);
+    if (!live || live.tenant !== actor.tenant)
+      throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
+    if (live.createdBy !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can publish.");
+    const handle = live.handle;
+    const bootImage = live.bootImage;
+    if (!handle || bootImage === undefined)
+      throw new BadRequestError("BAD_REQUEST", { run: runId }, "This session holds no container — nothing to publish.");
+    const publishLayer = this.deps.publishLayerSnapshot;
+    if (!publishLayer)
+      throw new BadRequestError("BAD_REQUEST", {}, "Registry layer publishing is not configured on this deployment.");
+    if (input.roots.length === 0 || input.roots.some((r) => !r.startsWith("/")))
+      throw new BadRequestError("BAD_REQUEST", { roots: input.roots }, "capture roots must be absolute paths");
+    const layerGzip = await this.captureRoots(handle, input.roots, runId);
+    const published = await publishLayer({
+      tenant: live.tenant,
+      world: input.repository, // the publisher's "world" IS the repository name in the workspace namespace
+      tag: input.tag,
+      baseReference: baseReferenceOf(bootImage),
+      baseImage: bootImage,
+      layerGzip,
+      createdBy: input.createdBy,
+    });
+    live.trace.push({
+      t: live.t++,
+      kind: "env_action",
+      action: "session.build_published",
+      detail: { repository: input.repository, tag: input.tag, digest: published.digest, roots: input.roots },
+    });
+    return { digest: published.digest };
   }
 
   // The snapshot core (live and crash paths share it): mint the next v<n> tag → commit+push HOST-side with

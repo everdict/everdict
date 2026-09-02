@@ -402,6 +402,7 @@ describe("the code-evolve example composes delegation into the campaign", () => 
       "campaign_decision",
       "adopt_campaign_candidate",
       "merge_campaign_candidate",
+      "build_campaign_candidate",
       "oracle",
       "changed files",
       "Do NOT merge",

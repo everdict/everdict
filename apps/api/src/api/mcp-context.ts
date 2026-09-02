@@ -26,6 +26,7 @@ import type { SpanAttrMappingService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
   CampaignAdoptionService,
+  CampaignBuildService,
   CampaignService,
   CheckpointService,
   CycleService,
@@ -127,6 +128,8 @@ export interface McpDeps {
   campaignService?: CampaignService; // evolution-campaign settlement — open/round/decision/settle
   // The consumer of what a settle authorized — the MCP twin of POST /campaigns/:id/adopt (BFF↔MCP parity).
   campaignAdoption?: CampaignAdoptionService;
+  // Everdict builds a code-evolution candidate image into its own managed store (code-evolution-loop.md, D2).
+  campaignBuild?: CampaignBuildService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/list/get
   taskService?: TaskService; // workspace task ledger — cross-agent coordination
   // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.

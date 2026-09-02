@@ -480,6 +480,7 @@ export type {
   AdoptionOperationStore,
   CampaignAppendOutcome,
   CampaignCloseOutcome,
+  CampaignBuildStore,
   EvolutionCampaignStore,
 } from "./ports/evolution-campaign-store.js";
 export {
@@ -492,6 +493,12 @@ export {
   type NewRoundInput,
   type TeamAccess,
 } from "./evolution/campaign-service.js";
+export {
+  CampaignBuildService,
+  type BuildSession,
+  type CampaignBuildDeps,
+  type StartBuildInput,
+} from "./evolution/campaign-build-service.js";
 export {
   adoptedImageReach,
   type AdoptedImageReachDeps,

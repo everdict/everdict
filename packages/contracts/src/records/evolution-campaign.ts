@@ -226,8 +226,60 @@ export const CandidateSourceSchema = z.object({
   prNumber: z.number().int().optional(),
   runUrl: z.string().optional(), // the CI run that built and evaluated it
   pinOverrides: z.record(z.string()).optional(), // submit-time ephemeral pins (slot → image), when the batch swapped one
+  // ── WHEN EVERDICT BUILT THE CANDIDATE ITSELF (docs/architecture/code-evolution-loop.md, D2) ───────
+  //
+  // `source: "everdict-build"`: the coordinates above came from the campaign's own BUILD record — the commit
+  // Everdict checked out and observed (`git rev-parse HEAD` in the build session), the image it published
+  // and the base it published it on. Everdict's word about bytes it produced, which outranks a scorecard
+  // origin's caller-authored coordinates whenever both exist for one candidate version.
+  image: z.string().optional(), // the candidate image, digest-pinned, in the managed store
+  baseImage: z.string().optional(), // the slot's image the build extended
+  buildId: z.string().optional(),
 });
 export type CandidateSource = z.infer<typeof CandidateSourceSchema>;
+
+// ── A CANDIDATE BUILT BY EVERDICT (docs/architecture/code-evolution-loop.md, D2) ─────────────────────
+//
+// The campaign's own record of turning a commit into a candidate: which slot, from which repository at which
+// commit, on which base, into which image, minted as which instance version. Born `building` when the build
+// session starts and settled `built` or `failed` by the build itself — never by the caller. `logRound` reads
+// a `built` record whose `candidateVersion` is the round's candidate and fills `candidateSource` from it.
+export const CampaignBuildStateSchema = z.enum(["building", "built", "failed"]);
+export type CampaignBuildState = z.infer<typeof CampaignBuildStateSchema>;
+
+export const CampaignBuildRecordSchema = z.object({
+  id: z.string().min(1),
+  tenant: z.string().min(1),
+  campaignId: z.string().min(1),
+  slot: z.string().min(1), // the template service name, or "image" for a command harness
+  source: z.object({
+    git: z.string().min(1),
+    repo: z.string().optional(), // "owner/name"
+    ref: z.string().optional(), // what the caller asked to check out (branch, tag or sha)
+    sha: z.string().optional(), // what the build OBSERVED checked out — written by the build, not the caller
+    prNumber: z.number().int().optional(),
+  }),
+  base: z.object({ version: z.string().min(1), image: z.string().min(1) }), // the instance version and slot image extended
+  state: CampaignBuildStateSchema,
+  sessionRunId: z.string().optional(), // the build session (a sandbox run) — its trajectory is the build log
+  image: z.object({ repository: z.string(), tag: z.string(), ref: z.string(), digest: z.string() }).optional(),
+  candidateVersion: z.string().optional(), // the instance version minted from the digest
+  receipt: z
+    .object({
+      steps: z.array(z.string()),
+      stepsDigest: z.string(),
+      workDir: z.string(),
+      capture: z.array(z.string()),
+      startedAt: z.string(),
+      finishedAt: z.string(),
+    })
+    .optional(),
+  error: z.string().max(4000).optional(),
+  createdBy: z.string().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CampaignBuildRecord = z.infer<typeof CampaignBuildRecordSchema>;
 
 // One hypothesis tested. The verdict is DERIVED by the service from the one production diff predicate
 // (trials significance + experiment identity) — never accepted from the caller, which would let the loop

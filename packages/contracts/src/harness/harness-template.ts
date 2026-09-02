@@ -32,8 +32,37 @@ export const HarnessCategorySchema = z.string().min(1);
 // Service structure. slot = the key name the instance pins (name if unspecified). `image` is the DEFAULT for that
 // slot: without it every instance had to re-state every service's image just to vary one, which is what pushed
 // "same shape, one image different" back into editing the template. Unset = the pin is required (previous behavior).
+// ── WHERE A SLOT'S CODE LIVES, AND HOW EVERDICT BUILDS ITS IMAGE FROM A COMMIT ────────────────────────
+//
+// A code-evolution campaign changes the repository behind a slot and needs the image that change produces —
+// built by Everdict into its own managed store, never by an outside CI (docs/architecture/code-evolution-loop.md,
+// D2). The recipe is part of the TEMPLATE: it is frozen with the template version, so "how this harness is
+// made" is part of the harness's identity rather than a step somebody remembers.
+//
+// The build is "the slot's base image + one layer": a build session boots the slot's current image, clones the
+// repository at the commit, runs `steps` in `workDir`, and publishes `capture` (default: the workDir) as a layer
+// on that base through the registry protocol — no daemon, no Dockerfile builder. What the base contains is the
+// author's (their Dockerfile); what the commit adds is Everdict's to capture and to name.
+export const HarnessSourceSchema = z.object({
+  git: z.string().min(1), // the clone URL (a private repository needs the workspace GitHub App on its owner)
+  repo: z.string().min(1).optional(), // "owner/name", when the URL is a GitHub repository — the pull-request coordinate
+});
+export type HarnessSource = z.infer<typeof HarnessSourceSchema>;
+
+export const HarnessBuildSchema = z.object({
+  steps: z.array(z.string().min(1)).min(1), // run in order, in workDir, inside the base image
+  // Absolute, because the capture is a tar of paths from `/` and the clone lands here. Default: a directory the
+  // base image is unlikely to own, so the layer carries the build and nothing the base already had.
+  workDir: z.string().min(1).regex(/^\//, "build.workDir must be an absolute path").default("/everdict/build"),
+  capture: z.array(z.string().min(1).regex(/^\//, "capture paths must be absolute")).optional(), // default [workDir]
+  timeoutSec: z.number().int().positive().max(7200).optional(), // the whole build's bound (default 1800)
+});
+export type HarnessBuild = z.infer<typeof HarnessBuildSchema>;
+
 export const TemplateServiceSchema = TopologyServiceSchema.extend({
   slot: z.string().optional(),
+  source: HarnessSourceSchema.optional(),
+  build: HarnessBuildSchema.optional(),
 });
 export type TemplateService = z.infer<typeof TemplateServiceSchema>;
 
@@ -84,6 +113,10 @@ export const CommandTemplateSpecSchema = z.object({
   kind: z.literal("command"),
   ...templateBase,
   image: z.string().optional(), // default when pins.image is absent
+  // The scaffold's own repository and build recipe — the `image` slot is what a code-evolution campaign rebuilds
+  // (see HarnessSourceSchema / HarnessBuildSchema above).
+  source: HarnessSourceSchema.optional(),
+  build: HarnessBuildSchema.optional(),
   resources: ServiceResourcesSchema.optional(), // job-level resource request (cpu/memoryMb) — carried into the resolved spec
   workDir: z.string().optional(),
   setup: z.array(z.string()).default([]),

@@ -1,5 +1,6 @@
 import type {
   AdoptionOperation,
+  CampaignBuildRecord,
   CampaignClose,
   CampaignRound,
   CampaignState,
@@ -159,4 +160,34 @@ export interface AdoptionOperationStore {
     outcome: "open" | "unknown" | "orphaned";
     nextAttemptAt: string;
   }): Promise<boolean>;
+}
+
+// ── THE CANDIDATES A CAMPAIGN BUILT (docs/architecture/code-evolution-loop.md, D2) ───────────────────
+//
+// Everdict's own record of turning a commit into a candidate image: born `building` when the build session
+// starts, settled `built` (image, digest, minted version, receipt) or `failed` (the reason) by the build
+// itself. The settle writes are CONDITIONAL on `building` and answer what happened — a build that lost a race
+// with its own retry, or was already settled, must not be recorded twice (rule `protocol` L1).
+export interface CampaignBuildStore {
+  create(record: CampaignBuildRecord, events?: OutboxEvent[]): Promise<void>;
+  get(tenant: string, id: string): Promise<CampaignBuildRecord | undefined>;
+  forCampaign(tenant: string, campaignId: string): Promise<CampaignBuildRecord[]>;
+  complete(
+    tenant: string,
+    id: string,
+    result: {
+      sha: string;
+      image: NonNullable<CampaignBuildRecord["image"]>;
+      candidateVersion: string;
+      receipt: NonNullable<CampaignBuildRecord["receipt"]>;
+      at: string;
+    },
+    events?: OutboxEvent[],
+  ): Promise<"completed" | "not_building" | "absent">;
+  fail(
+    tenant: string,
+    id: string,
+    failure: { error: string; sha?: string; at: string },
+    events?: OutboxEvent[],
+  ): Promise<"failed" | "not_building" | "absent">;
 }

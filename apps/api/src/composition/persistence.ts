@@ -29,6 +29,7 @@ import type {
   AgentMemberPreferenceStore,
   AgentTaskStore,
   ApprovalStore,
+  CampaignBuildStore,
   CycleStore,
   EnvelopeStore,
   EventConsumerStateStore,
@@ -60,6 +61,7 @@ import {
   InMemoryBrowserProfileStore,
   InMemoryBudgetStore,
   InMemoryCallbackStore,
+  InMemoryCampaignBuildStore,
   InMemoryCapabilityStore,
   InMemoryCommentStore,
   InMemoryCycleStore,
@@ -115,6 +117,7 @@ import {
   PgBrowserProfileStore,
   PgBudgetStore,
   PgCallbackStore,
+  PgCampaignBuildStore,
   PgCancellationStore,
   PgCapabilityGenerationStore,
   PgCapabilityStore,
@@ -293,6 +296,8 @@ export interface Persistence {
   issueStore: IssueStore;
   // The evolution-campaign settlement (docs/architecture/evolution-lineage.md, Track D).
   campaignStore: EvolutionCampaignStore;
+  // The candidates a campaign BUILT into the managed store (docs/architecture/code-evolution-loop.md, D2).
+  campaignBuildStore: CampaignBuildStore;
   // The authorization a registry write must present to claim a campaign proved its version
   // (arch-review 72 P0). Separate from the campaign store because the CONSUMER is the effect — and an
   // implementation nobody accepts is a feature unreachable by construction, which is how this one shipped.
@@ -386,6 +391,7 @@ export async function makePersistence(): Promise<Persistence> {
     // separate objects, so the composition root hands the issues over — otherwise a delete would leave `labelIds`
     // pointing at a label that no longer exists, and the two bindings would not be interchangeable.
     const inMemoryCampaigns = new InMemoryEvolutionCampaignStore();
+    const inMemoryCampaignBuilds = new InMemoryCampaignBuildStore();
     const inMemoryIssues = new InMemoryIssueStore();
     const inMemoryIssueLabels = new InMemoryIssueLabelStore();
     inMemoryIssueLabels.attachIssues(inMemoryIssues);
@@ -492,6 +498,7 @@ export async function makePersistence(): Promise<Persistence> {
       // One process holds both halves; the Pg deployment splits them.
       adoptionOperationStore: inMemoryCampaigns,
       campaignStore: inMemoryCampaigns,
+      campaignBuildStore: inMemoryCampaignBuilds,
       issueLabelStore: inMemoryIssueLabels,
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
@@ -566,6 +573,7 @@ export async function makePersistence(): Promise<Persistence> {
     projectUpdateStore: new PgProjectUpdateStore(client),
     issueStore: new PgIssueStore(client),
     campaignStore: new PgEvolutionCampaignStore(client),
+    campaignBuildStore: new PgCampaignBuildStore(client),
     adoptionOperationStore: new PgAdoptionOperationStore(client),
     issueLabelStore: new PgIssueLabelStore(client),
     projectStore: new PgProjectStore(client),

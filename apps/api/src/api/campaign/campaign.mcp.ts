@@ -259,6 +259,66 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
   );
 
   server.registerTool(
+    "build_campaign_candidate",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Build a code-evolution candidate image INTO Everdict's own managed store — no outside CI. Everdict boots " +
+        "the harness slot's base image, checks out the commit (ref/repo/prNumber), runs the template's frozen " +
+        "build steps, and publishes the result as one layer, minting a new harness instance version. Returns the " +
+        "`building` record; poll get_campaign_builds or subscribe to campaign.candidate_built for the result. " +
+        "The round then logs that minted version as its candidate, and its candidateSource is Everdict's own " +
+        "account of the build (execution_world held, no identity waiver). Requires scorecards:run and " +
+        "harnesses:register.",
+      inputSchema: {
+        id: z.string().describe("campaign id"),
+        ref: z.string().describe("What to check out — a pull-request head sha, a branch, or a tag"),
+        repo: z.string().optional().describe('"owner/name" when the ref is a GitHub pull request'),
+        pr_number: z.number().int().optional(),
+        slot: z.string().optional().describe("Which slot to rebuild — omit when the template has one buildable slot"),
+      },
+    },
+    ({ id, ref, repo, pr_number, slot }) =>
+      run(principal, "scorecards:run", async () => {
+        if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
+        const campaign = await campaigns.get(ws, id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+        gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        gate(principal, "harnesses:register", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        const record = await deps.campaignBuild.start(
+          ws,
+          {
+            campaignId: id,
+            ref,
+            ...(repo !== undefined ? { repo } : {}),
+            ...(pr_number !== undefined ? { prNumber: pr_number } : {}),
+            ...(slot !== undefined ? { slot } : {}),
+          },
+          principal.subject,
+        );
+        const build = deps.campaignBuild;
+        void build.run(ws, record.id).catch(() => undefined);
+        return ok(record);
+      }),
+  );
+
+  server.registerTool(
+    "get_campaign_builds",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "Everdict's build ledger for a campaign — each candidate build's commit, image, minted version and state",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) =>
+      run(principal, "scorecards:read", async () => {
+        if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
+        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
+        return ok(await deps.campaignBuild.forCampaign(ws, id));
+      }),
+  );
+
+  server.registerTool(
     "merge_campaign_candidate",
     {
       annotations: { readOnlyHint: false },

@@ -90,6 +90,10 @@ function template(fact: DomainFact): string | undefined {
         : `Adopted ${s(p, "candidateType")} ${s(p, "candidateId")}@${s(p, "version")} confirmed against the bytes it already held — proved by scorecard ${s(p, "provingScorecardId")}`;
     case "campaign.adoption_merged":
       return `Adopted ${s(p, "candidateId")}@${s(p, "version")} merged — pull request #${s(p, "prNumber")} of ${s(p, "repo")} at ${s(p, "mergedSha")}`;
+    case "campaign.candidate_built":
+      return `Campaign built candidate ${s(p, "candidateVersion")} for slot ${s(p, "slot")} from ${s(p, "sha")} — ${s(p, "image")}`;
+    case "campaign.candidate_build_failed":
+      return `Campaign candidate build for slot ${s(p, "slot")} failed — ${s(p, "error")}`;
     case "campaign.adoption_completed":
       return `Adoption of ${s(p, "candidateId")}@${s(p, "version")} settled its issue ${s(p, "issueId")}`;
     case "issue_label.created":

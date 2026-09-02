@@ -2824,6 +2824,27 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // code-evolution-loop.md D2. Everdict builds the candidate into its own store; a failed build must settle
+    // the record `failed`, not leave a dangling `building` row nobody converges. Neutralizing the fail write
+    // leaves it building, and the service suite must notice.
+    name: "Evolve — a failed build leaves its record building",
+    file: "packages/application-control/src/evolution/campaign-build-service.ts",
+    from: "      await this.deps.builds",
+    to: "      if (false) await this.deps.builds",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/campaign-build-service.counterexample.test.ts"],
+  },
+  {
+    // …and Everdict's own build account outranks the scorecard origin (D2): the candidate's provenance is the
+    // commit Everdict observed, not the caller's coordinates. Neutralizing the preference reads the origin.
+    name: "Evolve — the round prefers the caller's origin over Everdict's build account",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "  const candidateSource = builtSource ?? candidateSourceOf(snapshot.candidate);",
+    to: "  const candidateSource = candidateSourceOf(snapshot.candidate);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

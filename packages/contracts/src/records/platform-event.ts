@@ -131,6 +131,10 @@ export const PLATFORM_EVENT_KINDS = [
   // registered" and "the code is on main" are two effects a reader can want separately.
   "campaign.adoption_merged",
   "campaign.adoption_completed",
+  // Everdict built a candidate image for a campaign round from a commit, into its own store — or could not
+  // (docs/architecture/code-evolution-loop.md, D2). The driver waits on the first to run the round's batch.
+  "campaign.candidate_built",
+  "campaign.candidate_build_failed",
   // A team's iteration was planned, or closed with whatever was left. `cycle.completed` carries `carriedOver`,
   // which is the number a retro actually asks for — and the wake signal for "write the iteration summary".
   "cycle.created",

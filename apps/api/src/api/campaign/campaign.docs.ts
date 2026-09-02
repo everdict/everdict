@@ -3,6 +3,7 @@ import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
+import { BuildCampaignBodySchema } from "./request/build-campaign.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
 import { MergeCampaignBodySchema } from "./request/merge-campaign.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
@@ -13,7 +14,7 @@ import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 // pure adoption gate's answer. Authz reuses the scorecard actions (no new action): read = scorecards:read,
 // write = scorecards:run. Design: docs/architecture/evolution-lineage.md (Track D).
 export const campaignDocs: Record<
-  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption" | "adopt" | "merge",
+  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption" | "adopt" | "merge" | "build" | "builds",
   FastifySchema
 > = {
   open: {
@@ -107,6 +108,27 @@ export const campaignDocs: Record<
     },
   },
 
+  build: {
+    summary: "Build a code-evolution candidate image into Everdict's own managed store",
+    description:
+      "Everdict boots the harness slot's base image, checks out the commit, runs the template's frozen build " +
+      "steps, and publishes the result as one layer in the managed registry — no outside CI, no Dockerfile " +
+      "builder. The commit (ref/repo/prNumber) is the caller's; where the code lives and how it builds are the " +
+      "template's `source` + `build` recipe. Returns the `building` record; the build runs in the background and " +
+      "settles `built` (with the minted candidate version) or `failed`, emitting campaign.candidate_built.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    body: toJsonSchema(BuildCampaignBodySchema),
+    response: { 202: { description: "The building record" }, ...errorResponses(400, 401, 403, 404) },
+  },
+  builds: {
+    summary: "The candidate images this campaign built",
+    description:
+      "Everdict's own build ledger for the campaign — each build's commit, image, minted version and receipt.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: { 200: { description: "The campaign's builds" }, ...errorResponses(401, 403, 404) },
+  },
   merge: {
     summary: "Pay the adoption's code debt — merge the pull request the adopted bytes were built from",
     description:
