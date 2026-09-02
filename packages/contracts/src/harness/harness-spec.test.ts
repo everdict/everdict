@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   ExecArtifactSchema,
   FrontDoorSpecSchema,
+  HarnessSpecSchema,
   ServiceHarnessSpecSchema,
   TopologyDependencySchema,
+  commandConversationDefects,
   injectTemplateFields,
 } from "./harness-spec.js";
 
@@ -162,5 +164,35 @@ describe("ExecArtifactSchema.checksum — the go-getter pin grammar is validated
   it("keeps the unpinned forms parsing — the bare string and the object with no checksum (back-compat)", () => {
     expect(ExecArtifactSchema.safeParse("https://dl.example.com/ui-driver.zip").success).toBe(true);
     expect(ExecArtifactSchema.safeParse({ source: "https://dl.example.com/ui-driver.zip" }).success).toBe(true);
+  });
+});
+
+// ── A COMMAND SPEC'S CONVERSATION CONTRACT IS CHECKED WHERE IT ENTERS (docs/command-harness.md) ─────
+describe("CommandHarnessSpec.conversation — a resume contract with a slot to land in", () => {
+  const base = {
+    kind: "command" as const,
+    id: "codex",
+    version: "1.0.0",
+    command: "codex exec {{conversation}} --json {{task}}",
+    conversation: { resume: "resume {{resume}}", token: { pattern: "thread_id\\W+([0-9a-f-]{36})" } },
+  };
+
+  it("accepts a contract whose command carries the slot and whose resume carries the token", () => {
+    expect(HarnessSpecSchema.safeParse(base).success).toBe(true);
+    expect(commandConversationDefects(base)).toEqual([]);
+  });
+
+  it("refuses a contract with no {{conversation}} slot, and a resume with no {{resume}} — a marker nobody honours", () => {
+    const noSlot = HarnessSpecSchema.safeParse({ ...base, command: "codex exec --json {{task}}" });
+    expect(noSlot.success).toBe(false);
+    if (!noSlot.success)
+      expect(noSlot.error.issues.map((i) => i.message).join(" ")).toMatch(/\{\{conversation\}\} slot/);
+    const noToken = HarnessSpecSchema.safeParse({ ...base, conversation: { ...base.conversation, resume: "resume" } });
+    expect(noToken.success).toBe(false);
+  });
+
+  it("a spec that declares no conversation is one-shot and parses as before", () => {
+    const { conversation: _omit, ...oneShot } = base;
+    expect(HarnessSpecSchema.safeParse({ ...oneShot, command: "codex exec --json {{task}}" }).success).toBe(true);
   });
 });

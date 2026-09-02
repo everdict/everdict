@@ -88,6 +88,30 @@ judges keep reading exactly one answer.
   scope). Tag mode needs zero id coordination: the agent keeps its own trace ids. Empty pulls retry (3×,
   flush lag).
 
+## Conversations (`conversation`)
+
+A command harness is one-shot by default: each `run()` is a fresh process. A spec that declares how its CLI
+resumes becomes CONVERSATIONAL — the adapter carries the `conversational` marker, so it can be a delegation
+profile's agent or a playground conversation (`create_sandbox { harness, conversation: true }`), which until
+this only the built-in `claude-code` adapter could.
+
+```json
+"command": "codex exec {{conversation}} --json {{task}}",
+"conversation": {
+  "resume": "resume {{resume}}",
+  "token": { "pattern": "thread_id\\W+([0-9a-f-]{36})" }
+}
+```
+
+- `{{conversation}}` in `command` is the slot: on a first turn it expands to nothing; on a continued turn it
+  expands to `resume` with `{{resume}}` replaced by the previous turn's token, shell-quoted.
+- `token.pattern` is a regular expression run over the process's stdout and stderr; its FIRST capture group
+  (or the whole match) is the token that continues the next turn, reported through the run context's
+  `onToken`. A CLI that mints a new id per resume is handled — the caller keeps the last token reported.
+- A spec that declares `conversation` without the `{{conversation}}` slot, or a `resume` without `{{resume}}`,
+  is refused at registration (`commandConversationDefects` in `@everdict/contracts`): a contract with no place
+  to land is a declaration nobody honours.
+
 ## Security
 `setup`/`command` are **arbitrary user code** → they run only inside a **trust zone** (gVisor/Kata + per-tenant
 namespace + warm-pool keying), the isolation the runtime already enforces for untrusted tenant code. Pin

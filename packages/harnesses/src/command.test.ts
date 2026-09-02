@@ -628,3 +628,55 @@ describe("CommandHarness — trace:file (the self-reported plane)", () => {
     expect(answer?.at).toBe(new Date(1_700_000_000_000).toISOString()); // ours, so stamped
   });
 });
+
+// ── A DECLARATIVE CLI CAN HOLD A CONVERSATION (docs/architecture/code-evolution-loop.md, "which agents") ──
+//
+// Only a conversational harness can be a delegation profile, and until the `conversation` contract existed the
+// built-in claude-code adapter was the only one. A spec that says how its CLI resumes, and how to read the token
+// that continues the next turn, is one Codex or claude-code-router can be registered as.
+describe("CommandHarness — the conversation contract", () => {
+  const codex = spec({
+    id: "codex",
+    command: "codex exec {{conversation}} --json {{task}}",
+    conversation: { resume: "resume {{resume}}", token: { pattern: "thread_id\\W+([0-9a-f-]{36})" } },
+  });
+  const THREAD = "0f9d6b2e-1111-4c1c-9a1a-2b3c4d5e6f70";
+
+  it("carries the conversational marker only when the spec declares how it resumes", () => {
+    expect(new CommandHarness(codex).conversational).toBe(true);
+    expect(new CommandHarness(spec()).conversational).toBeUndefined();
+  });
+
+  it("a first turn expands {{conversation}} to nothing, and reports the token its output names", async () => {
+    const { compute, execs } = fakeCompute();
+    compute.exec = async (cmd, opts) => {
+      execs.push({ cmd, env: opts?.env, cwd: opts?.cwd });
+      return { exitCode: 0, stdout: `{"thread_id":"${THREAD}"}\nok\n`, stderr: "" };
+    };
+    const tokens: string[] = [];
+    await collect(
+      new CommandHarness(codex).run(compute, "fix it", { ...ctx, conversation: { onToken: (t) => tokens.push(t) } }),
+    );
+    expect(execs[0]?.cmd).toBe("codex exec  --json 'fix it'");
+    expect(tokens).toEqual([THREAD]);
+  });
+
+  it("a resumed turn fills the resume fragment with the previous token, shell-quoted", async () => {
+    const { compute, execs } = fakeCompute();
+    await collect(new CommandHarness(codex).run(compute, "continue", { ...ctx, conversation: { resume: THREAD } }));
+    expect(execs[0]?.cmd).toBe(`codex exec resume '${THREAD}' --json 'continue'`);
+  });
+
+  it("a one-shot spec leaves a stray {{conversation}} slot empty rather than literal, and reports no token", async () => {
+    const { compute, execs } = fakeCompute();
+    const tokens: string[] = [];
+    await collect(
+      new CommandHarness(spec({ command: "aider {{conversation}} --message {{task}} ." })).run(compute, "t", {
+        ...ctx,
+        conversation: { resume: "ignored", onToken: (t) => tokens.push(t) },
+      }),
+    );
+    expect(execs[0]?.cmd).toBe("aider  --message 't' .");
+    expect(tokens).toEqual([]);
+  });
+});

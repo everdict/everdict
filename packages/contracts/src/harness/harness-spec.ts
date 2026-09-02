@@ -701,12 +701,45 @@ export const CommandHarnessSpecSchema = z.object({
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
   // Opt-in live in-run screen capture (self-driven browser/GUI in the case container — e.g. browser-use over CDP).
   liveScreen: LiveScreenSpecSchema.optional(),
+  // ── HOW THIS CLI CONTINUES A CONVERSATION (docs/architecture/code-evolution-loop.md, "which agents") ──
+  //
+  // Only a CONVERSATIONAL harness can be a delegation profile or a playground conversation, and until this
+  // existed only the built-in claude-code adapter was one — Codex, claude-code-router and every other CLI were
+  // one-shot. Declared, the adapter honours `RunContext.conversation`: `{{conversation}}` in `command` expands
+  // to `resume` with `{{resume}}` replaced by the previous turn's token (shell-quoted), or to nothing on the
+  // first turn; and the token that continues THIS turn is captured from the process output by `token.pattern`
+  // (a regular expression whose FIRST capture group is the token) and reported through `onToken`. The command
+  // MUST carry the `{{conversation}}` slot — a contract with no place to land is a declaration nobody honours.
+  conversation: z
+    .object({
+      resume: z.string().min(1), // e.g. "--resume {{resume}}" · "exec resume {{resume}}"
+      token: z.object({ pattern: z.string().min(1) }), // e.g. "session_id\\W+([0-9a-f-]{36})"
+    })
+    .optional(),
 });
 export type CommandHarnessSpec = z.infer<typeof CommandHarnessSpecSchema>;
 
-export const HarnessSpecSchema = z.discriminatedUnion("kind", [
-  ProcessHarnessSpecSchema,
-  ServiceHarnessSpecSchema,
-  CommandHarnessSpecSchema,
-]);
+// A `conversation` contract that the command gives no slot to is refused at the boundary rather than honoured
+// silently by never resuming — the same "a declaration is not constitutional until consumed" law as the rest.
+export function commandConversationDefects(spec: { command: string; conversation?: { resume: string } }): string[] {
+  const defects: string[] = [];
+  if (spec.conversation !== undefined) {
+    if (!spec.command.includes("{{conversation}}"))
+      defects.push("a command harness declaring `conversation` must carry the {{conversation}} slot in its command");
+    if (!spec.conversation.resume.includes("{{resume}}"))
+      defects.push("conversation.resume must carry the {{resume}} slot the previous turn's token fills");
+  }
+  return defects;
+}
+
+export const HarnessSpecSchema = z
+  .discriminatedUnion("kind", [ProcessHarnessSpecSchema, ServiceHarnessSpecSchema, CommandHarnessSpecSchema])
+  // A command spec's conversation contract is checked where the spec enters (every register door parses
+  // through this union): a `conversation` with no slot to land in would otherwise be a marker that says
+  // "conversational" over a CLI that never resumes.
+  .superRefine((spec, ctx) => {
+    if (spec.kind !== "command") return;
+    for (const message of commandConversationDefects(spec))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conversation"], message });
+  });
 export type HarnessSpec = z.infer<typeof HarnessSpecSchema>;

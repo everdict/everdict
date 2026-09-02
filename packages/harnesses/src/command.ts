@@ -47,12 +47,16 @@ function defaultRunId(): string {
 export class CommandHarness implements EvaluableHarness {
   readonly id: string;
   readonly version: string;
+  // The capability marker `create_sandbox` and a delegation profile check BEFORE provisioning: a spec that
+  // declares how it resumes is a harness that can hold a conversation; one that does not stays one-shot.
+  readonly conversational?: true;
   constructor(
     private readonly spec: CommandHarnessSpec,
     private readonly opts: CommandHarnessOptions = {},
   ) {
     this.id = spec.id;
     this.version = spec.version;
+    if (spec.conversation !== undefined) this.conversational = true;
   }
 
   // Working directory: spec workDir (an absolute path like "/tmp" for os-use etc.) > opts.workDir > default "work".
@@ -221,10 +225,19 @@ export class CommandHarness implements EvaluableHarness {
     const modelSlot = typeof this.spec.model === "string" ? this.spec.model : (this.spec.model?.ref ?? "");
     // {{task}} is quoted to prevent shell injection (do not wrap it in quotes yourself). {{model}}/{{run_id}} are token substitutions.
     // Other {{var}} are substituted from params[var] (the CLI-flag channel for instance variation) — substitute the reserved words first so params can't override them.
+    // {{conversation}}: the spec's resume fragment with the previous turn's token (shell-quoted) when the caller
+    // is continuing a conversation, nothing on a first turn — and nothing at all for a spec that declared no
+    // conversation contract, so a stray slot in a one-shot command reads as empty rather than as the literal.
+    const conversationToken = ctx.conversation?.resume;
+    const conversationSlot =
+      this.spec.conversation !== undefined && conversationToken !== undefined
+        ? this.spec.conversation.resume.replaceAll("{{resume}}", shq(conversationToken))
+        : "";
     let cmd = this.spec.command
       .replaceAll("{{task}}", shq(task))
       .replaceAll("{{model}}", modelSlot)
-      .replaceAll("{{run_id}}", runId);
+      .replaceAll("{{run_id}}", runId)
+      .replaceAll("{{conversation}}", conversationSlot);
     for (const [key, value] of Object.entries(this.spec.params ?? {})) {
       cmd = cmd.replaceAll(`{{${key}}}`, value);
     }
@@ -246,6 +259,15 @@ export class CommandHarness implements EvaluableHarness {
         action: "command.exit",
         detail: { command: cmd, exitCode: res.exitCode, durationMs: Math.max(0, this.now() - startedMs) },
       };
+      // The token that continues THIS turn, read off the process output by the spec's own pattern and handed to
+      // the caller through the continuity contract — possibly a NEW token on a resumed turn (a CLI that mints a
+      // fresh session id per resume), which is why the caller keeps the last one reported.
+      const conversation = this.spec.conversation;
+      if (conversation !== undefined && ctx.conversation?.onToken !== undefined) {
+        const match = new RegExp(conversation.token.pattern, "m").exec(`${res.stdout}\n${res.stderr}`);
+        const token = match?.[1] ?? match?.[0];
+        if (token !== undefined && token !== "") ctx.conversation.onToken(token);
+      }
       // Surface a failure (exit≠0) — previously swallowed silently, so it looked like "success with an empty result" (only the score was 0).
       if (res.exitCode !== 0) {
         yield {
