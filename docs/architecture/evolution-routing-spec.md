@@ -78,6 +78,12 @@ case with a diagnosis naming no locus reads `unattributed`, and the brief says s
 
 ## §3 — The issue binds the cases, and the gate verifies THOSE cases flipped (G4.3)
 
+> **Landed 2026-09-02 (the targets half):** `frame.targets` with its creation defects
+> (`packages/contracts/src/records/evolution-campaign.ts`), the per-target verdict block derived by
+> `CampaignService.logRound`, and the gate rule in `packages/domain/src/evolution/campaign-gate.ts` — every target
+> flipped AND zero held-out regressions; a round under a targeted frame with no targets block does not adopt.
+> The issue's `case` link type and frame derivation are the second half.
+
 **The gap.** `ISSUE_LINK_TYPES` has no `case`, so an issue cannot say which cases it is about; a frame
 cannot be derived from an issue; and the gate reads `heldOut.improvements >= 1 && heldOut.regressions === 0`
 — an aggregate. A campaign opened against "these five cases fail" can adopt a candidate that improved five

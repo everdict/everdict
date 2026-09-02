@@ -26,6 +26,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame => ({
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
   oracleScope: [],
+  targets: [],
   observationPolicy: { allowDivergent: false },
   ...over,
 });
@@ -348,5 +349,64 @@ describe("the adopt answer carries where the candidate came from, and the gate d
     seq = 0;
     const losing = [round({ candidateSource: { source: "api", sha: "def" } })];
     expect(campaignAdoption(frame(), losing).kind).toBe("continue");
+  });
+});
+
+// ── THE ISSUE'S CASES HAVE TO FLIP (docs/architecture/evolution-routing-spec.md §3) ──────────────────
+//
+// RED before the rule: a frame naming targets adopted on any held-out improvement while every target still
+// failed — "the actual issue was resolved" was never asked.
+describe("[COUNTEREXAMPLE] a frame with targets adopts only when every target flipped", () => {
+  const targeted = frame({
+    scenarios: [
+      { id: "t1", heldOut: false },
+      { id: "t2", heldOut: false },
+      { id: "h1", heldOut: true },
+      { id: "h2", heldOut: true },
+    ],
+    targets: ["t1", "t2"],
+  });
+  it("held-out improvements elsewhere do NOT adopt while a target is still failing", () => {
+    const answer = campaignAdoption(targeted, [
+      round({
+        significantImprovements: 2,
+        heldOut: { improvements: 2, regressions: 0 },
+        targets: { flipped: ["t1"], unflipped: ["t2"] },
+      }),
+    ]);
+    expect(answer.kind, "adopted over an unflipped target").toBe("continue");
+  });
+  it("every target flipped and nothing held-out regressed: adopt — no held-out improvement is required", () => {
+    const answer = campaignAdoption(targeted, [
+      round({
+        significantImprovements: 2,
+        heldOut: { improvements: 0, regressions: 0 },
+        targets: { flipped: ["t1", "t2"], unflipped: [] },
+      }),
+    ]);
+    expect(answer.kind).toBe("adopt");
+  });
+  it("every target flipped but a held-out case regressed: not adopted — the fix must not cost the rest", () => {
+    const answer = campaignAdoption(targeted, [
+      round({
+        significantImprovements: 2,
+        significantRegressions: 1,
+        heldOut: { improvements: 0, regressions: 1 },
+        targets: { flipped: ["t1", "t2"], unflipped: [] },
+      }),
+    ]);
+    expect(answer.kind).toBe("continue");
+  });
+  it("a round under a targeted frame that carries no targets block could not answer, and does not adopt", () => {
+    const answer = campaignAdoption(targeted, [
+      round({ significantImprovements: 2, heldOut: { improvements: 2, regressions: 0 } }),
+    ]);
+    expect(answer.kind).toBe("continue");
+  });
+  it("without targets the aggregate rule stands unchanged", () => {
+    const answer = campaignAdoption(frame(), [
+      round({ significantImprovements: 1, heldOut: { improvements: 1, regressions: 0 } }),
+    ]);
+    expect(answer.kind).toBe("adopt");
   });
 });

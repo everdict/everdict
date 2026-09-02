@@ -37,6 +37,7 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame =>
     allowUnverifiedIdentity: false,
     allowLabelOnlyAdoption: false,
     oracleScope: [],
+    targets: [],
     observationPolicy: { allowDivergent: false },
     ...over,
   }) as unknown as CampaignFrame;

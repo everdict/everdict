@@ -78,6 +78,21 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
     if (obs?.assessed === undefined || obs.eligible === undefined) return false;
     if (obs.eligible === 0 || obs.assessed / obs.eligible < need) return false;
   }
+  // ── THE ISSUE'S OWN CASES HAVE TO FLIP (docs/architecture/evolution-routing-spec.md §3) ───────────
+  //
+  // A frame with `targets` asks a sharper question than "did anything held-out improve": did THESE cases, the
+  // ones the issue named, now pass — and did nothing held-out regress. The aggregate `improvements >= 1` is
+  // replaced by the targets, because a narrow, correct fix improves what it was asked to and nothing else, and
+  // that IS the adoption the program describes. Read from the POLICY (the frame), never from the data: a round
+  // that carries no `targets` block under a frame that declares them is a round that could not answer, and a
+  // question the round could not answer is refused rather than waved through (the minimumCoverage lesson).
+  if (frame.targets.length > 0) {
+    const t = v.targets;
+    if (t === undefined) return false;
+    const flipped = new Set(t.flipped);
+    if (!frame.targets.every((id) => flipped.has(id))) return false;
+    return held.regressions === 0;
+  }
   return held.improvements >= 1 && held.regressions === 0;
 }
 

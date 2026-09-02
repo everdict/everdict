@@ -43,6 +43,7 @@ const frame: CampaignFrame = {
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
   oracleScope: [],
+  targets: [],
   observationPolicy: { allowDivergent: false },
 };
 

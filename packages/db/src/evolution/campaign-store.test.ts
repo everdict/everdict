@@ -56,6 +56,7 @@ const frame: CampaignFrame = {
   allowUnverifiedIdentity: false,
   allowLabelOnlyAdoption: false,
   oracleScope: [],
+  targets: [],
   observationPolicy: { allowDivergent: false },
 };
 
@@ -1398,6 +1399,56 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       ).rejects.toMatchObject({ status: 500, extra: { candidateVersion: "1.0.1" } });
       // Nothing was logged: the round did not go in wearing the caller's provenance.
       expect((await store.get("acme", rec.id))?.rounds).toHaveLength(0);
+    });
+
+    it("[§3] the verdict answers the frame's targets one by one, from the same significance the held-out block reads", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = service(store);
+      const targeted: CampaignFrame = {
+        ...frame,
+        scenarios: [
+          { id: "c1", heldOut: false },
+          { id: "c2", heldOut: true },
+          { id: "c3", heldOut: true },
+        ],
+        targets: ["c1"],
+      };
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: targeted }, "alice");
+      // c1 (the target) improves significantly; c2 held-out improves; c3 held-out unchanged.
+      snapshots.set(
+        "sc-targets",
+        snapshot(
+          comparison({
+            trials: {
+              baseline: "b",
+              candidate: "c",
+              zThreshold: 1.96,
+              minDelta: 0,
+              cases: [trialCase("c1", 0.8, true), trialCase("c2", 0.6, true), trialCase("c3", 0, false)],
+            } as CampaignComparison["trials"],
+          }),
+        ),
+      );
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-targets" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.targets).toEqual({ flipped: ["c1"], unflipped: [] });
+      expect(logged.verdict.heldOut).toEqual({ improvements: 1, regressions: 0 });
+      // …and a frame without targets records no block at all — absence is the frame's, not the data's.
+      const plain = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-plain", snapshot(comparison()));
+      const { round: r2 } = await svc.logRound(
+        "acme",
+        plain.id,
+        { ...LOG, candidateScorecardId: "sc-plain" },
+        "agent:everdict",
+        {},
+      );
+      expect(r2.verdict.targets).toBeUndefined();
     });
 
     it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {

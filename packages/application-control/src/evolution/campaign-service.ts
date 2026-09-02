@@ -1091,6 +1091,17 @@ function verdictOf(
   // finally decides something.
   const heldOutIds = new Set(frame.scenarios.filter((sc) => sc.heldOut).map((sc) => sc.id));
   const heldOutCases = significant.filter((c) => heldOutIds.has(c.caseId));
+  // …and the frame's TARGETS, one by one (evolution-routing-spec.md §3): a target flipped when it improved
+  // significantly on the candidate. Derived here, from the same significance the held-out block reads, so the
+  // gate's "did the issue's cases pass" is the platform's answer and not the driver's.
+  const improved = new Set(significant.filter((c) => c.delta > 0).map((c) => c.caseId));
+  const targets =
+    frame.targets.length > 0
+      ? {
+          flipped: frame.targets.filter((id) => improved.has(id)),
+          unflipped: frame.targets.filter((id) => !improved.has(id)),
+        }
+      : undefined;
   return {
     comparable: true,
     significantImprovements: significant.filter((c) => c.delta > 0).length,
@@ -1099,6 +1110,7 @@ function verdictOf(
       improvements: heldOutCases.filter((c) => c.delta > 0).length,
       regressions: heldOutCases.filter((c) => c.delta < 0).length,
     },
+    ...(targets !== undefined ? { targets } : {}),
     // …and the exact bytes evaluated, so an adopted label can be checked against what a registry holds
     // under it (arch-review 71 P0-evolution).
     ...(snapshot.candidate.record.manifest?.harness?.specDigest !== undefined

@@ -49,6 +49,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       allowUnverifiedIdentity: false,
       allowLabelOnlyAdoption: false,
       oracleScope: [],
+      targets: [],
       observationPolicy: { allowDivergent: false },
     } as unknown as CampaignFrame;
 

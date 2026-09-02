@@ -2869,6 +2869,16 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // evolution-routing-spec.md §3. A frame with targets adopts only when every target flipped; neutralizing the
+    // rule falls back to the aggregate held-out block, and the gate suite must notice.
+    name: "Evolve — a targeted frame adopts on the aggregate while a target still fails",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "  if (frame.targets.length > 0) {",
+    to: "  if (frame.targets.length < 0) {",
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

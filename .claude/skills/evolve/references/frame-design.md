@@ -115,6 +115,14 @@ That round wins when all of these hold:
 Note the last line reads the HELD-OUT counts, not the whole round's. Improving where the loop has been
 pushing is evidence about the search, not about the capability.
 
+**`targets`** — scenario ids the campaign exists to FLIP: the cases the issue named as failing. Default empty.
+Declared, they must be frame scenarios and must NOT be held-out — a case the loop is briefed on and optimizes
+against is not a generalization population — and the gate changes shape: adopt requires EVERY target to be a
+significant improvement AND zero held-out regressions; the "at least one held-out improvement" rule is
+replaced, because a narrow, correct fix improves what it was asked to and regresses nothing. The round's
+verdict answers them one by one (`targets.flipped` / `targets.unflipped`), so a `continue` under a targeted
+frame tells you which of the issue's cases still fail.
+
 **`oracleScope`** — repository path patterns that ARE the exam: the dataset, the judge rubrics, the eval
 configs, the tests the graders run. Default empty. Non-empty means the round door reads what the candidate's
 pull request changed (from the repository the candidate scorecard's origin names) and a change inside the

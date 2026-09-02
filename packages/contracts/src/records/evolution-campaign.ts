@@ -44,6 +44,15 @@ const CampaignFrameShape = z.object({
     .array(z.object({ id: z.string().min(1).max(300), heldOut: z.boolean().default(false) }))
     .min(1)
     .max(500),
+  // ── THE CASES THIS CAMPAIGN EXISTS TO FLIP (docs/architecture/evolution-routing-spec.md §3) ───────
+  //
+  // An issue says "these cases fail". A campaign opened against it used to be judged on the AGGREGATE held-out
+  // block, so a candidate that improved five OTHER held-out cases adopted while the five the issue named still
+  // failed — "the actual issue was resolved" was never asked. `targets` are scenario ids the loop is briefed on
+  // and optimizes against, so they are NOT held-out (a case the loop is shown is not a generalization
+  // population by any meaning of the word); the gate requires every one of them to flip, and the held-out
+  // block to regress nowhere. Default empty = the aggregate rule, which every campaign written before had.
+  targets: z.array(z.string().min(1).max(300)).max(500).default([]),
   judges: z.array(z.string().min(1).max(200)).default([]),
   trialsPerCase: z.number().int().min(1).max(100),
   // The budget is ROUNDS: one round = one hypothesis = one baseline↔candidate comparison. Trials/scenarios
@@ -176,6 +185,7 @@ export type StoredCampaignFrame = z.infer<typeof StoredCampaignFrameSchema>;
 // twice it would already have diverged (rule `protocol` L3); written once, tightening it tightens both.
 export function campaignFrameDefects(frame: {
   scenarios: ReadonlyArray<{ id: string; heldOut?: boolean }>;
+  targets?: ReadonlyArray<string>;
   budget: { maxRounds: number };
   significance: { fdrAlpha?: number; heldOutFamilySize?: number };
 }): string[] {
@@ -183,6 +193,18 @@ export function campaignFrameDefects(frame: {
   const ids = frame.scenarios.map((s) => s.id);
   if (new Set(ids).size !== ids.length)
     defects.push("scenario ids must be unique — the gate compares the two sides by id set");
+  // Targets are scenarios, named once, and never held-out: the gate reads both blocks, and a case in both would
+  // be counted as the thing the loop optimizes against AND the population that says whether it generalized.
+  const targets = frame.targets ?? [];
+  if (new Set(targets).size !== targets.length) defects.push("target ids must be unique");
+  const scenarioById = new Map(frame.scenarios.map((s) => [s.id, s] as const));
+  const foreign = targets.filter((t) => !scenarioById.has(t));
+  if (foreign.length > 0) defects.push(`targets must be frame scenarios — not in scenarios: ${foreign.join(", ")}`);
+  const heldTargets = targets.filter((t) => scenarioById.get(t)?.heldOut === true);
+  if (heldTargets.length > 0)
+    defects.push(
+      `a target is a case the loop is briefed on and optimizes against, so it cannot also be held-out: ${heldTargets.join(", ")}`,
+    );
   const held = frame.scenarios.filter((s) => s.heldOut === true).length;
   if (held < 2)
     defects.push(`a campaign needs at least 2 held-out scenarios to have adoption evidence (this frame has ${held})`);
@@ -330,6 +352,16 @@ export const CampaignRoundSchema = z.object({
       .object({
         improvements: z.number().int().min(0),
         regressions: z.number().int().min(0),
+      })
+      .optional(),
+    // The frame's `targets`, answered one by one (evolution-routing-spec.md §3): `flipped` improved significantly
+    // on the candidate, `unflipped` did not. Present exactly when the frame declares targets; absent on rounds
+    // of a frame without them and on rows written before the field existed — the gate reads its presence as the
+    // frame's, never as the data's.
+    targets: z
+      .object({
+        flipped: z.array(z.string().min(1).max(300)),
+        unflipped: z.array(z.string().min(1).max(300)),
       })
       .optional(),
     // ── THE EXACT BYTES THIS ROUND EVALUATED (arch-review 71 P0-evolution) ─────────────────────────
