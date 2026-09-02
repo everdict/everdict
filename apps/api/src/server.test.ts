@@ -3095,6 +3095,76 @@ describe("API — benchmarks (catalog → tenant dataset import)", () => {
     await app.close();
   });
 
+  // ── A TASK SET THROUGH THE ORDINARY DOOR (docs/architecture/standard-task-formats.md, slices 2-3) ────
+  //
+  // Driven through the PRODUCTION composition rather than the mapper: the source kind, the text, the parse,
+  // the dedicated mapper and the registration are five things that each work alone, and the door is the only
+  // place that proves they meet. It also pins the two facts a task-set import must carry — the verifier's
+  // bytes travel WITH the case (a run that re-cloned the benchmark to find out how it is graded would
+  // depend on an unpinned repository), and the lineage says a task set rather than "pasted jsonl".
+  it("member: import a Terminal-Bench task set through /benchmarks/import (source kind terminal-bench)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const spec = {
+      id: "tb-demo",
+      version: "1.0.0",
+      category: "coding",
+      source: { kind: "terminal-bench", imageTemplate: "ghcr.io/acme/tb/{id}:v1" },
+    };
+    const text = JSON.stringify({
+      tasks: [
+        {
+          id: "hello",
+          instruction: "write hello to /app/out.txt",
+          tests: { "test.sh": "echo 1 > /logs/verifier/reward.txt" },
+          networkMode: "no-network",
+        },
+      ],
+    });
+    const res = await app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: h,
+      payload: { spec, id: "tb-demo", version: "1.0.0", text },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ id: "tb-demo", version: "1.0.0", cases: 1 });
+
+    const got = await app.inject({ method: "GET", url: "/datasets/tb-demo/versions/1.0.0", headers: h });
+    expect(got.statusCode).toBe(200);
+    const dataset = got.json() as {
+      cases: Array<{ image?: string; graders?: Array<{ id: string; config?: Record<string, unknown> }> }>;
+      producedBy?: { source?: { kind?: string } };
+    };
+    const evalCase = dataset.cases[0];
+    expect(evalCase?.image).toBe("ghcr.io/acme/tb/hello:v1"); // resolved from the template, referenced not built
+    const verifier = evalCase?.graders?.find((g) => g.id === "reward-file");
+    expect(Object.keys((verifier?.config?.files ?? {}) as Record<string, string>)).toEqual(["test.sh"]);
+    expect(dataset.producedBy?.source?.kind).toBe("terminal-bench");
+    await app.close();
+  });
+
+  // A malformed set is refused AT the door — not registered as a dataset with no cases.
+  it("an unreadable task set is a 400, never an empty dataset", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: h,
+      payload: {
+        spec: { id: "tb-bad", version: "1.0.0", category: "coding", source: { kind: "terminal-bench" } },
+        id: "tb-bad",
+        version: "1.0.0",
+        text: '{"cases": []}',
+      },
+    });
+    expect(res.statusCode).toBe(400);
+    const listed = await app.inject({ method: "GET", url: "/datasets", headers: h });
+    expect(JSON.stringify(listed.json())).not.toContain("tb-bad");
+    await app.close();
+  });
+
   it("viewer cannot import (403), unsupported benchmark → 400", async () => {
     const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const r403 = await viewer.app.inject({
