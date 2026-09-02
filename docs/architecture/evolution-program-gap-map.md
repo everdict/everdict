@@ -133,6 +133,21 @@ Not the priority of the pillars — the dependency between the specs.
 5. Everything else lands on its own evidence: definability §1/§3/§4, identity §1/§3, evidence §1/§4,
    routing §4/§5.
 
+## Where the program stands (2026-09-02, end of day)
+
+Landed the same day this page was written, each as its own commit with a RED-first counterexample: routing §1
+(the slot's maintainer), §3 (targets, the issue's `case` links, frames derived from the issue), §5 (memory as a
+subject filter), §2 (attribution); evidence §3 (the sealed round-evidence record) and §2 (judge diagnoses on it);
+identity §2 (seeds on the version, materialized or refused), §4 (the seed-leak refusal) and §1 (forks recorded and
+verified); definability §4 (case tokens, the process box, one resources predicate) and §3 (codex and
+claude-code-router recipes).
+
+Open, in the order they should land: routing §4 (the build set — design refined to claim-before-mint, deferred to
+its own change); identity §3 (lineage as one read — needs a per-version origin read the registry port does not
+expose yet); evidence §4 (citable export); definability §1 (targets beyond the browser) and §2 (the environment
+entity — the largest, and the one that unblocks an environment as a campaign subject); evidence §1 (the
+benchmark on-ramps, each an evaluator to port honestly). A Hermes recipe waits on its CLI's resume form.
+
 ## What would reopen this page
 
 - A pillar restated by the maintainer. The four sentences above are the program; a fifth, or a change to
