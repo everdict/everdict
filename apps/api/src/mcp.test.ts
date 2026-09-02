@@ -890,6 +890,7 @@ describe("MCP tools", () => {
       "remove_workspace_trace_source",
       "rerun_scorecard",
       "rescore_unmeasured_scores",
+      "resolve_harness_delegate",
       "retry_scorecard",
       "revoke_api_key",
       "revoke_invite",
@@ -1117,6 +1118,59 @@ describe("MCP tools", () => {
       changes: [{ path: "services[agent-server].image", before: "img", after: "img2", change: "changed" }],
       summary: { added: 0, removed: 0, changed: 1 },
     });
+  });
+
+  it("resolve_harness_delegate: WHO maintains a slot, from the template's source.maintainer (HTTP parity) — viewer allowed", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]);
+    await viewer.callTool({
+      name: "register_harness_template",
+      arguments: {
+        spec: JSON.stringify({
+          kind: "service",
+          category: "topology",
+          id: "shop",
+          version: "1",
+          services: [
+            {
+              name: "web",
+              slot: "web",
+              port: 8080,
+              needs: [],
+              perRun: [],
+              replicas: 1,
+              source: {
+                git: "https://github.com/acme/web.git",
+                maintainer: { profile: "codex-web", version: "1.2.0" },
+              },
+            },
+          ],
+          dependencies: [],
+          frontDoor: { service: "web", submit: "POST /runs" },
+          traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+        }),
+      },
+    });
+    await viewer.callTool({
+      name: "register_harness",
+      arguments: {
+        spec: JSON.stringify({
+          template: { id: "shop", version: "1" },
+          id: "shop",
+          version: "1.0.0",
+          pins: { web: "img" },
+        }),
+      },
+    });
+    const answer = await viewer.callTool({ name: "resolve_harness_delegate", arguments: { id: "shop" } });
+    expect(answer.isError).toBeFalsy();
+    expect(JSON.parse(text(answer))).toEqual({
+      harness: { id: "shop", version: "1.0.0" },
+      template: { id: "shop", version: "1" },
+      resolution: { kind: "profile", slot: "web", profile: "codex-web", version: "1.2.0" },
+    });
+    const missing = await viewer.callTool({ name: "resolve_harness_delegate", arguments: { id: "shop", slot: "db" } });
+    expect(JSON.parse(text(missing)).resolution).toEqual({ kind: "no_such_slot", slot: "db", slots: ["web"] });
   });
 
   it("workspace github app: admin can start github.com + enterprise install (both operator env), member lacks settings:write → denied", async () => {

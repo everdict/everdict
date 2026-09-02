@@ -26,6 +26,12 @@ dataset | judge | scorecard | run | view | issue | product | release` (`packages
 
 ## §1 — WHO is a field on the slot, and a pure resolver (G4.1)
 
+> **Landed 2026-09-02.** `HarnessSourceSchema.maintainer { profile, version? }` and `resolveDelegate` in
+> `packages/contracts/src/harness/harness-template.ts`; the read on both transports —
+> `GET /harnesses/:id/delegate` and `resolve_harness_delegate` — through one service function
+> (`packages/application-control/src/harness/harness-delegate-service.ts`); the `code_evolve` skill reads it and no
+> longer asks. The counterexample below is the contracts suite's.
+
 **The gap.** A template slot names WHERE its code lives (`source { git, repo }`) and HOW it builds (`build`).
 It does not name the coding harness built inside that repository — the one whose instructions file, tool
 conventions and model that repository was written for. The skill's answer is to list the delegation profiles

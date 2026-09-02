@@ -460,6 +460,7 @@ export {
   type RepinResult,
   repinHarnessImages,
 } from "./harness/harness-pin-service.js";
+export { type HarnessDelegateAnswer, resolveHarnessDelegate } from "./harness/harness-delegate-service.js";
 // evolution campaign — the agent-evolve loop's settlement (docs/architecture/evolution-lineage.md, Track D)
 export {
   type AdoptionOutcome,

@@ -1,5 +1,5 @@
 import { setVersionTags } from "@everdict/application-control";
-import { repinHarnessImages } from "@everdict/application-control";
+import { repinHarnessImages, resolveHarnessDelegate } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
@@ -87,6 +87,34 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
           return ok(diffHarnessSpecs(baseSpec, candidateSpec));
         }),
     );
+
+    // WHO maintains a slot's code — the MCP twin of GET /harnesses/:id/delegate (evolution-routing-spec.md §1).
+    if (deps.harnessTemplates) {
+      const templates = deps.harnessTemplates;
+      server.registerTool(
+        "resolve_harness_delegate",
+        {
+          annotations: { readOnlyHint: true },
+          description:
+            "WHICH coding agent (delegation profile) maintains a harness slot's repository — the `source.maintainer` " +
+            "the template declares for that slot. Look this up instead of asking a member. Omit `slot` when exactly one " +
+            "slot carries code. Answers `profile` (use it with create_sandbox), or names the miss: `unmapped` (the slot " +
+            "has code and no maintainer — register a template version that declares one), `ambiguous` (name the slot), " +
+            "`no_such_slot`. Requires harnesses:read (viewer+).",
+          inputSchema: {
+            id: z.string(),
+            version: z.string().optional().describe('instance version ref (default "latest")'),
+            slot: z.string().optional().describe("service slot, or `image` for a command template"),
+          },
+        },
+        ({ id, version, slot }) =>
+          run(principal, "harnesses:read", async () => {
+            if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
+            await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
+            return ok(await resolveHarnessDelegate(instances, templates, ws, id, version ?? "latest", slot));
+          }),
+      );
+    }
 
     server.registerTool(
       "delete_harness",

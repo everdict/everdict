@@ -44,9 +44,20 @@ export const HarnessCategorySchema = z.string().min(1);
 // repository at the commit, runs `steps` in `workDir`, and publishes `capture` (default: the workDir) as a layer
 // on that base through the registry protocol — no daemon, no Dockerfile builder. What the base contains is the
 // author's (their Dockerfile); what the commit adds is Everdict's to capture and to name.
+// WHO maintains this code (docs/architecture/evolution-routing-spec.md §1): the delegation profile — the coding
+// agent built for THIS repository, its instructions file, its tool conventions, its model. It lives on the slot's
+// source because the slot is the SSOT of "this code, built this way"; a workspace-level repository → profile map
+// would be a second owner of a fact the template already half-owns, and drift the moment a slot's repository moves.
+export const HarnessMaintainerSchema = z.object({
+  profile: z.string().min(1), // a delegation profile id (CapabilityRecord of type `delegation`)
+  version: z.string().min(1).optional(), // pin a profile version; absent = the workspace's current one
+});
+export type HarnessMaintainer = z.infer<typeof HarnessMaintainerSchema>;
+
 export const HarnessSourceSchema = z.object({
   git: z.string().min(1), // the clone URL (a private repository needs the workspace GitHub App on its owner)
   repo: z.string().min(1).optional(), // "owner/name", when the URL is a GitHub repository — the pull-request coordinate
+  maintainer: HarnessMaintainerSchema.optional(),
 });
 export type HarnessSource = z.infer<typeof HarnessSourceSchema>;
 
@@ -384,4 +395,41 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
     case "process":
       return ProcessHarnessSpecSchema.parse({ kind: "process", id: instance.id, version: instance.version });
   }
+}
+
+// ── WHO CHANGES THIS SLOT — a total decision over the template (evolution-routing-spec.md §1) ─────────
+//
+// The `code_evolve` driver used to answer "which coding agent should I delegate to" by listing the profiles and
+// asking the member, once per round, for a fact that does not change between rounds. The template's slot knows:
+// `source.maintainer`. This resolves it, and says by name when it cannot — an `unmapped` slot is a template that
+// needs a maintainer declared, `no_such_slot` is a caller naming a slot the template does not have, and
+// `ambiguous` is a template with several buildable slots and no slot named. Pure and total (no I/O), so the
+// agent's MCP door, the build service and a test all read one predicate.
+export const DelegateResolutionSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("profile"), slot: z.string(), profile: z.string(), version: z.string().optional() }),
+  z.object({ kind: z.literal("unmapped"), slot: z.string() }), // the slot has code (a source) and no maintainer
+  z.object({ kind: z.literal("no_such_slot"), slot: z.string(), slots: z.array(z.string()) }),
+  z.object({ kind: z.literal("ambiguous"), slots: z.array(z.string()) }), // several slots carry code; name one
+]);
+export type DelegateResolution = z.infer<typeof DelegateResolutionSchema>;
+export function resolveDelegate(template: HarnessTemplateSpec, slot?: string): DelegateResolution {
+  const carriers: Array<{ slot: string; source: HarnessSource | undefined }> =
+    template.kind === "service"
+      ? template.services.map((svc) => ({ slot: svc.slot ?? svc.name, source: svc.source }))
+      : [{ slot: "image", source: template.kind === "command" ? template.source : undefined }];
+  const withCode = carriers.filter((c) => c.source !== undefined);
+  const chosen =
+    slot !== undefined ? carriers.find((c) => c.slot === slot) : withCode.length === 1 ? withCode[0] : undefined;
+  if (chosen === undefined) {
+    if (slot !== undefined) return { kind: "no_such_slot", slot, slots: carriers.map((c) => c.slot) };
+    return { kind: "ambiguous", slots: withCode.map((c) => c.slot) };
+  }
+  const maintainer = chosen.source?.maintainer;
+  if (maintainer === undefined) return { kind: "unmapped", slot: chosen.slot };
+  return {
+    kind: "profile",
+    slot: chosen.slot,
+    profile: maintainer.profile,
+    ...(maintainer.version !== undefined ? { version: maintainer.version } : {}),
+  };
 }

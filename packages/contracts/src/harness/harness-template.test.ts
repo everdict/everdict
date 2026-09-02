@@ -4,6 +4,7 @@ import {
   HarnessInstanceSpecSchema,
   type HarnessTemplateSpec,
   HarnessTemplateSpecSchema,
+  resolveDelegate,
   resolveHarnessInstance,
 } from "./harness-template.js";
 
@@ -706,5 +707,101 @@ describe("command template → resolved spec carries the conversation contract",
     expect(HarnessTemplateSpecSchema.safeParse({ ...template, command: "codex exec --json {{task}}" }).success).toBe(
       false,
     );
+  });
+});
+
+// ── WHO CHANGES THIS SLOT (docs/architecture/evolution-routing-spec.md §1) ──────────────────────────
+//
+// The driver used to ask the member which coding agent maintains a slot's repository. The slot's `source` says.
+describe("resolveDelegate — the slot's maintainer is a lookup, and every miss is named", () => {
+  const service = (name: string, source?: Record<string, unknown>) => ({
+    name,
+    slot: name,
+    port: 8080,
+    needs: [],
+    perRun: [],
+    replicas: 1,
+    ...(source !== undefined ? { source } : {}),
+  });
+  const topology = (services: unknown[]) =>
+    HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "shop",
+      version: "1",
+      services,
+      dependencies: [],
+      frontDoor: { service: "web", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+    });
+
+  it("answers the profile a slot's source names, with its pinned version when one is declared", () => {
+    const tpl = topology([
+      service("web", {
+        git: "https://github.com/acme/web.git",
+        repo: "acme/web",
+        maintainer: { profile: "codex-web" },
+      }),
+      service("api", {
+        git: "https://github.com/acme/api.git",
+        repo: "acme/api",
+        maintainer: { profile: "claude-api", version: "2.0.0" },
+      }),
+    ]);
+    expect(resolveDelegate(tpl, "web")).toEqual({ kind: "profile", slot: "web", profile: "codex-web" });
+    expect(resolveDelegate(tpl, "api")).toEqual({
+      kind: "profile",
+      slot: "api",
+      profile: "claude-api",
+      version: "2.0.0",
+    });
+  });
+
+  it("an unnamed slot resolves when exactly one slot carries code, and is ambiguous when several do", () => {
+    const one = topology([
+      service("web", { git: "https://github.com/acme/web.git", maintainer: { profile: "codex-web" } }),
+      service("db"),
+    ]);
+    expect(resolveDelegate(one)).toEqual({ kind: "profile", slot: "web", profile: "codex-web" });
+    const two = topology([
+      service("web", { git: "https://github.com/acme/web.git", maintainer: { profile: "codex-web" } }),
+      service("api", { git: "https://github.com/acme/api.git", maintainer: { profile: "claude-api" } }),
+    ]);
+    expect(resolveDelegate(two)).toEqual({ kind: "ambiguous", slots: ["web", "api"] });
+  });
+
+  it("a slot with code and no maintainer is `unmapped` — the brief says to declare one, not to ask a member", () => {
+    const tpl = topology([service("web", { git: "https://github.com/acme/web.git" })]);
+    expect(resolveDelegate(tpl, "web")).toEqual({ kind: "unmapped", slot: "web" });
+    expect(resolveDelegate(tpl)).toEqual({ kind: "unmapped", slot: "web" });
+  });
+
+  it("a slot the template does not have is named back with the slots it does", () => {
+    const tpl = topology([service("web", { git: "https://github.com/acme/web.git" }), service("db")]);
+    expect(resolveDelegate(tpl, "worker")).toEqual({ kind: "no_such_slot", slot: "worker", slots: ["web", "db"] });
+  });
+
+  it("a command template has one slot, `image`, and its source's maintainer answers for it", () => {
+    const tpl = HarnessTemplateSpecSchema.parse({
+      kind: "command",
+      category: "cli-agent",
+      id: "codex",
+      version: "1.0.0",
+      image: "node:22",
+      command: "codex exec {{task}}",
+      source: { git: "https://github.com/acme/codex-scaffold.git", maintainer: { profile: "codex" } },
+    });
+    expect(resolveDelegate(tpl)).toEqual({ kind: "profile", slot: "image", profile: "codex" });
+    const bare = HarnessTemplateSpecSchema.parse({
+      kind: "command",
+      category: "cli-agent",
+      id: "aider",
+      version: "1.0.0",
+      image: "python:3.12",
+      command: "aider {{task}}",
+    });
+    // No source at all: nothing carries code, so there is nothing to map — ambiguous over an empty set, not a
+    // profile invented from thin air.
+    expect(resolveDelegate(bare)).toEqual({ kind: "ambiguous", slots: [] });
   });
 });

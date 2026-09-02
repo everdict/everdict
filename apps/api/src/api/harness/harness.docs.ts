@@ -14,6 +14,7 @@ import type { FastifySchema } from "fastify";
 import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { teamMoveDocs } from "../team-move.js";
+import { HarnessDelegateResponseSchema } from "./response/harness-delegate.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
 
 // OpenAPI descriptors for the harness (instance) routes — doc-only (rule api-layer): the no-op compilers in
@@ -112,6 +113,32 @@ const docs = {
     response: {
       200: { description: "Structural spec diff (base ↔ candidate)", ...toJsonSchema(HarnessSpecDiffResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  delegate: {
+    summary: "Who maintains a slot's code",
+    description:
+      "Resolves WHICH coding agent (delegation profile) maintains a slot's repository — the `source.maintainer` the " +
+      "harness template declares for that slot — so an evolution driver looks it up instead of asking. `slot` may be " +
+      "omitted when exactly one slot carries code; `version` defaults to latest. The answer names its own misses: " +
+      "`unmapped` (the slot has code and no maintainer — declare one on the template), `ambiguous` (several slots carry " +
+      "code — name one), `no_such_slot`. Requires harnesses:read (viewer+); unknown id/version or a private (non-owned) " +
+      "harness reads 404.",
+    tags: ["harness"],
+    params: idParams,
+    querystring: {
+      type: "object",
+      properties: {
+        slot: {
+          type: "string",
+          description: "The slot to resolve (a service slot, or `image` for a command template)",
+        },
+        version: { type: "string", description: 'Instance version ref (default "latest")' },
+      },
+    },
+    response: {
+      200: { description: "The slot's maintainer, or the named miss", ...toJsonSchema(HarnessDelegateResponseSchema) },
+      ...errorResponses(401, 403, 404),
     },
   },
   resolved: {

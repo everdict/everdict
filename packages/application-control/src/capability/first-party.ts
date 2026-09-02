@@ -1128,7 +1128,7 @@ its own managed store and mints the candidate version; you run the round, and le
 write the harness's code yourself, you never touch the oracle, and you never merge on your own authority.
 
 Everdict's tools load on demand. Before anything else:
-\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,open_campaign,get_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
+\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,resolve_harness_delegate,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,open_campaign,get_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
 
 ## 0. Frame the campaign — the exam, the repository, the delegate, the oracle's paths
 - Everything \`harness_evolve\` freezes, frozen the same way: \`subject: { type: "harness", id, baselineVersion }\`,
@@ -1138,11 +1138,15 @@ Everdict's tools load on demand. Before anything else:
   \`build { steps, workDir, capture }\` say where the code lives and how Everdict builds its image. A harness
   whose template has no recipe cannot run this loop — add it (a new template version) before opening the
   campaign. Everdict builds into its own managed store; you do not need an outside CI or a registry of your own.
-- **The delegate.** A delegation profile (\`list_public_capabilities\` / \`list_capabilities\`, type \`delegation\`)
-  whose harness is a CONVERSATIONAL coding agent: Claude Code (built in), or any CLI registered as a \`command\`
-  harness with a \`conversation\` block (how it resumes, how its next token is read) — Codex, claude-code-router.
-  A CLI registered without that block is one-shot and can only be driven through \`create_sandbox { harness }\`
-  one prompt at a time. The profile also decides the delegate's BOX: its \`network\` (\`allowlist\` with the
+- **The delegate — WHO, read off the template, never asked.** \`resolve_harness_delegate { id, slot? }\` answers
+  the delegation profile the slot's \`source.maintainer\` names: the coding agent built for THAT repository (its
+  instructions file, its conventions, its model). Use exactly that profile. \`unmapped\` means the slot has code
+  and no maintainer — register a template version that declares one, then continue; \`ambiguous\` means several
+  slots carry code — name the slot the evidence points at. Do not pick an agent yourself and do not ask the
+  member which one: the template is the owner of that fact. A profile's harness is a CONVERSATIONAL coding
+  agent: Claude Code (built in), or any CLI registered as a \`command\` harness with a \`conversation\` block
+  (how it resumes, how its next token is read) — Codex, claude-code-router. A CLI registered without that
+  block is one-shot and can only be driven through \`create_sandbox { harness }\` one prompt at a time. The profile also decides the delegate's BOX: its \`network\` (\`allowlist\` with the
   repository host and the model endpoint), and \`create_sandbox { runtime }\` places the session on a workspace
   runtime that can enforce it rather than the control plane's docker. The agent runs in ITS image with ITS model
   binding, and it never sees your tools or the workspace.

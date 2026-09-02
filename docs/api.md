@@ -84,6 +84,9 @@ resolved specs [config changes by field path — e.g. `services[x].image`; `base
 [datasets.md](datasets.md)) and key issuance (admin self-serve `POST/GET/DELETE /keys` — issued keys carry
 workspace admin role, narrowable by per-key `scopes` (`read|write|admin`, omitted = Full Access), plaintext shown
 once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in [tenancy.md](tenancy.md).
+`GET /harnesses/:id/delegate?slot=&version=` answers WHO maintains a slot's code — the delegation profile the
+template's `source.maintainer` names for that slot, or a named miss (`unmapped` · `ambiguous` · `no_such_slot`) — so an
+evolution driver looks the specialist up instead of asking (`docs/architecture/evolution-routing-spec.md` §1).
 
 `RunRecord` = `{ id, tenant, harness, caseId, status: queued|running|succeeded|failed, result?, error?,
 createdAt, updatedAt }`. Errors map by `AppError.status`: budget → **402** `BUDGET_EXCEEDED`, queue full →

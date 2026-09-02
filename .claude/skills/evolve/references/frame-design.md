@@ -17,7 +17,9 @@ campaign.
 
 For a `code_evolve` campaign (evolving a harness's CODE), the subject's harness TEMPLATE must declare the
 slot's `source {git, repo}` and `build {steps, workDir, capture}` — Everdict builds the candidate image into
-its own managed store from those. A template with no recipe can be evolved by pinning, not by building.
+its own managed store from those. A template with no recipe can be evolved by pinning, not by building. The
+slot's `source.maintainer {profile}` names the delegation profile that maintains that repository; the driver
+reads it (`resolve_harness_delegate`) instead of choosing an agent.
 
 **`continues`** — the id of the campaign this one continues, when you are chaining. A walk that keeps
 improving is a chain of campaigns, each starting from what the last one adopted; this field is what makes the

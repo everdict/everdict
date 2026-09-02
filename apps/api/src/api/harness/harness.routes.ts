@@ -1,6 +1,6 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
-import { RepinBodySchema, repinHarnessImages } from "@everdict/application-control";
+import { RepinBodySchema, repinHarnessImages, resolveHarnessDelegate } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { AppError, HarnessInstanceSpecSchema, type ImageWarning, resolveHarnessInstance } from "@everdict/contracts";
 import {
@@ -223,6 +223,45 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         return reply.send(diffHarnessSpecs(baseSpec, candidateSpec));
       } catch (err) {
         return sendError(reply, err); // version not found → 404
+      }
+    },
+  );
+
+  // WHO maintains a slot's code — the delegation profile the template's `source.maintainer` names, resolved by the
+  // one predicate the build lane and the `code_evolve` skill read (docs/architecture/evolution-routing-spec.md §1).
+  // Static "delegate" segment resolves ahead of :version, like "diff".
+  app.get<{ Params: { id: string }; Querystring: { slot?: string; version?: string } }>(
+    "/harnesses/:id/delegate",
+    { schema: harnessDocs.delegate },
+    async (req, reply) => {
+      if (!deps.harnessInstances || !deps.harnessTemplates)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness registries not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "harnesses:read");
+        if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.harnessInstances,
+          principal.workspace,
+          req.params.id,
+          "harness",
+        );
+        return reply.send(
+          await resolveHarnessDelegate(
+            deps.harnessInstances,
+            deps.harnessTemplates,
+            principal.workspace,
+            req.params.id,
+            req.query.version ?? "latest",
+            req.query.slot,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err); // missing id/version → 404
       }
     },
   );

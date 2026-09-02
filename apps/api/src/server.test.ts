@@ -1550,6 +1550,71 @@ describe("API — harness taxonomy (template category + instance)", () => {
     await app.close();
   });
 
+  // ── WHO MAINTAINS A SLOT (docs/architecture/evolution-routing-spec.md §1) ──────────────────────────
+  it("GET /harnesses/:id/delegate → the slot's maintainer from the template's source; misses are named, not guessed", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const mapped = {
+      ...TEMPLATE,
+      id: "shop",
+      services: [
+        {
+          name: "web",
+          slot: "web",
+          source: { git: "https://github.com/acme/web.git", repo: "acme/web", maintainer: { profile: "codex-web" } },
+        },
+        { name: "api", slot: "api", source: { git: "https://github.com/acme/api.git", repo: "acme/api" } },
+        { name: "db", slot: "db" },
+      ],
+      frontDoor: { service: "web", submit: "POST /runs" },
+    };
+    expect(
+      (await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: mapped })).statusCode,
+    ).toBe(201);
+    const inst = {
+      template: { id: "shop", version: "1" },
+      id: "shop",
+      version: "1.0.0",
+      pins: {
+        web: `ghcr.io/acme/web@sha256:${"a".repeat(64)}`,
+        api: `ghcr.io/acme/api@sha256:${"b".repeat(64)}`,
+        db: "postgres:16",
+      },
+    };
+    expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: inst })).statusCode).toBe(201);
+
+    const web = await app.inject({ method: "GET", url: "/harnesses/shop/delegate?slot=web", headers: h });
+    expect(web.statusCode).toBe(200);
+    expect(web.json()).toEqual({
+      harness: { id: "shop", version: "1.0.0" },
+      template: { id: "shop", version: "1" },
+      resolution: { kind: "profile", slot: "web", profile: "codex-web" },
+    });
+    // A slot with code and no maintainer: the answer says to declare one, it does not pick an agent.
+    expect(
+      (await app.inject({ method: "GET", url: "/harnesses/shop/delegate?slot=api", headers: h })).json().resolution,
+    ).toEqual({
+      kind: "unmapped",
+      slot: "api",
+    });
+    // Two slots carry code, none named: ambiguous, with the slots to choose from.
+    expect(
+      (await app.inject({ method: "GET", url: "/harnesses/shop/delegate", headers: h })).json().resolution,
+    ).toEqual({
+      kind: "ambiguous",
+      slots: ["web", "api"],
+    });
+    expect(
+      (await app.inject({ method: "GET", url: "/harnesses/shop/delegate?slot=worker", headers: h })).json().resolution,
+    ).toEqual({
+      kind: "no_such_slot",
+      slot: "worker",
+      slots: ["web", "api", "db"],
+    });
+    expect((await app.inject({ method: "GET", url: "/harnesses/nope/delegate", headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
   it("GET /harnesses/:id/diff → resolved-spec config diff between two versions; identical = empty; missing param 400", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
