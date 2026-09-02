@@ -19,14 +19,17 @@
     "postject": "^1.0.0-alpha.6"
   },
   "dependencies": {
-    "@everdict/job-runner": "workspace:*",
     "@everdict/application-control": "workspace:*",
     "@everdict/backends": "workspace:*",
     "@everdict/contracts": "workspace:*",
+    "@everdict/datasets": "workspace:^",
     "@everdict/domain": "workspace:*",
+    "@everdict/job-runner": "workspace:*",
     "@everdict/orchestrator": "workspace:*",
     "@everdict/self-hosted-runner": "workspace:*",
     "@everdict/topology": "workspace:*",
+    "smol-toml": "^1.8.0",
+    "yaml": "^2.9.0",
     "zod": "^3.24.1"
   }
 }

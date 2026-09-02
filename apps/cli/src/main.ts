@@ -17,6 +17,7 @@ import { harnessSpecFrom, withHarnessSpec } from "./harness-spec.js";
 import { imageBakeCommand } from "./image-bake.js";
 import { imagePushCommand } from "./image-push.js";
 import { runnerCommand } from "./runner-command.js";
+import { tasksPrebuildCommand } from "./tasks-prebuild.js";
 
 function usage(): void {
   console.error(
@@ -46,6 +47,12 @@ function usage(): void {
       "  --register-environment <id>: also register the pushed ref as a store ENVIRONMENT (digest-pinned when",
       "    docker reports one) so the team can find and reuse it — [--env-name <n>] [--env-description <t>]",
       "    [--benchmark <b>] [--instructions <file.md>] [--visibility private|workspace|subset|public]",
+      "",
+      "everdict tasks prebuild <task-set-dir> [--push] [--prefix <name>] [--out tasks.json] [--registry <name>]",
+      "  walk a Terminal-Bench task set (task.yaml + task.toml + tests/), build each task's Dockerfile and",
+      "  (with --push) publish it where a managed run can pull, then emit the set as JSON for",
+      "  POST /benchmarks/import (source kind terminal-bench). The [environment] block travels with the task —",
+      "  an under-provisioned task reads as an agent that failed (docs/architecture/standard-task-formats.md)",
       "",
       "everdict image bake <base-ref> [--agent-image <ref>] [--tag <target-ref>]",
       "  wrap a BYO eval image with the everdict in-job agent (entrypoint) so it runs on MANAGED",
@@ -231,6 +238,11 @@ async function main(): Promise<void> {
       // the positional arg (local ref) is not consumed by the flag parser, so handle it directly — image push <ref> [--flags]
       const positional = argv[2] && !argv[2].startsWith("--") ? argv[2] : undefined;
       await imagePushCommand(positional, parseFlags(argv.slice(2)));
+      return;
+    }
+    if (cmd === "tasks" && argv[1] === "prebuild") {
+      const positional = argv[2] && !argv[2].startsWith("--") ? argv[2] : undefined;
+      await tasksPrebuildCommand(positional, parseFlags(argv.slice(2)));
       return;
     }
     if (cmd === "image" && argv[1] === "bake") {

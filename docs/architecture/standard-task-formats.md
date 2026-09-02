@@ -7,10 +7,9 @@ anchors: [packages/datasets/src/terminal-bench.ts, packages/graders/src/reward-f
 ---
 # Standard task-format on-ramp — bring an existing agent benchmark, run it managed
 
-> Status: **M2 in progress.** Slices 1-3 landed (the pure mapper, the ingestion edge, and the source kind on
-> both doors); later slices
-> wire ingestion, the API/MCP surface, image provenance, and the web. SSOT for how Everdict ingests the
-> emerging *standard agent-benchmark task formats* (Terminal-Bench first) into its
+> Status: **M2 in progress.** Slices 1-4 landed — the pure mapper, the ingestion edge, the source kind on both
+> doors, and the prebuild/push helper; slice 5 (the web add-benchmark wizard) is what remains. SSOT for how
+> Everdict ingests the emerging *standard agent-benchmark task formats* (Terminal-Bench first) into its
 > harness-agnostic `Dataset` model.
 
 ## Why
@@ -81,7 +80,16 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    takes the set as TEXT and runs it through the ingestion edge (a caller that has a file, and the path a
    preview can share with the import). Both call `terminalBenchToDataset`, so the mapping cannot diverge —
    what differs is only the shape the caller arrives with.
-4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
+4. **Image provenance helper** — ✅ `everdict tasks prebuild <dir> [--push]` (`apps/cli/src/tasks-prebuild.ts`).
+   It walks the set (`task-set.ts`: `task.yaml` + `task.toml` + `tests/`, with the `[environment]` block
+   carried rather than dropped — rule `datasets`), builds each task's Dockerfile, optionally publishes each
+   through the same push machinery `everdict image push` uses, and emits the set as JSON **validated by the
+   very parser the import door runs**, so an operator learns their set is malformed while standing in it
+   rather than after pushing N images. The `{id}` template is derived from the repository segment this
+   command builds and REFUSED when it does not describe every pushed ref — a template naming images nobody
+   pushed is a set that imports and then fails one case at a time. It lives in the CLI because Everdict
+   references images and never builds them: this is an operator edge, and the platform still refuses a task
+   whose image it cannot resolve.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
 
 ## Non-goals (for now)
