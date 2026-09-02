@@ -161,6 +161,30 @@ export const EvalCaseSchema = z.object({
   // sealed world's, never a case author's guess — a dataset that hard-coded a URL would have no identity to
   // seal and no axis to move. Absent = the world is the actor's own container (or there is none).
   world: z.object({ wiring: z.record(z.string().min(1), z.string().min(1)) }).optional(),
+  // ── HOW THE ACTOR MEETS THE QUESTION (world-and-engagement-model.md, axis 2) ──────────────────────
+  //
+  // Every case in this repository has been ONE-SHOT: the actor is handed the task and produces a trace. A
+  // whole class of benchmarks is not — the case IS a conversation, and what is measured is where the agent
+  // ends up after several exchanges with a user.
+  //
+  // Engagement belongs to the CASE rather than to the harness because it is a property of the QUESTION
+  // ("this task is a dialogue"); the harness merely has to be capable of it, which it declares as
+  // `conversational`. A dialogue case meeting a one-shot harness is refused by name — each "turn" would be
+  // an independent run, so the conversation would be a fiction and the number would measure nothing.
+  //
+  // `scripted` is the user this ships with: the case carries the user's turns, so the exchange is fixed data
+  // like every other part of the question and two runs of the case ask the same thing. A model-driven
+  // simulator is a different user KIND (a later slice) and it plugs in here, not into the loop.
+  engagement: z
+    .object({
+      kind: z.literal("dialogue"),
+      user: z.object({ kind: z.literal("scripted"), turns: z.array(z.string().min(1)).min(1) }),
+      // The bound on the whole exchange, counting the opening task as turn 1. Absent = as many turns as the
+      // user has lines; a smaller value truncates them, which is what makes a shared dataset runnable under
+      // a tighter budget without editing the cases.
+      maxTurns: z.number().int().positive().max(50).optional(),
+    })
+    .optional(),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 
@@ -461,3 +485,14 @@ export const ScorecardSchema = z.object({
   results: z.array(CaseResultSchema),
 });
 export type Scorecard = z.infer<typeof ScorecardSchema>;
+
+// The user's turns this case will actually take, in order, after the opening task — the ONE reader of the
+// engagement's bound, so the loop and anything that previews a dialogue count the same exchange. Empty for a
+// one-shot case, which is every case that declares no engagement.
+export function dialogueTurns(evalCase: Pick<EvalCase, "engagement">): string[] {
+  const engagement = evalCase.engagement;
+  if (engagement === undefined) return [];
+  // The opening task is turn 1, so `maxTurns` leaves `maxTurns - 1` for the user.
+  const budget = engagement.maxTurns === undefined ? engagement.user.turns.length : engagement.maxTurns - 1;
+  return engagement.user.turns.slice(0, Math.max(0, budget));
+}

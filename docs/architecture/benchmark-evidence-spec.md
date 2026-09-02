@@ -57,7 +57,10 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 > unqualified or local-only refs is registered without a word. **Still open — tau-bench**, and the reason is sharper than "it needs a simulated
 > user": its case is not a task with a trace but a DIALOGUE, so the user simulator belongs in the execution
 > path rather than in a grader, and its reward compares the domain database's final state against the
-> benchmark's own. Two things Everdict does not have, and neither is a mapping.
+> benchmark's own. *(Since 2026-09-03 the first of those exists: a case declares its engagement and `runCase`
+> drives the exchange over the harness's continuity contract — `docs/architecture/world-and-engagement-model.md`
+> axis 2. What tau-bench still needs is a MODEL-DRIVEN user, which plugs in at `engagement.user` beside the
+> scripted one, and its domain database.)*
 
 **The gap.** Terminal-Bench slices 2–5 are unbuilt — the ingestion edge, the benchmark-source kind for
 `POST /datasets`, the image-provenance helper, the web wizard (`docs/architecture/standard-task-formats.md`).

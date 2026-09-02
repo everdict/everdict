@@ -23,9 +23,11 @@ import type {
   TraceEvent,
 } from "@everdict/contracts";
 import {
+  BadRequestError,
   CURRENT_EVIDENCE_VERSION,
   CURRENT_EXECUTION_MANIFEST_ERA,
   UpstreamError,
+  dialogueTurns,
   resolvePlacementOs,
   stamp,
 } from "@everdict/contracts";
@@ -373,12 +375,43 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const runId = deps.runCtx.runId ?? newRunId();
     const runCtx: RunContext = { ...deps.runCtx, runId };
     const trace: TraceEvent[] = [];
+    // ── HOW THIS CASE IS ENGAGED (world-and-engagement-model.md, axis 2) ─────────────────────────────
+    //
+    // One-shot is every case that says nothing: the task, one drive, a trace. A DIALOGUE case is driven once
+    // per turn — the opening task, then the user's lines — over the harness's own continuity contract, so
+    // the agent resumes its session rather than starting a new one each time. A harness that cannot hold a
+    // conversation is refused HERE rather than driven turn by turn: each "turn" would be an independent run,
+    // the conversation would be a fiction, and the score would measure something nobody asked for.
+    const userTurns = dialogueTurns(evalCase);
+    if (userTurns.length > 0 && deps.harness.conversational !== true)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { case: evalCase.id, harness: deps.harness.id },
+        `case '${evalCase.id}' is a dialogue and harness '${deps.harness.id}' does not hold a conversation — each turn would be an independent run, so the exchange would be a fiction`,
+      );
+    // The token that continues THIS agent's session, reported by the harness at the end of each turn and
+    // handed back on the next one. Kept here because the LAST one reported wins: a CLI that mints a fresh
+    // session id per resume is as valid as one that keeps the first.
+    let resumeToken: string | undefined;
     // Cooperative cancellation (self-hosted "stop scorecard"): if the signal aborts, stop consuming the harness
     // trace and let the finally dispose the compute — which frees the runtime mid-case (the container/process dies).
     const signal = deps.runCtx.signal;
     if (signal?.aborted) throw cancelledRun(runId);
-    const drain = (async () => {
-      for await (const ev of deps.harness.run(compute, evalCase.task, runCtx)) {
+    // One turn's drive. A one-shot case runs this once with the task; a dialogue runs it again per user line.
+    const driveTurn = async (text: string): Promise<void> => {
+      const turnCtx: RunContext =
+        userTurns.length === 0
+          ? runCtx
+          : {
+              ...runCtx,
+              conversation: {
+                ...(resumeToken !== undefined ? { resume: resumeToken } : {}),
+                onToken: (token: string) => {
+                  resumeToken = token;
+                },
+              },
+            };
+      for await (const ev of deps.harness.run(compute, text, turnCtx)) {
         if (signal?.aborted) return; // about to dispose the compute out from under the run — stop accumulating
         // The observation channel's vocabulary is the PLATFORM'S — sealed below, after the harness is done.
         // The harness's stream is the agent's own bytes, and an agent that can spell the reserved actions can
@@ -387,6 +420,15 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
         if (isReservedObservationEvent(ev)) continue;
         trace.push(ev);
         liveTrace?.push(ev); // tee to the live observer (batched flush) — the array above stays the record
+      }
+    };
+    const drain = (async () => {
+      await driveTurn(evalCase.task);
+      // The user's lines, in order, each resuming the session the previous turn reported. An abort between
+      // turns stops the exchange where it is — the trace so far is what happened, and the finally disposes.
+      for (const turn of userTurns) {
+        if (signal?.aborted) return;
+        await driveTurn(turn);
       }
     })();
     if (signal) {

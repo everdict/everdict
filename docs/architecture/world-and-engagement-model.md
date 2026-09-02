@@ -98,7 +98,7 @@ provide a declared world refuses the case.
 | ---- | --------------- | ------------------- |
 | `service` environment | a **provided** world with a dynamic provider | a `WorldProvider` port, a lifecycle owner, and a teardown that reads back zero |
 | environment build recipe | an **in-compute** world's bytes | ✅ landed 2026-09-03 — the environment carries an image and a `source`+`build` recipe, and an environment campaign builds it |
-| tau-bench | **dialogue** engagement + a state-comparing grader | the turn loop, a user simulator, and the benchmark's domain database |
+| tau-bench | **dialogue** engagement + a state-comparing grader | ✅ the turn loop (scripted user); still needs a model-driven user simulator and the benchmark's domain database |
 | api observation | the **provider's** obligation | a recording provider (a proxy) that yields coordinates AND events |
 | os target | a **provided** world | the same provider port; a session API is one implementation of it |
 
@@ -146,8 +146,12 @@ case declares and refuses when it cannot — a provided world is the same decora
    already compared against — is never overwritten. A recipe with no image to land in is refused at
    registration and again where a build would start.
 
-4. **Dialogue engagement** — the turn loop over a conversational harness, with a scripted user first (a case
-   that carries its user's turns is complete and verifiable) and a model-driven simulator second.
+4. ✅ **Dialogue engagement, scripted** (landed 2026-09-03) — `EvalCase.engagement` declares the exchange, and
+   `runCase` drives the opening task and then the user's lines over the harness's own continuity contract, so
+   the agent RESUMES its session instead of meeting each line cold. `dialogueTurns` is the one reader of the
+   bound. A harness that does not declare `conversational` is refused before the first turn: driving it would
+   make every turn an independent run, and the conversation the score is computed over would be a fiction.
+   A model-driven user is a different user KIND and plugs in at `engagement.user`, not into the loop.
 
 Each slice lands with a counterexample that drives the production composition, and slices 3 and 4 land with
 their refusals: a world that cannot be provided, and a harness that cannot hold a conversation.
