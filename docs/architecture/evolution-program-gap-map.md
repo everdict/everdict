@@ -145,12 +145,18 @@ environment as a registered entity, sealed per batch, with its own identity axis
 one); and evidence §1's first slice (the Terminal-Bench on-ramp end to end, SWE-bench Verified, and a boot
 line that says what a fresh deployment holds).
 
-Open: the remaining evidence §1 adapters — BrowseComp, WebArena and tau-bench. Each is an EVALUATOR to port,
-not a dataset to map, so each lands with its own honest `scoring` (`official` only where the port reproduces
-the official decision, else `proxy` with what it approximates); tau-bench also needs a simulated user, which
-is a judge-side conversational agent over the `conversation` contract. The Terminal-Bench image
-prebuild/push helper and the web add-benchmark wizard (`standard-task-formats.md` slices 4-5) are open too.
-A Hermes recipe waits on its CLI's resume form.
+Landed 2026-09-03: the Terminal-Bench on-ramp is complete (slices 4-5 — `everdict tasks prebuild` and the
+wizard's third source kind), and BrowseComp and WebArena ship as adapters that declare `proxy` with what they
+approximate, enforced for every adapter by a test.
+
+Open, and each with its reason written where somebody will meet it:
+- **tau-bench** (`benchmark-evidence-spec.md` §1) — its case is a DIALOGUE, so the user simulator belongs in
+  the execution path rather than in a grader, and its reward compares a domain database's final state.
+- **A `service` environment and an environment build recipe** (`harness-definability-spec.md` §2, "What the
+  two deferred arms actually need") — the first needs a provisioning port, a lifecycle owner and a teardown
+  that reads back zero; the second needs an environment to be able to carry an image, which raises a
+  precedence question against `EvalCase.image` that no caller answers yet.
+- A Hermes recipe waits on its CLI's resume form.
 
 ## What would reopen this page
 

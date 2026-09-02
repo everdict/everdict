@@ -87,9 +87,42 @@ one that matters: a target that resolves and is not observed is a declaration, n
 > harness held constant as an explicit check and the `environment` axis exempted from the confound refusal
 > because it is that campaign's TREATMENT. Adoption registers the candidate through the environment registry
 > under the dataset action pair, with the same owner-preserving write every other lane uses. **Not landed:**
-> the `service` environment kind (nothing provides one, so the schema would be a plan), and a `source`+`build`
-> recipe — an environment candidate is authored and registered, never built, which is what a harness with no
-> recipe already does.
+> the `service` environment kind and a `source`+`build` recipe. Both were deferred with evidence rather than
+> forgotten — see "What the two deferred arms actually need" below.
+
+### What the two deferred arms actually need (recorded 2026-09-03)
+
+This section exists because §2 above proposed both arms before the entity was built, and building it produced
+the reasons they are not one-line schema additions. A reader arriving with either idea is answered here
+instead of re-running the sweep.
+
+**A `service` environment — a topology the environment PROVIDES.** The idea is right and the machinery it
+would reuse does not fit as it stands:
+
+- `TopologyRuntime.ensureTopology(spec: ServiceHarnessSpec, zone?)` (`packages/topology/src/deploy/topology-runtime.ts`)
+  is keyed on a HARNESS spec and warm-pooled per `(harness, version, zone)`. An environment topology has no
+  harness identity to key on, and giving it a synthetic one would put two different things in one pool.
+- The case worth having is a COMMAND harness — a CLI agent on a local, Nomad or K8s runtime — acting on a
+  workspace-provided app. Nothing in that dispatch chain provisions anything: `ServiceTopologyBackend` is the
+  backend FOR a service harness, not a provisioning step other backends can call. The shape such a provider
+  would take already exists as a precedent — `SeedingDispatcher`, which materializes a harness's seeds before
+  dispatch and refuses when it cannot.
+- Lifecycle is the expensive half, not the schema. A per-case bring-up is L5 territory (a world that is not
+  verified gone is a leak that bills), and the existing per-run model is the opposite one: ONE warm topology
+  sliced per run by `wiringVars`/`keysFor`, where "the environment is a version" wants a world per version.
+
+So the arm lands with a provisioning port, a lifecycle owner and a teardown that reads back zero — not with a
+`kind: "service"` in a union. Until then a service-shaped world is expressed the way it always was: as the
+harness's own topology, which is exactly the conflation §2 wants to end, and saying so is more useful than a
+schema arm nothing provides.
+
+**A `source` + `build` recipe on an environment.** The blocker is smaller and sharper: **an environment
+carries no image**, so a build has nowhere to put its output. A harness slot's build produces the bytes that
+slot's image pin names; an environment's `repo`/`os-use` world runs inside `EvalCase.image`, which the CASE
+owns. Adding `image` to an environment is defensible — the world's bytes belong to the world — but it raises a
+precedence question against `EvalCase.image` that no current caller answers, and inventing an answer is how a
+field ends up meaning two things. An environment candidate is therefore authored and registered rather than
+built, which is what a harness with no recipe already does.
 
 **The gap.** A case EMBEDS its environment (`EvalCase.env`), a topology embeds its target, and a campaign's
 subject is `agent | harness` (`packages/contracts/src/records/evolution-campaign.ts`). So the environment —
