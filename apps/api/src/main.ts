@@ -607,13 +607,27 @@ async function main(): Promise<void> {
     metrics,
     // The seeds a harness version names, read from the workspace's own records at dispatch (seeds spec §2).
     seeds: {
+      // The stamped version's bytes, with the LIVE record's visibility and author — a version line inherits the
+      // skill's visibility, and `materializeSeeds` refuses a private seed for anyone but its author.
       skillVersion: async (tenant, id, version) => {
-        const stamped = await skillVersionStore.get(tenant, id, version);
-        return stamped === undefined ? undefined : { instructions: stamped.instructions, files: stamped.files };
+        const [stamped, live] = await Promise.all([
+          skillVersionStore.get(tenant, id, version),
+          skillStore.get(tenant, id),
+        ]);
+        return stamped === undefined || live === undefined
+          ? undefined
+          : {
+              instructions: stamped.instructions,
+              files: stamped.files,
+              visibility: live.visibility,
+              createdBy: live.createdBy,
+            };
       },
       knowledgeEntry: async (tenant, id) => {
         const entry = await knowledgeEntryStore.get(tenant, id);
-        return entry === undefined ? undefined : { title: entry.title, body: entry.body };
+        return entry === undefined
+          ? undefined
+          : { title: entry.title, body: entry.body, visibility: entry.visibility, createdBy: entry.createdBy };
       },
     },
     browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)

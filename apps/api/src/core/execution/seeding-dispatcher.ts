@@ -25,7 +25,8 @@ export class SeedingDispatcher implements Dispatcher {
         { harness: `${job.harness.id}@${job.harness.version}` },
         "this harness version ships seeds, and a job with no tenant cannot read them — the run is refused rather than started seedless",
       );
-    const seedFiles = await materializeSeeds(job.tenant, seeds, this.seeds);
+    // Read for the SUBMITTER: a private seed is its author's, and only their run may carry it.
+    const seedFiles = await materializeSeeds(job.tenant, seeds, this.seeds, job.submittedBy);
     return this.inner.dispatch({ ...job, seedFiles }, opts);
   }
 }

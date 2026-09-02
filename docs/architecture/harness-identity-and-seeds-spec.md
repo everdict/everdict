@@ -67,7 +67,9 @@ edge exists. Today the field is unknown and both register cleanly with nothing r
 > `seedFiles`; the runner writes them at `HARNESS_SEED_MOUNT` (`/everdict/seeds`) before the harness installs
 > (`packages/application-execution/src/run-case.ts`); a command reaches the mount through `{{seeds}}`.
 > Verification happens at DISPATCH, not at register: a version naming a stale digest registers and then refuses
-> every run by name until a version naming the current digest is registered — visible, never silent.
+> every run by name until a version naming the current digest is registered — visible, never silent. A PRIVATE
+> skill or entry is materialized only into a run its author submitted (404 for anyone else, never 403): a seed is
+> not a way to read another member's private bytes out of a sandbox.
 
 **The gap.** The program says a harness version SHIPS with its skill seeds and wiki seeds. Today a skill or
 a knowledge entry can be pinned ABOUT a harness version (`KnowledgePin`), which is a claim about an interval

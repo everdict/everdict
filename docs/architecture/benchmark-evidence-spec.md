@@ -66,8 +66,9 @@ never receives them) — the same assertion the mapper's tests already make, now
 > for one writes it as its score `detail` (or under a `diagnosis` key beside its rationale), and `diagnosesOf`
 > (`packages/domain/src/evolution/diagnosis.ts`) reads it off judge-family scores only — the family is the
 > authority, and `sanitizeScore` already refuses a producer that names a judge metric it does not own, so
-> "authored by a judge" is a fact rather than a label. Anything that does not parse is ignored: a rationale
-> sentence is not a diagnosis. The diagnoses ride the round's evidence record per case (§3), sealed with it.
+> "authored by a judge" is a fact rather than a label — and only a MEASURED judge score is read, because an
+> invalidated producer score keeps its judge-family name and detail verbatim. Anything that does not parse is
+> ignored: a rationale sentence is not a diagnosis. The diagnoses ride the round's evidence record per case (§3), sealed with it.
 > Not landed: a separate diagnosis receipt (the judge's score already seals under its pass) and a first-party
 > diagnosis rubric.
 

@@ -2900,6 +2900,26 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // code-review pass 1 over evidence spec §2. An invalidated producer score keeps its `judge:*` name and detail;
+    // only a MEASURED judge score is a judge's word. Neutralizing the status check reads the producer's diagnosis.
+    name: "Evolve — a producer's invalidated judge score is read as a diagnosis",
+    file: "packages/domain/src/evolution/diagnosis.ts",
+    from: '    if (score.status !== undefined && score.status !== "measured") continue;',
+    to: '    if (score.status !== undefined && score.status !== "measured" && score.status.length < 0) continue;',
+    build: "@everdict/domain",
+    suite: ["--root", "packages/domain", "src/evolution/diagnosis.test.ts"],
+  },
+  {
+    // code-review pass 1 over identity spec §2. A private seed belongs to its author; neutralizing the visibility
+    // rule seeds any member's private skill into any run that names it.
+    name: "Evolve — a private seed is materialized for a run its author did not submit",
+    file: "packages/application-control/src/harness/harness-seeds.ts",
+    from: '  return record.visibility === "workspace" || (subject !== undefined && record.createdBy === subject);',
+    to: '  return record.visibility === "workspace" || record.visibility === "private" || (subject !== undefined && record.createdBy === subject);',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/harness/harness-seeds.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

@@ -6,7 +6,7 @@ import { SeedingDispatcher } from "./seeding-dispatcher.js";
 
 // ── THE SEEDS TRAVEL WITH THE JOB (harness-identity-and-seeds-spec.md §2) ────────────────────────────
 describe("SeedingDispatcher", () => {
-  const skill = { instructions: "# Triage", files: [] };
+  const skill = { instructions: "# Triage", files: [], visibility: "workspace" as const, createdBy: "alice" };
   const reader: SeedReader = {
     async skillVersion(_t, id, version) {
       return id === "triage" && version === "1.0.0" ? skill : undefined;

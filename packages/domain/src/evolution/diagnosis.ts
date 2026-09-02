@@ -11,9 +11,17 @@ import {
 // key beside a rationale). Only judge-family metrics are read: the family is the authority, and `sanitizeScore`
 // keeps producers out of it. Anything that does not parse is ignored — a rationale sentence is not a diagnosis.
 export type JudgedDiagnosis = CaseDiagnosis & { judge: string };
-export function diagnosesOf(scores: ReadonlyArray<{ metric: string; detail?: unknown }>): JudgedDiagnosis[] {
+export function diagnosesOf(
+  scores: ReadonlyArray<{ metric: string; detail?: unknown; status?: string }>,
+): JudgedDiagnosis[] {
   const out: JudgedDiagnosis[] = [];
   for (const score of scores) {
+    // ── THE FAMILY IS THE AUTHORITY ONLY FOR A MEASURED SCORE (code-review pass 1) ─────────────────
+    //
+    // `sanitizeScore` turns a producer's `judge:*` score into `invalid{contract_violation}` — and keeps its
+    // metric and detail verbatim, so a reader that filters by NAME alone would read the producer's diagnosis
+    // off an invalidated row. Only a measured judge score is a judge's word.
+    if (score.status !== undefined && score.status !== "measured") continue;
     if (!isJudgeFamilyMetric(score.metric)) continue;
     const candidate =
       typeof score.detail === "object" && score.detail !== null && "diagnosis" in score.detail
