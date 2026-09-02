@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Eval domain model — Dataset / Rubric / Grader split"
+status: current
+updated: 2026-08-11
+anchors: [packages/graders/src/model-judge.ts, packages/contracts/src/harness/judge-spec.ts, packages/contracts/src/execution/grader.ts, packages/graders/src/make-graders.ts]
+---
 # Eval domain model — Dataset / Rubric / Grader split
 
 **Status: SHIPPED (all five slices + follow-ups).** S1 `7d1d809` (multi-metric contract) · S2 `59f26fa`

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Rich domain core — the domain expresses itself (design)"
+status: current
+updated: 2026-08-08
+anchors: [packages/domain/src/run/run.ts]
+---
 # Rich domain core — the domain expresses itself (design)
 
 > **Status: S0-S4 SHIPPED** (`466efdc`→`0941840`; 706/706 tests + build + boot contract at every slice).

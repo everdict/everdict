@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Workspace"
+status: current
+updated: 2026-08-11
+---
 # Workspace
 
 A **workspace is a tenant is a trust zone.** Not three ideas that happen to line up — one boundary with

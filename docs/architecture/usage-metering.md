@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Usage metering — the billing surface (meter-only, durable)"
+status: current
+updated: 2026-08-07
+anchors: [apps/api/src/common/usage-meter.ts]
+---
 # Usage metering — the billing surface (meter-only, durable)
 
 > SSOT for how Everdict meters the billable surface. Companion to `one-call-sdk.md` (the pricing position).

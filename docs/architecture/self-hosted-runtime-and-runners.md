@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Self-hosted runtime & runners — a pool you target, workers that drain it"
+status: current
+updated: 2026-08-11
+anchors: [apps/api/src/core/execution/runtime-dispatcher.ts, packages/application-control/src/runner/runner-hub.ts]
+---
 # Self-hosted runtime & runners — a pool you target, workers that drain it
 
 > **Status: DESIGN (not yet built).** A strict, additive generalization of the shipped

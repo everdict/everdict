@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Suna (Kortix) as an everdict harness — mapping + the gaps it exposes"
+status: current
+updated: 2026-07-15
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/topology/src/service-backend.ts]
+---
 # Suna (Kortix) as an everdict harness — mapping + the gaps it exposes
 
 Suna is a real, popular open-source generalist agent whose topology is exactly what everdict's service-topology

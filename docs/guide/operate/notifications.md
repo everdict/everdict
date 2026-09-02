@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Notifications"
+status: current
+updated: 2026-08-11
+---
 # Notifications
 
 Evaluations are asynchronous and slow. If finding out requires remembering to check, you will find out

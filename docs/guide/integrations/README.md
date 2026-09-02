@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Integrations"
+status: current
+updated: 2026-08-11
+---
 # Integrations
 
 Everdict is driven by people through the web app, and by machines through MCP. These pages are the

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Schedules & monitoring"
+status: current
+updated: 2026-08-11
+---
 # Schedules & monitoring
 
 A scorecard you run by hand tells you about today. A regression is something that happens while nobody

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Your first scorecard"
+status: current
+updated: 2026-08-11
+---
 # Your first scorecard
 
 A single run tells you what happened once. A **scorecard** produces a verdict: one dataset × one

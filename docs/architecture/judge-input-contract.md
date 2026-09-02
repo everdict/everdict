@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Judge input contract — declare, preview, dry-run"
+status: current
+updated: 2026-07-17
+anchors: [apps/api/src/core/execution/judge-runner.ts]
+---
 # Judge input contract — declare, preview, dry-run
 
 **Status: SHIPPED end-to-end (S1–S5 + artifact/span channel, control plane + MCP + web UI).** S1 core seam ·

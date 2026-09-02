@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Portable harness/runtime — one definition, runs whole anywhere (managed **or** the user's laptop)"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/execution/eval-case.ts, packages/drivers/src/docker.ts, packages/self-hosted-runner/src/capabilities.ts, apps/cli/src/main.ts]
+---
 # Portable harness/runtime — one definition, runs whole anywhere (managed **or** the user's laptop)
 
 > ⚠️ **Managed-lane caveat (2026-07-11):** nomad/k8s honor `case.image` by making it the TASK image with no

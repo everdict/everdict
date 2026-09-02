@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Suites & version regression"
+status: current
+updated: 2026-08-08
+---
 # Suites & version regression
 
 A **Suite** = a set of `EvalCase`s for one harness id. Run it against a harness **version** → a

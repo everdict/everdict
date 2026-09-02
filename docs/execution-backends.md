@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Execution backends (Backend vs Driver)"
+status: current
+updated: 2026-08-07
+---
 # Execution backends (Backend vs Driver)
 
 Two layers decide *where a harness run executes*:

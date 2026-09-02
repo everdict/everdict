@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Connect an agent"
+status: current
+updated: 2026-08-11
+---
 # Connect an agent
 
 Everdict exposes the same capabilities twice: an HTTP API for people and scripts, and an **MCP server**

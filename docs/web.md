@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "SaaS web (apps/web)"
+status: current
+updated: 2026-08-05
+---
 # SaaS web (`apps/web`)
 
 The multi-tenant SaaS frontend — a Next.js app (FSD architecture, **Linear-style** design — refined dark-first

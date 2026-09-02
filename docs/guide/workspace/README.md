@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Your workspace"
+status: current
+updated: 2026-08-11
+---
 # Your workspace
 
 A workspace is more than a tenant boundary. It holds an agent that works for you, a file tree that

@@ -1,3 +1,9 @@
+---
+kind: runbook
+title: "Runbook — GitHub self-hosted runner co-registration (real GitHub)"
+status: current
+updated: 2026-07-07
+---
 # Runbook — GitHub self-hosted runner co-registration (real GitHub)
 
 Stand up a **GitHub Actions self-hosted runner + an Everdict workspace-shared runner** on one build server, so CI

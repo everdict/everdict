@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Evolution lineage — ancestry, events, and the loop's own protocol"
+status: current
+updated: 2026-08-29
+anchors: [packages/application-control/src/capability/first-party.ts, packages/contracts/src/knowledge/predicate.ts, packages/domain/src/knowledge/harvest-specs.ts, packages/registry/src/pg-versioned-store.ts]
+---
 # Evolution lineage — ancestry, events, and the loop's own protocol
 
 > Status: **design.** The optimization loop itself is landed and drilled: `agent-evolve` + `try_agent` +

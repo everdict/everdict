@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The workspace filesystem"
+status: current
+updated: 2026-08-11
+anchors: [packages/storage/src/s3-fs.scenario.test.ts, packages/contracts/src/records/workspace-file.ts]
+---
 # The workspace filesystem
 
 > One isolated file tree per workspace, shared by every surface: agents persist task outputs as real

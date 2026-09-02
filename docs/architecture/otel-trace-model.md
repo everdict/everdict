@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The trace model — spans are the record (OTel-compatible)"
+status: current
+updated: 2026-08-06
+anchors: [apps/agent/src/turn-spans.ts]
+---
 # The trace model — spans are the record (OTel-compatible)
 
 > **Status: DESIGN (maintainer decision, 2026-08-04).** Amends

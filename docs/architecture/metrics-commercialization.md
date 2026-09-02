@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Metrics commercialization — two products, three bundles, one closed scrape"
+status: current
+updated: 2026-08-07
+---
 # Metrics commercialization — two products, three bundles, one closed scrape
 
 The operating decision: **operator metrics and customer metrics are different products.** The scheduler/

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Workspace-scoped image registry — classify + publish harness images"
+status: current
+updated: 2026-08-11
+anchors: [packages/domain/src/image/image-ref.ts, packages/application-control/src/image-registry/image-registry-service.ts]
+---
 # Workspace-scoped image registry — classify + publish harness images
 
 > **Scope note (post-M6/M7):** this is now the **BYO adapter chapter** — registries the workspace hosts

@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Auth — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/auth/src/authz.ts, packages/auth/src/oidc.ts, packages/auth/src/github-actions.ts, apps/web/src/shared/auth/can.ts]
+---
 # Auth — collaboration model
 
 > Principal + role/scope matrix + authenticator adapters + active-workspace resolution. Companion

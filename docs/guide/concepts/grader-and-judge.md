@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Grader & Judge"
+status: current
+updated: 2026-08-11
+---
 # Grader & Judge
 
 A run produces evidence. A grader turns evidence into a **measurement**:

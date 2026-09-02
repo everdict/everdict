@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The managed image store"
+status: current
+updated: 2026-08-11
+anchors: [packages/application-control/src/ports/workspace-images.ts]
+---
 # The managed image store
 
 > **Status:** DESIGN — direction confirmed with the maintainer (2026-07-29): Everdict should OWN the

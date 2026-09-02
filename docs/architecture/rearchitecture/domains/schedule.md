@@ -1,3 +1,9 @@
+---
+kind: decision
+title: "Schedule — collaboration model"
+status: accepted
+updated: 2026-08-19
+---
 # Schedule — collaboration model
 
 > Cron scorecards: DB SSOT + Temporal Schedules as the firing mechanism. Companion to

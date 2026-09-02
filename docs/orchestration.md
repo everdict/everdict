@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Orchestration (durable control plane)"
+status: current
+updated: 2026-08-10
+---
 # Orchestration (durable control plane)
 
 > **Role charter vs the event plane:** see

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Workspace agents"
+status: current
+updated: 2026-08-11
+---
 # Workspace agents
 
 Everdict evaluates agents. It also **runs one for you** — a workspace agent that lives inside the

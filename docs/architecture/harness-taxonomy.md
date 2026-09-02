@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Harness taxonomy — Template (category) + Instance (design)"
+status: current
+updated: 2026-08-11
+anchors: [packages/application-control/src/run/run-service.ts, apps/api/src/core/execution/topology-backend.ts, apps/api/src/core/execution/judge-runner.ts, apps/api/src/server.ts]
+---
 # Harness taxonomy — Template (category) + Instance (design)
 
 > **Status: design / not yet implemented.** Track A of the harness rework. Track B (image-source

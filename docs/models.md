@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Models (workspace-registered LLM models)"
+status: current
+updated: 2026-08-12
+anchors: [packages/contracts/src/harness/model-spec.ts, packages/domain/src/model/model-binding.ts]
+---
 # Models (workspace-registered LLM models)
 
 A **Model** is a workspace's first-class definition of an LLM — *what to infer or judge with* — registered

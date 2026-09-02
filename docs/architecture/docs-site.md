@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "The documentation site — information architecture (plan)"
+status: current
+updated: 2026-08-11
+---
 # The documentation site — information architecture (plan)
 
 > The repo has 121 markdown files and 288,654 words. Almost none of it is documentation a

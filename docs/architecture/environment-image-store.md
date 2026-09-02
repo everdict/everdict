@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Environment image store — managed eval-environment images as store assets"
+status: current
+updated: 2026-07-31
+anchors: [apps/web/src/entities/capability/model/schema.ts, packages/contracts/src/records/capability.ts]
+---
 # Environment image store — managed eval-environment images as store assets
 
 > **Status:** E1–E4 SHIPPED + E5 (agent guidance) — see the slice list for the per-slice state and the

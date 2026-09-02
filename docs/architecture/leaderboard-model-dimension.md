@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Leaderboard — model as a first-class dimension (harness × model × benchmark)"
+status: current
+updated: 2026-08-11
+anchors: [packages/domain/src/scorecard/trend.ts, packages/domain/src/scorecard/scorecard.ts]
+---
 # Leaderboard — model as a first-class dimension (harness × model × benchmark)
 
 > **Status: ALL 3 SLICES + follow-ups SHIPPED (gates green — suite·db·api: format/lint/typecheck/test; web:

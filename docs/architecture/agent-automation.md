@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Agent automation — platform-triggered agents, fleet observability, and the crafting studio"
+status: current
+updated: 2026-08-17
+anchors: [apps/agent/src/server.ts, packages/application-control/src/capability/first-party.ts]
+---
 # Agent automation — platform-triggered agents, fleet observability, and the crafting studio
 
 > **Status: P1–P7 LANDED (2026-07-28) — see "Implementation status" at the end for the shipped surface and

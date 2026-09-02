@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Scorecard — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [apps/api/src/core/scorecard/temporal-batch-driver.ts, apps/web/src/entities/scorecard/model/schema.ts, packages/db/src/results/scorecard-store.ts, packages/sdk/src/types.ts]
+---
 # Scorecard — collaboration model
 
 > Batch eval + verdict authority + trials + regression analytics. Companion to

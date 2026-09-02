@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "The workspace filesystem"
+status: current
+updated: 2026-08-11
+---
 # The workspace filesystem
 
 Every workspace gets one isolated file tree. Agents write their task output into it, members open the

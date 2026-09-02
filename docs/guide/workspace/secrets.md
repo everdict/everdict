@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Secrets"
+status: current
+updated: 2026-08-11
+---
 # Secrets
 
 Everything that needs a credential — judges calling a provider, a harness pulling a private repo, a

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Service-topology target generalization — the target axis (design)"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/harness/harness-template.ts, packages/topology/src/deploy/topology-runtime.ts, packages/topology/src/front-door/target-acquirer.ts]
+---
 # Service-topology target generalization — the target axis (design)
 
 > **Status: B1 + B2 DONE.** Round 2 of front-door generalization. Round 1

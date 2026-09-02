@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Guide — the product documentation"
+status: current
+updated: 2026-08-11
+---
 # Guide — the product documentation
 
 Written for someone using Everdict, not maintaining it. This is the tree the public docs site

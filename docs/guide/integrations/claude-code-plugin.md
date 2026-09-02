@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Claude Code plugin"
+status: current
+updated: 2026-08-11
+---
 # Claude Code plugin
 
 Two commands give any Claude Code session the ability to run and read evaluations:

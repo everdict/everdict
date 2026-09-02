@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "GitHub Actions trigger — CI-fired evals + zero-input repo↔service integration"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/harness/harness-template.ts, packages/application-control/src/scorecard/scorecard-service.ts, packages/db/src/results/scorecard-store.ts]
+---
 # GitHub Actions trigger — CI-fired evals + zero-input repo↔service integration
 
 > **Status: slices 1–3 SHIPPED (2026-07-03).**

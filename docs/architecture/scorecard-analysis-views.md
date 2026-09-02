@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Scorecard Analysis + Views (SSOT)"
+status: current
+updated: 2026-07-31
+---
 # Scorecard Analysis + Views (SSOT)
 
 > One flexible analysis dashboard over scorecards (filter · group · aggregate · search) that **subsumes** the

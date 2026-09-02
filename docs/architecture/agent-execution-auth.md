@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Agent execution auth — a credential for request-less agent turns"
+status: current
+updated: 2026-08-11
+---
 # Agent execution auth — a credential for request-less agent turns
 
 > **Status: doc-first SSOT (2026-07-24).** The crux dependency of

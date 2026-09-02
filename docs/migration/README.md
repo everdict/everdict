@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Database migrations — expand → deploy → contract"
+status: current
+updated: 2026-07-07
+---
 # Database migrations — expand → deploy → contract
 
 Carried discipline (reinterpreted for Postgres + plain numbered SQL — Flyway-style):

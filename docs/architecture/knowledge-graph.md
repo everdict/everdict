@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Workspace Knowledge Graph"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/records/agent-session.ts]
+---
 # Workspace Knowledge Graph
 
 > **SSOT** for everdict's knowledge system. Status: **the backend + API/MCP surface + the authored write path are

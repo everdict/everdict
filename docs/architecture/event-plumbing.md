@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Event plumbing — the platform's nervous system"
+status: current
+updated: 2026-08-11
+---
 # Event plumbing — the platform's nervous system
 
 > **Status: DESIGN (maintainer direction, 2026-07-29).** The last piece of the execution-model arc:

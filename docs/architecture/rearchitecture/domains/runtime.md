@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Runtime — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/backends/src/placement/build-runtime-backend.ts, packages/backends/src/orchestrators/nomad.ts]
+---
 # Runtime — collaboration model
 
 > Registered execution infra + the capability model + the placement policy suite. Companion to

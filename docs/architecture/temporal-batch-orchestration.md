@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Temporal batch orchestration — SHIPPED (live-verified vs a real dev Temporal)"
+status: current
+updated: 2026-08-16
+---
 # Temporal batch orchestration — SHIPPED (live-verified vs a real dev Temporal)
 
 > Status: implemented per this design and live-verified 2026-07-08 — worker SIGKILL mid-batch → a new

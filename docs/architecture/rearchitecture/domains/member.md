@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Member — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/db/src/workspace/workspace-invites.ts, apps/web/src/shared/auth/can.ts]
+---
 # Member — collaboration model
 
 > Workspace + membership + invite. Companion to `../00-target-architecture.md` (§4 `domain/member`,

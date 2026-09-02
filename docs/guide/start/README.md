@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Get started"
+status: current
+updated: 2026-08-11
+---
 # Get started
 
 Four pages, in order. Twenty minutes to a verdict you can defend.

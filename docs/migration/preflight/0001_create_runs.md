@@ -1,3 +1,10 @@
+---
+kind: runbook
+title: "Preflight — 0001_create_runs"
+status: current
+updated: 2026-07-07
+anchors: [packages/db/src/db.test.ts]
+---
 # Preflight — 0001_create_runs
 
 **Change:** additive (expand). Creates `everdict_runs` (result store) + a `(tenant, created_at DESC, id DESC)`

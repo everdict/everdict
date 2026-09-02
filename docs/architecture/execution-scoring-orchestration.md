@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Execution · Orchestration · Scoring — the three concerns"
+status: current
+updated: 2026-07-17
+anchors: [apps/api/src/composition/run.ts]
+---
 # Execution · Orchestration · Scoring — the three concerns
 
 > **Status: SHIPPED (S1 `ad7cdc2` + S2 `91f7c55`).** Doc-first SSOT for a **fundamental** separation of concerns in

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Products & releases"
+status: current
+updated: 2026-08-11
+---
 # Products & releases
 
 The tracker answers *why* you evaluate. The product timeline answers **what you ship** — and puts the

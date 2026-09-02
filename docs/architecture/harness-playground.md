@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Harness playground — interactive test cases against a live harness session"
+status: current
+updated: 2026-08-06
+anchors: [packages/drivers/src/spawn.ts]
+---
 # Harness playground — interactive test cases against a live harness session
 
 > Ships the interactive half of execution-model.md's symptom 1 ("`run` only serves scorecards; a harness

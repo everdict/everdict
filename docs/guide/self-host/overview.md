@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Self-hosting Everdict"
+status: current
+updated: 2026-08-11
+---
 # Self-hosting Everdict
 
 Everdict is Apache-2.0 and designed to run entirely on your infrastructure: your code, your data, your

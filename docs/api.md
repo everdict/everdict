@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Control-plane API (@everdict/api)"
+status: current
+updated: 2026-08-05
+---
 # Control-plane API (`@everdict/api`)
 
 The external SaaS surface — a Fastify HTTP server that accepts eval runs and exposes results, on top of

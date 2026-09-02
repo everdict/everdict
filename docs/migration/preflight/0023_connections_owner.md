@@ -1,3 +1,9 @@
+---
+kind: runbook
+title: "Preflight — 0023_connections_owner"
+status: current
+updated: 2026-08-11
+---
 # Preflight — 0023_connections_owner
 
 > **Status: SUPERSEDED.** The whole personally-owned Connected accounts feature was removed by

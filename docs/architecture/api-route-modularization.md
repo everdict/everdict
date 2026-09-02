@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "apps/api route modularization — split the 3676-line server.ts into resource route modules (design)"
+status: current
+updated: 2026-08-16
+anchors: [apps/api/src/server.ts]
+---
 # apps/api route modularization — split the 3676-line server.ts into resource route modules (design)
 
 > **Status: Rounds 1-5 SHIPPED.** Round 5 (`d7505a0`…`84b038d`): the transport layer gains the DTO/docs

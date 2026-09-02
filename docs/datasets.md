@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Datasets (@everdict/registry + control plane)"
+status: current
+updated: 2026-08-19
+anchors: [packages/datasets/src/travel.ts]
+---
 # Datasets (`@everdict/registry` + control plane)
 
 A **dataset** is a versioned, **harness-agnostic** bundle of eval cases — the thing a harness gets evaluated

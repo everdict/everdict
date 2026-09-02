@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Service-topology front-door generalization — absorbing the control-plane (design)"
+status: current
+updated: 2026-08-11
+anchors: [packages/topology/src/service-backend.ts, packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/harness/harness-template.ts, packages/topology/src/front-door/front-door-driver.ts]
+---
 # Service-topology front-door generalization — absorbing the control-plane (design)
 
 > **Status: all 5 core knobs DONE.** Sequenced so the live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`)

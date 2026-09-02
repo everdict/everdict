@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The execution model — Run as the platform's universal execution record"
+status: current
+updated: 2026-08-08
+anchors: [apps/agent/src/chat-run.ts]
+---
 # The execution model — Run as the platform's universal execution record
 
 > **Status: DESIGN (not implemented).** Doc-first SSOT for closing the "what is a Run?" question.

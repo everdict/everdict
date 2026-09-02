@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Track the work"
+status: current
+updated: 2026-08-11
+---
 # Track the work
 
 Everdict has a tracker, and the reason is narrow: **an eval that nobody acts on is a number in a

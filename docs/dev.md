@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Local development (web + auth)"
+status: current
+updated: 2026-07-07
+---
 # Local development (web + auth)
 
 How to run the full stack locally and develop against it in the browser, with **real Keycloak login**.

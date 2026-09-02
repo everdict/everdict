@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Environments"
+status: current
+updated: 2026-08-11
+---
 # Environments
 
 An environment is **the world a case acts on**. It is declared per eval case, and it is what makes the

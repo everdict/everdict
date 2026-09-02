@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Trial-based verdict — pass@k, flakiness & statistical regression"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/execution/eval-case.ts, packages/domain/src/scorecard/trials.ts]
+---
 # Trial-based verdict — pass@k, flakiness & statistical regression
 
 > Status: **M1 in progress.** Slice 1 (contracts + pure aggregation math) landed; slices 2–5 follow.

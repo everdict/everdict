@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Documentation quality rubric — scoring against Mastra"
+status: current
+updated: 2026-08-11
+---
 # Documentation quality rubric — scoring against Mastra
 
 > The docs site shipped. It is not good. This page is the instrument that says *how* not-good, in

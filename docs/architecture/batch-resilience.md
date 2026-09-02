@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Batch resilience — transient retry · restart resume · retry-failed"
+status: current
+updated: 2026-08-11
+---
 # Batch resilience — transient retry · restart resume · retry-failed
 
 Team-scale evaluation means hundreds of cases per batch (WebVoyager alone is 601), many users

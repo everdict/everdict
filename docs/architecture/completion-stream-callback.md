@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Front-door completion — stream & callback modes (design)"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/topology/src/front-door/front-door-driver.ts, packages/topology/src/service-backend.ts]
+---
 # Front-door completion — stream & callback modes (design)
 
 > **Status: C1 + C2 DONE.** Round 3 of front-door generalization. Round 1

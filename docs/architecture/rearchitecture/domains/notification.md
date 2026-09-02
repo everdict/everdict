@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Notification — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/db/src/activity/notification-store.ts, apps/desktop/src/notification-watcher.ts]
+---
 # Notification — collaboration model
 
 > "The work I asked for is done" — the personal feed + its delivery fan-out. Companion to

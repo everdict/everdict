@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Integrations — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/db/src/workspace/workspace-settings.ts, apps/web/src/shared/lib/image-ref.ts]
+---
 # Integrations — collaboration model
 
 > The five workspace-owned outbound/inbound integrations: **github-app · mattermost ·

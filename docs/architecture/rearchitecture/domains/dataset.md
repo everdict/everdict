@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Dataset — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/datasets/src/sources.ts, packages/datasets/src/terminal-bench.ts, apps/api/src/api/dataset/dataset.routes.ts]
+---
 # Dataset — collaboration model
 
 > Versioned harness-agnostic case bundles + benchmark import + subset selection + diff. Companion to

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Agent teams — message-based collaboration + proactive agents over the eval control plane"
+status: current
+updated: 2026-08-19
+anchors: [apps/agent/src/mcp-tools.ts, apps/agent/src/action-policy.ts]
+---
 # Agent teams — message-based collaboration + proactive agents over the eval control plane
 
 > **Status: doc-first SSOT (2026-07-24).** The product direction for Everdict's *own* agent beyond the

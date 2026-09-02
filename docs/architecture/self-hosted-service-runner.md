@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Self-hosted runner — drive *service* (topology) harnesses on your own machine (design)"
+status: current
+updated: 2026-08-11
+anchors: [packages/self-hosted-runner/src/run-leased-job.ts, packages/topology/src/deploy/docker-runtime.ts, packages/topology/src/deploy/docker.ts, apps/cli/src/main.ts]
+---
 # Self-hosted runner — drive *service* (topology) harnesses on your own machine (design)
 
 > **Status: design (doc-first). Three decisions locked with the user; implementation in slices.**

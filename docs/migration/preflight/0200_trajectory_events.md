@@ -1,3 +1,10 @@
+---
+kind: runbook
+title: "Preflight — 0200_trajectory_events"
+status: current
+updated: 2026-08-28
+anchors: [packages/db/src/results/trajectory-store.test.ts, packages/domain/src/trace/paged-projection.counterexample.test.ts]
+---
 # Preflight — 0200_trajectory_events
 
 **Change:** additive (expand). Creates `everdict_trajectory_events` (one row per trace event/span, PK

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Budgets & cost"
+status: current
+updated: 2026-08-11
+---
 # Budgets & cost
 
 Evaluation spends money on a timer. A nightly 400-case scorecard with two model judges is a nightly

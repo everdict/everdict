@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Image registry"
+status: current
+updated: 2026-08-11
+---
 # Image registry
 
 Evals run inside images. If an image reference can drift, the eval drifted too — so Everdict wants to

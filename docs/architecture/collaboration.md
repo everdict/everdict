@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Module collaboration diagrams"
+status: current
+updated: 2026-08-11
+---
 # Module collaboration diagrams
 
 How the `packages/*` and `apps/*` modules cooperate — first at low zoom (the whole mesh),

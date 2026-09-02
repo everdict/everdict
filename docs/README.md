@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Everdict docs"
+status: current
+updated: 2026-08-28
+---
 # Everdict docs
 
 Every document in this tree is listed here. Conventions (single source of truth):

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Runtime"
+status: current
+updated: 2026-08-11
+---
 # Runtime
 
 A runtime is **where your evals run**. It is the fourth registry entity next to harnesses, datasets and

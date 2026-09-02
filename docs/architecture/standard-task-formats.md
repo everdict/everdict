@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Standard task-format on-ramp — bring an existing agent benchmark, run it managed"
+status: current
+updated: 2026-08-19
+anchors: [packages/datasets/src/terminal-bench.ts, packages/graders/src/reward-file.ts]
+---
 # Standard task-format on-ramp — bring an existing agent benchmark, run it managed
 
 > Status: **M2 in progress.** Slice 1 (Terminal-Bench task → EvalCase pure mapper) landed; later slices

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Agent conversations — a conversational, multi-turn agent over the eval control plane"
+status: current
+updated: 2026-08-11
+anchors: [packages/domain/src/model/model-binding.ts, packages/self-hosted-runner/src/runner-session.ts, apps/api/src/main.ts, apps/agent/src/live-turns.ts]
+---
 # Agent conversations — a conversational, multi-turn agent over the eval control plane
 
 > **Status: P1–P5 LANDED (local, unpushed) — kernel + contracts/store + `apps/agent` + web panel; all

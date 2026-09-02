@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Topology portability — one HarnessSpec, identical semantics on every runtime"
+status: current
+updated: 2026-07-15
+anchors: [packages/topology/src/deploy/nomad-topology.ts, packages/domain/src/harness/portability.ts, packages/topology/src/deploy/peer-resolver.ts]
+---
 # Topology portability — one HarnessSpec, identical semantics on every runtime
 
 > **Requirement (not best-effort).** A `HarnessSpec(kind:"service")` that runs on ONE runtime MUST run

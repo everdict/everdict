@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Dataset"
+status: current
+updated: 2026-08-11
+---
 # Dataset
 
 A dataset is the fixed set of problems you measure an agent against. Here is one with a single case:

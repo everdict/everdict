@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Trust certification (the nightly invariant suite)"
+status: current
+updated: 2026-08-29
+anchors: [packages/job-runner/src/grader-failure.trust.test.ts, apps/api/src/trust/release-gate.trust.test.ts, apps/api/src/trust/fleet-admission.trust.test.ts, apps/api/src/trust/leader-election.trust.test.ts]
+---
 # Trust certification (the nightly invariant suite)
 
 Everdict's product is a **verdict**. Every other kind of bug costs a user time; a bug in the verdict costs

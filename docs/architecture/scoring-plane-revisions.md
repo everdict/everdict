@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The scoring plane as revisions (MVCC)"
+status: current
+updated: 2026-08-15
+anchors: [apps/api/src/trust/pass-ownership.trust.test.ts, packages/db/src/results/scoring-stage-round-trip.scenario.test.ts]
+---
 # The scoring plane as revisions (MVCC)
 
 > **Status:** DESIGN — arch-review 8 P2. The ownership work (P0, `fc6e4a19`) made concurrent scoring SAFE;

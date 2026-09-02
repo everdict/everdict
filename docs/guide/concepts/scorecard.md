@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Scorecard"
+status: current
+updated: 2026-08-11
+---
 # Scorecard
 
 A scorecard is one dataset × one harness, every case run and scored the same way:

@@ -1,3 +1,10 @@
+---
+kind: runbook
+title: "Preflight — 0004_harness_tenant"
+status: current
+updated: 2026-08-11
+anchors: [packages/registry/src/registry-contract.test.ts]
+---
 # Preflight — 0004_harness_tenant
 
 **Change:** expand — add tenant ownership to `everdict_harnesses`. Adds a `tenant` column (NOT NULL DEFAULT

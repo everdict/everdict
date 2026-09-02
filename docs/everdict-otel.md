@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "everdict-otel — sending traces to everdict (migration recipes)"
+status: current
+updated: 2026-07-31
+---
 # everdict-otel — sending traces to everdict (migration recipes)
 
 Everdict ingests **standard OTLP/HTTP JSON** at `POST {control-plane}/v1/traces` (the N0 door — see

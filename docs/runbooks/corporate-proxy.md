@@ -1,3 +1,9 @@
+---
+kind: runbook
+title: "Runbook — deploying behind a corporate proxy"
+status: current
+updated: 2026-07-28
+---
 # Runbook — deploying behind a corporate proxy
 
 For everdict deployments inside a corporate network where internet egress goes through an HTTP(S)

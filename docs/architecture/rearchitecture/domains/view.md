@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "View — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/db/src/results/view-store.ts]
+---
 # View — collaboration model
 
 > Saved scorecard-analysis lenses. Companion to `../00-target-architecture.md` (§4, §9). Design

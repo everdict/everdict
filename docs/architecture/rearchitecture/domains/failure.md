@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Failure — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/orchestrator/src/activities.ts]
+---
 # Failure — collaboration model
 
 > The case-failure taxonomy: WHERE a case died × WHOSE fault it was × whether retrying helps.

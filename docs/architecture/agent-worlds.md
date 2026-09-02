@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Agent worlds — persistent environments over ephemeral sandboxes"
+status: current
+updated: 2026-08-06
+---
 # Agent worlds — persistent environments over ephemeral sandboxes
 
 > A **world** is a durable, versioned environment an agent (or member) builds up across sandbox

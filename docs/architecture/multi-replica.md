@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Running more than one control-plane replica"
+status: current
+updated: 2026-08-08
+anchors: [packages/orchestrator/src/worker.ts]
+---
 # Running more than one control-plane replica
 
 The control plane (`apps/api`) was written against a **single-process assumption**: in-flight work lived in

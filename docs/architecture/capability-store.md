@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Capability Store (SSOT)"
+status: current
+updated: 2026-08-12
+anchors: [packages/contracts/src/harness/agent-spec.ts, packages/contracts/src/records/skill.ts, packages/contracts/src/records/capability.ts, apps/agent/src/profile.ts]
+---
 # Capability Store (SSOT)
 
 > A **store** — not a private registry — where a workspace's members AUTHOR agent capabilities (managed **tool

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "The secret-free execution envelope"
+status: current
+updated: 2026-08-22
+---
 # The secret-free execution envelope
 
 > Status: **implemented and verified against a live cluster.** The design below is what shipped; the

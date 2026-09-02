@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Runtimes (tenant-defined execution infrastructure)"
+status: current
+updated: 2026-08-21
+anchors: [apps/api/src/composition/runtime-compute.ts]
+---
 # Runtimes (tenant-defined execution infrastructure)
 
 A **Runtime** is a tenant's **execution infrastructure** — *where* their evals run. It's a user-registerable

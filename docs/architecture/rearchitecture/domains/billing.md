@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Billing — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/trace/src/usage-proxy.ts, packages/harnesses/src/command.ts]
+---
 # Billing — collaboration model
 
 > Payer attribution, enforcement budget (402), and meter-only usage. Companion to

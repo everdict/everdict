@@ -1,3 +1,9 @@
+---
+kind: decision
+title: "Harness — collaboration model"
+status: accepted
+updated: 2026-08-19
+---
 # Harness — collaboration model
 
 > Template + instance + pins + resolution + visibility. Companion to `../00-target-architecture.md`

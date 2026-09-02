@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Scheduled evals — run a scorecard on a cron schedule (regression monitoring)"
+status: current
+updated: 2026-08-11
+anchors: [packages/application-control/src/scorecard/scorecard-service.ts, apps/web/src/shared/lib/cron.ts]
+---
 # Scheduled evals — run a scorecard on a cron schedule (regression monitoring)
 
 > **Status: slices 1 + 2 + 3 SHIPPED.** Driver decision **locked with the user: Temporal Schedules (native)**.

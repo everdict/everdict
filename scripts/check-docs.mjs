@@ -139,6 +139,32 @@ for (const doc of docs) {
     ignored = new Set(res.split("\n").filter(Boolean));
   }
 
+  // ── 4b. AN ANCHOR NAMES CODE THAT MUST STILL EXIST ────────────────────────────────────────────────
+  //
+  // `anchors:` in a doc's frontmatter names the source files whose change should force a review of that
+  // page. Its whole value is that a stale one is LOUD — so it has to be checked, or it is a declaration
+  // nobody consumes, which is this repository's most-repeated defect wearing a documentation costume.
+  //
+  // Scanned separately from the backtick pass because frontmatter is not prose: these paths are bare, and
+  // the reader of a doc never sees them. Nothing else would ever notice them going dead.
+  for (const doc of docs) {
+    const head = readFileSync(join(ROOT, doc), "utf8").split("\n---", 2);
+    if (!head[0].startsWith("---")) continue;
+    const line = head[0].split("\n").find((l) => l.startsWith("anchors:"));
+    if (line === undefined) continue;
+    for (const raw of line
+      .slice("anchors:".length)
+      .replace(/^\s*\[|\]\s*$/g, "")
+      .split(",")) {
+      const anchorPath = raw.trim();
+      if (anchorPath === "") continue;
+      if (!tracked.has(anchorPath))
+        failures.push(
+          `${doc} anchors ${anchorPath}, which is not in the repository — the doc lost touch with the code it describes`,
+        );
+    }
+  }
+
   for (const { doc, token } of sites) {
     if (ignored.has(token)) continue;
     failures.push(`${doc} cites \`${token}\`, which is not in the repository`);

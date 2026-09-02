@@ -1,3 +1,10 @@
+---
+kind: runbook
+title: "Preflight — 0003_create_tenant_keys"
+status: current
+updated: 2026-08-11
+anchors: [packages/db/src/workspace/tenant-auth.test.ts]
+---
 # Preflight — 0003_create_tenant_keys
 
 **Change:** additive (expand). Creates `everdict_tenant_keys` (API-key auth) — PK `key_hash` (SHA-256 of the

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The ownership protocol"
+status: current
+updated: 2026-08-09
+anchors: [packages/contracts/src/records/ownership.ts, packages/agent-runtime/src/kernel/loop.ts, apps/agent/src/agent-activation.ts, packages/contracts/src/records/capability.ts]
+---
 # The ownership protocol
 
 Ownership as a **verifiable, transferable protocol** — not an imitated person. When a workspace hands work to

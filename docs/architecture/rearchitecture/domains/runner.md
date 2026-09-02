@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Runner — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/self-hosted-runner/src/runner-loop.ts]
+---
 # Runner — collaboration model
 
 > Pairing + personal/workspace tiers + the lease state machine (push→pull). Companion to

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Workspace pulse — the home screen's one read"
+status: current
+updated: 2026-08-05
+---
 # Workspace pulse — the home screen's one read
 
 > How is this workspace doing, and which way is it moving?

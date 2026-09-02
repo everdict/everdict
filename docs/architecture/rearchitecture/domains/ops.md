@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Ops — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [apps/api/src/api/ops/internal.routes.ts]
+---
 # Ops — collaboration model
 
 > Queue visibility · internal Temporal-bridge surface · metrics · resilience policies

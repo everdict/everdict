@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Run as the core primitive — scorecard = orchestration over runs"
+status: current
+updated: 2026-08-11
+anchors: [packages/application-control/src/run/run-service.ts, packages/application-control/src/scorecard/scorecard-service.ts, apps/api/src/mcp.ts, packages/contracts/src/execution/eval-case.ts]
+---
 # Run as the core primitive — scorecard = orchestration over runs
 
 > **Successor: [execution-model.md](./execution-model.md)** — this document made run the primitive of the

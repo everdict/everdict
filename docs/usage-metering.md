@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Usage metering (gateway sidecar)"
+status: current
+updated: 2026-08-11
+anchors: [packages/trace/src/usage-proxy.test.ts, packages/harnesses/src/command.test.ts, packages/application-control/src/run/run-service.test.ts, apps/api/src/mcp.ts]
+---
 # Usage metering (gateway sidecar)
 
 **Decision (operating model):** model gateways (e.g. LiteLLM) are **BYO** — a workspace/harness points at its own

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Durability & Temporal"
+status: current
+updated: 2026-08-11
+---
 # Durability & Temporal
 
 A 400-case scorecard runs for two hours. Somewhere in that window you will deploy, a pod will be

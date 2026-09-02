@@ -1,3 +1,11 @@
+---
+kind: wiki
+title: "MCP"
+status: current
+updated: 2026-08-11
+---
+
+> Design SSOT: [mcp.md](../../mcp.md) — the maintainer page holds the mechanism. Describe the behaviour here; do not re-derive the design.
 # MCP
 
 Everdict speaks MCP so that an agent can drive it the way you would. The endpoint is

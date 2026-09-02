@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Judge (+ rubric + model) — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/graders/src/model-judge.ts, packages/graders/src/judge-env.ts, packages/graders/src/judge.ts]
+---
 # Judge (+ rubric + model) — collaboration model
 
 > Agent Judges: registrable verdict renderers over traces/observations, plus the Rubric and Model

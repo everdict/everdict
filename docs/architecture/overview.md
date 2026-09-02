@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Architecture overview"
+status: current
+updated: 2026-07-22
+---
 # Architecture overview
 
 Detailed conventions live in `.claude/skills/` (single source of truth). This file is the

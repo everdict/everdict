@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Tenant access layer (harness ownership + scoped reads)"
+status: current
+updated: 2026-07-17
+---
 # Tenant access layer (harness ownership + scoped reads)
 
 How a tenant actually uses the SaaS: authenticate (see **`docs/auth.md`** for the auth core), register/own

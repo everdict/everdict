@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Runtime inspection — a live cluster read model"
+status: current
+updated: 2026-07-17
+---
 # Runtime inspection — a live cluster read model
 
 A registered runtime (`RuntimeSpec`) is a **static registration** — "where/how to dispatch". The runtime

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Bring your own agent"
+status: current
+updated: 2026-08-11
+---
 # Bring your own agent
 
 Find your agent below. Each path ends at a registered harness you can point a dataset at.

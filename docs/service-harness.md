@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Service-topology harnesses"
+status: current
+updated: 2026-08-14
+anchors: [packages/topology/src/deploy/inject-env.ts]
+---
 # Service-topology harnesses
 
 A harness can be a single process (Claude Code) OR a **multi-service topology that acts on a target

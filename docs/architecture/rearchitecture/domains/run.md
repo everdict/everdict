@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Run — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/domain/src/run/run.ts, packages/backends/src/backend.ts, packages/orchestrator/src/orchestrator.ts]
+---
 # Run — collaboration model
 
 > The core execution primitive: one eval case, dispatched, settled once. Companion to

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "What the agent knows"
+status: current
+updated: 2026-08-11
+---
 # What the agent knows
 
 An agent that starts a turn knowing nothing about your workspace will produce confident, generic work.

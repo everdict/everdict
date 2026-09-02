@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Secret + API key — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/db/src/workspace/secret-store.ts, packages/db/src/workspace/secret-cipher.ts]
+---
 # Secret + API key — collaboration model
 
 > Two-tier secrets and personal API keys — the workspace's credential plane. Companion to

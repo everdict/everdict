@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Trace — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/harnesses/src/command.ts]
+---
 # Trace — collaboration model
 
 > Normalized trace events, platform coordinates, correlation, sources (pull) and sinks (export).

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Managed case.image — the agent-bootstrap contract"
+status: current
+updated: 2026-07-22
+anchors: [apps/cli/src/image-bake.ts]
+---
 # Managed case.image — the agent-bootstrap contract
 
 > **Status: short-term (bake helper) SHIPPED; long-term (agent artifact injection) is a designed follow-up.**

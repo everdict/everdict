@@ -1,3 +1,11 @@
+---
+kind: wiki
+title: "Desktop app"
+status: current
+updated: 2026-08-11
+---
+
+> Design SSOT: [desktop-app.md](../../architecture/desktop-app.md) — the maintainer page holds the mechanism. Describe the behaviour here; do not re-derive the design.
 # Desktop app
 
 An Electron shell that renders the deployed web app and carries a **runner inside it**. Installers for

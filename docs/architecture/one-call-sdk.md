@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "One-call SDK — reproduce env + N trials + score → verdict in one await"
+status: current
+updated: 2026-07-08
+---
 # One-call SDK — reproduce env + N trials + score → verdict in one await
 
 > Status: **M3 in progress.** Slice 1 (`@everdict/sdk` client + `evaluate()`) landed; later slices add

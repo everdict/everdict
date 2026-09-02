@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Workspace secrets (model/provider keys)"
+status: current
+updated: 2026-08-11
+anchors: [packages/db/src/workspace/secret-store.test.ts, apps/api/src/api/secret/offline-token.routes.test.ts, apps/api/src/main.ts, packages/domain/src/harness/harness-secrets.test.ts]
+---
 # Workspace secrets (model/provider keys)
 
 The platform runs **many models** (Anthropic, OpenAI, a LiteLLM proxy serving anything, …), each needing keys.

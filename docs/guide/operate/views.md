@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Analysis & views"
+status: current
+updated: 2026-08-11
+---
 # Analysis & views
 
 After a few weeks you have hundreds of scorecards, and the same three questions every Monday.

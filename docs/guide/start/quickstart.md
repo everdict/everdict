@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Quickstart"
+status: current
+updated: 2026-08-11
+---
 # Quickstart
 
 Everdict self-hosts as a Docker Compose stack. There are three profiles; start with `dev`, which needs

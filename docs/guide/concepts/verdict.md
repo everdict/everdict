@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Verdict"
+status: current
+updated: 2026-08-11
+---
 # Verdict
 
 The verdict is the product. Everything else — harnesses, runtimes, traces — exists to make this one

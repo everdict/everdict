@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Harness auth across backends"
+status: current
+updated: 2026-07-22
+---
 # Harness auth across backends
 
 How `claude` (Claude Code) authenticates depends on where the run lands.

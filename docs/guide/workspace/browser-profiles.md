@@ -1,3 +1,11 @@
+---
+kind: wiki
+title: "Browser profiles"
+status: current
+updated: 2026-08-11
+---
+
+> Design SSOT: [browser-profiles.md](../../architecture/browser-profiles.md) — the maintainer page holds the mechanism. Describe the behaviour here; do not re-derive the design.
 # Browser profiles
 
 A `browser` case starts at a login wall unless the browser already knows who you are. A **profile** is

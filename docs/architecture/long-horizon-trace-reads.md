@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Long-horizon trace reads — the event is the unit"
+status: current
+updated: 2026-08-29
+anchors: [packages/application-control/src/ports/artifact-store.ts]
+---
 # Long-horizon trace reads — the event is the unit
 
 > **Status: landed — R0, R2 (with R3 merged in) and R1.** A long-horizon agent run is hundreds of turns over hours, and its

@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Harness version registry (@everdict/registry)"
+status: current
+updated: 2026-08-16
+---
 # Harness version registry (`@everdict/registry`)
 
 The **single source of truth for harness versions**: resolve `(id, version) → HarnessSpec`. An `CaseJob`

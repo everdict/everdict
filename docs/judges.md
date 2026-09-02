@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Agent Judges (@everdict/registry + control plane)"
+status: current
+updated: 2026-08-07
+anchors: [packages/graders/src/script-grader.ts, packages/graders/src/model-judge.scenario.test.ts, apps/api/src/core/execution/judge-runner.test.ts]
+---
 # Agent Judges (`@everdict/registry` + control plane)
 
 An **Agent Judge** scores a run/scorecard's trace — it's a **first-class, user-registerable entity** with the

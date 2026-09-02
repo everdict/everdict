@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Running Codex"
+status: current
+updated: 2026-08-13
+---
 # Running Codex
 
 Codex meets Everdict from two directions, and they are independent:

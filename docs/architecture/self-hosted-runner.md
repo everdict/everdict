@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Self-hosted runner — run a workspace's harness/dataset on *your own* machine"
+status: current
+updated: 2026-08-16
+anchors: [packages/job-runner/src/run.ts, packages/contracts/src/execution/case-job.ts, packages/application-control/src/scorecard/scorecard-service.ts, apps/api/src/core/execution/runtime-dispatcher.ts]
+---
 # Self-hosted runner — run a workspace's harness/dataset on *your own* machine
 
 > **Status: SHIPPED — all 6 slices landed; live e2e green (`scripts/live/self-hosted-runner.mjs`).**

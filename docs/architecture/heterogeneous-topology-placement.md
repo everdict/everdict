@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Heterogeneous topology placement — infra-agnostic (capability-driven)"
+status: current
+updated: 2026-07-27
+anchors: [packages/contracts/src/infra/capability.ts, packages/contracts/src/infra/runtime-spec.ts, packages/contracts/src/harness/harness-spec.ts, packages/domain/src/runtime/capability-requirements.ts]
+---
 # Heterogeneous topology placement — infra-agnostic (capability-driven)
 
 **Status: design draft.** Scope: let a `kind:"service"` topology contain services that require **different

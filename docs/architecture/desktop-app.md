@@ -1,3 +1,12 @@
+---
+kind: wiki
+title: "Desktop app — full web parity + resident self-hosted runner"
+status: current
+updated: 2026-08-11
+anchors: [packages/self-hosted-runner/src/runner-loop.ts]
+---
+
+> Same subject, other audience: [the product page](../guide/integrations/desktop-app.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
 # Desktop app — full web parity + resident self-hosted runner
 
 > **Status: decisions D1–D5 LOCKED with the user (2026-07-03) — implementation in progress.**

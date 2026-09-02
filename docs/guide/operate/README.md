@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Operate"
+status: current
+updated: 2026-08-11
+---
 # Operate
 
 Running one evaluation is a command. Running evaluation as a practice is these four pages.

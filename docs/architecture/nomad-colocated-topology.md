@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Nomad co-located service topology"
+status: current
+updated: 2026-07-09
+anchors: [packages/topology/src/deploy/nomad-topology.ts, packages/topology/src/deploy/nomad-runtime.ts]
+---
 # Nomad co-located service topology
 
 **Scope: the Nomad `TopologyRuntime` only.** K8s (stable Service DNS) and Docker (already co-located on one

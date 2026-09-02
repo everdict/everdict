@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Dependency store roles — plumbing vs data, and data-as-condition (design)"
+status: current
+updated: 2026-07-23
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/domain/src/harness/portability.ts, packages/contracts/src/execution/recording.ts]
+---
 # Dependency store roles — plumbing vs data, and data-as-condition (design)
 
 > **Status: P1 shipped · P2 core shipped (Docker/postgres) · tail + P3 open.** A doc-first SSOT for splitting a

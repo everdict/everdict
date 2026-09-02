@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Native observability — Everdict as the trace platform (OTel-first)"
+status: current
+updated: 2026-08-19
+anchors: [packages/trace/src/sources/otel.ts]
+---
 # Native observability — Everdict as the trace platform (OTel-first)
 
 > **Status: DESIGN (maintainer decision, 2026-07-29).** Supersedes-in-direction the *edge-adapter* half of

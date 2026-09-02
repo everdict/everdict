@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Trace sink — export judged results to the team's observability platform"
+status: current
+updated: 2026-08-19
+anchors: [packages/application-control/src/trace-sink/trace-sink-service.ts, packages/trace/src/discovery/probe-connection.ts]
+---
 # Trace sink — export judged results to the team's observability platform
 
 > **Status:** design (S0) → implementation. SSOT for the **outbound** half of the eval pipeline:

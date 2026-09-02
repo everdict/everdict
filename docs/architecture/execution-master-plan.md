@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Execution master plan — sequencing the five designs"
+status: current
+updated: 2026-08-06
+---
 # Execution master plan — sequencing the five designs
 
 > **Status: PLAN OF RECORD (maintainer direction, 2026-07-29).** This document *sequences*; it does not

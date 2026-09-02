@@ -1,3 +1,12 @@
+---
+kind: wiki
+title: "MCP server (agent-facing, OAuth-protected)"
+status: current
+updated: 2026-08-05
+anchors: [apps/api/src/mcp.test.ts]
+---
+
+> Same subject, other audience: [the product page](guide/integrations/mcp.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
 # MCP server (agent-facing, OAuth-protected)
 
 The platform's **agent-facing surface**: an MCP server inside `apps/api` that exposes the same operations as the

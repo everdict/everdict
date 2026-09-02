@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "The eval tracker — Initiative ⊃ Project ⊃ Issue"
+status: current
+updated: 2026-08-28
+anchors: [packages/domain/src/tracker/issue.ts]
+---
 # The eval tracker — Initiative ⊃ Project ⊃ Issue
 
 Everdict's primitives answer *what ran*: a harness against a dataset, judged, summarized into a scorecard.

@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Auth core (control-plane owned)"
+status: current
+updated: 2026-08-11
+anchors: [apps/api/src/main.ts]
+---
 # Auth core (control-plane owned)
 
 **The control plane owns all authentication and authorization.** `@everdict/auth` resolves identity and

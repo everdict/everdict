@@ -1,3 +1,12 @@
+---
+kind: wiki
+title: "Bundles — one-shot self-serve registration (harness + benchmark + runtime as a unit)"
+status: current
+updated: 2026-08-11
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/harnesses/src/command.ts, packages/datasets/src/spec.ts, packages/job-runner/src/registry.ts]
+---
+
+> Same subject, other audience: [the product page](../guide/start/bundles.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
 # Bundles — one-shot self-serve registration (harness + benchmark + runtime as a unit)
 
 > **Status: ALL 3 SLICES SHIPPED (gates green — api format/lint/typecheck/test; web prettier/eslint/tsc; live loop

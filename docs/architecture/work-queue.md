@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Work queue — workload visibility (running/queued/next-scheduled per runtime lane)"
+status: current
+updated: 2026-08-11
+anchors: [packages/application-control/src/queue/queue-service.ts]
+---
 # Work queue — workload visibility (running/queued/next-scheduled per runtime lane)
 
 Schedule firings, a user's scorecard runs, and one-off runs are all **workloads** received by the

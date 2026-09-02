@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Live observability — watch a run while it runs"
+status: current
+updated: 2026-08-07
+---
 # Live observability — watch a run while it runs
 
 Three layers close the "fire and wait" gap for running evals (parity with sandbox-cloud offerings:

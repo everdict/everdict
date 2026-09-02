@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Replay — record a run so the analysis phase can re-watch it"
+status: current
+updated: 2026-08-14
+anchors: [apps/api/src/common/live-frame-store.ts, apps/api/src/common/live-log-store.ts]
+---
 # Replay — record a run so the analysis phase can re-watch it
 
 > **Status: S1–S5 shipped; the player is being corrected to agent-trace-first (see "Current state" below).**

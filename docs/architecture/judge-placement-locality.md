@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Judge runtime selection + store-locality placement + pluggable observation delivery (design)"
+status: current
+updated: 2026-08-11
+anchors: [apps/api/src/core/execution/runtime-dispatcher.ts, packages/contracts/src/execution/eval-case.ts, packages/backends/src/scheduling/scheduler.ts, packages/contracts/src/execution/grader.ts]
+---
 # Judge runtime selection + store-locality placement + pluggable observation delivery (design)
 
 > **Status: design (doc-first). Three decisions locked with the user; implementation in slices.**

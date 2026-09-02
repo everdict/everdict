@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "What is Everdict"
+status: current
+updated: 2026-08-11
+---
 # What is Everdict
 
 You changed the retrieval prompt on Tuesday. On Thursday someone says the agent feels worse. You run it

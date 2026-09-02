@@ -1,3 +1,10 @@
+---
+kind: runbook
+title: "Preflight — 0002_create_harnesses"
+status: current
+updated: 2026-08-11
+anchors: [packages/registry/src/registry-contract.test.ts]
+---
 # Preflight — 0002_create_harnesses
 
 **Change:** additive (expand). Creates `everdict_harnesses` (harness version SSOT) with PK `(id, version)` + an

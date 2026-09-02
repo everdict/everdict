@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Workspace-scoped integrations (GitHub App + Mattermost) — replacing personal Connected accounts"
+status: current
+updated: 2026-08-11
+anchors: [apps/api/src/infrastructure/oauth/github-app.ts, packages/environments/src/repo.ts, packages/application-control/src/execution/execute-case.ts, apps/agent/src/action-policy.ts]
+---
 # Workspace-scoped integrations (GitHub App + Mattermost) — replacing personal Connected accounts
 
 > **Status:** design (S0). SSOT for the migration from **personal Connected accounts** to

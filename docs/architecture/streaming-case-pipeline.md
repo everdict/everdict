@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Streaming case pipeline — kill the batch barriers, release compute early"
+status: current
+updated: 2026-07-07
+---
 # Streaming case pipeline — kill the batch barriers, release compute early
 
 > **Status: doc-first SSOT.** Successor to

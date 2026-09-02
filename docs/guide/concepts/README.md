@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Core concepts"
+status: current
+updated: 2026-08-11
+---
 # Core concepts
 
 Eight nouns carry everything else in these docs. Read them in this order the first time.

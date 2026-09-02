@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Harness"
+status: current
+updated: 2026-08-11
+---
 # Harness
 
 A harness is the agent under test. Here is a complete one:

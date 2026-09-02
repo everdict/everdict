@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Runner distribution — a one-liner install for a headless machine"
+status: current
+updated: 2026-07-22
+anchors: [apps/cli/src/main.ts, apps/cli/src/runner-command.ts, apps/cli/src/runner-standalone.ts]
+---
 # Runner distribution — a one-liner install for a headless machine
 
 > How a machine that has **never heard of everdict** gets a running `everdict runner`. The workspace

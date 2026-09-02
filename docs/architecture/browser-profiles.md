@@ -1,3 +1,12 @@
+---
+kind: wiki
+title: "Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)"
+status: current
+updated: 2026-08-11
+anchors: [packages/topology/src/front-door/browser-session.ts, apps/api/src/common/terminal-ticket.ts, packages/auth/src/authz.ts, packages/topology/src/deploy/browser-image.ts]
+---
+
+> Same subject, other audience: [the product page](../guide/workspace/browser-profiles.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
 # Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)
 
 > **Status: S0–S9 SHIPPED (S1 transport + web canvas · S2 profile entity · S3 cookie capture · S4 proxy/geo login browser · S5 cookie injection into evals · S6 containerized provisioner — no host-Chrome dependency · S6b remote sidecar pool — socket-free multi-user self-hosted (`EVERDICT_BROWSER_PROVISIONER=remote`, lease-a-browser-from-a-pool, re-lease wipe) · S7 session-first creation UX + live remembered-login chips · S8 concurrent-session caps — per-tenant + fleet-wide · S9 runtime-bound sessions — the browser on the tenant's registered runtime inside its trust zone [Nomad shipped; K8s + self-hosted = follow-ups]). Follow-ups: K8s per-session reachability (port-forward), self-hosted reverse relay, store-backed session registry (multi-replica), web session runtime-picker, eval-browser proxy, localStorage.** S0 = the interactive live browser

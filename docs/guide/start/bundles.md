@@ -1,3 +1,11 @@
+---
+kind: wiki
+title: "Bundles"
+status: current
+updated: 2026-08-11
+---
+
+> Design SSOT: [bundles.md](../../architecture/bundles.md) — the maintainer page holds the mechanism. Describe the behaviour here; do not re-derive the design.
 # Bundles
 
 A harness, a dataset, a runtime and a grading recipe are four registrations. A **bundle** is all of

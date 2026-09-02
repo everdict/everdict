@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Scorecards (batch eval: dataset × harness → aggregated result)"
+status: current
+updated: 2026-08-17
+anchors: [apps/api/src/api/scorecard/serve.ts]
+---
 # Scorecards (batch eval: dataset × harness → aggregated result)
 
 A **scorecard run** evaluates a whole **dataset** (N cases) against one `harness@version` and aggregates the

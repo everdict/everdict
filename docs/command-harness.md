@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Declarative command harness (bring any CLI agent, no code)"
+status: current
+updated: 2026-08-11
+anchors: [packages/harnesses/src/command.test.ts]
+---
 # Declarative command harness (bring any CLI agent, no code)
 
 The `process` path used to be **code-bound**: a harness id mapped to a TypeScript adapter (`ClaudeCodeHarness`,

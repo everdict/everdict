@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "Run"
+status: current
+updated: 2026-08-11
+---
 # Run
 
 A Run is one execution, recorded. Submit one:

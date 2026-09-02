@@ -1,3 +1,9 @@
+---
+kind: wiki
+title: "The product timeline — Product ⊃ Release over an imported version ledger"
+status: current
+updated: 2026-08-16
+---
 # The product timeline — Product ⊃ Release over an imported version ledger
 
 > The tracker answers "why we evaluate" (docs/tracker.md); the product timeline answers **"what we ship"**:

@@ -1,3 +1,10 @@
+---
+kind: decision
+title: "Comment — collaboration model"
+status: accepted
+updated: 2026-08-19
+anchors: [packages/db/src/activity/comment-store.ts]
+---
 # Comment — collaboration model
 
 > Threaded discussion on workspace resources. Companion to `../00-target-architecture.md` (§4

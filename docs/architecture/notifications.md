@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Notifications — job completion via web inbox + desktop native"
+status: current
+updated: 2026-08-11
+anchors: [apps/web/src/entities/notification/model/href.ts, apps/desktop/src/notification-watcher.ts, apps/agent/src/server.ts, apps/api/src/api/ops/internal.routes.ts]
+---
 # Notifications — job completion via web inbox + desktop native
 
 > **Status: DESIGN → implementation in progress (2026-07-03).**

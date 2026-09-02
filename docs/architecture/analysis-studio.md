@@ -1,3 +1,10 @@
+---
+kind: wiki
+title: "Analysis Studio — natural-language analysis, artifacts, and scheduled reports over Views"
+status: current
+updated: 2026-08-11
+anchors: [apps/web/src/features/analyze-scorecards/model/analysis.ts, packages/application-control/src/capability/first-party.ts, packages/agent-runtime/src/tools/definition.ts, packages/contracts/src/records/schedule.ts]
+---
 # Analysis Studio — natural-language analysis, artifacts, and scheduled reports over Views
 
 > **Status: V1–V5 LANDED + LIVE-VERIFIED (2026-07-28).** The full report loop ran against the dev stack

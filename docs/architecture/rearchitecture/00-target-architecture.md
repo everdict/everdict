@@ -1,3 +1,9 @@
+---
+kind: decision
+title: "Everdict re-architecture — the domain is unique, interfaces are adapters (design)"
+status: accepted
+updated: 2026-07-22
+---
 # Everdict re-architecture — the domain is unique, interfaces are adapters (design)
 
 > **Status: SHIPPED (2026-07-10) — the P0–P4 migration is complete. Every phase was
