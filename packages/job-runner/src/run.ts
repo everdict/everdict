@@ -211,7 +211,12 @@ export async function runCaseJob(
     runCtx: {
       ...runContextFromEnv(job.evalCase.timeoutSec),
       // The case's id and environment declaration, for a command's `{{case.*}}` tokens (definability spec §4).
-      evalCase: { id: job.evalCase.id, env: job.evalCase.env },
+      // …and WHERE the world is, when the case acts on one it does not contain (world-and-engagement-model.md).
+      evalCase: {
+        id: job.evalCase.id,
+        env: job.evalCase.env,
+        ...(job.evalCase.world !== undefined ? { world: job.evalCase.world } : {}),
+      },
       ...(job.runId ? { runId: job.runId } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(liveScreen ? { liveScreen } : {}),

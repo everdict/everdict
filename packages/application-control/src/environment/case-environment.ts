@@ -90,7 +90,15 @@ export async function resolveCaseEnvironments(input: {
     if (imageDefect !== undefined)
       throw new ConflictError("CONFLICT", { case: c.id, environment: `${spec.id}@${spec.version}` }, imageDefect);
     seals[c.id] = { ref: `${spec.id}@${spec.version}`, digest };
-    cases.push({ ...c, env: spec.env, ...(spec.image !== undefined ? { image: spec.image } : {}) });
+    cases.push({
+      ...c,
+      env: spec.env,
+      ...(spec.image !== undefined ? { image: spec.image } : {}),
+      // …and WHERE the world is, when it is one the actor reaches by coordinates rather than by being inside
+      // it (world-and-engagement-model.md). Platform-authored from the version this batch sealed, so the
+      // coordinates and the identity axis are the same fact.
+      ...(spec.provides !== undefined ? { world: { wiring: spec.provides.wiring } } : {}),
+    });
   }
   return { cases, seals };
 }

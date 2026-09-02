@@ -9,7 +9,7 @@ export interface RunContext {
   timeoutSec: number;
   // The case the harness is running, for the `{{case.*}}` tokens (harness-definability-spec.md §4) — its id and
   // its environment declaration, never its grading material.
-  evalCase?: { id: string; env: EnvSpec };
+  evalCase?: { id: string; env: EnvSpec; world?: { wiring: Record<string, string> } };
   // Trace correlation key — runCase fills it so the same value flows to both run (the harness injects it as EVERDICT_RUN_ID/everdict.run_id)
   // and collectTrace (platform pull). If unspecified, the harness mints its own (backward-compat).
   runId?: string;

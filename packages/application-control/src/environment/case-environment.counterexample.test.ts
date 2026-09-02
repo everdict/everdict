@@ -1,4 +1,4 @@
-import { type EvalCase, NotFoundError } from "@everdict/contracts";
+import { type EnvironmentSpec, type EvalCase, NotFoundError } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { EnvironmentRegistry } from "../ports/environment-registry.js";
@@ -15,8 +15,8 @@ const SHOP_V1 = { id: "shop", version: "1.0.0", env: { kind: "repo" as const, so
 const SHOP_V2 = { id: "shop", version: "2.0.0", env: { kind: "repo" as const, source: { path: "/app-v2" } } };
 
 function registry(
-  versions: Array<typeof SHOP_V1>,
-  latest = versions[versions.length - 1],
+  versions: EnvironmentSpec[],
+  latest: EnvironmentSpec | undefined = versions[versions.length - 1],
   reads?: string[],
 ): EnvironmentRegistry {
   const get = async (_t: string, id: string, ref?: string) => {
@@ -39,8 +39,13 @@ function registry(
     versionTags: async () => ({}),
   };
 }
-const referencing = (): EvalCase =>
-  ({ id: "login", task: "sign in", env: { kind: "ref", id: "shop" }, graders: [] }) as unknown as EvalCase;
+const referencing = (over: { id?: string } = {}): EvalCase =>
+  ({
+    id: "login",
+    task: "sign in",
+    env: { kind: "ref", id: over.id ?? "shop" },
+    graders: [],
+  }) as unknown as EvalCase;
 const embedded = (): EvalCase =>
   ({ id: "plain", task: "answer", env: { kind: "prompt" }, graders: [] }) as unknown as EvalCase;
 
@@ -172,5 +177,39 @@ describe("an environment's image is the world's, and a case may not contradict i
       registry: registry([SHOP_V1], SHOP_V1),
     });
     expect(out.cases[0]?.image).toBe("ghcr.io/acme/mine:1");
+  });
+});
+
+// ── A PROVIDED WORLD (world-and-engagement-model.md, axis 1: provided) ────────────────────────────────
+//
+// The workspace hosts the app (a self-hosted WebArena, a staging API). Nothing is brought up, so there is
+// nothing to tear down — what the environment provides is WHERE it is, under a version somebody can pin. The
+// coordinates and the identity axis are then the same fact: a new version moves the world, and the diff says
+// `environment` rather than blaming the agent.
+const HOSTED = {
+  id: "shop-sites",
+  version: "1.0.0",
+  env: { kind: "prompt" as const },
+  provides: { kind: "static" as const, wiring: { target_base_url: "http://shop.internal:7770" } },
+};
+
+describe("a world the actor reaches by coordinates", () => {
+  it("attaches the sealed version's coordinates to the case, platform-authored", async () => {
+    const out = await resolveCaseEnvironments({
+      tenant: "t1",
+      cases: [referencing({ id: "shop-sites" })],
+      registry: registry([HOSTED], HOSTED),
+    });
+    expect(out.cases[0]?.world).toEqual({ wiring: { target_base_url: "http://shop.internal:7770" } });
+    expect(out.seals.login?.ref).toBe("shop-sites@1.0.0");
+  });
+
+  it("an environment that provides nothing leaves the case without a world — absent is not empty coordinates", async () => {
+    const out = await resolveCaseEnvironments({
+      tenant: "t1",
+      cases: [referencing()],
+      registry: registry([SHOP_V1], SHOP_V1),
+    });
+    expect(out.cases[0]?.world).toBeUndefined();
   });
 });

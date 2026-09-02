@@ -133,6 +133,24 @@ export const EnvironmentSpecSchema = z.object({
   // preferring one. A case with no environment reference is untouched — `EvalCase.image` still means what it
   // has always meant there.
   image: z.string().min(1).optional(),
+  // ── A PROVIDED WORLD'S COORDINATES (world-and-engagement-model.md, axis 1: provided) ──────────────
+  //
+  // Some worlds are not the actor's container: a deployed app, a browser, a desktop session. The actor
+  // reaches them by COORDINATES, and somebody has to produce those before it runs. `static` is the variant
+  // for a world that already exists — the workspace hosts it (a self-hosted WebArena, a staging API) — so
+  // there is nothing to bring up and nothing to tear down, and the environment's job is to say WHERE it is
+  // under a version somebody can pin.
+  //
+  // The wiring keys are the vocabulary the topology front door already speaks (`target_base_url`,
+  // `target_cdp_url`, …), so a world provided statically and one provided by a session API hand the actor the
+  // same names. A DYNAMIC variant — bring-up, teardown, verified zero — is the next slice and is deliberately
+  // not declared here: an arm nothing provides is a plan (rule `protocol`).
+  provides: z
+    .object({
+      kind: z.literal("static"),
+      wiring: z.record(z.string().min(1), z.string().min(1)),
+    })
+    .optional(),
 });
 export type EnvironmentSpec = z.infer<typeof EnvironmentSpecSchema>;
 

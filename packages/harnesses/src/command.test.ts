@@ -752,3 +752,53 @@ describe("{{target.baseUrl}} — the api target a command harness acts on", () =
     expect(e2[0]?.env?.EVERDICT_TARGET_BASE_URL).toBeUndefined();
   });
 });
+
+// ── THE WORLD THE BATCH SEALED WINS OVER THE HARNESS'S DEFAULT (world-and-engagement-model.md) ────────
+//
+// The spec's `target.baseUrl` is the CLI's own default; the case's `world` is the environment version this
+// batch resolved and sealed. If the default won, a new environment version would change nothing and the
+// whole point of versioning the world — evolving it without editing the agent — would be inert.
+describe("a provided world's coordinates reach the command", () => {
+  const withWorld = (wiring: Record<string, string>) => ({
+    ...ctx,
+    evalCase: { id: "c1", env: { kind: "prompt" as const }, world: { wiring } },
+  });
+
+  it("renders and exports the sealed world's base URL over the spec's own target", async () => {
+    const { compute, execs } = fakeCompute();
+    const spec_: CommandHarnessSpec = {
+      ...spec(),
+      command: "client --base {{target.baseUrl}} {{task}}",
+      target: { kind: "api", baseUrl: "https://the-harness-default", observe: ["request", "response"] },
+    };
+    await collect(
+      new CommandHarness(spec_, { runId: () => "rid1" }).run(
+        compute,
+        "buy milk",
+        withWorld({ target_base_url: "https://shop-v2.internal" }),
+      ),
+    );
+    expect(execs[0]?.cmd).toContain("--base 'https://shop-v2.internal'");
+    expect(execs[0]?.env?.EVERDICT_TARGET_BASE_URL).toBe("https://shop-v2.internal");
+  });
+
+  it("falls back to the spec's target when the case carries no world, and to empty when neither does", async () => {
+    const { compute, execs } = fakeCompute();
+    const spec_: CommandHarnessSpec = {
+      ...spec(),
+      command: "client --base {{target.baseUrl}} {{task}}",
+      target: { kind: "api", baseUrl: "https://the-harness-default", observe: ["request"] },
+    };
+    await collect(new CommandHarness(spec_, { runId: () => "rid1" }).run(compute, "x", ctx));
+    expect(execs[0]?.cmd).toContain("--base 'https://the-harness-default'");
+    const { compute: c2, execs: e2 } = fakeCompute();
+    await collect(
+      new CommandHarness(
+        { ...spec(), command: "client --base {{target.baseUrl}} {{task}}" },
+        { runId: () => "rid1" },
+      ).run(c2, "x", withWorld({ other_key: "ignored" })),
+    );
+    expect(e2[0]?.cmd).toContain("--base ''");
+    expect(e2[0]?.env?.EVERDICT_TARGET_BASE_URL).toBeUndefined();
+  });
+});

@@ -154,6 +154,13 @@ export const EvalCaseSchema = z.object({
   // that ran online measured something the benchmark does not claim to measure.
   resources: ResourceRequestSchema.optional(),
   network: NetworkPolicySchema.optional(),
+  // ── WHERE THE PROVIDED WORLD IS, WRITTEN BY THE PLATFORM (world-and-engagement-model.md) ──────────
+  //
+  // A world the actor reaches by coordinates rather than by being inside it. PLATFORM-AUTHORED: the control
+  // plane resolves the case's environment reference and attaches what that version says, so the value is the
+  // sealed world's, never a case author's guess — a dataset that hard-coded a URL would have no identity to
+  // seal and no axis to move. Absent = the world is the actor's own container (or there is none).
+  world: z.object({ wiring: z.record(z.string().min(1), z.string().min(1)) }).optional(),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 

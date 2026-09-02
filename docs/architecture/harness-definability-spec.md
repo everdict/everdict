@@ -87,8 +87,11 @@ one that matters: a target that resolves and is not observed is a declaration, n
 > harness held constant as an explicit check and the `environment` axis exempted from the confound refusal
 > because it is that campaign's TREATMENT. Adoption registers the candidate through the environment registry
 > under the dataset action pair, with the same owner-preserving write every other lane uses. **Not landed:**
-> the `service` environment kind and a `source`+`build` recipe. Both were deferred with evidence rather than
-> forgotten — see "What the two deferred arms actually need" below.
+> the `service` environment kind's DYNAMIC half and a `source`+`build` recipe. Both were deferred with
+> evidence rather than forgotten — see "What the two deferred arms actually need" below. *(Since 2026-09-03 a
+> STATIC provided world is landed — an environment may declare where an already-running world is, and the
+> case reaches it by coordinates: `docs/architecture/world-and-engagement-model.md`. What remains of the
+> `service` arm is bring-up and teardown.)*
 
 ### What the two deferred arms actually need (recorded 2026-09-03)
 

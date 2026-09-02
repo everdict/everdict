@@ -199,8 +199,8 @@ export class CommandHarness implements EvaluableHarness {
       ...flattenEnv(this.spec.env),
       EVERDICT_RUN_ID: runId, // Injected so the agent can correlate the trace
       // The API this CLI acts on (harness-definability-spec.md §1) — the static base URL its spec's target names.
-      ...(this.spec.target?.kind === "api" && this.spec.target.baseUrl !== undefined
-        ? { EVERDICT_TARGET_BASE_URL: this.spec.target.baseUrl }
+      ...(targetBaseUrl(this.spec, ctx) !== undefined
+        ? { EVERDICT_TARGET_BASE_URL: targetBaseUrl(this.spec, ctx) as string }
         : {}),
       ...(this.spec.trace.kind !== "none" ? { OTEL_RESOURCE_ATTRIBUTES: `everdict.run_id=${runId}` } : {}),
       // W3C trace context: the run's trace id crosses the process boundary, so an instrumented agent's spans
@@ -247,7 +247,7 @@ export class CommandHarness implements EvaluableHarness {
       // Where the version's seeds were written before install (harness-identity-and-seeds-spec.md §2).
       .replaceAll("{{seeds}}", HARNESS_SEED_MOUNT)
       // The API this CLI acts on — its target's static base URL, quoted; empty without one (definability spec §1).
-      .replaceAll("{{target.baseUrl}}", shq(this.spec.target?.kind === "api" ? (this.spec.target.baseUrl ?? "") : ""));
+      .replaceAll("{{target.baseUrl}}", shq(targetBaseUrl(this.spec, ctx) ?? ""));
     // The case's own coordinates, over the allowlist the spec was parsed against (harness-definability-spec.md §4).
     // Shell-quoted like {{task}}: these values come from a case document, not from the template author. A field
     // the case does not have (a repo ref on a prompt case) renders as the empty string, quoted.
@@ -352,4 +352,20 @@ function caseTokenValues(evalCase: RunContext["evalCase"]): Record<CaseTokenFiel
     "case.env.repo.url": repo?.git ?? "",
     "case.env.repo.ref": repo?.ref ?? "",
   };
+}
+
+// ── WHICH WORLD THIS RUN ACTS ON (docs/architecture/world-and-engagement-model.md) ────────────────────
+//
+// Two sources, and the order is the point. The harness spec's `target.baseUrl` is the CLI's own default —
+// "this agent acts on an API, here is one". The case's `world` is what the batch SEALED: a registered
+// environment version, on its own identity axis, resolved by the control plane. So the world wins, which is
+// exactly what makes it evolvable — a new environment version moves the world with no harness edited, and
+// the diff reads that as the environment axis rather than as a change to the agent under test.
+function targetBaseUrl(
+  spec: { target?: { kind: string; baseUrl?: string } },
+  ctx: { evalCase?: { world?: { wiring: Record<string, string> } } },
+): string | undefined {
+  const provided = ctx.evalCase?.world?.wiring.target_base_url;
+  if (provided !== undefined) return provided;
+  return spec.target?.kind === "api" ? spec.target.baseUrl : undefined;
 }

@@ -125,12 +125,17 @@ case declares and refuses when it cannot — a provided world is the same decora
 
 ## Landing order, and what each slice must carry
 
-1. **In-compute bytes** — an environment carries an image; a case that references an environment takes the
+1. ✅ **In-compute bytes** (landed 2026-09-03) — an environment carries an image; a case that references an environment takes the
    world's bytes from it, and a case that also names its own image for the same world is refused rather than
    silently preferred. Complete on its own, and it is what unblocks the build recipe.
-2. **Provided worlds, static** — an environment declares coordinates that already exist (row D: the workspace
-   hosts WebArena). One provider, no lifecycle to own, real consumer. This is what makes the PORT real
-   without the bring-up.
+2. ✅ **Provided worlds, static** (landed 2026-09-03) — an environment declares `provides: { kind: "static",
+   wiring }`, the resolution attaches those coordinates to the case as platform-authored `world`, the job
+   carries them, and a command harness renders `{{target.baseUrl}}` / `EVERDICT_TARGET_BASE_URL` from them.
+   **The sealed world wins over the harness's own `target`**, which is the whole point: a new environment
+   version moves the world with no harness edited, and the diff reads that as the `environment` axis rather
+   than as a change to the agent under test. Row D (WebArena on workspace-hosted sites) is expressible now.
+   Nothing is brought up, so nothing must be torn down — which is what makes this slice complete on its own
+   rather than half a lifecycle.
 3. **Provided worlds, dynamic** — bring-up and teardown, with the lifecycle owner and the verified-zero
    ending. The second implementation of a port that already has a consumer.
 4. **Dialogue engagement** — the turn loop over a conversational harness, with a scripted user first (a case
