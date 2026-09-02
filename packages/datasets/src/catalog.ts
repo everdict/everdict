@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/contracts";
+import { BadRequestError, type Dataset, DatasetSchema, type GraderSpec } from "@everdict/contracts";
 // Benchmark adapters + catalog: "adding a new benchmark = one adapter (descriptor), not code".
 // An adapter = {source (where to pull from), mapping (fields→EvalCase), scoring (graders), optional row normalization}. First-party adapters are
 // shipped as a catalog (to seed _shared); users add their own adapter to register a private/new benchmark in their workspace.
@@ -55,7 +55,9 @@ export interface BenchmarkAdapter {
   scoring?: BenchmarkScoringSemantics;
   defaultVersion: string; // catalog reference version (benchmark config/release)
   source: BenchmarkSource;
-  mapping: CaseMapping;
+  // How a ROW becomes a case. Absent only for a source with its own mapper (`terminal-bench`), where the
+  // fields a mapping names do not exist; `adapterToDataset` refuses rather than mapping nothing.
+  mapping?: CaseMapping;
   // Row normalization before mapping (e.g. extract only the final answer from gsm8k's "…#### 18"). The catalog is code-defined, so functions are allowed.
   rowTransform?: (row: Record<string, unknown>) => Record<string, unknown>;
   // Per-row structured grader (something the mapping's field-based form can't express — e.g. SWE-bench's swe-bench grader{test_patch,
@@ -74,10 +76,19 @@ export function adapterToDataset(
   meta: DatasetMeta,
 ): Dataset {
   const mapped = adapter.rowTransform ? rows.map(adapter.rowTransform) : rows;
-  if (!adapter.graderBuilder) return rowsToDataset(mapped, meta, adapter.mapping);
+  // A row-mapped source with no mapping cannot produce cases, and producing empty ones would be worse than
+  // saying so: the caller would register a dataset whose every case is a blank task.
+  const mapping = adapter.mapping;
+  if (mapping === undefined)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { adapter: adapter.id, source: adapter.source.kind },
+      `adapter ${adapter.id}: a ${adapter.source.kind} source is mapped row by row and this one declares no mapping`,
+    );
+  if (!adapter.graderBuilder) return rowsToDataset(mapped, meta, mapping);
   const build = adapter.graderBuilder;
   const cases = mapped.map((r, i) => {
-    const c = rowToCase(r, i, meta, adapter.mapping);
+    const c = rowToCase(r, i, meta, mapping);
     return { ...c, graders: [...c.graders, ...build(r)] };
   });
   return DatasetSchema.parse({

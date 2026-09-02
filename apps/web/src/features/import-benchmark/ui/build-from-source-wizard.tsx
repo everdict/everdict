@@ -28,7 +28,7 @@ import {
   type PreviewSourceResult,
 } from '../api/import-benchmark'
 
-type SourceKind = 'huggingface' | 'jsonl'
+type SourceKind = 'huggingface' | 'jsonl' | 'terminal-bench'
 type Category = 'qa' | 'browser' | 'coding' | 'tool'
 // The environment a case runs in — the env kind the mapping decides. browser(startUrl) | prompt(QA, no env) | repo(git clone) | os-use(desktop).
 type EnvKind = 'browser' | 'prompt' | 'repo' | 'os-use'
@@ -189,6 +189,11 @@ export function BuildFromSourceWizard({
   const [fileSel, setFileSel] = useState('')
 
   const [jsonlText, setJsonlText] = useState('')
+  // A Terminal-Bench task set has no field mapping — the dedicated mapper reads instruction/tests/world from
+  // each task — so the wizard's steps 2 (mapping) and its env guess do not apply to it. What it needs instead
+  // is the `{id}` image template `everdict tasks prebuild` prints (docs/architecture/standard-task-formats.md).
+  const [imageTemplate, setImageTemplate] = useState('')
+  const mapped = sourceKind !== 'terminal-bench'
 
   const [datasetId, setDatasetId] = useState('')
   const [version, setVersion] = useState('1.0.0')
@@ -270,6 +275,11 @@ export function BuildFromSourceWizard({
   const selectedSplit = splits.find((s) => splitKey(s) === splitSel)
 
   function buildSource(): Record<string, unknown> {
+    if (sourceKind === 'terminal-bench')
+      return {
+        kind: 'terminal-bench',
+        ...(imageTemplate.trim() ? { imageTemplate: imageTemplate.trim() } : {}),
+      }
     if (sourceKind !== 'huggingface') return { kind: 'jsonl' }
     // In file-fallback mode (not served by the viewer), fetch directly by file — config/split are viewer-only, so omit them.
     if (fileSel) return { kind: 'huggingface', dataset: hfDataset, file: fileSel }
@@ -285,7 +295,7 @@ export function BuildFromSourceWizard({
     setPreviewBusy(true)
     resetPreview()
     const body: Record<string, unknown> = { source: buildSource(), limit: 5 }
-    if (sourceKind === 'jsonl') body.text = jsonlText
+    if (sourceKind !== 'huggingface') body.text = jsonlText
     const r: PreviewSourceResult = await previewSourceAction(body)
     setPreviewBusy(false)
     if (!r.ok || !r.fields) {
@@ -312,7 +322,7 @@ export function BuildFromSourceWizard({
   const effectiveVersion = existingVersions.length > 0 ? version : '1.0.0'
 
   async function onCreate() {
-    if (!idField || !taskField) return
+    if (mapped && (!idField || !taskField)) return
     setCreateBusy(true)
     setCreateResult(undefined)
     const id = datasetId.trim() || (sourceKind === 'huggingface' ? slug(hfDataset) : 'benchmark')
@@ -321,22 +331,29 @@ export function BuildFromSourceWizard({
       version: effectiveVersion,
       category: ENV_TO_CATEGORY[envKind], // derived from the env (not chosen by the user)
       source: buildSource(),
-      mapping: {
-        idField,
-        taskField,
-        ...(taskTemplate.trim() ? { taskTemplate } : {}),
-        ...(answerField ? { answerField } : {}),
-        // Per-env-kind mapping — expressiveness on par with the first-party catalog (prompt/repo/os-use/browser).
-        ...(envKind === 'browser' && startUrlField ? { startUrlField } : {}),
-        ...(envKind === 'prompt' ? { promptEnv: true } : {}),
-        ...(envKind === 'os-use' ? { osUseEnv: true } : {}),
-        ...(envKind === 'repo' && gitField ? { gitField, ...(refField ? { refField } : {}) } : {}),
-        ...(image.trim() ? { image: image.trim() } : {}),
-        ...(placement.trim() ? { placement: placement.trim() } : {}),
-      },
+      // A task set is mapped by its own mapper, and the recipe schema refuses a mapping it would not read.
+      ...(mapped
+        ? {
+            mapping: {
+              idField,
+              taskField,
+              ...(taskTemplate.trim() ? { taskTemplate } : {}),
+              ...(answerField ? { answerField } : {}),
+              // Per-env-kind mapping — expressiveness on par with the first-party catalog (prompt/repo/os-use/browser).
+              ...(envKind === 'browser' && startUrlField ? { startUrlField } : {}),
+              ...(envKind === 'prompt' ? { promptEnv: true } : {}),
+              ...(envKind === 'os-use' ? { osUseEnv: true } : {}),
+              ...(envKind === 'repo' && gitField
+                ? { gitField, ...(refField ? { refField } : {}) }
+                : {}),
+              ...(image.trim() ? { image: image.trim() } : {}),
+              ...(placement.trim() ? { placement: placement.trim() } : {}),
+            },
+          }
+        : {}),
     }
     const body: Record<string, unknown> = { spec, id, version: effectiveVersion }
-    if (sourceKind === 'jsonl') body.text = jsonlText
+    if (sourceKind !== 'huggingface') body.text = jsonlText
     const r = await importBenchmarkAction(body)
     setCreateBusy(false)
     setCreateResult(r)
@@ -403,7 +420,7 @@ export function BuildFromSourceWizard({
           {t('step1Source')}
         </div>
         <div className="inline-flex rounded-lg border bg-secondary/40 p-0.5">
-          {(['huggingface', 'jsonl'] as const).map((k) => (
+          {(['huggingface', 'jsonl', 'terminal-bench'] as const).map((k) => (
             <button
               key={k}
               type="button"
@@ -415,7 +432,11 @@ export function BuildFromSourceWizard({
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {k === 'huggingface' ? 'HuggingFace' : t('pasteJsonl')}
+              {k === 'huggingface'
+                ? 'HuggingFace'
+                : k === 'jsonl'
+                  ? t('pasteJsonl')
+                  : t('taskSetSource')}
             </button>
           ))}
         </div>
@@ -544,16 +565,36 @@ export function BuildFromSourceWizard({
             )}
           </div>
         ) : (
-          <div className="space-y-1.5">
-            <Label htmlFor="jsonl">{t('jsonlLabel')}</Label>
-            <Textarea
-              id="jsonl"
-              className="min-h-40 text-[12px]"
-              value={jsonlText}
-              onChange={(e) => setJsonlText(e.target.value)}
-              spellCheck={false}
-              placeholder='{"id":"ex-0","question":"...","answer":"..."}'
-            />
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="jsonl">{mapped ? t('jsonlLabel') : t('taskSetLabel')}</Label>
+              <Textarea
+                id="jsonl"
+                className="min-h-40 text-[12px]"
+                value={jsonlText}
+                onChange={(e) => setJsonlText(e.target.value)}
+                spellCheck={false}
+                placeholder={
+                  mapped
+                    ? '{"id":"ex-0","question":"...","answer":"..."}'
+                    : '{"tasks":[{"id":"hello","instruction":"...","image":"ghcr.io/acme/tb-hello:v1"}]}'
+                }
+              />
+              {!mapped && <p className="text-[12px] text-muted-foreground">{t('taskSetHint')}</p>}
+            </div>
+            {!mapped && (
+              <div className="space-y-1.5">
+                <Label htmlFor="imgtpl">{t('imageTemplateLabel')}</Label>
+                <Input
+                  id="imgtpl"
+                  value={imageTemplate}
+                  onChange={(e) => setImageTemplate(e.target.value)}
+                  spellCheck={false}
+                  placeholder="ghcr.io/acme/tb-{id}:v1"
+                />
+                <p className="text-[12px] text-muted-foreground">{t('imageTemplateHint')}</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -658,7 +699,7 @@ export function BuildFromSourceWizard({
       </section>
 
       {/* 2. mapping (after preview) — only 3 roles. The rest (execution env/template/image) are auto-inferred + advanced settings. */}
-      {previewed && (
+      {previewed && mapped && (
         <section className="space-y-3">
           <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
             {t('step2Mapping')} <Sparkles className="size-3.5 text-primary" />

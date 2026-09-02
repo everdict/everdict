@@ -77,16 +77,28 @@ export const BenchmarkOriginSchema = z
   .optional();
 export type BenchmarkOrigin = z.infer<typeof BenchmarkOriginSchema>;
 
-export const BenchmarkAdapterSpecSchema = z.object({
-  id: z.string(),
-  version: z.string(),
-  description: z.string().optional(),
-  category: z.enum(["browser", "qa", "coding", "tool"]).default("qa"),
-  origin: BenchmarkOriginSchema, // provenance metadata (homepage/paper/code/data/official leaderboard, etc.)
-  source: BenchmarkSourceSchema,
-  mapping: CaseMappingSchema,
-  graderTemplates: z.array(GraderTemplateSchema).optional(),
-});
+export const BenchmarkAdapterSpecSchema = z
+  .object({
+    id: z.string(),
+    version: z.string(),
+    description: z.string().optional(),
+    category: z.enum(["browser", "qa", "coding", "tool"]).default("qa"),
+    origin: BenchmarkOriginSchema, // provenance metadata (homepage/paper/code/data/official leaderboard, etc.)
+    source: BenchmarkSourceSchema,
+    // ROW MAPPING, and only a row-mapped source has one. `terminal-bench` goes through its own mapper — a
+    // task's verdict is the reward its `tests/` publishes — so requiring a mapping there would force every
+    // caller to invent field names nothing reads, which is the shape a reviewer later mistakes for meaning.
+    mapping: CaseMappingSchema.optional(),
+    graderTemplates: z.array(GraderTemplateSchema).optional(),
+  })
+  .superRefine((spec, ctx) => {
+    if (spec.source.kind !== "terminal-bench" && spec.mapping === undefined)
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["mapping"],
+        message: `a ${spec.source.kind} source is mapped row by row, so it requires a mapping (idField + taskField).`,
+      });
+  });
 export type BenchmarkAdapterSpec = z.infer<typeof BenchmarkAdapterSpecSchema>;
 
 // Data spec → runtime BenchmarkAdapter. graderTemplates become graderBuilder (per-row interpolation). Defined as data with no code functions.

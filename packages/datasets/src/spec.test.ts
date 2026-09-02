@@ -121,8 +121,8 @@ describe("BenchmarkAdapterSpec (data definition)", () => {
         placement: "docker",
       },
     });
-    expect(spec.mapping.promptEnv).toBe(true); // Zod does not strip it
-    expect(spec.mapping.placement).toBe("docker");
+    expect(spec.mapping?.promptEnv).toBe(true); // Zod does not strip it
+    expect(spec.mapping?.placement).toBe("docker");
     const ds = await importFromSpec(
       spec,
       { id: "qa-full", version: "1.0.0" },
@@ -148,7 +148,7 @@ describe("BenchmarkAdapterSpec (data definition)", () => {
         promptEnv: true,
       },
     });
-    expect(spec.mapping.taskTemplate).toContain("{source_docs}"); // Zod does not strip it
+    expect(spec.mapping?.taskTemplate).toContain("{source_docs}"); // Zod does not strip it
     const ds = await importFromSpec(
       spec,
       { id: "officeqa-ish", version: "1.0.0" },

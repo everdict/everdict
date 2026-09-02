@@ -1,7 +1,7 @@
 import { BadRequestError, DatasetSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { importBenchmark } from "./catalog.js";
-import { fetchSourceRows } from "./spec.js";
+import { adapterToDataset, importBenchmark } from "./catalog.js";
+import { BenchmarkAdapterSpecSchema, fetchSourceRows } from "./spec.js";
 import { parseTerminalBenchTasks } from "./terminal-bench.js";
 import { terminalBenchTaskToCase, terminalBenchToDataset } from "./terminal-bench.js";
 
@@ -228,5 +228,32 @@ describe("parseTerminalBenchTasks — the shapes a caller actually has", () => {
       { text: JSON.stringify([task("a"), task("b"), task("c")]), limit: 2 },
     );
     expect(rows.map((r) => r.id)).toEqual(["a", "b"]);
+  });
+});
+
+// A mapping is a ROW-MAPPED source's, and only that (`BenchmarkAdapterSpecSchema`): requiring one for the
+// task-set source would force every caller to invent field names nothing reads.
+describe("the mapping belongs to the source that has rows", () => {
+  it("a terminal-bench recipe registers with no mapping; a jsonl one without a mapping is refused", () => {
+    const base = { id: "tb", version: "1.0.0", category: "coding" as const };
+    expect(
+      BenchmarkAdapterSpecSchema.safeParse({
+        ...base,
+        source: { kind: "terminal-bench", imageTemplate: "ghcr.io/acme/tb/{id}:v1" },
+      }).success,
+    ).toBe(true);
+    const jsonl = BenchmarkAdapterSpecSchema.safeParse({ ...base, source: { kind: "jsonl" } });
+    expect(jsonl.success).toBe(false);
+    expect(jsonl.success === false && jsonl.error.issues[0]?.message).toContain("mapped row by row");
+  });
+
+  it("and a row-mapped adapter that reaches the mapper with no mapping refuses instead of emitting blank cases", () => {
+    expect(() =>
+      adapterToDataset(
+        { id: "x", description: "x", category: "qa", defaultVersion: "1", source: { kind: "jsonl" } },
+        [{ id: "a", task: "b" }],
+        { id: "x", version: "1.0.0" },
+      ),
+    ).toThrow(/declares no mapping/);
   });
 });

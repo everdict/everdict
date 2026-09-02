@@ -7,10 +7,9 @@ anchors: [packages/datasets/src/terminal-bench.ts, packages/graders/src/reward-f
 ---
 # Standard task-format on-ramp — bring an existing agent benchmark, run it managed
 
-> Status: **M2 in progress.** Slices 1-4 landed — the pure mapper, the ingestion edge, the source kind on both
-> doors, and the prebuild/push helper; slice 5 (the web add-benchmark wizard) is what remains. SSOT for how
-> Everdict ingests the emerging *standard agent-benchmark task formats* (Terminal-Bench first) into its
-> harness-agnostic `Dataset` model.
+> Status: **M2 complete.** All five slices landed — the pure mapper, the ingestion edge, the source kind on
+> both doors, the prebuild/push helper, and the web wizard. SSOT for how Everdict ingests the emerging
+> *standard agent-benchmark task formats* (Terminal-Bench first) into its harness-agnostic `Dataset` model.
 
 ## Why
 
@@ -90,7 +89,11 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    pushed is a set that imports and then fails one case at a time. It lives in the CLI because Everdict
    references images and never builds them: this is an operator edge, and the platform still refuses a task
    whose image it cannot resolve.
-5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
+5. **Web** — ✅ the add-benchmark wizard's source picker has a third option ("Task set"). Choosing it takes
+   the set as text plus an optional `{id}` image template, previews it through the same parse the import
+   runs, and **skips the mapping step entirely** — a task carries its own instruction, tests and world, so
+   there are no fields to assign. The recipe schema enforces that shape rather than trusting the UI:
+   `mapping` is required for a row-mapped source and refused-as-meaningless for a task set.
 
 ## Non-goals (for now)
 - Building task images in-platform (against the `case.image` contract — reference, don't build).
