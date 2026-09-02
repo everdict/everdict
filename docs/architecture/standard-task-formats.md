@@ -75,6 +75,12 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    `POST /benchmarks/import` and `import_benchmark` accept a task set as `text`, and `POST /benchmarks/preview`
    previews it through the SAME parse the import uses. It does not go through `CaseMapping`: a task's verdict
    is the reward its own `tests/` publishes, which no field-mapping rule can express.
+
+   **Two doors, one mapper.** `POST /datasets/terminal-bench` takes a task set already parsed into a `tasks`
+   array (a caller that has JSON in hand — the web client's `importTerminalBench`); the benchmark source kind
+   takes the set as TEXT and runs it through the ingestion edge (a caller that has a file, and the path a
+   preview can share with the import). Both call `terminalBenchToDataset`, so the mapping cannot diverge —
+   what differs is only the shape the caller arrives with.
 4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
 

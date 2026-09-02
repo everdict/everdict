@@ -4,9 +4,13 @@ paths: "packages/registry/**"
 # Registry rules (push)
 
 Versioned SSOT — `(tenant, id, version) → HarnessSpec` (harnesses), `→ Dataset` (datasets), `→ JudgeSpec`
-(Agent Judges), `→ RuntimeSpec` (execution runtimes). All follow the SAME rules below; datasets are
-harness-agnostic case bundles, judges are `model`|`harness` specs, runtimes are local|nomad|k8s
-infra (no secrets in the spec; `local` = dev/control-plane-host, superseded for "my machine" by the self-hosted runner). See `docs/registry.md` + `docs/datasets.md` + `docs/judges.md` + `docs/runtimes.md`.
+(Agent Judges), `→ RuntimeSpec` (execution runtimes), `→ EnvironmentSpec` (environments). All follow the SAME
+rules below; datasets are harness-agnostic case bundles, judges are `model`|`harness` specs, runtimes are
+local|nomad|k8s infra (no secrets in the spec; `local` = dev/control-plane-host, superseded for "my machine"
+by the self-hosted runner), and an ENVIRONMENT is the world a case acts on — referenced from a case with
+`env: { kind: "ref", … }` and sealed per batch, so the world can move under an unchanged case and be read as
+its own identity axis (`docs/architecture/harness-definability-spec.md` §2). See `docs/registry.md` +
+`docs/datasets.md` + `docs/judges.md` + `docs/runtimes.md`.
 
 - **Versions are immutable.** Re-registering `(tenant, id, version)` with different content MUST throw
   `ConflictError` (identical = idempotent no-op). This is the SSOT guarantee — never silently overwrite a

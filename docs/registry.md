@@ -88,6 +88,19 @@ well as the inline string, resolved at judge-run time (see `docs/judges.md`). Th
 (`judges:read`/`judges:write` — no new authz action, like views reuse `scorecards:*`). Rubrics carry
 version tags like the other version entities (see below; `tags` column via migration `0054_rubric_version_tags`).
 
+## Environments (`EnvironmentRegistry`)
+An environment — the world a case ACTS ON (a seed repository, a browser fixture, a prompt context, a desktop),
+as opposed to the harness that acts — is its own versioned entity, keyed `(tenant, id, version)`, immutable
+per version, owner-first with a `_shared` fallback, with version tags and capability origin like every sibling.
+`InMemoryEnvironmentRegistry` + `PgEnvironmentRegistry` (`environment` jsonb, migration
+`0207_create_environments`). A case names one with `env: { kind: "ref", id, version? }`; the control plane
+resolves it before dispatch and SEALS the concrete version on the batch's manifest, so a batch can be re-run
+against exactly the world it measured and two batches over one dataset and two environment versions read as an
+`environment` confound rather than as a change to the harness under test. The HTTP/MCP surface
+(`POST/GET /environments`, `create/list/get_environment`, `set_environment_version_tags`) reuses the
+**dataset** actions (`datasets:read`/`datasets:write` — no new authz action, like rubrics reuse `judges:*`):
+an environment is part of what an evaluation asks. Design: `docs/architecture/harness-definability-spec.md` §2.
+
 ## Version tags (mutable registry metadata)
 Version numbers alone are hard to tell apart, so every versioned entity (harness instance / dataset / judge /
 runtime / rubric) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry
