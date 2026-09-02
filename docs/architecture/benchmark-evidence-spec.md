@@ -44,6 +44,19 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 > a judge-side conversational agent over the `conversation` contract. Slice 4 (the image prebuild/push helper)
 > and slice 5 (the web wizard) are also open.
 
+> **Landed 2026-09-03:** the on-ramp is complete (slices 4-5 — `everdict tasks prebuild` and the wizard's
+> third source kind), and **BrowseComp and WebArena** ship as catalog adapters. Both declare `scoring: proxy`
+> with what they approximate and the evaluator that would reproduce them, because neither evaluator runs
+> here: BrowseComp's official metric is itself a grader-model verdict under a template we do not carry, and
+> WebArena's is per-task functional checks whose `program_html` arm inspects the LIVE page a trace-scored
+> architecture does not have. A per-adapter `official` claim would have covered both the checks a port
+> reproduces and the ones it would guess at. A test now enforces the declaration mechanically for every
+> adapter, present and future: an `official` claim names its evaluator and approximates nothing; a `proxy`
+> says what it approximates. **Still open — tau-bench**, and the reason is sharper than "it needs a simulated
+> user": its case is not a task with a trace but a DIALOGUE, so the user simulator belongs in the execution
+> path rather than in a grader, and its reward compares the domain database's final state against the
+> benchmark's own. Two things Everdict does not have, and neither is a mapping.
+
 **The gap.** Terminal-Bench slices 2–5 are unbuilt — the ingestion edge, the benchmark-source kind for
 `POST /datasets`, the image-provenance helper, the web wizard (`docs/architecture/standard-task-formats.md`).
 There is no adapter for WebArena, tau-bench or BrowseComp, and SWE-bench exists only as `swe-bench-lite`.

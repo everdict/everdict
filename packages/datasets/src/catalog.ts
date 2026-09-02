@@ -286,6 +286,82 @@ export const BENCHMARK_CATALOG = {
       extraGraders: [{ id: "steps" }, { id: "judge", config: { rubric: WEBVOYAGER_RUBRIC } }],
     },
   },
+  // ── BROWSING BENCHMARKS, SHIPPED AS PROXIES BECAUSE THEIR EVALUATORS ARE NOT REPRODUCED HERE ─────────
+  //
+  // Both of these are on benchmark-evidence-spec.md §1's adapter list, and both arrive as `proxy` on purpose.
+  // A `proxy` is not a lesser adapter: it is the honest reading of a port that scores the same TASK by a
+  // different apparatus, and the field exists so a number can never be rendered as "the BrowseComp score" by
+  // a surface that never read the paragraph. What would make either `official` is written down below, so the
+  // next author is upgrading a stated gap rather than re-deriving one.
+  browsecomp: {
+    id: "browsecomp",
+    description:
+      "BrowseComp — short-answer questions that require persistent web browsing to answer (openai/simple-evals). Rows are supplied as jsonl: the published set ships ENCRYPTED (problem/answer under a per-row key), and this package does not carry a decryption it cannot verify — decrypt with the benchmark's own tooling and paste the rows. Maps to a prompt env, so a self-browsing agent answers with its own tools",
+    category: "qa",
+    // The official metric is itself an LLM judgment (simple-evals grades each answer with a fixed grader
+    // template), so "official" would mean running THAT template on a comparable model. This ships everdict's
+    // own judge with the reference answer interpolated per row: the same question, a different grader.
+    scoring: {
+      kind: "proxy",
+      approximates: "the official grader-model verdict on whether the response's final answer matches the reference",
+      officialEvaluator: "openai/simple-evals browsecomp_eval.py (GRADER_TEMPLATE)",
+      license: "code MIT",
+    },
+    defaultVersion: "1.0.0",
+    source: { kind: "jsonl" },
+    mapping: {
+      idField: "id",
+      taskField: "problem",
+      answerField: "answer",
+      promptEnv: true,
+      extraGraders: [{ id: "steps" }],
+    },
+    // The reference answer is baked into the rubric per row, which is what makes this judge decidable at all:
+    // a browsing question has no verifiable form a generic rubric could check without it.
+    graderBuilder: (row) => [
+      {
+        id: "judge",
+        config: {
+          rubric: `The reference answer is: ${String(row.answer ?? "")}\n\nPASS only if the response's FINAL answer is that answer (allowing formatting and surface wording to differ). A response that is well-argued but names a different answer FAILS, and so does one that never commits to an answer.`,
+        },
+      },
+    ],
+  },
+  webarena: {
+    id: "webarena",
+    description:
+      "WebArena — long-horizon tasks on self-hosted clones of real sites (web-arena-x/webarena). Source jsonl: paste the benchmark's task config files. Maps to a browser env with the task's start_url; the sites themselves are the WORKSPACE's to host, and the case's start URL must point at them",
+    category: "browser",
+    // WebArena decides a task with per-task functional checks (string / URL / DOM-program). The first two are
+    // textual and could be ported; `program_html` inspects the LIVE page after the run, which a trace-scored
+    // architecture does not have — so a port would reproduce some tasks and quietly guess at others, and a
+    // per-adapter `official` claim would cover both. It stays a proxy until the checks are ported per task and
+    // the unportable ones can be recorded as unmeasured rather than judged.
+    scoring: {
+      kind: "proxy",
+      approximates:
+        "the official per-task functional evaluator (string_match / url_match / program_html) over the live self-hosted sites",
+      officialEvaluator: "web-arena-x/webarena evaluation_harness",
+      license: "code Apache-2.0",
+    },
+    defaultVersion: "1.0.0",
+    source: { kind: "jsonl" },
+    mapping: {
+      idField: "task_id",
+      taskField: "intent",
+      startUrlField: "start_url",
+      tagFields: ["sites"],
+      extraGraders: [{ id: "steps" }],
+    },
+    graderBuilder: (row) => [
+      {
+        id: "judge",
+        config: {
+          rubric: `Judge whether the agent completed this WebArena task from the actions in the trace and the final page state it reports: "${String(row.intent ?? "")}". PASS only if the goal was actually achieved by the actions taken. A plausible narrative with no action that accomplishes the goal FAILS, and an unachievable task ("N/A") passes only if the agent SAYS it is unachievable.`,
+        },
+      },
+    ],
+  },
   // Coding (repo) benchmark — scored by passing target tests after the patch (tests-pass). HF open. repo env (git+base_commit).
   "swe-bench-lite": {
     id: "swe-bench-lite",

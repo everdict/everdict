@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { DatasetSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { BENCHMARK_CATALOG, adapterToDataset, importBenchmark, listBenchmarks, sweBenchImage } from "./catalog.js";
+import {
+  BENCHMARK_CATALOG,
+  type BenchmarkAdapter,
+  adapterToDataset,
+  importBenchmark,
+  listBenchmarks,
+  sweBenchImage,
+} from "./catalog.js";
 import { type FetchLike, fetchHfRows } from "./sources.js";
 
 describe("sweBenchImage (official prebuilt image naming, verified Docker Hub convention)", () => {
@@ -70,6 +77,7 @@ describe("BenchmarkAdapter catalog", () => {
       .map((b) => b.id)
       .sort();
     expect(ids).toEqual([
+      "browsecomp",
       "flex-travelplanner",
       "gaia",
       "gsm8k",
@@ -82,6 +90,7 @@ describe("BenchmarkAdapter catalog", () => {
       "travelplanner",
       "travelplanner-fs",
       "trek",
+      "webarena",
       "webvoyager",
     ]);
     expect(listBenchmarks().find((b) => b.id === "gaia")?.gated).toBe(true); // GAIA gated flag
@@ -234,5 +243,40 @@ describe("BenchmarkAdapter catalog", () => {
     );
     expect(ds.cases[0]?.env).toEqual({ kind: "browser", startUrl: "https://example.com" });
     expect(ds.cases[0]?.graders.map((g) => g.id)).toEqual(["answer-match", "steps", "judge"]);
+  });
+});
+
+// ── A PROXY THAT CANNOT SAY WHAT IT APPROXIMATES IS NOT A DESCRIPTION OF ONE ──────────────────────────
+//
+// benchmark-evidence-spec.md §1's adapter list ships as proxies deliberately: their evaluators are not
+// reproduced here, and the field is what stops a number being rendered as "the BrowseComp score" by a
+// surface that never read the description. The invariant is mechanical, so it is checked mechanically —
+// including for adapters nobody has written yet.
+describe("every catalog adapter states what a score from it IS", () => {
+  it("declares official only with the evaluator named, and proxy only with what it approximates", () => {
+    // Annotated, not cast: the catalog literal keeps its precise per-entry types (callers index it by name),
+    // so reading a field only some entries declare needs the INTERFACE — which is also the check that every
+    // entry still satisfies it.
+    const adapters: BenchmarkAdapter[] = Object.values(BENCHMARK_CATALOG);
+    for (const adapter of adapters) {
+      const scoring = adapter.scoring;
+      if (scoring === undefined) continue; // UNSTATED — read as "no claim", never as comparability
+      if (scoring.kind === "proxy") {
+        expect(scoring.approximates, `${adapter.id}: a proxy must say what it approximates`).toBeTruthy();
+        expect(scoring.officialEvaluator, `${adapter.id}: a proxy names what would reproduce it`).toBeTruthy();
+      } else {
+        expect(scoring.officialEvaluator, `${adapter.id}: an official claim names the evaluator`).toBeTruthy();
+        expect(scoring.approximates, `${adapter.id}: an official score approximates nothing`).toBeUndefined();
+      }
+    }
+  });
+
+  it("browsecomp and webarena are proxies, and their rubrics carry the row's own reference", () => {
+    expect(BENCHMARK_CATALOG.browsecomp?.scoring?.kind).toBe("proxy");
+    expect(BENCHMARK_CATALOG.webarena?.scoring?.kind).toBe("proxy");
+    const answer = BENCHMARK_CATALOG.browsecomp?.graderBuilder?.({ id: "q1", answer: "Ada Lovelace" }) ?? [];
+    expect(String(answer[0]?.config?.rubric)).toContain("Ada Lovelace");
+    const intent = BENCHMARK_CATALOG.webarena?.graderBuilder?.({ task_id: 1, intent: "cancel the order" }) ?? [];
+    expect(String(intent[0]?.config?.rubric)).toContain("cancel the order");
   });
 });
