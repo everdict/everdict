@@ -11,6 +11,7 @@ import {
   describeNomadPlacementFailure,
   evalContainerSecretEnv,
   extractLiveEvents,
+  harnessResourcesOf,
   parseResult,
   parseVerifierResult,
   refuseUnenforceableNetwork,
@@ -554,7 +555,7 @@ export function nomadWorld(
   job: CaseJob,
   opts: { cpuMhz?: number; cpuMhzPerCore?: number; memMb?: number; gpu?: number },
 ): { cpuMhz: number; memoryMb: number; gpu?: number; enforced: ResourceRequest } {
-  const harness = job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined;
+  const harness = harnessResourcesOf(job.harnessSpec);
   const cpu = job.evalCase.resources?.cpu ?? harness?.cpu;
   const memoryMb = job.evalCase.resources?.memoryMb ?? harness?.memoryMb;
   const gpu = job.evalCase.resources?.gpu ?? harness?.gpu ?? opts.gpu;

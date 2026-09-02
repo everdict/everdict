@@ -112,6 +112,13 @@ token the first turn reported.
 
 ## §4 — The case reaches the harness, and a process harness has a box (G1.4)
 
+> **Landed 2026-09-02.** `CASE_TOKEN_FIELDS` + `caseTokenDefects` (`packages/contracts/src/harness/harness-spec.ts`),
+> refused at both doors (the resolved spec's refine and the template union's); `RunContext.evalCase` carries the
+> case's id and environment declaration from the job-runner, and `CommandHarness` renders the tokens shell-quoted
+> (`packages/harnesses/src/command.ts`); `ProcessTemplateSpecSchema.resources` rides the resolved process spec; and
+> `harnessResourcesOf` is the ONE predicate the scheduler, the K8s manifest and the Nomad manifest read the harness's
+> box through — each used to spell `kind === "command"` itself. `case.target.baseUrl` waits for §1.
+
 **The gap.** A command template sees `{{task}}`, `{{model}}`, `{{run_id}}`, `{{conversation}}` and its own
 `params` (`packages/harnesses/src/command.ts`); nothing carries the CASE
 — its environment kind, its repository ref, its target's base URL — into the command. A harness that must

@@ -18,6 +18,7 @@ import {
   TopologyServiceSchema,
   TopologyTargetSchema,
   TraceSourceSpecSchema,
+  caseTokenDefects,
   commandConversationDefects,
 } from "./harness-spec.js";
 import { ModelBindingSchema } from "./model-spec.js";
@@ -149,6 +150,7 @@ export const CommandTemplateSpecSchema = z.object({
 export const ProcessTemplateSpecSchema = z.object({
   kind: z.literal("process"),
   ...templateBase,
+  resources: ServiceResourcesSchema.optional(), // the box a process harness asks for (harness-definability-spec.md §4)
 });
 
 export const HarnessTemplateSpecSchema = z
@@ -159,6 +161,9 @@ export const HarnessTemplateSpecSchema = z
     if (template.kind !== "command") return;
     for (const message of commandConversationDefects(template))
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conversation"], message });
+    // …and the case tokens, at the door registration uses (harness-definability-spec.md §4).
+    for (const message of caseTokenDefects(template.command))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["command"], message });
   });
 export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 
@@ -404,6 +409,9 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         id: instance.id,
         version: instance.version,
         ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
+        ...((instance.overrides?.resources ?? template.resources) !== undefined
+          ? { resources: instance.overrides?.resources ?? template.resources }
+          : {}),
       });
   }
 }

@@ -1,4 +1,5 @@
 import {
+  type CaseTokenField,
   type CommandHarnessSpec,
   type ComputeHandle,
   type EvaluableHarness,
@@ -241,6 +242,11 @@ export class CommandHarness implements EvaluableHarness {
       .replaceAll("{{conversation}}", conversationSlot)
       // Where the version's seeds were written before install (harness-identity-and-seeds-spec.md §2).
       .replaceAll("{{seeds}}", HARNESS_SEED_MOUNT);
+    // The case's own coordinates, over the allowlist the spec was parsed against (harness-definability-spec.md §4).
+    // Shell-quoted like {{task}}: these values come from a case document, not from the template author. A field
+    // the case does not have (a repo ref on a prompt case) renders as the empty string, quoted.
+    for (const [field, value] of Object.entries(caseTokenValues(ctx.evalCase)))
+      cmd = cmd.replaceAll(`{{${field}}}`, shq(value));
     for (const [key, value] of Object.entries(this.spec.params ?? {})) {
       cmd = cmd.replaceAll(`{{${key}}}`, value);
     }
@@ -329,4 +335,15 @@ export class CommandHarness implements EvaluableHarness {
       await proxy?.close();
     }
   }
+}
+
+function caseTokenValues(evalCase: RunContext["evalCase"]): Record<CaseTokenField, string> {
+  const env = evalCase?.env;
+  const repo = env?.kind === "repo" && "git" in env.source ? env.source : undefined;
+  return {
+    "case.id": evalCase?.id ?? "",
+    "case.env.kind": env?.kind ?? "",
+    "case.env.repo.url": repo?.git ?? "",
+    "case.env.repo.ref": repo?.ref ?? "",
+  };
 }

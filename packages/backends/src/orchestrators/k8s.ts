@@ -14,6 +14,7 @@ import {
   caseJobPayload,
   evalContainerSecretEnv,
   extractLiveEvents,
+  harnessResourcesOf,
   isDefaultNetwork,
   jobPayloadWriteCommand,
   parseResult,
@@ -1313,7 +1314,7 @@ export function buildK8sJob(
   // this particular unit of work, and the harness spec is the default for everything it runs.
   const cres = job.evalCase.resources;
   const hres = {
-    ...(job.harnessSpec?.kind === "command" ? job.harnessSpec.resources : undefined),
+    ...harnessResourcesOf(job.harnessSpec),
     ...(cres?.cpu !== undefined ? { cpu: cres.cpu } : {}),
     ...(cres?.memoryMb !== undefined ? { memoryMb: cres.memoryMb } : {}),
     ...(cres?.gpu !== undefined ? { gpu: cres.gpu } : {}),

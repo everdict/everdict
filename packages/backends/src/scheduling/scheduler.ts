@@ -6,6 +6,7 @@ import {
   InternalError,
   NotFoundError,
   RateLimitError,
+  harnessResourcesOf,
 } from "@everdict/contracts";
 import { type BudgetTracker, FairQueue, costOf } from "@everdict/domain";
 import { type BackendCapacity, type DispatchOptions, dispatchAborted, isCaseCapacityAware } from "../backend.js";
@@ -107,11 +108,11 @@ export function slotAdmits(slot: BackendSlot, need: { memoryMb?: number; cpu?: n
 
 // The memory a job asks of the admission envelope — the harness's declared weight. Undeclared → 0 (admitted
 // outside the memory budget; resource-aware admission is opt-in by declaring resources on the harness).
-const jobMemoryMb = (job: CaseJob): number =>
-  job.harnessSpec?.kind === "command" ? (job.harnessSpec.resources?.memoryMb ?? 0) : 0;
+// Read through the ONE predicate every lane shares (`harnessResourcesOf`): this used to spell `kind === "command"`
+// itself, as did the k8s and nomad manifests — so a process harness's box reached no lane (definability spec §4).
+const jobMemoryMb = (job: CaseJob): number => harnessResourcesOf(job.harnessSpec)?.memoryMb ?? 0;
 // The CPU twin (resources.cpu, 1000 = 1 vCPU) — same opt-in contract as jobMemoryMb.
-const jobCpu = (job: CaseJob): number =>
-  job.harnessSpec?.kind === "command" ? (job.harnessSpec.resources?.cpu ?? 0) : 0;
+const jobCpu = (job: CaseJob): number => harnessResourcesOf(job.harnessSpec)?.cpu ?? 0;
 
 // The placement policy that picks one of the candidates with room (must be pure/deterministic).
 export interface PlacementPolicy {

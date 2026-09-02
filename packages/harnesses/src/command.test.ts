@@ -691,3 +691,40 @@ describe("{{seeds}} — where the version's seeds were written before install", 
     expect(execs[0]?.cmd).not.toContain("{{seeds}}");
   });
 });
+
+// ── THE CASE REACHES THE COMMAND (docs/architecture/harness-definability-spec.md §4) ──────────────────
+describe("{{case.*}} — the case's coordinates, shell-quoted; absent fields render empty", () => {
+  it("renders id, env kind and the repo source for a repo case", async () => {
+    const { compute, execs } = fakeCompute();
+    const withCase: CommandHarnessSpec = {
+      ...spec(),
+      command:
+        "agent --case {{case.id}} --env {{case.env.kind}} --repo {{case.env.repo.url}} --ref {{case.env.repo.ref}} {{task}}",
+    };
+    await collect(
+      new CommandHarness(withCase, { runId: () => "rid1" }).run(compute, "fix the bug", {
+        ...ctx,
+        evalCase: {
+          id: "swe-42",
+          env: { kind: "repo", source: { git: "https://github.com/acme/web.git", ref: "abc123" } },
+        },
+      }),
+    );
+    // Every value shell-quoted, like {{task}} — a case document is not a template author.
+    expect(execs[0]?.cmd).toContain(
+      "--case 'swe-42' --env 'repo' --repo 'https://github.com/acme/web.git' --ref 'abc123'",
+    );
+  });
+  it("a prompt case has no repo: the repo tokens render as the empty string, quoted, never as literal braces", async () => {
+    const { compute, execs } = fakeCompute();
+    const withCase: CommandHarnessSpec = { ...spec(), command: "agent --ref {{case.env.repo.ref}} {{task}}" };
+    await collect(
+      new CommandHarness(withCase, { runId: () => "rid1" }).run(compute, "answer", {
+        ...ctx,
+        evalCase: { id: "q1", env: { kind: "prompt" } },
+      }),
+    );
+    expect(execs[0]?.cmd).toContain("--ref ''");
+    expect(execs[0]?.cmd).not.toContain("{{case");
+  });
+});

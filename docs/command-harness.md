@@ -27,7 +27,10 @@ single generic `CommandHarness` interprets it. A SaaS user registers a spec → 
                                        //     mlflow: "correlate":"id"|"tag"?, "experiment":"…"? · phoenix: "project" }
 }
 ```
-Template tokens in `command`: **`{{seeds}}`** (the directory the harness version's skill/knowledge seeds were
+Template tokens in `command`: **`{{case.id}}`**, **`{{case.env.kind}}`**, **`{{case.env.repo.url}}`**,
+**`{{case.env.repo.ref}}`** (the case's own coordinates, shell-quoted — the whole allowlist; any other `{{case.*}}` is
+refused at registration, because the verifier-private material must never reach the agent's command; a field the case
+lacks renders as the empty string), **`{{seeds}}`** (the directory the harness version's skill/knowledge seeds were
 written to before install — `/everdict/seeds/skills/<id>/SKILL.md`, `/everdict/seeds/knowledge/<id>.md`; see
 `docs/architecture/harness-identity-and-seeds-spec.md` §2), **`{{task}}`** (shell-quoted automatically — don't wrap it in quotes),
 `{{model}}`, `{{run_id}}`.

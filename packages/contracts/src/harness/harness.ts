@@ -1,4 +1,5 @@
 import type { ComputeHandle } from "../execution/compute.js";
+import type { EnvSpec } from "../execution/environment.js";
 import type { SpanAttrMapping } from "../execution/trace-source.js";
 import type { TraceEvent } from "../execution/trace.js";
 
@@ -6,6 +7,9 @@ export interface RunContext {
   // Usually empty — the claude CLI works from the machine's subscription login. Inject the key only in a sandbox without login.
   apiKeyEnv: Record<string, string>;
   timeoutSec: number;
+  // The case the harness is running, for the `{{case.*}}` tokens (harness-definability-spec.md §4) — its id and
+  // its environment declaration, never its grading material.
+  evalCase?: { id: string; env: EnvSpec };
   // Trace correlation key — runCase fills it so the same value flows to both run (the harness injects it as EVERDICT_RUN_ID/everdict.run_id)
   // and collectTrace (platform pull). If unspecified, the harness mints its own (backward-compat).
   runId?: string;

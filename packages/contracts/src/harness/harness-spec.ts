@@ -598,11 +598,52 @@ export const HarnessSeedsSchema = z.object({
 });
 export type HarnessSeeds = z.infer<typeof HarnessSeedsSchema>;
 
+// ── THE CASE REACHES THE COMMAND, THROUGH AN ALLOWLIST (harness-definability-spec.md §4) ─────────────
+//
+// A command template saw `{{task}}`, `{{model}}`, `{{run_id}}`, `{{conversation}}`, `{{seeds}}` and its own
+// params; nothing carried the CASE — its id, its environment kind, its repository ref — so a harness that must
+// behave differently for a repo case and a prompt case guessed from the task text. `{{case.<field>}}` over this
+// list, and only this list: exposing the whole case document would let a template name `case.tests` or the
+// verifier environment, the material `verifierPlanOf` exists to keep out of the agent's container. Refused at
+// parse — an unknown token used to reach the shell as literal text, silently.
+export const CASE_TOKEN_FIELDS = ["case.id", "case.env.kind", "case.env.repo.url", "case.env.repo.ref"] as const;
+export type CaseTokenField = (typeof CASE_TOKEN_FIELDS)[number];
+const CASE_TOKEN = /\{\{\s*(case\.[a-zA-Z0-9_.]+)\s*\}\}/g;
+export function caseTokenDefects(command: string): string[] {
+  const allowed = new Set<string>(CASE_TOKEN_FIELDS);
+  const unknown = [...command.matchAll(CASE_TOKEN)].map((m) => m[1] as string).filter((f) => !allowed.has(f));
+  return unknown.length === 0
+    ? []
+    : [
+        `unknown case token(s) ${[...new Set(unknown)].map((f) => `{{${f}}}`).join(", ")} — a command may read only ${CASE_TOKEN_FIELDS.map((f) => `{{${f}}}`).join(", ")}`,
+      ];
+}
+
+// The one reader of "what box did the HARNESS declare" — three placement lanes used to spell it themselves, and
+// every one of them read only the `command` kind (rule `protocol` L3: a predicate written twice has diverged).
+export function harnessResourcesOf(spec: HarnessSpec | undefined): ResourceRequest | undefined {
+  if (spec === undefined) return undefined;
+  switch (spec.kind) {
+    case "command":
+    case "process":
+      return spec.resources;
+    case "service":
+      return undefined; // a topology's box is per service
+    default:
+      return assertNeverSpec(spec);
+  }
+}
+function assertNeverSpec(value: never): never {
+  throw new Error(`unreachable harness kind: ${JSON.stringify(value)}`);
+}
+
 export const ProcessHarnessSpecSchema = z.object({
   kind: z.literal("process"),
   id: z.string(),
   version: VersionSchema,
   seeds: HarnessSeedsSchema.optional(),
+  // The box a process harness asks for — the same convention as a command's (harness-definability-spec.md §4).
+  resources: ServiceResourcesSchema.optional(),
 });
 
 // service harness: a deployable topology. browser-use-langgraph etc.
@@ -763,6 +804,8 @@ export const HarnessSpecSchema = z
   // "conversational" over a CLI that never resumes.
   .superRefine((spec, ctx) => {
     if (spec.kind !== "command") return;
+    for (const message of caseTokenDefects(spec.command))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["command"], message });
     for (const message of commandConversationDefects(spec))
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conversation"], message });
   });

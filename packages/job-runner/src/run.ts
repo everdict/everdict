@@ -201,6 +201,8 @@ export async function runCaseJob(
     // compute (frees the runtime). Absent for managed dispatch (the backend kills the whole alloc instead).
     runCtx: {
       ...runContextFromEnv(job.evalCase.timeoutSec),
+      // The case's id and environment declaration, for a command's `{{case.*}}` tokens (definability spec §4).
+      evalCase: { id: job.evalCase.id, env: job.evalCase.env },
       ...(job.runId ? { runId: job.runId } : {}),
       ...(opts.signal ? { signal: opts.signal } : {}),
       ...(liveScreen ? { liveScreen } : {}),

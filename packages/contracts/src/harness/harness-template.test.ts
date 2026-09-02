@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BadRequestError } from "../errors.js";
+import { caseTokenDefects, harnessResourcesOf } from "./harness-spec.js";
 import {
   HarnessInstanceSpecSchema,
   type HarnessTemplateSpec,
@@ -861,6 +862,81 @@ describe("resolveHarnessInstance — the instance's seeds land on the resolved s
         version: "1.0.0",
         pins: {},
       }).seeds,
+    ).toBeUndefined();
+  });
+});
+
+// ── THE CASE REACHES THE COMMAND THROUGH AN ALLOWLIST (docs/architecture/harness-definability-spec.md §4) ──
+describe("{{case.*}} tokens — refused at the template door unless allowlisted; a process harness declares its box", () => {
+  const command = (cmd: string) => ({
+    kind: "command",
+    category: "cli-agent",
+    id: "agent",
+    version: "1.0.0",
+    image: "node:22",
+    command: cmd,
+  });
+  it("accepts the allowlisted case fields and refuses any other, naming the list", () => {
+    expect(
+      HarnessTemplateSpecSchema.safeParse(
+        command("agent --repo {{case.env.repo.url}}@{{case.env.repo.ref}} --case {{case.id}} {{task}}"),
+      ).success,
+    ).toBe(true);
+    const refused = HarnessTemplateSpecSchema.safeParse(command("agent --tests {{case.tests}} {{task}}"));
+    expect(refused.success).toBe(false);
+    if (!refused.success)
+      expect(refused.error.issues.map((i) => i.message).join("\n")).toMatch(
+        /unknown case token\(s\) \{\{case\.tests\}\}/,
+      );
+    expect(caseTokenDefects("x {{case.env.kind}} {{ case.id }}")).toEqual([]);
+    expect(caseTokenDefects("x {{case.env}}")).toHaveLength(1);
+  });
+  it("a process template's resources ride the resolved spec, and every lane reads them through one predicate", () => {
+    const tpl = HarnessTemplateSpecSchema.parse({
+      kind: "process",
+      category: "builtin",
+      id: "claude-code",
+      version: "1",
+      resources: { cpu: 2000, memoryMb: 4096 },
+    });
+    const resolved = resolveHarnessInstance(tpl, {
+      template: { id: "claude-code", version: "1" },
+      id: "claude-code",
+      version: "1.0.0",
+      pins: {},
+    });
+    expect(resolved.kind === "process" ? resolved.resources : undefined).toEqual({ cpu: 2000, memoryMb: 4096 });
+    expect(harnessResourcesOf(resolved)).toEqual({ cpu: 2000, memoryMb: 4096 });
+    expect(harnessResourcesOf(undefined)).toBeUndefined();
+    const svc = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "shop",
+      version: "1",
+      services: [
+        {
+          name: "web",
+          slot: "web",
+          port: 8080,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          resources: { cpu: 500, memoryMb: 512 },
+        },
+      ],
+      dependencies: [],
+      frontDoor: { service: "web", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+    });
+    expect(
+      harnessResourcesOf(
+        resolveHarnessInstance(svc, {
+          template: { id: "shop", version: "1" },
+          id: "shop",
+          version: "1.0.0",
+          pins: { web: "img" },
+        }),
+      ),
     ).toBeUndefined();
   });
 });
