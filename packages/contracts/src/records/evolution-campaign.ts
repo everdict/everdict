@@ -690,6 +690,55 @@ export type EvolutionCampaignRecord = z.infer<typeof EvolutionCampaignRecordSche
 // target flags, and the trace coordinates of the runs on each side. The driver's `learned` stays advice; this is
 // the half the platform authors, and the next brief is rendered FROM it — with one deliberate hole the skill
 // keeps: the delegate receives failing case ids and an attributed slot, never judge rationale.
+// ── WHAT A JUDGE SAID WENT WRONG (docs/architecture/benchmark-evidence-spec.md §2) ──────────────────
+//
+// `classifyFailure` names what broke on the PLATFORM's side; an agent that finished and was WRONG carried no
+// structured reason. A diagnosis is a JUDGE's structured verdict about behaviour — a closed vocabulary, a locus
+// (which service, which tool, which phase), pointers into the trace, a confidence. It rides a judge-family
+// score's `detail`, so its authority is the judge family's: `sanitizeScore` already refuses a producer that
+// names a judge metric it does not own, which is what makes "authored by a judge" a fact and not a label.
+// Observational: it decides nothing, it explains — and it is what attribution reads.
+export const DIAGNOSIS_KINDS = [
+  "wrong_answer",
+  "incomplete",
+  "tool_misuse",
+  "loop",
+  "timeout",
+  "refused",
+  "environment_broken",
+  "spec_misread",
+] as const;
+export const CaseDiagnosisSchema = z.object({
+  kind: z.enum(DIAGNOSIS_KINDS),
+  locus: z
+    .object({
+      service: z.string().min(1).max(200).optional(), // a topology service name
+      tool: z.string().min(1).max(200).optional(), // a tool the agent misused / looped on
+      phase: z.string().min(1).max(200).optional(), // free: "planning", "verification", …
+    })
+    .optional(),
+  evidence: z
+    .array(
+      z.object({
+        t: z.number().optional(),
+        eventIndex: z.number().int().nonnegative().optional(),
+        note: z.string().max(500).optional(),
+      }),
+    )
+    .max(50)
+    .default([]),
+  confidence: z.number().min(0).max(1),
+});
+export type CaseDiagnosis = z.infer<typeof CaseDiagnosisSchema>;
+
+// ── WHICH SLOT A FAILING CASE POINTS AT (docs/architecture/evolution-routing-spec.md §2) ─────────────
+export const CaseAttributionSchema = z.object({
+  kind: z.enum(["measured", "unattributed"]),
+  slot: z.string().min(1).optional(), // present exactly when `measured`
+  because: z.array(z.string().min(1)).min(1), // the reasons, in the platform's words — never the delegate's
+});
+export type CaseAttribution = z.infer<typeof CaseAttributionSchema>;
+
 export const RoundEvidenceCaseSchema = z.object({
   caseId: z.string().min(1),
   heldOut: z.boolean(),
@@ -709,6 +758,10 @@ export const RoundEvidenceCaseSchema = z.object({
       trial: z.number().int().nonnegative().optional(),
     }),
   ),
+  // The candidate side's judge-authored diagnoses (§2 of the evidence spec), with the judge that wrote each.
+  diagnoses: z.array(CaseDiagnosisSchema.extend({ judge: z.string().min(1) })).default([]),
+  // …and the slot they point at (routing spec §2); absent on a case that improved.
+  attribution: CaseAttributionSchema.optional(),
 });
 export type RoundEvidenceCase = z.infer<typeof RoundEvidenceCaseSchema>;
 

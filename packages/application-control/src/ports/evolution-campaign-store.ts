@@ -8,7 +8,7 @@ import type {
   HarnessSeeds,
   ReadResult,
 } from "@everdict/contracts";
-import type { SeedEvidence } from "@everdict/domain";
+import type { HarnessSlot, SeedEvidence } from "@everdict/domain";
 import type { OutboxEvent } from "./run-store.js";
 
 // ── THE CAMPAIGN STORE (docs/architecture/evolution-lineage.md, Track D) ─────────────────────────────
@@ -180,6 +180,15 @@ export interface AdoptionOperationStore {
 export interface SeedProvenanceReader {
   seedsOf(tenant: string, harness: { id: string; version: string }): Promise<ReadResult<HarnessSeeds | undefined>>;
   evidenceOf(tenant: string, seeds: HarnessSeeds): Promise<ReadResult<SeedEvidence[]>>;
+}
+
+// ── THE CANDIDATE'S SHAPE — ITS SLOTS (docs/architecture/evolution-routing-spec.md §2) ───────────────
+//
+// What a failing case is attributed AGAINST: the candidate version's slots, each with the service it runs and the
+// tools it declares it owns. Read from the resolved spec; `unknown` leaves every case unattributed with the
+// reason — attribution is advice for the brief, so an unreadable shape does not refuse the round.
+export interface HarnessShapeReader {
+  slotsOf(tenant: string, harness: { id: string; version: string }): Promise<ReadResult<HarnessSlot[]>>;
 }
 
 // ── THE ROUND'S EVIDENCE, AS IMMUTABLE BYTES (docs/architecture/benchmark-evidence-spec.md §3) ───────

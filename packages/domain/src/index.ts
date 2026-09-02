@@ -541,6 +541,7 @@ export {
   campaignStoppedAt,
 } from "./evolution/campaign-gate.js";
 export { type SeedEvidence, seedLeakOf } from "./evolution/seed-leak.js";
+export { type HarnessSlot, type JudgedDiagnosis, attributeCase, diagnosesOf } from "./evolution/diagnosis.js";
 export {
   type RoundEvidenceInput,
   type RoundEvidenceSide,

@@ -134,6 +134,9 @@ export const TopologyServiceSchema = z.object({
   // overridable via ModelRef.env. Injected on top of `env` (the model binding wins for the keys it sets).
   model: ModelBindingSchema.optional(),
   volumes: z.array(z.string()).optional(),
+  // The tools this service OWNS — the names a diagnosis's `locus.tool` is matched against when a failing case is
+  // attributed to a slot (docs/architecture/evolution-routing-spec.md §2). Declared, never inferred.
+  owns: z.object({ tools: z.array(z.string().min(1)).max(200) }).optional(),
   readiness: ServiceReadinessSchema.optional(),
   resources: ServiceResourcesSchema.optional(), // cpu/memory request — interpreted by nomad/k8s/docker (unset = runtime default)
   // Intrinsic execution requirement — WHAT the service's image needs, never WHERE (no node label / cluster specifics).

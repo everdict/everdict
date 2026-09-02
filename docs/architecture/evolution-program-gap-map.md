@@ -94,8 +94,8 @@ trace reads, per-call cost on the trace.
 | id | gap | closed by |
 |---|---|---|
 | G3.1 | **On-ramps are incomplete.** Terminal-Bench slices 2–5 are unbuilt (`docs/architecture/standard-task-formats.md`); there is no adapter for WebArena, tau-bench, BrowseComp or SWE-bench beyond `swe-bench-lite`; first-party seeding of `_shared` was removed, so a fresh deployment starts with zero benchmarks. | `benchmark-evidence-spec.md` §1 |
-| G3.2 | **No agent-behaviour diagnosis.** `classifyFailure` is `infra | config | harness | agent` at the platform's granularity; an agent FAIL carries no `failure` at all, so "why did it fail" is judge prose plus a trace. | `benchmark-evidence-spec.md` §2 |
-| G3.3 | **No platform-derived evidence record for the next step.** A round carries a verdict (counts) and `learned` (the driver's prose, explicitly advice). Nothing platform-authored says which held-out cases failed on the candidate, with what diagnosis, pointing at which trace pages. The next round's brief is built by the driver from raw reads. | `benchmark-evidence-spec.md` §3 — **landed 2026-09-02** (diagnoses pending §2) |
+| G3.2 | **No agent-behaviour diagnosis.** `classifyFailure` is `infra | config | harness | agent` at the platform's granularity; an agent FAIL carries no `failure` at all, so "why did it fail" is judge prose plus a trace. | `benchmark-evidence-spec.md` §2 — **landed 2026-09-02** (judge-family score details) |
+| G3.3 | **No platform-derived evidence record for the next step.** A round carries a verdict (counts) and `learned` (the driver's prose, explicitly advice). Nothing platform-authored says which held-out cases failed on the candidate, with what diagnosis, pointing at which trace pages. The next round's brief is built by the driver from raw reads. | `benchmark-evidence-spec.md` §3 — **landed 2026-09-02** |
 | G3.4 | **Comparability stops at the label.** `official | proxy` says whether a number is citable; nothing exports a run in the benchmark's own report format with the evaluator identity attached. | `benchmark-evidence-spec.md` §4 |
 
 ## Pillar 4 — change anything, but know what and who; verify the issue was resolved
@@ -112,7 +112,7 @@ minting the version, a derived round verdict, a gate, an adoption and a merge
 | id | gap | closed by |
 |---|---|---|
 | G4.1 | **WHO is a question, not a lookup.** A template slot names its `source {git, repo}` and its `build`; it does not name the coding harness built inside that repository. The skill's answer is "list the profiles and ASK the member". | `evolution-routing-spec.md` §1 — **landed 2026-09-02** |
-| G4.2 | **WHAT is a prose ladder.** Nothing attributes a failing held-out case to a slot — the service whose spans carried the failure, the tool that was misused. The driver reads traces and guesses. | `evolution-routing-spec.md` §2 |
+| G4.2 | **WHAT is a prose ladder.** Nothing attributes a failing held-out case to a slot — the service whose spans carried the failure, the tool that was misused. The driver reads traces and guesses. | `evolution-routing-spec.md` §2 — **landed 2026-09-02** |
 | G4.3 | **The issue and the cases are not bound.** `ISSUE_LINK_TYPES` (`packages/contracts/src/records/tracker.ts`) has no `case`; a frame cannot be derived from an issue; the gate reads aggregate held-out counts, so "the actual issue was resolved" — THESE cases now pass — is never verified. | `evolution-routing-spec.md` §3 — **landed 2026-09-02** |
 | G4.4 | **One build is one slot.** A hypothesis that touches two services needs two builds and a hand-composed pin set; `pin_harness_images` accepts several pins, the build door accepts one slot. | `evolution-routing-spec.md` §4 — deferred; design refined (claim-before-mint) |
 | G4.5 | **No memory across campaigns.** Campaigns list per workspace; nothing reads "everything ever tried on this harness" — the rounds, what lost, what each taught. | `evolution-routing-spec.md` §5 — **landed 2026-09-02** |

@@ -31,6 +31,8 @@ const noSeedProvenance = {
   seedsOf: async () => ({ kind: "read" as const, value: undefined }),
   evidenceOf: async () => ({ kind: "read" as const, value: [] }),
 };
+// A single-slot harness: attribution by construction, so these cases test what they are about.
+const noShape = { slotsOf: async () => ({ kind: "read" as const, value: [{ slot: "image", tools: [] }] }) };
 
 // BFF↔MCP parity for the campaign settlement: the agent-evolve loop drives the SAME service over MCP that
 // the HTTP routes serve — open, derived round, gate decision, settle. Role gating rides `scorecards:*`.
@@ -124,6 +126,7 @@ function makeDeps(
     runs: noRuns,
     datasets: noDatasets,
     seedProvenance: noSeedProvenance,
+    shape: noShape,
     evidence: new InMemoryCampaignEvidenceStore(),
     issues: { get: async () => ({ id: "iss_1" }) },
     diffs: { diffSnapshot: async () => snapshot },
@@ -278,6 +281,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       runs: noRuns,
       datasets: noDatasets,
       seedProvenance: noSeedProvenance,
+      shape: noShape,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs: { diffSnapshot: async () => winning },

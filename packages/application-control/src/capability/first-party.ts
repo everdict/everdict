@@ -1159,7 +1159,10 @@ Everdict's tools load on demand. Before anything else:
   rates and trials, the per-case verdict (improved · regressed · unchanged · unclear), and the run ids whose
   traces show the mechanism. The platform derived it and sealed it by digest; your \`learned\` is advice about it.
   Brief the delegate with the failing TARGET ids and the slot the evidence points at — never with judge rationale
-  or trace excerpts (the candidate must not receive the findings).
+  or trace excerpts (the candidate must not receive the findings). Each case carries \`diagnoses\` (a judge's
+  structured verdict: kind, locus, confidence) and \`attribution\` — \`measured\` with the slot and the platform's
+  reasons, or \`unattributed\` with why. Delegate to the attributed slot's maintainer; when a case is
+  unattributed, choose the slot yourself and SAY in the brief that you chose it.
 - **The issue's cases.** Link the failing cases to the issue first — \`add_issue_link { type: "case", linkId:
   <caseId>, dataset, version }\` — and open the campaign with \`frame: { fromIssue: true, … }\` (everything but
   \`scenarios\`/\`targets\`): the platform makes the linked cases the TARGETS and every other case of that dataset

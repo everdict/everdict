@@ -29,6 +29,7 @@ import {
   campaignRoundRefusal,
   caseLinksOf,
   contentDigest,
+  diagnosesOf,
   frameFromCases,
   oracleTouched,
   roundEvidenceKey,
@@ -41,6 +42,7 @@ import type {
   CampaignEvidenceStore,
   CampaignSubjectRef,
   EvolutionCampaignStore,
+  HarnessShapeReader,
   SeedProvenanceReader,
 } from "../ports/evolution-campaign-store.js";
 
@@ -137,6 +139,14 @@ function sideOf(scorecardId: string, side: CampaignComparisonSide): RoundEvidenc
             ...(r.caseId !== undefined ? { caseId: r.caseId } : {}),
             ...(r.runId !== undefined ? { runId: r.runId } : {}),
             ...(r.trial !== undefined ? { trial: r.trial } : {}),
+            // Diagnoses off the MEASURED judge scores only (evidence spec §2): parsed here, where every other
+            // reader already filters `isMeasured`, so the domain builder never touches a raw scores array.
+            diagnoses: diagnosesOf(
+              r.scores.filter(isMeasured).map((sc) => ({
+                metric: sc.metric,
+                ...(sc.detail !== undefined ? { detail: sc.detail } : {}),
+              })),
+            ),
           })),
         }
       : {}),
@@ -223,6 +233,8 @@ export interface CampaignServiceDeps {
   // What the candidate's seeds were born from (harness-identity-and-seeds-spec.md §4): a seed whose evidence
   // names a scorecard over the frame's held-out scenarios is the exam mounted into the candidate. REQUIRED.
   seedProvenance: SeedProvenanceReader;
+  // The candidate's slots, for attribution on the evidence record (evolution-routing-spec.md §2). REQUIRED.
+  shape: HarnessShapeReader;
   // Where a round's evidence record is staged before the round is appended (benchmark-evidence-spec.md §3).
   // REQUIRED: a round without its evidence is a round whose next brief is built from raw reads again.
   evidence: CampaignEvidenceStore;
@@ -794,11 +806,22 @@ export class CampaignService {
     // run coordinates — and written as an immutable object the round then names by key + digest (L4). The
     // order is the protocol: bytes first, then the row that references them; a put that fails refuses the
     // round, because a round whose evidence does not exist is the state this record exists to abolish.
+    // The candidate's shape, for attribution (routing spec §2) — a harness subject only; an unreadable shape is
+    // recorded as the reason every non-improved case is unattributed, never as a refused round.
+    const shape =
+      record.frame.subject.type === "harness"
+        ? await this.deps.shape.slotsOf(tenant, { id: record.frame.subject.id, version: input.candidateVersion })
+        : undefined;
     const evidenceDocument = roundEvidenceOf({
       campaignId: id,
       seq,
       frameDigest: record.frameDigest,
       frame: record.frame,
+      ...(shape?.kind === "read" ? { slots: shape.value } : {}),
+      ...(shape !== undefined && shape.kind !== "read"
+        ? { slotsUnreadable: shape.kind === "unknown" ? shape.reason : "the candidate version is not registered" }
+        : {}),
+      ...(shape === undefined ? { slotsUnreadable: "an agent subject has no slots" } : {}),
       baseline: sideOf(input.baselineScorecardId, snapshot.baseline),
       candidate: sideOf(input.candidateScorecardId, snapshot.candidate),
       ...(snapshot.diff.trials !== undefined ? { trials: snapshot.diff.trials } : {}),

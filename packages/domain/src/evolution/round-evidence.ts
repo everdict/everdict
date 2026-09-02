@@ -1,4 +1,5 @@
 import type { RoundEvidence, RoundEvidenceCase } from "@everdict/contracts";
+import { type HarnessSlot, type JudgedDiagnosis, attributeCase } from "./diagnosis.js";
 
 // ── THE ROUND'S EVIDENCE, DERIVED (docs/architecture/benchmark-evidence-spec.md §3) ──────────────────
 //
@@ -26,12 +27,24 @@ export interface RoundEvidenceInput {
   };
   verdict: RoundEvidence["aggregate"];
   at: string;
+  // The candidate harness's slots (routing spec §2) — the shape attribution is measured against. Absent = the
+  // shape could not be read, and every non-improved case is `unattributed` with that reason.
+  slots?: ReadonlyArray<HarnessSlot>;
+  slotsUnreadable?: string;
 }
 export interface RoundEvidenceSide {
   scorecardId: string;
   version: string;
-  // The side's per-case results, when the record carries them — the trace coordinates a reader follows.
-  results?: ReadonlyArray<{ caseId?: string; runId?: string; trial?: number }>;
+  // The side's per-case results, when the record carries them — the trace coordinates a reader follows, and the
+  // diagnoses the SERVICE already parsed off the result's measured judge scores (evidence spec §2). Parsed there,
+  // not here: a domain file may not read a raw score array (the measured-gate guard), and the service is the one
+  // place that already filters `isMeasured` for every other reader.
+  results?: ReadonlyArray<{
+    caseId?: string;
+    runId?: string;
+    trial?: number;
+    diagnoses?: ReadonlyArray<JudgedDiagnosis>;
+  }>;
 }
 
 function caseVerdict(c: { delta: number; significant: boolean }): RoundEvidenceCase["verdict"] {
@@ -48,22 +61,40 @@ function tracesOf(side: "baseline" | "candidate", results: RoundEvidenceSide["re
 export function roundEvidenceOf(input: RoundEvidenceInput): RoundEvidence {
   const heldOut = new Set(input.frame.scenarios.filter((s) => s.heldOut).map((s) => s.id));
   const targets = new Set(input.frame.targets);
-  const cases: RoundEvidenceCase[] = (input.trials?.cases ?? []).map((c) => ({
-    caseId: c.caseId,
-    heldOut: heldOut.has(c.caseId),
-    target: targets.has(c.caseId),
-    baseline: { rate: c.baselineRate, trials: c.baselineTrials },
-    candidate: { rate: c.candidateRate, trials: c.candidateTrials },
-    delta: c.delta,
-    significant: c.significant,
-    ...(c.p !== undefined ? { p: c.p } : {}),
-    ...(c.method !== undefined ? { method: c.method } : {}),
-    verdict: caseVerdict(c),
-    traces: [
-      ...tracesOf("baseline", input.baseline.results, c.caseId),
-      ...tracesOf("candidate", input.candidate.results, c.caseId),
-    ],
-  }));
+  const cases: RoundEvidenceCase[] = (input.trials?.cases ?? []).map((c) => {
+    const verdict = caseVerdict(c);
+    // The candidate side's judges on this case — every trial's diagnoses, as the service parsed them.
+    const diagnoses = (input.candidate.results ?? [])
+      .filter((r) => r.caseId === c.caseId)
+      .flatMap((r) => r.diagnoses ?? []);
+    const attribution =
+      verdict === "improved"
+        ? undefined
+        : input.slots === undefined
+          ? {
+              kind: "unattributed" as const,
+              because: [`the harness shape could not be read: ${input.slotsUnreadable ?? "no shape given"}`],
+            }
+          : attributeCase(diagnoses, input.slots);
+    return {
+      caseId: c.caseId,
+      heldOut: heldOut.has(c.caseId),
+      target: targets.has(c.caseId),
+      baseline: { rate: c.baselineRate, trials: c.baselineTrials },
+      candidate: { rate: c.candidateRate, trials: c.candidateTrials },
+      delta: c.delta,
+      significant: c.significant,
+      ...(c.p !== undefined ? { p: c.p } : {}),
+      ...(c.method !== undefined ? { method: c.method } : {}),
+      verdict,
+      traces: [
+        ...tracesOf("baseline", input.baseline.results, c.caseId),
+        ...tracesOf("candidate", input.candidate.results, c.caseId),
+      ],
+      diagnoses,
+      ...(attribution !== undefined ? { attribution } : {}),
+    };
+  });
   return {
     campaignId: input.campaignId,
     seq: input.seq,

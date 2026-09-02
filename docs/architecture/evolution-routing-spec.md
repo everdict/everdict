@@ -56,6 +56,14 @@ and the field. Today the field is unknown and the brief says to ask.
 
 ## §2 — WHAT is attributed from the evidence, and says when it cannot be (G4.2)
 
+> **Landed 2026-09-02.** `attributeCase` (`packages/domain/src/evolution/diagnosis.ts`) over the case's judge
+> diagnoses and the candidate's slots — `TopologyServiceSchema.owns { tools }` declares what a slot owns; a
+> single-slot harness attributes by construction; a named service or an owned tool attributes with the reason;
+> disagreement and silence are `unattributed` with the reason. The shape comes from a `HarnessShapeReader`
+> (`apps/api/src/composition/harness-shape.ts`, a `ReadResult`) and an unreadable shape leaves cases unattributed
+> rather than refusing the round. The answer rides the evidence record as `attribution`; the brief reads it. Not
+> landed: recording a driver's override (`slotChosenBy`) — the round input has no slot field yet.
+
 **The gap.** A failing held-out case is a case id and a trace. Which SLOT is responsible — the service whose
 spans carried the failure, the tool that was misused — is a question the driver answers by reading and
 guessing, and the guess is not recorded as a guess.

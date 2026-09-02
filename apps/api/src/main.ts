@@ -106,6 +106,7 @@ import {
   startAutoscaler,
 } from "./composition/execution-scheduling.js";
 import { buildFileExecutionService } from "./composition/file-execution.js";
+import { buildHarnessShape } from "./composition/harness-shape.js";
 import { buildManagedImages } from "./composition/images.js";
 import { buildIntegrations } from "./composition/integrations.js";
 import { lateBoundEmitter, lateBoundIssueLinker } from "./composition/late-events.js";
@@ -1324,6 +1325,8 @@ async function main(): Promise<void> {
     datasets: datasetRegistry,
     // Where a round's evidence record is staged before the round is appended (benchmark-evidence-spec.md §3).
     evidence: campaignEvidenceStore,
+    // The candidate's slots, for attributing a failing case (evolution-routing-spec.md §2).
+    shape: buildHarnessShape({ harnesses: harnessInstanceRegistry }),
     // What the candidate's seeds were born from (harness-identity-and-seeds-spec.md §4).
     seedProvenance: buildSeedProvenance({
       harnesses: harnessInstanceRegistry,

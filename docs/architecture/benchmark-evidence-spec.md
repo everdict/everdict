@@ -61,6 +61,16 @@ never receives them) — the same assertion the mapper's tests already make, now
 
 ## §2 — Diagnose the agent, not only the platform (G3.2)
 
+> **Landed 2026-09-02, riding the judge family rather than a new sealed document:** `CaseDiagnosisSchema` with
+> the closed `DIAGNOSIS_KINDS` (`packages/contracts/src/records/evolution-campaign.ts`); a judge whose rubric asks
+> for one writes it as its score `detail` (or under a `diagnosis` key beside its rationale), and `diagnosesOf`
+> (`packages/domain/src/evolution/diagnosis.ts`) reads it off judge-family scores only — the family is the
+> authority, and `sanitizeScore` already refuses a producer that names a judge metric it does not own, so
+> "authored by a judge" is a fact rather than a label. Anything that does not parse is ignored: a rationale
+> sentence is not a diagnosis. The diagnoses ride the round's evidence record per case (§3), sealed with it.
+> Not landed: a separate diagnosis receipt (the judge's score already seals under its pass) and a first-party
+> diagnosis rubric.
+
 **The gap.** `classifyFailure` says what broke on the PLATFORM's side: a provision failure, a config error,
 a harness crash, an agent that did not finish. An agent that finished and was WRONG carries no `failure` at
 all, by design; "why" is the judges' prose plus a trace. That is the right split for a verdict and the wrong

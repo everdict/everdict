@@ -39,6 +39,8 @@ const noSeedProvenance = {
   seedsOf: async () => ({ kind: "read" as const, value: undefined }),
   evidenceOf: async () => ({ kind: "read" as const, value: [] }),
 };
+// A single-slot harness: attribution by construction, so these cases test what they are about.
+const noShape = { slotsOf: async () => ({ kind: "read" as const, value: [{ slot: "image", tools: [] }] }) };
 
 // ── The campaign settlement: store guards + the service's derived verdicts (Track D) ─────────────────
 //
@@ -311,6 +313,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       runs: noRuns,
       datasets: noDatasets,
       seedProvenance: noSeedProvenance,
+      shape: noShape,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs,
@@ -390,6 +393,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       runs: noRuns,
       datasets: noDatasets,
       seedProvenance: noSeedProvenance,
+      shape: noShape,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
@@ -444,6 +448,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       runs: noRuns,
       datasets: noDatasets,
       seedProvenance: noSeedProvenance,
+      shape: noShape,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         // The transport read team-a; by the time `open` reads it, the issue has moved.
@@ -991,6 +996,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       runs: noRuns,
       datasets: noDatasets,
       seedProvenance: noSeedProvenance,
+      shape: noShape,
       evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs,
@@ -1284,6 +1290,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         runs: noRuns,
         datasets: noDatasets,
         seedProvenance: noSeedProvenance,
+        shape: noShape,
         evidence: new InMemoryCampaignEvidenceStore(),
         builds,
         issues,
@@ -1362,6 +1369,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         runs: noRuns,
         datasets: noDatasets,
         seedProvenance: noSeedProvenance,
+        shape: noShape,
         evidence: new InMemoryCampaignEvidenceStore(),
         builds,
         issues,
@@ -1501,6 +1509,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         runs: noRuns,
         datasets: noDatasets,
         seedProvenance: noSeedProvenance,
+        shape: noShape,
         evidence,
         issues,
         diffs,
@@ -1591,6 +1600,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         runs: noRuns,
         datasets: noDatasets,
         seedProvenance: noSeedProvenance,
+        shape: noShape,
         evidence: {
           put: async (): Promise<never> => {
             throw new Error("object store down");
@@ -1636,6 +1646,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
           runs: noRuns,
           datasets: noDatasets,
           seedProvenance,
+          shape: noShape,
           evidence: new InMemoryCampaignEvidenceStore(),
           issues,
           diffs,
@@ -1683,6 +1694,91 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       );
       expect(r3.verdict.comparable).toBe(false);
       expect(r3.verdict.detail).toMatch(/could not be checked/);
+    });
+
+    // ── DIAGNOSES AND ATTRIBUTION ON THE EVIDENCE (evidence spec §2 · routing spec §2) ──────────────
+    it("[§2] a judge's diagnosis on the candidate's score reaches the evidence, and a topology case is attributed to the slot it names", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const harnessFrame: CampaignFrame = {
+        ...frame,
+        subject: { type: "harness", id: "shop", baselineVersion: "1.0.0" },
+      };
+      const svc = new CampaignService({
+        store,
+        operations: store,
+        changes: noChanges,
+        runs: noRuns,
+        datasets: noDatasets,
+        seedProvenance: noSeedProvenance,
+        shape: {
+          slotsOf: async () => ({
+            kind: "read" as const,
+            value: [
+              { slot: "web", service: "web", tools: ["browse"] },
+              { slot: "api", service: "api", tools: ["query"] },
+            ],
+          }),
+        },
+        evidence: new InMemoryCampaignEvidenceStore(),
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+      const diagnosis = {
+        kind: "tool_misuse",
+        locus: { tool: "browse" },
+        evidence: [{ eventIndex: 3 }],
+        confidence: 0.9,
+      };
+      const candidate = {
+        record: {
+          ...side("1.0.1").record,
+          harness: { id: "shop", version: "1.0.1" },
+          scorecard: {
+            results: [
+              {
+                caseId: "c1",
+                runId: "run-c1",
+                trial: 0,
+                scores: [{ graderId: "behaviour", metric: "judge:behaviour", value: 0, detail: diagnosis }],
+              },
+              {
+                caseId: "c2",
+                runId: "run-c2",
+                trial: 0,
+                scores: [{ graderId: "behaviour", metric: "judge:behaviour", value: 1, detail: "fine" }],
+              },
+            ],
+          },
+        },
+      };
+      // c1 regresses significantly (the case the brief needs), c2 unchanged.
+      snapshots.set(
+        "sc-diag",
+        snapshot(
+          comparison({
+            trials: {
+              baseline: "b",
+              candidate: "c",
+              zThreshold: 1.96,
+              minDelta: 0,
+              cases: [trialCase("c1", -0.6, true), trialCase("c2", 0, false)],
+            } as CampaignComparison["trials"],
+          }),
+          { baseline: { record: { ...side("1.0.0").record, harness: { id: "shop", version: "1.0.0" } } }, candidate },
+        ),
+      );
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: harnessFrame }, "alice");
+      await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-diag" }, "agent:everdict", {});
+      const evidence = await svc.roundEvidence("acme", rec.id, 1);
+      const c1 = evidence.cases.find((c) => c.caseId === "c1");
+      expect(c1?.verdict).toBe("regressed");
+      expect(c1?.diagnoses).toEqual([{ ...diagnosis, judge: "judge:behaviour" }]);
+      expect(c1?.attribution).toMatchObject({ kind: "measured", slot: "web" });
+      const c2 = evidence.cases.find((c) => c.caseId === "c2");
+      expect(c2?.diagnoses).toEqual([]); // a rationale sentence is not a diagnosis
+      expect(c2?.attribution).toMatchObject({ kind: "unattributed", because: ["no judge diagnosed this case"] });
     });
 
     it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {
@@ -1741,6 +1837,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         runs: noRuns,
         datasets: noDatasets,
         seedProvenance: noSeedProvenance,
+        shape: noShape,
         evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs,
@@ -1859,6 +1956,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         runs: ledger(runs),
         datasets: noDatasets,
         seedProvenance: noSeedProvenance,
+        shape: noShape,
         evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs,
