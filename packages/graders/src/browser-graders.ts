@@ -1,4 +1,10 @@
-import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
+import {
+  BUILTIN_GRADER_OWNED_METRICS,
+  BadRequestError,
+  type GradeContext,
+  type Grader,
+  type MeasuredScore,
+} from "@everdict/contracts";
 
 // Whether the final DOM contains specific text (browser snapshot target).
 export class DomContainsGrader implements Grader {
@@ -7,7 +13,7 @@ export class DomContainsGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly ownsMetrics = ["dom_contains"] as const;
+  readonly ownsMetrics = BUILTIN_GRADER_OWNED_METRICS["dom-contains"];
   constructor(private readonly needle: string) {}
   async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;
@@ -29,7 +35,7 @@ export class AnswerMatchGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly ownsMetrics = ["answer_match"] as const;
+  readonly ownsMetrics = BUILTIN_GRADER_OWNED_METRICS["answer-match"];
   constructor(
     private readonly expect?: string,
     private readonly mode: "contains" | "exact" = "contains",
@@ -53,7 +59,7 @@ export class UrlMatchesGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly ownsMetrics = ["url_matches"] as const;
+  readonly ownsMetrics = BUILTIN_GRADER_OWNED_METRICS["url-matches"];
   constructor(private readonly pattern: string) {}
   async grade(ctx: GradeContext): Promise<MeasuredScore> {
     const snap = ctx.snapshot;

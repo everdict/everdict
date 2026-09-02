@@ -3,13 +3,16 @@ import {
   type CaseCommitReceipt,
   type CaseResult,
   type DomainFact,
+  type EvalCase,
   type ExecutionAttemptState,
+  type GraderSpec,
   InternalError,
   type PersistedWorkIntent,
   type RunRecord,
   type RuntimeWorkRef,
   type VerdictPolicy,
   attemptIdOf,
+  sanitizeSubmittedResult,
   storedExecutionId,
 } from "@everdict/contracts";
 import {
@@ -67,6 +70,15 @@ type CaseOutcomeCommitterDeps = Pick<
 >;
 
 // A case whose execution is done and whose child row is deliberately still open until its judges land.
+// What a case DECLARED, read off the sealed plan the batch executes (`applyGradingPlan` has put the run-time
+// plan on every case). A case with no `graders` field declared none — the same fact `newSessionCase` states
+// with `graders: []` — and that reads fail-CLOSED at the settle: a reserved name nobody declared is a forgery.
+// One spelling for the three batch lanes (in-process, workflow, recovery), because the lane written after the
+// lesson is the one that spells it differently.
+export function declaredGradersOf(evalCase: Pick<EvalCase, "graders">): readonly GraderSpec[] {
+  return evalCase.graders ?? [];
+}
+
 export interface PendingChildSettle {
   childId?: string;
   ranOn?: string;
@@ -87,6 +99,9 @@ export interface PendingChildSettle {
   // The judges this batch SELECTED. Carried so the commit can state the absence of one that never answered
   // rather than leaving the row silent about it (review 39 P0-3) — the same invariant the Temporal path holds.
   judges: ReadonlyArray<{ id: string }>;
+  // …and what it DECLARED — the sealed plan's graders, which the settle re-checks every submitted score's
+  // authority against (a child persists no case of its own; see `declaredGradersOf`).
+  graders: readonly GraderSpec[];
   // …and the SEALED closure those judges resolved to at submit (specDigest/model/rubric digests) — what the
   // receipt's judgeClosureDigest names, so "which judgment produced this outcome" is the manifest's answer,
   // not a list of id strings (review 40 follow-up P1).
@@ -114,6 +129,8 @@ export interface FailureFinalization {
   // The judge selection + sealed closure, same as the judged exit's pending entry: a failure receipt names
   // the judgment identity too (pre-fix it carried no judgeClosureDigest — an asymmetry with no reason).
   judges: ReadonlyArray<{ id: string }>;
+  // …and what it DECLARED (`declaredGradersOf`) — what the settle re-checks score authority against.
+  graders: readonly GraderSpec[];
   sealedJudges?: SealedJudgeClosure[];
 }
 
@@ -216,6 +233,7 @@ export class CaseOutcomeCommitter {
         outcome: "failed",
         error: failure.error,
         judges: failure.judges,
+        graders: failure.graders,
         ...(failure.sealedJudges ? { sealedJudges: failure.sealedJudges } : {}),
         tenant,
         announce,
@@ -238,6 +256,7 @@ export class CaseOutcomeCommitter {
       epoch: entry.parentDriver.epoch,
       result,
       judges: entry.judges,
+      graders: entry.graders,
       ...(entry.sealedJudges ? { sealedJudges: entry.sealedJudges } : {}),
       tenant,
       announce,
@@ -360,6 +379,9 @@ export class CaseOutcomeCommitter {
     // The failure as the exit recorded it — required with outcome "failed" (the fail transition names it).
     error?: { code: string; message: string };
     judges: ReadonlyArray<{ id: string }>;
+    // The sealed plan's graders for THIS case (`declaredGradersOf`): the declaration the settle checks every
+    // submitted score's authority against, before the receipt digests the bytes it vouches for.
+    graders: readonly GraderSpec[];
     sealedJudges?: SealedJudgeClosure[];
     childId?: string;
     executionId: string;
@@ -381,10 +403,20 @@ export class CaseOutcomeCommitter {
     tenant?: string;
     announce?: { verdictPolicy?: VerdictPolicy; owner?: string };
   }): Promise<{ kind: "committed"; result: CaseResult } | { kind: "lost" } | { kind: "unwritten" }> {
-    const covered =
+    // ── SCORE AUTHORITY IS SETTLED HERE, BEFORE ANY READER (F5) ─────────────────────────────────────
+    //
+    // Every reader below — the completion fact's verdict, the evidence assembly, the receipt's digest, the
+    // child's terminal write and the result the parent COUNTS — reads one document, so the document is
+    // canonical before the first of them. `Run.succeed` asks the same question again inside the transaction
+    // (it is the seam every lane meets, and it is idempotent); asking it only there would seal a receipt over
+    // the bytes a producer submitted and store the bytes the platform accepted, and the batch then refuses to
+    // summarize a case its own ledger does not vouch for — which is exactly what the first fixture did.
+    const covered = sanitizeSubmittedResult(
       input.judges.length > 0
         ? { ...input.result, scores: completeJudgeCoverage(input.result.scores, input.judges) }
-        : input.result;
+        : input.result,
+      input.graders,
+    );
     const completionFact = (): { message: string; fact: DomainFact & { message: string; recipient?: string } } => {
       const v = caseVerdict(covered, input.announce?.verdictPolicy);
       const reason = caseReason(covered);
@@ -480,9 +512,9 @@ export class CaseOutcomeCommitter {
                 ? // The failure transition, WITH the frozen failure result — the same bytes the parent counts
                   // and the receipt's digest names (failedCaseResult is pure over (job, err), so runSuite's
                   // copy and this one are identical).
-                  Run.from(cur).fail(failureError, this.now(), covered).patch
+                  Run.from(cur).fail(failureError, this.now(), covered, input.graders).patch
                 : {
-                    ...Run.from(cur).succeed(covered, this.now()).patch,
+                    ...Run.from(cur).succeed(covered, this.now(), input.graders).patch,
                     // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
                     ...(input.ranOn ? { runtime: input.ranOn } : {}),
                   },

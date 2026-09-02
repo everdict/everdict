@@ -1,5 +1,5 @@
 import type { AdoptionDecision, CaseResult, Dataset, ReadResult, RuntimeWorkRef } from "@everdict/contracts";
-import { UpstreamError, readOrUnknown, storedExecutionId } from "@everdict/contracts";
+import { UpstreamError, readOrUnknown, sanitizeSubmittedResult, storedExecutionId } from "@everdict/contracts";
 import { initialScoringPassId } from "@everdict/domain";
 import { Run, ScorecardBatch, completeJudgeCoverage } from "@everdict/domain";
 import { type ContributingAttempts, recoverStagedVerdict, recoverVerifiedCase } from "../execution/agent-half.js";
@@ -9,6 +9,7 @@ import type { CaseSettleOutcome } from "../ports/case-receipt-store.js";
 import { requireAdopted } from "../ports/execution-attempt-store.js";
 import { settleRun } from "../ports/settle.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
+import { declaredGradersOf } from "./case-outcome-committer.js";
 import { commitReadback } from "./commit-readback.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 
@@ -323,6 +324,9 @@ export class RecoveryPlanner {
             // Ordered exactly as the in-flight pipeline orders it: collect, then the registered judges below,
             // then the coverage completion, then the canonical commit.
             const evalCase = dataset.cases.find((dc) => dc.id === c.caseId);
+            // What the case declared, for the settle's authority check. A case the dataset no longer holds declared
+            // nothing this recovery can vouch for — fail-closed, like every other absent declaration.
+            const declared = evalCase === undefined ? [] : declaredGradersOf(evalCase);
             // Called BARE, exactly as `executeCase` calls it. `collectDeferredTrace` is TOTAL on this path —
             // a platform that is down, an auth secret that is not registered, a grader that cannot be
             // reconstructed each come back as a classified, seedable result rather than a throw — so
@@ -366,8 +370,12 @@ export class RecoveryPlanner {
             // The evidence assembly is NOT repeated here: this result came back from a backend that
             // produced its own artifacts under an attempt this process never opened, and re-keying them
             // under a generation it would have to invent is worse than leaving them where they are.
-            const adoptedResult =
-              judges.length > 0 ? { ...adoptable, scores: completeJudgeCoverage(adoptable.scores, judges) } : adoptable;
+            // Settled BEFORE the receipt digests it and the adopt stores it — one document for both (see
+            // finalizeCaseAttempt, which is this lane's in-flight twin).
+            const adoptedResult = sanitizeSubmittedResult(
+              judges.length > 0 ? { ...adoptable, scores: completeJudgeCoverage(adoptable.scores, judges) } : adoptable,
+              declared,
+            );
             // ATOMIC, like every other commit (review 40 P0): the claim and the adopt-settle are ONE
             // transaction, so a recovery that lost the child's fence never leaves a receipt naming a child
             // whose adoption was refused. Through the VERB still — `adopt` writes `succeeded` under the
@@ -403,7 +411,7 @@ export class RecoveryPlanner {
                       const settled = await settleRun(
                         runs,
                         c.id,
-                        Run.from(cur).adopt(adoptedResult, this.now()).patch,
+                        Run.from(cur).adopt(adoptedResult, this.now(), declared).patch,
                         undefined,
                         { epoch: cur.ownerEpoch ?? 0, ...(parentDriver ? { parentDriver } : {}) },
                       );

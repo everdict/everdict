@@ -64,6 +64,7 @@ import { settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
+import { declaredGradersOf } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import { type PublicationOutcome, drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { RecoveryPlanner } from "./recovery-planner.js";
@@ -694,6 +695,7 @@ export class WorkflowBatchDriver {
         epoch: ctx.driverEpoch,
         result,
         judges: ctx.judges,
+        graders: declaredGradersOf(evalCase),
         ...(ctx.sealedJudges ? { sealedJudges: ctx.sealedJudges } : {}),
         tenant: ctx.tenant,
         announce: {

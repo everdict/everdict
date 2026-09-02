@@ -42,6 +42,33 @@ export const RESERVED_AUTHORITY_METRICS: readonly string[] = [
   "dom_contains",
 ];
 
+// Which built-in grader owns each reserved name BY CONSTRUCTION — the implementation's own metric, fixed in its
+// code (`Grader.ownsMetrics`, arch-review 17 P0-2). Recorded here because that ownership is now read in TWO
+// places, and a literal on the class was one of them: the in-sandbox producer boundary reads it off the
+// runtime class, and the control-plane settle (`sanitizeSubmittedResult`) holds only the case's `GraderSpec`s
+// — `{ id: "tests-pass" }` is all it knows, and it has to answer whether `tests_pass` under that id is the
+// built-in's own name or a runner's forgery. The classes read THIS table (a typo is a compile error, not an
+// empty grant), and `packages/graders` asserts that `makeGraders` agrees with it.
+//
+// `state` has no entry on purpose: nothing built-in emits it, a spec cannot grant it (`isConstitutionalMetric`),
+// and a `command` grader configured with `metric: "state"` is refused at the producer boundary today.
+export const BUILTIN_GRADER_OWNED_METRICS = {
+  "tests-pass": ["tests_pass"],
+  "dom-contains": ["dom_contains"],
+  "url-matches": ["url_matches"],
+  "answer-match": ["answer_match"],
+} as const satisfies Record<string, readonly string[]>;
+
+const BUILTIN_OWNED_BY_ID: ReadonlyMap<string, readonly string[]> = new Map(
+  Object.entries(BUILTIN_GRADER_OWNED_METRICS),
+);
+
+// The string-keyed read for a seam that holds a producer-named id. An id the table does not know owns
+// NOTHING — the fail-closed answer, and the one that makes an undeclared `tests-pass` a forgery.
+export function builtInOwnedMetrics(graderId: string): readonly string[] {
+  return BUILTIN_OWNED_BY_ID.get(graderId) ?? [];
+}
+
 // The judge family's root. Only a JUDGE may produce `judge` / `judge:<id>` / `judge:<id>:<criterion>` — a
 // grader emitting into it would forge a verdict, and (worse) the family it forged into is the unit re-scoring
 // strips and replaces, so the row would survive every later pass of the judge whose name it wears.

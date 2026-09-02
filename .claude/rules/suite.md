@@ -19,13 +19,21 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   reason to REFUSE, never to continue with less (arch-review 19 P0-2).
 - **Authority is STAMPED, never inferred from a producer-controlled label.** A metric NAME assigns authority
   (`state`/`tests_pass` → ground_truth, `judge:<id>` → judge), so the name is as powerful as the declaration —
-  and the declaration is constitution-gated while the name is not. `sanitizeScore(score, producer)` is the one
-  boundary that enforces it: a producer may emit a `RESERVED_AUTHORITY_METRICS` name only if its spec DECLARED
-  that authority, and only a judge may write into the `judge:` family. First-party graders carry their
-  intrinsic authority on the CLASS (`readonly declaredAuthority`) so it cannot be lost by a call site that
-  constructs one directly; a trusted builder that constructs a judge-shaped grader (the code-judge wrapper)
-  declares it on the spec. A violation becomes an `invalid` row — visible, aggregated nowhere, unable to
-  decide a case — never a silent rename.
+  and the declaration is constitution-gated while the name is not. `sanitizeScore(score, producer)` enforces
+  it at TWO seams, and they must answer alike: inside the job (`safeGrade`, against the runtime `Grader`
+  class) and again where the control plane makes the result canonical (`sanitizeSubmittedResult`, called by
+  `Run.succeed`/`fail`/`adopt` and — before the receipt digests the bytes — by the batch committer), because
+  on the self-hosted lane the job ran on the producer's own machine. A producer may emit a
+  `RESERVED_AUTHORITY_METRICS` name only if it OWNS it, and ownership is never granted by a declaration:
+  first-party graders carry theirs on the CLASS, read from `BUILTIN_GRADER_OWNED_METRICS` so the settle —
+  which holds only the case's `GraderSpec`s — reads the same table; `declaredOwnedMetrics` is the one
+  spelling of what a spec's `metrics` may grant (never a constitutional name); only a judge may write into
+  the `judge:` family. A trusted builder that constructs a judge-shaped grader (the code-judge wrapper)
+  declares that on the spec. WHICH declaration the settle checks is the run's own `caseSpec` when the row
+  persists one, else the sealed plan's graders the committer hands over (a batch child persists no case by
+  design) — exactly one, never both, and none reads fail-CLOSED. A violation becomes an `invalid` row —
+  visible, aggregated nowhere, unable to decide a case — never a silent rename; and an `invalid` row is
+  terminal, so the second seam re-reading the first's output is a no-op and the receipt's digest holds.
 - **Verification belongs at the read that produces the bytes actually used.** A pin checked where a document
   was RESOLVED says nothing about the read that materializes it later — the judge runner re-reads the rubric,
   the model and the delegated harness at use, and `JudgeAuthDispatcher` re-reads the runtime judge model at

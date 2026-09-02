@@ -259,6 +259,11 @@ export function measuredScores(scores: Score[]): MeasuredScore[] {
 // produced, rather than at whatever read happens to come first.
 export function sanitizeScore(score: Score, producer?: ScoreProducer): Score {
   const idsBroken = score.metric === "" || score.graderId === "";
+  // A row already refused is TERMINAL: it decides nothing, and rewriting its `detail` on a second pass is how
+  // one document gets two digests. The control-plane settle sanitizes what the batch committer already
+  // sanitized (rule `protocol` L4 — the receipt sealed those bytes), so this function has to be idempotent,
+  // and an ids-broken row is the one case where a second pass would otherwise answer differently.
+  if (score.status === "invalid" && !idsBroken) return score;
   const valueBroken = isMeasured(score) && !Number.isFinite(score.value);
   // …and the METRIC NAME is part of the contract (arch-review 17 P0-2). In this system a name is what assigns
   // authority, so a producer choosing its own name is a producer choosing its own authority: an undeclared

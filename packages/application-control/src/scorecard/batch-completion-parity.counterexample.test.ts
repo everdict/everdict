@@ -45,7 +45,10 @@ const UNCOLLECTED: CaseResult = {
   caseId: "c1",
   harness: "h@1",
   trace: [{ ts: "2026-08-24T00:00:00.000Z", kind: "log", message: "the agent's own trace" }],
-  scores: [{ graderId: "tests", metric: "tests_pass", value: 1, pass: true }],
+  // The built-in that OWNS `tests_pass`, declared on the case below: the real shape. Under `graderId: "tests"`
+  // with no declaration this score is a forgery, which the settle now refuses on both paths — a parity fixture
+  // may not rest on a document production would invalidate (F5).
+  scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
   snapshot: { kind: "prompt", output: "done" },
   traceRef: { kind: "otel", endpoint: "http://otel:4318", runId: "evd-sc-1-c1" },
 } as unknown as CaseResult;
@@ -54,7 +57,7 @@ const EVAL_CASE = {
   id: "c1",
   task: "t",
   env: { kind: "prompt" },
-  graders: [],
+  graders: [{ id: "tests-pass" }],
   timeoutSec: 60,
   tags: [],
 } as never;

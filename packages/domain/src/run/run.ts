@@ -1,4 +1,12 @@
-import { type CaseResult, ConflictError, type EvalCase, TERMINAL_RUN_STATUSES } from "@everdict/contracts";
+import {
+  type CaseResult,
+  ConflictError,
+  type EvalCase,
+  type GraderSpec,
+  InternalError,
+  TERMINAL_RUN_STATUSES,
+  sanitizeSubmittedResult,
+} from "@everdict/contracts";
 import type { DomainFact, RunAttachChannel, RunClass, RunEnvelope, RunOrigin, RunRecord } from "@everdict/contracts";
 import { settleAgentTransition } from "./agent-run.js";
 import { settleCommandTransition } from "./command-run.js";
@@ -606,10 +614,42 @@ export class Run {
   }
 
   // queued|running → succeeded (normal completion).
-  succeed(result: CaseResult, now: string): RunTransition {
+  // THE ONE SEAM EVERY RESULT CROSSES. `succeed`, `fail` and boot-recovery `adopt` are the three writes that
+  // make a result this record's answer, and both settlement lanes — the standalone `finalize` and the batch's
+  // per-case commit — end in one of them. So this is where the control plane asks what `safeGrade` asked
+  // inside the job: was each score's producer entitled to the metric it named? On the self-hosted lane that
+  // job ran on the producer's own machine, which is why the question is asked again at the seam that decides.
+  //
+  // Three writers, one method, on purpose: a check that lived in `succeed` alone would have left `adopt` —
+  // the recovery lane, the one whose bytes came from a process this one never watched — as the residue.
+  //
+  // WHICH DECLARATION it asks against: the run's own when the row carries its case (a standalone run persists
+  // it), and the caller's when it does not — a batch child never persists `caseSpec` BY DESIGN
+  // (`scorecard-child.ts`: the batch re-plans from its dataset), so its commit hands over the sealed plan's
+  // graders, the same document the in-sandbox boundary graded under. Exactly one of the two: both present is
+  // two readers of one fact and is refused as a programming error, never resolved by precedence. Neither
+  // present reads as "declared no graders" — the fact `newSessionCase` states with `graders: []` — which is
+  // fail-CLOSED: every reserved name the producer wrote becomes an invalid row. That is the loud direction,
+  // and it is how the first batch fixture found this seam rather than a forgery finding the verdict. The call
+  // is unconditional — no branch skips it — so it is not what a guarded strip leaves behind (rule `protocol`).
+  // Rows sealed before `caseSpec` existed are terminal, and `assertNotTerminal` on every writer is why they
+  // never reach this.
+  private settled(result: CaseResult, declared: readonly GraderSpec[] | undefined): CaseResult {
+    const own = this.record.caseSpec === undefined ? undefined : (this.record.caseSpec.graders ?? []);
+    if (own !== undefined && declared !== undefined)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { run: this.record.id },
+        "a run that persists its case is settled against that declaration alone — a caller-supplied one is a second reader",
+      );
+    return sanitizeSubmittedResult(result, own ?? declared ?? []);
+  }
+
+  // `declared`: the sealed plan's graders, for a row that persists no case of its own (see `settled`).
+  succeed(result: CaseResult, now: string, declared?: readonly GraderSpec[]): RunTransition {
     this.assertNotTerminal("succeed");
     return {
-      patch: { status: "succeeded", result, updatedAt: now },
+      patch: { status: "succeeded", result: this.settled(result, declared), updatedAt: now },
       facts: terminalRunFacts(this.record, "succeeded"),
     };
   }
@@ -618,16 +658,21 @@ export class Run {
   // result: the synthesized failed CaseResult (classified CaseFailure + the evidence trace the backend captured
   // at throw time) — the single-run twin of the batch path's failed result, so the ledger keeps the post-mortem
   // (placement identity, log tail) instead of only {code, message}. Optional: legacy callers settle error-only.
-  fail(error: { code: string; message: string }, now: string, result?: CaseResult): RunTransition {
+  fail(
+    error: { code: string; message: string },
+    now: string,
+    result?: CaseResult,
+    declared?: readonly GraderSpec[],
+  ): RunTransition {
     this.assertNotTerminal("fail");
     return {
-      patch: { status: "failed", error, ...(result ? { result } : {}), updatedAt: now },
+      patch: { status: "failed", error, ...(result ? { result: this.settled(result, declared) } : {}), updatedAt: now },
       facts: terminalRunFacts(this.record, "failed"),
     };
   }
 
   // Boot-recovery adoption: settle with a result harvested from the still-alive job (zero re-run).
-  adopt(result: CaseResult, now: string): RunTransition {
+  adopt(result: CaseResult, now: string, declared?: readonly GraderSpec[]): RunTransition {
     if (!this.canAdopt())
       throw new ConflictError(
         "CONFLICT",
@@ -640,7 +685,7 @@ export class Run {
     // `succeeded` and told nobody — the exact situation the durable callback was built for. A run that ends
     // is news whichever process was there to see it end.
     return {
-      patch: { status: "succeeded", result, updatedAt: now },
+      patch: { status: "succeeded", result: this.settled(result, declared), updatedAt: now },
       facts: terminalRunFacts(this.record, "succeeded"),
     };
   }

@@ -56,6 +56,7 @@ import type { Dispatch } from "../run-suite.js";
 import { runSuite } from "../run-suite.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
 import type { CaseOutcomeCommitter, FailureFinalization, PendingChildSettle } from "./case-outcome-committer.js";
+import { declaredGradersOf } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import { type PublicationOutcome, drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ResilientCaseRunner } from "./resilient-case-runner.js";
@@ -591,6 +592,7 @@ export class InProcessBatchDriver {
           })(),
           ...(unisolated.has(executionIdOf(job, id)) || winnerUnisolated ? { unisolated: true } : {}),
           judges, // …and what this batch asked of the case, so its commit can state a judge that never answered
+          graders: declaredGradersOf(job.evalCase),
           ...(opts.sealedJudges ? { sealedJudges: opts.sealedJudges } : {}),
         });
         return result;
@@ -633,6 +635,7 @@ export class InProcessBatchDriver {
           ...(unisolated.has(executionIdOf(job, id)) ? { unisolated: true } : {}),
           error,
           judges,
+          graders: declaredGradersOf(job.evalCase),
           ...(opts.sealedJudges ? { sealedJudges: opts.sealedJudges } : {}),
         });
         throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)

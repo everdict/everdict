@@ -1,7 +1,8 @@
-import { ConflictError } from "@everdict/contracts";
+import { ConflictError, type EvalCase } from "@everdict/contracts";
 import { RunRecordSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { Run, attachChannelsFor, canReadRun, runAudience } from "./run.js";
+import { newScorecardChildRun } from "./scorecard-child.js";
 
 const CASE = {
   id: "c1",
@@ -502,5 +503,89 @@ describe("Run — agent worlds (W1): session snapshots and touch", () => {
     expect(() => Run.from(queued()).extendSession(60, "t")).toThrow(ConflictError);
     const closed = { ...record, ...Run.from(record).closeSession("closed", "2026-08-03T00:10:00.000Z").patch };
     expect(() => Run.from(closed).extendSession(60, "t")).toThrow(ConflictError);
+  });
+});
+
+// ── A PRODUCER MAY NOT NAME ITS OWN AUTHORITY (counterexample) ───────────────────────────────────────
+//
+// `evaluateVerdict` ranks scores by metric NAME against the stamped policy, whose default ladder gives
+// `state` / `tests_pass` ground truth. `safeGrade` refuses a grader that names a reserved metric its spec
+// never declared — inside the job, which on the self-hosted lane is the producer's own machine. Nothing asked
+// again at the control plane, so a runner could submit `state: 1` and outrank every judge on the case, and
+// that verdict flowed into the trials, the round and the adoption proof.
+//
+// The seam is the domain transition every settlement lane ends in. Three writers (`succeed`, `fail`,
+// boot-recovery `adopt`) and the recovery one is asserted explicitly: its bytes come from a process this one
+// never watched, and a check that covered `succeed` alone would have left it as the residue.
+//
+// Seen RED with `settled()` neutralized to return its input, observed:
+//   expected 'invalid' — a forged ground-truth score stayed measured and decided the case.
+describe("[COUNTEREXAMPLE] a score claims only the authority its declared grader owns", () => {
+  const forged = { graderId: "runner", metric: "state", value: 1, pass: true };
+  const builtIn = { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true };
+  const withGraders = (graders: EvalCase["graders"]) => Run.from(queued({ evalCase: { ...CASE, graders } }));
+  // A batch child persists no case of its own (scorecard-child.ts): its declaration arrives with the settle.
+  const child = () =>
+    Run.from(
+      newScorecardChildRun({
+        id: "child",
+        tenant: "acme",
+        harness: { id: "h", version: "1" },
+        caseId: "c1",
+        parentScorecardId: "sc",
+        now: "t0",
+      }),
+    );
+
+  it("succeed: a reserved metric no grader declared becomes a visible invalid row", () => {
+    const done = withGraders([]).succeed({ ...RESULT, scores: [forged] }, "t1");
+    const score = done.patch.result?.scores[0];
+    expect(score?.status, "a forged ground-truth score stayed measured and decided the case").toBe("invalid");
+  });
+
+  it("succeed: the built-in that owns the name, declared on the case, stays measured", () => {
+    const done = withGraders([{ id: "tests-pass" }]).succeed({ ...RESULT, scores: [builtIn] }, "t1");
+    expect(done.patch.result?.scores[0], "the built-in's own name was refused as a forgery").toMatchObject({
+      metric: "tests_pass",
+      value: 1,
+    });
+  });
+
+  it("succeed: DECLARING a reserved name does not acquire it — the wildcard arch-review 20 closed stays closed", () => {
+    const done = withGraders([{ id: "runner", metrics: [{ id: "state" }] }]).succeed(
+      { ...RESULT, scores: [forged] },
+      "t1",
+    );
+    expect(done.patch.result?.scores[0]?.status, "a declaration granted a constitutional name at the settle").toBe(
+      "invalid",
+    );
+  });
+
+  it("a batch child is settled against the sealed plan's declaration its committer hands over", () => {
+    const done = child().succeed({ ...RESULT, scores: [builtIn] }, "t1", [{ id: "tests-pass" }]);
+    expect(done.patch.result?.scores[0]).toMatchObject({ metric: "tests_pass", value: 1 });
+  });
+
+  it("…and with no declaration at all it reads fail-closed: the reserved name is a forgery", () => {
+    const done = child().succeed({ ...RESULT, scores: [builtIn] }, "t1");
+    expect(done.patch.result?.scores[0]?.status, "an undeclared reserved name passed on a child").toBe("invalid");
+  });
+
+  it("a run that persists its case refuses a caller-supplied declaration — two readers of one fact", () => {
+    expect(() => withGraders([]).succeed({ ...RESULT, scores: [builtIn] }, "t1", [{ id: "tests-pass" }])).toThrow(
+      /settled against that declaration alone/,
+    );
+  });
+
+  it("adopt (boot recovery) asks the same question — the lane whose bytes nobody watched", () => {
+    const adopted = withGraders([]).adopt({ ...RESULT, scores: [forged] }, "t1");
+    expect(adopted.patch.result?.scores[0]?.status, "the recovery lane skipped the authority check").toBe("invalid");
+    const recovered = child().adopt({ ...RESULT, scores: [builtIn] }, "t1", [{ id: "tests-pass" }]);
+    expect(recovered.patch.result?.scores[0]?.status).toBeUndefined();
+  });
+
+  it("fail carries its result through the same seam", () => {
+    const failed = withGraders([]).fail({ code: "X", message: "boom" }, "t1", { ...RESULT, scores: [forged] });
+    expect(failed.patch.result?.scores[0]?.status).toBe("invalid");
   });
 });

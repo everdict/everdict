@@ -971,6 +971,14 @@ describe("ScorecardService.backfillModels", () => {
 });
 
 // A dataset with a single case (c1). The target for pull-ingest ordering.
+// The same one-case dataset DECLARING the built-in graders a fixture's dispatcher emits scores for. A score
+// under a built-in the case never declared is a forgery at the settle (F5), so a fixture whose premise is "a
+// graded case" states the real shape here instead of drifting onto the fail-closed branch.
+const datasetDeclaring = (graders: Dataset["cases"][number]["graders"]): Dataset => ({
+  ...datasetWithCase(),
+  cases: datasetWithCase().cases.map((c) => ({ ...c, graders })),
+});
+
 const datasetWithCase = (): Dataset => ({
   id: "d",
   version: "1.0.0",
@@ -2334,6 +2342,59 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
       };
     },
   };
+
+  // ── A RUNNER'S FORGED GROUND TRUTH IS REFUSED AT THE SETTLE, AND THE LEDGER STILL VOUCHES (F5) ──────
+  //
+  // The job ran on the producer's machine; `state` under a grader the case never declared is a forgery, and
+  // the control plane invalidates it when the child settles. The batch must still SUMMARIZE: the receipt is
+  // digested over the same bytes the child stores, so a sanitized case is a case the ledger vouches for.
+  //
+  // Seen RED with the settle inside `Run.succeed` alone, observed:
+  //   expected 'failed' to be 'succeeded'
+  //   "1 counted case(s) cannot be traced to a committed receipt — the batch cannot be summarized …"
+  // — the receipt sealed the submitted bytes and the row stored the accepted ones.
+  it("invalidates a forged reserved metric at the settle and still summarizes the batch under a vouching receipt", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase()); // declares NO graders
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const forging: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "runner", metric: "state", value: 1, pass: true }],
+        };
+      },
+    };
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: forging,
+      store,
+      runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      datasets,
+      newId: () => `sc-${n++}`,
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    const rec = await waitTerminal(store, "sc-0");
+    expect(rec.status, "a sanitized case could not be summarized — the receipt and the row hold different bytes").toBe(
+      "succeeded",
+    );
+    const child = await runStore.get("sc-2");
+    expect(child?.result?.scores).toHaveLength(1);
+    expect(child?.result?.scores[0]?.status, "the runner's `state` decided the case").toBe("invalid");
+    // …and no summary row reports a pass the platform never measured — an invalid row aggregates nowhere.
+    const hydrated = await service.get("sc-0");
+    expect(hydrated?.scorecard?.results[0]?.scores[0]?.status).toBe("invalid");
+    for (const m of hydrated?.summary ?? []) expect(m.passRate ?? 0, m.metric).toBe(0);
+  });
 
   it("with runStore set, creates a child run per case, hides them from the activity list, and references them via scorecard.runIds", async () => {
     const datasets = new InMemoryDatasetRegistry();
@@ -4195,7 +4256,7 @@ describe("ScorecardService.submit — N-trial (pass@k / flakiness)", () => {
       },
     };
     const datasets = new InMemoryDatasetRegistry();
-    await datasets.register("acme", datasetWithCase());
+    await datasets.register("acme", datasetDeclaring([{ id: "tests-pass" }]));
     const store = new InMemoryScorecardStore();
     const runStore = new InMemoryRunStore();
     let n = 0;
@@ -5807,7 +5868,7 @@ describe("ScorecardService — batch_settled observability event (operator time 
         id,
         env: { kind: "prompt" },
         task: `q-${id}`,
-        graders: [],
+        graders: [{ id: "tests-pass" }],
         timeoutSec: 60,
         tags: [],
       })),
@@ -5860,7 +5921,7 @@ describe("ScorecardService.opsReport — the workspace's own SLA evidence (C1)",
         id,
         env: { kind: "prompt" },
         task: `q-${id}`,
-        graders: [],
+        graders: [{ id: "tests-pass" }],
         timeoutSec: 60,
         tags: [],
       })),

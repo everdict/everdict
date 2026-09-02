@@ -10,7 +10,9 @@ import type { CaseResult, RunEnvelope, RunOrigin, RunRecord } from "@everdict/co
 // compute actually starts — a runner leases it / a managed backend dispatches it), so a fan-out parked behind one
 // runner reads as "waiting", not falsely "running". Unlike Run.newQueued it never persists caseSpec (the batch
 // re-plans from its dataset — the orchestration field is the resume basis, not per-child case bodies), and its
-// trigger is fixed to "scorecard".
+// trigger is fixed to "scorecard". The one thing a settle needs from the case — which graders it DECLARED, so
+// a submitted score's authority can be re-checked — therefore reaches `Run.succeed` from the sealed plan, through
+// the committer (`finalizeCaseAttempt.graders`), never from this row.
 export interface NewChildRunInput {
   id: string;
   tenant: string;

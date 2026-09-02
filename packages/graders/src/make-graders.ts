@@ -3,7 +3,7 @@ import {
   type Grader,
   type GraderSpec,
   JudgeCriterionSchema,
-  isConstitutionalMetric,
+  declaredOwnedMetrics,
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
@@ -72,7 +72,7 @@ function withDeclaredAuthority(grader: Grader, spec: GraderSpec): Grader {
   // A declaration describes the semantics of a name; it does not mint ownership of a name the constitution
   // already owns. Custom ground truth is available and always was — under a NEW name, through the admin gate.
   // Filtered here as well as refused at the boundary, because this is the function whose output is trusted.
-  const owned = (spec.metrics ?? []).map((m) => m.id).filter((id) => !isConstitutionalMetric(id));
+  const owned = declaredOwnedMetrics(spec);
   const patch = {
     ...(owned.length > 0 ? { ownsMetrics: owned } : {}),
     ...(spec.authority === "judge" ? { ownsJudgeVerdict: true } : {}),

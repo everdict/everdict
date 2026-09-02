@@ -2,13 +2,13 @@ import { z } from "zod";
 import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
 import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
-import { ScoreSchema } from "./grader.js";
+import { ScoreSchema, sanitizeScore } from "./grader.js";
 import { ImageProvenanceSchema } from "./image-provenance.js";
 import { ProvisionedWorldProofSchema } from "./provisioned-world.js";
 import { RecordingRefSchema } from "./recording.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema, stripPlatformAuthoredFields } from "./trace.js";
-import { MetricAuthoritySchema } from "./verdict-policy.js";
+import { MetricAuthoritySchema, builtInOwnedMetrics, isConstitutionalMetric } from "./verdict-policy.js";
 import { VerifierReceiptSchema } from "./verifier-receipt-record.js";
 
 // Grader spec: id + optional config (e.g. tests-pass's { cmd }).
@@ -45,6 +45,15 @@ export const GraderSpecSchema = z.object({
     .optional(),
 });
 export type GraderSpec = z.infer<typeof GraderSpecSchema>;
+
+// The half of a grader's entitlement a DECLARATION can grant: the metric ids the spec names, minus the
+// constitutional ones (arch-review 20 P0-1 — declaring `state` is not acquiring it). ONE spelling, read by
+// `makeGraders` when it stamps the runtime grader and by `sanitizeSubmittedResult` when the control plane asks
+// again at settle. Written twice it had already diverged: the settle's first draft granted every declared id,
+// which is the wildcard the producer boundary had closed a review earlier.
+export function declaredOwnedMetrics(spec: Pick<GraderSpec, "metrics">): readonly string[] {
+  return (spec.metrics ?? []).map((m) => m.id).filter((id) => !isConstitutionalMetric(id));
+}
 
 // The worlds an evaluation can declare. One vocabulary for the case's placement hint, the driver's
 // ComputeSpec, the os-<x> placement capabilities and the execution manifest below.
@@ -395,6 +404,41 @@ export type CaseResult = z.infer<typeof CaseResultSchema>;
 // vouch by design, not a stamp. This is a trust boundary, not a field sweep, and the counterexample asserts
 // the surviving field so it cannot decay into one.
 const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier", "judgmentsSealed"] as const;
+
+// ── THE COLLECTION BOUNDARY THE CONTROL PLANE NEVER HAD ─────────────────────────────────────────────
+//
+// `safeGrade` sanitizes a grader's scores against what that grader's spec DECLARED, inside the job — on the
+// self-hosted lane, the producer's own machine. Nothing re-asked at the control plane: the untrusted schema
+// strips the fields the PLATFORM stamps and never looks at score authority, and `evaluateVerdict` ranks by
+// metric NAME against the stamped policy, whose default ladder gives `state`/`tests_pass` ground truth. A
+// producer could name its way past every judge on the case, into the trials, the round and the adoption.
+//
+// What a producer is entitled to comes from the two sources the runtime class would have carried, and this
+// seam holds only the declaration: the built-in's own name (`BUILTIN_GRADER_OWNED_METRICS` — `{ id:
+// "tests-pass" }` says nothing about `tests_pass` on its own) and the names a declaration may grant
+// (`declaredOwnedMetrics`, never a constitutional one). A score whose graderId matches no declared grader owns
+// nothing — the honest answer, not a special case; `Run.newSessionCase` already writes `graders: []` to say
+// exactly that, and it is what makes a runner's `tests-pass` on a case that never asked for one a forgery.
+//
+// ⚠️ SCOPE, STATED. The judge family is left as it is (`ownsJudgeVerdict: true`): its entitlement lives on the
+// runtime `Grader` class, which a `GraderSpec` does not mirror, and inline judge scores come back through this
+// same door. Inventing a correspondence would invalidate legitimate judge rows in the one place where
+// "invalid" decides what passing means. Adding `ownsJudgeVerdict` to the spec is its own change.
+export function sanitizeSubmittedResult(result: CaseResult, graders: readonly GraderSpec[]): CaseResult {
+  if (result.scores.length === 0) return result;
+  return {
+    ...result,
+    scores: result.scores.map((score) => {
+      const spec = graders.find((g) => g.id === score.graderId);
+      return sanitizeScore(score, {
+        kind: "grader",
+        id: score.graderId,
+        ownsMetrics: spec === undefined ? [] : [...builtInOwnedMetrics(spec.id), ...declaredOwnedMetrics(spec)],
+        ownsJudgeVerdict: true,
+      });
+    }),
+  };
+}
 
 export const UntrustedCaseResultSchema = z.preprocess((value) => {
   const stripped = stripPlatformAuthoredFields(value);

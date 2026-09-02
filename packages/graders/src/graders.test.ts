@@ -1,4 +1,4 @@
-import { NO_IMAGE } from "@everdict/contracts";
+import { BUILTIN_GRADER_OWNED_METRICS, NO_IMAGE } from "@everdict/contracts";
 import { type GradeContext, type TraceEvent, measuredScores, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
@@ -385,5 +385,25 @@ describe("makeGraders", () => {
     };
     const g = makeGraders([{ id: "judge", config: { id: "wv-judge", rubric: "r" } }], { judge });
     expect(g[0]?.id).toBe("wv-judge"); // grader id specified by config.id
+  });
+});
+
+// ── ONE TABLE, READ BY THE CLASS AND BY THE SETTLE ─────────────────────────────────────────────────────
+//
+// A built-in's reserved name is owned by its implementation. The control-plane settle cannot see the class —
+// it holds the case's `GraderSpec`s — so `BUILTIN_GRADER_OWNED_METRICS` records the same fact, and the classes
+// now READ it. This pins the two ends together through the production builder: a class switched back to a
+// literal, or a table entry under the wrong id, comes apart here rather than at a runner's first `tests_pass`.
+describe("built-in ownership is the contracts table, and makeGraders hands it out unchanged", () => {
+  it("every table entry is exactly what makeGraders' grader for that id owns", () => {
+    for (const [id, owned] of Object.entries(BUILTIN_GRADER_OWNED_METRICS)) {
+      const [g] = makeGraders([{ id }]);
+      expect(g?.ownsMetrics, id).toEqual(owned);
+    }
+  });
+
+  it("a custom grader declaring a reserved name owns nothing reserved — the sandbox and the settle agree", () => {
+    const [g] = makeGraders([{ id: "command", config: { cmd: "true", metric: "state" }, metrics: [{ id: "state" }] }]);
+    expect(g?.ownsMetrics ?? []).not.toContain("state");
   });
 });

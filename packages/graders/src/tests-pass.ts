@@ -1,4 +1,10 @@
-import { BadRequestError, type GradeContext, type Grader, type MeasuredScore } from "@everdict/contracts";
+import {
+  BUILTIN_GRADER_OWNED_METRICS,
+  BadRequestError,
+  type GradeContext,
+  type Grader,
+  type MeasuredScore,
+} from "@everdict/contracts";
 
 // ⓐ Task success (objective) — runs the test command in the environment and decides by exit code. Requires compute (an environment).
 export class TestsPassGrader implements Grader {
@@ -7,7 +13,7 @@ export class TestsPassGrader implements Grader {
   // from config or from a script's stdout, so the ladder's assignment for it is a property of the
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
-  readonly ownsMetrics = ["tests_pass"] as const;
+  readonly ownsMetrics = BUILTIN_GRADER_OWNED_METRICS["tests-pass"];
   readonly needsCompute = true; // Runs tests in the environment — must be graded before compute is released
 
   constructor(
