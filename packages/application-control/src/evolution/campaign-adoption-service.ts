@@ -123,7 +123,7 @@ export interface MergeRequest {
 // so an honest adoption re-presents identical bytes and the immutable store makes that a no-op.
 export interface RegistrationOutcome {
   kind: "created" | "already_exists";
-  candidate: { type: "agent" | "harness"; id: string; version: string; specDigest?: string };
+  candidate: { type: "agent" | "harness" | "environment"; id: string; version: string; specDigest?: string };
 }
 
 // The only thing this service asks an issue: has it been closed, and on which evidence. Structural, so
@@ -145,7 +145,7 @@ export interface AdoptionRequest {
   tenant: string;
   campaignId: string;
   proof: CampaignAdoptionProof;
-  candidate: { type: "agent" | "harness"; id: string; version: string; specDigest?: string };
+  candidate: { type: "agent" | "harness" | "environment"; id: string; version: string; specDigest?: string };
   // The bytes being registered. Passed through to the effect rather than digested here — see the note on
   // `register` for why the digest a proof carries is not a hash of this document.
   spec: unknown;

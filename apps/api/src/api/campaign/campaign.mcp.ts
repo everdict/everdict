@@ -243,11 +243,20 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         // fail several reads later on its digest instead, as a 409 (rule `protocol` L3). Same as the route.
         gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
         const candidate = checked.data.candidate;
-        const owner =
-          candidate.type === "agent"
-            ? await teamOfEntity(deps.agentRegistry, ws, candidate.id)
-            : await teamOfEntity(deps.harnessInstances, ws, candidate.id);
-        gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+        // Three subject types, three registries, three actions — the HTTP twin's routing, verbatim
+        // (harness-definability-spec.md §2).
+        const registryFor = {
+          agent: deps.agentRegistry,
+          environment: deps.environmentRegistry,
+          harness: deps.harnessInstances,
+        }[candidate.type];
+        const owner = await teamOfEntity(registryFor, ws, candidate.id);
+        const action = {
+          agent: "agents:write",
+          environment: "datasets:write",
+          harness: "harnesses:register",
+        } as const;
+        gate(principal, action[candidate.type], owner);
         return ok(
           await deps.campaignAdoption.adopt({
             tenant: ws,
@@ -430,11 +439,20 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
         const candidate = checked.data.candidate;
-        const owner =
-          candidate.type === "agent"
-            ? await teamOfEntity(deps.agentRegistry, ws, candidate.id)
-            : await teamOfEntity(deps.harnessInstances, ws, candidate.id);
-        gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+        // Three subject types, three registries, three actions — the HTTP twin's routing, verbatim
+        // (harness-definability-spec.md §2).
+        const registryFor = {
+          agent: deps.agentRegistry,
+          environment: deps.environmentRegistry,
+          harness: deps.harnessInstances,
+        }[candidate.type];
+        const owner = await teamOfEntity(registryFor, ws, candidate.id);
+        const action = {
+          agent: "agents:write",
+          environment: "datasets:write",
+          harness: "harnesses:register",
+        } as const;
+        gate(principal, action[candidate.type], owner);
         return ok(
           await deps.campaignAdoption.merge({
             tenant: ws,

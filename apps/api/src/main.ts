@@ -1390,6 +1390,7 @@ async function main(): Promise<void> {
     agents: agentRegistry,
     harnesses: harnessInstanceRegistry,
     templates: harnessTemplateRegistry,
+    environments: environmentRegistry,
     issues: issueService,
     // …and the code half's effect (docs/architecture/code-evolution-loop.md, D5), through the workspace App.
     ...(githubAppService !== undefined ? { github: githubAppService } : {}),

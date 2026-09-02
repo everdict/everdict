@@ -22,6 +22,15 @@ export class InMemoryEnvironmentRegistry implements EnvironmentRegistry {
   ): Promise<void> {
     this.store.register(tenant, spec, createdBy, teamId, origin);
   }
+  async registerPreservingOwner(
+    tenant: string,
+    spec: EnvironmentSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved"> {
+    return this.store.registerPreservingOwner(tenant, spec, createdBy, origin, authority);
+  }
   // The owning team — the value the authz kernel's team axis reads. Undefined = unowned (_shared/seed), which
   // is NOT the same as "everyone's".
   teamOfVersion(tenant: string, id: string, version: string): string | undefined {

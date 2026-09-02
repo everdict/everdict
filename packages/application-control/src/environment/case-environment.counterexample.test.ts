@@ -24,6 +24,7 @@ function registry(versions: Array<typeof SHOP_V1>, latest = versions[versions.le
   return {
     get,
     register: async () => {},
+    registerPreservingOwner: async () => "registered" as const,
     teamOfVersion: () => undefined,
     has: async () => true,
     versions: async () => versions.map((v) => v.version),

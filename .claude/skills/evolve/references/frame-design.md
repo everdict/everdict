@@ -11,9 +11,18 @@ simply is not adoption evidence.
 
 ## The fields
 
-**`subject`** — `{type: "agent" | "harness", id, baselineVersion}`. One campaign optimizes one capability
-family against one fixed baseline. A different baseline is a different question and therefore a different
-campaign.
+**`subject`** — `{type: "agent" | "harness" | "environment", id, baselineVersion}`. One campaign optimizes one
+capability family against one fixed baseline. A different baseline is a different question and therefore a
+different campaign.
+
+An **environment** subject evolves the world a case ACTS ON rather than the thing that acts
+(`docs/architecture/harness-definability-spec.md` §2), and it inverts every identity check. The compared
+scorecards must run cases that name that environment by reference, so the versions come from each side's
+manifest SEAL rather than from the scorecard's harness stamp; the harness must be IDENTICAL on both sides
+(nothing else checks that — identity excludes the harness axis because it is normally the treatment); and the
+`environment` confound the diff reports is this campaign's treatment, so it does not reject the round. A
+candidate is authored and registered through `POST /environments`, never built: image recipes belong to a
+harness slot.
 
 For a `code_evolve` campaign (evolving a harness's CODE), the subject's harness TEMPLATE must declare the
 slot's `source {git, repo}` and `build {steps, workDir, capture}` — Everdict builds the candidate image into

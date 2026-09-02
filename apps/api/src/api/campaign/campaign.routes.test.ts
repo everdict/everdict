@@ -6,7 +6,7 @@ import { NotFoundError, readUnknown } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
 import { InMemoryCampaignEvidenceStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
-import { InMemoryAgentRegistry } from "@everdict/registry";
+import { InMemoryAgentRegistry, InMemoryEnvironmentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildCampaignAdoption } from "../../composition/campaign-adoption.js";
 import { buildServer } from "../../server.js";
@@ -108,6 +108,7 @@ function build(snapshot: CampaignSnapshot) {
       agents,
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     }),
   });
@@ -777,6 +778,7 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
         agents,
         harnesses: unusedHarnesses(),
         templates: unusedTemplates(),
+        environments: new InMemoryEnvironmentRegistry(),
         issues: openIssue(),
       }),
       teamService: {
@@ -948,6 +950,7 @@ describe("[COUNTEREXAMPLE] adopt gates the campaign's OWN team, whatever the pre
         agents,
         harnesses: unusedHarnesses(),
         templates: unusedTemplates(),
+        environments: new InMemoryEnvironmentRegistry(),
         issues: openIssue(),
       }),
       teamService: {
@@ -1102,6 +1105,7 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
         agents,
         harnesses: unusedHarnesses(),
         templates: unusedTemplates(),
+        environments: new InMemoryEnvironmentRegistry(),
         issues: openIssue(),
         ...(github !== undefined
           ? {
@@ -1242,6 +1246,7 @@ describe("POST /campaigns with frame.fromIssue — the issue's case links become
         agents,
         harnesses: unusedHarnesses(),
         templates: unusedTemplates(),
+        environments: new InMemoryEnvironmentRegistry(),
         issues: openIssue(),
       }),
     });
@@ -1364,6 +1369,122 @@ describe("GET /campaigns?subjectType=&subjectId=", () => {
     });
     expect(other.json()).toEqual([]);
     expect((await app.inject({ method: "GET", url: "/campaigns?subjectType=agent", headers: H })).statusCode).toBe(400);
+    await app.close();
+  });
+});
+
+// ── AN ENVIRONMENT CAMPAIGN (docs/architecture/harness-definability-spec.md §2) ───────────────────────
+//
+// The subject is the world a case acts on, so every identity check inverts: the harness is the held constant
+// and the environment is the treatment. Which means (a) the coordinates come from each side's manifest SEAL
+// rather than from the scorecard's harness stamp, (b) an `environment` confound is the experiment happening
+// and not a reason to reject, and (c) the harness staying equal is a check nothing else performs — identity
+// deliberately excludes the harness axis, because for every other subject the harness IS the treatment.
+const envFrame: CampaignFrame = {
+  ...frame,
+  subject: { type: "environment", id: "shop", baselineVersion: "1.0.0" },
+};
+const envSnapshot = (over: {
+  baselineEnv?: string;
+  candidateEnv?: string;
+  candidateHarnessVersion?: string;
+}): CampaignSnapshot => ({
+  diff: {
+    ...winning.diff,
+    // The environment axis reports a VERIFIED difference, which for any other subject would reject the round.
+    experiment: {
+      held: ["execution_world"],
+      confounds: [{ axis: "environment", detail: "1 case(s) ran against a different environment document" }],
+      unverified: [],
+    },
+  },
+  baseline: {
+    record: {
+      harness: { id: "agent:everdict", version: "1.0.0" },
+      manifest: { environments: { c1: { ref: `shop@${over.baselineEnv ?? "1.0.0"}` } } },
+    },
+  },
+  candidate: {
+    record: {
+      harness: { id: "agent:everdict", version: over.candidateHarnessVersion ?? "1.0.0" },
+      manifest: {
+        harness: { specDigest: "sha256:cand-env" },
+        environments: { c1: { ref: `shop@${over.candidateEnv ?? "2.0.0"}` } },
+      },
+    },
+  },
+});
+
+describe("campaign routes — an environment subject", () => {
+  const openAndLog = async (snapshot: CampaignSnapshot, candidateVersion: string) => {
+    const { app } = build(snapshot);
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame: envFrame },
+    });
+    expect(opened.statusCode).toBe(201);
+    const { id } = opened.json() as { id: string };
+    const logged = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "the seed repository's fixtures were the binding constraint",
+        learned: "the new fixture set removes the login wall the agent kept failing at",
+        candidateVersion,
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    return { app, logged };
+  };
+
+  it("verifies the sides from the SEAL and counts the environment axis as the treatment, not a confound", async () => {
+    const { app, logged } = await openAndLog(envSnapshot({}), "2.0.0");
+    expect(logged.statusCode).toBe(201);
+    const round = (logged.json() as { round: { verdict: { comparable: boolean; confoundedAxes: string[] } } }).round;
+    expect(round.verdict.comparable).toBe(true);
+    expect(round.verdict.confoundedAxes).toEqual([]);
+    await app.close();
+  });
+
+  it("refuses a round whose candidate scorecard ran a different environment version than the one declared", async () => {
+    const { app, logged } = await openAndLog(envSnapshot({ candidateEnv: "3.0.0" }), "2.0.0");
+    expect(logged.statusCode).toBe(400);
+    expect(logged.json()).toMatchObject({ message: expect.stringContaining("shop@3.0.0") });
+    await app.close();
+  });
+
+  it("refuses a round whose baseline ran a version the frame did not freeze", async () => {
+    const { app, logged } = await openAndLog(envSnapshot({ baselineEnv: "0.9.0" }), "2.0.0");
+    expect(logged.statusCode).toBe(400);
+    expect(logged.json()).toMatchObject({ message: expect.stringContaining("not the frame's baseline") });
+    await app.close();
+  });
+
+  it("refuses a round where the HARNESS also moved — nothing else in identity would catch it", async () => {
+    const { app, logged } = await openAndLog(envSnapshot({ candidateHarnessVersion: "1.0.1" }), "2.0.0");
+    expect(logged.statusCode).toBe(400);
+    expect(logged.json()).toMatchObject({ message: expect.stringContaining("holds the harness constant") });
+    await app.close();
+  });
+
+  it("refuses a round whose scorecards sealed no version of the subject at all", async () => {
+    const bare: CampaignSnapshot = {
+      diff: envSnapshot({}).diff,
+      baseline: { record: { harness: { id: "agent:everdict", version: "1.0.0" } } },
+      candidate: {
+        record: {
+          harness: { id: "agent:everdict", version: "1.0.0" },
+          manifest: { harness: { specDigest: "sha256:cand-env" } },
+        },
+      },
+    };
+    const { app, logged } = await openAndLog(bare, "2.0.0");
+    expect(logged.statusCode).toBe(400);
+    expect(logged.json()).toMatchObject({ message: expect.stringContaining("sealed no version of environment") });
     await app.close();
   });
 });

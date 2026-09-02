@@ -2,7 +2,7 @@ import type { AdoptionOperationStore } from "@everdict/application-control";
 import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contracts";
 import { AgentSpecSchema } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
-import { InMemoryAgentRegistry } from "@everdict/registry";
+import { InMemoryAgentRegistry, InMemoryEnvironmentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildCampaignAdoption } from "./campaign-adoption.js";
 
@@ -141,6 +141,7 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
       agents,
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     }).adopt({
       tenant: "acme",
@@ -183,6 +184,7 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
       agents,
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     });
     const request = {
@@ -219,6 +221,7 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
         agents: new InMemoryAgentRegistry(),
         harnesses: unusedHarnesses(),
         templates: unusedTemplates(),
+        environments: new InMemoryEnvironmentRegistry(),
         issues: openIssue(),
       }).adopt({
         tenant: "acme",
@@ -243,6 +246,7 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
       agents: new InMemoryAgentRegistry(),
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     });
     const request = {
@@ -289,6 +293,7 @@ describe("[R115 COUNTEREXAMPLE] adopting a candidate that lives only in _shared"
       agents,
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     }).adopt({
       tenant: "acme",
@@ -343,6 +348,7 @@ describe("[R115 COUNTEREXAMPLE] a refused adoption can still be adopted", () => 
       agents,
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     });
     const request = {

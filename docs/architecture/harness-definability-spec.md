@@ -82,7 +82,14 @@ one that matters: a target that resolves and is not observed is a declaration, n
 > so two batches over one dataset and two environment versions read as an environment confound instead of as a
 > change to the harness under test. **Not landed:** the `service` environment kind (nothing provides one yet, so
 > the schema would be a plan), a `source`+`build` recipe for environments, and `subject.type: "environment"` —
-> a campaign still evolves an agent or a harness.
+> `subject.type: "environment"` — a campaign evolves one, verified from the manifest seal (the harness stamp
+> names the harness, so a subject that is not the harness is read from what each side sealed), with the
+> harness held constant as an explicit check and the `environment` axis exempted from the confound refusal
+> because it is that campaign's TREATMENT. Adoption registers the candidate through the environment registry
+> under the dataset action pair, with the same owner-preserving write every other lane uses. **Not landed:**
+> the `service` environment kind (nothing provides one, so the schema would be a plan), and a `source`+`build`
+> recipe — an environment candidate is authored and registered, never built, which is what a harness with no
+> recipe already does.
 
 **The gap.** A case EMBEDS its environment (`EvalCase.env`), a topology embeds its target, and a campaign's
 subject is `agent | harness` (`packages/contracts/src/records/evolution-campaign.ts`). So the environment —

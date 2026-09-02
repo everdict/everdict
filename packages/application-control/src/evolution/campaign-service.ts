@@ -93,7 +93,10 @@ export interface CampaignComparisonSide {
     // The digest of the spec that batch actually ran, sealed at submit. This is the join every later
     // adoption proof rests on: a version label cannot tell an evaluated C1 from a saved C2 (arch-review 71
     // P0-evolution).
-    manifest?: { harness?: { specDigest?: string } };
+    // …and WHICH ENVIRONMENT DOCUMENT each referencing case ran against (harness-definability-spec.md §2),
+    // which is where an environment campaign's treatment coordinates live: the harness stamp names the
+    // harness, so a subject that is not the harness has to be read from the seal.
+    manifest?: { harness?: { specDigest?: string }; environments?: Record<string, { ref: string }> };
     // ── WHERE THE BATCH SAYS IT CAME FROM (docs/architecture/code-evolution-loop.md, D4) ──────────
     //
     // The scorecard's trigger provenance: `source` is stamped server-side from the submitter's credential, the
@@ -773,24 +776,71 @@ export class CampaignService {
     // IDENTITY is refused, not recorded: a round whose declared coordinates disagree with what the
     // scorecards actually evaluated is a mislabeled request, and logging it would let the loop name the
     // graduate (L3 — the scorecard's own harness stamp is the source).
-    const expectedId =
-      record.frame.subject.type === "harness" ? record.frame.subject.id : `agent:${record.frame.subject.id}`;
     const refuse = (what: string, extra: Record<string, unknown>): never => {
       throw new BadRequestError("BAD_REQUEST", extra, what);
     };
     const baselineHarness = snapshot.baseline.record.harness;
     const candidateHarness = snapshot.candidate.record.harness;
-    if (candidateHarness.id !== expectedId || baselineHarness.id !== expectedId)
+    // ── AN ENVIRONMENT SUBJECT IS VERIFIED AGAINST THE SEAL, NOT THE HARNESS STAMP (§2) ────────────
+    //
+    // For an agent or a harness subject the scorecard's own harness stamp names the treatment, which is what
+    // the block below reads. An environment campaign inverts that: the harness is the HELD CONSTANT and the
+    // environment is what moved, so the coordinates live in each side's manifest seal — and the harness
+    // being equal is a check nothing else performs, because identity deliberately excludes the harness axis
+    // (it is normally the treatment).
+    if (record.frame.subject.type === "environment") {
+      const subjectId = record.frame.subject.id;
+      const pinned = (side: "baseline" | "candidate"): string => {
+        const sealed = snapshot[side].record.manifest?.environments;
+        const refs = new Set(Object.values(sealed ?? {}).map((e) => e.ref));
+        const mine = [...refs].filter((r) => r.startsWith(`${subjectId}@`));
+        if (mine.length === 0)
+          refuse(`the ${side} scorecard sealed no version of environment '${subjectId}' — it did not run it`, {
+            side,
+            sealed: [...refs],
+          });
+        if (mine.length > 1)
+          refuse(`the ${side} scorecard ran ${mine.length} versions of environment '${subjectId}' at once`, {
+            side,
+            refs: mine,
+          });
+        // `mine[0]` exists: the two refusals above cover empty and many, and both throw.
+        return (mine[0] ?? "").slice(subjectId.length + 1);
+      };
+      const baselineEnv = pinned("baseline");
+      const candidateEnv = pinned("candidate");
+      if (candidateEnv !== input.candidateVersion)
+        refuse(
+          `the candidate scorecard ran ${subjectId}@${candidateEnv}, not the declared candidate ${input.candidateVersion}`,
+          { declared: input.candidateVersion, actual: candidateEnv },
+        );
+      if (baselineEnv !== record.frame.subject.baselineVersion)
+        refuse(
+          `the baseline scorecard ran ${subjectId}@${baselineEnv}, not the frame's baseline ${record.frame.subject.baselineVersion}`,
+          { frame: record.frame.subject.baselineVersion, actual: baselineEnv },
+        );
+      if (baselineHarness.id !== candidateHarness.id || baselineHarness.version !== candidateHarness.version)
+        refuse(
+          `an environment campaign holds the harness constant and the sides ran ${baselineHarness.id}@${baselineHarness.version} vs ${candidateHarness.id}@${candidateHarness.version}`,
+          { baseline: baselineHarness, candidate: candidateHarness },
+        );
+    }
+    const expectedId =
+      record.frame.subject.type === "harness" ? record.frame.subject.id : `agent:${record.frame.subject.id}`;
+    if (
+      record.frame.subject.type !== "environment" &&
+      (candidateHarness.id !== expectedId || baselineHarness.id !== expectedId)
+    )
       refuse(
         `the compared scorecards evaluated '${baselineHarness.id}'/'${candidateHarness.id}', not the campaign's subject '${expectedId}'`,
         { expectedId, baseline: baselineHarness, candidate: candidateHarness },
       );
-    if (candidateHarness.version !== input.candidateVersion)
+    if (record.frame.subject.type !== "environment" && candidateHarness.version !== input.candidateVersion)
       refuse(
         `the candidate scorecard evaluated ${expectedId}@${candidateHarness.version}, not the declared candidate ${input.candidateVersion}`,
         { declared: input.candidateVersion, actual: candidateHarness.version },
       );
-    if (baselineHarness.version !== record.frame.subject.baselineVersion)
+    if (record.frame.subject.type !== "environment" && baselineHarness.version !== record.frame.subject.baselineVersion)
       refuse(
         `the baseline scorecard evaluated ${expectedId}@${baselineHarness.version}, not the frame's baseline ${record.frame.subject.baselineVersion}`,
         { frame: record.frame.subject.baselineVersion, actual: baselineHarness.version },
@@ -1282,7 +1332,15 @@ function verdictOf(
       : comparison.experiment.unverified.map((u) => u.axis);
   // Axes VERIFIED different — stronger than unverified, never waivable: a delta across different worlds is
   // not evidence about the change under test (the axis's own sentence).
-  const confoundedAxes = comparison.experiment === undefined ? [] : comparison.experiment.confounds.map((c) => c.axis);
+  // …minus the axis this campaign IS. A harness campaign has no such subtraction to make — identity never
+  // reads the harness, precisely because it is the treatment — and an environment campaign needs the same
+  // exemption spelled out: the environment axis reporting a verified difference is the experiment happening,
+  // not a confound. The harness staying equal is checked separately, where the round's identity is verified.
+  const treatmentAxis = frame.subject.type === "environment" ? "environment" : undefined;
+  const confoundedAxes =
+    comparison.experiment === undefined
+      ? []
+      : comparison.experiment.confounds.map((c) => c.axis).filter((axis) => axis !== treatmentAxis);
   // Where the candidate came from rides EVERY verdict, rejected ones included: a round the platform could not
   // compare still names the pull request that produced its candidate, which is what the next brief reads.
   // Everdict's OWN build account (D2) outranks the scorecard origin whenever it built the candidate.

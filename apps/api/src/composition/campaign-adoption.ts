@@ -1,6 +1,7 @@
 import {
   type AdoptionOperationStore,
   CampaignAdoptionService,
+  type EnvironmentRegistry,
   type HarnessInstanceRegistry,
   type HarnessTemplateRegistry,
   type IssueResolutionView,
@@ -11,6 +12,7 @@ import {
   AgentSpecSchema,
   BadRequestError,
   ConflictError,
+  EnvironmentSpecSchema,
   HarnessInstanceSpecSchema,
   resolveHarnessInstance,
 } from "@everdict/contracts";
@@ -38,6 +40,11 @@ export interface CampaignAdoptionWiring {
   // write and a harness cannot be resolved without it — an optional one would silently degrade the check to
   // the post-write shape this whole finding is about (arch-review 76).
   templates: HarnessTemplateRegistry;
+  // The environment lane's registry (harness-definability-spec.md §2). REQUIRED for the same reason
+  // `templates` is: an environment candidate cannot be resolved without it, and an optional one would
+  // silently send an environment down the harness branch — the "a new lane inherits every constraint"
+  // failure this file already carries a case of.
+  environments: EnvironmentRegistry;
   // The workspace GitHub App, for the CODE half of an adoption (docs/architecture/code-evolution-loop.md, D5).
   // Optional at the ROOT because a deployment may run without GitHub; the service's dependency stays required
   // and is bound to a merge that refuses by name, so "no App" is a 404 the caller reads, never a silent skip.
@@ -168,6 +175,30 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         return {
           kind: existed ? ("already_exists" as const) : ("created" as const),
           candidate: { type, id, version, ...(held !== undefined ? { specDigest: held } : {}) },
+        };
+      }
+
+      // ── THE ENVIRONMENT LANE ──────────────────────────────────────────────────────────────────
+      //
+      // Placed BEFORE the harness fall-through on purpose: the branch used to be `agent` or else-harness, so a
+      // third subject type would have been registered into the harness registry with an EnvironmentSpec body.
+      // An environment's stored document IS the parsed spec (the registry keeps what it is given), so the
+      // digest is provable before the write, exactly like the agent lane's.
+      if (type === "environment") {
+        const parsedEnv = EnvironmentSpecSchema.parse(spec);
+        if (parsedEnv.id !== id || parsedEnv.version !== version) refuseSpec(parsedEnv.id, parsedEnv.version);
+        const wouldEnv = digestOf(parsedEnv);
+        if (measured !== undefined && wouldEnv !== measured) refuseDigest(wouldEnv);
+        const existedEnv = (await deps.environments.ownVersions(tenant, id)).includes(version);
+        const landedEnv = await deps.environments.registerPreservingOwner(tenant, parsedEnv, by, origin, {
+          ...(expectedOwnerTeamId !== undefined ? { expectedOwnerTeamId: expectedOwnerTeamId } : {}),
+          ...(proof.teamId !== undefined ? { initialTeamId: proof.teamId } : {}),
+        });
+        if (landedEnv === "owner_moved") refuseOwnerMoved(id);
+        const heldEnv = digestOf(await deps.environments.get(tenant, id, version));
+        return {
+          kind: existedEnv ? ("already_exists" as const) : ("created" as const),
+          candidate: { type, id, version, ...(heldEnv !== undefined ? { specDigest: heldEnv } : {}) },
         };
       }
 

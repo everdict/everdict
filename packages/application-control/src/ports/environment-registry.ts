@@ -27,6 +27,16 @@ export interface EnvironmentRegistry {
     teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void>;
+  // The adoption lane's write (arch-review 77/115, and the campaign subject of harness-definability-spec §2):
+  // the successor keeps the entity's owner, the write asserts the owner the AUTHORIZATION was granted
+  // against, and where there is no local owner to preserve the authority that caused the write owns it.
+  registerPreservingOwner(
+    tenant: string,
+    spec: EnvironmentSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved">;
   teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<EnvironmentSpec>;

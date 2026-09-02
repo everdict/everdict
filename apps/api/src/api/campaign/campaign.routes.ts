@@ -262,11 +262,18 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       // caller-authored value deciding whether a team gate runs is rule `protocol` L3's shape exactly.
       gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
       const candidate = body.proof.candidate;
-      const owner =
-        candidate.type === "agent"
-          ? await teamOfEntity(deps.agentRegistry, principal.workspace, candidate.id)
-          : await teamOfEntity(deps.harnessInstances, principal.workspace, candidate.id);
-      gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+      // THREE subject types, three registries, three actions (harness-definability-spec.md §2). This was
+      // `agent ? … : harness`, so an environment candidate would have had its owner read from — and its
+      // write authorized against — the HARNESS registry, which is the "a new lane inherits every constraint"
+      // failure rule `protocol` names. The registry that answers here is the one the effect writes through.
+      const registryFor = {
+        agent: deps.agentRegistry,
+        environment: deps.environmentRegistry,
+        harness: deps.harnessInstances,
+      }[candidate.type];
+      const owner = await teamOfEntity(registryFor, principal.workspace, candidate.id);
+      const action = { agent: "agents:write", environment: "datasets:write", harness: "harnesses:register" } as const;
+      gate(principal, action[candidate.type], owner);
       // …and the EFFECT is told what this gate was granted against. Reading the owner here to authorize and
       // letting the registry re-read it to write leaves a window an ownership transfer fits through: the
       // successor lands under a team the caller may not write to, and owner preservation "succeeded"
@@ -478,11 +485,18 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
       gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
       const candidate = body.proof.candidate;
-      const owner =
-        candidate.type === "agent"
-          ? await teamOfEntity(deps.agentRegistry, principal.workspace, candidate.id)
-          : await teamOfEntity(deps.harnessInstances, principal.workspace, candidate.id);
-      gate(principal, candidate.type === "agent" ? "agents:write" : "harnesses:register", owner);
+      // THREE subject types, three registries, three actions (harness-definability-spec.md §2). This was
+      // `agent ? … : harness`, so an environment candidate would have had its owner read from — and its
+      // write authorized against — the HARNESS registry, which is the "a new lane inherits every constraint"
+      // failure rule `protocol` names. The registry that answers here is the one the effect writes through.
+      const registryFor = {
+        agent: deps.agentRegistry,
+        environment: deps.environmentRegistry,
+        harness: deps.harnessInstances,
+      }[candidate.type];
+      const owner = await teamOfEntity(registryFor, principal.workspace, candidate.id);
+      const action = { agent: "agents:write", environment: "datasets:write", harness: "harnesses:register" } as const;
+      gate(principal, action[candidate.type], owner);
     } catch (err) {
       return sendError(reply, err);
     }

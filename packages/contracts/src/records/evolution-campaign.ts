@@ -13,7 +13,10 @@ import { z } from "zod";
 
 // What one campaign optimizes: candidate VERSIONS of one capability family, against a fixed baseline.
 export const CampaignSubjectSchema = z.object({
-  type: z.enum(["agent", "harness"]),
+  // What this campaign optimizes. An ENVIRONMENT subject evolves the world a case acts on rather than the
+  // thing that acts (harness-definability-spec.md §2): the harness is then the held constant and the
+  // environment is the treatment, which inverts every identity check below.
+  type: z.enum(["agent", "harness", "environment"]),
   id: z.string().min(1).max(200),
   baselineVersion: z.string().min(1).max(100),
 });
@@ -584,7 +587,7 @@ export type CampaignClose = z.infer<typeof CampaignCloseSchema>;
 // guess, and it is the only way downstream stays unable to confuse a weak proof with a strong one. An
 // optional `identity` would have handed every consumer a third case and reopened arch-review 72's finding.
 const AdoptionCandidateShape = z.object({
-  type: z.enum(["agent", "harness"]),
+  type: z.enum(["agent", "harness", "environment"]),
   id: z.string().min(1).max(200),
   version: z.string().min(1).max(100),
   // The bytes, not the label (arch-review 71). Absent for a built-in with no declarative spec.

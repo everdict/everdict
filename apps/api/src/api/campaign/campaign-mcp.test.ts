@@ -6,7 +6,7 @@ import { NotFoundError } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
 import { InMemoryCampaignEvidenceStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
-import { InMemoryAgentRegistry } from "@everdict/registry";
+import { InMemoryAgentRegistry, InMemoryEnvironmentRegistry } from "@everdict/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -156,6 +156,7 @@ function makeDeps(
       agents,
       harnesses: unusedHarnesses(),
       templates: unusedTemplates(),
+      environments: new InMemoryEnvironmentRegistry(),
       issues: openIssue(),
     }),
   };

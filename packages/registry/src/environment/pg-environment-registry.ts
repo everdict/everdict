@@ -30,6 +30,15 @@ export class PgEnvironmentRegistry implements EnvironmentRegistry {
   ): Promise<void> {
     return this.store.register(tenant, spec, createdBy, teamId, origin);
   }
+  registerPreservingOwner(
+    tenant: string,
+    spec: EnvironmentSpec,
+    createdBy?: string,
+    origin?: CapabilityOrigin,
+    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
+  ): Promise<"registered" | "owner_moved"> {
+    return this.store.registerPreservingOwner(tenant, spec, createdBy, origin, authority);
+  }
   teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     return this.store.teamOfVersion(tenant, id, version);
   }

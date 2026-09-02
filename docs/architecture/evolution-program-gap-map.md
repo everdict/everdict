@@ -143,8 +143,7 @@ verified); definability §4 (case tokens, the process box, one resources predica
 claude-code-router recipes); definability §1 (a target is a browser, an api or a desktop) and §2 (the
 environment as a registered entity, sealed per batch, with its own identity axis).
 
-Open, in the order they should land: an environment as a CAMPAIGN SUBJECT (`subject.type: "environment"`,
-the half of definability §2 that a campaign lane still has to learn); evidence §1 (the benchmark on-ramps,
+Open, in the order they should land: evidence §1 (the benchmark on-ramps,
 each an evaluator to port honestly). A Hermes recipe waits on its CLI's resume form.
 
 ## What would reopen this page

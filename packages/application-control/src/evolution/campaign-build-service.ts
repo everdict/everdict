@@ -64,7 +64,10 @@ export interface CampaignBuildDeps {
     ): Promise<{
       id: string;
       teamId?: string;
-      subjectType: "agent" | "harness";
+      // Widened for the environment subject (harness-definability-spec.md §2); this service still refuses
+      // anything but a harness — building a candidate IMAGE is a harness slot's recipe, and an environment
+      // candidate is authored and registered rather than built.
+      subjectType: "agent" | "harness" | "environment";
       subjectId: string;
       baselineVersion: string;
     }>;
