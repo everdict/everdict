@@ -7,9 +7,10 @@ anchors: [packages/datasets/src/terminal-bench.ts, packages/graders/src/reward-f
 ---
 # Standard task-format on-ramp — bring an existing agent benchmark, run it managed
 
-> Status: **M2 complete.** All five slices landed — the pure mapper, the ingestion edge, the source kind on
-> both doors, the prebuild/push helper, and the web wizard. SSOT for how Everdict ingests the emerging
-> *standard agent-benchmark task formats* (Terminal-Bench first) into its harness-agnostic `Dataset` model.
+> Status: **M2 — five slices landed, one half open.** The pure mapper, the ingestion edge, the source kind on
+> both doors, the prebuild/push helper and the web wizard are in; slice 4's `imageWarnings`-on-register half
+> is not (see the ⚠️ under it). SSOT for how Everdict ingests the emerging *standard agent-benchmark task
+> formats* (Terminal-Bench first) into its harness-agnostic `Dataset` model.
 
 ## Why
 
@@ -89,6 +90,13 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    pushed is a set that imports and then fails one case at a time. It lives in the CLI because Everdict
    references images and never builds them: this is an operator edge, and the platform still refuses a task
    whose image it cannot resolve.
+   ⚠️ **Half of this slice is still open, and the ✅ covers only the helper.** This line also asked for
+   `imageWarnings` on register, and no DATASET door classifies its case images — `imageWarnings` runs on
+   harness register/validate (`apps/api/src/api/harness/harness.routes.ts`) and on a capability save, so a
+   task set imported with unqualified or local-only refs is registered without a word, and the operator finds
+   out one case at a time at dispatch. What it needs is the existing predicate (`classifyImageRef` /
+   `imageWarnings`) applied to the produced cases' images at `POST /datasets` and `POST /benchmarks/import`,
+   warn-not-block, on both transports.
 5. **Web** — ✅ the add-benchmark wizard's source picker has a third option ("Task set"). Choosing it takes
    the set as text plus an optional `{id}` image template, previews it through the same parse the import
    runs, and **skips the mapping step entirely** — a task carries its own instruction, tests and world, so
