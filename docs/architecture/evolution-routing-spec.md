@@ -135,6 +135,13 @@ and both records readable.
 
 ## §5 — Memory across campaigns is a read over the subject (G4.5)
 
+> **Landed 2026-09-02, as a subject filter on the campaign list rather than a harness-side door:**
+> `GET /campaigns?subjectType=&subjectId=` and `list_campaigns { subject_type, subject_id }` return every
+> campaign ever opened on one capability, newest first, each with its rounds (verdict, evidence reference,
+> `learned`) and close. The narrowing is a predicate IN the store's query (`packages/db/src/evolution/campaign-store.ts`),
+> beside the team ceiling, never a page filtered afterwards. A half-named subject is refused, not read as "all".
+> The `code_evolve` skill reads it before its first hypothesis.
+
 **The gap.** Campaigns list per workspace. "Everything ever tried on this harness — the rounds, what lost,
 what each taught" has no read, so a new campaign's first brief starts from nothing, and the same dead
 hypothesis is spent twice.

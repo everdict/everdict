@@ -1323,3 +1323,26 @@ describe("GET /campaigns/:id/rounds/:seq/evidence", () => {
     await app.close();
   });
 });
+
+// ── ONE CAPABILITY'S EVOLUTION MEMORY (docs/architecture/evolution-routing-spec.md §5) ────────────────
+describe("GET /campaigns?subjectType=&subjectId=", () => {
+  it("narrows to the subject's campaigns, and refuses a half-named subject", async () => {
+    const { app } = build(winning);
+    await app.inject({ method: "POST", url: "/campaigns", headers: H, payload: { issueId: "iss_1", frame } });
+    const mine = await app.inject({
+      method: "GET",
+      url: "/campaigns?subjectType=agent&subjectId=everdict",
+      headers: H,
+    });
+    expect(mine.statusCode).toBe(200);
+    expect(mine.json()).toHaveLength(1);
+    const other = await app.inject({
+      method: "GET",
+      url: "/campaigns?subjectType=harness&subjectId=everdict",
+      headers: H,
+    });
+    expect(other.json()).toEqual([]);
+    expect((await app.inject({ method: "GET", url: "/campaigns?subjectType=agent", headers: H })).statusCode).toBe(400);
+    await app.close();
+  });
+});

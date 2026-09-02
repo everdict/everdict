@@ -38,6 +38,7 @@ import { stampFacts } from "../platform-event/outbox.js";
 import type {
   AdoptionOperationStore,
   CampaignEvidenceStore,
+  CampaignSubjectRef,
   EvolutionCampaignStore,
 } from "../ports/evolution-campaign-store.js";
 
@@ -622,8 +623,15 @@ export class CampaignService {
     return record;
   }
 
-  async list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]> {
-    return this.deps.store.list(tenant, visibleTeams);
+  // `subject` = one capability's whole evolution memory (evolution-routing-spec.md §5): every campaign ever
+  // opened on it, each with its rounds — verdicts, evidence references, `learned` — and its close. The brief for
+  // a new campaign reads this so the same dead hypothesis is not spent twice.
+  async list(
+    tenant: string,
+    visibleTeams?: string[],
+    subject?: CampaignSubjectRef,
+  ): Promise<EvolutionCampaignRecord[]> {
+    return this.deps.store.list(tenant, visibleTeams, subject);
   }
 
   // The pure gate over the current trace — a read, never an effect.

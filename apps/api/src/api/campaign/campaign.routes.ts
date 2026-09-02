@@ -6,6 +6,7 @@ import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-con
 import { campaignDocs } from "./campaign.docs.js";
 import { AdoptCampaignBodySchema } from "./request/adopt-campaign.js";
 import { BuildCampaignBodySchema } from "./request/build-campaign.js";
+import { CampaignSubjectQuerySchema } from "./request/list-campaigns.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
 import { MergeCampaignBodySchema } from "./request/merge-campaign.js";
 import { OpenCampaignBodySchema } from "./request/open-campaign.js";
@@ -65,21 +66,29 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
-  app.get("/campaigns", { schema: campaignDocs.list }, async (req, reply) => {
-    if (!deps.campaignService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "scorecards:read");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    // The caller's team ceiling, applied in the store's query — a private team's campaigns are answered as
-    // nonexistent to everybody else (arch-review 76 P1-security).
-    const { visibleTeams } = await teamCeiling(deps, principal);
-    return reply.send(await deps.campaignService.list(principal.workspace, visibleTeams));
-  });
+  app.get<{ Querystring: { subjectType?: string; subjectId?: string } }>(
+    "/campaigns",
+    { schema: campaignDocs.list },
+    async (req, reply) => {
+      if (!deps.campaignService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      // `subjectType` + `subjectId` = one capability's evolution memory (evolution-routing-spec.md §5). Both or
+      // neither: a type without an id (or the reverse) names nothing and is refused rather than read as "all".
+      const subject = CampaignSubjectQuerySchema.safeParse(req.query);
+      if (!subject.success) return reply.code(400).send({ code: "BAD_REQUEST", message: subject.error.message });
+      // The caller's team ceiling, applied in the store's query — a private team's campaigns are answered as
+      // nonexistent to everybody else (arch-review 76 P1-security).
+      const { visibleTeams } = await teamCeiling(deps, principal);
+      return reply.send(await deps.campaignService.list(principal.workspace, visibleTeams, subject.data));
+    },
+  );
 
   app.get<{ Params: { id: string } }>("/campaigns/:id", { schema: campaignDocs.get }, async (req, reply) => {
     if (!deps.campaignService)

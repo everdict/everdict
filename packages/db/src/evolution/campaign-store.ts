@@ -1,6 +1,7 @@
 import type {
   CampaignAppendOutcome,
   CampaignCloseOutcome,
+  CampaignSubjectRef,
   EvolutionCampaignStore,
   OutboxEvent,
 } from "@everdict/application-control";
@@ -46,10 +47,17 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
   // `visibleTeams` is the caller's ceiling, resolved by the transport. Absent = no ceiling (an admin, or a
   // deployment with no teams). A campaign with no team of its own is UNOWNED — the workspace's, which every
   // member sees; that is the legacy row's honest reading, not a hole.
-  async list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]> {
+  async list(
+    tenant: string,
+    visibleTeams?: string[],
+    subject?: CampaignSubjectRef,
+  ): Promise<EvolutionCampaignRecord[]> {
     return [...this.byId.values()]
       .filter((r) => r.tenant === tenant)
       .filter((r) => visibleTeams === undefined || r.teamId === undefined || visibleTeams.includes(r.teamId))
+      .filter(
+        (r) => subject === undefined || (r.frame.subject.type === subject.type && r.frame.subject.id === subject.id),
+      )
       .sort((a, b) =>
         a.createdAt === b.createdAt ? b.id.localeCompare(a.id) : b.createdAt.localeCompare(a.createdAt),
       );
@@ -300,19 +308,28 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
 
   // Filtered IN THE QUERY, never after it: a limited page filtered afterwards lets one team's rows push
   // everyone else's off it (the same reasoning the run list already carries).
-  async list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]> {
-    const { rows } =
-      visibleTeams === undefined
-        ? await this.client.query<CampaignRow>(
-            "SELECT * FROM everdict_evolution_campaigns WHERE tenant=$1 ORDER BY created_at DESC, id DESC",
-            [tenant],
-          )
-        : await this.client.query<CampaignRow>(
-            `SELECT * FROM everdict_evolution_campaigns
-              WHERE tenant=$1 AND (team_id IS NULL OR team_id = ANY($2))
-              ORDER BY created_at DESC, id DESC`,
-            [tenant, visibleTeams],
-          );
+  async list(
+    tenant: string,
+    visibleTeams?: string[],
+    subject?: CampaignSubjectRef,
+  ): Promise<EvolutionCampaignRecord[]> {
+    // Every narrowing is a predicate IN THE STATEMENT — the team ceiling (arch-review 76) and the subject
+    // (evolution-routing-spec.md §5) alike; a page filtered after the read lets one filter's rows push
+    // another's off it. No ceiling = no team predicate (`undefined` means "nothing hidden", never "sees nothing").
+    const where = ["tenant=$1"];
+    const params: unknown[] = [tenant];
+    if (visibleTeams !== undefined) {
+      params.push(visibleTeams);
+      where.push(`(team_id IS NULL OR team_id = ANY($${params.length}))`);
+    }
+    if (subject !== undefined) {
+      params.push(subject.type, subject.id);
+      where.push(`frame->'subject'->>'type' = $${params.length - 1}`, `frame->'subject'->>'id' = $${params.length}`);
+    }
+    const { rows } = await this.client.query<CampaignRow>(
+      `SELECT * FROM everdict_evolution_campaigns WHERE ${where.join(" AND ")} ORDER BY created_at DESC, id DESC`,
+      params,
+    );
     return rows.map(rowToRecord);
   }
 

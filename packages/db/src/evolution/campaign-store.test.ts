@@ -195,6 +195,14 @@ describe("PgEvolutionCampaignStore — the guards live in the statement", () => 
     const { client: c4, calls: calls4 } = fakeClient([{ match: "SELECT *", rows: [] }]);
     await new PgEvolutionCampaignStore(c4).list("acme");
     expect(calls4[0]?.text).not.toContain("team_id IS NULL");
+
+    // …and the SUBJECT narrows in the statement too (evolution-routing-spec.md §5): one capability's memory is
+    // a query, not a page filtered after the fact.
+    const { client: c5, calls: calls5 } = fakeClient([{ match: "SELECT *", rows: [] }]);
+    await new PgEvolutionCampaignStore(c5).list("acme", ["team-b"], { type: "harness", id: "shop" });
+    expect(calls5[0]?.text).toContain("frame->'subject'->>'type' = $3");
+    expect(calls5[0]?.text).toContain("frame->'subject'->>'id' = $4");
+    expect(calls5[0]?.params).toEqual(["acme", ["team-b"], "harness", "shop"]);
   });
 
   it("appendRound CASes on the round count and the open state IN THE WHERE, and reads the landed count back", async () => {
@@ -1831,5 +1839,40 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const named = await svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-any" }, "agent:everdict", {});
       expect(named.round.delegation).toEqual({ runId: "run-any", ttlSec: 7200, usd: 9 });
     });
+  });
+});
+
+// ── ONE CAPABILITY'S MEMORY IS A SUBJECT FILTER (docs/architecture/evolution-routing-spec.md §5) ──────
+describe("InMemoryEvolutionCampaignStore.list — the subject narrows like the team ceiling does", () => {
+  it("returns only the campaigns whose frame subject matches, newest first", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    const on = (
+      id: string,
+      subjectId: string,
+      type: "agent" | "harness" = "harness",
+      createdAt = "2026-09-02T00:00:00.000Z",
+    ) =>
+      store.create({
+        id,
+        tenant: "acme",
+        issueId: "iss_1",
+        frame: { ...frame, subject: { type, id: subjectId, baselineVersion: "1.0.0" } },
+        frameDigest: `d-${id}`,
+        rounds: [],
+        state: "open",
+        createdBy: "alice",
+        createdAt,
+        updatedAt: createdAt,
+      });
+    await on("c1", "shop", "harness", "2026-09-01T00:00:00.000Z");
+    await on("c2", "shop", "harness", "2026-09-02T00:00:00.000Z");
+    await on("c3", "other");
+    await on("c4", "shop", "agent");
+    expect((await store.list("acme", undefined, { type: "harness", id: "shop" })).map((r) => r.id)).toEqual([
+      "c2",
+      "c1",
+    ]);
+    expect((await store.list("acme", undefined, { type: "harness", id: "nobody" })).map((r) => r.id)).toEqual([]);
+    expect((await store.list("acme")).map((r) => r.id)).toHaveLength(4);
   });
 });

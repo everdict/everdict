@@ -44,6 +44,17 @@ export const campaignDocs: Record<
   list: {
     summary: "List the workspace's campaigns",
     tags: ["campaign"],
+    querystring: {
+      type: "object",
+      properties: {
+        subjectType: {
+          type: "string",
+          enum: ["agent", "harness"],
+          description: "With subjectId: one capability's campaigns — its evolution memory",
+        },
+        subjectId: { type: "string" },
+      },
+    },
     response: {
       200: { description: "Campaigns, newest first", ...toJsonSchema(z.array(EvolutionCampaignRecordSchema)) },
       ...errorResponses(401, 403),

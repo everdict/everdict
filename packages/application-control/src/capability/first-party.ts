@@ -1150,6 +1150,10 @@ Everdict's tools load on demand. Before anything else:
   repository host and the model endpoint), and \`create_sandbox { runtime }\` places the session on a workspace
   runtime that can enforce it rather than the control plane's docker. The agent runs in ITS image with ITS model
   binding, and it never sees your tools or the workspace.
+- **Memory first.** Before the FIRST hypothesis, read \`list_campaigns { subject_type: "harness", subject_id }\`:
+  every campaign ever opened on this harness, each round's verdict and \`learned\`, what was adopted and what
+  halted. A hypothesis that already lost is not spent again; a neutral candidate that was abandoned may be the
+  foundation to build on.
 - **The previous round's evidence, not your notes.** Before proposing round N+1, read
   \`get_campaign_round_evidence { id, seq: N }\`: per compared case — held-out / target flags, both sides' pass
   rates and trials, the per-case verdict (improved · regressed · unchanged · unclear), and the run ids whose

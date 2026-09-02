@@ -15,6 +15,11 @@ import type { OutboxEvent } from "./run-store.js";
 // what the caller does with it. Facts ride the same write via the E0 outbox `events` parameter, the same
 // contract every aggregate store carries.
 
+export interface CampaignSubjectRef {
+  type: "agent" | "harness";
+  id: string;
+}
+
 export type CampaignAppendOutcome =
   | { kind: "appended"; seq: number }
   | { kind: "conflict"; expected: number; actual: number } // another round landed first — re-read and retry
@@ -35,7 +40,9 @@ export interface EvolutionCampaignStore {
   get(tenant: string, id: string): Promise<EvolutionCampaignRecord | undefined>;
   // `visibleTeams` = the caller's team ceiling, resolved by the transport. Applied in the QUERY so a page
   // is built from what the caller may see rather than filtered after it (arch-review 76 P1-security).
-  list(tenant: string, visibleTeams?: string[]): Promise<EvolutionCampaignRecord[]>;
+  // `subject` narrows to one capability's campaigns — every version of it, every walk ever tried on it — the
+  // memory a new campaign's first brief reads (docs/architecture/evolution-routing-spec.md §5). In the query too.
+  list(tenant: string, visibleTeams?: string[], subject?: CampaignSubjectRef): Promise<EvolutionCampaignRecord[]>;
   // Append-only, CAS on the current round count — contiguity of `seq` is the store's to enforce.
   appendRound(
     tenant: string,

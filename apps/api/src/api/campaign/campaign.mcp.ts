@@ -56,11 +56,25 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
 
   server.registerTool(
     "list_campaigns",
-    { annotations: { readOnlyHint: true }, description: "The workspace's evolution campaigns", inputSchema: {} },
-    () =>
-      run(principal, "scorecards:read", async () =>
-        ok(await campaigns.list(ws, (await teamCeiling(deps, principal)).visibleTeams)),
-      ),
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "The workspace's evolution campaigns. With subject_type + subject_id: ONE capability's evolution memory — " +
+        "every campaign ever opened on it (any version), each with its rounds (verdict, evidence reference, learned) " +
+        "and its close. Read it before proposing a first hypothesis, so a dead one is not spent twice.",
+      inputSchema: {
+        subject_type: z.enum(["agent", "harness"]).optional(),
+        subject_id: z.string().optional(),
+      },
+    },
+    ({ subject_type, subject_id }) =>
+      run(principal, "scorecards:read", async () => {
+        if ((subject_type === undefined) !== (subject_id === undefined))
+          return fail("BAD_REQUEST: subject_type and subject_id go together — name both, or neither.");
+        const subject =
+          subject_type !== undefined && subject_id !== undefined ? { type: subject_type, id: subject_id } : undefined;
+        return ok(await campaigns.list(ws, (await teamCeiling(deps, principal)).visibleTeams, subject));
+      }),
   );
 
   server.registerTool(
