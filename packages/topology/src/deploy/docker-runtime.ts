@@ -459,7 +459,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     // extension from its OWN entrypoint, so it also gets NO args — passing them would replace that launch line.
     // Ignoring the declaration was silent, and silence here means the case runs without the extension it exists
     // to evaluate and scores badly for a reason nothing reports.
-    const extensionImage = spec.target?.extension?.ref;
+    const extensionImage = spec.target?.kind === "browser" ? spec.target.extension?.ref : undefined;
     await this.docker.run({
       name: cname,
       image: extensionImage ?? this.opts.browserImage ?? DEFAULT_BROWSER_IMAGE,

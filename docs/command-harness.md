@@ -27,7 +27,9 @@ single generic `CommandHarness` interprets it. A SaaS user registers a spec → 
                                        //     mlflow: "correlate":"id"|"tag"?, "experiment":"…"? · phoenix: "project" }
 }
 ```
-Template tokens in `command`: **`{{case.id}}`**, **`{{case.env.kind}}`**, **`{{case.env.repo.url}}`**,
+Template tokens in `command`: **`{{target.baseUrl}}`** (the static `api` target the template declares — the
+deployed environment this CLI acts on; also handed to the process as `EVERDICT_TARGET_BASE_URL`; see
+`docs/architecture/harness-definability-spec.md` §1), **`{{case.id}}`**, **`{{case.env.kind}}`**, **`{{case.env.repo.url}}`**,
 **`{{case.env.repo.ref}}`** (the case's own coordinates, shell-quoted — the whole allowlist; any other `{{case.*}}` is
 refused at registration, because the verifier-private material must never reach the agent's command; a field the case
 lacks renders as the empty string), **`{{seeds}}`** (the directory the harness version's skill/knowledge seeds were

@@ -1,4 +1,5 @@
 import {
+  BadRequestError,
   InternalError,
   type ServiceHarnessSpec,
   type TargetAcquire,
@@ -264,6 +265,22 @@ async function closeSession(
 
 // target.acquire → acquisition strategy. unset/provision = runtime provision (current), service = session-API acquisition.
 // An unknown mode is filtered at the boundary by the schema (discriminatedUnion).
+// A STATIC api target (harness-definability-spec.md §1): the environment the workspace already runs. Nothing to
+// provision, nothing to close; the base URL reaches the agent as the wiring variable `target_base_url`.
+export function staticApiAcquirer(baseUrl: string): TargetAcquirer {
+  return {
+    async acquire() {
+      return {
+        wiring: { target_base_url: baseUrl },
+        async snapshot() {
+          return { kind: "prompt", output: "" };
+        },
+        async dispose() {},
+      };
+    },
+  };
+}
+
 export function targetAcquirerFor(
   target: TopologyTarget,
   runtime: TopologyRuntime,
@@ -271,5 +288,26 @@ export function targetAcquirerFor(
   io: ServiceAcquirerIo = {},
 ): TargetAcquirer {
   if (target.acquire?.mode === "service") return serviceAcquirer(target.acquire, request, io);
-  return provisionAcquirer(runtime);
+  switch (target.kind) {
+    case "browser":
+      return provisionAcquirer(runtime);
+    case "api":
+      if (target.baseUrl !== undefined) return staticApiAcquirer(target.baseUrl);
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { target: "api" },
+        "an api target without a baseUrl acquires one through a session API (acquire.mode = service) — nothing provisions an API here",
+      );
+    case "os":
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { target: "os" },
+        "an os target is acquired through a session API (acquire.mode = service) — nothing provisions a desktop here",
+      );
+    default:
+      return assertNeverTarget(target);
+  }
+}
+function assertNeverTarget(value: never): never {
+  throw new Error(`unreachable target kind: ${JSON.stringify(value)}`);
 }

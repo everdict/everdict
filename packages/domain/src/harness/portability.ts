@@ -150,11 +150,17 @@ export function checkPortability(spec: PortabilityServiceSpec): PortabilityIssue
   // signal (an unauthenticated page, an empty answer, a login wall in the screenshot) read as THE AGENT FAILING
   // THE TASK. An infrastructure skip reported as a task failure is measurement corruption, which is precisely
   // what this check exists to catch before a run rather than after one.
-  if (spec.target?.profile && spec.target.acquire?.mode === "service" && spec.target.acquire.cdpBase === undefined)
+  // A saved profile is a BROWSER target's (definability spec §1: an api or os target has none to seed).
+  const browserTarget = spec.target?.kind === "browser" ? spec.target : undefined;
+  if (
+    browserTarget?.profile &&
+    browserTarget.acquire?.mode === "service" &&
+    browserTarget.acquire.cdpBase === undefined
+  )
     issues.push({
       rule: "profile-uninjectable",
       field: "target.profile",
-      message: `Target profile "${spec.target.profile}" cannot be injected: the browser is acquired from service "${spec.target.acquire.service}" and the session-open response declares no cdpBase, so this control plane has no browser to seed the login into. Declare acquire.cdpBase, or expect the agent to authenticate itself.`,
+      message: `Target profile "${browserTarget.profile}" cannot be injected: the browser is acquired from service "${browserTarget.acquire.service}" and the session-open response declares no cdpBase, so this control plane has no browser to seed the login into. Declare acquire.cdpBase, or expect the agent to authenticate itself.`,
     });
   const names = new Set(spec.services.map((s) => s.name));
   const byName = new Map(spec.services.map((s) => [s.name, s]));

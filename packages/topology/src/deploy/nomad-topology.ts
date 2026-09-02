@@ -673,7 +673,7 @@ export function buildBrowserJob(
   opts: BrowserJobOptions = {},
 ): NomadTopologyJobSpec {
   // A declared client extension → the user's headful browser+extension image (it loads the extension + serves CDP).
-  const extensionImage = spec.target?.extension?.ref;
+  const extensionImage = spec.target?.kind === "browser" ? spec.target.extension?.ref : undefined;
   const image = extensionImage ?? opts.image ?? DEFAULT_BROWSER_IMAGE;
   const cdpPort = opts.cdpPort ?? 9222;
   // chromedp/headless-shell already exposes CDP on 9222 (socat → internal 9223): override only allow-origins (permit ws
@@ -699,7 +699,15 @@ export function buildBrowserJob(
               Name: "browser",
               Driver: "docker",
               Config: config,
-              Env: { EVERDICT_RUN_ID: runId, EVERDICT_TARGET: spec.target?.engine ?? "chromium" },
+              Env: {
+                EVERDICT_RUN_ID: runId,
+                EVERDICT_TARGET:
+                  spec.target === undefined
+                    ? "chromium"
+                    : spec.target.kind === "browser"
+                      ? spec.target.engine
+                      : spec.target.kind,
+              },
               Resources: { CPU: 1000, MemoryMB: 1024 },
             },
           ],

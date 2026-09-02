@@ -3328,9 +3328,8 @@ describe("ServiceTopologyBackend — profile injection is reported either way", 
     },
     // No browserCdpBase: the browser belongs to the service, which is the case where injection has no channel.
   };
-  const withProfile: ServiceHarnessSpec = SPEC.target
-    ? { ...SPEC, target: { ...SPEC.target, profile: "acme-login" } }
-    : SPEC;
+  const withProfile: ServiceHarnessSpec =
+    SPEC.target?.kind === "browser" ? { ...SPEC, target: { ...SPEC.target, profile: "acme-login" } } : SPEC;
   const caseJob = {
     harness: { id: "browser-use-langgraph", version: "1.0.0" },
     evalCase: {

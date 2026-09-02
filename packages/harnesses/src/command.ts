@@ -198,6 +198,10 @@ export class CommandHarness implements EvaluableHarness {
       // The control plane resolves {secretRef} in env to a value just before dispatch. flattenEnv drops any unresolved ones (safe).
       ...flattenEnv(this.spec.env),
       EVERDICT_RUN_ID: runId, // Injected so the agent can correlate the trace
+      // The API this CLI acts on (harness-definability-spec.md §1) — the static base URL its spec's target names.
+      ...(this.spec.target?.kind === "api" && this.spec.target.baseUrl !== undefined
+        ? { EVERDICT_TARGET_BASE_URL: this.spec.target.baseUrl }
+        : {}),
       ...(this.spec.trace.kind !== "none" ? { OTEL_RESOURCE_ATTRIBUTES: `everdict.run_id=${runId}` } : {}),
       // W3C trace context: the run's trace id crosses the process boundary, so an instrumented agent's spans
       // are CHILDREN of the run rather than a separate trace that happens to share a correlation tag. The
@@ -241,7 +245,9 @@ export class CommandHarness implements EvaluableHarness {
       .replaceAll("{{run_id}}", runId)
       .replaceAll("{{conversation}}", conversationSlot)
       // Where the version's seeds were written before install (harness-identity-and-seeds-spec.md §2).
-      .replaceAll("{{seeds}}", HARNESS_SEED_MOUNT);
+      .replaceAll("{{seeds}}", HARNESS_SEED_MOUNT)
+      // The API this CLI acts on — its target's static base URL, quoted; empty without one (definability spec §1).
+      .replaceAll("{{target.baseUrl}}", shq(this.spec.target?.kind === "api" ? (this.spec.target.baseUrl ?? "") : ""));
     // The case's own coordinates, over the allowlist the spec was parsed against (harness-definability-spec.md §4).
     // Shell-quoted like {{task}}: these values come from a case document, not from the template author. A field
     // the case does not have (a repo ref on a prompt case) renders as the empty string, quoted.

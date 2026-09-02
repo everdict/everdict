@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BadRequestError } from "../errors.js";
-import { caseTokenDefects, harnessResourcesOf } from "./harness-spec.js";
+import { caseTokenDefects, harnessResourcesOf, targetDefects } from "./harness-spec.js";
 import {
   HarnessInstanceSpecSchema,
   type HarnessTemplateSpec,
@@ -271,7 +271,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     });
     const resolved = resolveHarnessInstance(tpl, instance);
     if (resolved.kind !== "service") throw new Error("expected service");
-    expect(resolved.target?.extension?.ref).toBe("ghcr.io/acme/ext:2");
+    expect(resolved.target?.kind === "browser" ? resolved.target.extension?.ref : undefined).toBe("ghcr.io/acme/ext:2");
 
     // target override on a template without a target → BadRequest
     const noTarget = HarnessTemplateSpecSchema.parse({ ...tpl, target: undefined });
@@ -938,5 +938,86 @@ describe("{{case.*}} tokens — refused at the template door unless allowlisted;
         }),
       ),
     ).toBeUndefined();
+  });
+});
+
+// ── A TARGET IS NOT ALWAYS A BROWSER (docs/architecture/harness-definability-spec.md §1) ──────────────
+describe("targets — browser | api | os, each obtainable or refused where it enters", () => {
+  const topology = (target: unknown) => ({
+    kind: "service",
+    category: "topology",
+    id: "shop",
+    version: "1",
+    services: [{ name: "web", slot: "web", port: 8080, needs: [], perRun: [], replicas: 1 }],
+    dependencies: [],
+    frontDoor: { service: "web", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+    target,
+  });
+  const command = (target: unknown) => ({
+    kind: "command",
+    category: "cli-agent",
+    id: "client",
+    version: "1.0.0",
+    image: "node:22",
+    command: "client --base {{target.baseUrl}} {{task}}",
+    target,
+  });
+  it("a browser target is unchanged; an api target names a baseUrl or a session API; an os target needs a session API", () => {
+    expect(HarnessTemplateSpecSchema.safeParse(topology({ kind: "browser", engine: "chromium" })).success).toBe(true);
+    expect(
+      HarnessTemplateSpecSchema.safeParse(topology({ kind: "api", baseUrl: "https://shop.internal" })).success,
+    ).toBe(true);
+    expect(
+      HarnessTemplateSpecSchema.safeParse(
+        topology({
+          kind: "api",
+          acquire: { mode: "service", service: "web", open: "POST /sessions", coordinates: { target_base_url: "url" } },
+        }),
+      ).success,
+    ).toBe(true);
+    expect(targetDefects({ kind: "api", observe: ["request", "response"] }, "service")).toHaveLength(1);
+    expect(targetDefects({ kind: "os", os: "linux", observe: ["screenshot", "window"] }, "service")).toHaveLength(1);
+    expect(
+      targetDefects(
+        {
+          kind: "os",
+          os: "linux",
+          observe: ["screenshot", "window"],
+          acquire: { mode: "service", service: "desk", open: "POST /sessions", coordinates: {} },
+        },
+        "service",
+      ),
+    ).toEqual([]);
+  });
+  it("a command harness's target is a static api and is carried onto the resolved spec; a browser or an acquired target is refused", () => {
+    const parsed = HarnessTemplateSpecSchema.parse(command({ kind: "api", baseUrl: "https://shop.internal" }));
+    const resolved = resolveHarnessInstance(parsed, {
+      template: { id: "client", version: "1.0.0" },
+      id: "client",
+      version: "1.0.0",
+      pins: {},
+    });
+    expect(resolved.kind === "command" ? resolved.target : undefined).toMatchObject({
+      kind: "api",
+      baseUrl: "https://shop.internal",
+    });
+    expect(HarnessTemplateSpecSchema.safeParse(command({ kind: "browser", engine: "chromium" })).success).toBe(false);
+    expect(
+      HarnessTemplateSpecSchema.safeParse(
+        command({ kind: "api", acquire: { mode: "service", service: "web", open: "POST /s", coordinates: {} } }),
+      ).success,
+    ).toBe(false);
+    // …and the extension override still only means something on a browser target.
+    const apiTopology = HarnessTemplateSpecSchema.parse(topology({ kind: "api", baseUrl: "https://shop.internal" }));
+    expect(() =>
+      resolveHarnessInstance(apiTopology, {
+        template: { id: "shop", version: "1" },
+        id: "shop",
+        version: "1.0.0",
+        pins: { web: "img" },
+        overrides: { target: { extension: { ref: "ghcr.io/acme/ext:2" } } },
+      }),
+    ).toThrow(/not a browser/);
   });
 });

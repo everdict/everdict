@@ -47,7 +47,7 @@ placed on `linux | windows | macos`. Built-in adapters: `ClaudeCodeHarness`, `Sc
 
 | id | gap | closed by |
 |---|---|---|
-| G1.1 | A **client** harness — one that acts on an environment through its API, browser or OS with no code of its own in the sandbox — has no shape of its own. A topology's `target` is a `browser` literal; an API target and an OS target do not exist, so a client is emulated as a `command` whose CLI happens to be a client. | `harness-definability-spec.md` §1 |
+| G1.1 | A **client** harness — one that acts on an environment through its API, browser or OS with no code of its own in the sandbox — has no shape of its own. A topology's `target` is a `browser` literal; an API target and an OS target do not exist, so a client is emulated as a `command` whose CLI happens to be a client. | `harness-definability-spec.md` §1 — **landed 2026-09-02** (declaration + acquisition; api observation proxy open) |
 | G1.2 | The **environment is not an entity**. A case embeds its environment; a topology embeds its target; a campaign's subject is `agent | harness`. An environment cannot be registered, versioned, diffed, or evolved. | `harness-definability-spec.md` §2 |
 | G1.3 | **Codex, Hermes and claude-code-router have no first-party template.** Codex ships as a one-shot `command` recipe; the others do not ship. The contract they need (`conversation`) is reachable from a template as of today. | `harness-definability-spec.md` §3 — **landed 2026-09-02** for codex + claude-code-router; hermes open |
 | G1.4 | A harness **cannot see the case** beyond `{{task}}` and its own params — no per-case hook carries the case's environment or metadata into the command — and a `process` harness declares no `resources`. | `harness-definability-spec.md` §4 — **landed 2026-09-02** |
@@ -142,7 +142,7 @@ identity §2 (seeds on the version, materialized or refused), §4 (the seed-leak
 verified); definability §4 (case tokens, the process box, one resources predicate) and §3 (codex and
 claude-code-router recipes).
 
-Open, in the order they should land: definability §1 (targets beyond the browser) and §2 (the environment
+Open, in the order they should land: definability §2 (the environment
 entity — the largest, and the one that unblocks an environment as a campaign subject); evidence §1 (the
 benchmark on-ramps, each an evaluator to port honestly). A Hermes recipe waits on its CLI's resume form.
 

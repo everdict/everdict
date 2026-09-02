@@ -1,4 +1,10 @@
-import { type ServiceHarnessSpec, type TargetAcquire, type TopologyTarget, UpstreamError } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type ServiceHarnessSpec,
+  type TargetAcquire,
+  type TopologyTarget,
+  UpstreamError,
+} from "@everdict/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TopologyRuntime } from "../deploy/topology-runtime.js";
 import {
@@ -414,5 +420,55 @@ describe("serviceAcquirer — wait without schema defaults applied", () => {
     });
     expect(handle.wiring.session_id).toBe("sess-1");
     expect(opens).toBe(2);
+  });
+});
+
+// ── A TARGET THAT IS NOT A BROWSER (docs/architecture/harness-definability-spec.md §1) ─────────────────
+describe("targetAcquirerFor — api and os targets", () => {
+  // A runtime that provisions a BROWSER when asked; an api or os target must never reach it.
+  const browserOnlyRuntime: TopologyRuntime = {
+    id: "fake",
+    async ensureTopology() {
+      return { endpoints: {} };
+    },
+    async provisionBrowserEnv() {
+      throw new Error("an api or os target must not provision a browser");
+    },
+  };
+  it("a static api target hands the agent its base URL as `target_base_url`, provisioning nothing", async () => {
+    const target: TopologyTarget = { kind: "api", baseUrl: "https://shop.internal", observe: ["request", "response"] };
+    const handle = await targetAcquirerFor(target, browserOnlyRuntime).acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: {},
+      wiring: {},
+    });
+    expect(handle.wiring.target_base_url).toBe("https://shop.internal");
+    await handle.dispose();
+  });
+  it("an api target with neither baseUrl nor a session API, and any os target without one, are refused by name rather than provisioned", () => {
+    const api: TopologyTarget = { kind: "api", observe: ["request", "response"] };
+    expect(() => targetAcquirerFor(api, browserOnlyRuntime)).toThrow(BadRequestError);
+    expect(() => targetAcquirerFor(api, browserOnlyRuntime)).toThrow(/baseUrl/);
+    const os: TopologyTarget = { kind: "os", os: "linux", observe: ["screenshot", "window"] };
+    expect(() => targetAcquirerFor(os, browserOnlyRuntime)).toThrow(BadRequestError);
+    expect(() => targetAcquirerFor(os, browserOnlyRuntime)).toThrow(/desktop/);
+  });
+  it("an api or os target acquired through a session API takes the service acquirer, like a browser", async () => {
+    const acquire: TargetAcquire = {
+      mode: "service",
+      service: "browsers",
+      open: "POST /sessions",
+      coordinates: { target_base_url: "url" },
+    };
+    const { fn } = fakeRequest({ "POST http://b/sessions": { url: "https://tenant-42.shop.internal" } });
+    const target: TopologyTarget = { kind: "api", acquire, observe: ["request"] };
+    const handle = await targetAcquirerFor(target, browserOnlyRuntime, fn).acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: { browsers: "http://b" },
+      wiring: {},
+    });
+    expect(handle.wiring.target_base_url).toBe("https://tenant-42.shop.internal");
   });
 });

@@ -319,6 +319,17 @@ fetch failure (auth, transient down, harness emitted no spans) is recorded as a 
 (visible, not silently lost) and grading proceeds over the snapshot. This is why the K8s/kind live e2e completes
 end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rejects the pull.
 
+### Target kinds — `browser` | `api` | `os`
+
+`target.kind` is a discriminated union (`TopologyTargetSchema`). `browser` is the original: engine, lifecycle,
+extension, saved profile, observation delivery. `api` names the deployed API a client harness acts on — a static
+`baseUrl` (wired to the agent as `target_base_url`) or a per-run one acquired through a session API — plus an
+optional OpenAPI reference and auth secret. `os` is a desktop acquired only through a session API. A target that
+cannot be obtained is refused where the spec enters (`targetDefects`), and the browser-only fields (extension,
+profile, delivery) are read only on a browser target. A `command` harness may declare a static `api` target,
+which reaches the CLI as `{{target.baseUrl}}` / `EVERDICT_TARGET_BASE_URL`. The recording proxy that would observe
+an api client's exchanges as trace events is not built yet; see `docs/architecture/harness-definability-spec.md` §1.
+
 ### Target acquisition (`target.acquire`) — pluggable (round 2)
 *How* the per-case target env is acquired is the `WHAT-target` seam (`TargetAcquirer`, the fourth sibling of
 `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`). `TopologyTarget.acquire` (`@everdict/contracts`) selects it; absent

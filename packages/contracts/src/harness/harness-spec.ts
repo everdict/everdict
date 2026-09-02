@@ -422,7 +422,13 @@ export const TargetAcquireSchema = z.discriminatedUnion("mode", [
 export type TargetAcquire = z.infer<typeof TargetAcquireSchema>;
 
 // Target environment (II): browser (+ client extension). A fresh per-case instance + the grader's observation target.
-export const TopologyTargetSchema = z.object({
+// ── A TARGET IS NOT ALWAYS A BROWSER (docs/architecture/harness-definability-spec.md §1) ─────────────
+//
+// The target is where the agent's actions LAND. It used to be a browser and nothing else, so a client that acts on
+// an environment through its API was written as a command whose CLI happens to be a client — and the experiment
+// identity could not say whether "the environment moved". Three kinds, one discriminated union; `acquire` is
+// shared (a session API can hand out a browser, a base URL or a desktop alike), the rest is each kind's own.
+export const BrowserTargetSchema = z.object({
   kind: z.literal("browser"),
   engine: z.literal("chromium"),
   extension: z.object({ ref: z.string() }).optional(),
@@ -436,7 +442,53 @@ export const TopologyTargetSchema = z.object({
   // unauthenticated). Design: docs/architecture/browser-profiles.md.
   profile: z.string().optional(),
 });
+export type BrowserTarget = z.infer<typeof BrowserTargetSchema>;
+// An API the agent calls. `baseUrl` = a deployed environment the workspace already runs (static); `acquire.mode =
+// service` = a session API hands out a base URL per case as the wiring variable `target_base_url`. One of the two.
+export const ApiTargetSchema = z.object({
+  kind: z.literal("api"),
+  baseUrl: z.string().url().optional(),
+  acquire: TargetAcquireSchema.optional(),
+  openapi: z.object({ ref: z.string().min(1) }).optional(), // where the API's contract is published
+  auth: z.object({ secretRef: z.string().min(1) }).optional(), // the credential the client presents, by secret name
+  observe: z.array(z.enum(["request", "response"])).default(["request", "response"]),
+});
+export type ApiTarget = z.infer<typeof ApiTargetSchema>;
+// A desktop the agent drives — the `os-use` world declared as a topology's target, so a deployed agent (not a CLI
+// in the sandbox) can act on it. Acquired through a session API; nothing provisions one here yet.
+export const OsTargetSchema = z.object({
+  kind: z.literal("os"),
+  os: z.enum(["linux", "windows", "macos"]),
+  acquire: TargetAcquireSchema.optional(),
+  observe: z.array(z.enum(["screenshot", "window"])).default(["screenshot", "window"]),
+});
+export type OsTarget = z.infer<typeof OsTargetSchema>;
+export const TopologyTargetSchema = z.discriminatedUnion("kind", [
+  BrowserTargetSchema,
+  ApiTargetSchema,
+  OsTargetSchema,
+]);
 export type TopologyTarget = z.infer<typeof TopologyTargetSchema>;
+
+// A target has to be OBTAINABLE: a browser is provisioned by default; an api needs a base URL or a session API; an
+// os needs a session API. Declared where the spec enters, so a target nobody could acquire never reaches a run.
+export function targetDefects(target: TopologyTarget | undefined, context: "service" | "command"): string[] {
+  if (target === undefined) return [];
+  const defects: string[] = [];
+  if (target.kind === "api" && target.baseUrl === undefined && target.acquire?.mode !== "service")
+    defects.push("an api target names a baseUrl, or acquires one through a session API (acquire.mode = service)");
+  if (target.kind === "os" && target.acquire?.mode !== "service")
+    defects.push(
+      "an os target is acquired through a session API (acquire.mode = service) — nothing provisions a desktop here",
+    );
+  if (context === "command") {
+    if (target.kind !== "api")
+      defects.push("a command harness's target is an api — a browser or a desktop is a topology's target");
+    if (target.acquire !== undefined)
+      defects.push("a command harness runs in a sandbox and acquires nothing — its api target names a static baseUrl");
+  }
+  return defects;
+}
 
 // Status response matching (done/failed decision) — no arbitrary code/eval, declarative data of a dot-path field + value comparison.
 export const StatusMatchSchema = z
@@ -749,6 +801,9 @@ export const CommandHarnessSpecSchema = z.object({
   id: z.string(),
   version: VersionSchema,
   seeds: HarnessSeedsSchema.optional(),
+  // The API this CLI acts on (harness-definability-spec.md §1): a static baseUrl, reaching the command as
+  // `{{target.baseUrl}}` and the environment as EVERDICT_TARGET_BASE_URL.
+  target: TopologyTargetSchema.optional(),
   image: z.string().optional(), // dispatch image (default job-runner image if absent). Install tools via setup.
   // Resource request for the whole job (same convention as TopologyService.resources: cpu 1000=1vCPU/nomad MHz,
   // memoryMb). Heavier harnesses declare it so nomad/k8s bin-pack correctly and starvation reads as an infra
@@ -806,7 +861,12 @@ export const HarnessSpecSchema = z
   // through this union): a `conversation` with no slot to land in would otherwise be a marker that says
   // "conversational" over a CLI that never resumes.
   .superRefine((spec, ctx) => {
+    if (spec.kind === "service")
+      for (const message of targetDefects(spec.target, "service"))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message });
     if (spec.kind !== "command") return;
+    for (const message of targetDefects(spec.target, "command"))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message });
     for (const message of caseTokenDefects(spec.command))
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["command"], message });
     for (const message of commandConversationDefects(spec))

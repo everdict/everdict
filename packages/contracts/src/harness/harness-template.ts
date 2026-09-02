@@ -20,6 +20,7 @@ import {
   TraceSourceSpecSchema,
   caseTokenDefects,
   commandConversationDefects,
+  targetDefects,
 } from "./harness-spec.js";
 import { ModelBindingSchema } from "./model-spec.js";
 
@@ -144,6 +145,8 @@ export const CommandTemplateSpecSchema = z.object({
   // lives on the template because registration is template-only: a contract the template cannot hold is one no
   // registered command harness could ever declare, and `conversational` would stay a marker nothing reaches.
   conversation: CommandHarnessSpecSchema.shape.conversation,
+  // The API this CLI acts on — a static baseUrl (harness-definability-spec.md §1); carried onto the resolved spec.
+  target: CommandHarnessSpecSchema.shape.target,
 });
 
 // --- process template --- a single process (Claude Code/Codex). Nothing to pin (template version = structure).
@@ -164,6 +167,8 @@ export const HarnessTemplateSpecSchema = z
     // …and the case tokens, at the door registration uses (harness-definability-spec.md §4).
     for (const message of caseTokenDefects(template.command))
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["command"], message });
+    for (const message of targetDefects(template.target, "command"))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["target"], message });
   });
 export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 
@@ -353,6 +358,12 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       // Target extension ref pin (Phase 3) — the template must have a target (fail clearly otherwise).
       let target = template.target;
       if (overrides?.target) {
+        if (target !== undefined && target.kind !== "browser")
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            { template: template.id, target: target.kind },
+            "overrides.target pins a browser extension, and the template's target is not a browser.",
+          );
         if (!target) {
           throw new BadRequestError(
             "BAD_REQUEST",
@@ -387,6 +398,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       const resources = overrides?.resources ?? template.resources;
       return CommandHarnessSpecSchema.parse({
         ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
+        ...(template.target !== undefined ? { target: template.target } : {}),
         kind: "command",
         id: instance.id,
         version: instance.version,

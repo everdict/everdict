@@ -728,3 +728,27 @@ describe("{{case.*}} — the case's coordinates, shell-quoted; absent fields ren
     expect(execs[0]?.cmd).not.toContain("{{case");
   });
 });
+
+// ── A COMMAND ACTS ON AN API (docs/architecture/harness-definability-spec.md §1) ──────────────────────
+describe("{{target.baseUrl}} — the api target a command harness acts on", () => {
+  it("renders the static base URL quoted and hands it to the process as EVERDICT_TARGET_BASE_URL; without a target both are empty", async () => {
+    const { compute, execs } = fakeCompute();
+    const withTarget: CommandHarnessSpec = {
+      ...spec(),
+      command: "client --base {{target.baseUrl}} {{task}}",
+      target: { kind: "api", baseUrl: "https://shop.internal", observe: ["request", "response"] },
+    };
+    await collect(new CommandHarness(withTarget, { runId: () => "rid1" }).run(compute, "buy milk", ctx));
+    expect(execs[0]?.cmd).toContain("--base 'https://shop.internal'");
+    expect(execs[0]?.env?.EVERDICT_TARGET_BASE_URL).toBe("https://shop.internal");
+    const { compute: c2, execs: e2 } = fakeCompute();
+    await collect(
+      new CommandHarness(
+        { ...spec(), command: "client --base {{target.baseUrl}} {{task}}" },
+        { runId: () => "rid1" },
+      ).run(c2, "x", ctx),
+    );
+    expect(e2[0]?.cmd).toContain("--base ''");
+    expect(e2[0]?.env?.EVERDICT_TARGET_BASE_URL).toBeUndefined();
+  });
+});

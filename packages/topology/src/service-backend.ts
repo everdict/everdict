@@ -625,7 +625,9 @@ export class ServiceTopologyBackend
         "target_acquired",
         spec.target?.acquire?.mode === "service"
           ? `session opened on service ${spec.target.acquire.service}${target.cdpBase ? " (live CDP reachable)" : ""}`
-          : `per-case browser provisioned${target.cdpBase ? ` (CDP ${target.cdpBase})` : ""}`,
+          : spec.target?.kind === "api"
+            ? `api target ${target.wiring.target_base_url ?? "(no base url)"}`
+            : `per-case browser provisioned${target.cdpBase ? ` (CDP ${target.cdpBase})` : ""}`,
       );
     }
     // A DECLARED observation coordinate that resolved to nothing degrades visibly instead of leaving the operator
@@ -658,7 +660,9 @@ export class ServiceTopologyBackend
       // Saved-profile injection (browser-profiles S5) — seed the profile's cookies into the per-case browser before
       // the agent drives it, so the eval runs already logged-in. Best-effort: a seed failure leaves the eval
       // unauthenticated but never fails the run (like the trace-source/export seams).
-      if (spec.target?.profile && this.opts.seedProfile) {
+      // The profile is a BROWSER target's; an api or os target has none to seed (definability spec §1).
+      const browserTarget = spec.target?.kind === "browser" ? spec.target : undefined;
+      if (browserTarget?.profile && this.opts.seedProfile) {
         // The acquired target's own address first: asking the runtime to rediscover a browser finds nothing when
         // the session API owns it, and a saved login that silently does not get injected produces an eval that
         // runs logged-out and scores as a capability failure.
@@ -670,21 +674,21 @@ export class ServiceTopologyBackend
         // wall in its screenshot read as the agent failing the task. Both outcomes are marked, so the reviewer
         // opening the trajectory is told which of the two they are looking at.
         if (cdpBase) {
-          const seeded = await this.opts.seedProfile(spec.target.profile, cdpBase, job).then(
+          const seeded = await this.opts.seedProfile(browserTarget.profile, cdpBase, job).then(
             () => true,
             (err: unknown) => {
               mark(
                 "profile_not_injected",
-                `saved profile "${spec.target?.profile}" was NOT injected — seeding failed: ${err instanceof Error ? err.message : String(err)}. This eval runs UNAUTHENTICATED; a login wall in its result is infrastructure, not the agent.`,
+                `saved profile "${browserTarget.profile}" was NOT injected — seeding failed: ${err instanceof Error ? err.message : String(err)}. This eval runs UNAUTHENTICATED; a login wall in its result is infrastructure, not the agent.`,
               );
               return false;
             },
           );
-          if (seeded) mark("profile_seeded", `saved profile "${spec.target.profile}" injected into the case browser`);
+          if (seeded) mark("profile_seeded", `saved profile "${browserTarget.profile}" injected into the case browser`);
         } else {
           mark(
             "profile_not_injected",
-            `saved profile "${spec.target.profile}" was NOT injected — this control plane has no reachable CDP for the case browser (a service-acquired target declares acquire.cdpBase to provide one). This eval runs UNAUTHENTICATED; a login wall in its result is infrastructure, not the agent.`,
+            `saved profile "${browserTarget.profile}" was NOT injected — this control plane has no reachable CDP for the case browser (a service-acquired target declares acquire.cdpBase to provide one). This eval runs UNAUTHENTICATED; a login wall in its result is infrastructure, not the agent.`,
           );
         }
       }
@@ -895,7 +899,8 @@ export class ServiceTopologyBackend
       // trace-delivery (gap 3): a containerless service target where the agent offloaded its observation (screenshot/DOM)
       // to its OWN artifact store and referenced it FROM the trace. The trace source's evidence extraction resolves those
       // refs to real bytes (ArtifactStore.get), so pull via fetchDetailed to carry the evidence into the ObservationSource.
-      const wantsTraceEvidence = spec.target?.delivery?.mode === "trace" && !inline;
+      const wantsTraceEvidence =
+        (spec.target?.kind === "browser" ? spec.target.delivery?.mode : undefined) === "trace" && !inline;
       let trace: TraceEvent[];
       let traceEvidence: TraceEvidence | undefined;
       // Which platform trace this case was scored from — the route back from a verdict to the evidence it
@@ -940,7 +945,10 @@ export class ServiceTopologyBackend
       // — pull the snapshot if there's a target, otherwise prompt. sentinel = extract inline from outcome.response (result channel).
       // egress = GET-retrieve from the sink (where the agent pushed; {run_id}-interpolated with the same correlation key as the trace).
       // trace = synthesize from the trace's resolved evidence (the harness's offloaded artifacts — gap 3).
-      const snapshot: EnvSnapshot = await observationSourceFor(spec.target?.delivery).observe({
+      // Observation delivery is a BROWSER target's declaration; an api or os target observes by reference for now.
+      const snapshot: EnvSnapshot = await observationSourceFor(
+        spec.target?.kind === "browser" ? spec.target.delivery : undefined,
+      ).observe({
         target,
         response: outcome.response,
         getJson: this.opts.getJson ?? fetchJson,

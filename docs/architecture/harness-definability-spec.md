@@ -27,6 +27,16 @@ agent's actions land — and today that target is a browser: `TopologyTargetSche
 
 ## §1 — A client harness is a harness with a target, and a target is not always a browser (G1.1)
 
+> **Landed 2026-09-02, the declaration and its acquisition:** `TopologyTargetSchema` is a discriminated union —
+> `browser` (unchanged), `api` (`baseUrl` or `acquire.mode = service`, `openapi`, `auth`, `observe`), `os` (`acquire.mode =
+> service`) — with `targetDefects` refusing an unobtainable target where the spec enters
+> (`packages/contracts/src/harness/harness-spec.ts`). A `command` template may declare a static `api` target, carried
+> onto the resolved spec, reaching the CLI as `{{target.baseUrl}}` and `EVERDICT_TARGET_BASE_URL`. The topology
+> backend acquires an `api` target statically (`staticApiAcquirer`, wiring `target_base_url`) or through a session
+> API; every browser-only read (extension image, saved profile, observation delivery) now narrows on the kind. **Not
+> landed:** the recording proxy that observes an api client's exchanges as trace events, and any provisioning of an
+> `os` target — both refuse by name today rather than pretend.
+
 **The gap.** The program names "a client that interacts with an environment directly" as a harness shape.
 Today that agent is written as a `command` whose CLI happens to be an HTTP client, or as a topology whose
 `target` is a browser. Neither says what the agent IS: the CLI is a client of the thing under test, and the
