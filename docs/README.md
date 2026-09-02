@@ -27,6 +27,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/overview.md](architecture/overview.md) — the architecture map (spine, eval loop, extension points)
 - [architecture/collaboration.md](architecture/collaboration.md) — module collaboration diagrams (Mermaid): bird's-eye dependency/eval-loop/control-plane + one detailed diagram per package & app
 - [architecture/execution-scoring-orchestration.md](architecture/execution-scoring-orchestration.md) — the three concerns, and why they stay apart
+- [architecture/evolution-program-gap-map.md](architecture/evolution-program-gap-map.md) — the four-pillar program (define any harness · one identity + seeds on the version · honest benchmarks + exact evidence · routed evolution), what holds, and the spec that closes each gap
 - [dev.md](dev.md) — local development: persistent Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
 
 ## Surfaces
@@ -48,6 +49,8 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [command-harness.md](command-harness.md) — declarative `command` harness: bring any CLI agent as a `HarnessSpec`, no code adapter
 - [service-harness.md](service-harness.md) — service-topology harnesses (multi-service + browser/OS target env), Nomad/K8s, OTel/MLflow trace
 - [architecture/harness-taxonomy.md](architecture/harness-taxonomy.md) — Template (category) + Instance, pins and resolution
+- [architecture/harness-definability-spec.md](architecture/harness-definability-spec.md) — spec: a client is a target of any kind, the environment is a registered entity, first-party coding-agent recipes, the case reaches the harness
+- [architecture/harness-identity-and-seeds-spec.md](architecture/harness-identity-and-seeds-spec.md) — spec: forks recorded at register, skill/wiki seeds on the harness version (inside the digest), lineage in one read, a seeded finding is a leak
 - [architecture/harness-playground.md](architecture/harness-playground.md) — interactive test cases against a live harness session
 - [architecture/eval-domain-model.md](architecture/eval-domain-model.md) — the Dataset / Rubric / Grader split
 - [architecture/standard-task-formats.md](architecture/standard-task-formats.md) — bring an existing agent benchmark, run it managed
@@ -57,6 +60,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 ## Scoring & verdicts
 - [trust-certification.md](trust-certification.md) — the nightly invariant suite: what "a defensible verdict" is mechanically pinned to
 - [architecture/trial-based-verdict.md](architecture/trial-based-verdict.md) — pass@k, flakiness & statistical regression
+- [architecture/benchmark-evidence-spec.md](architecture/benchmark-evidence-spec.md) — spec: finish the benchmark on-ramps, a judge-authored agent diagnosis, the round's evidence as an immutable platform-derived record, export only what is citable
 - [architecture/judge-input-contract.md](architecture/judge-input-contract.md) — declare, preview, dry-run
 - [architecture/judge-placement-locality.md](architecture/judge-placement-locality.md) — judge runtime selection + store-locality placement
 - [architecture/scoring-plane-revisions.md](architecture/scoring-plane-revisions.md) — the scoring plane as revisions (MVCC)
@@ -118,6 +122,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/knowledge-graph.md](architecture/knowledge-graph.md) — the workspace knowledge graph
 - [architecture/evolution-lineage.md](architecture/evolution-lineage.md) — evolution lineage: ancestry recorded at the write, events on the outbox, the campaign as a settlement
 - [architecture/code-evolution-loop.md](architecture/code-evolution-loop.md) — code evolution: a delegated coding agent mutates the harness repo, everdict builds the image into its own store, the campaign decides
+- [architecture/evolution-routing-spec.md](architecture/evolution-routing-spec.md) — spec: WHO from the slot's maintainer, WHAT from attributed evidence, the issue binds the cases, the gate verifies the targets flipped, build sets, memory across campaigns
 - [architecture/capability-store.md](architecture/capability-store.md) — the capability store (SSOT)
 - [architecture/analysis-studio.md](architecture/analysis-studio.md) — natural-language analysis, artifacts, scheduled reports over Views
 - [architecture/event-plumbing.md](architecture/event-plumbing.md) — the platform's nervous system: facts, one log + N cursor consumers, subscriptions
