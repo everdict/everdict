@@ -1150,6 +1150,12 @@ Everdict's tools load on demand. Before anything else:
   repository host and the model endpoint), and \`create_sandbox { runtime }\` places the session on a workspace
   runtime that can enforce it rather than the control plane's docker. The agent runs in ITS image with ITS model
   binding, and it never sees your tools or the workspace.
+- **The issue's cases.** Link the failing cases to the issue first — \`add_issue_link { type: "case", linkId:
+  <caseId>, dataset, version }\` — and open the campaign with \`frame: { fromIssue: true, … }\` (everything but
+  \`scenarios\`/\`targets\`): the platform makes the linked cases the TARGETS and every other case of that dataset
+  version held-out, and the gate adopts only when every target flipped with zero held-out regressions. That is
+  how "the actual issue was resolved" is verified rather than claimed. A frame you write by hand may name
+  \`targets\` directly; a target is never held-out.
 - **The oracle's paths.** Name the repository paths that ARE the exam — the dataset, judge rubrics, eval configs,
   the tests the graders run — as the frame's \`oracleScope\` (patterns: \`tests/\`, \`evals/**\`,
   \`judges/rubric-*.md\`). The record reads every candidate pull request's changed files against it and rejects a

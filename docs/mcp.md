@@ -76,7 +76,7 @@ last time, move it.
 | `get_issue` | `issues:read` | links, resolution (incl. the scorecard that proved it), GitHub copy, durable history |
 | `update_issue` | `issues:write` | content only (title/description/labels/assignee/project); `null` clears |
 | `set_issue_status` | `issues:write` | say where it should end up — the control plane picks move/resolve/reopen. `done` REQUIRES a resolution; reopening a done issue as `regressed` records a fallen resolution. Illegal move → `CONFLICT` |
-| `add_issue_link` / `remove_issue_link` | `issues:write` | attach/detach harness · dataset · judge · scorecard · run · view |
+| `add_issue_link` / `remove_issue_link` | `issues:write` | attach/detach harness · dataset · judge · scorecard · run · view · product · release · **case** (`dataset` + `version` + case id — the cases the issue is about; `open_campaign` with `frame.fromIssue` takes them as targets) |
 | `list_issue_scorecards` | `scorecards:read` | the issue's EVALUATION HISTORY: pinned evidence ∪ every batch its linked dataset/harness ran |
 | `delete_issue` | `issues:write` | hard delete; creator or admin |
 | `create/list/get/update/delete_project` | `issues:write` / `issues:read` | issues under one target date; `get` carries the rollup |

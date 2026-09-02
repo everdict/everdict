@@ -232,6 +232,18 @@ export const CampaignFrameSchema = CampaignFrameShape.superRefine((frame, ctx) =
 });
 export type CampaignFrame = z.infer<typeof CampaignFrameSchema>;
 
+// ── A FRAME DERIVED FROM THE ISSUE (docs/architecture/evolution-routing-spec.md §3) ─────────────────
+//
+// The caller states everything BUT the exam: `scenarios` and `targets` come from the issue's `case` links —
+// the linked cases are the targets, the linked dataset version's every other case is held-out. The service
+// performs the derivation (it needs the issue and the dataset) through `frameFromCases` in `@everdict/domain`,
+// and the result is parsed through `CampaignFrameSchema`, so a derived frame meets every creation rule a
+// hand-written one does. `fromIssue: true` is the discriminator a body carries to ask for this.
+export const CampaignFrameFromIssueSchema = CampaignFrameShape.omit({ scenarios: true, targets: true }).extend({
+  fromIssue: z.literal(true),
+});
+export type CampaignFrameFromIssue = z.infer<typeof CampaignFrameFromIssueSchema>;
+
 // ── WHERE A CANDIDATE CAME FROM (docs/architecture/code-evolution-loop.md, D4) ───────────────────────
 //
 // A round named a `candidateVersion` and nothing else, so the chain "delegation session → pull request → sha

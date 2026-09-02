@@ -1307,6 +1307,8 @@ async function main(): Promise<void> {
   const campaignService = new CampaignService({
     store: campaignStore,
     issues: issueService,
+    // The dataset version a frame derived `fromIssue` takes its scenarios from (evolution-routing-spec.md §3).
+    datasets: datasetRegistry,
     diffs: scorecardService,
     // The authorization an adopted close writes, readable through the campaign's own surface — without it
     // the operation was durable and unreachable from every transport (arch-review 73).

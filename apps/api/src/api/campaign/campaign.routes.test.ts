@@ -18,6 +18,11 @@ const noChanges = {
     readUnknown<{ paths: string[]; complete: boolean }>("no pull-request reader in this fixture"),
 };
 const noRuns = { get: async () => undefined };
+const noDatasets = {
+  get: async (): Promise<never> => {
+    throw new NotFoundError("NOT_FOUND", {}, "no dataset registry in this fixture");
+  },
+};
 
 // The campaign settlement over the HTTP transport — thin-route behavior (gate order, DTO refusal, error
 // mapping) over the same service the MCP twin drives. The diff is faked at the service seam: transport
@@ -56,6 +61,7 @@ function build(snapshot: CampaignSnapshot) {
     operations: store,
     changes: noChanges,
     runs: noRuns,
+    datasets: noDatasets,
     issues: {
       async get(_t: string, ref: string) {
         if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -507,6 +513,7 @@ function crossTeam() {
     operations: store,
     changes: noChanges,
     runs: noRuns,
+    datasets: noDatasets,
     // Both issues exist; they belong to different teams. Knowing the id is exactly what used to be enough.
     issues: {
       async get(_t: string, ref: string) {
@@ -576,6 +583,7 @@ describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team ca
         operations: store,
         changes: noChanges,
         runs: noRuns,
+        datasets: noDatasets,
         issues,
         diffs: { diffSnapshot: async () => winning },
         newId: () => "camp_open",
@@ -720,6 +728,7 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -890,6 +899,7 @@ describe("[COUNTEREXAMPLE] adopt gates the campaign's OWN team, whatever the pre
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_a") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -1039,6 +1049,7 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -1152,5 +1163,114 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
     const read = await app.inject({ method: "GET", url: `/campaigns/${id}/adoption`, headers: H });
     expect((read.json() as { operation: { code: { state: string } } }).operation.code.state).toBe("owed");
     await app.close();
+  });
+});
+
+// ── THE EXAM IS THE ISSUE'S (docs/architecture/evolution-routing-spec.md §3) ─────────────────────────
+//
+// RED before the derivation existed: a body whose frame said `fromIssue` was refused at parse, and nothing
+// could turn an issue's cases into a frame.
+describe("POST /campaigns with frame.fromIssue — the issue's case links become the exam", () => {
+  type Link = { type: string; id: string; version?: string; dataset?: string; addedBy: string; addedAt: string };
+  const issueWith = (links: Link[]) => ({
+    async get(_t: string, ref: string) {
+      if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
+      return { id: "iss_1", links };
+    },
+  });
+  const datasets = {
+    async get(_t: string, id: string, ref?: string) {
+      if (id !== "tb" || ref !== "3") throw new NotFoundError("NOT_FOUND", { id, ref }, "dataset not found");
+      return { cases: [{ id: "c1" }, { id: "c2" }, { id: "c3" }, { id: "c4" }] };
+    },
+  };
+  const appOver = (links: Link[]) => {
+    const store = new InMemoryEvolutionCampaignStore();
+    const issues = issueWith(links);
+    const campaignService = new CampaignService({
+      store,
+      operations: store,
+      changes: noChanges,
+      runs: noRuns,
+      datasets,
+      issues,
+      diffs: { diffSnapshot: async () => winning },
+      newId: () => "evc_from_issue",
+      now: () => "2026-09-02T03:00:00.000Z",
+    });
+    const agents = new InMemoryAgentRegistry();
+    return buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      campaignService,
+      issueService: {
+        async get(_t: string, ref: string) {
+          return ref === "iss_1" ? { id: "iss_1" } : undefined;
+        },
+      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["issueService"]>,
+      agentRegistry: agents,
+      campaignAdoption: buildCampaignAdoption({
+        operations: store,
+        agents,
+        harnesses: unusedHarnesses(),
+        templates: unusedTemplates(),
+        issues: openIssue(),
+      }),
+    });
+  };
+  const { scenarios: _scenarios, targets: _targets, ...rest } = frame;
+  void _scenarios;
+  void _targets;
+  const fromIssue = { fromIssue: true, ...rest };
+
+  it("derives targets from the case links and holds out every other case of the pinned dataset version", async () => {
+    const app = appOver([
+      { type: "case", id: "c1", dataset: "tb", version: "3", addedBy: "a", addedAt: "t" },
+      { type: "case", id: "c2", dataset: "tb", version: "3", addedBy: "a", addedAt: "t" },
+      { type: "harness", id: "shop", addedBy: "a", addedAt: "t" },
+    ]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame: fromIssue },
+    });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.json().frame).toMatchObject({
+      targets: ["c1", "c2"],
+      scenarios: [
+        { id: "c1", heldOut: false },
+        { id: "c2", heldOut: false },
+        { id: "c3", heldOut: true },
+        { id: "c4", heldOut: true },
+      ],
+    });
+    expect("fromIssue" in res.json().frame).toBe(false);
+    await app.close();
+  });
+
+  it("refuses by name when the issue links no cases, and when the links pin two dataset versions", async () => {
+    const none = appOver([{ type: "harness", id: "shop", addedBy: "a", addedAt: "t" }]);
+    const r1 = await none.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame: fromIssue },
+    });
+    expect(r1.statusCode).toBe(400);
+    expect(r1.json().message).toMatch(/links no cases/);
+    await none.close();
+    const mixed = appOver([
+      { type: "case", id: "c1", dataset: "tb", version: "3", addedBy: "a", addedAt: "t" },
+      { type: "case", id: "c2", dataset: "tb", version: "4", addedBy: "a", addedAt: "t" },
+    ]);
+    const r2 = await mixed.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame: fromIssue },
+    });
+    expect(r2.statusCode).toBe(400);
+    expect(r2.json().message).toMatch(/2 versions of dataset tb/);
+    await mixed.close();
   });
 });

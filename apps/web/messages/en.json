@@ -4973,7 +4973,8 @@
       "view": "View",
       "issue": "Mentions",
       "product": "Product",
-      "release": "Release"
+      "release": "Release",
+      "case": "Case"
     },
     "subject": {
       "issue": "issue",

@@ -359,14 +359,17 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     {
       annotations: { readOnlyHint: false },
       description:
-        "Attach a capability (harness/dataset/judge/scorecard/run/view) to an issue. Dataset and harness links " +
-        "widen the issue's evaluation history to every batch that exercised them, which is how a regression " +
-        "against a closed issue surfaces.",
+        "Attach a capability (harness/dataset/judge/scorecard/run/view) or a CASE to an issue. Dataset and harness " +
+        "links widen the issue's evaluation history to every batch that exercised them, which is how a regression " +
+        "against a closed issue surfaces. A `case` link (linkId = the case id, `dataset` + `version` = the dataset " +
+        "version it lives in) says which cases the issue is about; a campaign opened with frame.fromIssue takes " +
+        "them as its targets and adopts only when every one of them flipped.",
       inputSchema: {
         id: z.string(),
         type: IssueLinkTypeSchema,
         linkId: z.string(),
         version: z.string().optional(),
+        dataset: z.string().optional().describe("case links only — the dataset the case id lives in"),
         note: z.string().max(500).optional(),
       },
     },
@@ -380,6 +383,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
               type: a.type,
               id: a.linkId,
               ...(a.version !== undefined ? { version: a.version } : {}),
+              ...(a.dataset !== undefined ? { dataset: a.dataset } : {}),
               ...(a.note !== undefined ? { note: a.note } : {}),
             },
             actor,

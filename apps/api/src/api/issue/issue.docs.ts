@@ -211,8 +211,10 @@ export const issueDocs: Record<
   link: {
     summary: "Link a capability to an issue",
     description:
-      "Attach a harness, dataset, judge, scorecard, run or view. Links are pointers (resolved through the " +
-      "normal RBAC-gated reads), and the dataset/harness ones widen the issue's evaluation history. Requires issues:write.",
+      "Attach a harness, dataset, judge, scorecard, run, view — or a case (`type: case`, `id` = the case id, " +
+      "`dataset` + `version` = the dataset version it lives in; a campaign opened with frame.fromIssue takes the " +
+      "issue's cases as its targets). Links are pointers (resolved through the normal RBAC-gated reads), and the " +
+      "dataset/harness ones widen the issue's evaluation history. Requires issues:write.",
     tags: ["issue"],
     body: toJsonSchema(IssueLinkInputSchema),
     response: {

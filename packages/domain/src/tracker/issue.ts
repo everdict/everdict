@@ -22,6 +22,7 @@ import {
   ISSUE_PRIORITIES,
   ISSUE_STATUS_CATEGORY,
   NotFoundError,
+  issueLinkDefects,
 } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
 
@@ -37,6 +38,7 @@ export interface NewIssueLinkInput {
   type: IssueLinkType;
   id: string;
   version?: string;
+  dataset?: string; // `case` links only — the dataset the case id lives in (`issueLinkDefects`)
   note?: string;
 }
 
@@ -751,7 +753,22 @@ export class Issue {
   }
 
   link(input: NewIssueLinkInput, by: string, now: string): IssueTransition {
-    if (this.record.links.some((existing) => existing.type === input.type && existing.id === input.id))
+    // The coordinates rule, enforced where the link is BORN — both transports and every headless caller land
+    // here (rule `events`: choke points over call sites).
+    const defects = issueLinkDefects(input);
+    if (defects.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { issue: this.record.id, type: input.type, id: input.id },
+        defects.join("; "),
+      );
+    // Same type + same id is one link — and for a case, the same DATASET too: two datasets can both hold a
+    // case called `c1`, and they are two different exams.
+    if (
+      this.record.links.some(
+        (existing) => existing.type === input.type && existing.id === input.id && existing.dataset === input.dataset,
+      )
+    )
       throw new ConflictError(
         "CONFLICT",
         { issue: this.record.id, type: input.type, id: input.id },
@@ -761,6 +778,7 @@ export class Issue {
       type: input.type,
       id: input.id,
       ...(input.version !== undefined ? { version: input.version } : {}),
+      ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
       addedBy: by,
       addedAt: now,
@@ -772,7 +790,12 @@ export class Issue {
           at: now,
           by,
           event: "linked",
-          detail: { type: link.type, id: link.id, ...(link.version !== undefined ? { version: link.version } : {}) },
+          detail: {
+            type: link.type,
+            id: link.id,
+            ...(link.version !== undefined ? { version: link.version } : {}),
+            ...(link.dataset !== undefined ? { dataset: link.dataset } : {}),
+          },
         }),
         updatedAt: now,
       },

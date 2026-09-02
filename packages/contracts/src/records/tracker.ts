@@ -108,6 +108,14 @@ export const ISSUE_LINK_TYPES = [
   "issue",
   "product",
   "release",
+  // ── THE CASES AN ISSUE IS ABOUT (docs/architecture/evolution-routing-spec.md §3) ─────────────────
+  //
+  // "These five cases fail" used to be prose in the description. A `case` link names one: `id` is the CASE id,
+  // `dataset` the dataset it belongs to, `version` the dataset version (pinned, because a campaign derived from
+  // the issue freezes exactly that exam). A campaign opened `fromIssue` reads these as its `targets`, and the
+  // gate then adopts only when every one of them flipped — the join that makes "the actual issue was resolved"
+  // a verified fact rather than a sentence.
+  "case",
 ] as const;
 export const IssueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES);
 export type IssueLinkType = z.infer<typeof IssueLinkTypeSchema>;
@@ -118,11 +126,31 @@ export const IssueLinkSchema = z.object({
   // Absent = "this capability, any version" — which is what a long-lived issue usually means (a harness keeps
   // evolving while the issue stays the same). Pinning a version is the exception, not the default.
   version: z.string().optional(),
+  // The dataset a `case` link's id lives in. Present exactly on `case` links (`issueLinkDefects`); a case id
+  // without its dataset is a name with no address.
+  dataset: z.string().min(1).optional(),
   note: z.string().max(500).optional(),
   addedBy: z.string(),
   addedAt: z.string(),
 });
 export type IssueLink = z.infer<typeof IssueLinkSchema>;
+
+// The creation rule for a link's coordinates, one owner for every door (HTTP DTO, MCP input, the domain
+// transition): a `case` needs its dataset and a pinned dataset version; every other type carries no dataset.
+export function issueLinkDefects(link: { type: IssueLinkType; dataset?: string; version?: string }): string[] {
+  const defects: string[] = [];
+  if (link.type === "case") {
+    if (link.dataset === undefined)
+      defects.push("a case link names its dataset (`dataset`) — a case id alone has no address");
+    if (link.version === undefined)
+      defects.push(
+        "a case link pins the dataset version (`version`) — a campaign derived from the issue freezes exactly that exam",
+      );
+  } else if (link.dataset !== undefined) {
+    defects.push(`\`dataset\` belongs to case links only (this link is a ${link.type})`);
+  }
+  return defects;
+}
 
 // --- Issue labels: a workspace-level registry, referenced by id ---
 // Labels are RECORDS, not the free strings they used to be (mig 0107 promoted the old string arrays). An issue

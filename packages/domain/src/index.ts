@@ -533,6 +533,12 @@ export {
   campaignRoundRefusal,
   campaignStoppedAt,
 } from "./evolution/campaign-gate.js";
+export {
+  type CaseLinksAnswer,
+  type FrameFromCasesAnswer,
+  caseLinksOf,
+  frameFromCases,
+} from "./evolution/frame-from-issue.js";
 export { oracleTouched, pathMatchesPattern } from "./evolution/oracle-scope.js";
 // image — which BYTES a case ran from: the manifest reader, the driver/placement merge, and the comparison
 export {

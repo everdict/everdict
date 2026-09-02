@@ -476,6 +476,7 @@ function LinkTarget({
   if (!parsed.success || id === undefined) return null
   const type = parsed.data
   const version = detailString(detail, 'version')
+  const dataset = detailString(detail, 'dataset')
   const chip = (
     <Badge tone="neutral" className={cn(!linked && 'line-through decoration-faint')}>
       <span className="text-faint">{t(`linkType.${type}`)}</span>
@@ -490,7 +491,7 @@ function LinkTarget({
   if (!linked) return chip
   return (
     <Link
-      href={issueLinkHref(workspace, type, id)}
+      href={issueLinkHref(workspace, type, id, dataset)}
       className="transition-colors hover:text-foreground"
     >
       {chip}

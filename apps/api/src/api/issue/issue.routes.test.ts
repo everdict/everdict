@@ -869,3 +869,44 @@ describe("issue triage — the queue in front of the workflow", () => {
     }
   });
 });
+
+// ── A CASE LINK NAMES ITS DATASET VERSION (docs/architecture/evolution-routing-spec.md §3) ───────────
+describe("case links", () => {
+  it("stores the dataset coordinate with the case id, and refuses a case with no dataset or no pinned version", async () => {
+    const { app } = build();
+    const issue = await createIssue(app, { title: "c1 and c2 fail on the shop harness", status: "todo" });
+    const ok = await app.inject({
+      method: "POST",
+      url: `/issues/${issue.id}/links`,
+      headers: H,
+      payload: { type: "case", id: "c1", dataset: "tb", version: "3" },
+    });
+    expect(ok.statusCode, ok.body).toBe(200);
+    expect(ok.json().links[0]).toMatchObject({ type: "case", id: "c1", dataset: "tb", version: "3" });
+    const noDataset = await app.inject({
+      method: "POST",
+      url: `/issues/${issue.id}/links`,
+      headers: H,
+      payload: { type: "case", id: "c2", version: "3" },
+    });
+    expect(noDataset.statusCode).toBe(400);
+    expect(noDataset.json().message).toMatch(/names its dataset/);
+    const unpinned = await app.inject({
+      method: "POST",
+      url: `/issues/${issue.id}/links`,
+      headers: H,
+      payload: { type: "case", id: "c2", dataset: "tb" },
+    });
+    expect(unpinned.statusCode).toBe(400);
+    expect(unpinned.json().message).toMatch(/pins the dataset version/);
+    // …and a non-case link may not carry a dataset.
+    const stray = await app.inject({
+      method: "POST",
+      url: `/issues/${issue.id}/links`,
+      headers: H,
+      payload: { type: "harness", id: "shop", dataset: "tb" },
+    });
+    expect(stray.statusCode).toBe(400);
+    await app.close();
+  });
+});

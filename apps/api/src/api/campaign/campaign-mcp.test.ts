@@ -2,6 +2,7 @@ import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/ap
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import { AgentSpecSchema, type CampaignFrame, readUnknown } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
 import { InMemoryAgentRegistry } from "@everdict/registry";
@@ -19,6 +20,11 @@ const noChanges = {
     readUnknown<{ paths: string[]; complete: boolean }>("no pull-request reader in this fixture"),
 };
 const noRuns = { get: async () => undefined };
+const noDatasets = {
+  get: async (): Promise<never> => {
+    throw new NotFoundError("NOT_FOUND", {}, "no dataset registry in this fixture");
+  },
+};
 
 // BFF↔MCP parity for the campaign settlement: the agent-evolve loop drives the SAME service over MCP that
 // the HTTP routes serve — open, derived round, gate decision, settle. Role gating rides `scorecards:*`.
@@ -110,6 +116,7 @@ function makeDeps(
     operations: store,
     changes: noChanges,
     runs: noRuns,
+    datasets: noDatasets,
     issues: { get: async () => ({ id: "iss_1" }) },
     diffs: { diffSnapshot: async () => snapshot },
     newId: () => "evc_mcp",
@@ -261,6 +268,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues,
       diffs: { diffSnapshot: async () => winning },
       newId: () => "camp_foreign",

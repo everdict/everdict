@@ -27,6 +27,11 @@ const noChanges = {
     readUnknown<{ paths: string[]; complete: boolean }>("no pull-request reader in this fixture"),
 };
 const noRuns = { get: async () => undefined };
+const noDatasets = {
+  get: async (): Promise<never> => {
+    throw new NotFoundError("NOT_FOUND", {}, "no dataset registry in this fixture");
+  },
+};
 
 // ── The campaign settlement: store guards + the service's derived verdicts (Track D) ─────────────────
 //
@@ -289,6 +294,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues,
       diffs,
       newId: () => `id_${++n}`,
@@ -365,6 +371,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues: {
         async get(_t: string, ref: string) {
           return { id: ref, teamId: ref === "iss_a" ? "team-a" : "team-b" };
@@ -416,6 +423,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       operations: store,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues: {
         // The transport read team-a; by the time `open` reads it, the issue has moved.
         async get(_t: string, ref: string) {
@@ -959,6 +967,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       operations: raced,
       changes: noChanges,
       runs: noRuns,
+      datasets: noDatasets,
       issues,
       diffs,
       newId: () => "x",
@@ -1249,6 +1258,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         operations: store,
         changes: noChanges,
         runs: noRuns,
+        datasets: noDatasets,
         builds,
         issues,
         diffs,
@@ -1324,6 +1334,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         operations: store,
         changes,
         runs: noRuns,
+        datasets: noDatasets,
         builds,
         issues,
         diffs,
@@ -1505,6 +1516,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         operations: store,
         changes,
         runs: noRuns,
+        datasets: noDatasets,
         issues,
         diffs,
         newId: () => `id_${++n}`,
@@ -1620,6 +1632,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         operations: store,
         changes: noChanges,
         runs: ledger(runs),
+        datasets: noDatasets,
         issues,
         diffs,
         newId: () => `id_${++n}`,

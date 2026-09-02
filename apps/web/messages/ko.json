@@ -4973,7 +4973,8 @@
       "view": "뷰",
       "issue": "언급",
       "product": "프로덕트",
-      "release": "릴리즈"
+      "release": "릴리즈",
+      "case": "케이스"
     },
     "subject": {
       "issue": "이슈",

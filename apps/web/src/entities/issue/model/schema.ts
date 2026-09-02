@@ -66,6 +66,9 @@ export const ISSUE_LINK_TYPES = [
   // release gate counts its open linked issues through the same reverse query.
   'product',
   'release',
+  // A case the issue is about — `id` is the case id, `dataset` + `version` the dataset version it lives in. A
+  // campaign opened from the issue takes these as its targets (docs/architecture/evolution-routing-spec.md §3).
+  'case',
 ] as const
 export const issueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES)
 
@@ -73,6 +76,7 @@ export const issueLinkSchema = z.object({
   type: issueLinkTypeSchema,
   id: z.string(),
   version: z.string().optional(),
+  dataset: z.string().optional(), // case links only
   note: z.string().optional(),
   addedBy: z.string(),
   addedAt: z.string(),

@@ -145,9 +145,16 @@ The control plane's `?team=` narrowing on those lists is unchanged.
 
 Every issue belongs to exactly one team (`teamId`, required) and carries the identity that team minted
 (`number`, `identifier`). An issue gathers the capabilities that verify it (`links[]`: harness · dataset · judge · scorecard · run ·
-view · issue), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
+view · issue · product · release · **case**), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
 the normal RBAC-gated reads at render time, exactly like a platform event's subject. The one validated
 reference is `resolution.scorecardId`, because that one is evidence rather than navigation.
+
+**An issue can name the cases it is about** (`type: "case"`): `id` is the case id, `dataset` the dataset it lives in
+and `version` the dataset version — both required on a case link (`issueLinkDefects` in `@everdict/contracts`), because
+a campaign opened from the issue (`POST /campaigns` with `frame: { fromIssue: true, … }`) freezes exactly that exam:
+the linked cases become the frame's `targets`, the version's every other case is held-out, and the gate adopts only
+when every target flipped with zero held-out regressions (`docs/architecture/evolution-routing-spec.md` §3). Case links
+from two datasets are two exams, and the derivation refuses them by name rather than choosing.
 
 **One issue can point at another** (`type: "issue"`) — the cross-reference GitHub spells `#123`. It is stored like
 every other link, on the MENTIONING issue and one-directional, and the mentioned issue reads its backlinks with the

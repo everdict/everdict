@@ -17,6 +17,8 @@ const ROUTE: Record<IssueLinkType, string> = {
   // The product timeline — a link points at one product or one release (singular detail routes).
   product: 'product',
   release: 'release',
+  // A case has no page of its own; it lives on its dataset's. `issueLinkHref` takes the dataset for it.
+  case: 'dataset',
 }
 
 // 이슈 상세가 "연결된 자산"으로 보여주고 걸 수 있는 종류 — 이슈를 **검증하는 능력** 셋뿐이다.
@@ -51,6 +53,13 @@ export const ISSUE_LINK_REF_KIND: Partial<Record<IssueLinkType, 'dataset' | 'har
     judge: 'judge',
   }
 
-export function issueLinkHref(workspace: string, type: IssueLinkType, id: string): string {
-  return `/${workspace}/${ROUTE[type]}/${encodeURIComponent(id)}`
+export function issueLinkHref(
+  workspace: string,
+  type: IssueLinkType,
+  id: string,
+  dataset?: string
+): string {
+  // A case link points at its DATASET's page — the case id alone is not an address.
+  const target = type === 'case' ? (dataset ?? id) : id
+  return `/${workspace}/${ROUTE[type]}/${encodeURIComponent(target)}`
 }

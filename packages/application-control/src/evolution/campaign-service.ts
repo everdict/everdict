@@ -1,5 +1,6 @@
 import type {
   CampaignFrame,
+  CampaignFrameFromIssue,
   CampaignRound,
   CandidateSource,
   DomainFact,
@@ -24,7 +25,9 @@ import {
   adoptionProofOf,
   campaignAdoption,
   campaignRoundRefusal,
+  caseLinksOf,
   contentDigest,
+  frameFromCases,
   oracleTouched,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -174,7 +177,20 @@ export interface CampaignServiceDeps {
   // …and the TEAM it belongs to. A campaign journals into this issue, so they cannot be owned by different
   // teams without one of them being a lie — the campaign's authority is frozen from here at open
   // (arch-review 76 P1-security).
-  issues: { get(tenant: string, ref: string): Promise<{ id: string; teamId?: string }> };
+  issues: {
+    get(
+      tenant: string,
+      ref: string,
+    ): Promise<{
+      id: string;
+      teamId?: string;
+      // The issue's links, for a frame derived `fromIssue` — the `case` links name the exam.
+      links?: ReadonlyArray<{ type: string; id: string; version?: string; dataset?: string }>;
+    }>;
+  };
+  // The dataset version a derived frame's scenarios come from. REQUIRED: an optional one would let "no registry
+  // wired" read as "no such dataset" at the one door that turns an issue into an exam (rule `protocol`).
+  datasets: { get(tenant: string, id: string, ref?: string): Promise<{ cases: ReadonlyArray<{ id: string }> }> };
   // THE diff predicate (the ScorecardService facade's diffSnapshot) — policy-resolved transitions, trial
   // statistics, experiment identity, AND the two sides' records, so the round's declared coordinates are
   // verified against what actually ran. One owner; this service only summarizes its answer.
@@ -256,7 +272,9 @@ export type OracleCheck =
 
 export interface NewCampaignInput {
   issueId: string;
-  frame: CampaignFrame;
+  // A full frame, or `{ fromIssue: true, … }` — everything but the exam, which the service derives from the
+  // issue's `case` links and the dataset version they pin (evolution-routing-spec.md §3).
+  frame: CampaignFrame | CampaignFrameFromIssue;
   // ── THE TEAM THE TRANSPORT AUTHORIZED AGAINST (arch-review 115) ─────────────────────────────────
   //
   // The route reads the issue to gate `scorecards:run` on its team, and `open` below reads the SAME issue
@@ -321,17 +339,19 @@ export class CampaignService {
         { issue: input.issueId, authorized: input.expectedIssueTeamId ?? null, current: issue.teamId ?? null },
         "this issue changed teams while the campaign was being opened — read it back and open again",
       );
+    // The exam: the caller's, or derived from the issue's `case` links (evolution-routing-spec.md §3).
+    const frame = "fromIssue" in input.frame ? await this.frameFromIssue(tenant, issue, input.frame) : input.frame;
     // …and if this campaign says it CONTINUES another, the claim is verified before anything is written.
     // Open is the only moment the answer can change anything: after it the frame is frozen and its rounds are
     // judged at a level nobody may revise.
-    await this.assertChainIsHonest(tenant, input.frame);
+    await this.assertChainIsHonest(tenant, frame);
     const record: EvolutionCampaignRecord = {
       id: this.newId(),
       tenant,
       issueId: issue.id,
       ...(issue.teamId !== undefined ? { teamId: issue.teamId } : {}),
-      frame: input.frame,
-      frameDigest: contentDigest(input.frame),
+      frame,
+      frameDigest: contentDigest(frame),
       rounds: [],
       state: "open",
       createdBy: by,
@@ -345,13 +365,60 @@ export class CampaignService {
       payload: {
         id: record.id,
         issueId: record.issueId,
-        subjectType: input.frame.subject.type,
-        subjectId: input.frame.subject.id,
-        baselineVersion: input.frame.subject.baselineVersion,
+        subjectType: frame.subject.type,
+        subjectId: frame.subject.id,
+        baselineVersion: frame.subject.baselineVersion,
       },
     };
     await this.deps.store.create(record, this.stamped(tenant, [fact]));
     return record;
+  }
+
+  // ── THE EXAM IS THE ISSUE'S (docs/architecture/evolution-routing-spec.md §3) ─────────────────────
+  //
+  // The issue's `case` links name one dataset version and the cases the issue is about; the dataset version
+  // names every case there is. Targets are the linked cases, held-out is the rest, and the creation rules are
+  // applied to the result exactly as to a hand-written frame. Every way the links fail to be ONE exam is a
+  // refusal by name — a campaign whose exam is ambiguous has not frozen anything.
+  private async frameFromIssue(
+    tenant: string,
+    issue: { id: string; links?: ReadonlyArray<{ type: string; id: string; version?: string; dataset?: string }> },
+    base: CampaignFrameFromIssue,
+  ): Promise<CampaignFrame> {
+    const refuse = (message: string): never => {
+      throw new BadRequestError("BAD_REQUEST", { issue: issue.id }, message);
+    };
+    const named = caseLinksOf(issue.links ?? []);
+    switch (named.kind) {
+      case "none":
+        return refuse(
+          "the issue links no cases, so no exam can be derived from it — add `case` links (dataset + version + case id), or send a full frame",
+        );
+      case "several":
+        return refuse(
+          `the issue links cases from ${named.datasets.length} datasets (${named.datasets.join(", ")}) — one campaign is one exam; open one per dataset, or send a full frame`,
+        );
+      case "unpinned":
+        return refuse(
+          `the issue's case links on dataset ${named.dataset} do not all pin a version — a derived frame freezes exactly one dataset version`,
+        );
+      case "mixed_versions":
+        return refuse(
+          `the issue's case links pin ${named.versions.length} versions of dataset ${named.dataset} (${named.versions.join(", ")}) — one exam is one version`,
+        );
+      case "one": {
+        const dataset = await this.deps.datasets.get(tenant, named.dataset, named.version); // absent → NotFoundError
+        const answer = frameFromCases(
+          base,
+          dataset.cases.map((c) => c.id),
+          named.caseIds,
+        );
+        if (answer.kind === "refused") return refuse(answer.reason);
+        return answer.frame;
+      }
+      default:
+        return assertNever(named);
+    }
   }
 
   // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────

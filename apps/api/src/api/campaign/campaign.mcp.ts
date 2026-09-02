@@ -1,4 +1,4 @@
-import { CampaignAdoptionProofSchema, CampaignFrameSchema } from "@everdict/contracts";
+import { CampaignAdoptionProofSchema, CampaignFrameFromIssueSchema, CampaignFrameSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
@@ -25,7 +25,11 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         "the resolution).",
       inputSchema: {
         issue_id: z.string().describe("The issue this campaign journals into (id or identifier)"),
-        frame: CampaignFrameSchema,
+        frame: z
+          .union([CampaignFrameSchema, CampaignFrameFromIssueSchema])
+          .describe(
+            "a full frame, or { fromIssue: true, … } to derive scenarios + targets from the issue's case links",
+          ),
       },
     },
     ({ issue_id, frame }) =>

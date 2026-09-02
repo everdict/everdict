@@ -115,6 +115,12 @@ That round wins when all of these hold:
 Note the last line reads the HELD-OUT counts, not the whole round's. Improving where the loop has been
 pushing is evidence about the search, not about the capability.
 
+**`fromIssue`** — not a frame field but a way to obtain one: send `frame: { fromIssue: true, … }` with everything
+EXCEPT `scenarios` and `targets`, and the service derives both from the issue's `case` links — the linked cases
+are the targets, the linked dataset version's every other case is held-out. The result is parsed through the
+same creation rules a hand-written frame meets. Refused by name when the links name no cases, two datasets,
+or two versions: one campaign is one exam.
+
 **`targets`** — scenario ids the campaign exists to FLIP: the cases the issue named as failing. Default empty.
 Declared, they must be frame scenarios and must NOT be held-out — a case the loop is briefed on and optimizes
 against is not a generalization population — and the gate changes shape: adopt requires EVERY target to be a

@@ -1,14 +1,21 @@
-import { IssueLinkTypeSchema, IssuePrioritySchema, IssueStatusSchema } from "@everdict/contracts";
+import { IssueLinkTypeSchema, IssuePrioritySchema, IssueStatusSchema, issueLinkDefects } from "@everdict/contracts";
 import { z } from "zod";
 
 // A link is a POINTER to an everdict object (unvalidated by design — the same semantics a platform event's
 // subject has). Only resolution.scorecardId is checked, because that one is evidence.
-export const IssueLinkInputSchema = z.object({
-  type: IssueLinkTypeSchema,
-  id: z.string().min(1).max(200),
-  version: z.string().min(1).max(100).optional(),
-  note: z.string().max(500).optional(),
-});
+export const IssueLinkInputSchema = z
+  .object({
+    type: IssueLinkTypeSchema,
+    id: z.string().min(1).max(200),
+    version: z.string().min(1).max(100).optional(),
+    // `case` links only: the dataset the case id lives in (docs/architecture/evolution-routing-spec.md §3).
+    dataset: z.string().min(1).max(200).optional(),
+    note: z.string().max(500).optional(),
+  })
+  // The coordinates rule at the door (the domain transition enforces it again — one owner, `issueLinkDefects`).
+  .superRefine((link, ctx) => {
+    for (const message of issueLinkDefects(link)) ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+  });
 
 const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
 
