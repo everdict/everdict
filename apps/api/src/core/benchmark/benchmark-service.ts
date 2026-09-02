@@ -98,6 +98,10 @@ function toSourceRef(source: BenchmarkSourceSpec): DatasetSourceRef {
       url: `https://huggingface.co/datasets/${source.dataset}`, // canonical link (dataset page)
     };
   }
+  // A task set is NOT pasted jsonl. The fall-through used to say so anyway, which is the quiet half of a new
+  // source kind: the schema learned it, the import learned it, and the LINEAGE stamp kept answering with the
+  // shape it replaced (rule `protocol` L3 — provenance is born at the source).
+  if (source.kind === "terminal-bench") return { kind: "terminal-bench", url: "https://www.tbench.ai/" };
   return { kind: "jsonl" };
 }
 

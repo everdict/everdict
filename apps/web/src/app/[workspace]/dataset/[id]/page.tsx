@@ -592,6 +592,15 @@ function DatasetLineage({
               </span>
             ) : null}
           </span>
+        ) : source?.kind === 'terminal-bench' ? (
+          <a
+            href={source.url ?? 'https://www.tbench.ai/'}
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary hover:underline"
+          >
+            {t('lineageTaskSet')}
+          </a>
         ) : source?.kind === 'jsonl' ? (
           <span className="text-muted-foreground">{t('lineagePastedJsonl')}</span>
         ) : (

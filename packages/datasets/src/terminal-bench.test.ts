@@ -257,3 +257,17 @@ describe("the mapping belongs to the source that has rows", () => {
     ).toThrow(/declares no mapping/);
   });
 });
+
+// The LINEAGE a task-set import stamps. A dataset's `producedBy.source` is the one field answering "where did
+// these cases come from", and a fall-through that calls a task set "jsonl" answers it wrong — the shape this
+// batch replaced, stamped as the shape it replaced.
+describe("a task set's provenance says it is one", () => {
+  it("the mapper stamps Terminal-Bench provenance on the dataset it builds", () => {
+    const ds = terminalBenchToDataset([{ id: "hello", instruction: "hi", image: "img:1" }], {
+      id: "tb",
+      version: "1.0.0",
+    });
+    expect(ds.producedBy).toMatchObject({ via: "spec", id: "terminal-bench" });
+    expect(ds.producedBy?.origin?.code).toContain("terminal-bench");
+  });
+});

@@ -362,6 +362,7 @@
     "lineageTitle": "Source · Lineage",
     "lineageSource": "Source",
     "lineagePastedJsonl": "Pasted directly (JSONL)",
+    "lineageTaskSet": "Terminal-Bench task set",
     "lineageUnknown": "Unknown",
     "lineageOfficial": "Official",
     "linkHomepage": "Homepage",

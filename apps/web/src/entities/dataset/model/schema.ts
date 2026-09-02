@@ -16,7 +16,7 @@ import { versionOriginsSchema } from '@/entities/capability-origin'
 
 // Source data provenance (lineage) — where the case rows came from. HF dataset/file/split + canonical link.
 export const datasetSourceRefSchema = z.object({
-  kind: z.enum(['huggingface', 'jsonl']),
+  kind: z.enum(['huggingface', 'jsonl', 'terminal-bench']),
   dataset: z.string().optional(),
   config: z.string().optional(),
   split: z.string().optional(),

@@ -8,7 +8,10 @@ import { EvalCaseSchema } from "./eval-case.js";
 // Original data source (lineage) — where the case rows actually came from. HuggingFace dataset/file/split + canonical link.
 // The basis for the dataset detail showing "where this data came from" as links (lineage). Stamped at ingest (immutable).
 export const DatasetSourceRefSchema = z.object({
-  kind: z.enum(["huggingface", "jsonl"]),
+  // WHERE THE ROWS CAME FROM, and a kind this cannot name is a lineage stamped as something it is not.
+  // `terminal-bench` is its own kind for that reason: a task set is not "pasted jsonl", and the reader that
+  // answers "where did these cases come from" has no other field to learn it from.
+  kind: z.enum(["huggingface", "jsonl", "terminal-bench"]),
   dataset: z.string().optional(), // HF: org/name
   config: z.string().optional(), // HF config
   split: z.string().optional(), // HF split
