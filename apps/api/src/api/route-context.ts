@@ -74,6 +74,7 @@ import type { ImageTokenService } from "@everdict/images";
 import type {
   AgentRegistry,
   DatasetRegistry,
+  EnvironmentRegistry,
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
   JudgeRegistry,
@@ -199,6 +200,8 @@ export interface ServerDeps {
 
   skillGenerator?: SkillGenerator; // skill-generate — draft a skill from a description via the workspace's model (route disabled if absent)
   runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
+  // Environment (the world a case ACTS ON) CRUD — routes disabled if absent (harness-definability-spec.md §2)
+  environmentRegistry?: EnvironmentRegistry;
   // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   // Runtime live inspection — RuntimeSpec → build a live backend, then inspect() (read-only cluster view: nodes/capacity/workload/stores). Same secrets+builder as probe.

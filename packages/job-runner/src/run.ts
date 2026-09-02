@@ -49,6 +49,15 @@ function environmentFor(kind: EnvSpec["kind"], repoToken?: string): Environment 
         { envKind: kind },
         "browser env is not runnable on the local agent path (use a service topology backend).",
       );
+    // A REFERENCE reaches a sandbox only if the control plane failed to resolve it (harness-definability-spec
+    // §2). `resolveCaseEnvironments` runs at submit and on every execution lane, so this is a wiring failure,
+    // never a case shape — and guessing a seed for it would run the case against a world nobody named.
+    case "ref":
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { envKind: kind },
+        "this case names its environment by reference and the reference was never resolved — the control plane resolves it before dispatch.",
+      );
     default: {
       const exhaustive: never = kind;
       throw new BadRequestError("BAD_REQUEST", { envKind: exhaustive }, "unsupported env kind.");

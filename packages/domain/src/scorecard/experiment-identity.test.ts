@@ -54,9 +54,13 @@ const sealed = (over: Partial<ScorecardManifest> = {}): ScorecardManifest => ({
 
 describe("experimentIdentity — held / confound / unverified, never a guess", () => {
   it("identical seals hold every axis — and the harness is deliberately not one (it is the treatment)", () => {
+    // The environment axis ABSTAINS when neither side references one, so a fixture that seals nothing could
+    // never hold it — and "every axis" would quietly mean "every axis but that one". Both sides pin the same
+    // environment document, which is what holding it actually looks like.
+    const environments = { login: { ref: "shop@1.0.0", digest: "sha256:env-1" } };
     const id = identity(
-      sealed({ harness: { id: "agent", version: "1.0.0" } }),
-      sealed({ harness: { id: "agent", version: "2.0.0" } }), // the treatment moved — not a confound
+      sealed({ harness: { id: "agent", version: "1.0.0" }, environments }),
+      sealed({ harness: { id: "agent", version: "2.0.0" }, environments }), // the treatment moved — not a confound
     );
     // Derived, not restated: "every axis" is a claim about the vocabulary, and a hand-copied list turns
     // "an axis was added" into a failure that says nothing about this test (rule `protocol` L3).

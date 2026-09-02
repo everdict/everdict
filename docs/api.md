@@ -39,6 +39,10 @@ arrives by polling or webhook.
 | `POST` | `/judges/validate` | dry-run: schema + existing versions/conflict, no write (`judges:write`) |
 | `GET`  | `/judges` | workspace-owned + `_shared` Agent Judges (`judges:read`) |
 | `GET`  | `/judges/:id/versions/:version` | full `JudgeSpec`; `version` may be `latest` (`judges:read`) |
+| `POST` | `/environments` | register an `EnvironmentSpec` — the world a case ACTS ON (repo seed / browser fixture / prompt context / desktop), immutable → `409` (`datasets:write`) |
+| `GET`  | `/environments` | workspace-owned + `_shared` environments (`datasets:read`) |
+| `GET`  | `/environments/:id/versions/:version` | full `EnvironmentSpec`; `version` may be `latest` (`datasets:read`) |
+| `PUT`  | `/environments/:id/versions/:version/tags` | replace a version's free-form labels (`datasets:write`) |
 | `POST` | `/runtimes` | register a `RuntimeSpec` (local \| nomad \| k8s; immutable → `409`) (`runtimes:write`) |
 | `POST` | `/runtimes/validate` | dry-run: schema + existing versions/conflict, no write (`runtimes:write`) |
 | `GET`  | `/runtimes` | workspace-owned + `_shared` execution runtimes (`runtimes:read`) |

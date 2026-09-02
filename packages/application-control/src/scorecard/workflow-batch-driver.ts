@@ -47,6 +47,7 @@ import {
   verdictSummaryOf,
   worldCohortOf,
 } from "@everdict/domain";
+import { resolveCaseEnvironments } from "../environment/case-environment.js";
 import { jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-attempt.js";
 
 // The correlation id a (case, trial) is DISPATCHED with — the same spelling the in-process driver's
@@ -192,7 +193,17 @@ export class WorkflowBatchDriver {
     // mask a change to the case's own default graders.
     plan.assertSelection(selected);
     // Re-apply the recorded grading plan — a workflow-driven case must score exactly like the original submit.
-    const cases = applyGradingPlan(selected, orch.graders);
+    const graded = applyGradingPlan(selected, orch.graders);
+    // …and this batch's sealed environments at their pinned versions (§2), for the same reason the resume
+    // lane does it: a durable workflow outlives a registry edit.
+    const cases = (
+      await resolveCaseEnvironments({
+        tenant: rec.tenant,
+        cases: graded,
+        ...(this.deps.environments ? { registry: this.deps.environments } : {}),
+        ...(plan.sealedEnvironments ? { sealed: plan.sealedEnvironments } : {}),
+      })
+    ).cases;
     // Sharding: same comma-list round-robin as the in-process loop, keyed by the SELECTED index so a re-plan after
     // a restart assigns every case the same target it had before.
     const targets = (rec.runtime ?? "")

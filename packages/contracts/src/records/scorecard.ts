@@ -105,6 +105,12 @@ export const SealedJudgeEntrySchema = z.object({
 });
 export type SealedJudgeEntry = z.infer<typeof SealedJudgeEntrySchema>;
 
+export const SealedEnvironmentEntrySchema = z.object({
+  ref: z.string(), // "id@version", pinned at seal time
+  digest: z.string().optional(), // the environment document's own digest; absent = unreadable at seal time
+});
+export type SealedEnvironmentEntry = z.infer<typeof SealedEnvironmentEntrySchema>;
+
 export const ScorecardManifestSchema = z.object({
   identityVersion: z.number().int().positive().optional(), // declared seal era — absent = legacy (inferred)
   dataset: z.object({ id: z.string(), version: z.string(), digest: z.string() }), // digest over the resolved case bundle
@@ -175,6 +181,13 @@ export const ScorecardManifestSchema = z.object({
   // change. The digest answers "is this the document we sealed?", which is a different question from "is
   // this the same experiment?" — and only the first one belongs at the dispatcher.
   judgeRunModelDigest: z.string().optional(),
+  // WHICH ENVIRONMENT DOCUMENT each case ran against (harness-definability-spec.md §2), keyed by case id —
+  // only for cases that name their environment by REFERENCE. An embedded environment is part of the case's
+  // own content digest above and needs no second seal. `ref` is the concrete "id@version" the submit-time
+  // resolution pinned (a `latest` ref is pinned here, never left moving); `digest` is the document beneath
+  // it, absent when it could not be read at seal time — which the identity axis reads as "never pinned",
+  // never as agreement. Absent map = no case in this batch referenced an environment.
+  environments: z.record(z.string(), SealedEnvironmentEntrySchema).optional(),
   // The COMPOSED verdict policy this batch judges under, embedded IN FULL when it differs from the built-in
   // ladder: a composed document lives nowhere else, and a stamp whose document cannot be found is a verdict
   // that cannot be re-derived. Absent = the default ladder.

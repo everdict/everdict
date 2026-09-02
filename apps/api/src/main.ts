@@ -234,6 +234,7 @@ async function main(): Promise<void> {
     modelRegistry,
     agentRegistry,
     runtimeRegistry,
+    environmentRegistry,
     settingsStore,
     workspaceStore,
     userProfileStore,
@@ -887,6 +888,7 @@ async function main(): Promise<void> {
   const cascadeCancel: { fn?: (tenant: string, runId: string) => Promise<{ cancelled: number; failures: string[] }> } =
     {};
   const { service, judgeRunner, submitCodeJudgeRun } = buildRun({
+    environmentRegistry,
     envelopes: envelopeStore,
     trajectories: trajectoryStore,
     caseReceipts: caseReceiptStore,
@@ -953,6 +955,7 @@ async function main(): Promise<void> {
   });
 
   const scorecardService = buildScorecard({
+    environmentRegistry,
     publicationOperations: publicationOperationStore,
     publisherId: REPLICA_ID,
     scoringStageStore,

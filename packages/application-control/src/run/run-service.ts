@@ -65,6 +65,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type CancellationTeardownResult, runDurableTeardown } from "../cancellation/cancellation-coordinator.js";
+import { resolveOneCaseEnvironment } from "../environment/case-environment.js";
 import type { AgentHalfStore } from "../execution/agent-half.js";
 import { type ExecuteCaseDeps, executeCase } from "../execution/execute-case.js";
 import { openPhysicalAttempt } from "../execution/open-physical-attempt.js";
@@ -75,6 +76,7 @@ import type { CancellationCertificate, CancellationStore, CancellationTarget } f
 import type { CaseReceiptStore } from "../ports/case-receipt-store.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
+import type { EnvironmentRegistry } from "../ports/environment-registry.js";
 import type { ExecStreamHandle } from "../ports/exec-stream.js";
 import { type ExecutionAttemptStore, requireAdopted } from "../ports/execution-attempt-store.js";
 import {
@@ -146,6 +148,10 @@ export interface RunServiceDeps {
   store: RunStore;
   // Durable replay recording (optional) — at finalize, seal the frames/logs teed during the run and attach the ref.
   recordingStore?: RecordingStore;
+  // The environment registry, for a case that names its world by reference (harness-definability-spec.md
+  // §2). Resolved BEFORE the record is created, so the persisted case body — boot recovery's re-dispatch
+  // basis — carries the concrete environment rather than a ref that would resolve again later.
+  environments?: EnvironmentRegistry;
   // The PHYSICAL execution ledger (arch-review 42, Phase 1) — one unconditional row per physical execution of
   // this run, including the re-drive that the recording buffer alone could never distinguish. Dual-write and
   // observed-only: nothing reads it to decide anything yet.
@@ -486,10 +492,17 @@ export class RunService {
         )
       : undefined;
     this.deps.budget?.admit(input.tenant); // PaymentRequiredError (402) when exceeded — no run created
+    // A case may name its ENVIRONMENT by reference (§2) — resolved here, before the record is written, so
+    // the persisted case body is a concrete world and a boot recovery re-dispatches the same one.
+    const submitted = await resolveOneCaseEnvironment({
+      tenant: input.tenant,
+      case: input.case,
+      ...(this.deps.environments ? { registry: this.deps.environments } : {}),
+    });
     // When a runtime is chosen, inject it as the case's placement.target → RuntimeDispatcher routes to the tenant runtime (same symmetry as scorecard).
     const effective: SubmitInput = input.runtime
-      ? { ...input, case: { ...input.case, placement: { ...input.case.placement, target: input.runtime } } }
-      : input;
+      ? { ...input, case: { ...submitted, placement: { ...submitted.placement, target: input.runtime } } }
+      : { ...input, case: submitted };
     // The placed runtime (work-queue axis) — an explicit runtime or the case's own placement.target. If absent, the default backend (unset).
     const placedRuntime = input.runtime ?? input.case.placement?.target;
     // Record assembly is the domain's job (Run.newQueued) — the service only orchestrates. The persisted

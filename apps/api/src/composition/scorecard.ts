@@ -24,6 +24,7 @@ import { type CircuitBreaker, type UsageMeter, stagePromotionSafe } from "@everd
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@everdict/graders";
 import type {
   DatasetRegistry,
+  EnvironmentRegistry,
   HarnessInstanceRegistry,
   JudgeRegistry,
   ModelRegistry,
@@ -87,6 +88,9 @@ export function buildScorecard(deps: {
   metrics: Metrics;
   settingsStore: WorkspaceSettingsStore;
   datasetRegistry: DatasetRegistry;
+  // The environment registry, for a case that names its world by reference (harness-definability-spec.md
+  // §2). Every execution lane re-resolves through the batch's seal, so it has to reach the service.
+  environmentRegistry: EnvironmentRegistry;
   harnessInstanceRegistry: HarnessInstanceRegistry;
   judgeRegistry: JudgeRegistry;
   rubricRegistry: RubricRegistry;
@@ -126,6 +130,7 @@ export function buildScorecard(deps: {
     metrics,
     settingsStore,
     datasetRegistry,
+    environmentRegistry,
     harnessInstanceRegistry,
     judgeRegistry,
     rubricRegistry,
@@ -328,6 +333,7 @@ export function buildScorecard(deps: {
     ...(publicationOperations ? { publicationOperations } : {}),
     ...(publisherId !== undefined ? { publisherId } : {}),
     datasets: datasetRegistry,
+    environments: environmentRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,
     // Judge-closure seal (H8): a rubric REF resolves at run time, so the seal pins its latest-resolution.

@@ -20,6 +20,7 @@ import { registerCommentRoutes } from "./api/comment/comment.routes.js";
 import { registerCycleRoutes } from "./api/cycle/cycle.routes.js";
 import { registerDatasetRoutes } from "./api/dataset/dataset.routes.js";
 import { registerEnvironmentAdoptionRoutes } from "./api/environment-adoption/environment-adoption.routes.js";
+import { registerEnvironmentRoutes } from "./api/environment/environment.routes.js";
 import { registerEventRoutes } from "./api/event/event.routes.js";
 import { registerFrontdoorCallbackRoutes } from "./api/execution/frontdoor-callback.routes.js";
 import { registerFsRoutes } from "./api/fs/fs.routes.js";
@@ -147,6 +148,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerFsRoutes(routes, deps);
     registerCapabilityRoutes(routes, deps);
     registerRuntimeRoutes(routes, deps);
+    registerEnvironmentRoutes(routes, deps);
     registerProfileRoutes(routes, deps);
     registerWorkspaceRoutes(routes, deps);
     registerWorkspacePulseRoutes(routes, deps);

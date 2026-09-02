@@ -72,6 +72,18 @@ one that matters: a target that resolves and is not observed is a declaration, n
 
 ## §2 — The environment is an entity: registered, versioned, diffed, evolvable (G1.2, G4.6)
 
+> **Landed 2026-09-02, the entity and the identity axis:** `EnvironmentSpecSchema` is a registered document
+> (`(tenant, id, version) → EnvironmentSpec`, `InMemoryEnvironmentRegistry` / `PgEnvironmentRegistry`, migration
+> 0207, doors `POST/GET /environments` + `create_environment`/`list_environments`/`get_environment`, gated by
+> the dataset action pair). A case names one with `env: { kind: "ref", id, version? }`; `resolveCaseEnvironments`
+> resolves it at submit and SEALS the concrete version on the manifest (`environments`), and every execution
+> lane — resume, retry, the Temporal driver, the single run — re-resolves through that seal rather than through
+> a fresh `latest` read, refusing when the document's bytes have moved. `EXPERIMENT_AXES` gains `environment`,
+> so two batches over one dataset and two environment versions read as an environment confound instead of as a
+> change to the harness under test. **Not landed:** the `service` environment kind (nothing provides one yet, so
+> the schema would be a plan), a `source`+`build` recipe for environments, and `subject.type: "environment"` —
+> a campaign still evolves an agent or a harness.
+
 **The gap.** A case EMBEDS its environment (`EvalCase.env`), a topology embeds its target, and a campaign's
 subject is `agent | harness` (`packages/contracts/src/records/evolution-campaign.ts`). So the environment —
 the seed repository, the browser fixture, the OS image, the deployed service under test — has no identity of

@@ -17,6 +17,7 @@ import {
   resolvePolicyResolution,
 } from "@everdict/domain";
 import { applyGradingPlan, initialScoringPassId, selectSubsetCases } from "@everdict/domain";
+import { resolveCaseEnvironments } from "../environment/case-environment.js";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { OOM_ESCALATION_CAP_MB } from "../ops/oom-boost.js";
@@ -145,7 +146,16 @@ export class RetryFailedBatch {
       src.subset ? { ids: src.subset.ids, tags: src.subset.tags, limit: src.subset.limit } : undefined,
     );
     // Re-apply the recorded grading plan — a retry must score exactly like the original submit.
-    const dataset: Dataset = { ...resolved, cases: applyGradingPlan(cases, src.orchestration?.graders) };
+    const graded = applyGradingPlan(cases, src.orchestration?.graders);
+    // The source batch's sealed environments, re-resolved at the pinned versions (§2) — a retry that read
+    // `latest` again would measure a different world under the source's manifest.
+    const retryEnvironments = await resolveCaseEnvironments({
+      tenant: input.tenant,
+      cases: graded,
+      ...(this.deps.environments ? { registry: this.deps.environments } : {}),
+      ...(sourcePlan.sealedEnvironments ? { sealed: sourcePlan.sealedEnvironments } : {}),
+    });
+    const dataset: Dataset = { ...resolved, cases: retryEnvironments.cases };
 
     let harnessSpec: HarnessSpec | undefined;
     const pins = src.origin?.pinOverrides;

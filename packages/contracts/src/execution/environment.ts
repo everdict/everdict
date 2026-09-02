@@ -63,7 +63,7 @@ export const RepoSourceSchema = z.union([
 ]);
 export type RepoSource = z.infer<typeof RepoSourceSchema>;
 
-export const EnvSpecSchema = z.discriminatedUnion("kind", [
+export const ConcreteEnvSpecSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("repo"),
     source: RepoSourceSchema,
@@ -89,7 +89,38 @@ export const EnvSpecSchema = z.discriminatedUnion("kind", [
     screenshotPath: z.string().optional(), // screenshot save path (default /tmp/everdict-screen.png)
   }),
 ]);
+export type ConcreteEnvSpec = z.infer<typeof ConcreteEnvSpecSchema>;
+
+// ── AN ENVIRONMENT NAMED BY REFERENCE (docs/architecture/harness-definability-spec.md §2) ────────────
+//
+// A case that EMBEDS its environment can never be evaluated against a second version of that environment:
+// changing the seed repository, the fixture or the deployed app rewrites the case, so the delta is filed
+// under `dataset_content` and the comparison cannot say which side moved. A ref names a registered
+// environment document instead, and the version the batch actually ran is sealed on its own identity axis.
+//
+// The ref is resolved by the CONTROL PLANE before dispatch (`resolveCaseEnvironment`), so nothing in a
+// sandbox ever meets one — `environmentFor` in the job runner refuses this kind by name rather than
+// guessing a seed.
+export const EnvRefSchema = z.object({
+  kind: z.literal("ref"),
+  id: z.string().min(1).max(200),
+  version: z.string().min(1).max(100).optional(), // absent = the registry's `latest`, pinned at seal time
+});
+export type EnvRef = z.infer<typeof EnvRefSchema>;
+
+export const EnvSpecSchema = z.discriminatedUnion("kind", [...ConcreteEnvSpecSchema.options, EnvRefSchema]);
 export type EnvSpec = z.infer<typeof EnvSpecSchema>;
+
+// The registered environment document: `(tenant, id, version) → EnvironmentSpec`, immutable per version, the
+// same shape every other registry keeps (harness · dataset · judge · runtime). Its `env` is a CONCRETE spec —
+// a ref to a ref is a chain no reader resolves, so the type refuses to hold one.
+export const EnvironmentSpecSchema = z.object({
+  id: z.string().min(1).max(200),
+  version: z.string().min(1).max(100),
+  description: z.string().max(2000).optional(),
+  env: ConcreteEnvSpecSchema,
+});
+export type EnvironmentSpec = z.infer<typeof EnvironmentSpecSchema>;
 
 // The stage for behavior. seed = a known initial state, snapshot = capture the result world.
 export interface Environment<S extends EnvSnapshot = EnvSnapshot> {

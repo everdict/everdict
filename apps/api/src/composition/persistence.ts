@@ -203,11 +203,13 @@ import {
   type AgentRegistry,
   type BenchmarkRegistry,
   type DatasetRegistry,
+  type EnvironmentRegistry,
   type HarnessInstanceRegistry,
   type HarnessTemplateRegistry,
   InMemoryAgentRegistry,
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
+  InMemoryEnvironmentRegistry,
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
@@ -219,6 +221,7 @@ import {
   PgAgentRegistry,
   PgBenchmarkRegistry,
   PgDatasetRegistry,
+  PgEnvironmentRegistry,
   PgHarnessInstanceRegistry,
   PgHarnessTemplateRegistry,
   PgJudgeRegistry,
@@ -265,6 +268,8 @@ export interface Persistence {
   modelRegistry: ModelRegistry;
   agentRegistry: AgentRegistry; // the workspace's conversational-agent configuration (instructions + MCP tool servers + model)
   runtimeRegistry: RuntimeRegistry;
+  // The world a case ACTS ON, as a registered entity (harness-definability-spec.md §2).
+  environmentRegistry: EnvironmentRegistry;
   settingsStore: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) — always available
   workspaceStore: WorkspaceStore; // workspace membership (create/switch) — always available
   userProfileStore: UserProfileStore; // user profile (name/username/avatar) — always available
@@ -472,6 +477,7 @@ export async function makePersistence(): Promise<Persistence> {
       modelRegistry: new InMemoryModelRegistry(),
       agentRegistry: new InMemoryAgentRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
+      environmentRegistry: new InMemoryEnvironmentRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore,
       userProfileStore: new InMemoryUserProfileStore(),
@@ -550,6 +556,7 @@ export async function makePersistence(): Promise<Persistence> {
     modelRegistry: new PgModelRegistry(client),
     agentRegistry: new PgAgentRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
+    environmentRegistry: new PgEnvironmentRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),
     userProfileStore: new PgUserProfileStore(client),

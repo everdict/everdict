@@ -135,6 +135,7 @@ export * from "./runtime/control-runtime.js";
 export * from "./runtime/inspect-runtime-result.js";
 export * from "./runtime/probe-runtime-result.js";
 export * from "./runtime/register-runtime-result.js";
+export * from "./environment/environment.js";
 export * from "./runtime/runtime-list-entry.js";
 export * from "./runtime/runtime.js";
 export * from "./runtime/validate-runtime-result.js";

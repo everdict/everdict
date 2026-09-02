@@ -18,7 +18,7 @@ import type { RunStore, ScorecardStore, WorkspaceSettingsStore } from "@everdict
 import type { UsageMeter } from "@everdict/domain";
 import { resolvePolicyResolution } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
-import type { HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
+import type { EnvironmentRegistry, HarnessInstanceRegistry, ModelRegistry, RubricRegistry } from "@everdict/registry";
 import type { S3ArtifactStore } from "@everdict/storage";
 import { buildTraceSource } from "@everdict/trace";
 import type { PersistentBudget } from "../common/budget-tracker.js";
@@ -99,6 +99,9 @@ export function buildRun(deps: {
   dispatcher: CoreDispatcher;
   settingsStore: WorkspaceSettingsStore;
   harnessInstanceRegistry: HarnessInstanceRegistry;
+  // The world a case ACTS ON, when it names one by reference (harness-definability-spec.md §2). Resolved
+  // before the run record is written, so boot recovery re-dispatches the same environment.
+  environmentRegistry: EnvironmentRegistry;
   modelRegistry: ModelRegistry;
   rubricRegistry: RubricRegistry;
   budget: PersistentBudget;
@@ -181,6 +184,9 @@ export function buildRun(deps: {
   } = readers;
 
   const service = new RunService({
+    // A case may name its ENVIRONMENT by reference (harness-definability-spec.md §2); the submit resolves it
+    // before writing the record, so the persisted case body is a concrete world.
+    environments: deps.environmentRegistry,
     // Where a two-phase case's intermediates live, so THIS settlement ends their window rather than leaving a
     // full intermediate CaseResult in object storage forever (arch-review 64 P1-high).
     ...(artifacts ? { agentHalves: artifacts, verdicts: artifacts } : {}),

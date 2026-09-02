@@ -54,6 +54,7 @@ import type { UsageMeter } from "@everdict/domain";
 import type {
   AgentRegistry,
   DatasetRegistry,
+  EnvironmentRegistry,
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
   JudgeRegistry,
@@ -165,6 +166,8 @@ export interface McpDeps {
   capabilityService?: CapabilityService; // Capability Store (mcp|code|skill authored + published + adopted) CRUD
   probeCapabilityMcp?: (url: string, auth?: McpProbeAuth) => Promise<McpProbeResult>; // mcp "test connection" + tool discovery (wizard token / bound authorization)
   runtimeRegistry?: RuntimeRegistry;
+  // Environment (the world a case ACTS ON) — harness-definability-spec.md §2. Tools disabled if absent.
+  environmentRegistry?: EnvironmentRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   inspectRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<InspectRuntimeResult>; // runtime live cluster view
   controlRuntime?: (

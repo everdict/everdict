@@ -66,6 +66,7 @@ import {
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
 import { type CancellationTeardownResult, runDurableTeardown } from "../cancellation/cancellation-coordinator.js";
+import { resolveCaseEnvironments } from "../environment/case-environment.js";
 import { ScoringService } from "../execution/scoring-service.js";
 import type { DriverAuthority } from "../ops/startup-recovery.js";
 import { stampFacts } from "../platform-event/outbox.js";
@@ -272,6 +273,17 @@ export class ScorecardService {
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
     // Run-time grading plan — this batch scores with the requested graders instead of each case's defaults (S5).
     const dataset: Dataset = { ...resolved, cases: applyGradingPlan(selectedCases, input.graders) };
+    // A case may name its ENVIRONMENT by reference (harness-definability-spec.md §2). Resolving it here is
+    // the sealing moment: the concrete version each ref landed on goes into the manifest below, and every
+    // execution lane afterwards re-resolves through that seal instead of through a fresh `latest` read.
+    // The manifest keeps digesting the DECLARED cases — the case document did not move, the world under it
+    // did, and filing that under `dataset_content` is exactly the attribution this axis exists to prevent.
+    const environments = await resolveCaseEnvironments({
+      tenant: input.tenant,
+      cases: dataset.cases,
+      ...(this.deps.environments ? { registry: this.deps.environments } : {}),
+    });
+    const executionDataset: Dataset = { ...dataset, cases: environments.cases };
 
     // Constitution seed (trust-kernel O1): a grading plan declaring GROUND-TRUTH authority redefines what
     // passing means for this batch — an admin's call, never ambient member power. The composed policy itself
@@ -466,6 +478,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         // seals its own digest; per-case defaults seal per-case digests (gradingCases) the axis compares over
         // SHARED cases — the selection-keyed composite alone made an 80/100 subset read as a grading confound.
         ...sealGrading(input.graders, selectedCases),
+        ...(Object.keys(environments.seals).length > 0 ? { environments: environments.seals } : {}),
         harness: {
           id: input.harness.id,
           version: harnessVersion,
@@ -609,7 +622,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       record.id,
       input.tenant,
       input.submittedBy ?? input.tenant, // owner — clone a private-repo case via the submitter's personal connection
-      dataset,
+      executionDataset,
       input.harness.id,
       harnessVersion,
       executedHarnessSpec,

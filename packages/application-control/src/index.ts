@@ -281,6 +281,12 @@ export type { RubricListEntry, RubricRegistry } from "./ports/rubric-registry.js
 export type { ModelRegistry } from "./ports/model-registry.js";
 export type { AgentRegistry } from "./ports/agent-registry.js";
 export type { RuntimeListEntry, RuntimeRegistry } from "./ports/runtime-registry.js";
+export type { EnvironmentListEntry, EnvironmentRegistry } from "./ports/environment-registry.js";
+export {
+  resolveCaseEnvironments,
+  resolveOneCaseEnvironment,
+  type ResolvedCaseEnvironments,
+} from "./environment/case-environment.js";
 
 // Control-plane use-case services (the api services move here incrementally — re-architecture P2d).
 export {

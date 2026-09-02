@@ -561,6 +561,67 @@ function worldAxis(baseline: readonly CaseResult[], candidate: readonly CaseResu
   return { state: "held" };
 }
 
+// ── WHICH WORLD A REFERENCED CASE ACTED ON (harness-definability-spec.md §2) ─────────────────────────
+//
+// Only cases that name their environment by REFERENCE are sealed here: an embedded environment is part of
+// the case's own content digest, so `dataset_content` already owns it. That is exactly why this axis has to
+// exist — a ref keeps the case byte-identical while the seed repository, the fixture or the deployed app
+// underneath it moves, and without a separate axis that delta is attributed to the harness under test.
+//
+// It ABSTAINS (returns undefined) when neither side referenced an environment, the same way the world axis
+// does: an axis nobody's records say anything about is a question not asked, never a clean bill of health.
+function environmentAxis(b: ScorecardManifest, c: ScorecardManifest): AxisReading | undefined {
+  const bSealed = b.environments !== undefined && Object.keys(b.environments).length > 0;
+  const cSealed = c.environments !== undefined && Object.keys(c.environments).length > 0;
+  if (!bSealed && !cSealed) return undefined;
+  const be = b.environments ?? {};
+  const ce = c.environments ?? {};
+  if (!bSealed || !cSealed) {
+    const naming = bSealed ? be : ce;
+    const refs = Object.values(naming)
+      .map((e) => e.ref)
+      .join(", ");
+    return {
+      state: "unverified",
+      reason: "unsealed",
+      detail: `${bSealed ? "the candidate" : "the baseline"} references no environment while the other side pins ${refs} — one side's world is stated and the other's is unstated, so sameness cannot be verified either way`,
+    };
+  }
+  const shared = Object.keys(be).filter((id) => id in ce);
+  if (shared.length === 0)
+    return {
+      state: "unverified",
+      reason: "unresolved",
+      detail:
+        "the two sides reference environments on disjoint cases, so no case pins a world on both sides — nothing to compare",
+    };
+  const differing: string[] = [];
+  for (const id of shared) {
+    const bd = be[id];
+    const cd = ce[id];
+    if (bd === undefined || cd === undefined) continue; // one-sided case — coverage's axis, not this one
+    if (bd.digest === undefined || cd.digest === undefined)
+      return {
+        state: "unverified",
+        reason: "unresolved",
+        detail: `case '${id}' pins ${bd.ref} against ${cd.ref} and at least one document could not be read at seal time — an unpinned document is never agreement`,
+      };
+    if (era(bd.digest) !== era(cd.digest))
+      return {
+        state: "unverified",
+        reason: "digest_era",
+        detail: `case '${id}'s environment documents are sealed under different digest algorithms — sameness cannot be verified either way`,
+      };
+    if (bd.ref !== cd.ref || bd.digest !== cd.digest) differing.push(`${id} (${bd.ref} → ${cd.ref})`);
+  }
+  if (differing.length === 0) return { state: "held" };
+  const named = differing.slice(0, 3).join(", ");
+  return {
+    state: "confound",
+    detail: `${differing.length} case(s) ran against a different environment document: ${named}${differing.length > 3 ? ` and ${differing.length - 3} more` : ""} — the world moved, so the delta is not evidence about the harness`,
+  };
+}
+
 // The identity read. An entirely unsealed side (pre-manifest batch, mig 0126) verifies NOTHING: every axis
 // is unverified — which downgrades the claim a gate may make, without rewriting history as a refusal.
 export function experimentIdentity(
@@ -590,6 +651,7 @@ export function experimentIdentity(
     };
   }
   const world = worldAxis(results.baseline, results.candidate);
+  const environment = environmentAxis(baseline, candidate);
   const readings: Array<[ExperimentAxis, AxisReading]> = [
     ["dataset_content", datasetAxis(baseline, candidate)],
     ["grading_plan", gradingPlanAxis(baseline, candidate)],
@@ -597,6 +659,8 @@ export function experimentIdentity(
     ["harness_model", harnessModelAxis(baseline, candidate)],
     // Omitted entirely when the pair's records say nothing about the world — an abstention, not a verdict.
     ...(world ? ([["execution_world", world]] as Array<[ExperimentAxis, AxisReading]>) : []),
+    // …and the same abstention when neither side referenced a registered environment.
+    ...(environment ? ([["environment", environment]] as Array<[ExperimentAxis, AxisReading]>) : []),
   ];
   const out: ExperimentIdentity = { held: [], confounds: [], unverified: [] };
   for (const [axis, reading] of readings) {

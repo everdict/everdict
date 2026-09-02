@@ -19,6 +19,12 @@ export { type AgentRegistry, InMemoryAgentRegistry } from "./agent/agent-registr
 export { PgAgentRegistry } from "./agent/pg-agent-registry.js";
 export { type RuntimeRegistry, type RuntimeListEntry, InMemoryRuntimeRegistry } from "./runtime/runtime-registry.js";
 export { PgRuntimeRegistry } from "./runtime/pg-runtime-registry.js";
+export {
+  type EnvironmentRegistry,
+  type EnvironmentListEntry,
+  InMemoryEnvironmentRegistry,
+} from "./environment/environment-registry.js";
+export { PgEnvironmentRegistry } from "./environment/pg-environment-registry.js";
 export { loadRuntimeDir } from "./runtime/load-runtimes.js";
 export { type BenchmarkRegistry, InMemoryBenchmarkRegistry } from "./benchmark/benchmark-registry.js";
 export { PgBenchmarkRegistry } from "./benchmark/pg-benchmark-registry.js";

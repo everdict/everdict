@@ -53,6 +53,10 @@ rule `api-layer`):
 | `get_model` | `models:read` | one `ModelSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_model` | `models:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_model` | `models:write` (member+) | register a `ModelSpec` (immutable → `CONFLICT`); referenced by id from judge·command harnesses |
+| `list_environments` | `datasets:read` (viewer+) | workspace-owned + `_shared` environments — the world a case ACTS ON |
+| `get_environment` | `datasets:read` | one `EnvironmentSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `create_environment` | `datasets:write` (viewer+) | register an `EnvironmentSpec` (immutable → `CONFLICT`) |
+| `set_environment_version_tags` | `datasets:write` | replace a version's free-form labels |
 | `list_runtimes` | `runtimes:read` (viewer+) | workspace-owned + `_shared` execution runtimes (local \| nomad \| k8s) |
 | `get_runtime` | `runtimes:read` | one `RuntimeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_runtime` | `runtimes:write` (viewer+) | dry-run: schema + existing versions/conflict (no write) |

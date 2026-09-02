@@ -389,6 +389,7 @@ const experimentAxisSchema = z.enum([
   'judge_set',
   'harness_model',
   'execution_world',
+  'environment',
 ])
 
 export const scorecardDiffSchema = z.object({

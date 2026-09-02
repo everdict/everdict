@@ -23,6 +23,13 @@ export const EXPERIMENT_AXES = [
   // experiment, not a treatment comparison; attributing that delta to the change under test is the false
   // green light the gate exists to prevent (arch-review 58 follow-through).
   "execution_world",
+  // WHICH WORLD IT ACTED ON, under a case document that did not move. A case names its environment by
+  // reference (`EnvRefSchema`), so two batches over one dataset can run against two versions of the seed
+  // repository, the fixture or the deployed app — and the delta is about the environment, never about the
+  // harness under test (docs/architecture/harness-definability-spec.md §2). Embedded environments live
+  // inside the case digest and are `dataset_content`'s axis; this one exists because a REFERENCE lets the
+  // case stay identical while the world underneath it changes.
+  "environment",
 ] as const;
 
 export const ExperimentAxisSchema = z.enum(EXPERIMENT_AXES);

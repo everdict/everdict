@@ -31,6 +31,7 @@ import type { ConstitutionApprovalStore } from "../ports/constitution-approval-s
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
+import type { EnvironmentRegistry } from "../ports/environment-registry.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
@@ -66,6 +67,10 @@ export interface ScorecardServiceDeps {
   datasets: DatasetRegistry; // dataset resolution (owner/_shared fallback) + case loading
   harnesses?: HarnessInstanceRegistry; // instance resolution (template+pins→resolved HarnessSpec). Built-ins fall back.
   judges?: JudgeRegistry; // judge resolution (owner/_shared fallback)
+  // The environment registry, for cases that name their world by reference (harness-definability-spec.md
+  // §2). Optional because a deployment may run entirely on embedded environments; a case that DOES
+  // reference one is refused by name when it is absent, never quietly run against something else.
+  environments?: EnvironmentRegistry;
   // Rubric resolution for the judge-closure seal (H8): a judge whose rubric is a `{id, version?}` REF is
   // judged under whatever that ref resolves to at RUN time — the seal pins the latest-resolution at
   // submit/re-score so identity can compare it. Absent = latest rubric refs seal "unresolved" (honest).
@@ -337,6 +342,9 @@ export type ScorecardBatchDeps = Pick<
   | "scoringStageParity"
   | "scoringStageAuthoritative"
   | "datasets"
+  // …and the environment registry, because every lane that re-resolves a dataset for execution also has to
+  // re-resolve the environments this batch sealed (harness-definability-spec.md §2).
+  | "environments"
   | "harnesses"
   | "budget"
   | "usage"

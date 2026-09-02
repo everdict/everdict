@@ -17,6 +17,7 @@ import { registerCommentTools } from "./api/comment/comment.mcp.js";
 import { registerCycleTools } from "./api/cycle/cycle.mcp.js";
 import { registerDatasetTools } from "./api/dataset/dataset.mcp.js";
 import { registerEnvironmentAdoptionTools } from "./api/environment-adoption/environment-adoption.mcp.js";
+import { registerEnvironmentTools } from "./api/environment/environment.mcp.js";
 import { registerEventTools } from "./api/event/event.mcp.js";
 import type { AgentAttribution } from "./api/fs/fs-actor.js";
 import { registerFsTools } from "./api/fs/fs.mcp.js";
@@ -99,6 +100,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   registerFsTools(server, ctx);
   registerCapabilityTools(server, ctx);
   registerRuntimeTools(server, ctx);
+  registerEnvironmentTools(server, ctx);
   registerBenchmarkTools(server, ctx);
   registerBundleTools(server, ctx);
   registerScheduleTools(server, ctx);

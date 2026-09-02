@@ -1,0 +1,110 @@
+import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
+import { EnvironmentSpecSchema } from "@everdict/contracts";
+import { ownedByVisibleTeam } from "@everdict/domain";
+import type { FastifyInstance } from "fastify";
+import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
+import { environmentDocs } from "./environment.docs.js";
+
+// environments (workspace-owned SSOT: the world a case ACTS ON — harness-definability-spec.md §2).
+//
+// The gate REUSES `datasets:read`/`datasets:write` rather than minting an action pair, for the reason views
+// reuse the scorecard pair: an environment is part of what an evaluation ASKS — the seed repository, the
+// fixture, the deployed app a case is posed against — and whoever may author the cases may author the world
+// they run in. A new action would have to be granted to every role that already has the dataset one.
+export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps): void {
+  const missing = "environment registry not configured";
+
+  app.post("/environments", { schema: environmentDocs.register }, async (req, reply) => {
+    if (!deps.environmentRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: missing });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    // Resolve the owning team FIRST and gate against it — registering "as a team you are not on" is refused
+    // for the same reason writing another team's asset is (the sibling doors all do this).
+    let owner: Awaited<ReturnType<typeof teamForNew>>;
+    try {
+      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
+      gate(principal, "datasets:write", owner.gate);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = EnvironmentSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      await deps.environmentRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
+      return reply.code(201).send({
+        workspace: principal.workspace,
+        id: parsed.data.id,
+        version: parsed.data.version,
+        ...(owner.teamId ? { teamId: owner.teamId } : {}),
+      });
+    } catch (err) {
+      return sendError(reply, err); // immutable 409
+    }
+  });
+
+  app.get("/environments", { schema: environmentDocs.list }, async (req, reply) => {
+    if (!deps.environmentRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: missing });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:read");
+      // A private team's environment is that team's — the ceiling every other team-owned read stays under.
+      const seen = await visibleTeamsFor(deps, principal);
+      const entries = await deps.environmentRegistry.list(principal.workspace);
+      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string; version: string } }>(
+    "/environments/:id/versions/:version",
+    { schema: environmentDocs.get },
+    async (req, reply) => {
+      if (!deps.environmentRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: missing });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "datasets:read");
+        await assertEntityVisible(
+          deps,
+          principal,
+          deps.environmentRegistry,
+          principal.workspace,
+          req.params.id,
+          "environment",
+        );
+        return reply.send(await deps.environmentRegistry.get(principal.workspace, req.params.id, req.params.version));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  app.put<{ Params: { id: string; version: string } }>(
+    "/environments/:id/versions/:version/tags",
+    { schema: environmentDocs.setVersionTags },
+    async (req, reply) => {
+      if (!deps.environmentRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: missing });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const parsed = VersionTagsBodySchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+      try {
+        return reply.send(
+          await setVersionTags(
+            deps.environmentRegistry,
+            principal,
+            "datasets:write",
+            req.params.id,
+            req.params.version,
+            parsed.data.tags,
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+}

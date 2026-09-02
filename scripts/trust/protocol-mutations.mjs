@@ -28,6 +28,18 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/core/scorecard/authorized-submitter.counterexample.test.ts"],
   },
   {
+    // harness-definability-spec.md §2. A batch SEALS the environment version each referencing case resolved
+    // to, and every execution lane afterwards re-resolves through that seal. Reading the declared ref again
+    // (which a `latest` ref answers freshly) lets a resumed or retried batch finish its remaining cases in a
+    // world its finished ones never saw — with the manifest still claiming one experiment.
+    name: "DEF2 — an execution lane re-resolves the environment ref instead of the batch's seal",
+    file: "packages/application-control/src/environment/case-environment.ts",
+    from: "    const version = pinned !== undefined ? refVersion(pinned.ref) : declared.version;",
+    to: "    const version = (void refVersion, declared.version);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/case-environment.counterexample.test.ts"],
+  },
+  {
     // arch-review 59 P0-verifier. `PARENT_AUTHORIZES` compares the parent's epoch only when the attempt has
     // one, so a verifier row opened without it satisfies the predicate under ANY owner — a displaced replica
     // could still reserve and burn tenant compute. Dropping the coordinate must go red.

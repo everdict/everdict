@@ -19,6 +19,7 @@ import {
   selectSubsetCases,
 } from "@everdict/domain";
 import { childKey } from "@everdict/domain";
+import { resolveCaseEnvironments } from "../environment/case-environment.js";
 import { jobAttemptId } from "../execution/open-physical-attempt.js";
 import type { ScoringService } from "../execution/scoring-service.js";
 import type { SpilloverOutcome } from "../ops/runtime-spillover.js";
@@ -261,7 +262,16 @@ export class ScorecardBatchService {
       // under two different datasets.
       plan.assertSelection(cases);
       // Re-apply the recorded grading plan — resume must score exactly like the original submit.
-      dataset = { ...resolved, cases: applyGradingPlan(cases, orch.graders) };
+      // …and the environments this batch SEALED, re-resolved at the pinned versions (§2). A resumed batch
+      // that re-read `latest` would finish its remaining cases in a world its finished ones never saw.
+      const graded = applyGradingPlan(cases, orch.graders);
+      const environments = await resolveCaseEnvironments({
+        tenant: rec.tenant,
+        cases: graded,
+        ...(this.deps.environments ? { registry: this.deps.environments } : {}),
+        ...(plan.sealedEnvironments ? { sealed: plan.sealedEnvironments } : {}),
+      });
+      dataset = { ...resolved, cases: environments.cases };
       // The finished cases this batch already answered, and the mid-flight children a dead process left
       // behind — one collaborator, because both answers stand on the same rule (see RecoveryPlanner).
       const seeded = await this.recovery.seedFromLedger({

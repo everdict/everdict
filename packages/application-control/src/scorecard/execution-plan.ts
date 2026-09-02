@@ -148,6 +148,13 @@ export class ExecutionPlan {
     return this.manifest?.judges;
   }
 
+  // WHICH ENVIRONMENT DOCUMENT each referencing case ran against (harness-definability-spec.md §2). Every
+  // execution lane re-resolves the ref through this seal rather than through a fresh `latest` read, so a
+  // resumed or retried batch acts on the world it was measured in.
+  get sealedEnvironments(): ScorecardManifest["environments"] {
+    return this.manifest?.environments;
+  }
+
   // The RUNTIME judge configuration this batch scored under — stamped onto each scoring revision, so a
   // judgment records which judging apparatus produced it and not merely which judges were listed.
   get sealedJudgeRun(): ScorecardManifest["judgeRun"] {

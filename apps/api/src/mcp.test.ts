@@ -39,6 +39,7 @@ import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryAgentRegistry,
   InMemoryDatasetRegistry,
+  InMemoryEnvironmentRegistry,
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
@@ -114,6 +115,7 @@ function harness() {
   const skillService = new SkillService({ store: new InMemorySkillStore() });
   const subscriptionService = new SubscriptionService({ store: new InMemorySubscriptionStore() });
   const runtimeRegistry = new InMemoryRuntimeRegistry();
+  const environmentRegistry = new InMemoryEnvironmentRegistry();
   const bundleService = new BundleService({
     harnessTemplates,
     harnessInstances,
@@ -192,6 +194,7 @@ function harness() {
     skillService,
     subscriptionService,
     runtimeRegistry,
+    environmentRegistry,
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
       kind: spec.kind,
       reachable: true,
@@ -758,6 +761,7 @@ describe("MCP tools", () => {
       "create_agent",
       "create_api_key",
       "create_dataset",
+      "create_environment",
       "create_github_issue",
       "create_invite",
       "create_judge",
@@ -793,6 +797,7 @@ describe("MCP tools", () => {
       "gate_scorecards",
       "get_agent",
       "get_dataset",
+      "get_environment",
       "get_github_file",
       "get_github_issue",
       "get_github_pull_request_changes",
@@ -842,6 +847,7 @@ describe("MCP tools", () => {
       "list_agents",
       "list_api_keys",
       "list_datasets",
+      "list_environments",
       "list_github_issues",
       "list_github_repo_files",
       "list_harness_templates",
@@ -904,6 +910,7 @@ describe("MCP tools", () => {
       "sandbox_git_push",
       "score_group",
       "set_dataset_version_tags",
+      "set_environment_version_tags",
       "set_github_issue_state",
       "set_harness_version_tags",
       "set_judge_version_tags",
