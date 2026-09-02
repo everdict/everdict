@@ -116,6 +116,21 @@ axis unverified) and names no registry document (label-only), and there is no la
 Such a frame declares `allowUnverifiedIdentity` and `allowLabelOnlyAdoption` at open; one that did not is
 a campaign that can neither adopt nor settle on a win — abandon it in its issue and open a new one.
 
+## `POST /campaigns/:id/builds` with `slots` (a build set) refuses, or its set fails
+
+**400 "a build set names at least two DISTINCT slots"** — one slot is a plain build (`slot`); a repeated slot is one
+build twice.
+
+**400 "slot 'x' has no build recipe on this template"** — every member needs `source` + `build` on its template
+service. Add the recipe in a new template version.
+
+**Set `failed` "the members observed different commits … the pull request moved between builds"** — the head moved
+while the members were checking out. Start the set again on the current head.
+
+**Set `failed` "…already exists with different pins — this set cannot mint under its name"** — the set's derived
+version name is taken by a different document. A set re-driven after a crash re-mints the SAME name and is accepted
+when the pins match; a different document under it is refused rather than overwritten.
+
 ## `GET /campaigns/:id/rounds/:seq/evidence` refuses
 
 The evidence a round sealed — what it saw, case by case — served from the immutable object the round names.

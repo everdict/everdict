@@ -1266,6 +1266,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     it("[D2] Everdict's own build account outranks the scorecard origin — source everdict-build with the observed commit", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const builds = {
+        setsForCampaign: async () => [],
         forCampaign: async () => [
           {
             id: "bld_1",
@@ -1335,6 +1336,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     // so every oracle-scoped round of an Everdict-built candidate was "unverifiable", and the first-party code
     // loop could not adopt under an oracle scope at all.
     const buildLedger = (prNumber: number, repo = "acme/scaffold") => ({
+      setsForCampaign: async () => [],
       forCampaign: async () => [
         {
           id: "bld_1",
@@ -1359,7 +1361,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     });
     const withLedger = (
       store: InMemoryEvolutionCampaignStore,
-      builds: Pick<NonNullable<ConstructorParameters<typeof CampaignService>[0]["builds"]>, "forCampaign">,
+      builds: NonNullable<ConstructorParameters<typeof CampaignService>[0]["builds"]>,
       changes: ReturnType<typeof prReader>,
     ) =>
       new CampaignService({
@@ -1434,6 +1436,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     it("[D2] a build ledger that cannot be read REFUSES the round — a failed read is not 'no build' (L2)", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const broken = {
+        setsForCampaign: async (): Promise<never> => {
+          throw new Error("connection reset");
+        },
         forCampaign: async (): Promise<never> => {
           throw new Error("connection reset");
         },

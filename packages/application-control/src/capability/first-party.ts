@@ -1163,6 +1163,10 @@ Everdict's tools load on demand. Before anything else:
   structured verdict: kind, locus, confidence) and \`attribution\` — \`measured\` with the slot and the platform's
   reasons, or \`unattributed\` with why. Delegate to the attributed slot's maintainer; when a case is
   unattributed, choose the slot yourself and SAY in the brief that you chose it.
+- **A change across several services.** When the attributed slots span two services of ONE pull request, build
+  them as a set — \`build_campaign_candidate { id, ref, repo, pr_number, slots: ["web", "api"] }\` — and the set
+  mints ONE candidate version carrying every pin (\`get_campaign_build_sets\`). Two repositories are two hypotheses:
+  open two campaigns.
 - **The issue's cases.** Link the failing cases to the issue first — \`add_issue_link { type: "case", linkId:
   <caseId>, dataset, version }\` — and open the campaign with \`frame: { fromIssue: true, … }\` (everything but
   \`scenarios\`/\`targets\`): the platform makes the linked cases the TARGETS and every other case of that dataset

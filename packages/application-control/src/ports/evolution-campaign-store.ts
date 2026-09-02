@@ -1,6 +1,7 @@
 import type {
   AdoptionOperation,
   CampaignBuildRecord,
+  CampaignBuildSetRecord,
   CampaignClose,
   CampaignRound,
   CampaignState,
@@ -212,18 +213,40 @@ export interface CampaignBuildStore {
   create(record: CampaignBuildRecord, events?: OutboxEvent[]): Promise<void>;
   get(tenant: string, id: string): Promise<CampaignBuildRecord | undefined>;
   forCampaign(tenant: string, campaignId: string): Promise<CampaignBuildRecord[]>;
+  // `candidateVersion` is absent for a set member: the SET mints (evolution-routing-spec.md §4).
   complete(
     tenant: string,
     id: string,
     result: {
       sha: string;
       image: NonNullable<CampaignBuildRecord["image"]>;
-      candidateVersion: string;
+      candidateVersion?: string;
       receipt: NonNullable<CampaignBuildRecord["receipt"]>;
       at: string;
     },
     events?: OutboxEvent[],
   ): Promise<"completed" | "not_building" | "absent">;
+  // ── THE BUILD SET (evolution-routing-spec.md §4) ─────────────────────────────────────────────────
+  //
+  // `claimMint` is the authority the mint rests on: conditional on `building`, it answers who may mint — exactly
+  // one caller, once. `settleSet` records the outcome: `minted` only from `minting` (the claimer's), `failed` from
+  // `building` or `minting`. Both answer what happened rather than void (L1).
+  createSet(record: CampaignBuildSetRecord, events?: OutboxEvent[]): Promise<void>;
+  getSet(tenant: string, id: string): Promise<CampaignBuildSetRecord | undefined>;
+  setsForCampaign(tenant: string, campaignId: string): Promise<CampaignBuildSetRecord[]>;
+  claimMint(
+    tenant: string,
+    setId: string,
+    at: string,
+  ): Promise<"claimed" | "already_claimed" | "not_building" | "absent">;
+  settleSet(
+    tenant: string,
+    setId: string,
+    outcome:
+      | { state: "minted"; candidateVersion: string; images: Record<string, string>; sha: string; at: string }
+      | { state: "failed"; error: string; at: string },
+    events?: OutboxEvent[],
+  ): Promise<"settled" | "not_settleable" | "absent">;
   fail(
     tenant: string,
     id: string,

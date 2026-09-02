@@ -341,7 +341,24 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       // Minting the candidate version is a harness register, so the harness family's write action is required
       // too — a build is a re-pin that also compiles.
       gate(principal, "harnesses:register", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
-      const record = await deps.campaignBuild.start(
+      const build = deps.campaignBuild;
+      // A build SET (evolution-routing-spec.md §4): every slot from one head, one minted version.
+      if (body.slots !== undefined) {
+        const set = await build.startSet(
+          principal.workspace,
+          {
+            campaignId: req.params.id,
+            ref: body.ref,
+            ...(body.repo !== undefined ? { repo: body.repo } : {}),
+            ...(body.prNumber !== undefined ? { prNumber: body.prNumber } : {}),
+            slots: body.slots,
+          },
+          principal.subject,
+        );
+        void build.runSet(principal.workspace, set.id).catch(() => undefined);
+        return reply.code(202).send(set);
+      }
+      const record = await build.start(
         principal.workspace,
         {
           campaignId: req.params.id,
@@ -352,8 +369,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         },
         principal.subject,
       );
-      // The build runs after the response — its outcome is the record's settle and the fact, read via GET.
-      const build = deps.campaignBuild;
       void build.run(principal.workspace, record.id).catch(() => undefined);
       return reply.code(202).send(record);
     } catch (err) {
@@ -382,6 +397,30 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
         await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         return reply.send(await deps.campaignService.roundEvidence(principal.workspace, req.params.id, seq));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
+  // The build SETS of a campaign (evolution-routing-spec.md §4) — each: its members, the one version it minted.
+  app.get<{ Params: { id: string } }>(
+    "/campaigns/:id/build-sets",
+    { schema: campaignDocs.buildSets },
+    async (req, reply) => {
+      if (!deps.campaignBuild || !deps.campaignService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "campaign build is not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      try {
+        const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+        return reply.send(await deps.campaignBuild.setsForCampaign(principal.workspace, req.params.id));
       } catch (err) {
         return sendError(reply, err);
       }

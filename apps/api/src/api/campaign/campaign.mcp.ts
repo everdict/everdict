@@ -294,15 +294,40 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         repo: z.string().optional().describe('"owner/name" when the ref is a GitHub pull request'),
         pr_number: z.number().int().optional(),
         slot: z.string().optional().describe("Which slot to rebuild — omit when the template has one buildable slot"),
+        slots: z
+          .array(z.string().min(1))
+          .min(2)
+          .optional()
+          .describe(
+            "A BUILD SET: two or more slots rebuilt from the same head and minted as ONE candidate version (one pull request, several services). Exclusive with slot.",
+          ),
       },
     },
-    ({ id, ref, repo, pr_number, slot }) =>
+    ({ id, ref, repo, pr_number, slot, slots }) =>
       run(principal, "scorecards:run", async () => {
         if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
         const campaign = await campaigns.get(ws, id);
         await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
         gate(principal, "harnesses:register", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        if (slots !== undefined && slot !== undefined)
+          return fail("BAD_REQUEST: name slots for a build set, or slot for one build — not both.");
+        if (slots !== undefined) {
+          const set = await deps.campaignBuild.startSet(
+            ws,
+            {
+              campaignId: id,
+              ref,
+              ...(repo !== undefined ? { repo } : {}),
+              ...(pr_number !== undefined ? { prNumber: pr_number } : {}),
+              slots,
+            },
+            principal.subject,
+          );
+          const build = deps.campaignBuild;
+          void build.runSet(ws, set.id).catch(() => undefined);
+          return ok(set);
+        }
         const record = await deps.campaignBuild.start(
           ws,
           {
@@ -336,6 +361,22 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       run(principal, "scorecards:read", async () => {
         await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
         return ok(await campaigns.roundEvidence(ws, id, seq));
+      }),
+  );
+
+  server.registerTool(
+    "get_campaign_build_sets",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "The campaign's build SETS — several slots rebuilt from one head and minted as one version: members, observed commit, slot → image, the minted version or the failure",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) =>
+      run(principal, "scorecards:read", async () => {
+        if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
+        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
+        return ok(await deps.campaignBuild.setsForCampaign(ws, id));
       }),
   );
 

@@ -1,5 +1,6 @@
 import type {
   CampaignBuildRecord,
+  CampaignBuildSetRecord,
   CampaignBuildState,
   DomainFact,
   HarnessInstanceSpec,
@@ -76,11 +77,18 @@ export interface CampaignBuildDeps {
     // Resolve the whole instance so the slot's concrete image can be read (template + pins).
     resolvedImageOf(tenant: string, id: string, version: string, slot: string): Promise<string | undefined>;
   };
-  // Mint the candidate instance version from the built digest — the one door a re-pin goes through, so the
-  // build and a headless CI re-pin produce the same shape.
-  repin(input: { tenant: string; by: string; id: string; slot: string; imageRef: string; note: string }): Promise<{
-    version: string;
-  }>;
+  // Mint the candidate instance version from the built digest(s) — the one door a re-pin goes through, so the
+  // build and a headless CI re-pin produce the same shape. One pin for a plain build, every slot of a build set
+  // (evolution-routing-spec.md §4). `version` names the version to mint when the caller derived it (a set's
+  // `versionName`), so a retry meets the registry's immutability as "already minted", never as a second name.
+  repin(input: {
+    tenant: string;
+    by: string;
+    id: string;
+    pins: Record<string, string>;
+    version?: string;
+    note: string;
+  }): Promise<{ version: string }>;
   sessions: BuildSession;
   newId?: () => string;
   now?: () => string;
@@ -96,6 +104,15 @@ export interface StartBuildInput {
   // The slot to rebuild — a template service name, or "image" for a command harness. Default: the sole
   // buildable slot when the template has exactly one.
   slot?: string;
+}
+
+// A build SET (evolution-routing-spec.md §4): several slots of one pull request, one candidate version.
+export interface StartBuildSetInput {
+  campaignId: string;
+  ref: string; // the one head every member checks out
+  repo?: string;
+  prNumber?: number;
+  slots: string[]; // at least two, distinct, each with a build recipe on the template
 }
 
 export class CampaignBuildService {
@@ -118,6 +135,230 @@ export class CampaignBuildService {
 
   async forCampaign(tenant: string, campaignId: string): Promise<CampaignBuildRecord[]> {
     return this.deps.builds.forCampaign(tenant, campaignId);
+  }
+
+  async getSet(tenant: string, id: string): Promise<CampaignBuildSetRecord> {
+    const record = await this.deps.builds.getSet(tenant, id);
+    if (!record) throw new NotFoundError("NOT_FOUND", { id }, "campaign build set not found");
+    return record;
+  }
+
+  async setsForCampaign(tenant: string, campaignId: string): Promise<CampaignBuildSetRecord[]> {
+    return this.deps.builds.setsForCampaign(tenant, campaignId);
+  }
+
+  // ── START A BUILD SET (evolution-routing-spec.md §4) ─────────────────────────────────────────────
+  //
+  // One pull request, several slots, one version. Every slot must carry a build recipe; the set's version name
+  // is derived from the set id so a re-driven mint re-mints the same name. Member ids derive from the set id too —
+  // one `newId` per set, and no member can collide with another set's.
+  async startSet(tenant: string, input: StartBuildSetInput, by: string): Promise<CampaignBuildSetRecord> {
+    const campaign = await this.deps.campaigns.get(tenant, input.campaignId);
+    if (campaign.subjectType !== "harness")
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { campaign: input.campaignId, subject: campaign.subjectType },
+        "only a harness campaign builds candidate images — an agent campaign evolves a configuration, not code",
+      );
+    const slots = [...new Set(input.slots)];
+    if (slots.length < 2 || slots.length !== input.slots.length)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { slots: input.slots },
+        "a build set names at least two DISTINCT slots — one slot is a plain build, a repeated slot is one build twice",
+      );
+    const template = await this.deps.harness
+      .template(tenant, campaign.subjectId, campaign.baselineVersion)
+      .catch(() => {
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { harness: campaign.subjectId },
+          "the campaign's harness baseline could not be resolved",
+        );
+      });
+    const setId = this.newId();
+    const members: CampaignBuildRecord[] = [];
+    for (const slot of slots) {
+      const { recipe } = resolveBuildSlot(template, slot); // refuses a slot with no recipe, by name
+      const baseImage = await this.deps.harness.resolvedImageOf(
+        tenant,
+        campaign.subjectId,
+        campaign.baselineVersion,
+        slot,
+      );
+      if (baseImage === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { harness: campaign.subjectId, slot },
+          `slot '${slot}' of ${campaign.subjectId}@${campaign.baselineVersion} resolves to no image to build on`,
+        );
+      members.push({
+        id: `${setId}-${imageRepoName(slot)}`,
+        tenant,
+        campaignId: input.campaignId,
+        slot,
+        setId,
+        source: {
+          git: recipe.source.git,
+          ...(recipe.source.repo !== undefined
+            ? { repo: recipe.source.repo }
+            : input.repo !== undefined
+              ? { repo: input.repo }
+              : {}),
+          ref: input.ref,
+          ...(input.prNumber !== undefined ? { prNumber: input.prNumber } : {}),
+        },
+        base: { version: campaign.baselineVersion, image: baseImage },
+        state: "building",
+        createdBy: by,
+        createdAt: this.now(),
+        updatedAt: this.now(),
+      });
+    }
+    const set: CampaignBuildSetRecord = {
+      id: setId,
+      tenant,
+      campaignId: input.campaignId,
+      memberIds: members.map((m) => m.id),
+      source: {
+        ref: input.ref,
+        ...(input.repo !== undefined ? { repo: input.repo } : {}),
+        ...(input.prNumber !== undefined ? { prNumber: input.prNumber } : {}),
+      },
+      base: { version: campaign.baselineVersion },
+      versionName: `${campaign.baselineVersion}-set-${setId.slice(-8)}`,
+      state: "building",
+      createdBy: by,
+      createdAt: this.now(),
+      updatedAt: this.now(),
+    };
+    await this.deps.builds.createSet(set);
+    for (const member of members) await this.deps.builds.create(member);
+    return set;
+  }
+
+  // ── DRIVE A BUILD SET TO ITS ONE MINT (evolution-routing-spec.md §4) ─────────────────────────────
+  //
+  // Members build in order (a member another driver already built is read, not rebuilt). Then the authority: the
+  // observed commits must agree (or the pull request moved between builds), and `claimMint` must answer
+  // `claimed` — exactly one driver gets it. The claimer mints under the set's own version name; a registry that
+  // already holds that name with these pins is a retry meeting its earlier self, not a second version.
+  async runSet(tenant: string, setId: string): Promise<CampaignBuildSetRecord> {
+    const set = await this.getSet(tenant, setId);
+    if (set.state !== "building") return set;
+    const by = set.createdBy;
+    const campaign = await this.deps.campaigns.get(tenant, set.campaignId);
+    const failSet = async (error: string, slot: string, buildId: string): Promise<CampaignBuildSetRecord> => {
+      const fact: DomainFact = {
+        kind: "campaign.candidate_build_failed",
+        subject: { type: "campaign", id: set.campaignId },
+        actor: by,
+        payload: {
+          campaignId: set.campaignId,
+          buildId,
+          buildSetId: setId,
+          slot,
+          error,
+          ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
+        },
+      };
+      await this.deps.builds.settleSet(
+        tenant,
+        setId,
+        { state: "failed", error, at: this.now() },
+        this.stamped(tenant, [fact]),
+      );
+      return this.getSet(tenant, setId);
+    };
+    const members: CampaignBuildRecord[] = [];
+    for (const memberId of set.memberIds) {
+      const built = await this.run(tenant, memberId);
+      if (built.state === "failed") return failSet(built.error ?? "a member build failed", built.slot, built.id);
+      if (built.state !== "built")
+        return failSet(`member ${built.id} is ${built.state} after its build`, built.slot, built.id);
+      members.push(built);
+    }
+    const shas = [...new Set(members.map((m) => m.source.sha))];
+    const sha = shas[0];
+    if (shas.length !== 1 || sha === undefined)
+      return failSet(
+        `the members observed different commits (${shas.join(", ")}) — the pull request moved between builds; start the set again on its current head`,
+        members.map((m) => m.slot).join(","),
+        setId,
+      );
+    const images: Record<string, string> = {};
+    for (const m of members) if (m.image !== undefined) images[m.slot] = m.image.ref;
+    // THE AUTHORITY BEFORE THE EFFECT (L1): one claim, one mint.
+    const claim = await this.deps.builds.claimMint(tenant, setId, this.now());
+    if (claim !== "claimed") return this.getSet(tenant, setId); // another driver is minting, or the set already settled
+    try {
+      const version = await this.mintSet(tenant, campaign.subjectId, set, images, by, sha);
+      const fact: DomainFact = {
+        kind: "campaign.candidate_built",
+        subject: { type: "campaign", id: set.campaignId },
+        actor: by,
+        payload: {
+          campaignId: set.campaignId,
+          buildId: setId,
+          buildSetId: setId,
+          slot: members.map((m) => m.slot).join(","),
+          sha,
+          candidateVersion: version,
+          image: Object.values(images).join(" "),
+          ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
+        },
+      };
+      const outcome = await this.deps.builds.settleSet(
+        tenant,
+        setId,
+        { state: "minted", candidateVersion: version, images, sha, at: this.now() },
+        this.stamped(tenant, [fact]),
+      );
+      if (outcome !== "settled")
+        throw new ConflictError(
+          "CONFLICT",
+          { set: setId, outcome },
+          `the set minted but its record could not be settled (${outcome})`,
+        );
+      return this.getSet(tenant, setId);
+    } catch (err) {
+      return failSet(err instanceof Error ? err.message : String(err), members.map((m) => m.slot).join(","), setId);
+    }
+  }
+
+  // The mint, idempotent under the set's own version name: a registry that already holds `versionName` with
+  // exactly these pins is this set's earlier attempt, and the answer is that version — a different document
+  // under that name is a refusal, never a silent second version.
+  private async mintSet(
+    tenant: string,
+    harnessId: string,
+    set: CampaignBuildSetRecord,
+    images: Record<string, string>,
+    by: string,
+    sha: string,
+  ): Promise<string> {
+    try {
+      const minted = await this.deps.repin({
+        tenant,
+        by,
+        id: harnessId,
+        pins: images,
+        version: set.versionName,
+        note: `built by campaign ${set.campaignId} from ${sha} (build set ${set.id}: ${Object.keys(images).sort().join(", ")})`,
+      });
+      return minted.version;
+    } catch (err) {
+      if (!(err instanceof ConflictError)) throw err;
+      const existing = await this.deps.harness.instance(tenant, harnessId, set.versionName).catch(() => undefined);
+      const same = existing !== undefined && Object.entries(images).every(([slot, ref]) => existing.pins[slot] === ref);
+      if (!same)
+        throw new ConflictError(
+          "CONFLICT",
+          { version: set.versionName },
+          `${harnessId}@${set.versionName} already exists with different pins — this set cannot mint under its name`,
+        );
+      return set.versionName;
+    }
   }
 
   // Open the build: resolve the recipe, create the `building` record and its fact, and drive the session in
@@ -237,15 +478,18 @@ export class CampaignBuildService {
       });
       const endpoint = this.deps.sessions.imageEndpoint();
       const ref = `${endpoint.endpoint}/${endpoint.namespaceFor(tenant)}/${repository}:${tag}@${digest}`;
-      // Mint the candidate instance version pinning the built image into the slot — the one re-pin door.
-      const minted = await this.deps.repin({
-        tenant,
-        by,
-        id: campaign.subjectId,
-        slot: record.slot,
-        imageRef: ref,
-        note: `built by campaign ${record.campaignId} from ${observedSha} (build ${id})`,
-      });
+      // Mint the candidate instance version pinning the built image into the slot — the one re-pin door. A set
+      // MEMBER builds and stops: the set mints once, after every member (evolution-routing-spec.md §4).
+      const minted =
+        record.setId === undefined
+          ? await this.deps.repin({
+              tenant,
+              by,
+              id: campaign.subjectId,
+              pins: { [record.slot]: ref },
+              note: `built by campaign ${record.campaignId} from ${observedSha} (build ${id})`,
+            })
+          : undefined;
       await this.deps.sessions.close(actor, session.id, { snapshot: false }).catch(() => undefined);
       const receipt = {
         steps: recipe.build.steps,
@@ -256,32 +500,48 @@ export class CampaignBuildService {
         finishedAt: this.now(),
       };
       const image = { repository, tag, ref, digest };
-      const fact: DomainFact = {
-        kind: "campaign.candidate_built",
-        subject: { type: "campaign", id: record.campaignId },
-        actor: by,
-        payload: {
-          campaignId: record.campaignId,
-          buildId: id,
-          slot: record.slot,
-          sha: observedSha,
-          candidateVersion: minted.version,
-          image: ref,
-          ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
-        },
-      };
+      // A plain build's news is its mint; a set member's news is the SET's mint, so a member emits nothing here.
+      const facts: DomainFact[] =
+        minted !== undefined
+          ? [
+              {
+                kind: "campaign.candidate_built",
+                subject: { type: "campaign", id: record.campaignId },
+                actor: by,
+                payload: {
+                  campaignId: record.campaignId,
+                  buildId: id,
+                  slot: record.slot,
+                  sha: observedSha,
+                  candidateVersion: minted.version,
+                  image: ref,
+                  ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
+                },
+              },
+            ]
+          : [];
       const outcome = await this.deps.builds.complete(
         tenant,
         id,
-        { sha: observedSha, image, candidateVersion: minted.version, receipt, at: this.now() },
-        this.stamped(tenant, [fact]),
+        {
+          sha: observedSha,
+          image,
+          ...(minted !== undefined ? { candidateVersion: minted.version } : {}),
+          receipt,
+          at: this.now(),
+        },
+        this.stamped(tenant, facts),
       );
-      if (outcome !== "completed")
+      if (outcome !== "completed") {
+        // Another driver of the same set built this member first: its record is the answer, not an error.
+        const landed = await this.get(tenant, id);
+        if (landed.state === "built") return landed;
         throw new ConflictError(
           "CONFLICT",
           { build: id, outcome },
           `the build finished but its record could not be settled (${outcome})`,
         );
+      }
       return this.get(tenant, id);
     } catch (err) {
       if (sessionRunId !== undefined)

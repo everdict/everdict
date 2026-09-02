@@ -2920,6 +2920,26 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-control", "src/harness/harness-seeds.test.ts"],
   },
   {
+    // evolution-routing-spec.md §4. The set's mint rests on the claim; neutralizing it lets two drivers finishing
+    // the last member both mint, and the build-set counterexample must notice.
+    name: "Evolve — a build set mints without its claim",
+    file: "packages/application-control/src/evolution/campaign-build-service.ts",
+    from: '    if (claim !== "claimed") return this.getSet(tenant, setId);',
+    to: '    if (claim !== "claimed" && claim.length < 0) return this.getSet(tenant, setId);',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/campaign-build-service.counterexample.test.ts"],
+  },
+  {
+    // …and the members' observed commits must agree, or the pull request moved between builds and the version
+    // would carry two different heads under one name.
+    name: "Evolve — a build set mints over two different observed commits",
+    file: "packages/application-control/src/evolution/campaign-build-service.ts",
+    from: "    if (shas.length !== 1 || sha === undefined)",
+    to: "    if (sha === undefined)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/evolution/campaign-build-service.counterexample.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

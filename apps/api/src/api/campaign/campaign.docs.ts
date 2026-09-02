@@ -25,6 +25,7 @@ export const campaignDocs: Record<
   | "merge"
   | "build"
   | "builds"
+  | "buildSets"
   | "roundEvidence",
   FastifySchema
 > = {
@@ -157,6 +158,16 @@ export const campaignDocs: Record<
       200: { description: "The round's evidence record", ...toJsonSchema(RoundEvidenceSchema) },
       ...errorResponses(401, 403, 404, 409),
     },
+  },
+  buildSets: {
+    summary: "The build sets this campaign minted",
+    description:
+      "Build sets — several slots rebuilt from one pull request head and minted as ONE candidate version (the members " +
+      "build, the set mints once, exactly one driver claims the mint). Each set: its members, the observed commit, the " +
+      "slot → image map and the minted version, or the reason it failed.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: { 200: { description: "The campaign's build sets" }, ...errorResponses(401, 403, 404) },
   },
   builds: {
     summary: "The candidate images this campaign built",

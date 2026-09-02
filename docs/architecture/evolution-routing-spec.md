@@ -123,17 +123,18 @@ answers `continue`, and the verdict names the targets that did not flip.
 
 ## §4 — A hypothesis that touches two slots is one build set and one version (G4.4)
 
-> **Deferred 2026-09-02, design refined.** Writing this against the build service showed the first draft
-> below is not honest under concurrency: "the version is minted by whichever build completes last" lets two last
-> completions both see every member `built` and both mint — two versions, or one refused as immutable after
-> the other registered. The mint is the EFFECT and needs its authority first (rule `protocol` L1): a set-level
-> ledger (`CampaignBuildSetRecord`, state `building → minting → minted | failed`) whose `claimMint` is a
-> conditional write on "every member built and no claim yet"; the claimer mints under a version name derived
-> from the set id (so a crash-and-retry re-mints the SAME name and meets the registry's immutability as
-> `already`, never as a second version) and then records it. `candidateSource` becomes plural on the verdict,
-> the merge door pays one debt per pull request, and `builtSourceFor` reads members through the set. That is
-> a store, a migration, three schema changes and a new door; it lands as its own change with its own
-> counterexample (two concurrent last completions, exactly one version).
+> **Landed 2026-09-02, with one narrowing.** `CampaignBuildSetRecord` (state `building → minting → minted |
+> failed`, migration 0206) whose `claimMint` is a conditional write — exactly one driver of a set moves it to
+> `minting` and mints, under a version name derived from the set id, so a crash-and-retry meets the registry's
+> immutability as "already this set" (pins compared) and never as a second version. `POST /campaigns/:id/builds
+> { slots: [...] }` / `build_campaign_candidate { slots }` start a set; members build without minting; `GET
+> /campaigns/:id/build-sets` / `get_campaign_build_sets` read them; the round's `candidateSource` carries
+> `images` (slot → ref) and `buildSetId`. **The narrowing:** a set is ONE pull request — every member checks out
+> the same head, and members that observed different commits fail the set ("the pull request moved"). A change
+> spanning two repositories is two hypotheses and two campaigns, so `candidateSource` stays singular and the
+> merge door pays one debt. The first draft's "last completion mints" was not honest under concurrency — two
+> last completions both saw every member built — which is why the claim exists; the counterexample drives two
+> concurrent drivers and asserts one mint.
 
 **The gap.** One build is one slot. A hypothesis across two services needs two builds and a hand-composed
 pin set through `pin_harness_images`; the two intermediate versions each build minted were never run, and

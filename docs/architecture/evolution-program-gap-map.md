@@ -114,7 +114,7 @@ minting the version, a derived round verdict, a gate, an adoption and a merge
 | G4.1 | **WHO is a question, not a lookup.** A template slot names its `source {git, repo}` and its `build`; it does not name the coding harness built inside that repository. The skill's answer is "list the profiles and ASK the member". | `evolution-routing-spec.md` §1 — **landed 2026-09-02** |
 | G4.2 | **WHAT is a prose ladder.** Nothing attributes a failing held-out case to a slot — the service whose spans carried the failure, the tool that was misused. The driver reads traces and guesses. | `evolution-routing-spec.md` §2 — **landed 2026-09-02** |
 | G4.3 | **The issue and the cases are not bound.** `ISSUE_LINK_TYPES` (`packages/contracts/src/records/tracker.ts`) has no `case`; a frame cannot be derived from an issue; the gate reads aggregate held-out counts, so "the actual issue was resolved" — THESE cases now pass — is never verified. | `evolution-routing-spec.md` §3 — **landed 2026-09-02** |
-| G4.4 | **One build is one slot.** A hypothesis that touches two services needs two builds and a hand-composed pin set; `pin_harness_images` accepts several pins, the build door accepts one slot. | `evolution-routing-spec.md` §4 — deferred; design refined (claim-before-mint) |
+| G4.4 | **One build is one slot.** A hypothesis that touches two services needs two builds and a hand-composed pin set; `pin_harness_images` accepts several pins, the build door accepts one slot. | `evolution-routing-spec.md` §4 — **landed 2026-09-02** (one pull request per set; claim-before-mint) |
 | G4.5 | **No memory across campaigns.** Campaigns list per workspace; nothing reads "everything ever tried on this harness" — the rounds, what lost, what each taught. | `evolution-routing-spec.md` §5 — **landed 2026-09-02** |
 | G4.6 | **The subject is an agent or a harness.** An environment cannot be evolved (G1.2). | `harness-definability-spec.md` §2 |
 
@@ -142,8 +142,7 @@ identity §2 (seeds on the version, materialized or refused), §4 (the seed-leak
 verified); definability §4 (case tokens, the process box, one resources predicate) and §3 (codex and
 claude-code-router recipes).
 
-Open, in the order they should land: routing §4 (the build set — design refined to claim-before-mint, deferred to
-its own change); identity §3 (lineage as one read — needs a per-version origin read the registry port does not
+Open, in the order they should land: identity §3 (lineage as one read — needs a per-version origin read the registry port does not
 expose yet); evidence §4 (citable export); definability §1 (targets beyond the browser) and §2 (the environment
 entity — the largest, and the one that unblocks an environment as a campaign subject); evidence §1 (the
 benchmark on-ramps, each an evaluator to port honestly). A Hermes recipe waits on its CLI's resume form.

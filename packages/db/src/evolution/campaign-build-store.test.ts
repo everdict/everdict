@@ -1,6 +1,7 @@
-import type { CampaignBuildRecord } from "@everdict/contracts";
+import type { CampaignBuildRecord, CampaignBuildSetRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { InMemoryCampaignBuildStore } from "./campaign-build-store.js";
+import type { SqlClient } from "../client.js";
+import { InMemoryCampaignBuildStore, PgCampaignBuildStore } from "./campaign-build-store.js";
 
 // The campaign build ledger (docs/architecture/code-evolution-loop.md, D2). The settle writes are CONDITIONAL
 // on `building`, so a build that raced its own retry, or was already settled, is not recorded twice — the
@@ -81,5 +82,63 @@ describe("InMemoryCampaignBuildStore — the settle is conditional on building",
     await store.create(building({ id: "bld_b", createdAt: "2026-09-02T02:00:00.000Z" }));
     await store.create(building({ id: "bld_other", campaignId: "evc_2" }));
     expect((await store.forCampaign("acme", "evc_1")).map((b) => b.id)).toEqual(["bld_b", "bld_a"]);
+  });
+});
+
+// ── THE BUILD SET'S CLAIM (docs/architecture/evolution-routing-spec.md §4) ───────────────────────────
+describe("campaign build sets — the claim moves building → minting exactly once", () => {
+  const set = (over: Partial<CampaignBuildSetRecord> = {}): CampaignBuildSetRecord => ({
+    id: "set_1",
+    tenant: "acme",
+    campaignId: "evc_1",
+    memberIds: ["set_1-web", "set_1-api"],
+    source: { ref: "pr-7", repo: "acme/shop", prNumber: 7 },
+    base: { version: "1.0.0" },
+    versionName: "1.0.0-set_1",
+    state: "building",
+    createdBy: "alice",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    updatedAt: "2026-09-02T00:00:00.000Z",
+    ...over,
+  });
+  it("in-memory: the first claim is `claimed`, the second `already_claimed`; minted settles only from minting; failed from either", async () => {
+    const store = new InMemoryCampaignBuildStore();
+    await store.createSet(set());
+    expect(await store.claimMint("acme", "set_1", "t1")).toBe("claimed");
+    expect(await store.claimMint("acme", "set_1", "t1")).toBe("already_claimed");
+    expect(await store.claimMint("other", "set_1", "t1")).toBe("absent");
+    expect(
+      await store.settleSet("acme", "set_1", {
+        state: "minted",
+        candidateVersion: "1.0.0-set_1",
+        images: { web: "w", api: "a" },
+        sha: "abc",
+        at: "t2",
+      }),
+    ).toBe("settled");
+    expect((await store.getSet("acme", "set_1"))?.state).toBe("minted");
+    expect(await store.claimMint("acme", "set_1", "t3")).toBe("not_building");
+    await store.createSet(set({ id: "set_2" }));
+    expect(
+      await store.settleSet("acme", "set_2", { state: "minted", candidateVersion: "x", images: {}, sha: "s", at: "t" }),
+    ).toBe("not_settleable");
+    expect(await store.settleSet("acme", "set_2", { state: "failed", error: "boom", at: "t" })).toBe("settled");
+  });
+  it("postgres: the claim carries its state guard in the WHERE, and a claim that moved no row reads the state back", async () => {
+    const calls: string[] = [];
+    let rows: unknown[] = [{ id: "set_1" }];
+    const client = {
+      async query<T>(text: string) {
+        calls.push(text);
+        if (text.startsWith("SELECT state")) return { rows: [{ state: "minting" }] as T[], rowCount: 1 };
+        return { rows: rows as T[], rowCount: rows.length };
+      },
+    } as unknown as SqlClient;
+    const store = new PgCampaignBuildStore(client);
+    expect(await store.claimMint("acme", "set_1", "t1")).toBe("claimed");
+    expect(calls[0]).toMatch(/SET state='minting'/);
+    expect(calls[0]).toMatch(/AND state='building'/);
+    rows = [];
+    expect(await store.claimMint("acme", "set_1", "t1")).toBe("already_claimed");
   });
 });

@@ -269,6 +269,10 @@ export const CandidateSourceSchema = z.object({
   image: z.string().optional(), // the candidate image, digest-pinned, in the managed store
   baseImage: z.string().optional(), // the slot's image the build extended
   buildId: z.string().optional(),
+  // A BUILD SET (evolution-routing-spec.md §4): one hypothesis over several slots of one pull request, minted as
+  // ONE version. `images` is slot → digest-pinned ref; `buildSetId` names the set.
+  images: z.record(z.string()).optional(),
+  buildSetId: z.string().optional(),
 });
 export type CandidateSource = z.infer<typeof CandidateSourceSchema>;
 
@@ -286,6 +290,7 @@ export const CampaignBuildRecordSchema = z.object({
   tenant: z.string().min(1),
   campaignId: z.string().min(1),
   slot: z.string().min(1), // the template service name, or "image" for a command harness
+  setId: z.string().min(1).optional(), // a member of a build set (§4) — the SET mints, the member only builds
   source: z.object({
     git: z.string().min(1),
     repo: z.string().optional(), // "owner/name"
@@ -314,6 +319,40 @@ export const CampaignBuildRecordSchema = z.object({
   updatedAt: z.string(),
 });
 export type CampaignBuildRecord = z.infer<typeof CampaignBuildRecordSchema>;
+
+// ── A BUILD SET — SEVERAL SLOTS, ONE PULL REQUEST, ONE VERSION (evolution-routing-spec.md §4) ─────────
+//
+// A hypothesis that touches two services of one topology is one change: one pull request, several slots
+// rebuilt, ONE candidate version carrying every pin. The members build independently; the set mints once. The
+// mint is the EFFECT and needs its authority first (rule `protocol` L1): `claimMint` is a conditional write on
+// "every member built, nobody has claimed", so two drivers finishing the last member at once cannot both mint —
+// and the version name is derived from the set, so a crash-and-retry re-mints the SAME name and meets the
+// registry's immutability as "already", never as a second version. One pull request per set: members of two
+// repositories are two hypotheses and two campaigns.
+export const CampaignBuildSetStateSchema = z.enum(["building", "minting", "minted", "failed"]);
+export type CampaignBuildSetState = z.infer<typeof CampaignBuildSetStateSchema>;
+export const CampaignBuildSetRecordSchema = z.object({
+  id: z.string().min(1),
+  tenant: z.string().min(1),
+  campaignId: z.string().min(1),
+  memberIds: z.array(z.string().min(1)).min(2),
+  source: z.object({
+    ref: z.string().min(1), // what every member checks out — one pull request head, branch or tag
+    repo: z.string().optional(),
+    prNumber: z.number().int().optional(),
+  }),
+  base: z.object({ version: z.string().min(1) }),
+  versionName: z.string().min(1), // the ONE version this set mints — derived from the set id, so re-driving re-mints the same name
+  state: CampaignBuildSetStateSchema,
+  sha: z.string().optional(), // the commit every member observed (they must agree, or the pull request moved)
+  images: z.record(z.string()).optional(), // slot → digest-pinned ref, once every member built
+  candidateVersion: z.string().optional(), // = versionName once minted
+  error: z.string().max(4000).optional(),
+  createdBy: z.string().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type CampaignBuildSetRecord = z.infer<typeof CampaignBuildSetRecordSchema>;
 
 // One hypothesis tested. The verdict is DERIVED by the service from the one production diff predicate
 // (trials significance + experiment identity) — never accepted from the caller, which would let the loop

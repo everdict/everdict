@@ -276,13 +276,27 @@ export interface CampaignServiceDeps {
       tenant: string,
       campaignId: string,
     ): Promise<
-      Array<{
+      ReadonlyArray<{
+        id: string;
         state: string;
         candidateVersion?: string;
         source: { git: string; repo?: string; ref?: string; sha?: string; prNumber?: number };
         image?: { ref: string };
         base: { image: string };
+      }>
+    >;
+    // The build SETS (evolution-routing-spec.md §4): one version minted from several slots.
+    setsForCampaign(
+      tenant: string,
+      campaignId: string,
+    ): Promise<
+      ReadonlyArray<{
         id: string;
+        state: string;
+        candidateVersion?: string;
+        source: { ref: string; repo?: string; prNumber?: number };
+        sha?: string;
+        images?: Record<string, string>;
       }>
     >;
   };
@@ -904,6 +918,21 @@ export class CampaignService {
     candidateVersion: string,
   ): Promise<CandidateSource | undefined> {
     if (this.deps.builds === undefined) return undefined;
+    // A build SET that minted this version outranks a single build (its members carry no version of their own).
+    const sets = await this.deps.builds
+      .setsForCampaign(tenant, campaignId)
+      .catch(unreadableBuildLedger(campaignId, candidateVersion));
+    const set = sets.find((s) => s.state === "minted" && s.candidateVersion === candidateVersion);
+    if (set !== undefined)
+      return {
+        source: "everdict-build",
+        ...(set.source.repo !== undefined ? { repo: set.source.repo } : {}),
+        ...(set.sha !== undefined ? { sha: set.sha } : {}),
+        ref: set.source.ref,
+        ...(set.source.prNumber !== undefined ? { prNumber: set.source.prNumber } : {}),
+        ...(set.images !== undefined ? { images: set.images } : {}),
+        buildSetId: set.id,
+      };
     // A ledger that could not be read is not a ledger with no build in it. The first version swallowed the
     // failure into `[]`, so an outage of the build store silently demoted the round's provenance to the
     // caller's coordinates — and, once the oracle read this too, silently made an Everdict-built candidate

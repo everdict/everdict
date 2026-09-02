@@ -1,4 +1,5 @@
-import type { CampaignBuildRecord } from "@everdict/contracts";
+import type { CampaignBuildRecord, CampaignBuildSetRecord } from "@everdict/contracts";
+import { ConflictError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { CampaignBuildStore } from "../ports/evolution-campaign-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
@@ -69,6 +70,62 @@ class FakeBuildStore implements CampaignBuildStore {
   }
   outbox(): OutboxEvent[] {
     return [...this.events];
+  }
+  // ── the build SET (routing spec §4) — the same decisions the in-memory and Pg stores make ──
+  readonly sets = new Map<string, CampaignBuildSetRecord>();
+  async createSet(record: CampaignBuildSetRecord, events?: OutboxEvent[]): Promise<void> {
+    this.sets.set(record.id, record);
+    if (events) this.events.push(...events);
+  }
+  async getSet(tenant: string, id: string): Promise<CampaignBuildSetRecord | undefined> {
+    const r = this.sets.get(id);
+    return r && r.tenant === tenant ? r : undefined;
+  }
+  async setsForCampaign(tenant: string, campaignId: string): Promise<CampaignBuildSetRecord[]> {
+    return [...this.sets.values()].filter((r) => r.tenant === tenant && r.campaignId === campaignId);
+  }
+  async claimMint(
+    tenant: string,
+    setId: string,
+    at: string,
+  ): Promise<"claimed" | "already_claimed" | "not_building" | "absent"> {
+    // No await before the transition: the real statement is one atomic UPDATE, and a twin that yields between
+    // its read and its write hands two callers the same claim — which is exactly what the concurrency case found.
+    const r = this.sets.get(setId);
+    if (!r || r.tenant !== tenant) return "absent";
+    if (r.state === "minting") return "already_claimed";
+    if (r.state !== "building") return "not_building";
+    this.sets.set(setId, { ...r, state: "minting", updatedAt: at });
+    return "claimed";
+  }
+  async settleSet(
+    tenant: string,
+    setId: string,
+    outcome:
+      | { state: "minted"; candidateVersion: string; images: Record<string, string>; sha: string; at: string }
+      | { state: "failed"; error: string; at: string },
+    events?: OutboxEvent[],
+  ): Promise<"settled" | "not_settleable" | "absent"> {
+    const r = await this.getSet(tenant, setId);
+    if (!r) return "absent";
+    const allowed =
+      outcome.state === "minted" ? r.state === "minting" : r.state === "building" || r.state === "minting";
+    if (!allowed) return "not_settleable";
+    this.sets.set(
+      setId,
+      outcome.state === "minted"
+        ? {
+            ...r,
+            state: "minted",
+            candidateVersion: outcome.candidateVersion,
+            images: outcome.images,
+            sha: outcome.sha,
+            updatedAt: outcome.at,
+          }
+        : { ...r, state: "failed", error: outcome.error, updatedAt: outcome.at },
+    );
+    if (events) this.events.push(...events);
+    return "settled";
   }
 }
 
@@ -156,11 +213,10 @@ function service(store: FakeBuildStore, sessions: BuildSession, over: Partial<Ca
         }) as never,
       resolvedImageOf: async () => "reg/scaffold:1.0.0",
     },
-    repin: async ({ slot, imageRef }) => {
+    repin: async ({ pins }) => {
       minted += 1;
-      // The re-pin is the door — assert it got the built ref pinned into the slot.
-      expect(imageRef).toBe("reg.local/ws-acme/scaffold-image:sha-abc123def456@sha256:beefface");
-      expect(slot).toBe("image");
+      expect(pins.image).toBe("reg.local/ws-acme/scaffold-image:sha-abc123def456@sha256:beefface");
+      expect(Object.keys(pins)).toEqual(["image"]);
       return { version: `1.0.${minted}` };
     },
     sessions,
@@ -248,5 +304,169 @@ describe("[D2 COUNTEREXAMPLE] Everdict builds the candidate into its own store, 
     const settled = await svc.run("acme", opened.id);
     expect(settled.state).toBe("failed");
     expect(settled.error).toMatch(/registry refused/);
+  });
+});
+
+// ── A BUILD SET MINTS ONCE, UNDER A CLAIM (docs/architecture/evolution-routing-spec.md §4) ───────────
+//
+// RED before the set existed: two slots of one pull request needed two builds and a hand-composed pin set, and
+// the two intermediate versions each build minted were never run.
+describe("[COUNTEREXAMPLE] a build set — several slots, one pull request, one claimed mint", () => {
+  const TOPOLOGY = {
+    kind: "service",
+    id: "shop-t",
+    version: "1.0.0",
+    services: [
+      {
+        name: "web",
+        slot: "web",
+        source: { git: "https://github.com/acme/shop.git", repo: "acme/shop" },
+        build: { steps: ["make web"], workDir: "/everdict/build" },
+      },
+      {
+        name: "api",
+        slot: "api",
+        source: { git: "https://github.com/acme/shop.git", repo: "acme/shop" },
+        build: { steps: ["make api"], workDir: "/everdict/build" },
+      },
+      { name: "db", slot: "db" },
+    ],
+  };
+  function setService(store: FakeBuildStore, sessions: BuildSession, over: Partial<CampaignBuildDeps> = {}) {
+    let n = 0;
+    const repins: Array<{ pins: Record<string, string>; version?: string }> = [];
+    const deps: CampaignBuildDeps = {
+      builds: store,
+      campaigns: {
+        get: async (_t, id) => ({
+          id,
+          teamId: "team-a",
+          subjectType: "harness",
+          subjectId: "shop",
+          baselineVersion: "1.0.0",
+        }),
+      },
+      harness: {
+        instance: async () =>
+          ({ template: { id: "shop-t", version: "1.0.0" }, id: "shop", version: "1.0.0", pins: {} }) as never,
+        template: async () => TOPOLOGY as never,
+        resolvedImageOf: async (_t, _id, _v, slot) => `reg/${slot}:1.0.0`,
+      },
+      repin: async ({ pins, version }) => {
+        repins.push({ pins, ...(version !== undefined ? { version } : {}) });
+        return { version: version ?? `1.0.${repins.length}` };
+      },
+      sessions,
+      newId: () => `set_${++n}`,
+      now: () => "2026-09-02T00:00:00.000Z",
+      ...over,
+    };
+    return { svc: new CampaignBuildService(deps), repins };
+  }
+
+  it("builds every member without minting, then mints ONE version carrying every slot's pin under the set's name", async () => {
+    const store = new FakeBuildStore();
+    const { svc, repins } = setService(store, fakeSession());
+    const set = await svc.startSet(
+      "acme",
+      { campaignId: "evc_1", ref: "pr-7", repo: "acme/shop", prNumber: 7, slots: ["web", "api"] },
+      "alice",
+    );
+    expect(set.memberIds).toEqual(["set_1-web", "set_1-api"]);
+    expect(set.versionName).toBe("1.0.0-set-set_1");
+    const done = await svc.runSet("acme", set.id);
+    expect(done.state, done.error).toBe("minted");
+    expect(done.candidateVersion).toBe("1.0.0-set-set_1");
+    expect(repins).toHaveLength(1);
+    expect(repins[0]).toEqual({
+      pins: {
+        web: "reg.local/ws-acme/shop-web:sha-abc123def456@sha256:beefface",
+        api: "reg.local/ws-acme/shop-api:sha-abc123def456@sha256:beefface",
+      },
+      version: "1.0.0-set-set_1",
+    });
+    // Members carry no version of their own: the SET minted.
+    for (const id of set.memberIds) expect((await store.get("acme", id))?.candidateVersion).toBeUndefined();
+    expect(store.outbox().filter((e) => e.kind === "campaign.candidate_built")).toHaveLength(1);
+  });
+
+  it("two drivers finishing the same set mint exactly once — the claim is the authority, not the last completion", async () => {
+    const store = new FakeBuildStore();
+    const { svc, repins } = setService(store, fakeSession());
+    const set = await svc.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "api"] }, "alice");
+    await Promise.all([svc.runSet("acme", set.id), svc.runSet("acme", set.id)]);
+    expect(repins, "the mint happened more than once").toHaveLength(1);
+    expect((await store.getSet("acme", set.id))?.state).toBe("minted");
+  });
+
+  it("a member that fails fails the set with no mint; members observing different commits fail it as 'the pull request moved'", async () => {
+    const failing = new FakeBuildStore();
+    const { svc: f, repins: fr } = setService(
+      failing,
+      fakeSession({ steps: { "make api": { exitCode: 2, stderr: "boom" } } }),
+    );
+    const s1 = await f.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "api"] }, "alice");
+    const failed = await f.runSet("acme", s1.id);
+    expect(failed.state).toBe("failed");
+    expect(failed.error).toMatch(/boom/);
+    expect(fr).toHaveLength(0);
+    // The pull request moves between the two member checkouts.
+    const moving = new FakeBuildStore();
+    const heads = ["sha-one", "sha-two"];
+    const session = fakeSession();
+    const original = session.exec.bind(session);
+    session.exec = async (actor, runId, input) => {
+      if (input.command.includes("rev-parse HEAD"))
+        return { stdout: heads.shift() ?? "sha-two", stderr: "", exitCode: 0 };
+      return original(actor, runId, input);
+    };
+    const { svc: m, repins: mr } = setService(moving, session);
+    const s2 = await m.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "api"] }, "alice");
+    const moved = await m.runSet("acme", s2.id);
+    expect(moved.state).toBe("failed");
+    expect(moved.error).toMatch(/pull request moved/);
+    expect(mr).toHaveLength(0);
+  });
+
+  it("a registry that already holds the set's version with the same pins is a retry meeting itself: minted, not a second version", async () => {
+    const store = new FakeBuildStore();
+    const { svc } = setService(store, fakeSession(), {
+      repin: async () => {
+        throw new ConflictError("CONFLICT", {}, "version exists");
+      },
+      harness: {
+        instance: async (_t, _id, version) =>
+          ({
+            template: { id: "shop-t", version: "1.0.0" },
+            id: "shop",
+            version,
+            pins: {
+              web: "reg.local/ws-acme/shop-web:sha-abc123def456@sha256:beefface",
+              api: "reg.local/ws-acme/shop-api:sha-abc123def456@sha256:beefface",
+            },
+          }) as never,
+        template: async () => TOPOLOGY as never,
+        resolvedImageOf: async (_t, _id, _v, slot) => `reg/${slot}:1.0.0`,
+      },
+    });
+    const set = await svc.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "api"] }, "alice");
+    const done = await svc.runSet("acme", set.id);
+    expect(done.state, done.error).toBe("minted");
+    expect(done.candidateVersion).toBe(set.versionName);
+  });
+
+  it("refuses a set of one slot, a repeated slot, and a slot with no recipe — by name, before anything is created", async () => {
+    const store = new FakeBuildStore();
+    const { svc } = setService(store, fakeSession());
+    await expect(
+      svc.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web"] }, "alice"),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      svc.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "web"] }, "alice"),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      svc.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "db"] }, "alice"),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(store.sets.size).toBe(0);
   });
 });
