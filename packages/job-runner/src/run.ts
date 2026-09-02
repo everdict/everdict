@@ -189,6 +189,8 @@ export async function runCaseJob(
     // `runCase` hands it to the graders' view of the compute instead. Same consumer, same value; the harness's
     // environment no longer contains a credential it never needed.
     ...(Object.keys(jobEnv).length > 0 ? { graderEnv: jobEnv } : {}),
+    // The harness version's seeds, materialized by the control plane (harness-identity-and-seeds-spec.md §2).
+    ...(job.seedFiles !== undefined ? { seedFiles: job.seedFiles } : {}),
     // The lane's attestation, onto the manifest `runCase` writes — the same value the driver above checks the
     // declaration against, so what gets recorded is what was verified (arch-review 59 P1-high).
     ...(job.worldProof ? { worldProof: job.worldProof } : {}),

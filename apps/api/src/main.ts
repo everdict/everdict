@@ -603,6 +603,17 @@ async function main(): Promise<void> {
     scheduler,
     backends,
     metrics,
+    // The seeds a harness version names, read from the workspace's own records at dispatch (seeds spec §2).
+    seeds: {
+      skillVersion: async (tenant, id, version) => {
+        const stamped = await skillVersionStore.get(tenant, id, version);
+        return stamped === undefined ? undefined : { instructions: stamped.instructions, files: stamped.files };
+      },
+      knowledgeEntry: async (tenant, id) => {
+        const entry = await knowledgeEntryStore.get(tenant, id);
+        return entry === undefined ? undefined : { title: entry.title, body: entry.body };
+      },
+    },
     browserProfileStore, // browser-profiles S5 — eval-browser profile injection (resolve + owner-gate)
     cipher, // browser-profiles S5 — decrypt the profile's captured storageState
     caseRecorder, // replay ② — managed topology backend records the per-case browser's CDP events into the recording

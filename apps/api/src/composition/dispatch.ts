@@ -13,7 +13,7 @@ import {
 } from "@everdict/application-control";
 import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
-import type { VerifierPassDeps } from "@everdict/application-control";
+import type { SeedReader, VerifierPassDeps } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type CaseRuntimeSample,
@@ -43,6 +43,7 @@ import { JudgeAuthDispatcher } from "../core/execution/judge-auth-dispatcher.js"
 import { ModelResolvingDispatcher } from "../core/execution/model-resolving-dispatcher.js";
 import { RuntimeDispatcher } from "../core/execution/runtime-dispatcher.js";
 import { RuntimeSamplingDispatcher } from "../core/execution/runtime-sampling-dispatcher.js";
+import { SeedingDispatcher } from "../core/execution/seeding-dispatcher.js";
 import { SelfHostedBackend } from "../core/execution/self-hosted-backend.js";
 import { StoreCallbackRendezvous } from "../core/execution/store-callback-rendezvous.js";
 import { buildTopologyEnvironment } from "../core/execution/topology-backend.js";
@@ -68,6 +69,9 @@ export function buildDispatch(deps: {
   scheduler: Scheduler;
   backends: BackendRegistry;
   metrics: Metrics;
+  // The harness version's seeds are read and verified at dispatch (harness-identity-and-seeds-spec.md §2). REQUIRED:
+  // a chain without a seeder would dispatch a seeded version seedless under a digest that says otherwise.
+  seeds: SeedReader;
   browserProfileStore?: BrowserProfileStore; // browser-profiles S5 — resolve a referenced profile for eval injection
   // Managed image store (optional) — when present, a job's managed images are authorized with a minted grant
   // instead of a registered credential. docs/architecture/managed-image-store.md
@@ -441,8 +445,11 @@ export function buildDispatch(deps: {
   //
   // With no verifier lane wired the pass records the verdict as `unmeasured` rather than omitting it — a case
   // whose verdict never happened must not read downstream as a case that was graded.
+  // The seeds a harness version ships with, materialized onto the job INSIDE the verifier split (the agent half
+  // runs the harness) and outside model resolution (harness-identity-and-seeds-spec.md §2).
+  const seedingDispatcher = new SeedingDispatcher(deps.seeds, resolvingDispatcher);
   const verifierAwareDispatcher = new VerifierAwareDispatcher(
-    resolvingDispatcher,
+    seedingDispatcher,
     deps.dispatchVerifier,
     // …and where the agent's half is staged, so a crash between the two halves is recoverable rather than a
     // lost case (arch-review 60 follow-through).

@@ -2,6 +2,7 @@ import {
   type CommandHarnessSpec,
   type ComputeHandle,
   type EvaluableHarness,
+  HARNESS_SEED_MOUNT,
   type HarnessTraceSource,
   InternalError,
   type RunContext,
@@ -237,7 +238,9 @@ export class CommandHarness implements EvaluableHarness {
       .replaceAll("{{task}}", shq(task))
       .replaceAll("{{model}}", modelSlot)
       .replaceAll("{{run_id}}", runId)
-      .replaceAll("{{conversation}}", conversationSlot);
+      .replaceAll("{{conversation}}", conversationSlot)
+      // Where the version's seeds were written before install (harness-identity-and-seeds-spec.md §2).
+      .replaceAll("{{seeds}}", HARNESS_SEED_MOUNT);
     for (const [key, value] of Object.entries(this.spec.params ?? {})) {
       cmd = cmd.replaceAll(`{{${key}}}`, value);
     }

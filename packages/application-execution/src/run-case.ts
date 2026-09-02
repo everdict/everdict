@@ -60,6 +60,9 @@ export interface RunCaseDeps {
   // Applied to the compute the GRADERS are handed, and to any compute they provision for themselves. The
   // harness's compute is untouched, so the key is not in the environment of the process being evaluated.
   graderEnv?: Record<string, string>;
+  // The harness version's seeds, materialized by the control plane and written at the mount BEFORE the harness
+  // installs (harness-identity-and-seeds-spec.md §2). Written through the same compute the harness runs in.
+  seedFiles?: ReadonlyArray<{ path: string; content: string }>;
   // What the LANE that built this container says it enforced — carried here so the manifest can record it.
   // `runCase` is the site that writes the manifest, and the world is as much a part of "which box did this
   // run in" as the image bytes are (arch-review 59 P1-high). The in-container driver has already REFUSED a
@@ -355,6 +358,9 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     }
   };
   try {
+    // Seeds first (harness-identity-and-seeds-spec.md §2): a harness's install may read them — a CLI that loads
+    // its skills directory at start. Inside the try, so a write that fails still releases the compute.
+    for (const seed of deps.seedFiles ?? []) await compute.writeFile(seed.path, seed.content);
     await deps.environment.seed(compute, evalCase.env);
     await deps.harness.install(compute);
     // Opt-in live screen: push periodic frames of the case's screen (e.g. browser-use's Chromium over CDP) while it runs.

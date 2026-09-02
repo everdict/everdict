@@ -52,6 +52,10 @@ export const CaseJobSchema = z.object({
   evalCase: EvalCaseSchema,
   harness: z.object({ id: z.string(), version: z.string() }),
   harnessSpec: HarnessSpecSchema.optional(),
+  // The harness version's seeds, MATERIALIZED by the control plane (harness-identity-and-seeds-spec.md §2): the
+  // bytes the dispatch read from the workspace's records and verified against the version's digests, for the
+  // runner to write at `HARNESS_SEED_MOUNT` before the harness starts. Platform-authored; a runner receives it.
+  seedFiles: z.array(z.object({ path: z.string().min(1), content: z.string() })).optional(),
   // The model DOCUMENTS this batch pinned for that spec (arch-review 19 P0-4) — carried ON THE JOB because the
   // dispatcher is where a `{ref}` binding finally materializes into a provider, a base URL and a key, and it
   // has no other way to know what the batch certified. `pinHarnessSpecToClosure` already pins the VERSION

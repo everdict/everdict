@@ -393,3 +393,51 @@ describe("runCase — the world a case declares reaches the driver", () => {
     expect(seen[0]).not.toHaveProperty("network");
   });
 });
+
+// ── SEEDS ARE WRITTEN BEFORE THE HARNESS INSTALLS (docs/architecture/harness-identity-and-seeds-spec.md §2) ──
+describe("runCase — the version's seeds land at the mount before install", () => {
+  it("writes every seed file through the compute, before install runs, and a run without seeds writes none", async () => {
+    const order: string[] = [];
+    // `fakeComputeHandle` applies only `image` from its override; the recorder is attached afterwards.
+    const compute = fakeComputeHandle();
+    compute.writeFile = async (path: string) => {
+      order.push(`write:${path}`);
+    };
+    const driver = { id: "fake", provision: async () => compute } as Driver;
+    const harness: EvaluableHarness = {
+      id: "seeded",
+      version: "1.0.0",
+      install: async () => {
+        order.push("install");
+      },
+      run: async function* (): AsyncIterable<TraceEvent> {
+        yield { t: 0, kind: "log", text: "done", stream: "stdout" } as TraceEvent;
+      },
+    };
+    await runCase(CASE, {
+      driver,
+      environment: ENVIRONMENT,
+      harness,
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+      seedFiles: [
+        { path: "/everdict/seeds/skills/triage/SKILL.md", content: "# Triage" },
+        { path: "/everdict/seeds/knowledge/k1.md", content: "# Retry budget" },
+      ],
+    });
+    expect(order).toEqual([
+      "write:/everdict/seeds/skills/triage/SKILL.md",
+      "write:/everdict/seeds/knowledge/k1.md",
+      "install",
+    ]);
+    order.length = 0;
+    await runCase(CASE, {
+      driver,
+      environment: ENVIRONMENT,
+      harness,
+      graders: [],
+      runCtx: { apiKeyEnv: {}, timeoutSec: 60 },
+    });
+    expect(order).toEqual(["install"]);
+  });
+});

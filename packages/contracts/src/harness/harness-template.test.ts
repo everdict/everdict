@@ -805,3 +805,62 @@ describe("resolveDelegate — the slot's maintainer is a lookup, and every miss 
     expect(resolveDelegate(bare)).toEqual({ kind: "ambiguous", slots: [] });
   });
 });
+
+// ── SEEDS RIDE THE VERSION (docs/architecture/harness-identity-and-seeds-spec.md §2) ──────────────────
+describe("resolveHarnessInstance — the instance's seeds land on the resolved spec, so they are inside its digest", () => {
+  const seeds = {
+    skills: [{ id: "triage", version: "1.2.0", digest: "sha256:aaaa" }],
+    knowledge: [{ id: "k1", digest: "sha256:bbbb" }],
+  };
+  it("carries seeds onto a command, a service and a process resolution alike", () => {
+    const command = HarnessTemplateSpecSchema.parse({
+      kind: "command",
+      category: "cli-agent",
+      id: "codex",
+      version: "1.0.0",
+      image: "node:22",
+      command: "codex exec {{task}}",
+    });
+    const resolved = resolveHarnessInstance(command, {
+      template: { id: "codex", version: "1.0.0" },
+      id: "codex",
+      version: "1.0.0",
+      pins: {},
+      seeds,
+    });
+    expect(resolved.seeds).toEqual(seeds);
+    const process = HarnessTemplateSpecSchema.parse({
+      kind: "process",
+      category: "builtin",
+      id: "claude-code",
+      version: "1",
+    });
+    expect(
+      resolveHarnessInstance(process, {
+        template: { id: "claude-code", version: "1" },
+        id: "claude-code",
+        version: "1.0.0",
+        pins: {},
+        seeds,
+      }).seeds,
+    ).toEqual(seeds);
+  });
+  it("an instance without seeds resolves to a spec without them — never an empty declaration", () => {
+    const command = HarnessTemplateSpecSchema.parse({
+      kind: "command",
+      category: "cli-agent",
+      id: "codex",
+      version: "1.0.0",
+      image: "node:22",
+      command: "codex exec {{task}}",
+    });
+    expect(
+      resolveHarnessInstance(command, {
+        template: { id: "codex", version: "1.0.0" },
+        id: "codex",
+        version: "1.0.0",
+        pins: {},
+      }).seeds,
+    ).toBeUndefined();
+  });
+});

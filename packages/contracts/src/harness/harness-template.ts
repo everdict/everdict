@@ -7,6 +7,7 @@ import {
   type EnvValue,
   EnvValueSchema,
   FrontDoorSpecSchema,
+  HarnessSeedsSchema,
   type HarnessSpec,
   LiveScreenSpecSchema,
   ProcessHarnessSpecSchema,
@@ -232,6 +233,9 @@ export const HarnessInstanceSpecSchema = z.object({
   // Part of the version spec so immutable (subject to specsEqual): re-registering the same version with different notes → 409. Runtime-agnostic meta, so not carried into resolve.
   description: z.string().optional(),
   pins: z.record(z.string()).default({}), // slot → value (image ref; command uses "image"/"model")
+  // The skill and knowledge seeds this VERSION ships with — carried onto the resolved document, so inside its digest
+  // (docs/architecture/harness-identity-and-seeds-spec.md §2).
+  seeds: HarnessSeedsSchema.optional(),
   pinSources: z.record(PinSourceSchema).optional(), // slot → store environment provenance (annotation; resolve ignores)
   overrides: InstanceOverridesSchema.optional(), // structure-invariant behavior variation (env/body/params) — unset = image only (current)
 });
@@ -354,6 +358,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         target = { ...target, extension: { ...(target.extension ?? {}), ref: overrides.target.extension.ref } };
       }
       return ServiceHarnessSpecSchema.parse({
+        ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
         kind: "service",
         id: instance.id,
         version: instance.version,
@@ -376,6 +381,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       const params = overrides?.params ? { ...template.params, ...overrides.params } : template.params;
       const resources = overrides?.resources ?? template.resources;
       return CommandHarnessSpecSchema.parse({
+        ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
         kind: "command",
         id: instance.id,
         version: instance.version,
@@ -393,7 +399,12 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       });
     }
     case "process":
-      return ProcessHarnessSpecSchema.parse({ kind: "process", id: instance.id, version: instance.version });
+      return ProcessHarnessSpecSchema.parse({
+        kind: "process",
+        id: instance.id,
+        version: instance.version,
+        ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
+      });
   }
 }
 

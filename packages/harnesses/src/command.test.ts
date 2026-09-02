@@ -680,3 +680,14 @@ describe("CommandHarness — the conversation contract", () => {
     expect(tokens).toEqual([]);
   });
 });
+
+// ── THE COMMAND REACHES ITS SEEDS (docs/architecture/harness-identity-and-seeds-spec.md §2) ──────────
+describe("{{seeds}} — where the version's seeds were written before install", () => {
+  it("substitutes the fixed mount", async () => {
+    const { compute, execs } = fakeCompute();
+    const seeded: CommandHarnessSpec = { ...spec(), command: "agent --skills {{seeds}}/skills --message {{task}}" };
+    await collect(new CommandHarness(seeded, { runId: () => "rid1" }).run(compute, "fix the bug", ctx));
+    expect(execs[0]?.cmd).toContain("--skills /everdict/seeds/skills");
+    expect(execs[0]?.cmd).not.toContain("{{seeds}}");
+  });
+});

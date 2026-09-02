@@ -1,3 +1,4 @@
+import { knowledgeSeedDigest } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import {
@@ -225,7 +226,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:read");
-      return reply.send(await deps.knowledgeEntryService.get(principal.workspace, req.params.id, principal.subject));
+      const entry = await deps.knowledgeEntryService.get(principal.workspace, req.params.id, principal.subject);
+      // …with the digest a harness version names to SEED this entry (harness-identity-and-seeds-spec.md §2).
+      return reply.send({ ...entry, seedDigest: knowledgeSeedDigest(entry) });
     } catch (err) {
       return sendError(reply, err); // foreign private / missing → 404
     }

@@ -577,10 +577,32 @@ export const FrontDoorSpecSchema = z
 export type FrontDoorSpec = z.infer<typeof FrontDoorSpecSchema>;
 
 // process harness: a single process (one sandbox). Claude Code/Codex.
+// ── THE SEEDS A HARNESS VERSION SHIPS WITH (docs/architecture/harness-identity-and-seeds-spec.md §2) ──
+//
+// Skill seeds and wiki (knowledge) seeds hang off the harness VERSION: they ride the resolved document, so they
+// are inside `specDigest` and the manifest seal, and a seed change is a new version on the same axis a pin change
+// is. Each names the exact bytes — a skill's stamped version and the digest of its body, a knowledge entry and
+// the digest of its body (`skillSeedDigest` / `knowledgeSeedDigest` in `@everdict/domain`) — and the dispatch
+// materializes them at `HARNESS_SEED_MOUNT` from the workspace's own records, refusing when the bytes there no
+// longer digest to what the version named (rule `protocol` L4: a settlement owns immutable bytes).
+export const HARNESS_SEED_MOUNT = "/everdict/seeds";
+export const HarnessSeedsSchema = z.object({
+  skills: z
+    .array(z.object({ id: z.string().min(1), version: z.string().min(1), digest: z.string().min(1) }))
+    .max(64)
+    .default([]),
+  knowledge: z
+    .array(z.object({ id: z.string().min(1), digest: z.string().min(1) }))
+    .max(256)
+    .default([]),
+});
+export type HarnessSeeds = z.infer<typeof HarnessSeedsSchema>;
+
 export const ProcessHarnessSpecSchema = z.object({
   kind: z.literal("process"),
   id: z.string(),
   version: VersionSchema,
+  seeds: HarnessSeedsSchema.optional(),
 });
 
 // service harness: a deployable topology. browser-use-langgraph etc.
@@ -588,6 +610,7 @@ export const ServiceHarnessSpecSchema = z.object({
   kind: z.literal("service"),
   id: z.string(),
   version: VersionSchema,
+  seeds: HarnessSeedsSchema.optional(),
   // The array-level refine enforces the image↔exec pairing (the object stays a plain ZodObject for the union).
   services: z.array(TopologyServiceSchema).superRefine(validateServiceExec),
   dependencies: z.array(TopologyDependencySchema).default([]),
@@ -681,6 +704,7 @@ export const CommandHarnessSpecSchema = z.object({
   kind: z.literal("command"),
   id: z.string(),
   version: VersionSchema,
+  seeds: HarnessSeedsSchema.optional(),
   image: z.string().optional(), // dispatch image (default job-runner image if absent). Install tools via setup.
   // Resource request for the whole job (same convention as TopologyService.resources: cpu 1000=1vCPU/nomad MHz,
   // memoryMb). Heavier harnesses declare it so nomad/k8s bin-pack correctly and starvation reads as an infra

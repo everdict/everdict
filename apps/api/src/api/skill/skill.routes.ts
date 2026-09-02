@@ -1,3 +1,4 @@
+import { skillSeedDigest } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { CreateSkillBodySchema } from "./request/create-skill.js";
@@ -206,9 +207,14 @@ export function registerSkillRoutes(app: FastifyInstance, deps: ServerDeps): voi
       if (!principal) return reply;
       try {
         gate(principal, "skills:read");
-        return reply.send(
-          await deps.skillService.getVersion(principal.workspace, req.params.id, req.params.version, principal.subject),
+        const stamped = await deps.skillService.getVersion(
+          principal.workspace,
+          req.params.id,
+          req.params.version,
+          principal.subject,
         );
+        // …with the digest a harness version names to SEED this skill (harness-identity-and-seeds-spec.md §2).
+        return reply.send({ ...stamped, seedDigest: skillSeedDigest(stamped) });
       } catch (err) {
         return sendError(reply, err);
       }

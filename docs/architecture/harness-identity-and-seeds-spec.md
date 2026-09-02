@@ -48,6 +48,19 @@ edge exists. Today the field is unknown and both register cleanly with nothing r
 
 ## §2 — Seeds hang off the harness version, and are part of its identity (G2.2)
 
+> **Landed 2026-09-02.** `HarnessSeedsSchema` on the instance and on every resolved spec
+> (`packages/contracts/src/harness/harness-spec.ts`, `packages/contracts/src/harness/harness-template.ts`) — so
+> inside `specDigest` and the manifest seal; the digests a seed names are `skillSeedDigest` (a stamped skill
+> version's instructions + files) and `knowledgeSeedDigest` (an entry's title + body) in
+> `packages/domain/src/harness/harness-seeds.ts`, exposed on `GET /skills/:id/versions/:version` and
+> `GET /knowledge/entries/:id` as `seedDigest`; the dispatch chain's `SeedingDispatcher`
+> (`apps/api/src/core/execution/seeding-dispatcher.ts`) reads the bytes from the workspace's skill-version and
+> knowledge-entry stores, refuses a mismatch (409) or a missing seed (404), and attaches them to the job as
+> `seedFiles`; the runner writes them at `HARNESS_SEED_MOUNT` (`/everdict/seeds`) before the harness installs
+> (`packages/application-execution/src/run-case.ts`); a command reaches the mount through `{{seeds}}`.
+> Verification happens at DISPATCH, not at register: a version naming a stale digest registers and then refuses
+> every run by name until a version naming the current digest is registered — visible, never silent.
+
 **The gap.** The program says a harness version SHIPS with its skill seeds and wiki seeds. Today a skill or
 a knowledge entry can be pinned ABOUT a harness version (`KnowledgePin`), which is a claim about an interval
 of validity — it can be added after the version exists and it changes nothing about what runs. No field on

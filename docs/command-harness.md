@@ -27,7 +27,9 @@ single generic `CommandHarness` interprets it. A SaaS user registers a spec → 
                                        //     mlflow: "correlate":"id"|"tag"?, "experiment":"…"? · phoenix: "project" }
 }
 ```
-Template tokens in `command`: **`{{task}}`** (shell-quoted automatically — don't wrap it in quotes),
+Template tokens in `command`: **`{{seeds}}`** (the directory the harness version's skill/knowledge seeds were
+written to before install — `/everdict/seeds/skills/<id>/SKILL.md`, `/everdict/seeds/knowledge/<id>.md`; see
+`docs/architecture/harness-identity-and-seeds-spec.md` §2), **`{{task}}`** (shell-quoted automatically — don't wrap it in quotes),
 `{{model}}`, `{{run_id}}`.
 
 ## How it runs

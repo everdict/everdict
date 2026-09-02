@@ -415,6 +415,13 @@ export {
 
 // harness — resolved-spec version diff (base ↔ candidate)
 export { diffHarnessSpecs } from "./harness/harness-diff.js";
+export {
+  type SeedFile,
+  knowledgeSeedDigest,
+  knowledgeSeedFile,
+  skillSeedDigest,
+  skillSeedFiles,
+} from "./harness/harness-seeds.js";
 
 // harness — what makes ONE instance different from its template (the display answer to "which one is this?")
 export {
