@@ -29,6 +29,7 @@ import {
   issueKey,
 } from "@everdict/db";
 import { inMemoryBudget, inMemoryUsageMeter } from "@everdict/domain";
+import { contentDigest } from "@everdict/domain";
 import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
 import {
   InMemoryBenchmarkRegistry,
@@ -1612,6 +1613,49 @@ describe("API — harness taxonomy (template category + instance)", () => {
       slots: ["web", "api", "db"],
     });
     expect((await app.inject({ method: "GET", url: "/harnesses/nope/delegate", headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  // ── A FORK IS VERIFIED BEFORE THE WRITE (docs/architecture/harness-identity-and-seeds-spec.md §1) ──────
+  it("POST /harnesses with forkedFrom → registers when the parent resolves and digests as named; 409 on a wrong digest; 404 on a missing parent", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: INSTANCE }); // the parent: bu@pr-1
+    const parent = (await app.inject({ method: "GET", url: "/harnesses/bu/pr-1", headers: h })).json();
+    const { imageClasses: _classes, ...parentDocument } = parent;
+    void _classes;
+    const fork = { ...TEMPLATE, id: "bu-fork" };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: fork });
+    const child = {
+      template: { id: "bu-fork", version: "1" },
+      id: "bu-fork",
+      version: "1.0.0",
+      pins: { agent: "ghcr.io/x/agent:abc" },
+    };
+    const wrong = await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: h,
+      payload: { ...child, forkedFrom: { id: "bu", version: "pr-1", specDigest: "sha256:wish" } },
+    });
+    expect(wrong.statusCode, wrong.body).toBe(409);
+    // Nothing was registered by the refused fork.
+    expect((await app.inject({ method: "GET", url: "/harnesses/bu-fork", headers: h })).statusCode).toBe(404);
+    const missing = await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: h,
+      payload: { ...child, forkedFrom: { id: "bu", version: "nope", specDigest: "sha256:x" } },
+    });
+    expect(missing.statusCode).toBe(404);
+    const ok = await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: h,
+      payload: { ...child, forkedFrom: { id: "bu", version: "pr-1", specDigest: contentDigest(parentDocument) } },
+    });
+    expect(ok.statusCode, ok.body).toBe(201);
     await app.close();
   });
 

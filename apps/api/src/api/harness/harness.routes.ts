@@ -1,6 +1,11 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
-import { RepinBodySchema, repinHarnessImages, resolveHarnessDelegate } from "@everdict/application-control";
+import {
+  RepinBodySchema,
+  repinHarnessImages,
+  resolveHarnessDelegate,
+  verifyForkLineage,
+} from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { AppError, HarnessInstanceSpecSchema, type ImageWarning, resolveHarnessInstance } from "@everdict/contracts";
 import {
@@ -13,7 +18,7 @@ import {
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
-import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
+import { capabilityOriginFor, declaredForkFrom, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
   type ServerDeps,
@@ -69,7 +74,17 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         declaredOriginFrom(req.body),
         { type: "harness", id: parsed.data.id },
       );
-      await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject, owner.teamId, origin);
+      // A declared fork is verified BEFORE the write (harness-identity-and-seeds-spec.md §1): the parent resolves
+      // and digests to what the fork names, or nothing is registered. Stamped on the origin — provenance, not content.
+      const forkedFrom = declaredForkFrom(req.body);
+      if (forkedFrom !== undefined) await verifyForkLineage(deps.harnessInstances, principal.workspace, forkedFrom);
+      await deps.harnessInstances.register(
+        principal.workspace,
+        parsed.data,
+        principal.subject,
+        owner.teamId,
+        forkedFrom !== undefined ? { ...origin, forkedFrom } : origin,
+      );
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
       const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
       // Visibility tradeoff surfaced at write time: a user-scope secretRef makes the harness visible to you only.

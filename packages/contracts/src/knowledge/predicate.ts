@@ -47,6 +47,7 @@ export const PREDICATES = [
 
   // LINEAGE — version & derivation history
   "succeeds", // entity@vN → entity@vN-1 (immutable-version lineage)
+  "forked_from", // entity@v → OTHER entity@v it was copied from (CapabilityOrigin.forkedFrom — identity spec §1)
   "derived_from", // dataset → dataset | harness-instance → template (producedBy / recipe provenance)
 
   // AGENT & COMMUNICATION

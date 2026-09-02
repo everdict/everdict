@@ -462,6 +462,7 @@ export {
 } from "./harness/harness-pin-service.js";
 export { type HarnessDelegateAnswer, resolveHarnessDelegate } from "./harness/harness-delegate-service.js";
 export { type SeedReader, materializeSeeds } from "./harness/harness-seeds.js";
+export { verifyForkLineage } from "./harness/harness-fork.js";
 // evolution campaign — the agent-evolve loop's settlement (docs/architecture/evolution-lineage.md, Track D)
 export {
   type AdoptionOutcome,

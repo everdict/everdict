@@ -1,5 +1,10 @@
 import type { CapabilityOrigin, CapabilityOriginChannel, CapabilityOriginSourceType } from "@everdict/contracts";
-import { BadRequestError, CapabilityOriginRefSchema } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CapabilityOriginFork,
+  CapabilityOriginForkSchema,
+  CapabilityOriginRefSchema,
+} from "@everdict/contracts";
 import { z } from "zod";
 import type { AgentAttribution } from "./fs/fs-actor.js";
 import type { ServerDeps } from "./route-context.js";
@@ -115,4 +120,20 @@ async function resolveIssueRef(
   } catch {
     return undefined;
   }
+}
+
+// ── THE FORK A REGISTER DECLARES (harness-identity-and-seeds-spec.md §1) ─────────────────────────────
+//
+// A body-level sibling like `origin`: `forkedFrom: { id, version, specDigest }`. Read here so both transports parse
+// one shape; verified by `verifyForkLineage` before the write; stamped on the origin, never into the spec.
+export function declaredForkFrom(body: unknown): CapabilityOriginFork | undefined {
+  if (typeof body !== "object" || body === null || !("forkedFrom" in body)) return undefined;
+  const parsed = CapabilityOriginForkSchema.safeParse((body as { forkedFrom?: unknown }).forkedFrom);
+  if (!parsed.success)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { forkedFrom: (body as { forkedFrom?: unknown }).forkedFrom },
+      parsed.error.message,
+    );
+  return parsed.data;
 }

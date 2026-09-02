@@ -76,6 +76,14 @@ function common(
   tags.forEach((t, i) => b.ref("tagged_with", { type: "tag", key: t }, `tags[${i}]`));
   if (meta.teamId !== undefined && meta.teamId !== "")
     b.ref("belongs_to", { type: "team", key: meta.teamId }, "teamId");
+  // A FORK — another id's version this one was copied from (identity spec §1). Recorded at the register, never
+  // inferred from similarity; the digest the fork named rides the edge so a reader can check it later.
+  const fork = meta.origin?.forkedFrom;
+  if (fork !== undefined)
+    b.ref("forked_from", { type: self.type, key: fork.id, version: fork.version }, "origin.forkedFrom", {
+      via: meta.origin?.via,
+      specDigest: fork.specDigest,
+    });
   const from = meta.origin?.from;
   if (from !== undefined) {
     const ft = NodeTypeSchema.safeParse(from.type);

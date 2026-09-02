@@ -26,6 +26,14 @@ both carry `refs: KnowledgePin[]` — a claim's known-valid INTERVAL along an en
 
 ## §1 — A fork is recorded where it happens (G2.1)
 
+> **Landed 2026-09-02, on the ORIGIN rather than the instance spec:** `CapabilityOrigin.forkedFrom { id, version,
+> specDigest }` (`packages/contracts/src/records/capability-origin.ts`) — provenance stamped beside the spec, never
+> inside the digest, the way `origin.from` already is. Declared as a body sibling `forkedFrom` on `POST /harnesses`
+> and as `register_harness { forkedFrom }`; `verifyForkLineage` (`packages/application-control/src/harness/harness-fork.ts`)
+> refuses before the write when the parent does not resolve (404) or does not digest as named (409, via
+> `digestUnder` so an older-era seal still verifies); the knowledge harvest emits `forked_from` to the other id's
+> version with the digest on the edge (`packages/domain/src/knowledge/harvest-specs.ts`).
+
 **The gap.** `succeeds` is same-id only. A harness that started as a copy of another — a Codex variant of the
 Claude scaffold, a workspace's copy of a `_shared` template, a team's fork of another team's instance —
 records nothing about where it came from. "Which harnesses descend from this one" is unanswerable, so a

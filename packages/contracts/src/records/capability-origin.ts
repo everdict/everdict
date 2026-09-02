@@ -54,9 +54,23 @@ export const CapabilityOriginRefSchema = z.object({
 });
 export type CapabilityOriginRef = z.infer<typeof CapabilityOriginRefSchema>;
 
+// ── A FORK IS RECORDED WHERE IT HAPPENS (docs/architecture/harness-identity-and-seeds-spec.md §1) ──────
+//
+// The version this one was COPIED from — another id's version (a Codex variant of the Claude scaffold, a
+// workspace copy of a `_shared` template). Provenance, not content: it rides the origin stamp beside the spec, so
+// it never enters the digest. Verified at the register door — the named version resolves and its document digests
+// to `specDigest` — because a fork that names bytes it did not come from is provenance re-derived from a wish.
+export const CapabilityOriginForkSchema = z.object({
+  id: z.string().min(1).max(200),
+  version: z.string().min(1).max(100),
+  specDigest: z.string().min(1),
+});
+export type CapabilityOriginFork = z.infer<typeof CapabilityOriginForkSchema>;
+
 export const CapabilityOriginSchema = z.object({
   via: CapabilityOriginChannelSchema,
   from: CapabilityOriginRefSchema.optional(),
+  forkedFrom: CapabilityOriginForkSchema.optional(),
   // The agent that acted, and the conversation it acted in — the same attribution the workspace filesystem
   // already records on a revision, arriving through the same request headers. Absent = a member acted directly.
   agentId: z.string().max(200).optional(),

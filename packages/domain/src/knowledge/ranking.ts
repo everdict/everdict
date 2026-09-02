@@ -52,6 +52,7 @@ export const PREDICATE_PRIORITY: readonly Predicate[] = [
   "belongs_to",
   // lineage / low-signal scoping
   "succeeds",
+  "forked_from",
   "created_by",
   "member_of",
   "in_workspace",

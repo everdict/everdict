@@ -1,5 +1,5 @@
 import { setVersionTags } from "@everdict/application-control";
-import { repinHarnessImages, resolveHarnessDelegate } from "@everdict/application-control";
+import { repinHarnessImages, resolveHarnessDelegate, verifyForkLineage } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
@@ -170,9 +170,15 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
+          forkedFrom: z
+            .object({ id: z.string().min(1), version: z.string().min(1), specDigest: z.string().min(1) })
+            .optional()
+            .describe(
+              "The harness version this one was copied from (another id) — verified: it must resolve and digest to specDigest (read it from GET /harnesses/:id/:version's document digest). Recorded as provenance, never in the spec.",
+            ),
         },
       },
-      ({ spec, team, fromIssue, originNote }) =>
+      ({ spec, team, fromIssue, originNote, forkedFrom }) =>
         // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
         runForTeam(ctx, "harnesses:register", team, async (teamId) => {
           let parsed: unknown;
@@ -192,7 +198,15 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             { type: "harness", id: result.data.id },
           );
           // creator stamp = HTTP parity — without it a user-secret (private) instance becomes invisible even to its registrant
-          await instances.register(ws, result.data, principal.subject, teamId, origin); // resolve validation (missing template / absent pins → error)
+          // A declared fork is verified BEFORE the write (identity spec §1), then stamped on the origin — parity with the route.
+          if (forkedFrom !== undefined) await verifyForkLineage(instances, ws, forkedFrom);
+          await instances.register(
+            ws,
+            result.data,
+            principal.subject,
+            teamId,
+            forkedFrom !== undefined ? { ...origin, forkedFrom } : origin,
+          ); // resolve validation (missing template / absent pins → error)
           // Visibility tradeoff surfaced at write time (HTTP parity): user-scope secretRef → visible to you only.
           const isPrivate = await harnessIsPrivate(instances, ws, result.data.id, result.data.version);
           return ok({

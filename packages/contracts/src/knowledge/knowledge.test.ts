@@ -9,7 +9,7 @@ import { PREDICATES } from "./predicate.js";
 describe("knowledge vocabularies are closed", () => {
   it("has the expected node and predicate cardinality with no duplicates", () => {
     expect(NODE_TYPES).toHaveLength(32);
-    expect(PREDICATES).toHaveLength(41);
+    expect(PREDICATES).toHaveLength(42); // +forked_from (harness-identity-and-seeds-spec.md §1)
     expect(new Set(NODE_TYPES).size).toBe(NODE_TYPES.length);
     expect(new Set(PREDICATES).size).toBe(PREDICATES.length);
   });

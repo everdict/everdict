@@ -209,3 +209,37 @@ describe("origin lineage — a same-family origin is the succeeds edge", () => {
     expect(p.get("born_from")).toBe(nodeId("acme", { type: "dataset", key: "swe-mini", version: "1.0.0" }));
   });
 });
+
+// ── A FORK IS AN EDGE TO ANOTHER ID'S VERSION (docs/architecture/harness-identity-and-seeds-spec.md §1) ──
+describe("origin lineage — a recorded fork is the forked_from edge, carrying the digest it named", () => {
+  it("emits forked_from to the other id's version, with the fork's specDigest on the edge", () => {
+    const meta = {
+      tenant: "acme",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      updatedAt: "2026-09-02T00:00:00.000Z",
+      createdBy: "alice",
+      origin: {
+        via: "web" as const,
+        forkedFrom: { id: "claude-scaffold", version: "1.0.0", specDigest: "sha256:abc" },
+      },
+    };
+    const spec: HarnessSpec = {
+      kind: "command",
+      id: "codex-scaffold",
+      version: "1.0.0",
+      command: "codex exec {{task}}",
+      env: {},
+      setup: [],
+      params: {},
+      trace: { kind: "none" },
+    };
+    const res = harvestHarness(meta, spec);
+    const fork = res.edges.find((e) => e.predicate === "forked_from");
+    expect(preds(res.edges).get("forked_from")).toBe(
+      nodeId("acme", { type: "harness", key: "claude-scaffold", version: "1.0.0" }),
+    );
+    expect(fork?.edgeAttrs).toMatchObject({ via: "web", specDigest: "sha256:abc" });
+    // …and a fork is not a `succeeds` (that is the same id) nor a `born_from` (that is an intent).
+    expect(res.edges.some((e) => e.predicate === "succeeds" || e.predicate === "born_from")).toBe(false);
+  });
+});
