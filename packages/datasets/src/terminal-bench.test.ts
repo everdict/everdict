@@ -1,5 +1,8 @@
 import { BadRequestError, DatasetSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { importBenchmark } from "./catalog.js";
+import { fetchSourceRows } from "./spec.js";
+import { parseTerminalBenchTasks } from "./terminal-bench.js";
 import { terminalBenchTaskToCase, terminalBenchToDataset } from "./terminal-bench.js";
 
 describe("terminalBenchTaskToCase", () => {
@@ -159,5 +162,71 @@ describe("terminalBenchTaskToCase — the world the task declares", () => {
     const c = terminalBenchTaskToCase({ id: "t", instruction: "x", image: "img:1" });
     expect(c.resources).toBeUndefined();
     expect(c.network).toBeUndefined();
+  });
+});
+
+// ── THE INGESTION EDGE (docs/architecture/standard-task-formats.md, slices 2-3) ───────────────────────
+//
+// Text → tasks → a dataset, through the same door `POST /datasets/import` uses. What these pin is the pair
+// of refusals: a document this cannot read must not import as an EMPTY task set (a dataset with no cases and
+// no error is the worst outcome available), and a task whose image cannot be resolved must not import as a
+// case nothing can run.
+describe("parseTerminalBenchTasks — the shapes a caller actually has", () => {
+  const task = (id: string) => ({ id, instruction: `do ${id}`, image: `ghcr.io/acme/${id}:1` });
+
+  it("reads a JSON array, a { tasks } document and one task per line alike", () => {
+    const two = [task("a"), task("b")];
+    expect(parseTerminalBenchTasks(JSON.stringify(two)).map((t) => t.id)).toEqual(["a", "b"]);
+    expect(parseTerminalBenchTasks(JSON.stringify({ tasks: two })).map((t) => t.id)).toEqual(["a", "b"]);
+    expect(parseTerminalBenchTasks(two.map((t) => JSON.stringify(t)).join("\n")).map((t) => t.id)).toEqual(["a", "b"]);
+  });
+
+  it("refuses an empty, unreadable or non-task document by name — never an empty task set", () => {
+    expect(() => parseTerminalBenchTasks("   ")).toThrow(/empty/);
+    expect(() => parseTerminalBenchTasks("{not json")).toThrow(/not valid JSON/);
+    expect(() => parseTerminalBenchTasks('{"cases": []}')).toThrow(/is not a task/);
+    expect(() => parseTerminalBenchTasks("[]")).toThrow(/zero tasks/);
+    expect(() => parseTerminalBenchTasks(JSON.stringify([{ id: "a" }]))).toThrow(/task #1 is not a task/);
+  });
+
+  it("imports a task set through the benchmark door, resolving each image from the template", async () => {
+    const dataset = await importBenchmark(
+      {
+        id: "tb",
+        description: "a task set",
+        category: "coding",
+        defaultVersion: "1.0.0",
+        source: { kind: "terminal-bench", imageTemplate: "ghcr.io/acme/tb/{id}:v1" },
+        mapping: { idField: "id", taskField: "instruction" },
+      },
+      { id: "tb", version: "1.0.0" },
+      { text: JSON.stringify([{ id: "hello", instruction: "say hello" }]) },
+    );
+    expect(dataset.cases).toHaveLength(1);
+    expect(dataset.cases[0]?.image).toBe("ghcr.io/acme/tb/hello:v1");
+    expect(dataset.cases[0]?.graders?.[0]?.id).toBe("reward-file");
+    // …and a task with no image and no template is refused, not imported as a case nothing can run.
+    await expect(
+      importBenchmark(
+        {
+          id: "tb",
+          description: "a task set",
+          category: "coding",
+          defaultVersion: "1.0.0",
+          source: { kind: "terminal-bench" },
+          mapping: { idField: "id", taskField: "instruction" },
+        },
+        { id: "tb", version: "1.0.0" },
+        { text: JSON.stringify([{ id: "hello", instruction: "say hello" }]) },
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("previews the set through the same parse the import uses", async () => {
+    const rows = await fetchSourceRows(
+      { kind: "terminal-bench" },
+      { text: JSON.stringify([task("a"), task("b"), task("c")]), limit: 2 },
+    );
+    expect(rows.map((r) => r.id)).toEqual(["a", "b"]);
   });
 });

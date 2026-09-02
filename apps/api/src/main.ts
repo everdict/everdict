@@ -2246,6 +2246,25 @@ async function main(): Promise<void> {
   console.error(
     `▶ everdict-api on :${port} (backend:${nomad ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.EVERDICT_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
   );
+  // ── WHAT A FRESH DEPLOYMENT ACTUALLY HAS (benchmark-evidence-spec.md §1) ────────────────────────────
+  //
+  // First-party seeding of `_shared` was removed deliberately — a deployment that never asked for eleven
+  // benchmarks should not carry them, and boot seeding is not workspace news (rule `events`). What was
+  // missing is that nothing SAID so: an operator met an empty catalogue with no line telling them it is
+  // empty by design, or which command fills it. The count is read, never assumed; a registry that cannot
+  // answer says that instead of reporting zero, because "we could not find out" is not "there are none".
+  try {
+    const shared = await datasetRegistry.list("_shared");
+    console.error(
+      shared.length > 0
+        ? `▶ shared datasets: ${shared.length} available to every workspace`
+        : "▶ shared datasets: none — seeded by design, not by boot. Import a benchmark with POST /benchmarks/import (MCP: import_benchmark), or register one under _shared (docs/datasets.md).",
+    );
+  } catch (err) {
+    console.error(
+      `▶ shared datasets: could not be read (${err instanceof Error ? err.message : String(err)}) — this is not the same as none`,
+    );
+  }
 }
 
 main().catch((err) => {

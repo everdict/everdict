@@ -3,6 +3,7 @@ import { z } from "zod";
 import { type BenchmarkAdapter, type ImportBenchmarkOpts, importBenchmark } from "./catalog.js";
 import { type DatasetMeta, interpolateFields } from "./mapping.js";
 import { type FetchLike, fetchHfFileRows, fetchHfRows } from "./sources.js";
+import { parseTerminalBenchTasks } from "./terminal-bench.js";
 
 // The benchmark definition as JSON-serializable "data" — a recipe the tenant registers/versions in their own workspace.
 // Unlike the first-party catalog adapters (code: rowTransform/graderBuilder), this spec is pure data, so it can be stored in the registry.
@@ -47,6 +48,9 @@ export const BenchmarkSourceSchema = z.discriminatedUnion("kind", [
     gated: z.boolean().optional(),
   }),
   z.object({ kind: z.literal("jsonl") }),
+  // The Terminal-Bench task set (docs/architecture/standard-task-formats.md, slices 2-3): the tasks arrive as
+  // text, and `{id}` in `imageTemplate` resolves each task's prebuilt image (referenced, never built).
+  z.object({ kind: z.literal("terminal-bench"), imageTemplate: z.string().optional() }),
 ]);
 
 // Per-row grader template — {field} interpolation into config string values (e.g. command's applyPatch:"{test_patch}").
@@ -149,6 +153,15 @@ export async function fetchSourceRows(
       },
       opts.fetchImpl,
     );
+  }
+  if (source.kind === "terminal-bench") {
+    // Preview a task set the same way it will be imported — through the ingestion edge, so the wizard's
+    // preview and the import agree about what the document says. A malformed set is refused HERE, which is
+    // the point of previewing it.
+    if (!opts.text) throw new Error("The terminal-bench source requires text (the task set).");
+    return parseTerminalBenchTasks(opts.text)
+      .slice(0, limit)
+      .map((task) => ({ ...task }));
   }
   if (!opts.text) throw new Error("The jsonl source requires text (the raw content).");
   return opts.text

@@ -76,6 +76,7 @@ describe("BenchmarkAdapter catalog", () => {
       "mind2web",
       "osworld",
       "swe-bench-lite",
+      "swe-bench-verified",
       "travelbench",
       "traveleval",
       "travelplanner",

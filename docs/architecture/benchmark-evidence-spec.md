@@ -32,6 +32,18 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 
 ## §1 — Finish the on-ramps, and say what a fresh deployment has (G3.1)
 
+> **Landed 2026-09-02, the Terminal-Bench on-ramp and the first adapter:** slices 2-3 (`parseTerminalBenchTasks`
+> + the `terminal-bench` source kind on the import AND preview doors — see
+> `docs/architecture/standard-task-formats.md`), `swe-bench-verified` beside `swe-bench-lite` (the same
+> evaluator, the same image convention, the same resolution rule — both now DECLARE `scoring: official` with
+> the upstream harness named, where before they claimed nothing), and a boot line that says what the `_shared`
+> tier holds, naming the door that fills it when the answer is none and distinguishing "could not be read"
+> from "there are none". **Not landed:** BrowseComp, WebArena and tau-bench. Each is an EVALUATOR to port, not
+> a dataset to map — and a port that cannot reproduce the official decision has to say `proxy` with what it
+> approximates, so none of them is a mapping exercise. tau-bench additionally needs a simulated user, which is
+> a judge-side conversational agent over the `conversation` contract. Slice 4 (the image prebuild/push helper)
+> and slice 5 (the web wizard) are also open.
+
 **The gap.** Terminal-Bench slices 2–5 are unbuilt — the ingestion edge, the benchmark-source kind for
 `POST /datasets`, the image-provenance helper, the web wizard (`docs/architecture/standard-task-formats.md`).
 There is no adapter for WebArena, tau-bench or BrowseComp, and SWE-bench exists only as `swe-bench-lite`.

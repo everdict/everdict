@@ -155,3 +155,83 @@ export function terminalBenchToDataset(
     producedBy: TERMINAL_BENCH_PROVENANCE,
   });
 }
+
+// ── THE INGESTION EDGE (docs/architecture/standard-task-formats.md, slice 2) ──────────────────────────
+//
+// Text → `TerminalBenchTask[]`. Two shapes, because both are what a caller actually has: a JSON array (what a
+// crawler over a task-set directory emits, and what the wizard uploads) or one task per line (the shape every
+// other source in this package speaks). A `{ tasks: [...] }` envelope is accepted too — a manifest file's
+// natural form — and nothing else is guessed at: a document this cannot read is refused by name rather than
+// imported as an empty task set, which would register a dataset with no cases and no error.
+//
+// YAML is deliberately NOT parsed here. A Terminal-Bench task's `task.yaml`/`task.toml` are read by whatever
+// walks the repository (that is the edge's job, and it has a filesystem); this package stays dependency-free
+// and takes the parsed result.
+export function parseTerminalBenchTasks(text: string): TerminalBenchTask[] {
+  const trimmed = text.trim();
+  if (trimmed.length === 0)
+    throw new BadRequestError("BAD_REQUEST", {}, "the Terminal-Bench task set is empty — nothing to import.");
+  // The dispatch, and it is not "starts with a brace": one task per line ALSO starts with `{`, so that rule
+  // sent every JSONL set down the whole-document path and refused it as invalid JSON. An array is
+  // unambiguous; a `{ tasks: [...] }` envelope is whatever parses whole AND carries the key; everything else
+  // is line-delimited, which is the shape a single task on a single line has too.
+  const rows = trimmed.startsWith("[") ? arrayDocument(trimmed) : (envelope(trimmed) ?? lineDelimited(trimmed));
+  if (rows.length === 0)
+    throw new BadRequestError("BAD_REQUEST", {}, "the Terminal-Bench task set parsed to zero tasks.");
+  return rows.map((row, i) => {
+    const parsed = TerminalBenchTaskSchema.safeParse(row);
+    if (!parsed.success)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { index: i, issues: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`) },
+        `Terminal-Bench task #${i + 1} is not a task: ${parsed.error.message}`,
+      );
+    return parsed.data;
+  });
+}
+
+function arrayDocument(text: string): unknown[] {
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch (err) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { detail: err instanceof Error ? err.message : String(err) },
+      "the Terminal-Bench task set is not valid JSON.",
+    );
+  }
+  if (Array.isArray(document)) return document;
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    {},
+    "a Terminal-Bench task set is a JSON array of tasks, a { tasks: [...] } document, or one task per line.",
+  );
+}
+
+// The manifest envelope, or `undefined` when this is not one — the caller then reads the text line by line.
+function envelope(text: string): unknown[] | undefined {
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    return undefined; // not one document at all — line-delimited, and its own parse reports the bad line
+  }
+  if (typeof document === "object" && document !== null && Array.isArray((document as { tasks?: unknown }).tasks))
+    return (document as { tasks: unknown[] }).tasks;
+  return undefined;
+}
+
+function lineDelimited(text: string): unknown[] {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, i) => {
+      try {
+        return JSON.parse(line) as unknown;
+      } catch {
+        throw new BadRequestError("BAD_REQUEST", { line: i + 1 }, `line ${i + 1} of the task set is not valid JSON.`);
+      }
+    });
+}

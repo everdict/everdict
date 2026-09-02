@@ -26,7 +26,8 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
   tenant sees it via fallback), but the first-party **example** datasets (`examples/datasets/*.json`) are **no
   longer auto-seeded** — they were list-cluttering noise, so `apps/api` boots with an empty `_shared` dataset
   tier. The loader (`loadDatasetDir`, default owner `_shared`) remains for opt-in/first-party seeding; it is just
-  not wired into boot.
+  not wired into boot. The API boot line says so out loud — an empty `_shared` tier prints the door that fills
+  it (`POST /benchmarks/import`), and a registry that could not be READ says that instead of reporting zero.
 - **Immutable versions** — re-registering `(id, version)` with different content → `CONFLICT` (identical =
   idempotent no-op). This is *why* it's a registry, not mutable CRUD: baseline↔candidate comparison is only
   meaningful if the dataset is frozen. A dataset evolves by publishing a new version (`1.0.0 → 1.1.0`), leaving

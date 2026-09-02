@@ -5,12 +5,18 @@ import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/contract
 import { type BenchmarkJudge, GAIA_QUESTION_SCORER, GSM8K_EXACT_MATCH } from "./judges.js";
 import { type CaseMapping, type DatasetMeta, WEBVOYAGER_MAPPING, rowToCase, rowsToDataset } from "./mapping.js";
 import { type FetchLike, fetchHfFileRows, fetchHfRows } from "./sources.js";
+import { parseTerminalBenchTasks, terminalBenchToDataset } from "./terminal-bench.js";
 import { TRAVEL_BENCHMARKS } from "./travel.js";
 
 // Where the benchmark lives. huggingface = HF Hub (most new benchmarks), jsonl = inline/local text (caller-provided).
 export type BenchmarkSource =
   | { kind: "huggingface"; dataset: string; config?: string; split?: string; file?: string; gated?: boolean }
-  | { kind: "jsonl" };
+  | { kind: "jsonl" }
+  // A TERMINAL-BENCH TASK SET (docs/architecture/standard-task-formats.md, slices 2-3). The caller supplies
+  // the parsed task set as text — a JSON array of tasks, or one task per line — and the dedicated mapper
+  // turns it into cases. It does NOT go through `CaseMapping`: a Terminal-Bench task's verdict is the reward
+  // its own `tests/` publishes, which no field-mapping rule can express.
+  | { kind: "terminal-bench"; imageTemplate?: string };
 
 // WHAT A SCORE FROM THIS ADAPTER IS, as data rather than as prose (arch-review 16 P2-8).
 //
@@ -120,6 +126,24 @@ export async function importBenchmark(
           opts.fetchImpl,
         );
     return adapterToDataset(adapter, rows, meta);
+  }
+  if (adapter.source.kind === "terminal-bench") {
+    // The ingestion edge (slice 2): text → `TerminalBenchTask[]` → the dedicated mapper. `limit` caps the set
+    // exactly as it does elsewhere; a task the mapper cannot resolve an image for THROWS rather than importing
+    // a case nothing can run (Everdict references images, it never builds them).
+    if (!opts.text) throw new Error(`adapter ${adapter.id}: terminal-bench source requires opts.text`);
+    const tasks = parseTerminalBenchTasks(opts.text);
+    const limited = opts.limit !== undefined ? tasks.slice(0, opts.limit) : tasks;
+    return terminalBenchToDataset(
+      limited,
+      {
+        id: meta.id,
+        version: meta.version,
+        ...(meta.description ? { description: meta.description } : {}),
+        ...(meta.tags ? { tags: meta.tags } : {}),
+      },
+      adapter.source.imageTemplate !== undefined ? { imageTemplate: adapter.source.imageTemplate } : {},
+    );
   }
   if (!opts.text) throw new Error(`adapter ${adapter.id}: jsonl source requires opts.text`);
   const rows = opts.text
@@ -256,6 +280,13 @@ export const BENCHMARK_CATALOG = {
     id: "swe-bench-lite",
     description: "SWE-bench Lite — resolve real GitHub issues, graded by tests (princeton-nlp/SWE-bench_Lite)",
     category: "coding",
+    // OFFICIAL: the `swe-bench` grader applies the gold test_patch and requires FAIL_TO_PASS to pass while
+    // PASS_TO_PASS holds, which IS the upstream resolution rule — not an approximation of it.
+    scoring: {
+      kind: "official",
+      officialEvaluator: "SWE-bench harness (swebench.harness.run_evaluation)",
+      license: "MIT (dataset: CC-BY-4.0)",
+    },
     defaultVersion: "test",
     source: { kind: "huggingface", dataset: "princeton-nlp/SWE-bench_Lite", config: "default", split: "test" },
     mapping: {
@@ -267,6 +298,40 @@ export const BENCHMARK_CATALOG = {
     },
     rowTransform: sweBenchRow,
     // Scoring: after applying the gold test_patch, FAIL_TO_PASS (pass) + PASS_TO_PASS (hold) → resolved (official SWE-bench resolution).
+    graderBuilder: (row) => [
+      {
+        id: "swe-bench",
+        config: {
+          testPatch: String(row.test_patch ?? ""),
+          failToPass: jsonStrArray(row.FAIL_TO_PASS),
+          passToPass: jsonStrArray(row.PASS_TO_PASS),
+        },
+      },
+    ],
+  },
+  // The full, human-VALIDATED SWE-bench slice (500 instances). Same evaluator, same image convention, same
+  // resolution rule — the only differences are the HuggingFace dataset and the size, which is exactly why it
+  // is a sibling entry rather than a new adapter (benchmark-evidence-spec.md §1, the first adapter on the list).
+  "swe-bench-verified": {
+    id: "swe-bench-verified",
+    description:
+      "SWE-bench Verified — the 500 human-validated instances, graded by tests (princeton-nlp/SWE-bench_Verified)",
+    category: "coding",
+    scoring: {
+      kind: "official",
+      officialEvaluator: "SWE-bench harness (swebench.harness.run_evaluation)",
+      license: "MIT (dataset: CC-BY-4.0)",
+    },
+    defaultVersion: "test",
+    source: { kind: "huggingface", dataset: "princeton-nlp/SWE-bench_Verified", config: "default", split: "test" },
+    mapping: {
+      idField: "instance_id",
+      taskField: "problem_statement",
+      repoPath: "/testbed", // in-image repo (SWE-bench convention) — no clone
+      imageField: "_image", // official prebuilt image (deps+repo) — as the per-case compute image
+      tagFields: ["repo", "version"],
+    },
+    rowTransform: sweBenchRow,
     graderBuilder: (row) => [
       {
         id: "swe-bench",

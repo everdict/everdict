@@ -7,7 +7,8 @@ anchors: [packages/datasets/src/terminal-bench.ts, packages/graders/src/reward-f
 ---
 # Standard task-format on-ramp — bring an existing agent benchmark, run it managed
 
-> Status: **M2 in progress.** Slice 1 (Terminal-Bench task → EvalCase pure mapper) landed; later slices
+> Status: **M2 in progress.** Slices 1-3 landed (the pure mapper, the ingestion edge, and the source kind on
+> both doors); later slices
 > wire ingestion, the API/MCP surface, image provenance, and the web. SSOT for how Everdict ingests the
 > emerging *standard agent-benchmark task formats* (Terminal-Bench first) into its
 > harness-agnostic `Dataset` model.
@@ -64,10 +65,16 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
 
 1. **Terminal-Bench pure mapper** (this doc + `terminal-bench.ts` + tests) — task → `EvalCase`, dataset
    build, image-required guard. ✅ Green in `datasets`, no network/docker.
-2. **Ingestion edge** — parse a Terminal-Bench task set (YAML task.yaml from a git repo / uploaded
-   tarball / manifest) into `TerminalBenchTask[]` at the API/CLI boundary, then `terminalBenchToDataset`.
-3. **API/MCP surface** — expose it as a benchmark source/recipe kind so `POST /datasets` / `import_benchmark`
-   accept a Terminal-Bench source (BFF↔MCP parity).
+2. **Ingestion edge** — `parseTerminalBenchTasks(text)` → `TerminalBenchTask[]` → `terminalBenchToDataset`.
+   ✅ Three shapes, because all three are what a caller has: a JSON array, a `{ tasks: [...] }` manifest, or
+   one task per line. A document it cannot read is REFUSED by name — importing an unreadable set as zero
+   tasks would register a dataset with no cases and no error. YAML stays outside this package deliberately:
+   whatever walks the repository reads `task.yaml`/`task.toml` (it has a filesystem), and this package takes
+   the parsed result, dependency-free.
+3. **API/MCP surface** — ✅ the `terminal-bench` benchmark source kind (`{ kind, imageTemplate? }`), so
+   `POST /benchmarks/import` and `import_benchmark` accept a task set as `text`, and `POST /benchmarks/preview`
+   previews it through the SAME parse the import uses. It does not go through `CaseMapping`: a task's verdict
+   is the reward its own `tests/` publishes, which no field-mapping rule can express.
 4. **Image provenance helper** — prebuild+push tasks to the workspace registry; `imageWarnings` on register.
 5. **Web** — the add-benchmark wizard recognizes the Terminal-Bench source kind.
 
