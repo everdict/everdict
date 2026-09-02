@@ -1,0 +1,21 @@
+{
+  "kind": "command",
+  "category": "cli-agent",
+  "id": "claude-code-router",
+  "version": "1",
+  "image": "node:22",
+  "setup": ["npm install -g @anthropic-ai/claude-code @musistudio/claude-code-router"],
+  "command": "ccr code -p {{task}} --output-format stream-json --verbose {{conversation}}",
+  "conversation": {
+    "resume": "--resume {{resume}}",
+    "token": { "pattern": "\"session_id\"\\s*:\\s*\"([0-9a-f-]{36})\"" }
+  },
+  "source": {
+    "git": "https://github.com/musistudio/claude-code-router.git",
+    "repo": "musistudio/claude-code-router",
+    "maintainer": { "profile": "claude-code" }
+  },
+  "build": { "steps": ["npm ci", "npm run build"], "workDir": "/everdict/build" },
+  "env": {},
+  "trace": { "kind": "none" }
+}

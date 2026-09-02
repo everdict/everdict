@@ -28,6 +28,27 @@ describe("first-party harness taxonomy seed", () => {
     expect(bu.kind).toBe("service");
   });
 
+  // ── THE FIRST-PARTY CODING-AGENT RECIPES ARE CONVERSATIONAL (harness-definability-spec.md §3) ──────
+  it("codex and claude-code-router resolve as command harnesses carrying a conversation contract and a build recipe", async () => {
+    const { templates, instances } = await loadHarnessTaxonomyDir(HARNESS_DIR);
+    for (const id of ["codex", "claude-code-router"]) {
+      const resolved = await instances.get("t", id);
+      expect(resolved.kind).toBe("command");
+      if (resolved.kind !== "command") continue;
+      // A registered recipe that cannot resume is one no delegation profile can use; the contract has to survive
+      // the template → instance resolution, which is the door registration actually uses.
+      expect(resolved.conversation?.resume).toContain("{{resume}}");
+      expect(resolved.command).toContain("{{conversation}}");
+      // The code recipe and its maintainer live on the TEMPLATE — the build lane and the delegate resolver read it there.
+      const template = await templates.get("t", id, "1");
+      expect(template.kind).toBe("command");
+      if (template.kind !== "command") continue;
+      expect(template.source?.git).toMatch(/^https:\/\/github\.com\//);
+      expect(template.source?.maintainer?.profile).toBeDefined();
+      expect(template.build?.steps.length).toBeGreaterThan(0);
+    }
+  });
+
   it("an os-use desktop agent (command, workDir) instance resolves", async () => {
     const { instances } = await loadHarnessTaxonomyDir(HARNESS_DIR);
     const agent = await instances.get("t", "desktop-ssh-agent");

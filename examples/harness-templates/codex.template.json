@@ -1,0 +1,22 @@
+{
+  "kind": "command",
+  "category": "cli-agent",
+  "id": "codex",
+  "version": "1",
+  "image": "node:22",
+  "setup": ["npm install -g @openai/codex"],
+  "command": "codex exec {{conversation}} --json --skip-git-repo-check {{task}}",
+  "conversation": {
+    "resume": "resume {{resume}}",
+    "token": { "pattern": "\"thread_id\"\\s*:\\s*\"([0-9a-f-]{36})\"" }
+  },
+  "source": {
+    "git": "https://github.com/openai/codex.git",
+    "repo": "openai/codex",
+    "maintainer": { "profile": "codex" }
+  },
+  "build": { "steps": ["npm ci", "npm run build"], "workDir": "/everdict/build" },
+  "model": "gpt-5-codex",
+  "env": {},
+  "trace": { "kind": "none" }
+}

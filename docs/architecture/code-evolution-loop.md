@@ -172,7 +172,8 @@ Only a CONVERSATIONAL harness can be a delegation profile: a profile session is 
 
 - **Claude Code** — through a delegation profile, as designed.
 - **Codex, claude-code-router, any other CLI** — register a `command` harness with a `conversation` block and
-  it qualifies as a profile's agent exactly like the built-in. A spec without the block stays one-shot and can
+  it qualifies as a profile's agent exactly like the built-in. First-party recipes for both ship in
+  `examples/harness-templates` (a `conversation` contract, a `source` + `build` recipe, a `source.maintainer`). A spec without the block stays one-shot and can
   still be driven through the playground's `harness` boot mode, one `submit_sandbox_task` per prompt.
 
 ## What is open, and the seam each rung closes

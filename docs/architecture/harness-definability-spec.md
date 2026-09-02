@@ -90,6 +90,13 @@ same treatment two image digests already get.
 
 ## §3 — First-party recipes for the coding agents the program names (G1.3)
 
+> **Landed 2026-09-02, for two of the three:** `examples/harness-templates` gains codex and claude-code-router
+> templates (with instances), each a `command` harness with a `conversation` contract, a `source` + `build` recipe
+> and a `source.maintainer`; the seed test asserts the contract survives resolution. The CLI resume forms and
+> session-id patterns are the shapes those CLIs document today and are the part a workspace adjusts when a CLI
+> changes them. **Hermes has no recipe yet**: its CLI's resume form is not confirmed, and a recipe that guesses it
+> would register a "conversational" harness that cannot resume — the exact defect the contract exists to refuse.
+
 **The gap.** Codex ships as a one-shot `command` recipe (`examples/bundles/codex-pinch/bundle.json`: `codex
 exec … < /dev/null`, no `conversation`). Hermes appears only as an example name in an environment comment.
 claude-code-router has nothing. `examples/harness-templates` holds aider, browser-use, desktop and langgraph

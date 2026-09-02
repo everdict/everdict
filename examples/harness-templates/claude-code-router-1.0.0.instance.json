@@ -1,0 +1,6 @@
+{
+  "template": { "id": "claude-code-router", "version": "1" },
+  "id": "claude-code-router",
+  "version": "1.0.0",
+  "pins": {}
+}
