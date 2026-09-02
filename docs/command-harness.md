@@ -111,6 +111,10 @@ this only the built-in `claude-code` adapter could.
 - A spec that declares `conversation` without the `{{conversation}}` slot, or a `resume` without `{{resume}}`,
   is refused at registration (`commandConversationDefects` in `@everdict/contracts`): a contract with no place
   to land is a declaration nobody honours.
+- The contract is declared on the command TEMPLATE (`CommandTemplateSpecSchema`) and carried onto every
+  instance `resolveHarnessInstance` produces. Registration is template-only, so a contract the template could
+  not hold would be one no registered command harness could ever declare — the first version of this feature
+  had exactly that gap: the marker existed, and only a hand-built spec nobody registers could reach it.
 
 ## Security
 `setup`/`command` are **arbitrary user code** → they run only inside a **trust zone** (gVisor/Kata + per-tenant

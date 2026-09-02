@@ -17,6 +17,7 @@ import {
   TopologyServiceSchema,
   TopologyTargetSchema,
   TraceSourceSpecSchema,
+  commandConversationDefects,
 } from "./harness-spec.js";
 import { ModelBindingSchema } from "./model-spec.js";
 
@@ -126,6 +127,10 @@ export const CommandTemplateSpecSchema = z.object({
   params: z.record(z.string()).default({}), // {{var}} defaults (an instance's overrides.params overrides them)
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
   liveScreen: LiveScreenSpecSchema.optional(), // opt-in live in-run screen capture (self-driven browser/GUI in the container)
+  // How this CLI continues a conversation — the SAME contract the resolved spec carries (harness-spec.ts). It
+  // lives on the template because registration is template-only: a contract the template cannot hold is one no
+  // registered command harness could ever declare, and `conversational` would stay a marker nothing reaches.
+  conversation: CommandHarnessSpecSchema.shape.conversation,
 });
 
 // --- process template --- a single process (Claude Code/Codex). Nothing to pin (template version = structure).
@@ -134,11 +139,15 @@ export const ProcessTemplateSpecSchema = z.object({
   ...templateBase,
 });
 
-export const HarnessTemplateSpecSchema = z.discriminatedUnion("kind", [
-  ServiceTemplateSpecSchema,
-  CommandTemplateSpecSchema,
-  ProcessTemplateSpecSchema,
-]);
+export const HarnessTemplateSpecSchema = z
+  .discriminatedUnion("kind", [ServiceTemplateSpecSchema, CommandTemplateSpecSchema, ProcessTemplateSpecSchema])
+  // A command template's conversation contract is checked where the TEMPLATE enters — registration is
+  // template-only, so this is the door the resolved spec's own refine never sees.
+  .superRefine((template, ctx) => {
+    if (template.kind !== "command") return;
+    for (const message of commandConversationDefects(template))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["conversation"], message });
+  });
 export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 
 // Instance variation (overrides) — leave the structure (template) alone and layer only "behavior knobs" as a delta. deep-merge at resolve.
@@ -369,6 +378,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         ...(model !== undefined ? { model } : {}),
         ...(resources !== undefined ? { resources } : {}),
         ...(template.liveScreen !== undefined ? { liveScreen: template.liveScreen } : {}),
+        ...(template.conversation !== undefined ? { conversation: template.conversation } : {}),
       });
     }
     case "process":

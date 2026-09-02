@@ -675,3 +675,36 @@ describe("resolveHarnessInstance — host-exec services (no container, no image 
     expect(res.success).toBe(false);
   });
 });
+
+// ── THE CONVERSATION CONTRACT REACHES A REGISTERED COMMAND HARNESS (docs/command-harness.md) ─────────
+//
+// Registration is template-only, so a contract the TEMPLATE cannot hold is one no registered command harness
+// could declare: the `conversational` marker would be reachable only by hand-built specs nobody registers.
+// RED before the fix: the template schema had no `conversation`, and the resolve dropped it.
+describe("command template → resolved spec carries the conversation contract", () => {
+  const template = {
+    kind: "command" as const,
+    category: "cli-agent",
+    id: "codex-t",
+    version: "1.0.0",
+    image: "node:22",
+    command: "codex exec {{conversation}} --json {{task}}",
+    conversation: { resume: "resume {{resume}}", token: { pattern: "thread_id\\W+([0-9a-f-]{36})" } },
+  };
+  it("a registered template's contract lands on the resolved spec, so the adapter is conversational", () => {
+    const parsed = HarnessTemplateSpecSchema.parse(template);
+    const resolved = resolveHarnessInstance(parsed, {
+      template: { id: "codex-t", version: "1.0.0" },
+      id: "codex",
+      version: "1.0.0",
+      pins: { image: "reg/codex@sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+    });
+    expect(resolved.kind).toBe("command");
+    if (resolved.kind === "command") expect(resolved.conversation).toEqual(template.conversation);
+  });
+  it("refuses a template that declares the contract with no {{conversation}} slot — checked where it enters", () => {
+    expect(HarnessTemplateSpecSchema.safeParse({ ...template, command: "codex exec --json {{task}}" }).success).toBe(
+      false,
+    );
+  });
+});
