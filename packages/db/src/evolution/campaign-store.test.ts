@@ -17,6 +17,7 @@ import {
 import { contentDigest } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
+import { InMemoryCampaignEvidenceStore } from "./campaign-evidence-store.js";
 import { InMemoryEvolutionCampaignStore, PgEvolutionCampaignStore } from "./campaign-store.js";
 
 // The two reads a campaign service now REQUIRES and these cases do not exercise: a pull-request listing (the
@@ -295,6 +296,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs,
       newId: () => `id_${++n}`,
@@ -372,6 +374,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
           return { id: ref, teamId: ref === "iss_a" ? "team-a" : "team-b" };
@@ -424,6 +427,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         // The transport read team-a; by the time `open` reads it, the issue has moved.
         async get(_t: string, ref: string) {
@@ -511,7 +515,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
     snapshots.set("sc-win", snapshot(comparison()));
     const { round: logged, answer } = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
-    expect(logged.verdict).toEqual({
+    // `toMatchObject`: the verdict also names its evidence object (key + digest), pinned by its own cases below.
+    expect(logged.verdict).toMatchObject({
       comparable: true,
       significantImprovements: 1,
       significantRegressions: 0,
@@ -968,6 +973,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs,
       newId: () => "x",
@@ -1259,6 +1265,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes: noChanges,
         runs: noRuns,
         datasets: noDatasets,
+        evidence: new InMemoryCampaignEvidenceStore(),
         builds,
         issues,
         diffs,
@@ -1335,6 +1342,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes,
         runs: noRuns,
         datasets: noDatasets,
+        evidence: new InMemoryCampaignEvidenceStore(),
         builds,
         issues,
         diffs,
@@ -1462,6 +1470,124 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       expect(r2.verdict.targets).toBeUndefined();
     });
 
+    // ── THE ROUND'S EVIDENCE IS STAGED, SEALED AND READ BACK (benchmark-evidence-spec.md §3) ──────────
+    it("[§3] a logged round names an evidence object whose bytes re-digest to the seal, per case, with its run ids", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const evidence = new InMemoryCampaignEvidenceStore();
+      const svc = new CampaignService({
+        store,
+        operations: store,
+        changes: noChanges,
+        runs: noRuns,
+        datasets: noDatasets,
+        evidence,
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+      const targeted: CampaignFrame = {
+        ...frame,
+        scenarios: [
+          { id: "c1", heldOut: false },
+          { id: "c2", heldOut: true },
+          { id: "c3", heldOut: true },
+        ],
+        targets: ["c1"],
+      };
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: targeted }, "alice");
+      const withRuns = (version: string, runs: Array<[string, string]>) => ({
+        record: {
+          ...side(version).record,
+          scorecard: { results: runs.map(([caseId, runId]) => ({ caseId, runId, trial: 0, scores: [] })) },
+        },
+      });
+      snapshots.set(
+        "sc-evidence",
+        snapshot(
+          comparison({
+            trials: {
+              baseline: "b",
+              candidate: "c",
+              zThreshold: 1.96,
+              minDelta: 0,
+              cases: [trialCase("c1", 0.8, true), trialCase("c2", 0, false), trialCase("c3", 0, false)],
+            } as CampaignComparison["trials"],
+          }),
+          {
+            baseline: withRuns("1.0.0", [
+              ["c1", "run-b1"],
+              ["c2", "run-b2"],
+            ]),
+            candidate: withRuns("1.0.1", [
+              ["c1", "run-c1"],
+              ["c2", "run-c2"],
+            ]),
+          },
+        ),
+      );
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-evidence" },
+        "agent:everdict",
+        {},
+      );
+      const ref = logged.verdict.evidence;
+      expect(ref?.key).toMatch(new RegExp(`^campaigns/${rec.id}/rounds/1/`));
+      const held = await evidence.get("acme", ref?.key ?? "");
+      expect(contentDigest(held)).toBe(ref?.digest);
+      const read = await svc.roundEvidence("acme", rec.id, 1);
+      expect(read.cases.map((c) => [c.caseId, c.heldOut, c.target, c.verdict])).toEqual([
+        ["c1", false, true, "improved"],
+        ["c2", true, false, "unchanged"],
+        ["c3", true, false, "unchanged"],
+      ]);
+      expect(read.cases[0]?.traces).toEqual([
+        { side: "baseline", runId: "run-b1", trial: 0 },
+        { side: "candidate", runId: "run-c1", trial: 0 },
+      ]);
+      expect(read.aggregate).toMatchObject({ comparable: true, targets: { flipped: ["c1"], unflipped: [] } });
+      // Tampered bytes are refused, never served: the round sealed a digest and the store holds something else.
+      evidence.overwrite("acme", ref?.key ?? "", { ...(held as object), cases: [] });
+      await expect(svc.roundEvidence("acme", rec.id, 1)).rejects.toMatchObject({ status: 409 });
+      // …and a round with no evidence reference (logged before the record existed) is a 404, not an invention.
+      await store.appendRound(
+        "acme",
+        rec.id,
+        { ...logged, seq: 2, verdict: { ...logged.verdict, evidence: undefined } },
+        1,
+      );
+      await expect(svc.roundEvidence("acme", rec.id, 2)).rejects.toMatchObject({ status: 404 });
+    });
+
+    it("[§3] a store that cannot take the evidence refuses the round — nothing is appended without its bytes", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = new CampaignService({
+        store,
+        operations: store,
+        changes: noChanges,
+        runs: noRuns,
+        datasets: noDatasets,
+        evidence: {
+          put: async (): Promise<never> => {
+            throw new Error("object store down");
+          },
+          get: async () => undefined,
+        },
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-no-evidence", snapshot(comparison()));
+      await expect(
+        svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-no-evidence" }, "agent:everdict", {}),
+      ).rejects.toThrow(/object store down/);
+      expect((await store.get("acme", rec.id))?.rounds).toHaveLength(0);
+    });
+
     it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const svc = service(store);
@@ -1517,6 +1643,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes,
         runs: noRuns,
         datasets: noDatasets,
+        evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs,
         newId: () => `id_${++n}`,
@@ -1633,6 +1760,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         changes: noChanges,
         runs: ledger(runs),
         datasets: noDatasets,
+        evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs,
         newId: () => `id_${++n}`,

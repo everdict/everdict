@@ -6,6 +6,7 @@ import type {
   DomainFact,
   EvolutionCampaignRecord,
   ReadResult,
+  RoundEvidence,
 } from "@everdict/contracts";
 import {
   type AdoptionOperation,
@@ -14,12 +15,13 @@ import {
   ConflictError,
   InternalError,
   NotFoundError,
+  RoundEvidenceSchema,
   type Score,
   isJudgeFamilyMetric,
   isMeasured,
 } from "@everdict/contracts";
 import { campaignFrameDefects } from "@everdict/contracts";
-import type { ExperimentIdentity, TrialDiff } from "@everdict/domain";
+import type { ExperimentIdentity, RoundEvidenceSide, TrialDiff } from "@everdict/domain";
 import {
   type CampaignGateAnswer,
   adoptionProofOf,
@@ -29,9 +31,15 @@ import {
   contentDigest,
   frameFromCases,
   oracleTouched,
+  roundEvidenceKey,
+  roundEvidenceOf,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
-import type { AdoptionOperationStore, EvolutionCampaignStore } from "../ports/evolution-campaign-store.js";
+import type {
+  AdoptionOperationStore,
+  CampaignEvidenceStore,
+  EvolutionCampaignStore,
+} from "../ports/evolution-campaign-store.js";
 
 // ── THE CAMPAIGN SERVICE (docs/architecture/evolution-lineage.md, Track D) ───────────────────────────
 //
@@ -74,7 +82,9 @@ export interface CampaignComparisonSide {
     // — which is the shape this whole review is about, one layer up.
     // `record.scorecard.results` is the per-case `CaseResult[]` the detail read carries — the same rows the
     // analyst sees, so nothing new is fetched and nothing is re-derived from rendering.
-    scorecard?: { results: ReadonlyArray<{ scores: Score[] }> };
+    // The side's per-case results: the scores the observation account reads, and the run coordinates the round's
+    // evidence record points at (benchmark-evidence-spec.md §3).
+    scorecard?: { results: ReadonlyArray<{ scores: Score[]; caseId?: string; runId?: string; trial?: number }> };
     // The digest of the spec that batch actually ran, sealed at submit. This is the join every later
     // adoption proof rests on: a version label cannot tell an evaluated C1 from a saved C2 (arch-review 71
     // P0-evolution).
@@ -108,6 +118,25 @@ function unreadableBuildLedger(campaignId: string, candidateVersion: string): (e
       { campaignId, candidateVersion, cause: err instanceof Error ? err.message : String(err) },
       `the build ledger could not be read, so whether Everdict built candidate ${candidateVersion} — and from which pull request — cannot be established; the round was not logged, retry once the ledger answers`,
     );
+  };
+}
+
+// One compared side, in the shape the evidence record reads: the batch id the caller named, the version the
+// record itself says it evaluated, and the run coordinates its results carry.
+function sideOf(scorecardId: string, side: CampaignComparisonSide): RoundEvidenceSide {
+  const results = side.record.scorecard?.results;
+  return {
+    scorecardId,
+    version: side.record.harness.version,
+    ...(results !== undefined
+      ? {
+          results: results.map((r) => ({
+            ...(r.caseId !== undefined ? { caseId: r.caseId } : {}),
+            ...(r.runId !== undefined ? { runId: r.runId } : {}),
+            ...(r.trial !== undefined ? { trial: r.trial } : {}),
+          })),
+        }
+      : {}),
   };
 }
 
@@ -188,6 +217,9 @@ export interface CampaignServiceDeps {
       links?: ReadonlyArray<{ type: string; id: string; version?: string; dataset?: string }>;
     }>;
   };
+  // Where a round's evidence record is staged before the round is appended (benchmark-evidence-spec.md §3).
+  // REQUIRED: a round without its evidence is a round whose next brief is built from raw reads again.
+  evidence: CampaignEvidenceStore;
   // The dataset version a derived frame's scenarios come from. REQUIRED: an optional one would let "no registry
   // wired" read as "no such dataset" at the one door that turns an issue into an exam (rule `protocol`).
   datasets: { get(tenant: string, id: string, ref?: string): Promise<{ cases: ReadonlyArray<{ id: string }> }> };
@@ -419,6 +451,40 @@ export class CampaignService {
       default:
         return assertNever(named);
     }
+  }
+
+  // ── THE EVIDENCE A ROUND SEALED, READ BACK AGAINST ITS DIGEST (benchmark-evidence-spec.md §3) ────
+  //
+  // The round names bytes by key + digest; this serves those bytes and nothing else. A round logged before the
+  // record existed says so (404, not an invented record); a key the store does not hold is an escalation — the
+  // round references evidence nobody can find; bytes that do not digest to what the round sealed are refused,
+  // because serving them would be serving something the round did not seal (L4).
+  async roundEvidence(tenant: string, id: string, seq: number): Promise<RoundEvidence> {
+    const record = await this.get(tenant, id);
+    const round = record.rounds.find((r) => r.seq === seq);
+    if (round === undefined)
+      throw new NotFoundError("NOT_FOUND", { campaign: id, seq }, `campaign ${id} has no round ${seq}`);
+    const ref = round.verdict.evidence;
+    if (ref === undefined)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { campaign: id, seq },
+        `round ${seq} carries no evidence record — it was logged before the record existed, and none is invented for it`,
+      );
+    const document = await this.deps.evidence.get(tenant, ref.key);
+    if (document === undefined)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { campaign: id, seq, key: ref.key },
+        `round ${seq} references evidence at ${ref.key} and the store holds nothing there — the round's evidence is missing, which is an escalation, not an empty answer`,
+      );
+    if (contentDigest(document) !== ref.digest)
+      throw new ConflictError(
+        "CONFLICT",
+        { campaign: id, seq, key: ref.key, sealed: ref.digest, held: contentDigest(document) },
+        `the evidence stored at ${ref.key} does not digest to what round ${seq} sealed — refusing to serve bytes the round did not seal`,
+      );
+    return RoundEvidenceSchema.parse(document);
   }
 
   // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────
@@ -701,8 +767,38 @@ export class CampaignService {
     const oracle = await this.oracleCheck(tenant, record.frame, snapshot, builtSource);
     // …and the delegation the round names, read off the run ledger and held to the frame's budget.
     const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
+    const seq = record.rounds.length + 1;
+    const at = this.now();
+    const verdict = verdictOf(snapshot, record.frame, oracle, builtSource);
+    // ── THE ROUND'S EVIDENCE IS STAGED BEFORE THE ROUND EXISTS (benchmark-evidence-spec.md §3) ──────
+    //
+    // Derived from what this method already read — the diff's per-case trials, the frame's flags, each side's
+    // run coordinates — and written as an immutable object the round then names by key + digest (L4). The
+    // order is the protocol: bytes first, then the row that references them; a put that fails refuses the
+    // round, because a round whose evidence does not exist is the state this record exists to abolish.
+    const evidenceDocument = roundEvidenceOf({
+      campaignId: id,
+      seq,
+      frameDigest: record.frameDigest,
+      frame: record.frame,
+      baseline: sideOf(input.baselineScorecardId, snapshot.baseline),
+      candidate: sideOf(input.candidateScorecardId, snapshot.candidate),
+      ...(snapshot.diff.trials !== undefined ? { trials: snapshot.diff.trials } : {}),
+      verdict: {
+        comparable: verdict.comparable,
+        significantImprovements: verdict.significantImprovements,
+        significantRegressions: verdict.significantRegressions,
+        ...(verdict.heldOut !== undefined ? { heldOut: verdict.heldOut } : {}),
+        ...(verdict.targets !== undefined ? { targets: verdict.targets } : {}),
+        ...(verdict.detail !== undefined ? { detail: verdict.detail } : {}),
+      },
+      at,
+    });
+    const evidenceDigest = contentDigest(evidenceDocument);
+    const evidenceKey = roundEvidenceKey(id, seq, evidenceDigest);
+    await this.deps.evidence.put(tenant, evidenceKey, evidenceDocument); // a failure propagates: no round
     const round: CampaignRound = {
-      seq: record.rounds.length + 1,
+      seq,
       hypothesis: input.hypothesis,
       candidateVersion: input.candidateVersion,
       baselineScorecardId: input.baselineScorecardId,
@@ -711,8 +807,8 @@ export class CampaignService {
       // the platform judges incomparable keeps its lesson, which is the case the layer exists for.
       ...(input.learned !== undefined ? { learned: input.learned } : {}),
       ...(delegation !== undefined ? { delegation } : {}),
-      verdict: verdictOf(snapshot, record.frame, oracle, builtSource),
-      at: this.now(),
+      verdict: { ...verdict, evidence: { key: evidenceKey, digest: evidenceDigest } },
+      at,
       by,
     };
     const fact: DomainFact = {

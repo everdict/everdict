@@ -4,6 +4,7 @@ import type { CampaignFrame } from "@everdict/contracts";
 import { AgentSpecSchema } from "@everdict/contracts";
 import { NotFoundError, readUnknown } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
+import { InMemoryCampaignEvidenceStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
 import { InMemoryAgentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
@@ -62,6 +63,7 @@ function build(snapshot: CampaignSnapshot) {
     changes: noChanges,
     runs: noRuns,
     datasets: noDatasets,
+    evidence: new InMemoryCampaignEvidenceStore(),
     issues: {
       async get(_t: string, ref: string) {
         if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -514,6 +516,7 @@ function crossTeam() {
     changes: noChanges,
     runs: noRuns,
     datasets: noDatasets,
+    evidence: new InMemoryCampaignEvidenceStore(),
     // Both issues exist; they belong to different teams. Knowing the id is exactly what used to be enough.
     issues: {
       async get(_t: string, ref: string) {
@@ -584,6 +587,7 @@ describe("[R81 COUNTEREXAMPLE] a campaign belongs to a team, and another team ca
         changes: noChanges,
         runs: noRuns,
         datasets: noDatasets,
+        evidence: new InMemoryCampaignEvidenceStore(),
         issues,
         diffs: { diffSnapshot: async () => winning },
         newId: () => "camp_open",
@@ -729,6 +733,7 @@ describe("[arch-review 114] adopting an agent owned by another team is refused",
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -900,6 +905,7 @@ describe("[COUNTEREXAMPLE] adopt gates the campaign's OWN team, whatever the pre
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_a") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -1050,6 +1056,7 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues: {
         async get(_t: string, ref: string) {
           if (ref !== "iss_1") throw new NotFoundError("NOT_FOUND", { ref }, "issue not found");
@@ -1193,6 +1200,7 @@ describe("POST /campaigns with frame.fromIssue — the issue's case links become
       changes: noChanges,
       runs: noRuns,
       datasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs: { diffSnapshot: async () => winning },
       newId: () => "evc_from_issue",
@@ -1272,5 +1280,46 @@ describe("POST /campaigns with frame.fromIssue — the issue's case links become
     expect(r2.statusCode).toBe(400);
     expect(r2.json().message).toMatch(/2 versions of dataset tb/);
     await mixed.close();
+  });
+});
+
+// ── THE EVIDENCE A ROUND SEALED, OVER HTTP (docs/architecture/benchmark-evidence-spec.md §3) ───────────
+describe("GET /campaigns/:id/rounds/:seq/evidence", () => {
+  it("serves the sealed record, 404s a round with none, 400s a non-integer seq", async () => {
+    const { app } = build(winning);
+    const open = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const id = open.json().id as string;
+    const logged = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "shorter instructions",
+        learned: "the tool budget was the binding constraint",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-base",
+        candidateScorecardId: "sc-win",
+      },
+    });
+    expect(logged.statusCode, logged.body).toBe(201);
+    const evidence = await app.inject({ method: "GET", url: `/campaigns/${id}/rounds/1/evidence`, headers: H });
+    expect(evidence.statusCode, evidence.body).toBe(200);
+    expect(evidence.json()).toMatchObject({ campaignId: id, seq: 1, aggregate: { comparable: true } });
+    expect(evidence.json().cases.map((c: { caseId: string; verdict: string }) => [c.caseId, c.verdict])).toEqual([
+      ["c1", "improved"],
+      ["c2", "unchanged"],
+    ]);
+    expect(
+      (await app.inject({ method: "GET", url: `/campaigns/${id}/rounds/7/evidence`, headers: H })).statusCode,
+    ).toBe(404);
+    expect(
+      (await app.inject({ method: "GET", url: `/campaigns/${id}/rounds/x/evidence`, headers: H })).statusCode,
+    ).toBe(400);
+    await app.close();
   });
 });

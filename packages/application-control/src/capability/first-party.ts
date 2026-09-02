@@ -1128,7 +1128,7 @@ its own managed store and mints the candidate version; you run the round, and le
 write the harness's code yourself, you never touch the oracle, and you never merge on your own authority.
 
 Everdict's tools load on demand. Before anything else:
-\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,resolve_harness_delegate,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,open_campaign,get_campaign,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
+\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,resolve_harness_delegate,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,add_issue_link,open_campaign,get_campaign,get_campaign_round_evidence,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
 
 ## 0. Frame the campaign — the exam, the repository, the delegate, the oracle's paths
 - Everything \`harness_evolve\` freezes, frozen the same way: \`subject: { type: "harness", id, baselineVersion }\`,
@@ -1150,6 +1150,12 @@ Everdict's tools load on demand. Before anything else:
   repository host and the model endpoint), and \`create_sandbox { runtime }\` places the session on a workspace
   runtime that can enforce it rather than the control plane's docker. The agent runs in ITS image with ITS model
   binding, and it never sees your tools or the workspace.
+- **The previous round's evidence, not your notes.** Before proposing round N+1, read
+  \`get_campaign_round_evidence { id, seq: N }\`: per compared case — held-out / target flags, both sides' pass
+  rates and trials, the per-case verdict (improved · regressed · unchanged · unclear), and the run ids whose
+  traces show the mechanism. The platform derived it and sealed it by digest; your \`learned\` is advice about it.
+  Brief the delegate with the failing TARGET ids and the slot the evidence points at — never with judge rationale
+  or trace excerpts (the candidate must not receive the findings).
 - **The issue's cases.** Link the failing cases to the issue first — \`add_issue_link { type: "case", linkId:
   <caseId>, dataset, version }\` — and open the campaign with \`frame: { fromIssue: true, … }\` (everything but
   \`scenarios\`/\`targets\`): the platform makes the linked cases the TARGETS and every other case of that dataset

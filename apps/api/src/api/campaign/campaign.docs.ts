@@ -1,4 +1,4 @@
-import { EvolutionCampaignRecordSchema } from "@everdict/contracts";
+import { EvolutionCampaignRecordSchema, RoundEvidenceSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -14,7 +14,18 @@ import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 // pure adoption gate's answer. Authz reuses the scorecard actions (no new action): read = scorecards:read,
 // write = scorecards:run. Design: docs/architecture/evolution-lineage.md (Track D).
 export const campaignDocs: Record<
-  "open" | "list" | "get" | "logRound" | "decision" | "settle" | "adoption" | "adopt" | "merge" | "build" | "builds",
+  | "open"
+  | "list"
+  | "get"
+  | "logRound"
+  | "decision"
+  | "settle"
+  | "adoption"
+  | "adopt"
+  | "merge"
+  | "build"
+  | "builds"
+  | "roundEvidence",
   FastifySchema
 > = {
   open: {
@@ -120,6 +131,21 @@ export const campaignDocs: Record<
     params: toJsonSchema(z.object({ id: z.string() })),
     body: toJsonSchema(BuildCampaignBodySchema),
     response: { 202: { description: "The building record" }, ...errorResponses(400, 401, 403, 404) },
+  },
+  roundEvidence: {
+    summary: "The evidence a round sealed",
+    description:
+      "The platform-derived record of what one round saw — per compared case: held-out / target flags, both sides' " +
+      "pass rates and trials, the per-case verdict (improved · regressed · unchanged · unclear), and the run ids to " +
+      "read its traces from — served from the immutable object the round names by key + digest, and refused (409) " +
+      "when the stored bytes no longer digest to what the round sealed. A round logged before the record existed " +
+      "is 404. Requires scorecards:read.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string(), seq: z.string() })),
+    response: {
+      200: { description: "The round's evidence record", ...toJsonSchema(RoundEvidenceSchema) },
+      ...errorResponses(401, 403, 404, 409),
+    },
   },
   builds: {
     summary: "The candidate images this campaign built",

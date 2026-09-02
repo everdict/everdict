@@ -534,6 +534,12 @@ export {
   campaignStoppedAt,
 } from "./evolution/campaign-gate.js";
 export {
+  type RoundEvidenceInput,
+  type RoundEvidenceSide,
+  roundEvidenceKey,
+  roundEvidenceOf,
+} from "./evolution/round-evidence.js";
+export {
   type CaseLinksAnswer,
   type FrameFromCasesAnswer,
   caseLinksOf,

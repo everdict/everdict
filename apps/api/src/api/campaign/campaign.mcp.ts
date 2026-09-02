@@ -307,6 +307,25 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
   );
 
   server.registerTool(
+    "get_campaign_round_evidence",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "The platform-derived evidence one round sealed — per compared case: held-out / target flags, both sides' " +
+        "pass rates and trials, the per-case verdict (improved · regressed · unchanged · unclear) and the run ids " +
+        "to read its traces from. Read THIS to build the next brief (the failing target ids and where they failed), " +
+        "never the driver's own notes. Served from the immutable object the round names by key + digest; refused " +
+        "when the bytes no longer match.",
+      inputSchema: { id: z.string(), seq: z.number().int().positive().describe("the round's sequence number") },
+    },
+    ({ id, seq }) =>
+      run(principal, "scorecards:read", async () => {
+        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
+        return ok(await campaigns.roundEvidence(ws, id, seq));
+      }),
+  );
+
+  server.registerTool(
     "get_campaign_builds",
     {
       annotations: { readOnlyHint: true },

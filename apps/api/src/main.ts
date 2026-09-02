@@ -263,6 +263,7 @@ async function main(): Promise<void> {
     issueStore,
     campaignStore,
     campaignBuildStore,
+    campaignEvidenceStore,
     adoptionOperationStore,
     issueLabelStore,
     projectStore,
@@ -1309,6 +1310,8 @@ async function main(): Promise<void> {
     issues: issueService,
     // The dataset version a frame derived `fromIssue` takes its scenarios from (evolution-routing-spec.md §3).
     datasets: datasetRegistry,
+    // Where a round's evidence record is staged before the round is appended (benchmark-evidence-spec.md §3).
+    evidence: campaignEvidenceStore,
     diffs: scorecardService,
     // The authorization an adopted close writes, readable through the campaign's own surface — without it
     // the operation was durable and unreachable from every transport (arch-review 73).

@@ -352,6 +352,33 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
+  // ── THE EVIDENCE A ROUND SEALED (docs/architecture/benchmark-evidence-spec.md §3) ──────────────────
+  app.get<{ Params: { id: string; seq: string } }>(
+    "/campaigns/:id/rounds/:seq/evidence",
+    { schema: campaignDocs.roundEvidence },
+    async (req, reply) => {
+      if (!deps.campaignService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      const seq = Number(req.params.seq);
+      if (!Number.isInteger(seq) || seq < 1)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "seq must be a positive integer." });
+      try {
+        const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
+        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+        return reply.send(await deps.campaignService.roundEvidence(principal.workspace, req.params.id, seq));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.get<{ Params: { id: string } }>("/campaigns/:id/builds", { schema: campaignDocs.builds }, async (req, reply) => {
     if (!deps.campaignBuild || !deps.campaignService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "campaign build is not configured" });

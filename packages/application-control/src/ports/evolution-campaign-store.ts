@@ -162,6 +162,17 @@ export interface AdoptionOperationStore {
   }): Promise<boolean>;
 }
 
+// ── THE ROUND'S EVIDENCE, AS IMMUTABLE BYTES (docs/architecture/benchmark-evidence-spec.md §3) ───────
+//
+// A round references what it saw by key + digest (L4). The key is content-addressed (the digest is in it), so
+// `put` is insert-once: a second put of the same key is the same bytes and answers `exists`, never an
+// overwrite. A store failure THROWS — an outage is not an absence, and the round is refused rather than logged
+// without its evidence.
+export interface CampaignEvidenceStore {
+  put(tenant: string, key: string, document: unknown): Promise<"stored" | "exists">;
+  get(tenant: string, key: string): Promise<unknown | undefined>;
+}
+
 // ── THE CANDIDATES A CAMPAIGN BUILT (docs/architecture/code-evolution-loop.md, D2) ───────────────────
 //
 // Everdict's own record of turning a commit into a candidate image: born `building` when the build session

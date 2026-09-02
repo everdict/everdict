@@ -482,6 +482,7 @@ export type {
   CampaignAppendOutcome,
   CampaignCloseOutcome,
   CampaignBuildStore,
+  CampaignEvidenceStore,
   EvolutionCampaignStore,
 } from "./ports/evolution-campaign-store.js";
 export {

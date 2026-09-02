@@ -106,6 +106,19 @@ axis unverified) and names no registry document (label-only), and there is no la
 Such a frame declares `allowUnverifiedIdentity` and `allowLabelOnlyAdoption` at open; one that did not is
 a campaign that can neither adopt nor settle on a win — abandon it in its issue and open a new one.
 
+## `GET /campaigns/:id/rounds/:seq/evidence` refuses
+
+The evidence a round sealed — what it saw, case by case — served from the immutable object the round names.
+
+**404 "round N carries no evidence record"** — the round was logged before the record existed. Nothing is
+invented for it; read its scorecards directly.
+
+**500 "round N references evidence at … and the store holds nothing there"** — the round names bytes the
+store does not have. An escalation, not an empty answer: the evidence is missing and an operator should know.
+
+**409 "the evidence stored at … does not digest to what round N sealed"** — the bytes changed under the seal.
+Refused rather than served: a reader must never be handed evidence the round did not seal.
+
 ## `POST /campaigns` refuses a chain
 
 Only when the frame carries `continues`. Every one of these means "this is not a continuation of that

@@ -30,6 +30,7 @@ import type {
   AgentTaskStore,
   ApprovalStore,
   CampaignBuildStore,
+  CampaignEvidenceStore,
   CycleStore,
   EnvelopeStore,
   EventConsumerStateStore,
@@ -62,6 +63,7 @@ import {
   InMemoryBudgetStore,
   InMemoryCallbackStore,
   InMemoryCampaignBuildStore,
+  InMemoryCampaignEvidenceStore,
   InMemoryCapabilityStore,
   InMemoryCommentStore,
   InMemoryCycleStore,
@@ -118,6 +120,7 @@ import {
   PgBudgetStore,
   PgCallbackStore,
   PgCampaignBuildStore,
+  PgCampaignEvidenceStore,
   PgCancellationStore,
   PgCapabilityGenerationStore,
   PgCapabilityStore,
@@ -298,6 +301,8 @@ export interface Persistence {
   campaignStore: EvolutionCampaignStore;
   // The candidates a campaign BUILT into the managed store (docs/architecture/code-evolution-loop.md, D2).
   campaignBuildStore: CampaignBuildStore;
+  // The bytes a campaign round names as its evidence, by key + digest (benchmark-evidence-spec.md §3).
+  campaignEvidenceStore: CampaignEvidenceStore;
   // The authorization a registry write must present to claim a campaign proved its version
   // (arch-review 72 P0). Separate from the campaign store because the CONSUMER is the effect — and an
   // implementation nobody accepts is a feature unreachable by construction, which is how this one shipped.
@@ -392,6 +397,7 @@ export async function makePersistence(): Promise<Persistence> {
     // pointing at a label that no longer exists, and the two bindings would not be interchangeable.
     const inMemoryCampaigns = new InMemoryEvolutionCampaignStore();
     const inMemoryCampaignBuilds = new InMemoryCampaignBuildStore();
+    const inMemoryCampaignEvidence = new InMemoryCampaignEvidenceStore();
     const inMemoryIssues = new InMemoryIssueStore();
     const inMemoryIssueLabels = new InMemoryIssueLabelStore();
     inMemoryIssueLabels.attachIssues(inMemoryIssues);
@@ -499,6 +505,7 @@ export async function makePersistence(): Promise<Persistence> {
       adoptionOperationStore: inMemoryCampaigns,
       campaignStore: inMemoryCampaigns,
       campaignBuildStore: inMemoryCampaignBuilds,
+      campaignEvidenceStore: inMemoryCampaignEvidence,
       issueLabelStore: inMemoryIssueLabels,
       projectStore: new InMemoryProjectStore(),
       initiativeStore: new InMemoryInitiativeStore(),
@@ -574,6 +581,7 @@ export async function makePersistence(): Promise<Persistence> {
     issueStore: new PgIssueStore(client),
     campaignStore: new PgEvolutionCampaignStore(client),
     campaignBuildStore: new PgCampaignBuildStore(client),
+    campaignEvidenceStore: new PgCampaignEvidenceStore(client),
     adoptionOperationStore: new PgAdoptionOperationStore(client),
     issueLabelStore: new PgIssueLabelStore(client),
     projectStore: new PgProjectStore(client),

@@ -2879,6 +2879,17 @@ const MUTATIONS = [
     suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
   },
   {
+    // benchmark-evidence-spec.md §3. A round names its evidence by key + digest; the read serves the bytes only
+    // when they still digest to the seal. Neutralizing the check serves tampered bytes as the round's evidence,
+    // and the db campaign suite must notice.
+    name: "Evolve — the evidence read serves bytes that do not digest to the round's seal",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    if (contentDigest(document) !== ref.digest)",
+    to: "    if (contentDigest(document) !== ref.digest && ref.digest.length < 0)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
     // arch-review 76 P0. The digest is proved BEFORE the immutable write; neutralizing that puts the proof
     // back after it, which poisons the label with bytes the campaign never measured and makes the honest
     // retry impossible forever. The counterexample asserts the WORLD, not just the refusal.

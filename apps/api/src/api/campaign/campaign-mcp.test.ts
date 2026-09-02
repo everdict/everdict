@@ -4,6 +4,7 @@ import type { Dispatcher } from "@everdict/backends";
 import { AgentSpecSchema, type CampaignFrame, readUnknown } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
+import { InMemoryCampaignEvidenceStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
 import { InMemoryAgentRegistry } from "@everdict/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -117,6 +118,7 @@ function makeDeps(
     changes: noChanges,
     runs: noRuns,
     datasets: noDatasets,
+    evidence: new InMemoryCampaignEvidenceStore(),
     issues: { get: async () => ({ id: "iss_1" }) },
     diffs: { diffSnapshot: async () => snapshot },
     newId: () => "evc_mcp",
@@ -269,6 +271,7 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
       changes: noChanges,
       runs: noRuns,
       datasets: noDatasets,
+      evidence: new InMemoryCampaignEvidenceStore(),
       issues,
       diffs: { diffSnapshot: async () => winning },
       newId: () => "camp_foreign",

@@ -90,6 +90,16 @@ the scoring pass; a diagnosis whose `kind` is outside the vocabulary is refused 
 
 ## §3 — The round's evidence is platform-derived, immutable, and the input to the next step (G3.3)
 
+> **Landed 2026-09-02 (without diagnoses, which are §2):** `RoundEvidenceSchema`
+> (`packages/contracts/src/records/evolution-campaign.ts`), the pure builder `roundEvidenceOf` + the
+> content-addressed `roundEvidenceKey` (`packages/domain/src/evolution/round-evidence.ts`), an insert-once
+> `CampaignEvidenceStore` (`packages/db/src/evolution/campaign-evidence-store.ts`, migration 0205 — a Postgres
+> table rather than the object store, because the object store is optional per deployment and the evidence
+> may not be), `CampaignService.logRound` staging the object BEFORE the round is appended and naming it as
+> `verdict.evidence { key, digest }`, and the read on both transports — `GET /campaigns/:id/rounds/:seq/evidence`
+> and `get_campaign_round_evidence` — which refuses bytes that no longer digest to the seal. `diagnoses` joins the
+> record when §2 lands; a field with no producer is a plan.
+
 **The gap.** A round carries a verdict — counts, axes, `candidateSource` — and `learned`, the driver's prose,
 which the design correctly calls advice (`packages/contracts/src/records/evolution-campaign.ts`). Nothing
 PLATFORM-authored says: on this round, these held-out cases failed on the candidate, each with this

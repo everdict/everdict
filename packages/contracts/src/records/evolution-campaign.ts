@@ -366,6 +366,13 @@ export const CampaignRoundSchema = z.object({
         regressions: z.number().int().min(0),
       })
       .optional(),
+    // ── THE ROUND'S EVIDENCE, BY KEY AND DIGEST (docs/architecture/benchmark-evidence-spec.md §3) ────
+    //
+    // What this round saw, case by case, staged as an immutable object BEFORE the round was appended and named
+    // here by key + digest — never "the record's current results", which a later re-score would move under a
+    // decision that already rested on them (rule `protocol` L4). Absent on rows logged before the record
+    // existed; a read of such a round says so rather than inventing one.
+    evidence: z.object({ key: z.string().min(1), digest: z.string().min(1) }).optional(),
     // The frame's `targets`, answered one by one (evolution-routing-spec.md §3): `flipped` improved significantly
     // on the candidate, `unflipped` did not. Present exactly when the frame declares targets; absent on rounds
     // of a frame without them and on rows written before the field existed — the gate reads its presence as the
@@ -670,3 +677,50 @@ export const EvolutionCampaignRecordSchema = z.object({
   updatedAt: z.string(),
 });
 export type EvolutionCampaignRecord = z.infer<typeof EvolutionCampaignRecordSchema>;
+
+// ── THE ROUND'S EVIDENCE RECORD (docs/architecture/benchmark-evidence-spec.md §3) ────────────────────
+//
+// Platform-derived, from what `logRound` already read: the diff's per-case trials, the frame's held-out and
+// target flags, and the trace coordinates of the runs on each side. The driver's `learned` stays advice; this is
+// the half the platform authors, and the next brief is rendered FROM it — with one deliberate hole the skill
+// keeps: the delegate receives failing case ids and an attributed slot, never judge rationale.
+export const RoundEvidenceCaseSchema = z.object({
+  caseId: z.string().min(1),
+  heldOut: z.boolean(),
+  target: z.boolean(),
+  baseline: z.object({ rate: z.number(), trials: z.number().int().nonnegative() }),
+  candidate: z.object({ rate: z.number(), trials: z.number().int().nonnegative() }),
+  delta: z.number(),
+  significant: z.boolean(),
+  p: z.number().optional(),
+  method: z.string().optional(),
+  // improved / regressed = significant with a sign; unchanged = no movement; unclear = moved, not significant.
+  verdict: z.enum(["improved", "regressed", "unchanged", "unclear"]),
+  traces: z.array(
+    z.object({
+      side: z.enum(["baseline", "candidate"]),
+      runId: z.string().min(1),
+      trial: z.number().int().nonnegative().optional(),
+    }),
+  ),
+});
+export type RoundEvidenceCase = z.infer<typeof RoundEvidenceCaseSchema>;
+
+export const RoundEvidenceSchema = z.object({
+  campaignId: z.string().min(1),
+  seq: z.number().int().min(1),
+  frameDigest: z.string().min(1),
+  baseline: z.object({ scorecardId: z.string().min(1), version: z.string().min(1) }),
+  candidate: z.object({ scorecardId: z.string().min(1), version: z.string().min(1) }),
+  cases: z.array(RoundEvidenceCaseSchema),
+  aggregate: z.object({
+    comparable: z.boolean(),
+    significantImprovements: z.number().int().min(0),
+    significantRegressions: z.number().int().min(0),
+    heldOut: z.object({ improvements: z.number().int().min(0), regressions: z.number().int().min(0) }).optional(),
+    targets: z.object({ flipped: z.array(z.string()), unflipped: z.array(z.string()) }).optional(),
+    detail: z.string().optional(),
+  }),
+  at: z.string(),
+});
+export type RoundEvidence = z.infer<typeof RoundEvidenceSchema>;
