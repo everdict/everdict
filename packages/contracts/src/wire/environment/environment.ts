@@ -7,6 +7,8 @@ export const RegisterEnvironmentResultSchema = z.object({
   id: z.string(),
   version: z.string(),
   teamId: z.string().optional(),
+  // Warn-not-block advice about the world's bytes — same shape the harness register door returns.
+  imageWarnings: z.array(z.object({ image: z.string(), class: z.string() })).optional(),
 });
 export type RegisterEnvironmentResult = z.infer<typeof RegisterEnvironmentResultSchema>;
 

@@ -49,6 +49,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [command-harness.md](command-harness.md) — declarative `command` harness: bring any CLI agent as a `HarnessSpec`, no code adapter
 - [service-harness.md](service-harness.md) — service-topology harnesses (multi-service + browser/OS target env), Nomad/K8s, OTel/MLflow trace
 - [architecture/harness-taxonomy.md](architecture/harness-taxonomy.md) — Template (category) + Instance, pins and resolution
+- [architecture/world-and-engagement-model.md](architecture/world-and-engagement-model.md) — design: the world a case acts on (delivery · lifecycle) and how the actor meets the question (engagement)
 - [architecture/harness-definability-spec.md](architecture/harness-definability-spec.md) — spec: a client is a target of any kind, the environment is a registered entity, first-party coding-agent recipes, the case reaches the harness
 - [architecture/harness-identity-and-seeds-spec.md](architecture/harness-identity-and-seeds-spec.md) — spec: forks recorded at register, skill/wiki seeds on the harness version (inside the digest), lineage in one read, a seeded finding is a leak
 - [architecture/harness-playground.md](architecture/harness-playground.md) — interactive test cases against a live harness session

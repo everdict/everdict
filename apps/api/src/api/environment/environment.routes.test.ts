@@ -75,3 +75,24 @@ describe("environment routes", () => {
     expect(other.statusCode).toBe(404);
   });
 });
+
+// The world's BYTES (docs/architecture/world-and-engagement-model.md, axis 1) — an in-compute world is
+// delivered as the container the actor runs in, so the environment carries the image and the door gives it
+// the same advice every other image-bearing door gives.
+describe("environment routes — the world's image", () => {
+  const H2 = { "x-everdict-tenant": "acme" };
+  it("registers an environment that carries its image, and warns about an unqualified ref without refusing it", async () => {
+    const app = build(true);
+    const res = await app.inject({
+      method: "POST",
+      url: "/environments",
+      payload: { id: "shop", version: "2.0.0", env: { kind: "repo", source: { path: "/app" } }, image: "shop:2" },
+      headers: H2,
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ imageWarnings: [{ image: "shop:2", class: "unqualified" }] });
+    const read = await app.inject({ method: "GET", url: "/environments/shop/versions/2.0.0", headers: H2 });
+    expect((read.json() as { image?: string }).image).toBe("shop:2");
+    await app.close();
+  });
+});

@@ -5,6 +5,7 @@ import {
   type EvalCase,
   InternalError,
   type SealedEnvironmentEntry,
+  caseEnvironmentImageDefect,
 } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import type { EnvironmentRegistry } from "../ports/environment-registry.js";
@@ -82,8 +83,14 @@ export async function resolveCaseEnvironments(input: {
         { case: c.id, environment: `${spec.id}@${spec.version}`, sealed: pinned.digest, read: digest },
         `environment '${spec.id}@${spec.version}' no longer holds the bytes this batch sealed — a registry version is immutable, so this batch cannot be run against what it measured`,
       );
+    // The world's BYTES travel with the world (world-and-engagement-model.md, axis 1). A case that also
+    // names an image for the same world is refused here rather than resolved by precedence — both readings
+    // are defensible from the outside, and picking one silently decides which experiment ran.
+    const imageDefect = caseEnvironmentImageDefect(c, spec);
+    if (imageDefect !== undefined)
+      throw new ConflictError("CONFLICT", { case: c.id, environment: `${spec.id}@${spec.version}` }, imageDefect);
     seals[c.id] = { ref: `${spec.id}@${spec.version}`, digest };
-    cases.push({ ...c, env: spec.env });
+    cases.push({ ...c, env: spec.env, ...(spec.image !== undefined ? { image: spec.image } : {}) });
   }
   return { cases, seals };
 }

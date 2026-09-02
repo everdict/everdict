@@ -119,6 +119,20 @@ export const EnvironmentSpecSchema = z.object({
   version: z.string().min(1).max(100),
   description: z.string().max(2000).optional(),
   env: ConcreteEnvSpecSchema,
+  // ── THE WORLD'S BYTES (docs/architecture/world-and-engagement-model.md, axis 1: in-compute) ────────
+  //
+  // A repo at a commit, a desktop with its apps, a fixture tree — an IN-COMPUTE world is delivered as the
+  // container the actor runs in, so its bytes belong to the world rather than to the case that asks a
+  // question about it. Until this field existed, a versioned environment could not carry them: `EvalCase.image`
+  // owned them, so evolving the world meant editing every case, and an environment build recipe had nowhere
+  // to put its output.
+  //
+  // PRECEDENCE, stated once because a field that means two things is how the next reader gets it wrong: a
+  // case that references an environment takes the world's image FROM the environment, and a case that also
+  // names its own image for that world is REFUSED (`caseEnvironmentImageDefect`) rather than silently
+  // preferring one. A case with no environment reference is untouched — `EvalCase.image` still means what it
+  // has always meant there.
+  image: z.string().min(1).optional(),
 });
 export type EnvironmentSpec = z.infer<typeof EnvironmentSpecSchema>;
 
@@ -135,4 +149,18 @@ export interface Environment<S extends EnvSnapshot = EnvSnapshot> {
   // the recorder owns best-effort and counts the failure, because a swallow here turned every broken sampler
   // into a calmer-looking world (evolution-lineage Track C, sampling_failed).
   sampleDelta?(compute: ComputeHandle): Promise<{ kind: "repo-diff"; text: string } | undefined>;
+}
+
+// The refusal above, as a total function, so the resolution and any door that validates a case ask ONE
+// question. Empty = no conflict. It is a DEFECT rather than a precedence rule because both readings are
+// defensible from the outside — the case author meant to pin the world's bytes, or meant to override the
+// actor's container — and a platform that picks one silently decides which experiment ran.
+export function caseEnvironmentImageDefect(
+  evalCase: { id: string; image?: string; env: { kind: string } },
+  environment: { id: string; version: string; image?: string },
+): string | undefined {
+  if (evalCase.env.kind !== "ref") return undefined;
+  if (evalCase.image === undefined || environment.image === undefined) return undefined;
+  if (evalCase.image === environment.image) return undefined; // the same bytes, said twice — not a conflict
+  return `case '${evalCase.id}' names image '${evalCase.image}' and references environment '${environment.id}@${environment.version}', whose world is '${environment.image}' — the world's bytes belong to the environment, so remove the case's image or stop referencing the environment`;
 }

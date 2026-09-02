@@ -116,3 +116,61 @@ describe("resolveCaseEnvironments — the world a case acts on, resolved once an
     expect(new Set(Object.values(out.seals).map((s) => s.ref))).toEqual(new Set(["shop@2.0.0"]));
   });
 });
+
+// ── THE WORLD'S BYTES BELONG TO THE WORLD (world-and-engagement-model.md, axis 1) ─────────────────────
+//
+// An IN-COMPUTE world is delivered as the container the actor runs in, so a versioned environment carries
+// its image. What this pins is the pair that makes it evolvable: the referencing case takes the world's
+// bytes from the environment (so a new environment version IS a new world, with no case edited), and a case
+// that names its own image for that same world is REFUSED rather than resolved by precedence — both
+// readings are defensible from the outside, and picking one silently decides which experiment ran.
+const IMAGED = {
+  id: "shop",
+  version: "3.0.0",
+  env: { kind: "repo" as const, source: { path: "/app" } },
+  image: "ghcr.io/acme/shop:3",
+};
+
+describe("an environment's image is the world's, and a case may not contradict it", () => {
+  it("a referencing case runs the environment's image, and a new environment version changes the world alone", async () => {
+    const out = await resolveCaseEnvironments({
+      tenant: "t1",
+      cases: [referencing()],
+      registry: registry([IMAGED], IMAGED),
+    });
+    expect(out.cases[0]?.image).toBe("ghcr.io/acme/shop:3");
+    expect(out.cases[0]?.env).toEqual(IMAGED.env);
+  });
+
+  it("refuses a case that names a different image for the world it references", async () => {
+    await expect(
+      resolveCaseEnvironments({
+        tenant: "t1",
+        cases: [{ ...referencing(), image: "ghcr.io/acme/mine:1" }],
+        registry: registry([IMAGED], IMAGED),
+      }),
+    ).rejects.toThrow(/the world's bytes belong to the environment/);
+    // …and the SAME bytes said twice is not a conflict — it is a redundant pin, not a contradiction.
+    const agreed = await resolveCaseEnvironments({
+      tenant: "t1",
+      cases: [{ ...referencing(), image: IMAGED.image }],
+      registry: registry([IMAGED], IMAGED),
+    });
+    expect(agreed.cases[0]?.image).toBe(IMAGED.image);
+  });
+
+  it("leaves a case that references no environment exactly as it was", async () => {
+    const embeddedWithImage = { ...embedded(), image: "ghcr.io/acme/mine:1" };
+    const out = await resolveCaseEnvironments({ tenant: "t1", cases: [embeddedWithImage] });
+    expect(out.cases[0]?.image).toBe("ghcr.io/acme/mine:1");
+  });
+
+  it("an environment with no image leaves the case's own image alone — not every world is bytes", async () => {
+    const out = await resolveCaseEnvironments({
+      tenant: "t1",
+      cases: [{ ...referencing(), image: "ghcr.io/acme/mine:1" }],
+      registry: registry([SHOP_V1], SHOP_V1),
+    });
+    expect(out.cases[0]?.image).toBe("ghcr.io/acme/mine:1");
+  });
+});

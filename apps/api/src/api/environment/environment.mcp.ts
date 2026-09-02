@@ -1,6 +1,6 @@
 import { setVersionTags } from "@everdict/application-control";
 import { EnvironmentSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
+import { imageWarnings, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
@@ -69,7 +69,18 @@ export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext)
         if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
         // …and the creator stamp the HTTP twin writes (HTTP parity).
         await environments.register(ws, result.data, principal.subject, teamId);
-        return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+        // HTTP parity: the same image advice its twin gives.
+        const warnings =
+          result.data.image !== undefined
+            ? imageWarnings([result.data.image], await deps.imageRegistryService?.coordinates(ws))
+            : [];
+        return ok({
+          workspace: ws,
+          id: result.data.id,
+          version: result.data.version,
+          ...(teamId ? { teamId } : {}),
+          ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+        });
       }),
   );
 

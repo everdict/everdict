@@ -1,6 +1,6 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { EnvironmentSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
+import { imageWarnings, ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
@@ -32,11 +32,18 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       await deps.environmentRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
+      // The world's bytes get the same advice every other image-bearing door gives (harness register, a
+      // capability save): unqualified or local-only refs run on a self-hosted runner and nowhere else.
+      const warnings =
+        parsed.data.image !== undefined
+          ? imageWarnings([parsed.data.image], await deps.imageRegistryService?.coordinates(principal.workspace))
+          : [];
       return reply.code(201).send({
         workspace: principal.workspace,
         id: parsed.data.id,
         version: parsed.data.version,
         ...(owner.teamId ? { teamId: owner.teamId } : {}),
+        ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
       });
     } catch (err) {
       return sendError(reply, err); // immutable 409

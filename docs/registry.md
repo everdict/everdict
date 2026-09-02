@@ -93,7 +93,11 @@ An environment — the world a case ACTS ON (a seed repository, a browser fixtur
 as opposed to the harness that acts — is its own versioned entity, keyed `(tenant, id, version)`, immutable
 per version, owner-first with a `_shared` fallback, with version tags and capability origin like every sibling.
 `InMemoryEnvironmentRegistry` + `PgEnvironmentRegistry` (`environment` jsonb, migration
-`0207_create_environments`). A case names one with `env: { kind: "ref", id, version? }`; the control plane
+`0207_create_environments`). An environment may carry its own **image** — an in-compute world (a repo at a
+commit, a desktop with its apps) is delivered as the container the actor runs in, so the world's bytes belong
+to the world; a referencing case takes the image from the environment, and a case that names a DIFFERENT
+image for that world is refused rather than resolved by precedence
+(`docs/architecture/world-and-engagement-model.md`). A case names one with `env: { kind: "ref", id, version? }`; the control plane
 resolves it before dispatch and SEALS the concrete version on the batch's manifest, so a batch can be re-run
 against exactly the world it measured and two batches over one dataset and two environment versions read as an
 `environment` confound rather than as a change to the harness under test. The HTTP/MCP surface
