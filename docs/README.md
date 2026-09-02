@@ -117,7 +117,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/workspace-filesystem.md](architecture/workspace-filesystem.md) — one isolated file tree per workspace, attributed revisions, three-way merge
 - [architecture/knowledge-graph.md](architecture/knowledge-graph.md) — the workspace knowledge graph
 - [architecture/evolution-lineage.md](architecture/evolution-lineage.md) — evolution lineage: ancestry recorded at the write, events on the outbox, the campaign as a settlement
-- [architecture/code-evolution-loop.md](architecture/code-evolution-loop.md) — code evolution: a delegated coding agent mutates the harness repo, CI builds the image, the campaign decides
+- [architecture/code-evolution-loop.md](architecture/code-evolution-loop.md) — code evolution: a delegated coding agent mutates the harness repo, everdict builds the image into its own store, the campaign decides
 - [architecture/capability-store.md](architecture/capability-store.md) — the capability store (SSOT)
 - [architecture/analysis-studio.md](architecture/analysis-studio.md) — natural-language analysis, artifacts, scheduled reports over Views
 - [architecture/event-plumbing.md](architecture/event-plumbing.md) — the platform's nervous system: facts, one log + N cursor consumers, subscriptions

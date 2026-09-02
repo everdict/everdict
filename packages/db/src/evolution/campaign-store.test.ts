@@ -1284,6 +1284,122 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       });
     });
 
+    // ── THE ORACLE READS THE CHANGE EVERDICT BUILT (D2 meets D3) ──────────────────────────────────
+    //
+    // RED before the fix: the oracle check read only the scorecard's origin, while the build account — which
+    // outranks it for the verdict — was read AFTER it. A driver-submitted batch carries no `origin.prNumber`,
+    // so every oracle-scoped round of an Everdict-built candidate was "unverifiable", and the first-party code
+    // loop could not adopt under an oracle scope at all.
+    const buildLedger = (prNumber: number, repo = "acme/scaffold") => ({
+      forCampaign: async () => [
+        {
+          id: "bld_1",
+          state: "built",
+          candidateVersion: "1.0.1",
+          source: { git: `https://github.com/${repo}.git`, repo, ref: `pr-${prNumber}`, sha: "observed-sha", prNumber },
+          image: { ref: "reg/ns/scaffold-image:sha-observed@sha256:beef" },
+          base: { image: "reg/scaffold:1.0.0" },
+        },
+      ],
+    });
+    const scopedFrame: CampaignFrame = { ...frame, oracleScope: ["tests/", "datasets/**"] };
+    const prReader = (files: Record<number, string[]>) => ({
+      calls: [] as Array<{ repo: string; pr: number }>,
+      async pullRequestFiles(_tenant: string, repo: string, pr: number) {
+        this.calls.push({ repo, pr });
+        const paths = files[pr];
+        return paths === undefined
+          ? { kind: "absent" as const }
+          : { kind: "read" as const, value: { paths, complete: true } };
+      },
+    });
+    const withLedger = (
+      store: InMemoryEvolutionCampaignStore,
+      builds: Pick<NonNullable<ConstructorParameters<typeof CampaignService>[0]["builds"]>, "forCampaign">,
+      changes: ReturnType<typeof prReader>,
+    ) =>
+      new CampaignService({
+        store,
+        operations: store,
+        changes,
+        runs: noRuns,
+        builds,
+        issues,
+        diffs,
+        newId: () => `id_${++n}`,
+        now: () => "2026-09-02T02:00:00.000Z",
+      });
+
+    it("[D2·D3] an oracle-scoped frame reads the pull request from Everdict's build record when the scorecard names none", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const changes = prReader({ 7: ["src/loop.ts", "README.md"] });
+      const svc = withLedger(store, buildLedger(7), changes);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: scopedFrame }, "alice");
+      // The driver submitted the batch itself: an `api` origin with no repository and no pull request.
+      snapshots.set(
+        "sc-built-nopr",
+        snapshot(comparison(), { candidate: { record: { ...side("1.0.1").record, origin: { source: "api" } } } }),
+      );
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-built-nopr" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable, logged.verdict.detail).toBe(true);
+      expect(changes.calls).toEqual([{ repo: "acme/scaffold", pr: 7 }]);
+      expect(logged.verdict.candidateSource).toMatchObject({ source: "everdict-build", prNumber: 7 });
+    });
+
+    it("[D2·D3] …and the build record's pull request outranks the origin's for the oracle, as it does for the verdict", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      // Origin names a clean PR #3; the build Everdict actually made came from PR #7, which rewrote a dataset.
+      const changes = prReader({ 3: ["src/loop.ts"], 7: ["src/loop.ts", "datasets/tb.json"] });
+      const svc = withLedger(store, buildLedger(7), changes);
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: scopedFrame }, "alice");
+      snapshots.set(
+        "sc-built-otherpr",
+        snapshot(comparison(), {
+          candidate: {
+            record: {
+              ...side("1.0.1").record,
+              origin: { source: "github-actions", repo: "acme/scaffold", sha: "caller-sha", prNumber: 3 },
+            },
+          },
+        }),
+      );
+      const { round: logged } = await svc.logRound(
+        "acme",
+        rec.id,
+        { ...LOG, candidateScorecardId: "sc-built-otherpr" },
+        "agent:everdict",
+        {},
+      );
+      expect(logged.verdict.comparable, "the oracle was checked against a pull request Everdict did not build").toBe(
+        false,
+      );
+      expect(logged.verdict.oracleTouched).toEqual(["datasets/tb.json"]);
+      expect(changes.calls).toEqual([{ repo: "acme/scaffold", pr: 7 }]);
+    });
+
+    it("[D2] a build ledger that cannot be read REFUSES the round — a failed read is not 'no build' (L2)", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const broken = {
+        forCampaign: async (): Promise<never> => {
+          throw new Error("connection reset");
+        },
+      };
+      const svc = withLedger(store, broken, prReader({}));
+      const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+      snapshots.set("sc-ledger-down", snapshot(comparison(), { candidate: built("1.0.1") }));
+      await expect(
+        svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-ledger-down" }, "agent:everdict", {}),
+      ).rejects.toMatchObject({ status: 500, extra: { candidateVersion: "1.0.1" } });
+      // Nothing was logged: the round did not go in wearing the caller's provenance.
+      expect((await store.get("acme", rec.id))?.rounds).toHaveLength(0);
+    });
+
     it("a candidate whose scorecard carries no origin records none — absence, not an invented source", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const svc = service(store);

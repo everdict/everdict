@@ -143,6 +143,6 @@ This file is the driver for a human or an outside agent. The product's own agent
 first-party skills in `packages/application-control/src/capability/first-party.ts` — `agent_evolve` for an
 agent configuration (shadow tries, ingested traces), `harness_evolve` for a harness (real batches, so no
 identity waiver), and `code_evolve` for a harness whose CODE changes: a delegated coding agent in a sandbox
-makes the change, the repository's CI builds the image, and the driver pins that digest into the candidate
-version (`docs/architecture/code-evolution-loop.md`). They are the same protocol with different subjects;
+makes the change, Everdict builds the image into its own managed store and mints the candidate version
+(`docs/architecture/code-evolution-loop.md`). They are the same protocol with different subjects;
 when this file changes, check whether they say the same thing.

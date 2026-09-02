@@ -11,6 +11,7 @@ import {
   BadRequestError,
   CampaignRoundInputSchema,
   ConflictError,
+  InternalError,
   NotFoundError,
   type Score,
   isJudgeFamilyMetric,
@@ -94,6 +95,19 @@ export interface CampaignComparisonSide {
 
 // The candidate's origin, projected to the fields the round records — and only when the record carries one.
 // A batch with no origin is not "from nowhere"; it is a round that cannot say, which the field's absence states.
+// The refusal a round meets when Everdict's own build ledger cannot say whether it built the candidate. Named
+// so the mutation rung that removes it has one line to neutralize, and typed `never` so the `.catch` it feeds
+// cannot quietly become a value.
+function unreadableBuildLedger(campaignId: string, candidateVersion: string): (err: unknown) => never {
+  return (err: unknown): never => {
+    throw new InternalError(
+      "UPSTREAM_ERROR",
+      { campaignId, candidateVersion, cause: err instanceof Error ? err.message : String(err) },
+      `the build ledger could not be read, so whether Everdict built candidate ${candidateVersion} — and from which pull request — cannot be established; the round was not logged, retry once the ledger answers`,
+    );
+  };
+}
+
 function candidateSourceOf(side: CampaignComparisonSide): CandidateSource | undefined {
   const origin = side.record.origin;
   if (origin === undefined) return undefined;
@@ -607,14 +621,19 @@ export class CampaignService {
         `the baseline scorecard evaluated ${expectedId}@${baselineHarness.version}, not the frame's baseline ${record.frame.subject.baselineVersion}`,
         { frame: record.frame.subject.baselineVersion, actual: baselineHarness.version },
       );
+    // Everdict's own account of the candidate, when it BUILT it (D2): the `built` record whose minted version
+    // is this round's candidate. Its coordinates outrank the scorecard origin's — for the verdict AND for the
+    // oracle read below, which is why it is read first. The first version read it after the oracle, so a
+    // candidate Everdict built from pull request #7 was checked against the scorecard's origin, which a
+    // driver-submitted batch does not carry: every oracle-scoped round of the first-party loop was
+    // "unverifiable", and the loop this design exists for could not adopt with an oracle at all.
+    const builtSource = await this.builtSourceFor(tenant, id, input.candidateVersion);
     // The oracle boundary, read AFTER the identity checks and BEFORE the verdict: a frame that froze a scope
-    // asks what the candidate's pull request changed, from the repository the scorecard's origin names.
-    const oracle = await this.oracleCheck(tenant, record.frame, snapshot);
+    // asks what the candidate's pull request changed — the pull request Everdict's build record names, else
+    // the one the scorecard's origin names.
+    const oracle = await this.oracleCheck(tenant, record.frame, snapshot, builtSource);
     // …and the delegation the round names, read off the run ledger and held to the frame's budget.
     const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
-    // …and Everdict's own account of the candidate, when it BUILT it (D2): the `built` record whose minted
-    // version is this round's candidate. Its coordinates outrank the scorecard origin's.
-    const builtSource = await this.builtSourceFor(tenant, id, input.candidateVersion);
     const round: CampaignRound = {
       seq: record.rounds.length + 1,
       hypothesis: input.hypothesis,
@@ -681,7 +700,13 @@ export class CampaignService {
     candidateVersion: string,
   ): Promise<CandidateSource | undefined> {
     if (this.deps.builds === undefined) return undefined;
-    const builds = await this.deps.builds.forCampaign(tenant, campaignId).catch(() => []);
+    // A ledger that could not be read is not a ledger with no build in it. The first version swallowed the
+    // failure into `[]`, so an outage of the build store silently demoted the round's provenance to the
+    // caller's coordinates — and, once the oracle read this too, silently made an Everdict-built candidate
+    // "unverifiable". The round is refused instead, and nothing is logged (rule `protocol` L2).
+    const builds = await this.deps.builds
+      .forCampaign(tenant, campaignId)
+      .catch(unreadableBuildLedger(campaignId, candidateVersion));
     const built = builds.find((b) => b.state === "built" && b.candidateVersion === candidateVersion);
     if (built === undefined) return undefined;
     return {
@@ -698,22 +723,25 @@ export class CampaignService {
 
   // ── DID THE CANDIDATE TOUCH ITS OWN EXAM (docs/architecture/code-evolution-loop.md, D3) ─────────
   //
-  // Answered from the candidate scorecard's own origin (the pull request it names) and the repository's own
-  // listing of what that pull request changed. Three answers, never two: clean, touched (with the paths), or
-  // unverifiable — a candidate that names no pull request, a listing the reader could not complete, or a read
-  // that failed. The last is refused rather than waved through: "we could not check" is not "clean" (L2).
+  // Answered from the pull request the candidate names — Everdict's own build record first (D2: the commit it
+  // observed and the pull request it was asked to build), the candidate scorecard's origin second — and the
+  // repository's own listing of what that pull request changed. Three answers, never two: clean, touched
+  // (with the paths), or unverifiable — a candidate that names no pull request on either account, a listing
+  // the reader could not complete, or a read that failed. The last is refused rather than waved through: "we
+  // could not check" is not "clean" (L2).
   private async oracleCheck(
     tenant: string,
     frame: CampaignFrame,
     snapshot: CampaignSnapshot,
+    builtSource: CandidateSource | undefined,
   ): Promise<OracleCheck | undefined> {
     if (frame.oracleScope.length === 0) return undefined;
-    const source = candidateSourceOf(snapshot.candidate);
+    const source = builtSource ?? candidateSourceOf(snapshot.candidate);
     if (source?.repo === undefined || source.prNumber === undefined)
       return {
         kind: "unverifiable",
         reason:
-          "the candidate scorecard names no pull request (origin.repo / origin.prNumber), so what the candidate changed cannot be read against the frame's oracle scope",
+          "the candidate names no pull request — neither Everdict's build record nor the scorecard's origin (origin.repo / origin.prNumber) carries one — so what the candidate changed cannot be read against the frame's oracle scope",
       };
     const read = await this.deps.changes.pullRequestFiles(tenant, source.repo, source.prNumber);
     switch (read.kind) {

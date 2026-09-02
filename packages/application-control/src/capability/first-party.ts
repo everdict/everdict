@@ -1113,17 +1113,18 @@ const HARNESS_EVOLVE: CapabilityRecord = {
 // composition — a SKILL, not code, for the same reason the other two are: each step is a tool the agent has.
 //
 // Two facts shape the procedure and are stated in it rather than hidden. Only a CONVERSATIONAL harness can be a
-// delegation profile today (`ClaudeCodeHarness` carries the marker; `CommandHarness` does not), so Codex and
-// its kin ride the playground's `harness` boot mode one prompt at a time. And the CI-fired PR evaluation runs
+// delegation profile (`ClaudeCodeHarness` carries the marker; a `CommandHarness` carries it when its template
+// declares a `conversation` contract — docs/command-harness.md); a command harness without one rides the
+// playground's `harness` boot mode one prompt at a time. And the CI-fired PR evaluation (the alternative path) runs
 // against the BASE version with an ephemeral pin override, so its record names the base version and cannot be
-// a round's candidate as-is: the driver pins the CI-built digest into a REAL instance version and runs the
+// a round's candidate as-is: the driver pins that CI-built digest into a REAL instance version (on the CI alternative path) and runs the
 // round's batch on that — which is also what keeps the adoption's identity exact.
 const CODE_EVOLVE_INSTRUCTIONS = `
-# Evolve a harness by changing its code (delegated, sandboxed, CI-built)
+# Evolve a harness by changing its code (delegated, sandboxed, built by Everdict)
 
 Improve a HARNESS by changing the code in its repository — not a pin, the code — with the trust harness as the
-oracle. A coding agent you DELEGATE to makes the change in an isolated sandbox; the repository's CI builds the
-image; you pin that image into a candidate version, run the round, and let the campaign gate decide. You never
+oracle. A coding agent you DELEGATE to makes the change in an isolated sandbox; Everdict builds the image into
+its own managed store and mints the candidate version; you run the round, and let the campaign gate decide. You never
 write the harness's code yourself, you never touch the oracle, and you never merge on your own authority.
 
 Everdict's tools load on demand. Before anything else:
@@ -1224,7 +1225,7 @@ Everdict's tools load on demand. Before anything else:
 - One hypothesis per round, one PR per hypothesis, one lever per PR.
 - Do not paste secrets into a brief; the profile carries the delegate's credentials. Do not paste your tool names;
   the delegate cannot call them.
-- Never report a candidate as built, evaluated or adopted on the delegate's word — the CI run, the scorecard and
+- Never report a candidate as built, evaluated or adopted on the delegate's word — the build record, the scorecard and
   the gate's answer are the evidence.
 - Load \`references/round-brief.md\` (via \`read_skill_file\`) before writing any brief.
 `.trim();
@@ -1265,9 +1266,10 @@ to look at. The delegate cannot open them with your tools; put the relevant exce
 
 ## Before you log the round — the checklist
 1. The PR's changed files against the oracle's paths: any hit → not a candidate.
-2. The CI run built and pushed an image, and you have its DIGEST (a tag pins nothing).
-3. The candidate version was minted from that digest with \`pin_harness_images\`, and \`diff_harness_versions\`
-   shows one slot moved.
+2. Everdict's build record reads \`built\` and names the image DIGEST it published (a tag pins nothing); the build
+   was asked for with the pull request's \`repo\` + \`prNumber\`, or the oracle cannot be checked.
+3. The candidate version the build minted is the one you will log, and \`diff_harness_versions\` shows one slot
+   moved.
 4. The candidate batch ran the frame's exact scenarios, N trials, the frame's judges.
 5. \`learned\` says what this round established about the MECHANISM — written before you read the verdict.
 `.trim();
@@ -1279,8 +1281,8 @@ const CODE_EVOLVE: CapabilityRecord = {
   name: "code_evolve",
   description:
     "Run an evolution campaign that changes a HARNESS's code: delegate one hypothesis per round to a coding agent " +
-    "in an isolated sandbox with the repository checked out, let the repository's CI build the image, pin that " +
-    "digest into a candidate version, run the round, and adopt only over a statistically significant diff on " +
+    "in an isolated sandbox with the repository checked out, have Everdict build the image into its own store " +
+    "and mint the candidate version, run the round, and adopt only over a statistically significant diff on " +
     "held-out scenarios. Use when a scorecard trend says the scaffold's code is the ceiling and a pin cannot fix it.",
   spec: {
     type: "skill",

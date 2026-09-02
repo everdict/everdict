@@ -1,11 +1,11 @@
 ---
 kind: wiki
-title: "Code evolution loop — a delegated coding agent mutates the harness repo, CI builds the image, the campaign decides"
+title: "Code evolution loop — a delegated coding agent mutates the harness repo, everdict builds the image, the campaign decides"
 status: current
 updated: 2026-09-02
 anchors: [packages/application-control/src/capability/first-party.ts, packages/application-control/src/evolution/campaign-service.ts, packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/session/sandbox-session-service.ts, packages/contracts/src/records/capability.ts]
 ---
-# Code evolution loop — a delegated coding agent mutates the harness repo, CI builds the image, the campaign decides
+# Code evolution loop — a delegated coding agent mutates the harness repo, everdict builds the image, the campaign decides
 
 > **Status:** the DRIVER half landed 2026-09-02 as the first-party skill `code_evolve`
 > (`packages/application-control/src/capability/first-party.ts`), composed from `delegate_work` and
@@ -115,7 +115,7 @@ the round still verifies the batch's identity against the frame when it is logge
 **Still open — the PR-mode scorecard as the round's candidate.** The CI-fired evaluation runs the BASE
 version with an ephemeral pin override, so its record names the base version and the round's identity check
 (candidate version) and the adoption's spec comparison (the version the proof authorizes) both key on a label
-the candidate does not have. Today the driver pins the CI-built digest into a REAL instance version
+the candidate does not have. On that alternative path the driver pins the CI-built digest into a REAL instance version
 (`pin_harness_images`) and runs the round's batch on that, which is also what keeps the adoption's identity
 exact. Admitting the PR-mode scorecard directly needs the round and the proof to key the candidate on its
 resolved digest rather than its version label, and the adopt effect to mint the version — a change to the
@@ -129,9 +129,10 @@ scaffold. Any of those is the candidate rewriting its own exam.
 The frame is the place to freeze that boundary: an `oracleScope` of repository path patterns, declared at
 open. A round whose candidate PR touches a path in scope is recorded `comparable: false` with the reason
 `oracle touched` — the same treatment as a drifted scenario set, because it is the same defect: the exam
-moved. **Landed:** `CampaignService.logRound` reads the pull request the candidate scorecard's origin names
-(the workspace GitHub App's changed-files listing, a REQUIRED dependency that answers `unknown` where no App
-is configured), matches it with `oracleTouched` (`@everdict/domain`), and records the offending paths on the
+moved. **Landed:** `CampaignService.logRound` reads the pull request the candidate names — Everdict's own
+build record first (D2: the pull request the build was asked for), the candidate scorecard's origin second —
+through the workspace GitHub App's changed-files listing (a REQUIRED dependency that answers `unknown` where
+no App is configured), matches it with `oracleTouched` (`@everdict/domain`), and records the offending paths on the
 verdict as `oracleTouched`. Three answers, never two: clean, touched, or unverifiable — a candidate with no
 pull request, a truncated listing, or a failed read is non-comparable, because "could not check" is not
 "clean" (L2). The brief still carries the boundary with its reason, so the delegate is told before it is
@@ -202,11 +203,12 @@ policy, and refusing the boot is the honest answer until such a lane exists.
 
 ## What would reopen this
 
-- Everdict gaining an in-platform build lane. D2 rests on "never builds"; if that changes, the candidate image
-  can be built from the PR inside the loop and D2's CI dependency goes away.
-- A conversational `CommandHarness`. The "which agents" section is a description of today's adapters and
-  expires the day one lands.
-- Evidence that CI-fired origin coordinates are forged in practice. D4 records `source` so a reader can weigh
+- A candidate that needs a new BASE image, not a layer over the current one (a runtime upgrade, a new system
+  dependency the base lacks). D2 rests on "one layer over the harness's own base"; such a change is a template
+  version today, and a loop that must make it is a loop that needs a Dockerfile lane D2 deliberately refused.
+- A coding agent that cannot be a `command` harness — an HTTP-only agent with no CLI. The "which agents"
+  section assumes a conversation is a CLI that resumes.
+- Evidence that caller-authored origin coordinates are forged in practice on the CI alternative path. D4 records `source` so a reader can weigh
   them; if that is not enough, the round has to verify the sha against the pushed image's build attestation.
 
 ## Verification

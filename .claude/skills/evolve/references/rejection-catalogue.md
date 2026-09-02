@@ -44,9 +44,11 @@ on the verdict as `oracleTouched`. Close that pull request, re-brief the delegat
 constraint, and spend a new round.
 
 **"the frame declares an oracle scope and the candidate's change could not be checked against it: …"** —
-the scorecard names no pull request (`origin.repo` / `origin.prNumber`), the listing was truncated, or the
-repository could not be asked (no GitHub App on it, a failed read). "Could not check" is not "clean". Run the
-candidate through the CI-fired path so its scorecard carries the pull request, or fix the App installation.
+neither Everdict's build record nor the scorecard's origin names a pull request, the listing was truncated, or
+the repository could not be asked (no GitHub App on it, a failed read). "Could not check" is not "clean". The
+build record is read FIRST: ask `build_campaign_candidate` for the build with the pull request's `repo` +
+`prNumber`, so the candidate Everdict built is the change the oracle reads. A batch you submitted yourself may
+carry them on `origin.repo`/`origin.prNumber` instead; otherwise fix the App installation.
 
 ## `POST /campaigns/:id/rounds` refuses (409 / 400)
 
@@ -69,6 +71,10 @@ in this workspace's ledger, or is a case run rather than a session.
 **"delegation session '…' was granted Ns and the frame budgets Ms per round" / "spent $X and the frame
 budgets $Y"** (409) — the session ran past the frame's delegation budget; the round is refused, not scored.
 Open the next session within the budget (`create_sandbox` with `ttlSec` at most the frame's).
+
+**"the build ledger could not be read, so whether Everdict built candidate … cannot be established"** (500) —
+Everdict's own build store did not answer. Nothing was logged: a round whose provenance cannot be read is not
+logged wearing the caller's coordinates. Retry once the ledger answers.
 
 **"the round cannot be stored as sent: …"** (400) — a caller field the row cannot hold: `hypothesis` 1 to
 2000 characters, `learned` up to 4000 (a new round needs at least 10 on either transport), `candidateVersion`
@@ -172,16 +178,17 @@ a different version.
 
 ## `POST /campaigns/:id/merge` refuses
 
-The code half of an adoption. Only when the adopted candidate's scorecard named a pull request does the close
-record a code debt; this door pays it through the workspace GitHub App.
+The code half of an adoption. Only when the adopted candidate named a pull request — on Everdict's build
+record, else on the scorecard's origin — does the close record a code debt; this door pays it through the
+workspace GitHub App.
 
 **404 "this campaign never authorized an adoption"** — settle first.
 
 **409 "the proof presented is not the one this campaign recorded"** — read it from
 `GET /campaigns/:id/adoption`.
 
-**409 "this adoption carries no code debt"** — the candidate scorecard named no pull request (a pin-only
-campaign, or a batch submitted outside the CI path). Nothing to merge.
+**409 "this adoption carries no code debt"** — neither the build record nor the candidate scorecard named a
+pull request (a pin-only campaign, or a build asked for from a bare branch). Nothing to merge.
 
 **409 "the adopted bytes are not registered yet"** — adopt first. Code is promoted only behind an adoption that
 landed.

@@ -2840,7 +2840,31 @@ const MUTATIONS = [
     name: "Evolve — the round prefers the caller's origin over Everdict's build account",
     file: "packages/application-control/src/evolution/campaign-service.ts",
     from: "  const candidateSource = builtSource ?? candidateSourceOf(snapshot.candidate);",
-    to: "  const candidateSource = candidateSourceOf(snapshot.candidate);",
+    // A `void` fingerprint, not the bare fallback: the bare line is one an HONEST earlier commit carried before
+    // the build account existed, and `pnpm mutation-leak` matches `to:` text against every commit ahead of the
+    // remote — a neutralization spelled like a plausible line accuses history it never touched.
+    to: "  const candidateSource = (void builtSource, candidateSourceOf(snapshot.candidate));",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // D2 meets D3. The oracle reads the pull request Everdict's build record names before the scorecard
+    // origin's — a driver-submitted batch carries none, so reading the origin alone makes every Everdict-built
+    // candidate "unverifiable" under an oracle scope. Neutralizing the preference reads the origin.
+    name: "Evolve — the oracle reads the caller's origin over Everdict's build account",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    const source = builtSource ?? candidateSourceOf(snapshot.candidate);",
+    to: "    const source = (void builtSource, candidateSourceOf(snapshot.candidate));",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    // L2 on the build ledger. A read that failed is not a ledger with no build in it; neutralizing the refusal
+    // turns an outage into "no build", and the round goes in wearing the caller's provenance.
+    name: "Evolve — an unreadable build ledger reads as no build",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "      .catch(unreadableBuildLedger(campaignId, candidateVersion));",
+    to: "      .catch(() => (void unreadableBuildLedger, []));",
     build: "@everdict/application-control",
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
