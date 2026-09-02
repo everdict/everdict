@@ -2077,6 +2077,23 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     expect(runStore.rows.size).toBe(1);
   });
 
+  it("provisions the delegate inside the profile's declared network — the box is the profile's, not the lane's default", async () => {
+    const fake = fakeDelegationProfile({
+      network: { mode: "allowlist", allowedHosts: ["github.com", "api.anthropic.com"] },
+    });
+    const { service, driver } = build({ resolveDelegationProfile: async () => fake.resolved });
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief });
+    expect(driver.provisioned[0]).toMatchObject({
+      image: "reg/claude-preinstalled:1",
+      network: { mode: "allowlist", allowedHosts: ["github.com", "api.anthropic.com"] },
+    });
+    // …and a profile that declared none leaves the provision without one — the runtime's default, by absence.
+    const bare = fakeDelegationProfile();
+    const plain = build({ resolveDelegationProfile: async () => bare.resolved });
+    await plain.service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief });
+    expect(plain.driver.provisioned[0]).not.toHaveProperty("network");
+  });
+
   it("seals the handoff on the session trajectory — the ledger alone answers what they were asked to do", async () => {
     const fake = fakeDelegationProfile();
     const { service, trajectories } = build({ resolveDelegationProfile: async () => fake.resolved });

@@ -7,6 +7,7 @@ import {
   TopologyTargetSchema,
 } from "../harness/harness-spec.js";
 import { ModelBindingSchema } from "../harness/model-spec.js";
+import { NetworkPolicySchema } from "../infra/world.js";
 import { SkillFilesSchema } from "./skill.js";
 
 // Capability Store contracts — one discriminated `Capability` entity (kind ∈ mcp|code|skill|environment) that a
@@ -255,6 +256,15 @@ export const DelegationProfileSpecSchema = z.object({
   // generalizes past any single CLI's convention.
   instructionsFile: z.string().min(1).default("CLAUDE.md"),
   ttlSec: z.number().int().positive().optional(), // the delegation's default session budget
+  // ── THE WORLD THE DELEGATE MAY REACH (docs/architecture/code-evolution-loop.md, placement) ────────
+  //
+  // A coding agent with a repository checkout and a model key is a process that can talk to anything unless
+  // the box it runs in says otherwise. The same `NetworkPolicy` an eval case declares, carried to the session's
+  // provision: `none` for a delegate that needs no network, `allowlist` with the repository host and the model
+  // endpoint for one that does, absent = the runtime's default. A lane that cannot ENFORCE the declared mode
+  // refuses to boot the session rather than booting it open (the docker driver already does, for `allowlist`)
+  // — a policy the box does not hold is not a policy.
+  network: NetworkPolicySchema.optional(),
 });
 export type DelegationProfileSpec = z.infer<typeof DelegationProfileSpecSchema>;
 

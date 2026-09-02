@@ -10,6 +10,7 @@ import {
   GIT_MACHINE_IDENTITY,
   type HarnessSpec,
   IMAGE_GRANT_USERNAME,
+  type NetworkPolicy,
   NotFoundError,
   RateLimitError,
   type RegistryAuth,
@@ -216,6 +217,9 @@ export interface ResolvedDelegationProfile {
   instructions: string; // the profile's STANDING brief (what is true of every delegation into it)
   instructionsFile: string; // the convention file this agent reads (CLAUDE.md · AGENTS.md · …)
   ttlSec?: number;
+  // The network the delegate may reach, carried to the provision (code-evolution-loop.md, placement). Absent
+  // = the runtime's default. A driver that cannot enforce the declared mode refuses the boot.
+  network?: NetworkPolicy;
 }
 
 // One submitted test case: its child run id + the live cursor buffer the web polls. Kept until the
@@ -583,6 +587,9 @@ export class SandboxSessionService {
         // zone from it; a host-local driver ignores it.
         tenant: input.tenant,
         ...(registryAuths !== undefined && registryAuths.length > 0 ? { registryAuths } : {}),
+        // The delegation profile's network policy, when it declared one — the box the delegate runs in, decided
+        // by the profile the workspace registered rather than by whatever the lane defaults to.
+        ...(resolved.delegation?.network !== undefined ? { network: resolved.delegation.network } : {}),
       });
     } catch (err) {
       this.deps.budget?.release(input.tenant); // the admit reservation must not leak on a failed provision

@@ -192,6 +192,8 @@ export function buildSandboxSessions(opts: {
             instructions: profile.instructions,
             instructionsFile: profile.instructionsFile,
             ...(profile.ttlSec !== undefined ? { ttlSec: profile.ttlSec } : {}),
+            // The box the delegate runs in, from the profile the workspace registered (code-evolution-loop.md).
+            ...(profile.network !== undefined ? { network: profile.network } : {}),
           };
         }
       : undefined;
