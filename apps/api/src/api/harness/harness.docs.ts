@@ -15,6 +15,7 @@ import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { teamMoveDocs } from "../team-move.js";
 import { HarnessDelegateResponseSchema } from "./response/harness-delegate.js";
+import { HarnessLineageResponseSchema } from "./response/harness-lineage.js";
 import { SetVersionTagsResultSchema } from "./response/set-version-tags-result.js";
 
 // OpenAPI descriptors for the harness (instance) routes — doc-only (rule api-layer): the no-op compilers in
@@ -113,6 +114,21 @@ const docs = {
     response: {
       200: { description: "Structural spec diff (base ↔ candidate)", ...toJsonSchema(HarnessSpecDiffResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  lineage: {
+    summary: "A harness's lineage in one read",
+    description:
+      "Per version: the resolved document's digest, the birth stamp, the predecessor (the origin's same-family `from` " +
+      "when stamped, else the previous version in order — the answer says which), a fork it was copied from, the intent it " +
+      "was born from, the seeds it ships with, what moved against its predecessor (diff + the slots those paths belong " +
+      "to), and the campaigns that adopted it. `adoptionsKnown` says whether campaigns were asked at all. Requires " +
+      "harnesses:read (viewer+); an unknown or private (non-owned) harness reads 404.",
+    tags: ["harness"],
+    params: idParams,
+    response: {
+      200: { description: "The lineage", ...toJsonSchema(HarnessLineageResponseSchema) },
+      ...errorResponses(401, 403, 404),
     },
   },
   delegate: {

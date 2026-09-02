@@ -104,6 +104,13 @@ match the filesystem revision is refused at materialization with the id and both
 
 ## §3 — Lineage is one read (G2.3)
 
+> **Landed 2026-09-02.** `harnessLineage` (`packages/application-control/src/harness/harness-lineage-service.ts`)
+> composes, per version, the resolved digest, the birth stamp, the predecessor (the origin's same-family `from`
+> when stamped, else the previous version in order — and says which), `forkedFrom`, the intent `bornFrom`, the
+> `seeds`, the diff against the predecessor with the slots those paths belong to, and the campaigns that adopted
+> it (`adoptionsKnown` says whether campaigns were asked). `GET /harnesses/:id/lineage` and `get_harness_lineage`;
+> no new store — a projection over reads that existed.
+
 **The gap.** "Where did this version come from, what changed, what did it ship with" takes three reads —
 the registry record's origin, `diff_harness_versions`, the knowledge graph's edges — and nothing composes
 them. An agent deciding what to change next pays three round trips and reconciles them itself.

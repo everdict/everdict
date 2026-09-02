@@ -796,6 +796,7 @@ describe("MCP tools", () => {
       "get_github_issue",
       "get_github_pull_request_changes",
       "get_harness_instance",
+      "get_harness_lineage",
       "get_harness_template",
       "get_judge",
       "get_mattermost_channel_posts",

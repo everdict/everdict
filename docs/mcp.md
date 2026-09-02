@@ -30,6 +30,7 @@ rule `api-layer`):
 | `register_harness_template` | `templates:write` (viewer+) | register a `HarnessTemplateSpec` (immutable → `CONFLICT`) |
 | `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` instances (grouped by template id) |
 | `get_harness_instance` | `harnesses:read` | one raw `HarnessInstanceSpec` (template ref + pins; `version` or `latest`) — config view / re-pin prefill |
+| `get_harness_lineage` | `harnesses:read` | the harness's lineage in one read — per version: digest, origin, predecessor, fork, intent, seeds, diff + slots moved, adopting campaigns |
 | `resolve_harness_delegate` | `harnesses:read` | WHO maintains a slot's code — the delegation profile the template's `source.maintainer` names, or a named miss (`unmapped` · `ambiguous` · `no_such_slot`) |
 | `register_harness` | `harnesses:register` (viewer+) | register a `HarnessInstanceSpec` (template ref + pins; resolve-validated, immutable → `CONFLICT`) |
 | `list_datasets` | `datasets:read` (viewer+) | workspace-owned + `_shared` benchmark datasets |

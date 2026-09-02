@@ -84,6 +84,9 @@ resolved specs [config changes by field path — e.g. `services[x].image`; `base
 [datasets.md](datasets.md)) and key issuance (admin self-serve `POST/GET/DELETE /keys` — issued keys carry
 workspace admin role, narrowable by per-key `scopes` (`read|write|admin`, omitted = Full Access), plaintext shown
 once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in [tenancy.md](tenancy.md).
+`GET /harnesses/:id/lineage` is the harness's lineage in one read — per version: digest, birth stamp,
+predecessor, fork, intent, seeds, the diff against the predecessor with the slots that moved, and the campaigns that
+adopted it (`docs/architecture/harness-identity-and-seeds-spec.md` §3).
 `GET /harnesses/:id/delegate?slot=&version=` answers WHO maintains a slot's code — the delegation profile the
 template's `source.maintainer` names for that slot, or a named miss (`unmapped` · `ambiguous` · `no_such_slot`) — so an
 evolution driver looks the specialist up instead of asking (`docs/architecture/evolution-routing-spec.md` §1).

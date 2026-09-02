@@ -1,5 +1,10 @@
 import { setVersionTags } from "@everdict/application-control";
-import { repinHarnessImages, resolveHarnessDelegate, verifyForkLineage } from "@everdict/application-control";
+import {
+  harnessLineage,
+  repinHarnessImages,
+  resolveHarnessDelegate,
+  verifyForkLineage,
+} from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
 import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
@@ -85,6 +90,39 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             instances.get(ws, id, candidate),
           ]);
           return ok(diffHarnessSpecs(baseSpec, candidateSpec));
+        }),
+    );
+
+    // LINEAGE IN ONE READ — the MCP twin of GET /harnesses/:id/lineage (harness-identity-and-seeds-spec.md §3).
+    server.registerTool(
+      "get_harness_lineage",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "A harness's lineage in one read — per version: the resolved document's digest, the birth stamp, the " +
+          "predecessor (origin-stamped, else by order — the answer says which), a fork it was copied from, the intent " +
+          "it was born from, the seeds it ships with, the diff against its predecessor with the slots that moved, and the " +
+          "campaigns that adopted it. Read this before proposing a change to know how the version got here.",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) =>
+        run(principal, "harnesses:read", async () => {
+          if ((await instances.versions(ws, id)).length === 0) return fail("NOT_FOUND: harness not found.");
+          if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
+          await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
+          const campaigns = deps.campaignService;
+          return ok(
+            await harnessLineage(
+              {
+                instances,
+                ...(campaigns !== undefined
+                  ? { campaigns: { forSubject: (tenant, subject) => campaigns.list(tenant, undefined, subject) } }
+                  : {}),
+              },
+              ws,
+              id,
+            ),
+          );
         }),
     );
 

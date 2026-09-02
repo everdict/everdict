@@ -1659,6 +1659,34 @@ describe("API — harness taxonomy (template category + instance)", () => {
     await app.close();
   });
 
+  // ── LINEAGE IN ONE READ (docs/architecture/harness-identity-and-seeds-spec.md §3) ──────────────────
+  it("GET /harnesses/:id/lineage → every version with its digest, predecessor, diff slots and fork; 404 for an unknown id", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: INSTANCE }); // pr-1
+    await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: h,
+      payload: { ...INSTANCE, version: "pr-2", pins: { agent: "ghcr.io/x/agent:def" } },
+    });
+    const lineage = await app.inject({ method: "GET", url: "/harnesses/bu/lineage", headers: h });
+    expect(lineage.statusCode, lineage.body).toBe(200);
+    const body = lineage.json();
+    expect(body.id).toBe("bu");
+    expect(body.versions.map((v: { version: string }) => v.version)).toEqual(["pr-1", "pr-2"]);
+    const [first, second] = body.versions;
+    expect(first.specDigest).toMatch(/^sha256:/);
+    expect(first.predecessor).toBeUndefined();
+    expect(second.predecessor).toEqual({ version: "pr-1", via: "order" });
+    expect(second.diff.slots).toEqual(["agent"]);
+    expect(second.diff.summary).toEqual({ added: 0, removed: 0, changed: 1 });
+    expect(typeof body.adoptionsKnown).toBe("boolean");
+    expect((await app.inject({ method: "GET", url: "/harnesses/nope/lineage", headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
   it("GET /harnesses/:id/diff → resolved-spec config diff between two versions; identical = empty; missing param 400", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };

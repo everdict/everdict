@@ -2,6 +2,7 @@ import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-con
 import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import {
   RepinBodySchema,
+  harnessLineage,
   repinHarnessImages,
   resolveHarnessDelegate,
   verifyForkLineage,
@@ -241,6 +242,38 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       }
     },
   );
+
+  // LINEAGE IN ONE READ (harness-identity-and-seeds-spec.md §3) — origins, forks, seeds, the diff against the
+  // predecessor and the campaigns that adopted each version. Static "lineage" segment resolves ahead of :version.
+  app.get<{ Params: { id: string } }>("/harnesses/:id/lineage", { schema: harnessDocs.lineage }, async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      if ((await deps.harnessInstances.versions(principal.workspace, req.params.id)).length === 0)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
+      if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
+      await assertEntityVisible(deps, principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
+      const campaigns = deps.campaignService;
+      return reply.send(
+        await harnessLineage(
+          {
+            instances: deps.harnessInstances,
+            ...(campaigns !== undefined
+              ? { campaigns: { forSubject: (tenant, subject) => campaigns.list(tenant, undefined, subject) } }
+              : {}),
+          },
+          principal.workspace,
+          req.params.id,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   // WHO maintains a slot's code — the delegation profile the template's `source.maintainer` names, resolved by the
   // one predicate the build lane and the `code_evolve` skill read (docs/architecture/evolution-routing-spec.md §1).
