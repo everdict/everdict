@@ -93,7 +93,7 @@ trace reads, per-call cost on the trace.
 
 | id | gap | closed by |
 |---|---|---|
-| G3.1 | **On-ramps are incomplete.** Terminal-Bench slices 2–5 are unbuilt (`docs/architecture/standard-task-formats.md`); there is no adapter for WebArena, tau-bench, BrowseComp or SWE-bench beyond `swe-bench-lite`; first-party seeding of `_shared` was removed, so a fresh deployment starts with zero benchmarks. | `benchmark-evidence-spec.md` §1 |
+| G3.1 | **On-ramps are incomplete.** Terminal-Bench slices 2–5 are unbuilt (`docs/architecture/standard-task-formats.md`); there is no adapter for WebArena, tau-bench, BrowseComp or SWE-bench beyond `swe-bench-lite`; first-party seeding of `_shared` was removed, so a fresh deployment starts with zero benchmarks. | `benchmark-evidence-spec.md` §1 — **first slice landed 2026-09-02** (Terminal-Bench on-ramp, SWE-bench Verified, boot readiness; three adapters open) |
 | G3.2 | **No agent-behaviour diagnosis.** `classifyFailure` is `infra | config | harness | agent` at the platform's granularity; an agent FAIL carries no `failure` at all, so "why did it fail" is judge prose plus a trace. | `benchmark-evidence-spec.md` §2 — **landed 2026-09-02** (judge-family score details) |
 | G3.3 | **No platform-derived evidence record for the next step.** A round carries a verdict (counts) and `learned` (the driver's prose, explicitly advice). Nothing platform-authored says which held-out cases failed on the candidate, with what diagnosis, pointing at which trace pages. The next round's brief is built by the driver from raw reads. | `benchmark-evidence-spec.md` §3 — **landed 2026-09-02** |
 | G3.4 | **Comparability stops at the label.** `official | proxy` says whether a number is citable; nothing exports a run in the benchmark's own report format with the evaluator identity attached. | `benchmark-evidence-spec.md` §4 — **landed 2026-09-02** (generic citable report; leaderboard file formats open) |
@@ -141,10 +141,16 @@ subject filter), §2 (attribution); evidence §3 (the sealed round-evidence reco
 identity §2 (seeds on the version, materialized or refused), §4 (the seed-leak refusal) and §1 (forks recorded and
 verified); definability §4 (case tokens, the process box, one resources predicate) and §3 (codex and
 claude-code-router recipes); definability §1 (a target is a browser, an api or a desktop) and §2 (the
-environment as a registered entity, sealed per batch, with its own identity axis).
+environment as a registered entity, sealed per batch, with its own identity axis, and a campaign that evolves
+one); and evidence §1's first slice (the Terminal-Bench on-ramp end to end, SWE-bench Verified, and a boot
+line that says what a fresh deployment holds).
 
-Open, in the order they should land: evidence §1 (the benchmark on-ramps,
-each an evaluator to port honestly). A Hermes recipe waits on its CLI's resume form.
+Open: the remaining evidence §1 adapters — BrowseComp, WebArena and tau-bench. Each is an EVALUATOR to port,
+not a dataset to map, so each lands with its own honest `scoring` (`official` only where the port reproduces
+the official decision, else `proxy` with what it approximates); tau-bench also needs a simulated user, which
+is a judge-side conversational agent over the `conversation` contract. The Terminal-Bench image
+prebuild/push helper and the web add-benchmark wizard (`standard-task-formats.md` slices 4-5) are open too.
+A Hermes recipe waits on its CLI's resume form.
 
 ## What would reopen this page
 
