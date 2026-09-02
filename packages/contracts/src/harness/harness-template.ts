@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BadRequestError } from "../errors.js";
+import { BuildRecipeSchema, type SourceRecipe, SourceRecipeSchema } from "../execution/build-recipe.js";
 import { VersionSchema } from "../version.js";
 import {
   CommandHarnessSpecSchema,
@@ -47,37 +48,24 @@ export const HarnessCategorySchema = z.string().min(1);
 // repository at the commit, runs `steps` in `workDir`, and publishes `capture` (default: the workDir) as a layer
 // on that base through the registry protocol — no daemon, no Dockerfile builder. What the base contains is the
 // author's (their Dockerfile); what the commit adds is Everdict's to capture and to name.
-// WHO maintains this code (docs/architecture/evolution-routing-spec.md §1): the delegation profile — the coding
-// agent built for THIS repository, its instructions file, its tool conventions, its model. It lives on the slot's
-// source because the slot is the SSOT of "this code, built this way"; a workspace-level repository → profile map
-// would be a second owner of a fact the template already half-owns, and drift the moment a slot's repository moves.
-export const HarnessMaintainerSchema = z.object({
-  profile: z.string().min(1), // a delegation profile id (CapabilityRecord of type `delegation`)
-  version: z.string().min(1).optional(), // pin a profile version; absent = the workspace's current one
-});
-export type HarnessMaintainer = z.infer<typeof HarnessMaintainerSchema>;
-
-export const HarnessSourceSchema = z.object({
-  git: z.string().min(1), // the clone URL (a private repository needs the workspace GitHub App on its owner)
-  repo: z.string().min(1).optional(), // "owner/name", when the URL is a GitHub repository — the pull-request coordinate
-  maintainer: HarnessMaintainerSchema.optional(),
-});
-export type HarnessSource = z.infer<typeof HarnessSourceSchema>;
-
-export const HarnessBuildSchema = z.object({
-  steps: z.array(z.string().min(1)).min(1), // run in order, in workDir, inside the base image
-  // Absolute, because the capture is a tar of paths from `/` and the clone lands here. Default: a directory the
-  // base image is unlikely to own, so the layer carries the build and nothing the base already had.
-  workDir: z.string().min(1).regex(/^\//, "build.workDir must be an absolute path").default("/everdict/build"),
-  capture: z.array(z.string().min(1).regex(/^\//, "capture paths must be absolute")).optional(), // default [workDir]
-  timeoutSec: z.number().int().positive().max(7200).optional(), // the whole build's bound (default 1800)
-});
-export type HarnessBuild = z.infer<typeof HarnessBuildSchema>;
+// The build recipe's OWNER moved to `execution/build-recipe.ts` when an environment gained its own image —
+// one shape, two subjects (world-and-engagement-model.md). Re-exported here under the names this package has
+// always used, so nothing that reads a harness template moved.
+export {
+  MaintainerSchema as HarnessMaintainerSchema,
+  SourceRecipeSchema as HarnessSourceSchema,
+  BuildRecipeSchema as HarnessBuildSchema,
+} from "../execution/build-recipe.js";
+export type {
+  Maintainer as HarnessMaintainer,
+  SourceRecipe as HarnessSource,
+  BuildRecipe as HarnessBuild,
+} from "../execution/build-recipe.js";
 
 export const TemplateServiceSchema = TopologyServiceSchema.extend({
   slot: z.string().optional(),
-  source: HarnessSourceSchema.optional(),
-  build: HarnessBuildSchema.optional(),
+  source: SourceRecipeSchema.optional(),
+  build: BuildRecipeSchema.optional(),
 });
 export type TemplateService = z.infer<typeof TemplateServiceSchema>;
 
@@ -130,8 +118,8 @@ export const CommandTemplateSpecSchema = z.object({
   image: z.string().optional(), // default when pins.image is absent
   // The scaffold's own repository and build recipe — the `image` slot is what a code-evolution campaign rebuilds
   // (see HarnessSourceSchema / HarnessBuildSchema above).
-  source: HarnessSourceSchema.optional(),
-  build: HarnessBuildSchema.optional(),
+  source: SourceRecipeSchema.optional(),
+  build: BuildRecipeSchema.optional(),
   resources: ServiceResourcesSchema.optional(), // job-level resource request (cpu/memoryMb) — carried into the resolved spec
   workDir: z.string().optional(),
   setup: z.array(z.string()).default([]),
@@ -444,7 +432,7 @@ export const DelegateResolutionSchema = z.discriminatedUnion("kind", [
 ]);
 export type DelegateResolution = z.infer<typeof DelegateResolutionSchema>;
 export function resolveDelegate(template: HarnessTemplateSpec, slot?: string): DelegateResolution {
-  const carriers: Array<{ slot: string; source: HarnessSource | undefined }> =
+  const carriers: Array<{ slot: string; source: SourceRecipe | undefined }> =
     template.kind === "service"
       ? template.services.map((svc) => ({ slot: svc.slot ?? svc.name, source: svc.source }))
       : [{ slot: "image", source: template.kind === "command" ? template.source : undefined }];

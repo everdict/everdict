@@ -1958,6 +1958,7 @@ async function main(): Promise<void> {
           campaigns: campaignService,
           instances: harnessInstanceRegistry,
           templates: harnessTemplateRegistry,
+          environments: environmentRegistry,
           sessions: sandboxSessions,
           images: workspaceImages,
         })

@@ -3,6 +3,7 @@ import type {
   CampaignBuildSetRecord,
   CampaignBuildState,
   DomainFact,
+  EnvironmentSpec,
   HarnessInstanceSpec,
   HarnessTemplateSpec,
 } from "@everdict/contracts";
@@ -84,6 +85,22 @@ export interface CampaignBuildDeps {
   // build and a headless CI re-pin produce the same shape. One pin for a plain build, every slot of a build set
   // (evolution-routing-spec.md §4). `version` names the version to mint when the caller derived it (a set's
   // `versionName`), so a retry meets the registry's immutability as "already minted", never as a second name.
+  // ── THE ENVIRONMENT LANE (world-and-engagement-model.md, landing order 3) ────────────────────────
+  //
+  // An environment carries its own image and its own recipe, so a campaign can evolve the WORLD by building
+  // it — the same session, the same publish, a different subject. REQUIRED rather than optional for the
+  // reason `templates` is required in the adoption wiring: an optional one would make a deployment that
+  // forgot it indistinguishable from one that has no environments, and the refusal would arrive as a silent
+  // skip instead of a 404.
+  environment: {
+    get(tenant: string, id: string, version: string): Promise<EnvironmentSpec>;
+    // Mint a NEW version of the environment carrying the built image. Registry versions are immutable, so a
+    // re-driven build of the SAME commit re-registers identical bytes (an idempotent no-op) and a
+    // non-reproducible build collides by name — which is the immutability guarantee working, not a bug.
+    mint(input: { tenant: string; by: string; id: string; version: string; image: string; note: string }): Promise<{
+      version: string;
+    }>;
+  };
   repin(input: {
     tenant: string;
     by: string;
@@ -369,11 +386,12 @@ export class CampaignBuildService {
   // building record; `run` settles it.
   async start(tenant: string, input: StartBuildInput, by: string): Promise<CampaignBuildRecord> {
     const campaign = await this.deps.campaigns.get(tenant, input.campaignId);
+    if (campaign.subjectType === "environment") return this.startEnvironment(tenant, input, by, campaign);
     if (campaign.subjectType !== "harness")
       throw new BadRequestError(
         "BAD_REQUEST",
         { campaign: input.campaignId, subject: campaign.subjectType },
-        "only a harness campaign builds candidate images — an agent campaign evolves a configuration, not code",
+        "only a harness or environment campaign builds candidate images — an agent campaign evolves a configuration, not code",
       );
     const template = await this.deps.harness
       .template(tenant, campaign.subjectId, campaign.baselineVersion)
@@ -427,6 +445,76 @@ export class CampaignBuildService {
     return record;
   }
 
+  // The environment lane's open: the WORLD's own recipe and its own bytes, under the campaign's frozen
+  // baseline version. There is no slot — an environment is one world, not a topology of them — so the record
+  // carries the fixed slot `world`, which is what every reader of a build record then sees.
+  private async startEnvironment(
+    tenant: string,
+    input: StartBuildInput,
+    by: string,
+    campaign: { id: string; subjectId: string; baselineVersion: string },
+  ): Promise<CampaignBuildRecord> {
+    const { recipe, baseImage } = await this.environmentRecipe(tenant, campaign);
+    const id = this.newId();
+    const record: CampaignBuildRecord = {
+      id,
+      tenant,
+      campaignId: input.campaignId,
+      slot: ENVIRONMENT_SLOT,
+      source: {
+        git: recipe.source.git,
+        ...(recipe.source.repo !== undefined
+          ? { repo: recipe.source.repo }
+          : input.repo !== undefined
+            ? { repo: input.repo }
+            : {}),
+        ref: input.ref,
+        ...(input.prNumber !== undefined ? { prNumber: input.prNumber } : {}),
+      },
+      base: { version: campaign.baselineVersion, image: baseImage },
+      state: "building",
+      createdBy: by,
+      createdAt: this.now(),
+      updatedAt: this.now(),
+    };
+    await this.deps.builds.create(record);
+    return record;
+  }
+
+  // The world's recipe and the bytes it extends, refused by name when either is missing. A world with no
+  // image has nowhere for a build to land, and the schema refuses that pair at registration — this is the
+  // same refusal read at the moment a build would start, for an environment registered before the rule.
+  private async environmentRecipe(
+    tenant: string,
+    campaign: { subjectId: string; baselineVersion: string },
+  ): Promise<{ recipe: BuildRecipe; baseImage: string }> {
+    const spec = await this.deps.environment.get(tenant, campaign.subjectId, campaign.baselineVersion).catch(() => {
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { environment: campaign.subjectId },
+        "the campaign's environment baseline could not be resolved",
+      );
+    });
+    if (spec.source === undefined || spec.build === undefined || spec.image === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { environment: `${spec.id}@${spec.version}` },
+        "this environment declares no buildable world (`source` + `build` + `image`) — add the recipe, or evolve it by registering a new version instead of building",
+      );
+    return {
+      recipe: {
+        source: { git: spec.source.git, ...(spec.source.repo !== undefined ? { repo: spec.source.repo } : {}) },
+        build: {
+          steps: spec.build.steps,
+          workDir: spec.build.workDir,
+          ...(spec.build.capture !== undefined ? { capture: spec.build.capture } : {}),
+          ...(spec.build.timeoutSec !== undefined ? { timeoutSec: spec.build.timeoutSec } : {}),
+        },
+      },
+      baseImage: spec.image,
+    };
+  }
+
   // Drive the build session to completion and settle the record. Called by the transport in the background
   // after `start`. Every failure settles the record `failed` and writes its fact — a build that threw and
   // recorded nothing would be a `building` row nobody converges.
@@ -436,8 +524,14 @@ export class CampaignBuildService {
     const by = record.createdBy;
     const actor = { tenant, subject: by, isAdmin: false };
     const campaign = await this.deps.campaigns.get(tenant, record.campaignId);
-    const template = await this.deps.harness.template(tenant, campaign.subjectId, campaign.baselineVersion);
-    const { recipe } = resolveBuildSlot(template, record.slot);
+    // Which subject's recipe drives this build — the world's own, or the harness slot's.
+    const isEnvironment = campaign.subjectType === "environment";
+    const recipe = isEnvironment
+      ? (await this.environmentRecipe(tenant, campaign)).recipe
+      : resolveBuildSlot(
+          await this.deps.harness.template(tenant, campaign.subjectId, campaign.baselineVersion),
+          record.slot,
+        ).recipe;
     const startedAt = this.now();
     let sessionRunId: string | undefined;
     let observedSha: string | undefined;
@@ -483,16 +577,29 @@ export class CampaignBuildService {
       const ref = `${endpoint.endpoint}/${endpoint.namespaceFor(tenant)}/${repository}:${tag}@${digest}`;
       // Mint the candidate instance version pinning the built image into the slot — the one re-pin door. A set
       // MEMBER builds and stops: the set mints once, after every member (evolution-routing-spec.md §4).
+      // The mint: a harness re-pins the slot into a new instance version; an environment registers a new
+      // version of the WORLD carrying the built image. The version name is derived from the commit, so a
+      // re-driven build of the same source re-mints the same name — and a non-reproducible build collides
+      // there rather than silently minting a second world under a name somebody already compared against.
       const minted =
-        record.setId === undefined
-          ? await this.deps.repin({
-              tenant,
-              by,
-              id: campaign.subjectId,
-              pins: { [record.slot]: ref },
-              note: `built by campaign ${record.campaignId} from ${observedSha} (build ${id})`,
-            })
-          : undefined;
+        record.setId !== undefined
+          ? undefined
+          : isEnvironment
+            ? await this.deps.environment.mint({
+                tenant,
+                by,
+                id: campaign.subjectId,
+                version: `${campaign.baselineVersion}-build-${(observedSha ?? "").slice(0, 12)}`,
+                image: ref,
+                note: `built by campaign ${record.campaignId} from ${observedSha} (build ${id})`,
+              })
+            : await this.deps.repin({
+                tenant,
+                by,
+                id: campaign.subjectId,
+                pins: { [record.slot]: ref },
+                note: `built by campaign ${record.campaignId} from ${observedSha} (build ${id})`,
+              });
       await this.deps.sessions.close(actor, session.id, { snapshot: false }).catch(() => undefined);
       const receipt = {
         steps: recipe.build.steps,
@@ -598,6 +705,11 @@ const BUILD_REPO_DIR = "/everdict/repo";
 
 // The buildable slot and its recipe. A template with exactly one buildable slot needs no name; more than one
 // is named, and a name that is not buildable is refused (a recipe nobody wrote is not a slot).
+// An environment is ONE world, not a topology of them, so its build record carries this fixed slot where a
+// harness record carries a service name. Named rather than inlined because three readers see it: the record,
+// the image repository, and the mint note.
+export const ENVIRONMENT_SLOT = "world";
+
 interface BuildRecipe {
   source: { git: string; repo?: string };
   build: { steps: string[]; workDir: string; capture?: string[]; timeoutSec?: number };

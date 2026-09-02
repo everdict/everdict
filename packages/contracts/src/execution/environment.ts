@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { BuildRecipeSchema, SourceRecipeSchema } from "./build-recipe.js";
 import type { ComputeHandle } from "./compute.js";
 
 // v1 is repo only. browser/os-use add variants to the union (no core rewrite).
@@ -114,44 +115,61 @@ export type EnvSpec = z.infer<typeof EnvSpecSchema>;
 // The registered environment document: `(tenant, id, version) → EnvironmentSpec`, immutable per version, the
 // same shape every other registry keeps (harness · dataset · judge · runtime). Its `env` is a CONCRETE spec —
 // a ref to a ref is a chain no reader resolves, so the type refuses to hold one.
-export const EnvironmentSpecSchema = z.object({
-  id: z.string().min(1).max(200),
-  version: z.string().min(1).max(100),
-  description: z.string().max(2000).optional(),
-  env: ConcreteEnvSpecSchema,
-  // ── THE WORLD'S BYTES (docs/architecture/world-and-engagement-model.md, axis 1: in-compute) ────────
-  //
-  // A repo at a commit, a desktop with its apps, a fixture tree — an IN-COMPUTE world is delivered as the
-  // container the actor runs in, so its bytes belong to the world rather than to the case that asks a
-  // question about it. Until this field existed, a versioned environment could not carry them: `EvalCase.image`
-  // owned them, so evolving the world meant editing every case, and an environment build recipe had nowhere
-  // to put its output.
-  //
-  // PRECEDENCE, stated once because a field that means two things is how the next reader gets it wrong: a
-  // case that references an environment takes the world's image FROM the environment, and a case that also
-  // names its own image for that world is REFUSED (`caseEnvironmentImageDefect`) rather than silently
-  // preferring one. A case with no environment reference is untouched — `EvalCase.image` still means what it
-  // has always meant there.
-  image: z.string().min(1).optional(),
-  // ── A PROVIDED WORLD'S COORDINATES (world-and-engagement-model.md, axis 1: provided) ──────────────
-  //
-  // Some worlds are not the actor's container: a deployed app, a browser, a desktop session. The actor
-  // reaches them by COORDINATES, and somebody has to produce those before it runs. `static` is the variant
-  // for a world that already exists — the workspace hosts it (a self-hosted WebArena, a staging API) — so
-  // there is nothing to bring up and nothing to tear down, and the environment's job is to say WHERE it is
-  // under a version somebody can pin.
-  //
-  // The wiring keys are the vocabulary the topology front door already speaks (`target_base_url`,
-  // `target_cdp_url`, …), so a world provided statically and one provided by a session API hand the actor the
-  // same names. A DYNAMIC variant — bring-up, teardown, verified zero — is the next slice and is deliberately
-  // not declared here: an arm nothing provides is a plan (rule `protocol`).
-  provides: z
-    .object({
-      kind: z.literal("static"),
-      wiring: z.record(z.string().min(1), z.string().min(1)),
-    })
-    .optional(),
-});
+export const EnvironmentSpecSchema = z
+  .object({
+    id: z.string().min(1).max(200),
+    version: z.string().min(1).max(100),
+    description: z.string().max(2000).optional(),
+    env: ConcreteEnvSpecSchema,
+    // ── THE WORLD'S BYTES (docs/architecture/world-and-engagement-model.md, axis 1: in-compute) ────────
+    //
+    // A repo at a commit, a desktop with its apps, a fixture tree — an IN-COMPUTE world is delivered as the
+    // container the actor runs in, so its bytes belong to the world rather than to the case that asks a
+    // question about it. Until this field existed, a versioned environment could not carry them: `EvalCase.image`
+    // owned them, so evolving the world meant editing every case, and an environment build recipe had nowhere
+    // to put its output.
+    //
+    // PRECEDENCE, stated once because a field that means two things is how the next reader gets it wrong: a
+    // case that references an environment takes the world's image FROM the environment, and a case that also
+    // names its own image for that world is REFUSED (`caseEnvironmentImageDefect`) rather than silently
+    // preferring one. A case with no environment reference is untouched — `EvalCase.image` still means what it
+    // has always meant there.
+    image: z.string().min(1).optional(),
+    // ── A PROVIDED WORLD'S COORDINATES (world-and-engagement-model.md, axis 1: provided) ──────────────
+    //
+    // Some worlds are not the actor's container: a deployed app, a browser, a desktop session. The actor
+    // reaches them by COORDINATES, and somebody has to produce those before it runs. `static` is the variant
+    // for a world that already exists — the workspace hosts it (a self-hosted WebArena, a staging API) — so
+    // there is nothing to bring up and nothing to tear down, and the environment's job is to say WHERE it is
+    // under a version somebody can pin.
+    //
+    // The wiring keys are the vocabulary the topology front door already speaks (`target_base_url`,
+    // `target_cdp_url`, …), so a world provided statically and one provided by a session API hand the actor the
+    // same names. A DYNAMIC variant — bring-up, teardown, verified zero — is the next slice and is deliberately
+    // not declared here: an arm nothing provides is a plan (rule `protocol`).
+    provides: z
+      .object({
+        kind: z.literal("static"),
+        wiring: z.record(z.string().min(1), z.string().min(1)),
+      })
+      .optional(),
+    // ── HOW THE WORLD'S BYTES ARE PRODUCED (world-and-engagement-model.md, landing order 3) ────────────
+    //
+    // The same recipe a harness slot's image is built from — one shape, two subjects, one owner
+    // (`execution/build-recipe.ts`). It is what makes an environment EVOLVABLE by building rather than only by
+    // pinning: a campaign proposes a change to the world's source, the build lane produces an image, and the
+    // minted version is a new world with its own identity. Absent = this world is authored and registered,
+    // which is what a harness with no recipe already does.
+    //
+    // Declaring a recipe with no `image` is refused (`environmentBuildDefects`): a build whose output has
+    // nowhere to land is the state this field exists to end.
+    source: SourceRecipeSchema.optional(),
+    build: BuildRecipeSchema.optional(),
+  })
+  .superRefine((spec, ctx) => {
+    for (const message of environmentBuildDefects(spec))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["build"], message });
+  });
 export type EnvironmentSpec = z.infer<typeof EnvironmentSpecSchema>;
 
 // The stage for behavior. seed = a known initial state, snapshot = capture the result world.
@@ -181,4 +199,22 @@ export function caseEnvironmentImageDefect(
   if (evalCase.image === undefined || environment.image === undefined) return undefined;
   if (evalCase.image === environment.image) return undefined; // the same bytes, said twice — not a conflict
   return `case '${evalCase.id}' names image '${evalCase.image}' and references environment '${environment.id}@${environment.version}', whose world is '${environment.image}' — the world's bytes belong to the environment, so remove the case's image or stop referencing the environment`;
+}
+
+// A recipe that cannot produce a world, refused where the environment enters rather than where a build fails.
+// Both halves are needed: a `build` with no `source` has nothing to clone, and a recipe with no `image` on the
+// spec has nowhere to put what it produced — which was the exact blocker this field was added to remove.
+export function environmentBuildDefects(spec: {
+  image?: string;
+  source?: unknown;
+  build?: unknown;
+}): string[] {
+  const defects: string[] = [];
+  if (spec.build !== undefined && spec.source === undefined)
+    defects.push("build declared with no source — there is nothing to clone and build");
+  if (spec.build !== undefined && spec.image === undefined)
+    defects.push(
+      "build declared with no image — a built world needs somewhere to land, and the image is what a case runs",
+    );
+  return defects;
 }

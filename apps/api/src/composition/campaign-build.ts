@@ -2,6 +2,7 @@ import {
   type CampaignBuildDeps,
   CampaignBuildService,
   type CampaignBuildStore,
+  type EnvironmentRegistry,
   type HarnessInstanceRegistry,
   type HarnessTemplateRegistry,
   type SandboxSessionService,
@@ -22,6 +23,9 @@ export interface CampaignBuildWiring {
   campaigns: CampaignService;
   instances: HarnessInstanceRegistry;
   templates: HarnessTemplateRegistry;
+  // The world's own registry (world-and-engagement-model.md): an environment campaign builds the WORLD and
+  // mints a new version of it, the same way a harness campaign builds a slot and re-pins.
+  environments: EnvironmentRegistry;
   sessions: SandboxSessionService;
   // The managed image store, for the endpoint the built ref is named against and the digest read-back.
   images: Pick<WorkspaceImages, "endpoint" | "namespaceFor">;
@@ -94,6 +98,17 @@ export function buildCampaignBuild(deps: CampaignBuildWiring): CampaignBuildServ
         { via: "ci", note },
       );
       return { version: result.version };
+    },
+    // The environment lane's mint: a NEW version of the world carrying the built image. Registry versions are
+    // immutable, so a re-driven build of the same commit re-registers identical bytes (idempotent) and a
+    // non-reproducible one collides by name — the guarantee working, not a failure to paper over.
+    environment: {
+      get: (tenant, id, version) => deps.environments.get(tenant, id, version),
+      mint: async ({ tenant, by, id, version, image, note }) => {
+        const base = await deps.environments.get(tenant, id, version.split("-build-")[0] ?? version);
+        await deps.environments.registerPreservingOwner(tenant, { ...base, version, image }, by, { via: "ci", note });
+        return { version };
+      },
     },
     sessions: sessionDep,
   });

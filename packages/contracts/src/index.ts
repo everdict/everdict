@@ -46,6 +46,7 @@ export * from "./execution/compute.js";
 export * from "./execution/file-execution.js";
 export * from "./execution/case-failure.js";
 export * from "./execution/case-key.js";
+export * from "./execution/build-recipe.js";
 export * from "./execution/environment.js";
 export * from "./harness/harness.js";
 export * from "./harness/auth-env.js";

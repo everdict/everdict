@@ -119,9 +119,9 @@ So the arm lands with a provisioning port, a lifecycle owner and a teardown that
 harness's own topology, which is exactly the conflation §2 wants to end, and saying so is more useful than a
 schema arm nothing provides.
 
-**A `source` + `build` recipe on an environment.** *(Half of this cleared on 2026-09-03: an environment now
-carries an image — `docs/architecture/world-and-engagement-model.md` axis 1 — so a build HAS somewhere to put
-its output. What remains is the builder itself.)* The blocker was: **an environment carried no image**, so a
+**A `source` + `build` recipe on an environment.** ✅ *Landed 2026-09-03: an environment carries an image and
+a recipe, and `CampaignBuildService` builds it — see `docs/architecture/world-and-engagement-model.md`. The
+original blocker, recorded here because it is the reason the field could not simply be added:* The blocker was: **an environment carried no image**, so a
 build had nowhere to put its output. A harness slot's build produces the bytes that
 slot's image pin names; an environment's `repo`/`os-use` world runs inside `EvalCase.image`, which the CASE
 owns. Adding `image` to an environment is defensible — the world's bytes belong to the world — but it raises a

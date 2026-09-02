@@ -3,7 +3,12 @@ import { ConflictError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import type { CampaignBuildStore } from "../ports/evolution-campaign-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
-import { type BuildSession, type CampaignBuildDeps, CampaignBuildService } from "./campaign-build-service.js";
+import {
+  type BuildSession,
+  type CampaignBuildDeps,
+  CampaignBuildService,
+  ENVIRONMENT_SLOT,
+} from "./campaign-build-service.js";
 
 // A minimal build store that makes the SAME conditional decisions the real one does (rule `testing`): the
 // settle answers `not_building`/`absent` rather than always succeeding, and it lives in THIS package (db, where
@@ -213,6 +218,16 @@ function service(store: FakeBuildStore, sessions: BuildSession, over: Partial<Ca
         }) as never,
       resolvedImageOf: async () => "reg/scaffold:1.0.0",
     },
+    // The environment lane is a required dependency; this suite drives the HARNESS lane, so both members
+    // refuse — a fixture that omitted them would not compile, which is why they are required.
+    environment: {
+      get: async () => {
+        throw new Error("the harness lane never reads an environment");
+      },
+      mint: async () => {
+        throw new Error("the harness lane never mints an environment");
+      },
+    },
     repin: async ({ pins }) => {
       minted += 1;
       expect(pins.image).toBe("reg.local/ws-acme/scaffold-image:sha-abc123def456@sha256:beefface");
@@ -280,7 +295,7 @@ describe("[D2 COUNTEREXAMPLE] Everdict builds the candidate into its own store, 
       },
     });
     await expect(svc.start("acme", { campaignId: "evc_1", ref: "x" }, "alice")).rejects.toThrow(
-      /only a harness campaign/,
+      /only a harness or environment campaign/,
     );
   });
 
@@ -351,6 +366,16 @@ describe("[COUNTEREXAMPLE] a build set — several slots, one pull request, one 
           ({ template: { id: "shop-t", version: "1.0.0" }, id: "shop", version: "1.0.0", pins: {} }) as never,
         template: async () => TOPOLOGY as never,
         resolvedImageOf: async (_t, _id, _v, slot) => `reg/${slot}:1.0.0`,
+      },
+      // The environment lane is a required dependency; this suite drives the HARNESS lane, so both members
+      // refuse — a fixture that omitted them would not compile, which is why they are required.
+      environment: {
+        get: async () => {
+          throw new Error("the harness lane never reads an environment");
+        },
+        mint: async () => {
+          throw new Error("the harness lane never mints an environment");
+        },
       },
       repin: async ({ pins, version }) => {
         repins.push({ pins, ...(version !== undefined ? { version } : {}) });
@@ -431,6 +456,16 @@ describe("[COUNTEREXAMPLE] a build set — several slots, one pull request, one 
   it("a registry that already holds the set's version with the same pins is a retry meeting itself: minted, not a second version", async () => {
     const store = new FakeBuildStore();
     const { svc } = setService(store, fakeSession(), {
+      // The environment lane is a required dependency; this suite drives the HARNESS lane, so both members
+      // refuse — a fixture that omitted them would not compile, which is why they are required.
+      environment: {
+        get: async () => {
+          throw new Error("the harness lane never reads an environment");
+        },
+        mint: async () => {
+          throw new Error("the harness lane never mints an environment");
+        },
+      },
       repin: async () => {
         throw new ConflictError("CONFLICT", {}, "version exists");
       },
@@ -468,5 +503,76 @@ describe("[COUNTEREXAMPLE] a build set — several slots, one pull request, one 
       svc.startSet("acme", { campaignId: "evc_1", ref: "pr-7", slots: ["web", "db"] }, "alice"),
     ).rejects.toMatchObject({ status: 400 });
     expect(store.sets.size).toBe(0);
+  });
+});
+
+// ── [COUNTEREXAMPLE] A CAMPAIGN BUILDS THE WORLD (world-and-engagement-model.md, landing order 3) ─────
+//
+// An environment carries its own image and its own recipe, so evolving the world is a build like any other:
+// the same session, the same captured layer, a different subject and a different mint. What this pins is the
+// pair that makes it honest — the built image lands on a NEW version of the world (never on the baseline,
+// which somebody has already compared against), and an environment with no place to put the output is
+// refused before a session is created rather than after one has run.
+describe("[COUNTEREXAMPLE] an environment campaign builds the world and mints a new version of it", () => {
+  const WORLD = {
+    id: "shop",
+    version: "1.0.0",
+    env: { kind: "repo" as const, source: { path: "/app" } },
+    image: "reg/shop:1.0.0",
+    source: RECIPE.source,
+    build: RECIPE.build,
+  };
+  function environmentService(store: FakeBuildStore, sessions: BuildSession, world: Record<string, unknown> = WORLD) {
+    const mints: Array<{ id: string; version: string; image: string }> = [];
+    const svc = service(store, sessions, {
+      campaigns: {
+        get: async (_t, id) => ({
+          id,
+          teamId: "team-a",
+          subjectType: "environment",
+          subjectId: "shop",
+          baselineVersion: "1.0.0",
+        }),
+      },
+      environment: {
+        get: async () => world as never,
+        mint: async ({ id, version, image }) => {
+          mints.push({ id, version, image });
+          return { version };
+        },
+      },
+    });
+    return { svc, mints };
+  }
+
+  it("builds the world's recipe and mints a NEW version carrying the built image", async () => {
+    const store = new FakeBuildStore();
+    const sessions = fakeSession();
+    const { svc, mints } = environmentService(store, sessions);
+    const started = await svc.start("acme", { campaignId: "evc_1", ref: "feature" }, "u1");
+    expect(started.slot).toBe(ENVIRONMENT_SLOT);
+    expect(started.base).toEqual({ version: "1.0.0", image: "reg/shop:1.0.0" });
+
+    const settled = await svc.run("acme", started.id);
+    expect(settled.state).toBe("built");
+    expect(mints).toEqual([
+      {
+        id: "shop",
+        // Derived from the commit, so a re-driven build of the same source re-mints the same name — and the
+        // BASELINE is never overwritten, because a world somebody compared against is not a draft.
+        version: "1.0.0-build-abc123def456",
+        image: "reg.local/ws-acme/shop-world:sha-abc123def456@sha256:beefface",
+      },
+    ]);
+  });
+
+  it("refuses an environment with no recipe — before a session exists, not after one has run", async () => {
+    const store = new FakeBuildStore();
+    const sessions = fakeSession();
+    const { svc } = environmentService(store, sessions, { id: "shop", version: "1.0.0", env: { kind: "prompt" } });
+    await expect(svc.start("acme", { campaignId: "evc_1", ref: "feature" }, "u1")).rejects.toThrow(
+      /declares no buildable world/,
+    );
+    expect(await store.forCampaign("acme", "evc_1")).toHaveLength(0);
   });
 });

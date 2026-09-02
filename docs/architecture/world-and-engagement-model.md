@@ -97,7 +97,7 @@ provide a declared world refuses the case.
 | Item | Under the model | What it still needs |
 | ---- | --------------- | ------------------- |
 | `service` environment | a **provided** world with a dynamic provider | a `WorldProvider` port, a lifecycle owner, and a teardown that reads back zero |
-| environment build recipe | an **in-compute** world's bytes | the environment carries an image, with a stated precedence against `EvalCase.image` |
+| environment build recipe | an **in-compute** world's bytes | ✅ landed 2026-09-03 — the environment carries an image and a `source`+`build` recipe, and an environment campaign builds it |
 | tau-bench | **dialogue** engagement + a state-comparing grader | the turn loop, a user simulator, and the benchmark's domain database |
 | api observation | the **provider's** obligation | a recording provider (a proxy) that yields coordinates AND events |
 | os target | a **provided** world | the same provider port; a session API is one implementation of it |
@@ -138,6 +138,14 @@ case declares and refuses when it cannot — a provided world is the same decora
    rather than half a lifecycle.
 3. **Provided worlds, dynamic** — bring-up and teardown, with the lifecycle owner and the verified-zero
    ending. The second implementation of a port that already has a consumer.
+3.5 ✅ **Building the world** (landed 2026-09-03) — the recipe moved to one owner (`execution/build-recipe.ts`,
+   re-exported under its historical harness names), an environment declares `source`+`build` beside its
+   `image`, and `CampaignBuildService` grew the second subject: same session, same captured layer, and a mint
+   that registers a NEW version of the world rather than re-pinning a slot. The version name is derived from
+   the observed commit, so a re-driven build re-mints the same name and the BASELINE — a world somebody has
+   already compared against — is never overwritten. A recipe with no image to land in is refused at
+   registration and again where a build would start.
+
 4. **Dialogue engagement** — the turn loop over a conversational harness, with a scripted user first (a case
    that carries its user's turns is complete and verifiable) and a model-driven simulator second.
 
