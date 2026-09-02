@@ -142,6 +142,15 @@ picks whichever pass is current (the L4 shape this section exists to avoid).
 
 ## §4 — Export what is citable, refuse to export what is not (G3.4)
 
+> **Landed 2026-09-02, as a generic citable report rather than per-benchmark submission files:**
+> `citableReport` (`packages/application-control/src/scorecard/scorecard-report.ts`) — the dataset version and
+> digest, the harness version and spec digest, the manifest era, the scoring semantics as data (`official · proxy ·
+> unstated`), the metric summary and per-case verdicts — under `GET /scorecards/:id/report?allowProxy=` and
+> `export_scorecard_report`. A `proxy` or unstated scoring is REFUSED unless asked for by name, and the export then
+> carries the label and the `approximates` sentence. Not landed: an adapter-declared `reportFormat` rendering a
+> leaderboard's exact submission file — each format is a fact about that leaderboard to be copied from it, not
+> guessed here.
+
 **The gap.** `official | proxy` says whether a number may be compared with the paper's; nothing produces the
 comparison. A tenant that wants to submit to a leaderboard, or quote a number in a report, transcribes by hand.
 

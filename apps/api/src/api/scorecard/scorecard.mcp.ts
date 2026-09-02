@@ -1,4 +1,9 @@
-import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
+import {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  citableReport,
+  originSource,
+} from "@everdict/application-control";
 import { NotFoundError, type ScorecardStatus, ScorecardStatusSchema } from "@everdict/contracts";
 import { type Action, authorize, ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -895,6 +900,35 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             ),
           ),
         ),
+    );
+
+    server.registerTool(
+      "export_scorecard_report",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "Export a scorecard as a CITABLE report — the number with the identities that make it a number: dataset " +
+          "version + digest, harness version + spec digest, manifest era, scoring semantics (official · proxy · " +
+          "unstated), metric summary, per-case verdicts. Refused when the dataset scores as a proxy or states no " +
+          "semantics unless allow_proxy is true — the export then says so. Only a succeeded batch has a number to cite.",
+        inputSchema: {
+          id: z.string().describe("Scorecard id"),
+          allow_proxy: z.boolean().optional().describe("Export a proxy / unstated scoring, labelled as such"),
+        },
+      },
+      ({ id, allow_proxy }) =>
+        run(principal, "scorecards:read", async () => {
+          if (!ctx.deps.datasetRegistry) return fail("NOT_FOUND: dataset registry is not configured.");
+          return ok(
+            await citableReport(
+              { scorecards, datasets: ctx.deps.datasetRegistry },
+              ws,
+              id,
+              await visibleTeamsFor(ctx.deps, principal),
+              { allowProxy: allow_proxy === true },
+            ),
+          );
+        }),
     );
 
     server.registerTool(

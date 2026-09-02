@@ -447,6 +447,23 @@ const docs = {
       ...errorResponses(401, 403, 404),
     },
   },
+  report: {
+    summary: "Export the scorecard as a citable report",
+    description:
+      "The number with everything that makes it a number: the dataset version and digest, the harness version and " +
+      "spec digest, the manifest era, the scoring semantics as data (official · proxy · unstated), the metric summary " +
+      "and per-case verdicts. REFUSED (400) when the dataset scores as a proxy, or states no semantics, unless " +
+      "?allowProxy=true — the export then says so in its header. Only a succeeded batch has a number to cite. " +
+      "Requires scorecards:read (viewer+), workspace-scoped.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    querystring: toJsonSchema(
+      z.object({
+        allowProxy: z.enum(["true", "false"]).optional().describe("Export a proxy / unstated scoring, labelled"),
+      }),
+    ),
+    response: { 200: { description: "The citable report" }, ...errorResponses(400, 401, 403, 404) },
+  },
   analysisBundle: {
     summary: "Get a scorecard's offloaded analysis bundle",
     description:

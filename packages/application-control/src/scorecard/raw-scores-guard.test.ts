@@ -10,6 +10,9 @@ import { describe, expect, it } from "vitest";
 // the role (gate applied, producer, or a worklist that needs the failures themselves).
 // A new consumer failing here is the invariant working, not the test being fussy.
 const ALLOWED = new Set([
+  // The citable report (benchmark-evidence-spec.md §4) reads a result's scores through `isMeasured` before it lists
+  // them, and decides nothing from them — the verdict comes from `caseVerdict`, which is on the gate.
+  "scorecard/scorecard-report.ts",
   "execution/collect-trace.ts", // producer — mints the unmeasured skip row for a non-reconstructable grader
   "execution/scoring-service.ts", // producer — appends judge verdicts + the unresolved-judge unmeasured row
   "scorecard/scorecard-ingest-service.ts", // producer — concatenates derived + uploaded scores onto the case

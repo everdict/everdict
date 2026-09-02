@@ -786,6 +786,7 @@ describe("MCP tools", () => {
       "diff_scorecards",
       "estimate_scorecard",
       "exec_in_run",
+      "export_scorecard_report",
       "fail_job",
       "fire_schedule",
       "flake_scorecards",

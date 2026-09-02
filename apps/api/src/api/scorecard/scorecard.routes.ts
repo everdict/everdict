@@ -1,4 +1,9 @@
-import { IngestScorecardBodySchema, PullIngestBodySchema, originSource } from "@everdict/application-control";
+import {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  citableReport,
+  originSource,
+} from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
@@ -696,6 +701,35 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
 
   // The offloaded analysis bundle (analysisRef) fetched server-side — per-case verdicts/scores as one JSON document.
   // ?revision=N serves that scoring revision's FROZEN artifact (immutable history) instead of the current bundle.
+  // ── EXPORT WHAT IS CITABLE (docs/architecture/benchmark-evidence-spec.md §4) ─────────────────────────
+  app.get<{ Params: { id: string }; Querystring: { allowProxy?: string } }>(
+    "/scorecards/:id/report",
+    { schema: scorecardDocs.report },
+    async (req, reply) => {
+      if (!deps.scorecardService || !deps.datasetRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard or dataset service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const allowProxy = req.query.allowProxy === "true";
+      if (req.query.allowProxy !== undefined && req.query.allowProxy !== "true" && req.query.allowProxy !== "false")
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "allowProxy must be true or false." });
+      try {
+        gate(principal, "scorecards:read");
+        return reply.send(
+          await citableReport(
+            { scorecards: deps.scorecardService, datasets: deps.datasetRegistry },
+            principal.workspace,
+            req.params.id,
+            await visibleTeamsFor(deps, principal),
+            { allowProxy },
+          ),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.get<{ Params: { id: string }; Querystring: { revision?: string } }>(
     "/scorecards/:id/analysis",
     { schema: scorecardDocs.analysisBundle },

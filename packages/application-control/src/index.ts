@@ -463,6 +463,7 @@ export {
 export { type HarnessDelegateAnswer, resolveHarnessDelegate } from "./harness/harness-delegate-service.js";
 export { type SeedReader, materializeSeeds } from "./harness/harness-seeds.js";
 export { verifyForkLineage } from "./harness/harness-fork.js";
+export { type CitableReport, type CitableReportDeps, citableReport } from "./scorecard/scorecard-report.js";
 export {
   type HarnessLineage,
   type HarnessLineageDeps,
