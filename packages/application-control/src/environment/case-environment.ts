@@ -45,6 +45,20 @@ export async function resolveCaseEnvironments(input: {
     );
   const seals: Record<string, SealedEnvironmentEntry> = {};
   const cases: EvalCase[] = [];
+  // ── ONE READ PER DISTINCT REFERENCE, AND ONE ANSWER FOR THE WHOLE BATCH ────────────────────────────
+  //
+  // Not merely a saved round trip. A `latest` ref resolved per CASE is resolved several hundred times over
+  // the seconds a large dataset takes to seal, and a registration landing in that window would give two cases
+  // of one batch two different worlds — recorded honestly by the per-case seal, and then refused by the
+  // campaign's "ran N versions at once" check, for a batch nobody meant to split. Memoizing by the ref as
+  // ASKED makes the whole submit see one answer.
+  const reads = new Map<string, Promise<EnvironmentSpec>>();
+  const readOnce = (id: string, version?: string): Promise<EnvironmentSpec> => {
+    const key = `${id}@${version ?? "latest"}`;
+    const pending = reads.get(key) ?? registry.get(input.tenant, id, version);
+    reads.set(key, pending);
+    return pending;
+  };
   for (const c of input.cases) {
     if (c.env.kind !== "ref") {
       cases.push(c);
@@ -60,7 +74,7 @@ export async function resolveCaseEnvironments(input: {
       );
     // The version to read: the sealed one when there is a seal, else the declared ref (`latest` allowed).
     const version = pinned !== undefined ? refVersion(pinned.ref) : declared.version;
-    const spec: EnvironmentSpec = await registry.get(input.tenant, declared.id, version);
+    const spec: EnvironmentSpec = await readOnce(declared.id, version);
     const digest = contentDigest(spec);
     if (pinned !== undefined && pinned.digest !== undefined && pinned.digest !== digest)
       throw new ConflictError(

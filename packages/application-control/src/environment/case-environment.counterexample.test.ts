@@ -14,8 +14,13 @@ import { resolveCaseEnvironments } from "./case-environment.js";
 const SHOP_V1 = { id: "shop", version: "1.0.0", env: { kind: "repo" as const, source: { path: "/app-v1" } } };
 const SHOP_V2 = { id: "shop", version: "2.0.0", env: { kind: "repo" as const, source: { path: "/app-v2" } } };
 
-function registry(versions: Array<typeof SHOP_V1>, latest = versions[versions.length - 1]): EnvironmentRegistry {
+function registry(
+  versions: Array<typeof SHOP_V1>,
+  latest = versions[versions.length - 1],
+  reads?: string[],
+): EnvironmentRegistry {
   const get = async (_t: string, id: string, ref?: string) => {
+    reads?.push(`${id}@${ref ?? "latest"}`);
     const found = ref === undefined || ref === "latest" ? latest : versions.find((v) => v.version === ref);
     if (found === undefined || found.id !== id)
       throw new NotFoundError("NOT_FOUND", { id, ref }, "no such environment");
@@ -97,5 +102,17 @@ describe("resolveCaseEnvironments — the world a case acts on, resolved once an
     const out = await resolveCaseEnvironments({ tenant: "t1", cases: [embedded()] });
     expect(out.cases).toHaveLength(1);
     expect(out.seals).toEqual({});
+  });
+
+  it("reads each distinct reference ONCE, so a `latest` ref cannot resolve to two worlds inside one batch", async () => {
+    const reads: string[] = [];
+    const three = [referencing(), { ...referencing(), id: "logout" }, { ...referencing(), id: "search" }];
+    const out = await resolveCaseEnvironments({
+      tenant: "t1",
+      cases: three,
+      registry: registry([SHOP_V1, SHOP_V2], SHOP_V2, reads),
+    });
+    expect(reads).toEqual(["shop@latest"]);
+    expect(new Set(Object.values(out.seals).map((s) => s.ref))).toEqual(new Set(["shop@2.0.0"]));
   });
 });
