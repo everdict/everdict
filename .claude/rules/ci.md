@@ -23,7 +23,7 @@ See skill `ci`.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
-  **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm mutation-leak`**,
+  **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
   `pnpm -F @everdict/web lint`/`build`), and a full-history gitleaks scan.
 - **`pnpm convention-harness` keeps the conventions reachable**: every `.claude/rules/*.md` declares a
@@ -203,6 +203,19 @@ See skill `ci`.
   schema anywhere outside its declaration; every allowlist entry states why that site is not a door, and the
   honest reasons are "it decodes bytes WE wrote" and "it IS the declaration". An entry whose site stopped
   naming the schema FAILS — a reason that outlived its subject reads as permission for a door nobody opened.
+- **`pnpm gated-doors` refuses a transport that locks itself on a dependency the composition root never
+  passes.** A route saying `if (!deps.x) … 404` means "this deployment may not have x"; it says nothing about
+  whether ANY deployment does. Two doors shipped dead for exactly that reason: every `/environments` door
+  answered "not configured", so a world could not be registered through the API and therefore never
+  referenced — while the resolution and the manifest seal behind it worked perfectly — and the dataset
+  ATTEST door answered the same, so the only way to GRANT a ground-truth approval was unreachable while the
+  submit-time refusal that requires one worked. `unwired-capabilities` cannot see this: it asks whether a
+  composition root CONSTRUCTS the port, and both were constructed and handed to services — just not to
+  `buildServer`. ⚠️ Its first draft matched the literal "not configured" and missed one of the two defects it
+  was written for, because `registerEnvironmentRoutes` hoists that sentence into a `const`; the marker is the
+  404 now, not the prose. Its second flagged four healthy doors whose names sit inside a conditional spread
+  (`…? { a, b } : {}`, no trailing comma), so the match is any mention of the name in the
+  comment-stripped call — erring toward missing a defect rather than inventing one.
 - **`pnpm mutation-leak` refuses a COMMIT that carries a neutralized protocol** (arch-review 112). The warning
   below covers a killed run; it does not cover the run that is alive and WORKING while you stage beside it. The
   gate's dirty-tree guard protects the GATE, not the author — between two rungs the tree is clean, and while a

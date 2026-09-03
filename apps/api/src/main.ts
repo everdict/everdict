@@ -2124,6 +2124,21 @@ async function main(): Promise<void> {
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,
+    // …and the ENVIRONMENT registry, which every other registry's neighbour had and this one did not. The
+    // registry is constructed in `buildPersistence` and handed to the run and scorecard services, so a case
+    // that REFERENCED an environment resolved and sealed correctly — while `registerEnvironmentRoutes` was
+    // registered against a `deps.environmentRegistry` nobody filled, and answered 404 "not configured" on
+    // every door. Nothing could register a world through the API, so nothing could reference one either.
+    //
+    // `pnpm unwired-capabilities` cannot see this by construction: it asks whether a composition root
+    // CONSTRUCTS the port, and this one does. "A producer exists ≠ the producer reaches this consumer"
+    // (rule `protocol`) — and the consumer here is a transport, not another service.
+    environmentRegistry,
+    // …and the approvals ledger the dataset ATTEST door gates on. Same shape as the line above: the store is
+    // built in `buildPersistence` and handed to the run and scorecard services, so submit-time refusal of an
+    // unapproved ground-truth declaration worked — while the door that RECORDS an approval answered 404
+    // "constitution approvals not configured", so the only way to grant one was unreachable.
+    ...(constitutionApprovalStore ? { constitutionApprovals: constitutionApprovalStore } : {}),
     judgeRegistry,
     judgePreviewService: new JudgePreviewService({
       rubrics: rubricRegistry,

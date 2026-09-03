@@ -72,6 +72,7 @@ run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);
 run("pnpm unwired-capabilities", "pnpm", ["unwired-capabilities"]);
+run("pnpm gated-doors", "pnpm", ["gated-doors"]);
 run("pnpm unwired-guards", "pnpm", ["unwired-guards"]);
 run("pnpm authz-optional", "pnpm", ["authz-optional"]);
 run("pnpm import-cycles", "pnpm", ["import-cycles"]);

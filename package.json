@@ -25,6 +25,7 @@
     "constructed-casts": "node scripts/check-constructed-casts.mjs",
     "guarded-doubles": "node scripts/check-guarded-doubles.mjs",
     "unwired-capabilities": "node scripts/check-unwired-capabilities.mjs",
+    "gated-doors": "node scripts/check-gated-doors.mjs",
     "unwired-guards": "node scripts/check-unwired-guards.mjs",
     "option-forwarding": "node scripts/check-option-forwarding.mjs",
     "ci:commits": "node scripts/ci-commits.mjs",

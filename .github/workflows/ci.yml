@@ -55,6 +55,7 @@ jobs:
       - run: pnpm constructed-casts
       - run: pnpm guarded-doubles
       - run: pnpm unwired-capabilities
+      - run: pnpm gated-doors
       - run: pnpm unwired-guards
       - run: pnpm authz-optional
       - run: pnpm import-cycles
