@@ -30,9 +30,8 @@ export function sessionWorldProvider(request: AcquireRequestFn = fetchAcquire): 
         ...(acquire.close !== undefined ? { close: acquire.close } : {}),
       };
       const handle = await serviceAcquirer(asTarget, request).acquire({
-        // The acquirer's `spec` is only read for pool/capacity declarations a topology carries; an
-        // environment session has none, so the minimum shape is what it gets.
-        spec: { kind: "service", id: "environment", version: "0", services: [], dependencies: [] } as never,
+        // No `spec`: that field is the harness TOPOLOGY the provision lane brings a browser up inside, and an
+        // environment opening its own world has none. The session lane never reads it.
         runId,
         endpoints: { [service]: endpoint },
         wiring: { run_id: runId },

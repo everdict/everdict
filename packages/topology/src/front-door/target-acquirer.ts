@@ -18,7 +18,12 @@ import { getField, interpolatePath, joinUrl, methodPath } from "./front-door-dri
 // Design: docs/architecture/target-acquisition-generalization.md.
 
 export interface AcquireRequest {
-  spec: ServiceHarnessSpec;
+  // The harness topology this acquisition belongs to — read ONLY by the provision lane, which asks the
+  // runtime to bring a browser up inside it. The SESSION lane never touches it, and an environment opening
+  // its own world through a session API has no topology at all (world-and-engagement-model.md), so it is
+  // optional rather than a shape such a caller has to fabricate: a value built to satisfy a parameter that
+  // nobody reads is exactly what `pnpm constructed-casts` refuses, and the honest repair is the parameter.
+  spec?: ServiceHarnessSpec;
   runId: string;
   endpoints: Record<string, string>; // warm topology service → base URL (reach the session service)
   wiring: Record<string, string>; // open/close path interpolation (run_id + isolateBy-derived + task). Coordinates are merged in at close.
@@ -96,6 +101,12 @@ export const fetchAcquire: AcquireRequestFn = async (method, url, body) => {
 export function provisionAcquirer(runtime: TopologyRuntime): TargetAcquirer {
   return {
     async acquire({ spec, runId, zone }) {
+      if (spec === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { runId },
+          "provisioning a browser needs the harness topology it lives in — this acquisition carried none",
+        );
       return runtime.provisionBrowserEnv(spec, runId, zone);
     },
   };
