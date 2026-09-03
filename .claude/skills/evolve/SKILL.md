@@ -136,6 +136,13 @@ So the split to hold in mind, because every mistake below is a confusion of the 
   refusal each one turns off. Read before opening a campaign.
 - `references/rejection-catalogue.md` — every refusal a round, a settle or an adoption can answer, its exact
   cause, and the repair. Read when something comes back not-comparable or 409.
+- `scripts/live/evolution-campaign.mjs` — the whole walk, driven against a running control plane: it registers
+  a subject, opens a campaign, runs both sides as real batches, logs rounds without a verdict, asks the gate,
+  settles and spends the authorization, then probes the refusals. The default subject needs no model and takes
+  about fifteen seconds; `--claude` evolves a real Claude Code scaffold over six repo tasks and spends model
+  budget. Run it after changing anything in this walk — driving it for real is what found the three defects
+  the unit suites could not see (an override the template could not apply, a round that compared the baseline
+  with itself, a setup step with no env).
 - Rule `protocol` for why the verdict is derived rather than accepted; skill `evaluation` for the scorecard
   and diff semantics the round verdict is built from.
 
