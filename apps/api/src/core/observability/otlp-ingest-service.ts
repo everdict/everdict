@@ -1,5 +1,5 @@
 import type { PlatformEventEmitter, TrajectoryStore } from "@everdict/application-control";
-import { RateLimitError } from "@everdict/contracts";
+import { RateLimitError, UpstreamError } from "@everdict/contracts";
 import type { TraceSpan } from "@everdict/contracts";
 import { groupOtlpTraceSpansByRun, partitionTraceSpansByService } from "@everdict/trace";
 
@@ -92,7 +92,19 @@ export class OtlpIngestService {
   // twice over — 429 to the exporter, trace.ingestion_throttled on the log (cooldown-bounded).
   private async admit(tenant: string, incomingEvents: number): Promise<void> {
     if (incomingEvents === 0) return;
-    const override = await this.deps.quotaFor?.(tenant).catch(() => undefined);
+    // ── AN UNREADABLE QUOTA IS NOT "NO OVERRIDE" (rule `protocol` L2, perf review) ──────────────────
+    //
+    // This read was `quotaFor?.(tenant).catch(() => undefined)`, and `undefined` is the arm that means "this
+    // workspace set no override, use the operator default". So a settings-store outage did not look like an
+    // outage: it looked like a workspace that had never configured a quota, and admission then proceeded
+    // under a limit nobody had chosen — silently over a workspace that had set a LOWER one, silently under a
+    // workspace that had raised it. It fails exactly when the database is already unwell, which is when the
+    // door most needs to hold.
+    //
+    // Refusing is the fail-closed side here and it is cheap: OTLP exporters retry, so a transient failure
+    // costs a retry rather than evidence. The throw is the OUTCOME (this push is refused), never a signal
+    // meaning "somebody deal with it later" — which is the shape L2 bans.
+    const override = await this.readQuota(tenant);
     const limit = override?.maxEventsPerHour ?? this.deps.defaultMaxEventsPerHour;
     if (limit === undefined) return;
     const now = this.deps.now?.() ?? Date.now();
@@ -114,5 +126,21 @@ export class OtlpIngestService {
       { usedLastHour: used.events, incoming: incomingEvents, limit },
       `Trace ingestion quota exceeded: ${used.events} events in the last hour + ${incomingEvents} incoming > ${limit}. Retry later or raise the workspace quota.`,
     );
+  }
+
+  // The workspace's own ceiling, or the honest absence of one. An outage is neither.
+  private async readQuota(tenant: string): Promise<{ maxEventsPerHour?: number } | undefined> {
+    if (this.deps.quotaFor === undefined) return undefined;
+    try {
+      return await this.deps.quotaFor(tenant);
+    } catch (err) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { tenant },
+        `Trace ingestion refused: the workspace's ingestion quota could not be read, so admission cannot be decided (${
+          err instanceof Error ? err.message : String(err)
+        }). Retry — exporters retry this.`,
+      );
+    }
   }
 }
