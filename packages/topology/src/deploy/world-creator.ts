@@ -1,6 +1,6 @@
 import type { WorldCreator } from "@everdict/application-control";
 import type { ServiceHarnessSpec, TopologyService } from "@everdict/contracts";
-import type { TopologyRuntime } from "./topology-runtime.js";
+import { type TopologyRuntime, worldTopologyId } from "./topology-runtime.js";
 
 // ── MAKING AND UNMAKING A WORLD, OVER THE TOPOLOGY RUNTIME (world-and-engagement-model.md, 3.9) ──────
 //
@@ -8,15 +8,19 @@ import type { TopologyRuntime } from "./topology-runtime.js";
 // What it does not have is the PROTOCOL around that — record before you create, and settle only on a
 // read-back — which lives in `@everdict/application-control` and calls this.
 //
-// The world is addressed as a synthetic service topology keyed by the RUN: one world per case, never shared,
-// so a teardown can never reclaim a world another case is still acting on. That key is also what makes the
-// read-back meaningful — `describeTopology` answers about this run's world and nothing else.
+// The world is addressed as a synthetic service topology keyed by the RUN — the run of the LEDGER ROW, which
+// for a `per-run` world is the case that created it and for a `per-case` world is the only case there is. So
+// two worlds never collide, a leaked one names the run that made it, and `describeTopology` answers about
+// that world and nothing else.
+//
+// It is deliberately NOT a warm-pool entry: the ledger owns when a world may be reclaimed (the refcount says
+// who is inside it), and the pool's idle sweeper defers to `isWorldTopology` rather than answering the same
+// question from `lastUsedAt` — which a shared world, ensured once and used for hours, would fail.
 export function topologyWorldCreator(runtime: TopologyRuntime): WorldCreator {
   const specFor = (runId: string, services: unknown[]): ServiceHarnessSpec =>
     ({
       kind: "service",
-      // The id carries the run so two cases never share a world, and a leaked one names the run that made it.
-      id: `everdict-world-${runId}`,
+      id: worldTopologyId(runId),
       version: "1",
       services: services as TopologyService[],
       dependencies: [],

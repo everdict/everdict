@@ -181,6 +181,41 @@ export const EnvironmentSpecSchema = z
           kind: z.literal("topology"),
           services: z.array(TopologyServiceSchema).min(1),
           wiring: z.record(z.string().min(1), z.object({ service: z.string().min(1), path: z.string().optional() })),
+          // ── HOW MANY CASES TAKE TURNS IN ONE WORLD ──────────────────────────────────────────────
+          //
+          // `per-case` is the default and the safe one: the world is made for this case and unmade after it,
+          // so no case can see what another did. `per-run` stands the world up ONCE and the batch's cases
+          // share it — the only affordable shape for a world of several services and a dataset of hundreds,
+          // and a shape that is only a COMPARISON if the world can be put back between cases.
+          //
+          // Which is why `perCase.reset` is not optional for `per-run` (`environmentSharingDefects`): case N
+          // starting in the state case N-1 left is not a slower experiment, it is a different one, and
+          // nothing about the resulting number looks wrong.
+          lifecycle: z.enum(["per-case", "per-run"]).default("per-case"),
+          // Putting the world back. `from` names one of the wiring keys above and `reset` is the path the
+          // platform POSTs there before each case — declared rather than executed, because the world is
+          // reached by coordinates and the platform has no shell inside it. A reset that fails REFUSES the
+          // case: running it in the previous case's leftovers is exactly what this field exists to prevent.
+          //
+          // ⚠️ `reset` is a PATH and the schema is what makes that true. The base URL is minted by the
+          // platform (the runtime's own answer for a world it created) and the path is written by a
+          // workspace, so a value that can change the HOST turns this into a control-plane call to an address
+          // a tenant chose: `"@evil.example/x"` appended to `http://web.internal:8080` parses with
+          // `web.internal:8080` as userinfo. One leading slash, and never two (a `//host` is protocol-relative
+          // and moves the host just as effectively).
+          perCase: z
+            .object({
+              reset: z
+                .string()
+                .min(1)
+                .max(2000)
+                .regex(
+                  /^\/(?!\/)/,
+                  "the reset must be an absolute PATH on the world (a single leading '/'), not an address of its own — the host is the platform's to decide",
+                ),
+              from: z.string().min(1),
+            })
+            .optional(),
         }),
       ])
       .optional(),
@@ -211,6 +246,8 @@ export const EnvironmentSpecSchema = z
   .superRefine((spec, ctx) => {
     for (const message of environmentBuildDefects(spec))
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["build"], message });
+    for (const message of environmentSharingDefects(spec))
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["provides", "perCase"], message });
   });
 export type EnvironmentSpec = z.infer<typeof EnvironmentSpecSchema>;
 
@@ -246,6 +283,35 @@ export function caseEnvironmentImageDefect(
 // A recipe that cannot produce a world, refused where the environment enters rather than where a build fails.
 // Both halves are needed: a `build` with no `source` has nothing to clone, and a recipe with no `image` on the
 // spec has nowhere to put what it produced — which was the exact blocker this field was added to remove.
+// A world shared across a batch's cases with no way to reset between them is not a shared world; it is a
+// dependency between cases. Refused where the environment enters, not where the second case reads the first's
+// leftovers — by then the number is already wrong and nothing about it looks wrong.
+export function environmentSharingDefects(spec: {
+  provides?: {
+    kind: string;
+    lifecycle?: string;
+    perCase?: { reset: string; from: string };
+    wiring?: Record<string, unknown>;
+  };
+}): string[] {
+  const provides = spec.provides;
+  if (provides === undefined || provides.kind !== "topology") return [];
+  if (provides.lifecycle !== "per-run") return [];
+  const perCase = provides.perCase;
+  if (perCase === undefined)
+    return [
+      "a per-run world is reused by every case in the batch, so it must declare `perCase.reset` — without it case N starts in the state case N-1 left, and cases that are not independent are not a comparison",
+    ];
+  // The reset is performed by the platform against a coordinate the world publishes, so a `from` naming a key
+  // the wiring does not have is a reset that can never run — refused here rather than at the second case,
+  // where the failure is a world nobody put back.
+  return provides.wiring !== undefined && provides.wiring[perCase.from] === undefined
+    ? [
+        `perCase.reset is sent to wiring key '${perCase.from}', which this world does not publish (it publishes ${Object.keys(provides.wiring).join(", ") || "nothing"}) — a reset with no address is a reset that never runs`,
+      ]
+    : [];
+}
+
 export function environmentBuildDefects(spec: {
   image?: string;
   source?: unknown;

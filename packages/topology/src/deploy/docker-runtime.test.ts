@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { CdpSocket } from "../front-door/capture-cdp.js";
 import { DockerTopologyRuntime } from "./docker-runtime.js";
 import { type Docker, type DockerRunSpec, dockerRunArgs, parseHostPort } from "./docker.js";
+import { worldTopologyId } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
   kind: "service",
@@ -739,5 +740,33 @@ describe("DockerTopologyRuntime — warm-topology idle reclamation", () => {
     expect(await rt.sweepIdle(5 * 60_000)).toEqual(["bu@1.0.0"]);
     expect(f.removed.slice(baseline)).toEqual(expect.arrayContaining(["everdict-bu-1.0.0-agent-server"]));
     expect(f.rmNets).toContain("everdict-bu-1.0.0");
+  });
+
+  // ── [COUNTEREXAMPLE] TWO RECLAIMERS FOR ONE OBJECT (world-and-engagement-model.md, 3.9) ────────────
+  //
+  // A created WORLD is owned by the created-world ledger, whose refcount says how many cases are inside it.
+  // The warm pool answers the same question from `lastUsedAt`, which is bumped by `ensureTopology` — and a
+  // world shared by a batch is ensured ONCE. With the default thirty-minute idle TTL, any batch longer than
+  // that would have its world reclaimed underneath live cases, and every score after that would read as an
+  // ordinary agent failure. So the sweeper defers, and this is the assertion that says so.
+  it("never reclaims a created WORLD, however idle it looks — the ledger owns that decision", async () => {
+    const f = fakeDocker();
+    let t = 0;
+    const rt = new DockerTopologyRuntime({
+      docker: f.docker,
+      fetchImpl: okFetch,
+      warmIdleTtlMs: 0, // self-timer off — the sweep below is driven explicitly
+      now: () => t,
+    });
+    await rt.ensureTopology({ ...SPEC, id: worldTopologyId("run-1") });
+    const baseline = f.removed.length;
+    // Hours after the one and only ensure: to the pool this looks like the idlest thing it has.
+    t = 6 * 60 * 60_000;
+    expect(await rt.sweepIdle(5 * 60_000)).toEqual([]);
+    expect(f.removed.length, "a world torn out from under a live batch reads as an agent that failed").toBe(baseline);
+    // …and an ordinary topology of the same age is still reclaimed, so the exemption is the world's alone.
+    await rt.ensureTopology(SPEC);
+    t = 12 * 60 * 60_000;
+    expect(await rt.sweepIdle(5 * 60_000)).toEqual(["bu@1.0.0"]);
   });
 });

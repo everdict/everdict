@@ -183,6 +183,12 @@ export const EvalCaseSchema = z.object({
           environment: z.string().min(1), // "id@version" — what the ledger records as the world's identity
           services: z.array(TopologyServiceSchema).min(1),
           wiring: z.record(z.string().min(1), z.object({ service: z.string().min(1), path: z.string().optional() })),
+          // Whether this world is made for THIS case or shared by the batch's cases, and — for a shared one —
+          // how it is put back between them. Carried from the sealed environment for the same reason the
+          // recipe is: the dispatcher is where a world is actually joined, and it may not decide from a
+          // default what the world's version declared.
+          lifecycle: z.enum(["per-case", "per-run"]).optional(),
+          perCase: z.object({ reset: z.string().min(1), from: z.string().min(1) }).optional(),
         })
         .optional(),
     })

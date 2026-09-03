@@ -31,6 +31,7 @@ import {
   type CaseJob,
   type RegistryAuth,
   type RuntimeSpec,
+  UpstreamError,
   storedExecutionId,
 } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -470,12 +471,24 @@ export function buildDispatch(deps: {
     {
       creator: deps.worldCreator,
       store: deps.worldCreations,
+      // PUTTING A SHARED WORLD BACK between the cases that take turns in it. A plain POST to a coordinate the
+      // world published: the endpoints are the topology runtime's, minted for a world this control plane
+      // created, so the address is platform-authored rather than caller-named. A non-2xx is the case's
+      // refusal, not a warning — the alternative is dispatching case N into case N-1's leftovers.
+      reset: async (url: string) => {
+        const res = await fetch(url, { method: "POST", headers: { accept: "application/json" } });
+        if (!res.ok)
+          throw new UpstreamError("UPSTREAM_ERROR", { url, status: res.status }, `world reset ${res.status}`);
+      },
       newId: () => `cw_${randomUUID()}`,
       now: () => new Date().toISOString(),
     },
     seedingDispatcher,
     (outcome) => {
       if (outcome.result.kind === "closed") return;
+      // A SHARED world is not this case's to close: it left, and the world stands for whoever is still in it
+      // until the reconciler finds it idle. Saying so is not the same as saying it was released.
+      if (outcome.result.kind === "held") return;
       console.error(
         `[world] case ${outcome.caseId}: the world at ${outcome.endpoint} was NOT released (${outcome.result.reason}) — a session service's own expiry frees a session; a CREATED world stays owed on the ledger until a sweep proves it gone`,
       );

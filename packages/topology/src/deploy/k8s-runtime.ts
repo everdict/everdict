@@ -34,6 +34,7 @@ import {
   type TargetEnvHandle,
   type TopologyHandle,
   type TopologyRuntime,
+  isWorldTopology,
 } from "./topology-runtime.js";
 
 export interface K8sTopologyRuntimeOptions {
@@ -245,6 +246,9 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     for (const [key, entry] of [...this.warm]) {
       if (entry.lastUsedAt > cutoff) continue;
       if (this.inFlight.has(key)) continue; // a deploy in flight = someone wants it right now — not idle
+      // A created WORLD is the ledger's to reclaim, never this pool's: it is ensured once and used by every
+      // case of a batch, so `lastUsedAt` says idle while cases are still inside it (`isWorldTopology`).
+      if (isWorldTopology(entry.spec.id)) continue;
       await this.teardown(entry.spec, entry.zone).catch(() => {});
       reclaimed.push(key);
     }

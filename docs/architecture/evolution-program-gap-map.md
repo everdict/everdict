@@ -173,9 +173,11 @@ domain database and tool APIs, registered as an environment that provides a worl
 would be a different benchmark wearing its name), and one fact about a third-party CLI for a hermes recipe
 (its resume flag; the contract, the refusal and two worked examples are already here).
 
-One direction a later pass may take, recorded in `world-and-engagement-model.md` under "what would reopen
-this" rather than as a gap: a world SHARED across a batch's cases, which wants a slice key rather than a new
-axis.
+That direction has since been taken too: a world SHARED across a batch's cases is slice 3.95 of
+`world-and-engagement-model.md` — a topology environment declares `lifecycle: "per-run"` and a `perCase.reset`
+without which the registration is refused, the batch's cases join one world through a single conditional
+write, and the reconciler unmakes it once nobody has been inside it for the idle window. What is left open
+there is a pool shared ACROSS batches, which is an admission-policy question rather than a lifecycle one.
 
 ## What would reopen this page
 

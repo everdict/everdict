@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConsulClient, ServiceIntention } from "./consul-intentions.js";
 import { type NomadExec, type NomadHttp, NomadTopologyRuntime } from "./nomad-runtime.js";
 import { SERVICE_GROUP_NAME, servicePortLabel, topologyJobId } from "./nomad-topology.js";
+import { worldTopologyId } from "./topology-runtime.js";
 
 // A portless service → skips ensureTopology's endpoint-discovery (real fetch) loop (unit-test only the pool wiring).
 const SPEC: ServiceHarnessSpec = {
@@ -621,6 +622,30 @@ describe("NomadTopologyRuntime — warm-topology idle reclamation", () => {
     t = 8 * 60_000; // 8 min after deploy, but only 4 min after the last use
     expect(await rt.sweepIdle(5 * 60_000)).toEqual([]);
     expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+  });
+
+  // The same exemption the Docker lane carries, asserted here because three runtimes answer this one question
+  // and a lesson learned in one of them is not learned in the others (rule `protocol`, the sibling-lane law).
+  // A created WORLD belongs to the created-world ledger: it is ensured ONCE and then used by every case of a
+  // batch, so `lastUsedAt` says idle while cases are still inside it.
+  it("never reclaims a created WORLD — the ledger owns that decision, not the warm pool", async () => {
+    const { calls, http } = recordingHttp();
+    let t = 0;
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      pollIntervalMs: 1,
+      maxPolls: 2,
+      warmIdleTtlMs: 0,
+      now: () => t,
+    });
+    await rt.ensureTopology({ ...SPEC, id: worldTopologyId("run-1") });
+    t = 6 * 60 * 60_000; // hours after its one and only ensure
+    expect(await rt.sweepIdle(5 * 60_000)).toEqual([]);
+    expect(
+      calls.some((c) => c.method === "DELETE"),
+      "a world torn out from under a live batch reads as an agent that failed",
+    ).toBe(false);
   });
 });
 

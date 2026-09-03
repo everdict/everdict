@@ -81,3 +81,22 @@ export interface TopologyRuntime {
 // ACTIVE traffic, not to pin dead versions forever).
 export const DEFAULT_WARM_IDLE_TTL_MS = 30 * 60_000;
 export const DEFAULT_WARM_SWEEP_INTERVAL_MS = 60_000;
+
+// ── A WORLD IS NOT A WARM-POOL ENTRY (docs/architecture/world-and-engagement-model.md, 3.9) ──────────
+//
+// A topology deployed as a case's WORLD is owned by the created-world ledger: it records the intent before
+// the world exists, holds the refcount that says how many cases are inside it, and tears it down only after a
+// read-back says it is gone. The warm pool's idle sweeper answers the same question — when may this be
+// reclaimed — from a different clock, and it would win: `lastUsedAt` is bumped by `ensureTopology`, a shared
+// world is ensured ONCE, and the default idle TTL is thirty minutes. A batch longer than that would have its
+// world reclaimed underneath live cases, and the scores would come back looking like ordinary failures.
+//
+// Two reclaimers for one object is the two-readers defect (rule `protocol` L3), so the sweeper defers: these
+// two functions are the only place the name is minted and the only place it is recognised.
+export function worldTopologyId(runId: string): string {
+  return `everdict-world-${runId}`;
+}
+
+export function isWorldTopology(id: string): boolean {
+  return id.startsWith("everdict-world-");
+}

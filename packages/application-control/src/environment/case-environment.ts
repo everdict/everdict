@@ -116,6 +116,11 @@ export async function resolveCaseEnvironments(input: {
                       environment: `${spec.id}@${spec.version}`,
                       services: provides.services,
                       wiring: provides.wiring,
+                      // …unless the world's version says the batch's cases take turns in ONE world, in which
+                      // case the dispatcher joins rather than creates — and needs, from here, the reset that
+                      // makes taking turns a comparison rather than a chain.
+                      lifecycle: provides.lifecycle,
+                      ...(provides.perCase !== undefined ? { perCase: provides.perCase } : {}),
                     },
                   }),
             ...(spec.observe !== undefined ? { observe: spec.observe } : {}),

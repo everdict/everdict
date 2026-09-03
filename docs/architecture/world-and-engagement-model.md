@@ -73,6 +73,11 @@ An environment says how its world reaches the actor.
   **coordinates** — a base URL, a CDP endpoint, a session id. Somebody must produce those coordinates before
   the actor runs, and somebody must be able to say they are gone afterwards.
 
+A provided world also has a LIFETIME, and the choice is per **case** or per **run**: a world made for one
+case can be unmade after it and no case can see what another did, while a world the batch shares is affordable
+and is only a comparison if it can be put back between cases. That is a property of the environment (the world
+knows how to reset itself), never of the case, which is why it is declared where the world is registered.
+
 This single distinction is what the three deferred items were each missing:
 
 - A `service` environment is a **provided** world. Its blocker was never the schema arm; it was that nothing
@@ -196,6 +201,38 @@ case declares and refuses when it cannot — a provided world is the same decora
    already compared against — is never overwritten. A recipe with no image to land in is refused at
    registration and again where a build would start.
 
+3.95 ✅ **A world several cases take turns in** (landed 2026-09-03) — the created arm above builds a world per
+   case, which is correct and, for a world of several services against a dataset of hundreds, a cost nobody
+   will pay. A topology environment now declares `lifecycle: "per-case" | "per-run"`; a `per-run` world stands
+   up ONCE and the batch's cases share it.
+
+   **It is only a comparison because the schema refuses to register one without `perCase.reset`** — a wiring
+   key and a path the platform POSTs before each case. Case N starting in the state case N-1 left is not a
+   slower experiment, it is a different one, and nothing about the resulting number looks wrong. A reset that
+   fails REFUSES the case; the dispatcher refuses a `per-run` world that reached it without a reset at all.
+
+   Four decisions, each of them the place a shared resource usually goes wrong:
+
+   - **Who creates it is decided by ONE conditional write.** `acquireShared` is a single statement whose
+     conflict arm increments a holder count, so two cases arriving at the same instant get two different
+     answers: exactly one is told to create, and the other waits and is handed the coordinates the creator
+     got. A read followed by a write here is the race, not a style question. The arbiter index excludes
+     released rows, so a torn-down world's NAME is free and the next batch to ask for it inserts a new world
+     rather than reviving a settled one — no statement has to tell "I revived it" from "I joined it".
+   - **The refcount is the FENCE and the lease is the backstop.** A world is never unmade while somebody is
+     inside it; `expiresAt`, refreshed on every acquire, is what stops a crashed holder from pinning one
+     forever.
+   - **Leaving is not tearing down, and neither is being the last one out.** Releasing the moment the count
+     hits zero would make a sequentially-dispatched batch build and destroy one world per case — the reuse
+     this arm exists for, eliminated — and would refuse the next case, which arrives while the teardown is in
+     flight. The reconciler is the reaper: it takes a world only once nobody is inside it AND nobody has been
+     for the idle window. The case's own ending is reported as `held`, never as `closed`, because a world
+     still standing reported as released is the accepted-is-not-gone lie one layer up.
+   - **The world is addressed by the LEDGER ROW.** A joiner never touches the runtime; the sweep has nothing
+     but the row. What the batch shares is keyed by `sharedWorldKey({scope, environment, target})` — the batch
+     id, the world's sealed version, and the runtime it stands on — so two batches, two versions or two
+     clusters are never one world, and a single run (scope = its own run id) gets a world of its own.
+
 4. ✅ **Dialogue engagement, scripted** (landed 2026-09-03) — `EvalCase.engagement` declares the exchange, and
    `runCase` drives the opening task and then the user's lines over the harness's own continuity contract, so
    the agent RESUMES its session instead of meeting each line cold. `dialogueTurns` is the one reader of the
@@ -219,7 +256,8 @@ their refusals: a world that cannot be provided, and a harness that cannot hold 
 
 - A case whose world must change **during** the run (a world that the actor mutates and a later phase
   re-provisions) — the model above assumes one world per case for its whole life.
-- A world shared by several cases ON PURPOSE (a warm pool of one expensive app) — the lifecycle axis above is
-  per-case; a shared world needs a slice key, which is what `wiringVars`/`keysFor`
-  (`packages/topology/src/environment-manager.ts`) already do for topology dependencies.
+- A world shared ACROSS batches (a warm pool that outlives the run that built it). Slice 3.95 shares a world
+  within one batch and keys it by that batch on purpose: two batches sharing a world would compare against
+  each other's leftovers. A pool that spans them needs an admission policy — who may join, and what a case
+  is entitled to assume about a world it did not build — which is a different question from this one.
 - An engagement with more than two parties (an actor, a user, and an adversary).
