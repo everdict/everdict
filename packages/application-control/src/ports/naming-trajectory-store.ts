@@ -83,12 +83,12 @@ export class NamingTrajectoryStore implements TrajectoryStore {
   // The retention sweep's other half, and the reason the port declares it REQUIRED: this decorator sits
   // BETWEEN the offloading store and the concrete one, so a method it does not forward is a capability that
   // exists in `@everdict/db` and never reaches the caller that decides (arch-review 120).
-  payloadRefsOlderThan(
-    cutoffIso: string,
+  payloadRefsOf(
+    runIds: readonly string[],
     limit: number,
     after?: TrajectoryPayloadRef,
   ): Promise<TrajectoryPayloadRef[]> {
-    return this.inner.payloadRefsOlderThan(cutoffIso, limit, after);
+    return this.inner.payloadRefsOf(runIds, limit, after);
   }
 }
 

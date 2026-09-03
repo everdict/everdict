@@ -118,6 +118,10 @@ class FakeRuns implements RunStore {
   async inFlightByTenant(): Promise<Record<string, number>> {
     return {};
   }
+  // No children in this fixture — the queue-progress read is not this test's subject.
+  async countChildrenByStatus() {
+    return [];
+  }
   async liveSessions(): Promise<[]> {
     return [];
   }

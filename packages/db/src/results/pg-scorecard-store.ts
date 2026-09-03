@@ -655,6 +655,8 @@ function scorecardFilterSql(
   if (filter?.runtimes) conds.push(`coalesce(runtime, '') = ANY(${put(filter.runtimes)}::text[])`);
   if (filter?.creators) conds.push(`coalesce(created_by, '') = ANY(${put(filter.creators)}::text[])`);
   if (filter?.teamIds) conds.push(`coalesce(team_id, '') = ANY(${put(filter.teamIds)}::text[])`);
+  // The half-open window the dashboard reads, same index as `day` (`everdict_scorecards_tenant_created_idx`).
+  if (filter?.createdSince) conds.push(`created_at >= ${put(filter.createdSince)}::timestamptz`);
   if (filter?.day) {
     // A half-open UTC range rather than a cast on the column: this one can use
     // `everdict_scorecards_tenant_created_idx`, and `(created_at)::date` cannot.

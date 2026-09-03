@@ -108,7 +108,10 @@ function inner(): TrajectoryStore & { sealedEvents: () => TraceEvent[] } {
       held = [];
       return 1;
     },
-    async payloadRefsOlderThan(_cutoffIso: string, limit: number, after?: TrajectoryPayloadRef) {
+    // HONOURS the run scope, like both adapters — a twin that ignored it would be wider than production on
+    // exactly the axis the sweep's cost depends on (rule `testing`: the underscore is the tell).
+    async payloadRefsOf(runIds: readonly string[], limit: number, after?: TrajectoryPayloadRef) {
+      if (!runIds.includes("r1")) return [];
       return refsOf(held)
         .sort()
         .filter((ref) => after === undefined || ref > after.ref)

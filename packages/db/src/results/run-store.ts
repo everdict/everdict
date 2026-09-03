@@ -18,6 +18,7 @@ import type {
   LiveSessionRow,
   OutboxEvent,
   PlatformEventStore,
+  RunChildStatusCount,
   RunCreateGuard,
   RunListOptions,
   RunStore,
@@ -195,7 +196,11 @@ export class InMemoryRunStore implements RunStore {
     const viewer = opts?.viewer;
     const audience = viewer === undefined ? inTenant : inTenant.filter((r) => canReadRun(r, viewer));
     // A private team's runs are that team's work — the same ceiling every other team-owned read stays under.
-    const scoped = audience.filter((r) => ownedByVisibleTeam(r, opts?.visibleTeams));
+    const teamScoped = audience.filter((r) => ownedByVisibleTeam(r, opts?.visibleTeams));
+    // …and the lifecycle narrowing the adapter applies in its WHERE (perf review). Before the page, like
+    // every other predicate here: a twin that filtered after paging would answer a different size.
+    const statuses = opts?.statuses;
+    const scoped = statuses === undefined ? teamScoped : teamScoped.filter((r) => statuses.includes(r.status));
     // runnerId → runs this self-hosted runner executed (provenance), newest first, capped. Implies children included
     // (a runner mostly runs scorecard cases). Mirrors the Pg jsonb filter.
     if (opts?.runnerId) {
@@ -212,6 +217,23 @@ export class InMemoryRunStore implements RunStore {
         ? scoped
         : scoped.filter((r) => r.parentScorecardId == null);
     return page(filtered, opts).map(withRunUsage);
+  }
+
+  // The twin of the grouped adapter read — same tenant scope, same "no children ⇒ no row" shape.
+  async countChildrenByStatus(tenant: string, scorecardIds: readonly string[]): Promise<RunChildStatusCount[]> {
+    if (scorecardIds.length === 0) return [];
+    const wanted = new Set(scorecardIds);
+    const counts = new Map<string, RunChildStatusCount>();
+    for (const run of this.runs.values()) {
+      if (run.tenant !== tenant) continue;
+      const parent = run.parentScorecardId;
+      if (parent === undefined || parent === null || !wanted.has(parent)) continue;
+      const key = `${parent}\u0001${run.status}`;
+      const seen = counts.get(key);
+      if (seen) seen.count += 1;
+      else counts.set(key, { scorecardId: parent, status: run.status, count: 1 });
+    }
+    return [...counts.values()];
   }
 
   async deleteByScorecard(scorecardId: string): Promise<number> {

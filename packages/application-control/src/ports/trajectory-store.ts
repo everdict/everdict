@@ -705,7 +705,25 @@ export interface TrajectoryStore {
   //     alone then skips every remaining owner of a ref a page boundary landed inside, and an object whose
   //     only surviving owner row was skipped is deleted with its rows and named by nothing. So the caller
   //     hands back the last ROW it saw and every adapter orders and compares the whole tuple.
-  payloadRefsOlderThan(cutoffIso: string, limit: number, after?: TrajectoryPayloadRef): Promise<TrajectoryPayloadRef[]>;
+  // ⚠️ AND IT IS SCOPED TO THE RUNS THE SWEEP CLAIMED, NOT TO THE CUTOFF (perf review). This took a
+  // `cutoffIso` and answered for EVERY expired trajectory in the deployment, while its only caller had
+  // already narrowed itself to one bounded page of runs — so the decorator drained the whole expired corpus,
+  // page by page, and discarded all but its own runs in JavaScript. On Postgres each of those pages re-ran
+  // `jsonb_path_query(body, '$.**')` over every expired event body and re-sorted the result; on ClickHouse it
+  // re-ran a regex over the largest column in the system and rebuilt a full-table hash join. To delete N runs
+  // per hour the sweep therefore re-read the whole expired corpus (corpus/N) times, every hour, for ever —
+  // quadratic in the thing that grows fastest in the product, inside the API process.
+  //
+  //     the caller knows which runs it is deleting   →   the query is the place that filter belongs
+  //
+  // The run set is the parameter now, so one drain costs one page. The old spelling is DELETED rather than
+  // kept beside it: a `get`-shaped escape hatch that CAN read everything will, from some caller, eventually
+  // (rule `protocol` — the escape hatch goes with the change that replaces it).
+  payloadRefsOf(
+    runIds: readonly string[],
+    limit: number,
+    after?: TrajectoryPayloadRef,
+  ): Promise<TrajectoryPayloadRef[]>;
 }
 
 // One offloaded payload reference, WITH the trajectory that holds it. The pair is the point: a ref alone is

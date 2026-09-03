@@ -29,6 +29,8 @@ export class InMemoryProjectStore implements ProjectStore {
         (record) =>
           record.tenant === tenant &&
           (filter?.status === undefined || record.status === filter.status) &&
+          // The set form (perf review) — ANDs with `status` exactly as the adapter's clauses do.
+          (filter?.statuses === undefined || filter.statuses.includes(record.status)) &&
           (filter?.initiativeId === undefined || record.initiativeIds.includes(filter.initiativeId)) &&
           (filter?.initiativeIds === undefined ||
             record.initiativeIds.some((id) => filter.initiativeIds?.includes(id) === true)) &&
@@ -159,6 +161,11 @@ export class PgProjectStore implements ProjectStore {
     if (filter?.status !== undefined) {
       conds.push(`status = $${i++}`);
       params.push(filter.status);
+    }
+    // "Any of these" — the dashboard's narrowing, done in SQL rather than after the read (perf review).
+    if (filter?.statuses !== undefined) {
+      conds.push(`status = ANY($${i++}::text[])`);
+      params.push([...filter.statuses]);
     }
     // Containment over the jsonb lists (GIN-indexed in migration 0108) — a project belongs to every initiative
     // and every team it names, so both filters are `@>`, never an equality on a scalar column.

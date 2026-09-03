@@ -1,4 +1,4 @@
-import type { PlatformEventRecord, RunRecord } from "@everdict/contracts";
+import type { PlatformEventRecord, RunRecord, RunStatus } from "@everdict/contracts";
 import type { AdmissionLedger } from "./admission-ledger.js";
 import type { ExecutionAttemptStore } from "./execution-attempt-store.js";
 import type { IntermediateCleanupStore } from "./intermediate-cleanup-store.js";
@@ -30,11 +30,36 @@ export interface RunListOptions {
   // always kept. `undefined` = nothing is hidden, never "no teams". Orthogonal to `viewer` above: that hides one
   // MEMBER's personal executions, this hides one TEAM's work, and both narrow the same page.
   visibleTeams?: string[];
+  // ── "ONLY THE RUNS IN THESE STATES", BECAUSE THAT IS WHAT THE CALLERS WANTED (perf review) ────────
+  //
+  // Two readers asked for the whole run ledger and then kept the handful of ACTIVE rows: the queue snapshot
+  // (`runs.list(tenant)`) and boot recovery (`runs.list()` — with no tenant at all, so every workspace's).
+  // The adapter's projection is `SELECT *`, which carries the heavy `result` jsonb, and `limit` defaults to
+  // unlimited — so both read the entire ledger, including finished runs' snapshots, to find the few rows
+  // that were still moving.
+  //
+  // Applied in the QUERY, beside `viewer`/`visibleTeams` and for the same reason those are: a page narrowed
+  // afterwards is the wrong size. Empty array = chosen and nothing matches, never "no filter".
+  statuses?: readonly RunStatus[];
 }
 
 // A platform event stamped with identity but not yet sequenced — what the same-tx outbox persists alongside
 // the write it describes (event-plumbing.md E0). The store assigns seq (the log's cursor) on insert.
 export type OutboxEvent = Omit<PlatformEventRecord, "seq">;
+
+// ── HOW MANY CHILDREN, IN WHICH STATE — WITHOUT READING THE CHILDREN (perf review) ──────────────────
+//
+// The queue screen shows each running batch's progress as done/active/waiting. It computed that by LISTING
+// every child of every running batch — `runs.list(tenant, { scorecardId })`, once per batch, and the adapter's
+// projection is `SELECT *`, so a 600-case batch shipped 600 rows of `result` jsonb (snapshots and all) to
+// produce three integers. N+1 in the number of running batches, and each of the N unbounded in dataset size.
+//
+// One grouped read answers every batch at once, and it reads only the column the answer depends on.
+export interface RunChildStatusCount {
+  scorecardId: string;
+  status: RunStatus;
+  count: number;
+}
 
 // Result store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
 // `events` (optional) is the E0 outbox: implementations persist them ATOMICALLY with the write (Postgres: one
@@ -245,6 +270,9 @@ export interface RunStore extends AdmissionLedger {
   ): Promise<RunRecord | undefined>;
   get(id: string): Promise<RunRecord | undefined>;
   list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]>;
+  // Child-run counts per (batch, status) for the given batches, in ONE read — see `RunChildStatusCount`.
+  // An empty `scorecardIds` answers `[]`; a batch with no children simply contributes no rows.
+  countChildrenByStatus(tenant: string, scorecardIds: readonly string[]): Promise<RunChildStatusCount[]>;
   // Remove every child run a scorecard fanned out (scorecard hard-delete cascade — orphaned children would
   // otherwise linger in the "all executions" view). Returns the number of runs removed.
   deleteByScorecard(scorecardId: string): Promise<number>;

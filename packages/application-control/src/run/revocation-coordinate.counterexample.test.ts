@@ -71,6 +71,10 @@ function store(records: RunRecord[]): RunStore {
     async inFlightByTenant() {
       return {};
     },
+    // No children in this fixture — the queue-progress read is not this test's subject.
+    async countChildrenByStatus() {
+      return [];
+    },
     async liveSessions() {
       return [];
     },

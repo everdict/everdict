@@ -71,7 +71,7 @@ function inner(events: TraceEvent[]): TrajectoryStore {
     async deleteRuns() {
       return 0;
     },
-    async payloadRefsOlderThan() {
+    async payloadRefsOf() {
       return [];
     },
     async ingestedSince() {

@@ -196,9 +196,15 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
 
   it("list dedups per (run, emitter), pages by keyset cursor; meter and retention ride the same dedup", async () => {
     const { calls, fetchImpl } = fakeClickHouse((sql) => {
-      if (sql.includes("argMin(tenant_first"))
-        return listLine() + listLine({ run_id: "r0", sealed_at_run: "2026-07-29T00:00:00.000Z" });
-      if (sql.includes("sum(event_count_run) AS events"))
+      // Step 1 of the browse read: WHICH runs are on this page, over the narrow columns only.
+      if (sql.includes("min(sealed_at) AS sealed_at_run") && !sql.includes("argMin"))
+        return (
+          `${JSON.stringify({ run_id: "r1", sealed_at_run: "2026-07-30T00:00:00.000Z" })}\n` +
+          `${JSON.stringify({ run_id: "r0", sealed_at_run: "2026-07-29T00:00:00.000Z" })}\n`
+        );
+      // Step 2: what to SHOW for the ids step 1 picked.
+      if (sql.includes("argMin(tenant_first")) return listLine();
+      if (sql.includes("uniqExact(run_id) AS trajectories"))
         return `${JSON.stringify({ trajectories: "3", events: "9" })}\n`;
       if (sql.includes("count() AS trajectories")) return `${JSON.stringify({ trajectories: "2" })}\n`;
       return "";
@@ -208,13 +214,24 @@ describe("ClickHouseTrajectoryStore — the ops-scale rung behind the SAME port 
     const page = await store.list("acme", { limit: 1 });
     expect(page.items).toHaveLength(1);
     expect(page.nextCursor).toBeDefined();
-    const listSql = calls[0]?.sql ?? "";
+    // Step 1 reads the KEY columns only — never the fifteen-column argMin aggregate over the whole history.
+    const pickSql = calls[0]?.sql ?? "";
+    expect(pickSql).toMatch(/SELECT run_id, min\(sealed_at\) AS sealed_at_run/);
+    expect(pickSql).not.toMatch(/argMin/);
+    // Step 2 keeps the per-plane dedup the run-level aggregate sits on, restricted to the page's ids.
+    const listSql = calls[1]?.sql ?? "";
     expect(listSql).toMatch(/argMin\(source, sealed_at\) AS source_first/); // *_first: a CH alias shadows its column everywhere in the SELECT
-    expect(listSql).toMatch(/GROUP BY run_id, emitter/); // the per-plane dedup the run-level aggregate sits on
+    expect(listSql).toMatch(/GROUP BY run_id, emitter/);
     expect(listSql).toMatch(/sum\(event_count_first\) AS event_count_run/); // a run's planes counted together
+    expect(listSql).toMatch(/run_id IN \{runIds:Array\(String\)\}/);
 
     await store.list("acme", { limit: 1, cursor: page.nextCursor ?? "" });
-    expect(calls[1]?.sql).toMatch(/HAVING \(sealed_at_run, run_id\) </);
+    // ⚠️ THE CURSOR IS A ROW PREDICATE FIRST (perf review). It is still checked exactly in the HAVING, but a
+    // HAVING alone made every page cost the whole history — `sealed_at` leads the key after `tenant`, so the
+    // WHERE is what lets the engine skip granules.
+    const pagedSql = calls[2]?.sql ?? "";
+    expect(pagedSql).toMatch(/AND sealed_at <= \{afterSealedAt:String\}/);
+    expect(pagedSql).toMatch(/HAVING \(sealed_at_run, run_id\) </);
 
     expect(await store.ingestedSince("acme", "2026-07-30T00:00:00.000Z")).toEqual({ trajectories: 3, events: 9 });
 
@@ -246,7 +263,11 @@ describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the confi
     // reports success and the first seal fails with UNKNOWN_TABLE.
     // BOTH tables are qualified — the events table (mig 0200's rung-2 twin) is the second one that would
     // otherwise land in the connection's default database while every read says `everdict.…`.
-    for (const { sql } of calls.slice(1)) expect(sql).toMatch(/everdict\.everdict_trajector(ies|y_events)/);
+    // Every DDL statement is qualified. The `system.tables` read-back is exempt on purpose: it passes the
+    // database and table as PARAMETERS (they are values to that query, not identifiers), which is the safer
+    // spelling and the reason it does not carry the qualified name in its text.
+    for (const { sql } of calls.slice(1))
+      if (!sql.includes("system.tables")) expect(sql).toMatch(/everdict\.everdict_trajector(ies|y_events)/);
     expect(calls.some(({ sql }) => sql.startsWith("CREATE TABLE IF NOT EXISTS everdict.everdict_trajectories"))).toBe(
       true,
     );
@@ -254,6 +275,22 @@ describe("ClickHouseTrajectoryStore.ensureSchema — the DDL addresses the confi
       calls.some(({ sql }) => sql.startsWith("CREATE TABLE IF NOT EXISTS everdict.everdict_trajectory_events")),
     ).toBe(true);
     expect(calls.filter(({ sql }) => sql.startsWith("ALTER TABLE")).length).toBeGreaterThan(0);
+    // ── BOTH TABLES ARE PARTITIONED, AND BOOT READS BACK WHAT THE LIVE ONE ACTUALLY IS (perf review) ──
+    //
+    // An unpartitioned MergeTree answers every delete by touching the whole table, which is the hourly cost
+    // of retention on the table this product grows fastest. A partition key has no `ALTER`, so `CREATE TABLE
+    // IF NOT EXISTS` reaches only fresh installs — hence the read-back, which is what keeps an upgraded
+    // deployment from silently running a different schema (the drift this file has been fixed for twice).
+    for (const table of ["everdict.everdict_trajectories", "everdict.everdict_trajectory_events"]) {
+      const create = calls.find(({ sql }) => sql.startsWith(`CREATE TABLE IF NOT EXISTS ${table}`));
+      expect(create?.sql, `${table} is created without a partition key`).toContain(
+        "PARTITION BY substring(sealed_at, 1, 7)",
+      );
+    }
+    expect(
+      calls.filter(({ sql }) => sql.includes("SELECT partition_key FROM system.tables")),
+      "boot did not read back what the live tables are partitioned by",
+    ).toHaveLength(2);
   });
 
   it("ALTERs every column the CREATE declares, VERBATIM — a table from an older install must serve today's reads", async () => {

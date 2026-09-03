@@ -80,7 +80,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-190 — retention enumerates and delet
     const owned = objects.keys()[0];
 
     // The enumeration itself, executed by Postgres. Before the fix this THREW.
-    const refs = await raw.payloadRefsOlderThan("2999-01-01T00:00:00.000Z", 5_000);
+    const refs = await raw.payloadRefsOf([runId], 5_000);
     expect(
       refs.map((r) => r.ref),
       "the enumeration did not find the trajectory's own payload",

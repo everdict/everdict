@@ -48,6 +48,17 @@ export interface ScorecardListFilter {
   runtimes?: string[];
   creators?: string[];
   teamIds?: string[];
+  // ── A TIME WINDOW, BECAUSE THE HOME SCREEN ASKS ONE (perf review) ─────────────────────────────────
+  //
+  // `day` narrows to a single calendar day and `before` pages backwards; neither says "everything since T".
+  // The workspace pulse wants exactly that — the current window plus the one before it, to compare — and
+  // having no way to ask for it, it read `list(tenant)` with no filter at all and windowed the result in
+  // JavaScript. So opening the home screen loaded EVERY scorecard the workspace had ever produced, with its
+  // jsonb summary columns, once per page view, forever. A batch is an event CI files; the collection only
+  // grows, and a dashboard is the one read that must not grow with it.
+  //
+  // Inclusive lower bound on `created_at`, ISO-8601. Uses the same `(tenant, created_at)` index `day` does.
+  createdSince?: string;
   // One calendar day of `created_at`, as `YYYY-MM-DD` **in UTC** — the stored instant's date, which is
   // exactly how the list's day grouping keys a row (`createdAt.slice(0, 10)`). A reader in another timezone
   // sees the same buckets the server counts; a locale-local day would make the header disagree with the page.

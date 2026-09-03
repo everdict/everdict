@@ -11,6 +11,13 @@ export interface ProjectListFilter {
   // "Any of these initiatives" — one query for an initiative AND its descendants, so a nested readiness roll-up
   // is a single read instead of one per node in the tree.
   initiativeIds?: string[];
+  // ── "ANY OF THESE STATUSES", BECAUSE THAT IS WHAT A DASHBOARD ASKS (perf review) ──────────────────
+  //
+  // `status` is one value, and every caller that wanted the LIVE set — the workspace pulse, the readiness
+  // roll-up — asked for everything and filtered in JavaScript. That read grows with the workspace forever on
+  // the screen people open first. A set filter narrows in the store, exactly as the issue store's `statuses`
+  // does. Empty array = chosen and nothing matches, never "no filter" (the issue store's rule, kept).
+  statuses?: readonly ProjectStatus[];
   limit?: number;
 }
 

@@ -239,24 +239,34 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     };
   }
 
+  // A PLANE is the unit, counted by its own seal stamp — the rule both adapters follow (perf review). The
+  // twin used to date a whole run by its HEADER and then add every segment it had ever gathered, so a late
+  // plane on an old run counted as nothing and an old plane on a new run counted as this hour's. A double
+  // that measures differently from production cannot see a metering defect.
   async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
-    let trajectories = 0;
+    const touched = new Set<string>();
     let events = 0;
     for (const [runId, row] of this.rows) {
-      if (row.tenant !== tenant || row.sealedAt <= sinceIso) continue;
-      trajectories += 1;
-      events += this.metaOf(runId).eventCount;
+      if (row.tenant !== tenant) continue;
+      for (const segment of row.segments) {
+        if (segment.sealedAt <= sinceIso) continue;
+        touched.add(runId);
+        events += segment.eventCount;
+      }
     }
-    return { trajectories, events };
+    return { trajectories: touched.size, events };
   }
 
   // The twin of the Pg reader (arch-review 120): every payload ref the doomed rows hold, so the decorator can
-  // delete the bytes before the rows that name them are gone.
-  async payloadRefsOlderThan(
-    cutoffIso: string,
+  // delete the bytes before the rows that name them are gone. Scoped to the RUN SET the sweep claimed, like
+  // both adapters (perf review) — a twin whose scope is wider than production's cannot see a scoping defect.
+  async payloadRefsOf(
+    runIds: readonly string[],
     limit: number,
     after?: TrajectoryPayloadRef,
   ): Promise<TrajectoryPayloadRef[]> {
+    if (runIds.length === 0) return [];
+    const wanted = new Set(runIds);
     const found: TrajectoryPayloadRef[] = [];
     // ── DEDUPED PER (ref, tenant, run), NOT PER REF (arch-review 124) ────────────────────────────────
     //
@@ -295,7 +305,7 @@ export class InMemoryTrajectoryStore implements TrajectoryStore {
     };
     // The twin walks the WHOLE row — header, segments and items alike — which is what the Pg statement's
     // three-way UNION has to reproduce, side segments included.
-    for (const [runId, row] of this.rows.entries()) if (row.sealedAt < cutoffIso) walk(row, row.tenant, runId);
+    for (const [runId, row] of this.rows.entries()) if (wanted.has(runId)) walk(row, row.tenant, runId);
     // Ordered and compared on the WHOLE identity, because one ref legitimately has several owners — see the
     // port. The twin pages the way the adapters do, or the sweep's drain is a property no unit test can see.
     const key = (r: TrajectoryPayloadRef): string => `${r.ref}\u0001${r.tenant}\u0001${r.runId}`;
@@ -752,10 +762,29 @@ export class PgTrajectoryStore implements TrajectoryStore {
     };
   }
 
+  // ── A PLANE IS COUNTED BY ITS OWN SEAL STAMP (perf review — the ClickHouse twin's rule, here too) ──
+  //
+  // This read dated a whole trajectory by its HEADER row's `sealed_at` and then added the denormalized
+  // `segment_event_count` to it. So a service pushing spans into a run whose header sealed before the window
+  // contributed nothing to the meter, while a run whose header sealed inside it contributed every segment it
+  // had ever gathered — including segments from hours earlier. Both directions are wrong, and the door this
+  // number guards is a QUOTA: what it must measure is bytes that arrived in the window.
+  //
+  // A plane is one row in one of two tables, so the window predicate applies to each table's own stamp and
+  // the union is the window's ingestion. `count(DISTINCT run_id)` keeps `trajectories` meaning "runs touched"
+  // rather than "rows written", which is what a workspace reading its own usage expects to see.
+  //
+  // Indexes: `everdict_trajectories (tenant, sealed_at DESC)` already existed; the segments table's
+  // `(tenant, sealed_at)` twin ships in migration 0210, because this predicate is new to that table.
   async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
     const res = await this.client.query<{ trajectories: string | number; events: string | number }>(
-      `SELECT count(*) AS trajectories, COALESCE(SUM(event_count + segment_event_count), 0) AS events
-       FROM everdict_trajectories WHERE tenant = $1 AND sealed_at > $2::timestamptz`,
+      `SELECT COUNT(DISTINCT run_id) AS trajectories, COALESCE(SUM(events), 0) AS events FROM (
+         SELECT run_id, event_count AS events FROM everdict_trajectories
+          WHERE tenant = $1 AND sealed_at > $2::timestamptz
+         UNION ALL
+         SELECT run_id, event_count AS events FROM everdict_trajectory_segments
+          WHERE tenant = $1 AND sealed_at > $2::timestamptz
+       ) windowed`,
       [tenant, sinceIso],
     );
     const row = res.rows[0];
@@ -766,7 +795,9 @@ export class PgTrajectoryStore implements TrajectoryStore {
   //
   // An offloaded payload is named ONLY by the event row carrying its ref, so deleting the rows removes the
   // last enumeration of those objects. This is the read the offloading decorator makes BEFORE the delete —
-  // after it there is nothing left to ask.
+  // after it there is nothing left to ask. Scoped to the RUNS the sweep claimed (perf review): the caller
+  // already knows which rows it is about to delete, and answering for every expired trajectory in the
+  // deployment made one page's drain cost the whole corpus.
   //
   // Both split and unsplit planes: a legacy single-blob body holds its events inside one jsonb document, and
   // its refs are just as real. `$.**` walks either shape at any depth, and `DISTINCT` collapses the many
@@ -786,39 +817,43 @@ export class PgTrajectoryStore implements TrajectoryStore {
   // Matching is by VALUE, never by key name: a whole string that STARTS WITH the scheme. A key-name rule
   // would miss a ref stored under any other name, and a substring rule would match an agent's own output
   // quoting somebody else's ref — and retention deletes what it matches.
-  async payloadRefsOlderThan(
-    cutoffIso: string,
+  async payloadRefsOf(
+    runIds: readonly string[],
     limit: number,
     after?: TrajectoryPayloadRef,
   ): Promise<TrajectoryPayloadRef[]> {
+    if (runIds.length === 0) return [];
     const res = await this.client.query<{ tenant: string; run_id: string; ref: string }>(
       `SELECT DISTINCT tenant, run_id, ref FROM (
          SELECT t.tenant, t.run_id, jsonb_path_query(e.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectory_events e
            JOIN everdict_trajectories t ON t.run_id = e.run_id
-          WHERE t.sealed_at < $1::timestamptz
+          WHERE e.run_id = ANY($1::text[])
          UNION ALL
          SELECT t.tenant, t.run_id, jsonb_path_query(t.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectories t
-          WHERE t.sealed_at < $1::timestamptz AND t.body IS NOT NULL
+          WHERE t.run_id = ANY($1::text[]) AND t.body IS NOT NULL
          UNION ALL
          -- ── AND THE SIDE SEGMENTS' OWN BODIES ────────────────────────────────────────────────────
          --
          -- A plane sealed BEFORE the split (mig 0200), or arriving through a rolling deploy, a migration or
          -- a legacy import, holds its events in the segments table's own body column — and this enumeration
-         -- read the header's body and the split event rows and not this one. deleteOlderThan cascades the
+         -- read the header's body and the split event rows and not this one. deleteRuns cascades the
          -- segments away with their header, so every payload named only there was orphaned permanently:
          -- exactly the leak the drain above was written to close, through the third table.
+         --
+         -- It reads run_id directly rather than joining the header for a cutoff, because the SCOPE is now
+         -- the run set the sweep claimed — the join that used to be needed to date the row is gone with the
+         -- predicate that needed it.
          SELECT g.tenant, g.run_id, jsonb_path_query(g.body, '$.**') #>> '{}' AS ref
            FROM everdict_trajectory_segments g
-           JOIN everdict_trajectories t ON t.run_id = g.run_id
-          WHERE t.sealed_at < $1::timestamptz AND g.body IS NOT NULL
+          WHERE g.run_id = ANY($1::text[]) AND g.body IS NOT NULL
        ) refs
        WHERE ref LIKE 'artifact://%'
          AND ($3::text IS NULL OR (ref, tenant, run_id) > ($3, $4, $5))
        ORDER BY ref, tenant, run_id
        LIMIT $2`,
-      [cutoffIso, limit, after?.ref ?? null, after?.tenant ?? null, after?.runId ?? null],
+      [[...runIds], limit, after?.ref ?? null, after?.tenant ?? null, after?.runId ?? null],
     );
     return res.rows.map((r) => ({ tenant: r.tenant, runId: r.run_id, ref: r.ref }));
   }

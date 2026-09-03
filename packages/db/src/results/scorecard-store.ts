@@ -226,6 +226,9 @@ function matchesScorecardFilter(
   if (filter.runtimes !== undefined && !filter.runtimes.includes(c.runtime ?? "")) return false;
   if (filter.creators !== undefined && !filter.creators.includes(c.createdBy ?? "")) return false;
   if (filter.teamIds !== undefined && !filter.teamIds.includes(c.teamId ?? "")) return false;
+  // The dashboard's half-open window (perf review) — the twin filters it here so a service that narrows the
+  // READ behaves the same against either store.
+  if (filter.createdSince !== undefined && c.createdAt < filter.createdSince) return false;
   if (filter.day !== undefined && c.createdAt.slice(0, 10) !== filter.day) return false;
   if (filter.search !== undefined && filter.search !== "" && !matchesSearch(c, filter.search)) return false;
   return true;

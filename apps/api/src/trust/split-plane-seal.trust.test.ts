@@ -134,7 +134,7 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-191 — a split plane seals atomically
       [runId, tenant, JSON.stringify([{ t: 0, kind: "tool_result", id: "c1", ok: true, outputRef: ref }])],
     );
 
-    const refs = await store.payloadRefsOlderThan("2999-01-01T00:00:00.000Z", 5_000);
+    const refs = await store.payloadRefsOf([runId], 5_000);
     expect(
       refs.filter((r) => r.runId === runId).map((r) => r.ref),
       "the legacy segment's payload was invisible to retention, so its object outlives every row that named it",

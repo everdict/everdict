@@ -97,7 +97,7 @@ function inner(
       deleted.push(...runIds);
       return runIds.length;
     },
-    async payloadRefsOlderThan() {
+    async payloadRefsOf() {
       return refs;
     },
     async ingestedSince() {

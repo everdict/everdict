@@ -22,6 +22,10 @@ const ref = (n: string) => `artifact://trajectory-payloads/acme/run-${n}/run/sha
 describe("the payload-ref cursor pages on the whole row", () => {
   // Three runs quote ONE ref, plus a run with its own. Ordered by ref, the shared one is a group of three
   // that a two-row page must not lose the tail of.
+  // The runs the sweep would have claimed for its page — `payloadRefsOf` is scoped to an exact set now
+  // (perf review), so the enumeration's subject is named rather than inferred from a cutoff.
+  const RUNS = ["run-1", "run-2", "run-3", "run-4"];
+
   async function seeded(): Promise<InMemoryTrajectoryStore> {
     const store = new InMemoryTrajectoryStore();
     const shared = ref("a");
@@ -43,12 +47,10 @@ describe("the payload-ref cursor pages on the whole row", () => {
 
   it("drains every owner of a shared ref across page boundaries", async () => {
     const store = await seeded();
-    const cutoff = "2999-01-01T00:00:00.000Z";
-
     const seen: string[] = [];
-    let after = undefined as Awaited<ReturnType<InMemoryTrajectoryStore["payloadRefsOlderThan"]>>[number] | undefined;
+    let after = undefined as Awaited<ReturnType<InMemoryTrajectoryStore["payloadRefsOf"]>>[number] | undefined;
     for (;;) {
-      const page = await store.payloadRefsOlderThan(cutoff, 2, after);
+      const page = await store.payloadRefsOf(RUNS, 2, after);
       if (page.length === 0) break;
       for (const row of page) seen.push(`${row.ref}|${row.runId}`);
       if (page.length < 2) break;
@@ -56,7 +58,7 @@ describe("the payload-ref cursor pages on the whole row", () => {
     }
 
     // The premise: the seed really does share one ref across three runs, or this proves nothing.
-    const all = await store.payloadRefsOlderThan(cutoff, 5_000);
+    const all = await store.payloadRefsOf(RUNS, 5_000);
     expect(all.filter((r) => r.ref === ref("a"))).toHaveLength(3);
     // …and paging two at a time reached every one of them.
     expect(new Set(seen).size).toBe(all.length);
@@ -65,13 +67,12 @@ describe("the payload-ref cursor pages on the whole row", () => {
 
   it("returns the same set whether it is read whole or paged", async () => {
     const store = await seeded();
-    const cutoff = "2999-01-01T00:00:00.000Z";
-    const whole = (await store.payloadRefsOlderThan(cutoff, 5_000)).map((r) => `${r.ref}|${r.runId}`).sort();
+    const whole = (await store.payloadRefsOf(RUNS, 5_000)).map((r) => `${r.ref}|${r.runId}`).sort();
 
     const paged: string[] = [];
-    let after = undefined as Awaited<ReturnType<InMemoryTrajectoryStore["payloadRefsOlderThan"]>>[number] | undefined;
+    let after = undefined as Awaited<ReturnType<InMemoryTrajectoryStore["payloadRefsOf"]>>[number] | undefined;
     for (;;) {
-      const page = await store.payloadRefsOlderThan(cutoff, 1, after);
+      const page = await store.payloadRefsOf(RUNS, 1, after);
       if (page.length === 0) break;
       const row = page[0];
       if (!row) break;

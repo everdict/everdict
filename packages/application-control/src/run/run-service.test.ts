@@ -37,6 +37,10 @@ function fakeStore(records: RunRecord[]): RunStore {
     async inFlightByTenant() {
       return {};
     },
+    // No children in this fixture — the queue-progress read is not this test's subject.
+    async countChildrenByStatus() {
+      return [];
+    },
     async liveSessions() {
       return [];
     },
@@ -343,6 +347,10 @@ describe("standalone attempts — every dispatch's row ends where the run ends",
       async inFlightByTenant() {
         return {};
       },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
+      },
       async liveSessions() {
         return [];
       },
@@ -608,6 +616,10 @@ describe("standalone finality — the terminal write itself carries the evidence
       },
       async inFlightByTenant() {
         return {};
+      },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
       },
       async liveSessions() {
         return [];
