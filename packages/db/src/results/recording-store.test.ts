@@ -2,6 +2,10 @@ import type { TrackEntry } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRecordingStore } from "./recording-store.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-170 — A re-drive opens an attempt; it does not erase one
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 describe("InMemoryRecordingStore", () => {
   it("returns undefined for a recording that was never sealed", async () => {
     // Given a store with only appended (in-progress) entries

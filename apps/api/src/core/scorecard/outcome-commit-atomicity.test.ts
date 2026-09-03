@@ -10,6 +10,10 @@ import {
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-168 — The summary is built from the committed children, not from this process's memory
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // ── EVERY OUTCOME COMMITS THROUGH THE ONE ATOMIC POINT (arch-review 41 P0-lifecycle) ─────────────────
 //
 // Success already went receipt+terminal-write-in-one-transaction (review 40). Failures terminalized first

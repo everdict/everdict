@@ -19,6 +19,10 @@ import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, TRUST_SUITE_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-106 — The world crosses the database into the decision
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // Trust suite (docs/trust-certification.md) — TRUST-37.
 //
 // THE RELEASE PATH SPEAKS THE SCORECARD GATE'S VERDICT, AND NOT EVALUATED IS NEVER GREEN. Product release

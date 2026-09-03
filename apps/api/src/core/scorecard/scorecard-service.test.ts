@@ -58,6 +58,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // imports @everdict/graders, so the composition side supplies the steps/cost/latency graders the ingest re-derives.
 const defaultTraceGraders = () => [stepsGrader, costGrader, latencyGrader];
 import type { CaseExportStream, JudgeRunner } from "@everdict/application-control";
+
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-163 — The Temporal driver ends a case the same way the in-process one does
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 import {
   InMemoryCaseReceiptStore,
   InMemoryExecutionAttemptStore,

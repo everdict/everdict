@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { analysisBundle, initialPassId } from "./scorecard-observability.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-165 — An artifact is keyed by the attempt that made it, never by the thing it is about
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // ── A COMPETING FINALIZER CANNOT OVERWRITE THE WINNER'S BUNDLE (review 39 P0-6) ──────────────────────
 describe("initialPassId — the initial pass is keyed by its own bytes", () => {
   // The bundle is the JUDGMENT, so what distinguishes two finalizers is what they concluded — here, one

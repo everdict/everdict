@@ -2,6 +2,11 @@ import { RunnerHub, type SelfHostedKey, poolKeyFor } from "@everdict/application
 import { type CaseJob, type CaseResult, RateLimitError } from "@everdict/contracts";
 import { describe, expect, it, vi } from "vitest";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-162 — A producer owns its attempt
+//   TRUST-173 — The attempt token protects the outcome, not just the evidence that explains it
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 const result: CaseResult = {
   caseId: "c1",
   harness: "scripted@0",

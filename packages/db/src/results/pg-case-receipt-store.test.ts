@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { SqlClient } from "../client.js";
 import { PgCaseReceiptStore } from "./pg-case-receipt-store.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-166 — At most one canonical outcome per case
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // The store is one statement, so what a unit can pin is that the CLAIM and the read of the winner happen
 // inside it — a two-statement version (insert, then select on conflict) is exactly the race the receipt
 // exists to end.

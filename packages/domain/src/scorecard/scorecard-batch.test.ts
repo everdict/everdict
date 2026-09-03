@@ -6,6 +6,10 @@ import { SPANS_TO_EVENTS_VERSION } from "../trace/spans-to-events.js";
 import { ScorecardBatch } from "./scorecard-batch.js";
 import { verdictPolicyRef } from "./verdict-policy.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-172 — The ledger keeps the trial axis
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 const NOW = "2026-07-10T00:00:00.000Z";
 
 const result = (caseId: string, trial?: number): CaseResult => ({

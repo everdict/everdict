@@ -92,7 +92,14 @@ then says the campaign came from A alone. The provenance is half-written, which 
 (provenance is born at the source, never re-derived downstream). Nothing later can reconstruct that this
 version came from two lineages.
 
-**The change, if it lands.** `continues` becomes a list, and three things follow — none of them large,
+**The change is DESIGNED AND DELIBERATELY NOT BUILT, because nothing merges leaves today.** Rule
+`api-layer` is explicit — "a field, parameter, or endpoint exists only if it has a current caller; 'could be
+useful later' is removal grounds, not justification" — and a `continues: string[]` with no driver that
+produces a merge is that surface exactly. Two things would give it one: a driver that fans out and wants both
+results, or a second campaign that cannot express its ancestry without it. Until then the workaround above is
+the honest shape, and its cost (half the provenance) is recorded here rather than discovered later.
+
+What it would be, when it has a caller. `continues` becomes a list, and three things follow — none of them large,
 because the existing code is already set-shaped:
 
 1. **The family walk unions and de-duplicates.** `assertChainIsHonest` already builds a `Set` and grows it to
@@ -105,6 +112,12 @@ because the existing code is already set-shaped:
    baselines the MERGE of what its parents adopted" — computed by `mergeThreeWay` against the shared
    ancestor, refused when it conflicts. The baseline of a merge campaign is a document the platform derived,
    so it is registered like any other version before the campaign opens, and the frame names it by digest.
+
+**What was checked before writing that.** The tree accounting is not a comment: `assertChainIsHonest` grows
+the closure to a fixed point and then sums it —
+`for (const c of everyCampaign) if (tree.has(c.id) && !seen.has(c.id)) spent += c.rounds.length` — so a
+sibling's rounds really are charged to the family. There is no defect to fix here; there is a shape the
+schema cannot express, and no caller that needs it expressed.
 
 ## Rejected alternatives
 

@@ -9,6 +9,10 @@ import type { CaseJob, CaseResult } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { InMemoryRunnerJobStore } from "./runner-job-store.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-173 — The attempt token protects the outcome, not just the evidence that explains it
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // StoreRunnerHub over the InMemory store — mirrors the Pg semantics, so these cover the multi-replica lease flow
 // without a real database (the Pg impl is exercised by the env-gated *.scenario.test.ts).
 

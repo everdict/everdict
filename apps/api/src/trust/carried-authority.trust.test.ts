@@ -18,6 +18,11 @@ import {
 } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-164 — A terminal payload is not amended, and a settled run's replay is its own
+//   TRUST-170 — A re-drive opens an attempt; it does not erase one
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // A registry that answers "who is alive"; heartbeat/leave are the process lifecycle, not this scenario's.
 const aliveOnly = (who: string[]): ReplicaRegistry => ({
   liveReplicas: async () => who,

@@ -13,6 +13,10 @@ import { InMemoryRecordingStore, InMemoryRunStore, InMemoryTrajectoryStore, type
 import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-164 — A terminal payload is not amended, and a settled run's replay is its own
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 const CASE: EvalCase = {
   id: "c1",
   env: { kind: "repo", source: { files: {} } },

@@ -4,6 +4,11 @@ import { PgRunStore } from "@everdict/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-context.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-19 — Permit conservation
+//   TRUST-20 — The permit is a lease, not a timestamp
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // Trust suite (docs/trust-certification.md) — TRUST-07.
 //
 // The invariant: A WORKSPACE QUOTA IS FLEET-WIDE, NOT PER-PROCESS. A control plane of N replicas must hand a

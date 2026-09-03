@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { CURRENT_STAGE_PARITY_VERSION, stagePromotionReadiness } from "./stage-promotion.js";
 
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-125 — Evidence is only meaningful together with the decision procedure that produced it
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 // Trust suite (docs/trust-certification.md) — TRUST-124.
 //
 // A DEFERRAL WITH NO DECISION FUNCTION IS A DEFERRAL FOREVER.

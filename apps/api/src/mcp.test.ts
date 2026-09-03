@@ -58,6 +58,12 @@ import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
 import { LiveTraceStore } from "./common/live-trace-store.js";
 import { BundleService } from "./core/bundle/bundle-service.js";
+
+// Certified in the trust suite (docs/trust-certification.md) as:
+//   TRUST-162 — A producer owns its attempt
+//   TRUST-173 — The attempt token protects the outcome, not just the evidence that explains it
+// Named here because the table's last column points at this file, and a row whose test does not say
+// which claim it carries leaves the next reader to guess which assertion is load-bearing.
 import { githubAppGateway } from "./infrastructure/github/app-gateway.js";
 import { githubRepoTreeReaderFactory, githubRepoWriterFactory } from "./infrastructure/github/repo-writer.js";
 import { buildMcpServer } from "./mcp.js";
