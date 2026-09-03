@@ -37,8 +37,8 @@ const MUTATIONS = [
     // costs a campaign its evidence was green against a store more permissive than production.
     name: "evolution — the in-memory adoption lane stops validating what it registers",
     file: "packages/registry/src/harness/harness-instance-registry.ts",
-    from: "    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);\n    assertRegistrableInstance(template, instance);\n    return this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);",
-    to: "    void this.templates;\n    return this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);",
+    from: "    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);\n    assertRegistrableInstance(template, instance);\n    this.store.register(tenant, instance, createdBy, origin);",
+    to: "    void this.templates;\n    this.store.register(tenant, instance, createdBy, origin);",
     build: "@everdict/registry",
     suite: ["--root", "packages/registry", "src/harness/harness-instance-registry.test.ts"],
   },
@@ -2767,50 +2767,6 @@ const MUTATIONS = [
     suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
   },
   {
-    // …and the re-pin preserves the team that owns the harness: detached from the base's row, the
-    // successor becomes the newest own version with no owner and re-files the entity out of its team.
-    // ⚠️ RE-AIMED (arch-review 106). Both lanes used to resolve the team themselves and pass it to
-    // `register` — a read-then-write with a window an ownership transfer fits through — and each carried its
-    // own rung on its own read. arch-review 92 replaced BOTH with `registerPreservingOwner`, which resolves
-    // the owner INSIDE the write, so the two subjects those rungs named no longer exist and the gate refused
-    // them (a mutation whose target is gone FAILS, which is the check working). The protocol is now one
-    // mechanism, so it gets one rung on that mechanism — neutralize the resolution and every lane that
-    // depends on it must go red.
-    // ── THE THREE DOORS THAT MINT A VERSION ALL ASK WHOSE ENTITY IT IS (arch-review 117-118) ────────
-    //
-    // `registerPreservingOwner` preserves an owner; being ALLOWED to write to that owner is a different
-    // question, and three doors mint versions through it. arch-review 76 gated the adoption door and did not
-    // look at its siblings — the re-pin gated the action without a resource, the agent save gated neither
-    // transport. A gate that exists on one door and not the others is the one-lane-only shape this whole
-    // series is about, so each door gets its own rung.
-    name: "R118 — the agent save door mints a version without asking whose agent it is",
-    file: "apps/api/src/api/agent/agent.routes.ts",
-    from: '      gate(principal, "agents:write", owner);',
-    to: '      gate(principal, "agents:write");',
-    suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
-  },
-  {
-    // …and the MCP twin, because BFF↔MCP parity is structural (rule `api-layer`) and a gate one transport
-    // carries and the other does not is exactly how this defect reached production.
-    name: "R118 — the MCP save door mints a version without asking whose agent it is",
-    file: "apps/api/src/api/agent/agent.mcp.ts",
-    // ⚠️ The formatter split `}, owner);` across lines, so the rung names the ARGUMENT — the thing whose
-    // absence is the defect — rather than a punctuation shape a formatter owns.
-    from: "          owner,",
-    to: "",
-    suite: ["--root", "apps/api", "src/api/agent/agent-save.mcp.test.ts"],
-  },
-  {
-    // The re-pin door's half: the service forwards what the transport gated on, and dropping the forward
-    // silently restores the window (arch-review 117).
-    name: "R117 — the re-pin drops the owner its authorization was granted against",
-    file: "packages/application-control/src/harness/harness-pin-service.ts",
-    from: "    ...(authority !== undefined ? ([authority] as const) : ([] as const)),",
-    to: "",
-    build: "@everdict/application-control",
-    suite: ["--root", "packages/registry", "src/harness/harness-pin-lineage.counterexample.test.ts"],
-  },
-  {
     // ── A VERDICT READS THE PAYLOAD, NOT ITS PREVIEW (arch-review 120) ────────────────────────────
     //
     // The offload leaves an EXCERPT plus a ref where an oversized value was. Asking for the bytes back was
@@ -2826,43 +2782,6 @@ const MUTATIONS = [
     to: "  return collectTrajectoryEvents(store, tenant, runId, { ...window });",
     build: "@everdict/application-control",
     suite: ["--root", "apps/api", "src/core/scorecard/exact-offloaded-scoring.counterexample.test.ts"],
-  },
-  {
-    name: "wave C — a successor is registered without the team its entity is owned by",
-    file: "packages/registry/src/versioned-store.ts",
-    // ⚠️ RE-AIMED TWICE, and the second time because THE PROTOCOL MOVED DOWN A LAYER (arch-review 119).
-    //
-    // 115 gave the write an `authority` precondition, so the resolution and its fallback moved onto one line
-    // and this rung followed them. Then `register` itself learned that silence PRESERVES an entity's owner —
-    // a successor can no longer be born detached even when its caller passes nothing — and neutralizing
-    // `registerPreservingOwner`'s spelling stopped changing the outcome. The gate said so: HOLE, the suite
-    // stayed green with the protocol removed.
-    //
-    // That is the fix working, not the rung failing. The question "can a successor forget whose entity it is"
-    // is now answered one layer down, so the rung asks it there. A rung left aimed at the old line would have
-    // gone on reporting a protocol nothing tests.
-    from: "    const effectiveTeamId = owner ?? teamId;",
-    to: "    const effectiveTeamId = teamId;",
-    build: "@everdict/registry",
-    suite: ["--root", "packages/registry", "src/owner-preserving-register.counterexample.test.ts"],
-  },
-  {
-    // …and the agent bump rides the same resolution, on the transport an owner actually uses.
-    name: "wave C — the agent bump detaches from its entity's owning team",
-    file: "packages/registry/src/versioned-store.ts",
-    from: "      if (entry.deletedAt === undefined && entry.teamId !== undefined) return entry.teamId;",
-    to: "      if (entry.deletedAt === undefined && entry.teamId !== undefined) return undefined;",
-    build: "@everdict/registry",
-    suite: ["--root", "apps/api", "src/api/capability-origin.routes.test.ts"],
-  },
-  {
-    // …and the MCP pin tool authorizes against the entity's owning team (BFF↔MCP parity) — read from the
-    // wrong id, the gate sees an unowned resource and lets an outsider re-pin another team's harness.
-    name: "wave C — the MCP pin gate reads the wrong entity's team",
-    file: "apps/api/src/api/harness/harness.mcp.ts",
-    from: "        const owner = await teamOfEntity(instances, ws, id);",
-    to: '        const owner = await teamOfEntity(instances, ws, "");',
-    suite: ["--root", "apps/api", "src/mcp.test.ts"],
   },
   {
     // review wave B. The observation channel cannot be forged from after the seal: the sealer writes its
@@ -3092,15 +3011,6 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
-    // The adopt route gates the campaign's OWN team; gating on the proof's copy let a proof with the field
-    // stripped skip the gate and fail on its digest as a 409 where a member of another team owes a 403.
-    name: "Evolve — the adopt route gates the team the caller wrote on the proof",
-    file: "apps/api/src/api/campaign/campaign.routes.ts",
-    from: '      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});',
-    to: '      gate(principal, "scorecards:run", body.proof.teamId !== undefined ? { teamId: body.proof.teamId } : {});',
-    suite: ["--root", "apps/api", "src/api/campaign/campaign.routes.test.ts"],
-  },
-  {
     // code-evolution-loop.md D3. A candidate whose pull request touched the frame's oracle paths rewrote its own
     // exam; the round is non-comparable whatever it scored. Neutralizing the refusal files it as a win, and the
     // service suite must notice.
@@ -3281,21 +3191,6 @@ const MUTATIONS = [
     from: '    const unknown = dispositions.find((d) => d.kind === "unknown");',
     to: '    return { kind: "terminal" };\n    const unknown = dispositions.find((d) => d.kind === "unknown");',
     suite: ["--root", "apps/api", "src/composition/logical-terminal.counterexample.test.ts"],
-  },
-  {
-    // arch-review 77. The successor's owning team is resolved INSIDE the write; the caller-read spelling
-    // leaves a window an ownership transfer fits through, and the entity's versions then come apart — the
-    // split `teamOfVersion` was made required to prevent.
-    name: "R77 — a successor is filed under a team the caller read earlier",
-    file: "packages/registry/src/versioned-store.ts",
-    // ⚠️ RE-AIMED (arch-review 119). R77 closed the WRITER's window by resolving the owner here; 115 closed
-    // the AUTHORIZER's by asserting the owner the gate was granted against. Both rungs pointed at the same
-    // vanished line, which made them one test wearing two names — so this one now neutralizes the
-    // PRECONDITION and the sibling above neutralizes the resolution. Two windows, two rungs.
-    from: "      current !== authority.expectedOwnerTeamId",
-    to: "      false",
-    build: "@everdict/registry",
-    suite: ["--root", "packages/registry", "src/owner-preserving-register.counterexample.test.ts"],
   },
   {
     // evolution-lineage Track B. The kubelet's imageID observation is what resolves a mutable tag; dropping

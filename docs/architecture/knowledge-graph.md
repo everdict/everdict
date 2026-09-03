@@ -9,7 +9,7 @@ anchors: [packages/contracts/src/records/agent-session.ts]
 
 > **SSOT** for everdict's knowledge system. Status: **the backend + API/MCP surface + the authored write path are
 > landed** — the contract spine; the `KnowledgeStore` (in-memory + Postgres); the multi-hop query engine; eighteen
-> harvesters (scorecard/run/schedule/comment/membership + issue/project/initiative/team/cycle + harness/dataset/judge/
+> harvesters (scorecard/run/schedule/comment/membership + issue/project/initiative + harness/dataset/judge/
 > runtime/model/rubric/agent/capability); and the `knowledge/` HTTP + MCP slice — read (node/related/subgraph/
 > annotations) + `reindex` + the **authored write path** (`annotate`/`relate`) so a user or agent contributes knowledge
 > from Claude Code via the everdict plugin. The graph is centred on the **intent stratum** (§The intent stratum): the
@@ -138,7 +138,7 @@ is a one-line enum extension plus a harvester — the same cheap axis digo grew 
 | Axis | Node types |
 | --- | --- |
 | **Actors (WHO)** | `workspace`, `user` |
-| **Intent (WHY — the hub)** | `issue`, `project`, `initiative`, `team`, `cycle` |
+| **Intent (WHY — the hub)** | `issue`, `project`, `initiative` |
 | **Under test (versioned)** | `harness`, `dataset`, `case`, `judge`, `rubric`, `model`, `agent`, `capability` |
 | **Execution infra (WHERE)** | `runtime`, `runner`, `image` |
 | **Execution & outcomes (WHEN)** | `run`, `scorecard`, `schedule` |
@@ -159,7 +159,7 @@ concern, keeping the vocabulary the single extension axis.
 | Axis | Predicates (typical subject → object) |
 | --- | --- |
 | **Provenance** | `created_by` (any → user), `member_of` (user → workspace, role in `edgeAttrs`), `in_workspace` (any → workspace) |
-| **Intent** | `verified_by` (issue → harness/dataset/judge/scorecard/run/view — an issue link; note in `edgeAttrs`), `resolved_by` (issue → scorecard — the closing evidence and regression baseline), `part_of` (issue → project/cycle; project → initiative; initiative/team → parent), `belongs_to` (issue/cycle/project/spec → team), `assigned_to` (issue → user; project/initiative lead with `edgeAttrs.role`), `born_from` (capability version → issue/project/scorecard/… — `CapabilityOrigin.from`) |
+| **Intent** | `verified_by` (issue → harness/dataset/judge/scorecard/run/view — an issue link; note in `edgeAttrs`), `resolved_by` (issue → scorecard — the closing evidence and regression baseline), `part_of` (issue → project; project → initiative; initiative → parent), `assigned_to` (issue → user; project/initiative lead with `edgeAttrs.role`), `born_from` (capability version → issue/project/scorecard/… — `CapabilityOrigin.from`) |
 | **Eval composition** | `evaluates` (scorecard/run → harness), `uses_dataset`, `includes_case` (dataset → case), `covers_case` (run → case), `applies_judge`, `uses_rubric` (judge → rubric), `uses_model`, `runs_on` (→ runtime), `placed_on` (run → runner), `child_of` (run → scorecard; sub-issue → parent issue), `fired_by` (scorecard → schedule) |
 | **Results & measurement** | `measures` (→ metric; value/pass in `edgeAttrs`), `compared_to` (scorecard ↔ scorecard diff), `supersedes` (scorecard → scorecard) |
 | **Lineage** | `succeeds` (entity@vN → @vN-1), `forked_from` (entity@v → the OTHER id's version it was copied from, digest on the edge), `derived_from` (dataset → dataset, instance → template) |
@@ -182,11 +182,11 @@ problem, what closed it, why did it come back").
 
 Three strata, with a deliberate tiering:
 
-1. **Intent (WHY)** — `issue` / `project` / `initiative` (+ `team` / `cycle` as organisational scoping). Harvested
+1. **Intent (WHY)** — `issue` / `project` / `initiative`. Harvested
    whole from the tracker stores ([harvest-tracker.ts](https://github.com/everdict/everdict/blob/main/packages/domain/src/knowledge/harvest-tracker.ts)):
    an issue's links become `verified_by` edges (version pin + note preserved), its resolution `resolved_by` (the
-   regression baseline), its plan coordinates `part_of` (project/cycle) + `child_of` (parent issue) +
-   `belongs_to` (team) + `assigned_to` (assignee; project/initiative leads carry `edgeAttrs.role: "lead"`).
+   regression baseline), its plan coordinates `part_of` (project) + `child_of` (parent issue) +
+   `assigned_to` (assignee; project/initiative leads carry `edgeAttrs.role: "lead"`).
 2. **Capability (WHAT)** — the versioned eval subjects/config, unchanged, plus the **`born_from` lineage**: a
    registered version's `CapabilityOrigin.from` (stored per-version in the registries, exposed on list entries as
    `versionOrigins`) becomes `harness/dataset/judge/… -[born_from]-> issue|scorecard|…` — "which issue was this
@@ -205,9 +205,8 @@ Because the spine is type-agnostic, the moment `issue` became a NodeType the exi
 entries and skills can pin issues (`about` / `evidenced_by`); and the infra panel's "Ask in chat" button works on
 issue nodes (`AGENT_REFERENCE_TYPES` already carried `issue` → `get_issue`).
 
-Deliberately NOT projected (follow-ups): issue `labelIds` (registry ids — a tag node labelled by a UUID says
-nothing; needs label-name resolution at harvest time) and team roster edges (`member_of` runs user → team, but the
-`HarvestBuilder` emits self → object only — the same reason `harvestMembership` materialises the USER node).
+Deliberately NOT projected (follow-up): issue `labelIds` (registry ids — a tag node labelled by a UUID says
+nothing; needs label-name resolution at harvest time).
 
 ## The knowledge layer — claims over predicates
 
@@ -345,7 +344,7 @@ Following everdict's one-way spine (no new package — schemas belong at the con
    cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`). Every core scorecard edge resolves to a
    materialised node, and every referenced eval-config node has an owning harvester. ✅ the knowledge-layer harvesters
    `skill` / `knowledge_entry` (projecting `refs` → `about`, `evidence` → `evidenced_by`). ✅ the intent-stratum
-   harvesters `issue` / `project` / `initiative` / `team` / `cycle` (§The intent stratum — the issue hub's
+   harvesters `issue` / `project` / `initiative` (§The intent stratum — the issue hub's
    `verified_by` / `resolved_by` / `part_of` / `belongs_to` / `assigned_to` edges, plus `born_from` via
    `SpecHarvestMeta.origin` on every registry-spec harvester). Remaining (low-fan-in leaves): `view` /
    `browser_profile` / `trace_source` / `agent_session`. Idempotent, versioned by `extractor`.

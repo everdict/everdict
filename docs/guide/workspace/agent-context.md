@@ -117,7 +117,7 @@ curl -XPUT localhost:8787/fs/file \
 ```
 
 Node types cover the whole product — `harness`, `dataset`, `scorecard`, `run`, `case`, `issue`,
-`judge`, `runtime`, `skill`, `secret`, `model`, `team` and more — so the graph describes your actual
+`judge`, `runtime`, `skill`, `secret`, `model` and more — so the graph describes your actual
 work rather than a parallel wiki.
 
 **Annotations** — a note plus a confidence on an existing node, for the small observation that is not
