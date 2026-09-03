@@ -1,14 +1,12 @@
 import {
-  type CycleRecord,
   EdgeMentionSchema,
   type InitiativeRecord,
   type IssueRecord,
   MentionSchema,
   type ProjectRecord,
-  type TeamRecord,
 } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { harvestCycle, harvestInitiative, harvestIssue, harvestProject, harvestTeam } from "./harvest-tracker.js";
+import { harvestInitiative, harvestIssue, harvestProject } from "./harvest-tracker.js";
 import { nodeId } from "./ids.js";
 
 function predicates(edges: { predicate: string; objectNodeId?: string }[]): Map<string, string | undefined> {
@@ -24,16 +22,13 @@ describe("harvestIssue", () => {
   const issue: IssueRecord = {
     id: "i1",
     tenant: "acme",
-    teamId: "team-eng",
     number: 12,
     identifier: "ENG-12",
     formerIdentifiers: [],
     title: "Judge misses truncated answers",
     status: "done",
     priority: "high",
-    inTriage: false,
     parentId: "i0",
-    cycleId: "cy1",
     projectId: "p1",
     assignee: "user-bob",
     labelIds: ["lbl-1"],
@@ -61,19 +56,10 @@ describe("harvestIssue", () => {
     expect(res.nodes[0]?.label).toBe("ENG-12 · Judge misses truncated answers");
     expect(res.nodes[0]?.attrs).toMatchObject({ status: "done", identifier: "ENG-12", priority: "high" });
     const p = predicates(res.edges);
-    expect(p.get("belongs_to")).toBe(nodeId("acme", { type: "team", key: "team-eng" }));
     expect(p.get("assigned_to")).toBe(nodeId("acme", { type: "user", key: "user-bob" }));
     expect(p.get("child_of")).toBe(nodeId("acme", { type: "issue", key: "i0" }));
     expect(p.get("created_by")).toBe(nodeId("acme", { type: "user", key: "user-alice" }));
     assertValid(res);
-  });
-
-  it("projects both containment coordinates (project AND cycle) as part_of", () => {
-    const partOf = harvestIssue(issue)
-      .edges.filter((e) => e.predicate === "part_of")
-      .map((e) => e.objectNodeId);
-    expect(partOf).toContain(nodeId("acme", { type: "project", key: "p1" }));
-    expect(partOf).toContain(nodeId("acme", { type: "cycle", key: "cy1" }));
   });
 
   it("projects issue links as verified_by (version pin + note preserved) and the resolution as resolved_by", () => {
@@ -100,7 +86,6 @@ describe("harvestProject", () => {
     tenant: "acme",
     name: "Q3 judge reliability",
     status: "in_progress",
-    teamIds: ["team-eng", "team-plt"],
     memberIds: [],
     lead: "user-alice",
     health: "on_track",
@@ -112,19 +97,12 @@ describe("harvestProject", () => {
     updatedAt: "2026-08-01T00:00:00Z",
   };
 
-  it("materialises the project with team scoping, its goals and its lead", () => {
+  it("names the project and the goal it serves", () => {
     const res = harvestProject(project);
-    expect(res.nodes[0]?.nodeId).toBe(nodeId("acme", { type: "project", key: "p1" }));
-    const teams = res.edges.filter((e) => e.predicate === "belongs_to").map((e) => e.objectNodeId);
-    expect(teams).toEqual([
-      nodeId("acme", { type: "team", key: "team-eng" }),
-      nodeId("acme", { type: "team", key: "team-plt" }),
-    ]);
+    expect(res.nodes[0]?.label).toBe("Q3 judge reliability");
     const p = predicates(res.edges);
     expect(p.get("part_of")).toBe(nodeId("acme", { type: "initiative", key: "n1" }));
-    const lead = res.edges.find((e) => e.predicate === "assigned_to");
-    expect(lead?.edgeAttrs).toMatchObject({ role: "lead" });
-    assertValid(res);
+    expect(p.get("in_workspace")).toBe(nodeId("acme", { type: "workspace", key: "acme" }));
   });
 });
 
@@ -150,68 +128,5 @@ describe("harvestInitiative", () => {
     const p = predicates(res.edges);
     expect(p.get("part_of")).toBe(nodeId("acme", { type: "initiative", key: "n0" }));
     assertValid(res);
-  });
-});
-
-describe("harvestTeam", () => {
-  const team: TeamRecord = {
-    id: "team-eng",
-    tenant: "acme",
-    key: "ENG",
-    name: "Engineering",
-    isDefault: true,
-    cyclesEnabled: false,
-    cycleDurationWeeks: 2,
-    cycleStartDay: 1,
-    upcomingCycleCount: 2,
-    cycleAutoClose: false,
-    isPrivate: false,
-    triageEnabled: false,
-    issueCounter: 12,
-    cycleCounter: 0,
-    history: [],
-    createdBy: "user-alice",
-    createdAt: "2026-07-01T00:00:00Z",
-    updatedAt: "2026-08-01T00:00:00Z",
-  };
-
-  it("materialises the team named by its identifier prefix", () => {
-    const res = harvestTeam(team);
-    expect(res.nodes[0]?.nodeId).toBe(nodeId("acme", { type: "team", key: "team-eng" }));
-    expect(res.nodes[0]?.label).toBe("ENG · Engineering");
-    assertValid(res);
-  });
-
-  it("rolls a sub-team under its parent team", () => {
-    const p = predicates(harvestTeam({ ...team, id: "team-rt", key: "RT", parentId: "team-eng" }).edges);
-    expect(p.get("part_of")).toBe(nodeId("acme", { type: "team", key: "team-eng" }));
-  });
-});
-
-describe("harvestCycle", () => {
-  const cycle: CycleRecord = {
-    id: "cy1",
-    tenant: "acme",
-    teamId: "team-eng",
-    number: 7,
-    startsAt: "2026-08-03",
-    endsAt: "2026-08-16",
-    history: [],
-    createdBy: "user-alice",
-    createdAt: "2026-08-01T00:00:00Z",
-    updatedAt: "2026-08-01T00:00:00Z",
-  };
-
-  it("materialises the numbered iteration under its team", () => {
-    const res = harvestCycle(cycle);
-    expect(res.nodes[0]?.label).toBe("Cycle 7");
-    expect(res.nodes[0]?.attrs).toMatchObject({ number: 7, startsAt: "2026-08-03", endsAt: "2026-08-16" });
-    const p = predicates(res.edges);
-    expect(p.get("belongs_to")).toBe(nodeId("acme", { type: "team", key: "team-eng" }));
-    assertValid(res);
-  });
-
-  it("prefers a themed name over the number when one is set", () => {
-    expect(harvestCycle({ ...cycle, name: "Hardening" }).nodes[0]?.label).toBe("Hardening");
   });
 });

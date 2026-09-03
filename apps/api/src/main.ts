@@ -4,7 +4,6 @@ import { promisify } from "node:util";
 import {
   AdoptionCompletionReconciler,
   CampaignService,
-  CycleService,
   GithubIssueSync,
   InitiativeService,
   IntermediateCleanupReconciler,
@@ -21,7 +20,6 @@ import {
   SeriesEvaluator,
   type SeriesRunSubmitter,
   TaskService,
-  TeamService,
   WorkflowStateService,
   adoptionCompletionWatch,
   cleanupProbe,
@@ -269,11 +267,10 @@ async function main(): Promise<void> {
     handoffCheckpointStore,
     verificationDecisionStore,
     taskStore,
-    teamStore,
-    cycleStore,
     workflowStateStore,
     projectUpdateStore,
     issueStore,
+    issueNumberAllocator,
     campaignStore,
     campaignBuildStore,
     campaignEvidenceStore,
@@ -419,8 +416,6 @@ async function main(): Promise<void> {
       issues: issueStore,
       projects: projectStore,
       initiatives: initiativeStore,
-      teams: teamStore,
-      cycles: cycleStore,
       datasets: datasetRegistry,
       judges: judgeRegistry,
       runtimes: runtimeRegistry,
@@ -1341,15 +1336,8 @@ async function main(): Promise<void> {
   // weakening the "one choke point for facts and pushes" invariant — the pusher closure reads the holder at
   // CALL time, by which point it is populated.
   const githubSyncRef: { current?: GithubIssueSync } = {};
-  // Teams come first: they are the allocator IssueService calls to resolve an owning team and mint ENG-12.
-  // A team's board — seeded when a team is born, edited from Settings › Teams.
+  // The workspace's board — one board, edited from Settings.
   const workflowStateService = new WorkflowStateService({ store: workflowStateStore, issues: issueStore });
-  const teamService = new TeamService({
-    store: teamStore,
-    workflowStates: workflowStateService,
-    issues: issueStore,
-    events: platformEventService,
-  });
   // The label registry the tracker classifies with — also the name→id resolver a GitHub import needs.
   const issueLabelService = new IssueLabelService({
     labels: issueLabelStore,
@@ -1357,13 +1345,12 @@ async function main(): Promise<void> {
   });
   const issueService = new IssueService({
     store: issueStore,
-    teams: teamService,
+    // The workspace mints `EVD-12`: one prefix, one counter, one conditional UPDATE (`0211`).
+    numbers: issueNumberAllocator,
     scorecards: scorecardStore,
-    // "Does this cycle exist, and whose is it" — the only question an issue asks about an iteration.
-    cycles: cycleStore,
-    // "Is this checkpoint one of that project's" — the same question about a milestone.
+    // "Is this checkpoint one of that project's" — the only question an issue asks about a milestone.
     projects: projectStore,
-    // "Which column is this, and whose board" — moving an issue by board column.
+    // "Which column is this" — moving an issue by board column.
     states: workflowStateStore,
     // Read-only, for the list row's thread badge — one batched count per page, never a read per row.
     comments: commentStore,
@@ -1439,9 +1426,9 @@ async function main(): Promise<void> {
 
   // Absent GitHub App config just means the sync routes answer 404 — the local tracker is unaffected.
   const githubIssueSync = new GithubIssueSync({
+    numbers: issueNumberAllocator,
     store: issueStore,
     issues: issueService,
-    teams: teamService,
     tokens: githubAppService,
     writers: githubRepoWriterFactory(),
     labels: issueLabelService,
@@ -1498,22 +1485,10 @@ async function main(): Promise<void> {
       feed: notificationStore,
     }),
   );
-  // A team's iterations. Composed before the issue service so an issue can validate the cycle it names.
-  const cycleService = new CycleService({
-    store: cycleStore,
-    teams: teamStore,
-    issues: issueStore,
-    events: platformEventService,
-  });
   const projectService = new ProjectService({
     store: projectStore,
     issues: issueStore,
-    // A project's team/initiative edges are validated against these on write — store reads, never peer-service
-    // calls. The one thing a store cannot answer is "which team does work land on when the caller names none":
-    // the workspace's default may still have to be minted, so that goes through the same TeamService seam
-    // filing an issue uses (a project always names at least one team).
-    teams: teamStore,
-    defaultTeam: teamService,
+    // A project's initiative edge is validated against this on write — a store read, never a peer-service call.
     initiatives: initiativeStore,
     // The posted-update timeline — the project's health is what the latest one said.
     updates: projectUpdateStore,
@@ -1676,7 +1651,6 @@ async function main(): Promise<void> {
   // count through five peer services would be five services' worth of coupling for arithmetic none of them owns.
   const workspacePulseService = new WorkspacePulseService({
     issues: issueStore,
-    cycles: cycleStore,
     projects: projectStore,
     initiatives: initiativeStore,
     tasks: taskStore,
@@ -2071,12 +2045,10 @@ async function main(): Promise<void> {
     ...(campaignBuildService !== undefined ? { campaignBuild: campaignBuildService } : {}),
     checkpointService,
     taskService,
-    teamService,
-    workflowStateService, // the team's board — /teams/:id/states, edited from Settings › Teams
+    workflowStateService, // the workspace's board — /workflow-states, edited from Settings
     issueService,
     issueLabelService,
     issueSync: githubIssueSync,
-    cycleService, // the team's iterations — /cycles
     projectService,
     initiativeService,
     productService,

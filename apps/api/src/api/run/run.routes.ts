@@ -1,7 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import { teamCeiling } from "../../common/team-scope.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { runActivityPage } from "./request/run-page.js";
 import { SubmitBodySchema } from "./request/submit.js";
 import { runDocs } from "./run.docs.js";
@@ -19,17 +18,14 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
     // 결과의 소유 팀 — 스코어카드와 같은 규칙.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
       // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "runs:submit", owner.gate);
+      gate(principal, "runs:submit");
       // submittedBy=subject → clone a private-repo seed with the submitter's personal connection ("clone with my connection").
       return reply.code(202).send(
         await deps.service.submit({
           tenant: principal.workspace,
           submittedBy: principal.subject,
-          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
           ...body,
         }),
       );
@@ -133,7 +129,6 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
         ...opts,
         viewer: principal.subject,
         // Second ceiling, orthogonal to the audience one above: a private team's runs are that team's work.
-        ...(await teamCeiling(deps, principal)),
       });
       // A batch's children include superseded attempts; the receipt ledger says which row each case's answer
       // is. ONE ledger read per request (never per row), over the children this viewer may actually see.

@@ -8,10 +8,6 @@ export const AgentListEntrySchema = z.object({
   owner: z.string().describe("Owning tenant, or _shared for first-party agents"),
   // Creator subject of the first-registered version (none for seed/_shared). Surfaces who may soft-delete the agent (creator or admin).
   createdBy: z.string().optional(),
-  teamId: z
-    .string()
-    .optional()
-    .describe("Owning team — absent means unowned (a _shared entry, or one from before the axis)"),
   versionOrigins: z
     .record(CapabilityOriginSchema)
     .optional()

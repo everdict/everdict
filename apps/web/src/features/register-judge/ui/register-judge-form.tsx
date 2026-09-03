@@ -6,7 +6,6 @@ import { CheckCircle2, Loader2, ShieldCheck } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
-import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
@@ -148,8 +147,6 @@ export function RegisterJudgeForm({
   models = [],
   sources = [],
   assignments = {},
-  teams = [],
-  defaultTeamId,
   initial,
   lockId = false,
   redirectDetailId,
@@ -159,10 +156,6 @@ export function RegisterJudgeForm({
   models?: { id: string; provider: string; model: string }[]
   sources?: TraceSourceConfig[]
   assignments?: Record<string, string>
-  // The owning-team choices (only teams the caller can create into). Empty = no picker, the control
-  // plane's own fallback decides.
-  teams?: TeamPickerOption[]
-  defaultTeamId?: string
   initial?: JudgeFormInitial
   lockId?: boolean
   redirectDetailId?: string
@@ -173,7 +166,6 @@ export function RegisterJudgeForm({
   const initialLanguage: Language = initial?.language === 'node' ? 'node' : 'python'
   const [id, setId] = useState(initial?.id ?? '')
   const [version, setVersion] = useState(initial?.version ?? '1.0.0')
-  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [language, setLanguage] = useState<Language>(initialLanguage)
   // An entrypoint-in-image judge carries no code — fall back to the starter rather than an empty editor.
@@ -247,7 +239,7 @@ export function RegisterJudgeForm({
       // The owning team rides BESIDE the spec (the route reads it, the spec schema strips it) — kept out of
       // buildSpec so validate/preview/try keep sending the pure spec.
       const spec = buildSpec() as Record<string, unknown>
-      const r = await createJudgeAction(teamId ? { ...spec, teamId } : spec)
+      const r = await createJudgeAction(spec)
       if (r.ok) {
         toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
         router.push(doneHref)
@@ -293,7 +285,6 @@ export function RegisterJudgeForm({
       </Field>
 
       {/* A new version keeps the judge's owning team — re-filing is the detail's TeamOwnerControl, not here. */}
-      {!lockId && <TeamPicker id="judge-team" teams={teams} value={teamId} onChange={setTeamId} />}
 
       {/* The code — the judge itself. Contract: argv[1] = context JSON path; print Score[] last on stdout. */}
       <div className="space-y-2.5">

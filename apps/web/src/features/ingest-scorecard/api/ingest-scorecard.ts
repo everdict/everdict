@@ -39,7 +39,6 @@ export async function ingestScorecardAction(
     return { ok: false, error: t('tracesParseError') }
   }
   const body = {
-    ...(input.teamId ? { teamId: input.teamId } : {}),
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     traces,
@@ -80,7 +79,6 @@ export async function pullScorecardAction(
     return { ok: false, error: t('runsParseError') }
   }
   const body = {
-    ...(input.teamId ? { teamId: input.teamId } : {}),
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     source: {
@@ -121,7 +119,6 @@ export async function evaluateTracesAction(
     // dataset + harness deliberately omitted → the control plane treats this as a direct trace evaluation.
     // correlate:"id" — the ids ARE the platform's real trace ids (from listTraces), so fetch by id even if the source
     // is registered for "tag" (everdict.run_id) correlation.
-    ...(input.teamId ? { teamId: input.teamId } : {}),
     source: { name: input.sourceName, correlate: 'id' as const },
     runs: input.traceIds.map((id) => ({ caseId: id, runId: id })),
     ...(input.judges.length > 0 ? { judges: input.judges } : {}),

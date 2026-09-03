@@ -7,7 +7,6 @@ import { Controller, useForm } from 'react-hook-form'
 
 import { JudgePicker, type JudgePickerChoice, type JudgeRef } from '@/entities/judge'
 import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
-import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import { versionOptions } from '@/shared/lib/version-options'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -22,7 +21,6 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  teamId: string // The owning team — '' = follow the team of the harness chosen (the control plane's default).
   judges: JudgeRef[] // Optional Agent Judges (id + version) to score each case's trace → judge:<id> metrics (empty = control-plane default scoring).
   runtime: string // Execution location (registered runtime id or self runner target). The control plane 400s an unspecified placement — required.
   concurrency: string // Parallelism (empty = control plane default). Parsed to a number on submit.
@@ -41,7 +39,6 @@ export function RunScorecardForm({
   runtimes = [],
   runners = [],
   hasWorkspaceRunners = false,
-  teams = [],
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   // kind drives the submit-time capability-fit preview against each runtime (a service harness needs a container runtime).
@@ -55,9 +52,6 @@ export function RunScorecardForm({
   runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
-  // The owning-team choices (only teams the caller can create into). The default stays "follow the harness's
-  // team" — an explicit pick overrides it, so no preselected team is threaded here.
-  teams?: TeamPickerOption[]
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -76,7 +70,6 @@ export function RunScorecardForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
-      teamId: '',
       judges: [],
       runtime: '',
       concurrency: '',
@@ -224,21 +217,6 @@ export function RunScorecardForm({
           />
         </div>
       </div>
-
-      {/* Owning team — defaults to following the team of the harness chosen above; an explicit pick overrides. */}
-      <Controller
-        control={control}
-        name="teamId"
-        render={({ field }) => (
-          <TeamPicker
-            id="teamId"
-            teams={teams}
-            value={field.value}
-            onChange={field.onChange}
-            noneLabel={t('teamInheritOption')}
-          />
-        )}
-      />
 
       {/* Agent Judges (optional) — model/harness judges that score each case's trace; each pick aggregates as a
           judge:<id> metric and carries its own version (default latest). */}

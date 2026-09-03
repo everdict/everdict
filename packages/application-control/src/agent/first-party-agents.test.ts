@@ -9,12 +9,6 @@ function registryStub() {
     async register(tenant, spec, createdBy) {
       registered.push({ tenant, spec, ...(createdBy !== undefined ? { createdBy } : {}) });
     },
-    // Records the same way, because a double whose two register paths disagree would let a caller move
-    // between them without the suite noticing (arch-review 77).
-    async registerPreservingOwner(tenant, spec, createdBy) {
-      registered.push({ tenant, spec, ...(createdBy !== undefined ? { createdBy } : {}) });
-      return "registered" as const;
-    },
     async has(tenant, id, version) {
       return registered.some((r) => r.tenant === tenant && r.spec.id === id && r.spec.version === version);
     },

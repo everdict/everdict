@@ -38,16 +38,10 @@ const deps = (scoring: Scoring) => ({
 
 describe("citableReport", () => {
   it("exports an official scorecard with the identities that make it a number", async () => {
-    const report = await citableReport(
-      deps({ kind: "official", officialEvaluator: "gaia-scorer" }),
-      "acme",
-      "sc-1",
-      undefined,
-      {
-        allowProxy: false,
-        now: () => "t",
-      },
-    );
+    const report = await citableReport(deps({ kind: "official", officialEvaluator: "gaia-scorer" }), "acme", "sc-1", {
+      allowProxy: false,
+      now: () => "t",
+    });
     expect(report).toMatchObject({
       kind: "everdict-scorecard-report",
       benchmark: {
@@ -68,33 +62,28 @@ describe("citableReport", () => {
         deps({ kind: "proxy", approximates: "judge stands in for the official DB check" }),
         "acme",
         "sc-1",
-        undefined,
         { allowProxy: false },
       ),
     ).rejects.toMatchObject({ status: 400 });
-    await expect(
-      citableReport(deps(undefined), "acme", "sc-1", undefined, { allowProxy: false }),
-    ).rejects.toMatchObject({ status: 400 });
-    const proxy = await citableReport(
-      deps({ kind: "proxy", approximates: "judge stands in" }),
-      "acme",
-      "sc-1",
-      undefined,
-      { allowProxy: true },
-    );
+    await expect(citableReport(deps(undefined), "acme", "sc-1", { allowProxy: false })).rejects.toMatchObject({
+      status: 400,
+    });
+    const proxy = await citableReport(deps({ kind: "proxy", approximates: "judge stands in" }), "acme", "sc-1", {
+      allowProxy: true,
+    });
     expect(proxy.benchmark.scoring).toEqual({ kind: "proxy", approximates: "judge stands in" });
-    const unstated = await citableReport(deps(undefined), "acme", "sc-1", undefined, { allowProxy: true });
+    const unstated = await citableReport(deps(undefined), "acme", "sc-1", { allowProxy: true });
     expect(unstated.benchmark.scoring).toEqual({ kind: "unstated" });
   });
   it("another workspace's or an unfinished scorecard is not citable", async () => {
     await expect(
-      citableReport(deps({ kind: "official" }), "other", "sc-1", undefined, { allowProxy: true }),
+      citableReport(deps({ kind: "official" }), "other", "sc-1", { allowProxy: true }),
     ).rejects.toMatchObject({ status: 404 });
     const running = {
       scorecards: { get: async () => ({ ...record, status: "running" }) as ScorecardRecord },
       datasets: deps({ kind: "official" }).datasets,
     };
-    await expect(citableReport(running, "acme", "sc-1", undefined, { allowProxy: true })).rejects.toMatchObject({
+    await expect(citableReport(running, "acme", "sc-1", { allowProxy: true })).rejects.toMatchObject({
       status: 400,
     });
   });

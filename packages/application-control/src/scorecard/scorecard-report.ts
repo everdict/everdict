@@ -1,5 +1,5 @@
 import { BadRequestError, type Dataset, NotFoundError, type ScorecardRecord, isMeasured } from "@everdict/contracts";
-import { caseVerdict, ownedByVisibleTeam, summarizeScorecard } from "@everdict/domain";
+import { caseVerdict, summarizeScorecard } from "@everdict/domain";
 import { ExecutionPlan } from "./execution-plan.js";
 
 // ── EXPORT WHAT IS CITABLE, REFUSE WHAT IS NOT (docs/architecture/benchmark-evidence-spec.md §4) ──────
@@ -44,12 +44,10 @@ export async function citableReport(
   deps: CitableReportDeps,
   tenant: string,
   id: string,
-  visibleTeams: string[] | undefined,
   opts: { allowProxy: boolean; now?: () => string },
 ): Promise<CitableReport> {
   const record = await deps.scorecards.get(id);
-  if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
-    throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
+  if (!record || record.tenant !== tenant) throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
   if (record.status !== "succeeded")
     throw new BadRequestError(
       "BAD_REQUEST",

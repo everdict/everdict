@@ -1,24 +1,20 @@
 import {
-  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueService,
   ProjectService,
   RunService,
-  TeamService,
 } from "@everdict/application-control";
 import type { GithubRepoWriter, GithubRepoWriterFactory, OutboxEvent } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
 import {
-  InMemoryCycleStore,
   InMemoryInitiativeStore,
   InMemoryInitiativeUpdateStore,
   InMemoryIssueStore,
   InMemoryProjectStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
-  InMemoryTeamStore,
 } from "@everdict/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -27,6 +23,18 @@ import { type McpDeps, buildMcpServer } from "../../mcp.js";
 
 // BFF↔MCP parity for the eval tracker — the surface an agent triages its own regressions through. The agent
 // attribution bound at initialize rides into the service, so an agent's transitions stamp causedBy (loop guard #1).
+
+// The workspace mints one sequence, so an issue's identifier is a prefix and a counter — deterministic here
+// because a test that asserts on `EVD-1` needs to know which issue that is.
+const numberAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { number: n, identifier: `EVD-${n}` };
+    },
+  };
+})();
 
 const unusedDispatcher: Dispatcher = {
   async dispatch() {
@@ -39,7 +47,6 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
   const issueStore = new InMemoryIssueStore();
   const projectStore = new InMemoryProjectStore();
   const initiativeStore = new InMemoryInitiativeStore();
-  const teamStore = new InMemoryTeamStore();
   const events = {
     emit: async () => undefined,
     pushPersisted: async (batch: Array<{ record: OutboxEvent }>) => {
@@ -57,26 +64,21 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
   // The real team service, so an issue and a project land on the SAME default team — an issue may only join a
   // project its own team is on, and a fake allocator naming a team the project store never heard of would make
   // every tool that puts an issue in a project fail for a reason production does not have.
-  const teamService = new TeamService({ store: teamStore, issues: issueStore });
-  const cycleStore = new InMemoryCycleStore();
   const issueService = new IssueService({
-    teams: teamService,
+    numbers: numberAllocator,
     store: issueStore,
     scorecards: new InMemoryScorecardStore(),
     projects: projectStore,
     // "Does this cycle exist, and whose is it" — production's wiring, so an agent moving an issue into an
     // iteration meets the same team check a member does.
-    cycles: cycleStore,
     events,
   });
   return {
     deps: {
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
       issueService,
-      teamService,
-      cycleService: new CycleService({ store: cycleStore, teams: teamStore, issues: issueStore }),
       issueSync: new GithubIssueSync({
-        teams: teamService,
+        numbers: numberAllocator,
         store: issueStore,
         issues: issueService,
         tokens: { tokenForRepository: async () => ({ token: "tok" }) },
@@ -85,8 +87,6 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
       projectService: new ProjectService({
         store: projectStore,
         issues: issueStore,
-        teams: teamStore,
-        defaultTeam: teamService,
         // The SAME store the initiative service writes to — a project's initiative edge is validated against
         // the workspace, so a second (empty) store here would reject every real id.
         initiatives: initiativeStore,
@@ -129,8 +129,6 @@ describe("eval tracker MCP tools", () => {
       "get_issue",
       "update_issue",
       "set_issue_status",
-      "accept_issue_triage",
-      "decline_issue_triage",
       "add_issue_link",
       "remove_issue_link",
       "list_issue_scorecards",
@@ -176,90 +174,6 @@ describe("eval tracker MCP tools", () => {
     }
   });
 
-  // ── THE TRIAGE LIFECYCLE, END TO END, ON THE TRANSPORT THAT WAS MISSING IT (arch-review 106) ─────
-  //
-  // Two findings meeting. `Issue.create`'s own comment names who enters the queue — "the surfaces that bring
-  // work in from outside (import, an agent)" — and NOTHING in the repository wrote `inTriage: true`, so the
-  // flag, both triage routes, both domain transitions, the store filter and the `?triage=` list param were a
-  // designed lifecycle with no producer. Meanwhile both triage ROUTES read `agentAttributionFrom(req.headers)`
-  // — built expecting an agent actor — while the transport an agent actually reaches the control plane
-  // through exposed neither move, and this file's header calls itself "the surface an agent uses to triage".
-  //
-  // Nothing anywhere tested accept or decline, on any transport, which is how both halves stayed invisible.
-  //
-  // Seen RED before the doors existed: `create_issue` rejected `inTriage` ("Unrecognized key") and
-  // `accept_issue_triage` did not exist ("Tool accept_issue_triage not found").
-  it("an agent files into triage, and a member's accept takes it into the workflow", async () => {
-    const { deps, pushed } = makeDeps();
-    const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
-
-    const filed = JSON.parse(
-      textOf(
-        await client.callTool({
-          name: "create_issue",
-          arguments: { title: "The retry loop drops tool results", inTriage: true },
-        }),
-      ),
-    );
-    expect(filed.inTriage, "an agent could not file into the queue the design says it files into").toBe(true);
-
-    const accepted = JSON.parse(
-      textOf(await client.callTool({ name: "accept_issue_triage", arguments: { id: filed.id, status: "todo" } })),
-    );
-    expect(accepted.inTriage, "accepting left the issue in the queue").toBe(false);
-    expect(accepted.status).toBe("todo");
-    // The transition rides the same choke point as every other one, so the agent's own fact is stamped and it
-    // does not wake itself on it (loop guard #1).
-    expect(pushed.at(-1)).toMatchObject({ kind: "issue.status_changed", causedBy: "agent:triage-bot:conv-9" });
-
-    // Accepting is once: the queue is left, and leaving it again is a conflict rather than a silent no-op.
-    const again = await client.callTool({ name: "accept_issue_triage", arguments: { id: filed.id } });
-    expect(textOf(again)).toContain("not in triage");
-  });
-
-  // The accept tool declares `status: z.enum([...]).default("todo")`. Whether an MCP argument DEFAULT is
-  // applied at all is a property of the transport's own parse, not of the schema literal — and if it were not,
-  // `acceptTriage` would receive `undefined` where its parameter says `IssueStatus`, which is the silent
-  // nullable default rule `typescript` forbids. Asserted rather than assumed.
-  it("applies the accept tool's default landing status when the caller omits it", async () => {
-    const { deps } = makeDeps();
-    const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
-    const filed = JSON.parse(
-      textOf(await client.callTool({ name: "create_issue", arguments: { title: "Queued", inTriage: true } })),
-    );
-    const accepted = JSON.parse(
-      textOf(await client.callTool({ name: "accept_issue_triage", arguments: { id: filed.id } })),
-    );
-    expect(accepted.status, "the omitted default never reached the service").toBe("todo");
-    expect(accepted.inTriage).toBe(false);
-  });
-
-  it("declining cancels the issue and keeps it on the record, with the reason", async () => {
-    const { deps } = makeDeps();
-    const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-9" });
-    const filed = JSON.parse(
-      textOf(
-        await client.callTool({
-          name: "create_issue",
-          arguments: { title: "Rewrite everything in Rust", inTriage: true },
-        }),
-      ),
-    );
-
-    const declined = JSON.parse(
-      textOf(
-        await client.callTool({
-          name: "decline_issue_triage",
-          arguments: { id: filed.id, note: "out of scope for this quarter" },
-        }),
-      ),
-    );
-    // "We said no to this" is an answer somebody looks for later — the issue survives its own decline.
-    expect(declined.inTriage).toBe(false);
-    const readBack = JSON.parse(textOf(await client.callTool({ name: "get_issue", arguments: { id: filed.id } })));
-    expect(readBack.id, "the declined issue vanished from the record").toBe(filed.id);
-  });
-
   it("an agent's issue transitions stamp causedBy so it never wakes on its own fact", async () => {
     const { deps, pushed } = makeDeps();
     const client = await connect(deps, { agentId: "triage-bot", conversationId: "conv-1" });
@@ -288,29 +202,6 @@ describe("eval tracker MCP tools", () => {
       causedBy: "agent:triage-bot:conv-1",
       payload: { from: "todo", to: "done", cause: "manual" },
     });
-  });
-
-  // The edit that puts work in an iteration — parity with PATCH /issues/:id, where the same field was missing
-  // from the body schema. A tool that lists the field in its description but not its inputSchema is worse than
-  // one that never offered it: the agent sends it and the SDK strips it.
-  it("pulls an issue into its team's iteration through the ordinary edit", async () => {
-    const client = await connect(makeDeps().deps);
-    const issue = JSON.parse(
-      textOf(await client.callTool({ name: "create_issue", arguments: { title: "Retry drops tool results" } })),
-    );
-    const cycle = JSON.parse(
-      textOf(await client.callTool({ name: "create_cycle", arguments: { teamId: issue.teamId } })),
-    );
-
-    const moved = JSON.parse(
-      textOf(await client.callTool({ name: "update_issue", arguments: { id: issue.id, cycleId: cycle.id } })),
-    );
-    expect(moved.cycleId).toBe(cycle.id);
-
-    const cleared = JSON.parse(
-      textOf(await client.callTool({ name: "update_issue", arguments: { id: issue.id, cycleId: null } })),
-    );
-    expect(cleared.cycleId).toBeUndefined();
   });
 
   it("reaches the same completion gate the HTTP surface does — a 409 arrives as a tool error", async () => {

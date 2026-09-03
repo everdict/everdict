@@ -261,14 +261,10 @@ resume from their own cursor/history.
   `causedBy agent:<id>:<conversation>`) · `knowledge.created/proposed/approved` (the S14 HITL loop's
   observable half) · ops fact `budget.exceeded` emitted by the admission gate's 402 refusal (the gate
   already computed it). All are trigger-matchable (`TRIGGERABLE_EVENT_KINDS`). The review rule is codified
-  in `.claude/rules/events.md`. **Ownership transfer joined the family**: `harness.moved` /
-  `dataset.moved` / `judge.moved` / `scorecard.moved` — a capability's owning team decides who may change it
-  and (for a private team) who may see it at all, so re-filing one is workspace-shaping news the way a
-  rename is not. Payload carries `{from?, to}`; a harness TEMPLATE transfer rides the `harness.moved` kind
-  with `subject.type: "harness_template"` (one kind per noun family, the subject says which thing). Emitted
-  from the one shared core each transport calls (`moveCapabilityToTeam` / `ScorecardService.moveToTeam` —
-  the scorecard's rides the E0 outbox, since that store is ours). Deliberately NOT trigger-matchable: no
-  automation reads "who owns this now", and an agent waking on a re-file is noise. **Coverage widened (with the Mattermost re-base)**: the terminal-fact
+  in `.claude/rules/events.md`. **Ownership transfer left the family**: `harness.moved` /
+  `dataset.moved` / `judge.moved` / `scorecard.moved` / `issue.moved` were the team axis's news — who owns
+  this now — and went with it (migrations `0211`/`0212`). Nothing re-files a capability any more, so the kinds
+  have no emit point and a kind with no emit point does not exist (this rule's own first bullet). **Coverage widened (with the Mattermost re-base)**: the terminal-fact
   initiator gates fell — a machine-fired run/scorecard completion announces on the log (actor/recipient
   ride only with a known initiator, so the feed consumers still skip actor-less facts; child-run silence
   stands). **Deferred rungs**: `runner.online/offline` (needs a presence sweeper — lease-TTL expiry

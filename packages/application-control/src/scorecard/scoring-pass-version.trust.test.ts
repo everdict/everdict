@@ -111,9 +111,6 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       async list() {
         return [];
       },
-      async moveToTeam() {
-        throw new Error("unused");
-      },
       async creatorOfVersion() {
         return undefined;
       },
@@ -128,9 +125,6 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       },
       // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
       // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
-      async teamOfVersion(): Promise<string | undefined> {
-        throw new Error("unused");
-      },
     } satisfies JudgeRegistry;
     // The v2 judge's runner — its verdict is DISTINGUISHABLE from v1's, so "re-judged" is observable.
     const judgeRunner: JudgeRunner = {
@@ -197,9 +191,6 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       datasets: {
         // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the
         // double from silently supplying the permissive arm of a gate it does not model (arch-review 119).
-        async teamOfVersion(): Promise<string | undefined> {
-          throw new Error("unused");
-        },
         async register() {
           throw new Error("unused");
         },
@@ -220,9 +211,6 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
         },
         async creatorOf() {
           return undefined;
-        },
-        async moveToTeam() {
-          throw new Error("unused");
         },
         async softDelete() {
           throw new Error("unused");

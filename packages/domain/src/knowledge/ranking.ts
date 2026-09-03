@@ -49,7 +49,6 @@ export const PREDICATE_PRIORITY: readonly Predicate[] = [
   // plan structure — where work sits (below the content facts, above raw scoping)
   "part_of",
   "assigned_to",
-  "belongs_to",
   // lineage / low-signal scoping
   "succeeds",
   "forked_from",

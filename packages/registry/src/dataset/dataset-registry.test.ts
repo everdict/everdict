@@ -68,16 +68,6 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     expect(await r.ownVersions("beta", "bench")).toEqual([]); // nothing registered directly → no conflict on registration
   });
 
-  it("list shows tenant-owned + shared and labels the owner", async () => {
-    const r = new InMemoryDatasetRegistry();
-    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
-    await r.register("acme", ds("mine", "1.0.0"));
-    expect(await r.list("acme")).toMatchObject([
-      { id: "bench", owner: SHARED_TENANT, versions: ["1.0.0"], latestVersion: "1.0.0", caseCount: 1 },
-      { id: "mine", owner: "acme", versions: ["1.0.0"], latestVersion: "1.0.0", caseCount: 1 },
-    ]);
-  });
-
   it("list summarizes each dataset's metadata (case count, tags, description, creator, creation/update times) from the latest version", async () => {
     const r = new InMemoryDatasetRegistry();
     await r.register("acme", ds("d", "1.0.0", { description: "first version", tags: ["repo"] }), "alice");
@@ -185,34 +175,6 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     await expect(r.setVersionTags("acme", "mine", "1.0.0", ["y"])).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("moveToTeam re-owns EVERY version of the id, tombstones included", async () => {
-    const r = new InMemoryDatasetRegistry();
-    await r.register("acme", ds("mine", "1.0.0"), "alice", "team_eng");
-    await r.register("acme", ds("mine", "1.1.0"), "alice", "team_eng");
-    await r.register("acme", ds("mine", "2.0.0"), "alice", "team_eng");
-    await r.softDelete("acme", "mine", "1.1.0"); // retired, but still transferable
-
-    await r.moveToTeam("acme", "mine", "team_platform");
-
-    expect(await r.teamOfVersion("acme", "mine", "1.0.0")).toBe("team_platform");
-    expect(await r.teamOfVersion("acme", "mine", "2.0.0")).toBe("team_platform");
-    // The tombstone moved too: re-registering identical content revives it, and it must come back under the
-    // team that owns the dataset now — not the one that owned it when the version was retired.
-    expect(await r.teamOfVersion("acme", "mine", "1.1.0")).toBe("team_platform");
-  });
-
-  it("moveToTeam acts on tenant directly-owned live entities only — _shared / other tenants / all-tombstoned → NotFound", async () => {
-    const r = new InMemoryDatasetRegistry();
-    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
-    await r.register("acme", ds("mine", "1.0.0"), "alice");
-    // A first-party benchmark is visible through the fallback but is not this workspace's to re-file.
-    await expect(r.moveToTeam("acme", "bench", "team_eng")).rejects.toBeInstanceOf(NotFoundError);
-    await expect(r.moveToTeam("beta", "mine", "team_eng")).rejects.toBeInstanceOf(NotFoundError);
-    await r.softDelete("acme", "mine", "1.0.0");
-    // Every version retired = invisible to every read, so there is nothing here to move.
-    await expect(r.moveToTeam("acme", "mine", "team_eng")).rejects.toBeInstanceOf(NotFoundError);
-  });
-
   it("softDelete/creatorOf act on this tenant's directly-owned versions only — _shared/other tenants → NotFound (no fallback)", async () => {
     const r = new InMemoryDatasetRegistry();
     await r.register(SHARED_TENANT, ds("bench", "1.0.0"), "sys");
@@ -222,27 +184,6 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     await expect(r.creatorOf("acme", "bench", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
     // Another tenant's owned dataset can't be deleted either.
     await expect(r.softDelete("beta", "mine", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
-  });
-
-  it("versionDates maps each live version to its registration instant — owner-first, tombstones excluded", async () => {
-    // The product timeline's read: WHEN each version of a watched capability arrived. Live versions only —
-    // a deleted version is invisible to every read, and this one is no exception.
-    const r = new InMemoryDatasetRegistry();
-    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
-    await r.register("acme", ds("d", "1.0.0"));
-    await r.register("acme", ds("d", "1.1.0"));
-
-    const dates = await r.versionDates("acme", "d");
-    expect(Object.keys(dates).sort()).toEqual(["1.0.0", "1.1.0"]);
-    for (const at of Object.values(dates)) expect(Number.isNaN(Date.parse(at))).toBe(false);
-
-    // The _shared fallback answers with its OWN history — a first-party benchmark has a timeline too.
-    expect(Object.keys(await r.versionDates("acme", "bench"))).toEqual(["1.0.0"]);
-    // An unknown id answers empty (a dangling series ref draws nothing, it does not fail the read).
-    expect(await r.versionDates("acme", "nope")).toEqual({});
-
-    await r.softDelete("acme", "d", "1.0.0");
-    expect(Object.keys(await r.versionDates("acme", "d"))).toEqual(["1.1.0"]);
   });
 });
 
@@ -332,7 +273,7 @@ function fakePg(): SqlClient {
       // summarize — version/dataset/created_at/created_by/team_id/tags of live versions (list metadata).
       if (
         t.startsWith(
-          "SELECT version, dataset, created_at, created_by, team_id, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -435,11 +376,10 @@ function fakePg(): SqlClient {
         // (arch-review 119).
         return { rows: [{}] as R[] };
       }
-      // `WITH authorized AS (…) revived AS (UPDATE …) SELECT 1 FROM authorized` — the exact-version lane
-      // settles in ONE data-modifying CTE (arch-review 120). These doubles hold no team_id, so the authority
-      // arm they model is satisfied; what they must still DO is the revive the CTE performs, or they report
-      // a success whose effect never happened.
-      if (/^WITH authorized AS /.test(t)) {
+      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane
+      // settles in ONE data-modifying CTE (arch-review 120). What this double must still DO is the revive the
+      // CTE performs, or it reports a success whose effect never happened.
+      if (/^WITH revived AS \(UPDATE/.test(t) || /^WITH origined AS \(UPDATE/.test(t)) {
         if (/revived AS \(UPDATE/.test(t)) {
           const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
           if (r) r.deleted_at = null;
@@ -525,5 +465,36 @@ describe("PgDatasetRegistry (tenant-owned)", () => {
     await r.setVersionTags("acme", "d", "1.0.0", []);
     expect(await r.versionTags("acme", "d")).toEqual({});
     await expect(r.setVersionTags("acme", "d", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("list shows tenant-owned + shared and labels the owner", async () => {
+    const r = new InMemoryDatasetRegistry();
+    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
+    await r.register("acme", ds("mine", "1.0.0"));
+    expect(await r.list("acme")).toMatchObject([
+      { id: "bench", owner: SHARED_TENANT, versions: ["1.0.0"], latestVersion: "1.0.0", caseCount: 1 },
+      { id: "mine", owner: "acme", versions: ["1.0.0"], latestVersion: "1.0.0", caseCount: 1 },
+    ]);
+  });
+
+  it("versionDates maps each live version to its registration instant — owner-first, tombstones excluded", async () => {
+    // The product timeline's read: WHEN each version of a watched capability arrived. Live versions only —
+    // a deleted version is invisible to every read, and this one is no exception.
+    const r = new InMemoryDatasetRegistry();
+    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.register("acme", ds("d", "1.1.0"));
+
+    const dates = await r.versionDates("acme", "d");
+    expect(Object.keys(dates).sort()).toEqual(["1.0.0", "1.1.0"]);
+    for (const at of Object.values(dates)) expect(Number.isNaN(Date.parse(at))).toBe(false);
+
+    // The _shared fallback answers with its OWN history — a first-party benchmark has a timeline too.
+    expect(Object.keys(await r.versionDates("acme", "bench"))).toEqual(["1.0.0"]);
+    // An unknown id answers empty (a dangling series ref draws nothing, it does not fail the read).
+    expect(await r.versionDates("acme", "nope")).toEqual({});
+
+    await r.softDelete("acme", "d", "1.0.0");
+    expect(Object.keys(await r.versionDates("acme", "d"))).toEqual(["1.1.0"]);
   });
 });

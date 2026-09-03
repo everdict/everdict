@@ -21,8 +21,7 @@ export const PREDICATES = [
   // issue record), so the direction convention holds: the issue is the referencing subject.
   "verified_by", // issue → harness | dataset | judge | scorecard | run | view (an IssueLink; note in edge_attrs)
   "resolved_by", // issue → scorecard (resolution.scorecardId — the closing evidence AND the regression baseline)
-  "part_of", // issue → project | cycle; project → initiative; initiative → parent initiative; team → parent team
-  "belongs_to", // issue | cycle | project | registry spec → team (team scoping; `in_workspace` stays the tenant hub)
+  "part_of", // issue → project; project → initiative; initiative → parent initiative
   "assigned_to", // issue → user (assignee); project | initiative → user with edge_attrs.role: "lead"
   "born_from", // versioned capability → issue | project | initiative | scorecard | run (CapabilityOrigin.from —
   // why a registered version exists at all; edge_attrs carries {via, agentId?})

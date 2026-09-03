@@ -65,9 +65,8 @@ export const CLOSED_ISSUE_STATUSES: readonly IssueStatus[] = ISSUE_STATUSES.filt
 // is not what an `= ANY($1)` takes.
 //
 // They had not diverged. L3 calls that the state a duplicated predicate is in BEFORE it diverges, and the bill
-// arrives the day one of them learns something the others do not — which is exactly the question arch-review
-// 106 raised by making `inTriage` reachable: whether a queued request counts as open work is one decision, and
-// with four copies it would have been four.
+// arrives the day one of them learns something the others do not — whether a given status counts as open work
+// is one decision, and with four copies it would have been four.
 //
 // Derived as the strict complement of the closed half, so the two vectors partition the vocabulary by
 // construction and a status added tomorrow lands in exactly one of them.
@@ -306,10 +305,6 @@ export type IssueGithub = z.infer<typeof IssueGithubSchema>;
 export const IssueRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // Every issue belongs to exactly one team — required, because "which team owns this" has no sensible empty
-  // answer and an optional owner would grow an unowned bucket nobody triages. A caller that names no team gets
-  // the workspace's default team, so the requirement costs the caller nothing.
-  teamId: z.string(),
   // The team-scoped sequence and its rendered form (`ENG-12`). Stored rather than derived: the team key is
   // immutable, so the identifier is stable for the life of the issue and readable without loading the team.
   number: z.number().int().positive(),
@@ -339,10 +334,6 @@ export const IssueRecordSchema = z.object({
   // service refuses a cycle (nothing may be its own ancestor) and refuses deleting an issue that still has
   // children rather than silently orphaning them.
   parentId: z.string().optional(),
-  // The team iteration this issue is pulled into (records/cycle.ts). A cycle belongs to a team, so this only
-  // ever names one of the OWNING team's cycles — the service refuses another team's, because an issue in a
-  // cycle it cannot appear in is invisible work.
-  cycleId: z.string().optional(),
   // The project checkpoint this issue belongs to. Only ever one of ITS project's milestones — the service
   // refuses another project's, because a checkpoint an issue cannot appear under is work made invisible.
   milestoneId: z.string().optional(),
@@ -351,11 +342,6 @@ export const IssueRecordSchema = z.object({
   // "the team's default state for that status" — which is every issue that predates the board, and every one
   // the regression watch moved (nobody dragged it into a column).
   stateId: z.string().optional(),
-  // Triage: the issue arrived from outside the team's workflow (an import, an agent, a request) and has not
-  // been accepted into it yet. A flag rather than a status, deliberately — the status vocabulary is the
-  // WORKFLOW, and something waiting to enter the workflow has not started it. Accepting clears the flag;
-  // declining cancels the issue.
-  inTriage: z.boolean().default(false),
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   // Ids into the workspace label registry above — NOT names. A reader that needs to draw a chip joins against
@@ -401,7 +387,6 @@ export type IssueSummaryGithub = z.infer<typeof IssueSummaryGithubSchema>;
 export const IssueSummarySchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  teamId: z.string(),
   number: z.number().int().positive(),
   identifier: z.string().min(1),
   title: z.string().min(1),
@@ -412,10 +397,8 @@ export const IssueSummarySchema = z.object({
   estimate: z.number().int().nonnegative().optional(),
   dueDate: CalendarDateSchema.optional(),
   parentId: z.string().optional(),
-  cycleId: z.string().optional(),
   milestoneId: z.string().optional(),
   stateId: z.string().optional(),
-  inTriage: z.boolean().default(false),
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   labelIds: z.array(z.string()).default([]),
@@ -455,7 +438,7 @@ export type IssueOrder = z.infer<typeof IssueOrderSchema>;
 // The columns a list can be grouped by — each a SCALAR on the issue, so every row belongs to exactly one group
 // and the count is a plain GROUP BY. Labels are deliberately absent: an issue carries several, so grouping by
 // label would put one row in several groups and the group counts would add up to more than the list.
-export const ISSUE_GROUP_BYS = ["status", "assignee", "priority", "project", "cycle"] as const;
+export const ISSUE_GROUP_BYS = ["status", "assignee", "priority", "project"] as const;
 export const IssueGroupBySchema = z.enum(ISSUE_GROUP_BYS);
 export type IssueGroupBy = z.infer<typeof IssueGroupBySchema>;
 
@@ -528,16 +511,6 @@ export const ProjectRecordSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   status: ProjectStatusSchema,
-  // The teams contributing to this project, and the reason it is a LIST: a project is the unit a release is
-  // planned in, and a release only one team may join is not a release — it is that team's backlog with a date
-  // on it. Stored rather than derived from the project's issues, because the derived answer was "no teams" for
-  // exactly as long as the project was still being planned, which is when the question gets asked.
-  //
-  // **At least one, always.** An empty list used to be legal and mean "workspace-wide", which quietly made a
-  // SECOND kind of project: one that appears in no team's sidebar and that no team's issues may join. There is
-  // one kind of project, and it is somebody's work — naming no team at creation lands it on the workspace's
-  // default team, the same courtesy `teamId` gets on an issue, so the requirement costs a caller nothing.
-  teamIds: z.array(z.string()).min(1),
   // Who is answerable for the project, and who is on it. The lead is a subject (the same identity every other
   // actor field carries), and membership is a plain list rather than a roster table: a project's members are a
   // statement about this project, not a second workspace directory.

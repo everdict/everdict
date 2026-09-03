@@ -1,10 +1,9 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
 import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
-import { ownedByVisibleTeam, runtimeSpecWithCapabilities } from "@everdict/domain";
+import { runtimeSpecWithCapabilities } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { runtimeDocs } from "./runtime.docs.js";
 
 // runtimes (workspace-owned SSOT, execution infra: local | nomad | k8s)
@@ -16,11 +15,9 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!principal) return reply;
     // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로,
     // 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
       // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "runtimes:write", owner.gate);
+      gate(principal, "runtimes:write");
     } catch (err) {
       return sendError(reply, err); // no permission 403 (execution infra = admin)
     }
@@ -29,7 +26,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     // Fill capabilities server-side (declared ∪ auto-derived) so the client never recomputes the hardened-runtime set.
     const spec = runtimeSpecWithCapabilities(parsed.data);
     try {
-      await deps.runtimeRegistry.register(principal.workspace, spec, principal.subject, owner.teamId);
+      await deps.runtimeRegistry.register(principal.workspace, spec, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: spec.id, version: spec.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409
@@ -99,9 +96,8 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     try {
       gate(principal, "runtimes:read");
       // A private team's registered infra is that team's — the ceiling every other team-owned read stays under.
-      const seen = await visibleTeamsFor(deps, principal);
       const entries = await deps.runtimeRegistry.list(principal.workspace);
-      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
+      return reply.send(entries);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -117,7 +113,6 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "runtimes:read");
-        await assertEntityVisible(deps, principal, deps.runtimeRegistry, principal.workspace, req.params.id, "runtime");
         return reply.send(await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err);
@@ -141,7 +136,6 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
         gate(principal, "runtimes:read");
         // A private team's runtime reads as one that does not exist — the guard `GET /runtimes/:id/versions`
         // already carries, on the door that resolves the same spec (arch-review 119).
-        await assertEntityVisible(deps, principal, deps.runtimeRegistry, principal.workspace, req.params.id, "runtime");
         // get() 404s a non-owned / missing runtime (no existence leak) before any live I/O.
         const spec = await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version);
         return reply.send(await deps.inspectRuntime(principal.workspace, spec));

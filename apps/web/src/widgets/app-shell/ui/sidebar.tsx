@@ -6,7 +6,6 @@ import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Plus, Search, Settings, X
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
-import { matchTeamPath, teamSectionHref, type TeamPathScope } from '@/entities/team'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
@@ -19,17 +18,6 @@ import { isNavItemActive, NAV_SECTIONS, RESOURCES_SECTION } from './nav-config'
 import { navGroupOpen } from './nav-group-open'
 import { SETTINGS_NAV_GROUPS } from './settings-nav-config'
 
-export interface SidebarTeam {
-  id: string
-  key: string
-  name: string
-  isDefault: boolean
-  // 트리아지를 켠 팀만 인박스 줄을 갖는다.
-  triageEnabled: boolean
-  // 사이클도 마찬가지 — 이터레이션으로 일하지 않는 팀에게는 사이클 줄이 없다.
-  cyclesEnabled: boolean
-}
-
 export interface SidebarProps {
   workspace: string
   workspaces: Workspace[]
@@ -39,7 +27,6 @@ export interface SidebarProps {
   showLogin: boolean
   email?: string
   profile?: { name?: string; username?: string; avatarUrl?: string }
-  teams?: SidebarTeam[]
 }
 
 // Open the Cmd+K palette — a module-level custom event (wires the search button ↔ palette without context plumbing).
@@ -80,28 +67,11 @@ function navItemGroupKey(labelKey: string): string {
   return `item:${labelKey}`
 }
 
-function NavLinks({
-  workspace,
-  teams,
-  canJoinTeams,
-  onNavigate,
-}: {
-  workspace: string
-  teams: SidebarTeam[]
-  canJoinTeams: boolean
-  onNavigate?: () => void
-}) {
+function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
   const pathname = usePathname()
   const t = useTranslations('nav')
-  // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list,
-  // with "Your teams" spliced in AFTER the eval nav and BEFORE Resources: teams are where issues live, so they
-  // belong with the tracker at the top, not below the onboarding links.
+  // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list.
   const sections = [...NAV_SECTIONS, RESOURCES_SECTION]
-  // "Your teams" 는 Workspace 그룹 바로 다음 — 이슈가 사는 곳이라 트래커 축 안에 있어야 하고, 평가 primitive
-  // 들보다 앞선다. (헤딩 키로 찾는다: 섹션이 늘거나 줄어도 위치가 어긋나지 않는다.)
-  const teamsAfterIndex = NAV_SECTIONS.findIndex(
-    (section) => section.headingKey === 'workspaceGroup'
-  )
   // 사용자가 직접 토글한 항목만 기록한다(미기록 = 기본 접힘 + 활성 경로 자동 펼침).
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   // localStorage 는 렌더 중에 읽으면 하이드레이션이 어긋나므로 마운트 후에 반영한다. 첫 페인트는 기본값(접힘)이라
@@ -121,10 +91,6 @@ function NavLinks({
     setOpenGroups((prev) => ({ ...prev, [key]: next }))
     window.localStorage.setItem(`${NAV_GROUP_STORAGE_PREFIX}${key}`, next ? 'open' : 'closed')
   }
-
-  // 지금 경로가 어느 팀의 것인가 — 한 번만 판정하고 양쪽(워크스페이스 나브 · 팀 그룹)이 같은 답을 쓴다.
-  // 각자 답하던 시절에는 `/teams` 행이 팀 하위 페이지까지 자기 것이라 주장해 두 행이 동시에 켜졌다.
-  const teamScope = matchTeamPath(pathname, workspace)
 
   const isActiveItem = (href: string, exact?: boolean) =>
     isNavItemActive({ href, exact }, pathname, workspace)
@@ -226,150 +192,10 @@ function NavLinks({
                 )
               })}
             </div>
-            {i === teamsAfterIndex && (
-              <TeamsNav
-                workspace={workspace}
-                teams={teams}
-                scope={teamScope}
-                canJoin={canJoinTeams}
-                onNavigate={onNavigate}
-              />
-            )}
           </Fragment>
         )
       })}
     </nav>
-  )
-}
-
-// 사이드바의 팀 섹션 — Linear 의 "Your teams", 그리고 이 제품에서 이슈의 유일한 집. 내가 속한 팀만 보여준다
-// (팀 멤버십이 워크스페이스 멤버십과 별도 로스터인 이유가 이것이다).
-//
-// 팀은 링크가 아니라 펼쳐지는 그룹이다: 이슈는 `teamId` 가 필수이고 식별자도 `<KEY>-123` 으로 팀이 발번하므로,
-// 팀은 이슈를 거르는 필터가 아니라 이슈가 사는 곳이다. 그래서 최상단의 평평한 "Issues" 항목을 없애고 각 팀이
-// 자기 이슈 목록을 소유하게 했다. 프로젝트는 종류가 하나뿐이다 — 워크스페이스의 것이면서 자기 팀들을 이름으로
-// 들고 있고(`teamIds`, 최소 하나), 그래서 워크스페이스 목록과 팀 아래 목록은 같은 한 컬렉션의 두 주소다.
-//
-// 팀이 하나뿐이어도 감추지 않는다. 예전에는 감췄지만, 그러면 이슈가 팀에 속한다는 사실 자체가 화면에서 사라져
-// 워크스페이스 전역 목록처럼 보인다 — 팀 키(`ENG`)는 이슈 번호에 이미 박혀 있으니 하나뿐인 팀도 보여줄 값이 있다.
-function TeamsNav({
-  workspace,
-  teams,
-  scope,
-  canJoin,
-  onNavigate,
-}: {
-  workspace: string
-  teams: SidebarTeam[]
-  // 어느 팀의 화면을 보고 있나 — 전부 경로가 말한다(`/{workspace}/teams/ENG/…`). 판정은 위에서 한 번만 하고
-  // 내려받는다: 이 그룹과 워크스페이스 나브가 각자 경로를 읽으면 둘 다 자기 것이라 주장할 수 있다.
-  scope: TeamPathScope | null
-  // 리니어의 "Join teams" — 로스터에 없는 팀에 스스로 참여할 수 있는 역할(member+)에게만 진입점을 보인다.
-  // viewer 에게는 참여 버튼 없는 디렉터리로 가는 문일 뿐이라 그리지 않는다.
-  canJoin: boolean
-  onNavigate?: () => void
-}) {
-  const t = useTranslations('nav')
-  const [openTeams, setOpenTeams] = useState<Record<string, boolean>>({})
-  if (teams.length === 0 && !canJoin) return null
-  return (
-    <div className="flex flex-col gap-0.5">
-      <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">{t('yourTeams')}</p>
-      {teams.map((team) => {
-        // 활성 스코프인 팀은 기본으로 펼치되, 사용자가 접었으면 접힌 채로 둔다. 팀이 하나뿐이면 접을 이유도
-        // 없으니 그때의 기본은 펼침이다.
-        const holdsActive = scope?.key === team.key
-        const open = navGroupOpen({
-          recorded: openTeams[team.id],
-          holdsActive,
-          whenUnrecorded: teams.length === 1,
-        })
-        // 팀이 소유하는 것은 전부 팀 아래의 경로 자원이다 — `/{workspace}/teams/ENG/issues`. 목록은 여전히
-        // 한 벌이지만(같은 컴포넌트, 다른 주소), 팀마다 가진 것이 다르다는 사실은 URL 이 말한다.
-        const children = [
-          // 팀의 짧은 주소가 곧 이슈 화면이라 「홈」 행은 없다 — 같은 목적지를 두 줄로 내밀면 둘 중 무엇이
-          // 다른지 사람이 찾게 된다. 팀 이름을 누르는 것은 접기/펴기이고, 목적지는 아래 줄들이다.
-          {
-            href: teamSectionHref(workspace, team.key, 'issues'),
-            labelKey: 'issues',
-            page: 'issues',
-          },
-          // 사이클은 팀의 것이다 — 팀 밖에 두면 "Cycle 3"이 누구의 세 번째인지 알 수 없다. 그리고 그 팀이
-          // 켰을 때만 — 트리아지와 같은 이유로, 이터레이션으로 일하지 않는 팀에게 빈 화면 한 줄을 내밀지 않는다.
-          ...(team.cyclesEnabled
-            ? [
-                {
-                  href: teamSectionHref(workspace, team.key, 'cycles'),
-                  labelKey: 'cycles',
-                  page: 'cycles',
-                },
-              ]
-            : []),
-          // 트리아지는 그 팀이 켰을 때만 — 큐를 요청하지 않은 팀에게 빈 인박스를 보여줄 이유가 없다.
-          ...(team.triageEnabled
-            ? [
-                {
-                  href: teamSectionHref(workspace, team.key, 'triage'),
-                  labelKey: 'triage',
-                  page: 'triage',
-                },
-              ]
-            : []),
-          {
-            href: teamSectionHref(workspace, team.key, 'projects'),
-            labelKey: 'projects',
-            page: 'projects',
-          },
-        ]
-        return (
-          <div key={team.id} className="flex flex-col gap-0.5">
-            <button
-              type="button"
-              onClick={() => setOpenTeams((prev) => ({ ...prev, [team.id]: !open }))}
-              aria-expanded={open}
-              className={cn(rowClass, 'relative w-full text-left')}
-            >
-              <ChevronRight
-                className={cn(
-                  'size-3 shrink-0 text-faint transition-transform duration-150',
-                  open && 'rotate-90'
-                )}
-                strokeWidth={2.25}
-              />
-              <span className="inline-flex size-[17px] shrink-0 items-center justify-center rounded-sm bg-muted font-mono text-[9px] font-semibold uppercase text-muted-foreground">
-                {team.key.slice(0, 2)}
-              </span>
-              <span className="truncate">{team.name}</span>
-            </button>
-            {open && (
-              <div className="ml-[13px] flex flex-col gap-0.5 border-l border-border/60 pl-2">
-                {children.map((child) => (
-                  <TeamNavRow
-                    key={child.page}
-                    href={child.href}
-                    label={t(child.labelKey)}
-                    // 경로 하나로 판정된다 — 어느 팀인지도, 그 팀의 어느 자원인지도 URL 이 들고 있다.
-                    active={holdsActive && scope?.section === child.page}
-                    {...(onNavigate ? { onNavigate } : {})}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        )
-      })}
-      {/* 리니어의 "Join teams" — 목적지는 팀 디렉터리다. 참여는 거기서, 이 줄은 문일 뿐이다. */}
-      {canJoin && (
-        <Link
-          href={`/${workspace}/teams`}
-          onClick={onNavigate}
-          className={cn(rowClass, 'text-muted-foreground')}
-        >
-          <Plus className="size-[17px] shrink-0 text-faint" strokeWidth={1.75} />
-          {t('joinTeams')}
-        </Link>
-      )}
-    </div>
   )
 }
 
@@ -607,8 +433,6 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
       <div className="flex-1 overflow-y-auto scrollbar-none">
         <NavLinks
           workspace={props.workspace}
-          teams={props.teams ?? []}
-          canJoinTeams={can(props.roles, 'teams:join')}
           onNavigate={onNavigate}
         />
       </div>

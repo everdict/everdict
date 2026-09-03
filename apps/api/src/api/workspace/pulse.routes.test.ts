@@ -1,16 +1,14 @@
-import { RunService, TeamService } from "@everdict/application-control";
+import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import {
   InMemoryAgentTaskStore,
   InMemoryApprovalStore,
-  InMemoryCycleStore,
   InMemoryInitiativeStore,
   InMemoryIssueStore,
   InMemoryPlatformEventStore,
   InMemoryProjectStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
-  InMemoryTeamStore,
 } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { WorkspacePulseService } from "../../core/workspace/workspace-pulse-service.js";
@@ -26,10 +24,8 @@ const ADMIN = { "x-everdict-tenant": "acme" };
 
 function build(options: { withPulse?: boolean } = {}) {
   const issues = new InMemoryIssueStore();
-  const teamStore = new InMemoryTeamStore();
   const pulse = new WorkspacePulseService({
     issues,
-    cycles: new InMemoryCycleStore(),
     projects: new InMemoryProjectStore(),
     initiatives: new InMemoryInitiativeStore(),
     tasks: new InMemoryAgentTaskStore(),
@@ -39,7 +35,6 @@ function build(options: { withPulse?: boolean } = {}) {
   });
   return buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-    teamService: new TeamService({ store: teamStore, issues }),
     ...(options.withPulse === false ? {} : { workspacePulseService: pulse }),
   });
 }
@@ -58,7 +53,6 @@ describe("GET /workspace/pulse", () => {
     expect(body.window.days).toBe(7);
     expect(body).toMatchObject({
       work: { open: 0, inProgress: 0, regressed: 0 },
-      cycles: { active: 0 },
       goals: { initiatives: 0, projects: 0, atRisk: 0 },
       agents: { runs: 0, openTasks: 0, awaitingApproval: 0 },
       evaluation: { scorecards: 0, runs: 0, failed: 0 },

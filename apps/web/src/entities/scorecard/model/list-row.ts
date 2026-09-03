@@ -65,7 +65,6 @@ export function toScorecardRow(record: ScorecardRecord): ScorecardRow {
         }
       : {}),
     ...(record.createdBy !== undefined ? { createdBy: record.createdBy } : {}),
-    ...(record.teamId !== undefined ? { teamId: record.teamId } : {}),
     ...(record.runtime !== undefined ? { runtime: record.runtime } : {}),
     ...(record.subset !== undefined
       ? { subset: { total: record.subset.total, selected: record.subset.selected } }

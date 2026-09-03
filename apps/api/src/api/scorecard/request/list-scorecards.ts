@@ -31,8 +31,7 @@ export const ListScorecardsQuerySchema = z.object({
   dataset: z.string().min(1).optional(),
   harness: z.string().min(1).optional(),
   // The SCOPES: one value each, and the ones a detail-history read asks with (a judge's evaluations, a
-  // schedule's runs, one team's page).
-  team: z.string().min(1).optional(),
+  // schedule's runs).
   status: ScorecardStatusSchema.optional(),
   runtime: optionalRef.optional(),
   creator: optionalRef.optional(),
@@ -43,7 +42,6 @@ export const ListScorecardsQuerySchema = z.object({
   harnesses: repeatable(optionalRef),
   runtimes: repeatable(optionalRef),
   creators: repeatable(optionalRef),
-  teams: repeatable(z.string().min(1).max(200)),
   // A UTC calendar day (`YYYY-MM-DD`) — the same key the day grouping buckets a row under, which is the
   // stored instant's UTC date rather than the reader's local one.
   day: z
@@ -82,7 +80,6 @@ const SCORECARD_GROUP_BY = [
   "status",
   "harness",
   "dataset",
-  "team",
   "creator",
 ] as const satisfies readonly ScorecardGroupBy[];
 export type ScorecardGroupByCoverage = ScorecardGroupBy extends (typeof SCORECARD_GROUP_BY)[number] ? true : never;
@@ -94,19 +91,12 @@ export const ScorecardCountsQuerySchema = ListScorecardsQuerySchema.extend({
 
 export type ScorecardCountsQuery = z.infer<typeof ScorecardCountsQuerySchema>;
 
-// Query → store filter, in ONE place so the rows and the counts can never be narrowed differently. The team
-// ref and the visible-team ceiling are resolved by the route (they need the team service), so they arrive
-// already decided.
+// Query → store filter, in ONE place so the rows and the counts can never be narrowed differently.
 //
 // `judge` and `schedule` stay MUTUALLY EXCLUSIVE with each other and with the capability narrows, exactly as
 // the route has always treated them: they are detail-history reads ("this judge's evaluations", "this
 // schedule's runs"), not facets of the workspace list.
-export function scorecardFilterOf(
-  query: ListScorecardsQuery,
-  // `teamIds` arrives resolved by the route: the facet names teams by id or key, and resolving a key needs
-  // the team service, which is the transport's to reach.
-  scope: { teamId?: string; visibleTeams?: string[]; teamIds?: string[] },
-): ScorecardListFilter {
+export function scorecardFilterOf(query: ListScorecardsQuery): ScorecardListFilter {
   const narrow: ScorecardListFilter = query.schedule
     ? { scheduleId: query.schedule }
     : query.judge
@@ -127,9 +117,6 @@ export function scorecardFilterOf(
     ...(query.harnesses !== undefined ? { harnesses: query.harnesses } : {}),
     ...(query.runtimes !== undefined ? { runtimes: query.runtimes } : {}),
     ...(query.creators !== undefined ? { creators: query.creators } : {}),
-    ...(scope.teamIds !== undefined ? { teamIds: scope.teamIds } : {}),
-    ...(scope.teamId !== undefined ? { teamId: scope.teamId } : {}),
-    ...(scope.visibleTeams !== undefined ? { visibleTeams: scope.visibleTeams } : {}),
   };
 }
 

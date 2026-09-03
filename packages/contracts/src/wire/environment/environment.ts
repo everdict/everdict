@@ -6,7 +6,6 @@ export const RegisterEnvironmentResultSchema = z.object({
   workspace: z.string(),
   id: z.string(),
   version: z.string(),
-  teamId: z.string().optional(),
   // Warn-not-block advice about the world's bytes — same shape the harness register door returns.
   imageWarnings: z.array(z.object({ image: z.string(), class: z.string() })).optional(),
 });
@@ -17,7 +16,6 @@ export const EnvironmentListEntrySchema = z.object({
   id: z.string(),
   versions: z.array(z.string()).describe("Versions (semver ascending)"),
   owner: z.string().describe("Owning tenant, or _shared for first-party environments"),
-  teamId: z.string().optional().describe("Owning team (absent = unowned / _shared)"),
   versionTags: z.record(z.array(z.string())).optional().describe("version → free-form labels (tagged versions only)"),
   versionOrigins: z
     .record(CapabilityOriginSchema)

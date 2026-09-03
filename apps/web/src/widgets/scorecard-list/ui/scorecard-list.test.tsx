@@ -81,7 +81,6 @@ const render = (over: Partial<ScorecardViewData> = {}): string =>
         initialData={{ ...data, ...over }}
         stats={{ total: TOTAL, succeeded: 3600, running: 0, failed: 400 }}
         authors={{ 'oidc|dana': { name: 'Dana' } }}
-        teams={[]}
         scope={scope}
         runnerLabels={{}}
         viewer={{ subject: 'oidc|dana', admin: true }}
@@ -143,7 +142,6 @@ describe('scorecard list — a collection that only grows', () => {
             initialData={ended}
             stats={{ total: TOTAL, succeeded: 3600, running: 0, failed: 400 }}
             authors={{ 'oidc|dana': { name: 'Dana' } }}
-            teams={[]}
             scope={scope}
             runnerLabels={{}}
             viewer={{ subject: 'oidc|dana', admin: true }}

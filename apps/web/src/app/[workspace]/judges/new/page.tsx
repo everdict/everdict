@@ -4,7 +4,6 @@ import { getTranslations } from 'next-intl/server'
 import { RegisterJudgeForm } from '@/features/register-judge'
 import { modelSpecSchema, modelsSchema } from '@/entities/model'
 import { runtimesSchema } from '@/entities/runtime'
-import { ownerChoicesFor, teamsSchema, type OwnerChoices } from '@/entities/team'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -21,17 +20,6 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
   const t = await getTranslations('judgesPage')
   const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'judges:write')
-
-  // Owning-team choices for the new judge (only teams the caller can create into). Empty = picker hidden.
-  let ownerChoices: OwnerChoices = { teams: [] }
-  if (allowed) {
-    try {
-      const teams = teamsSchema.parse(await controlPlane.listTeams(ctx))
-      ownerChoices = ownerChoicesFor(principal, teams, 'judges:write')
-    } catch {
-      ownerChoices = { teams: [] }
-    }
-  }
 
   // For the harness judge's runtime selector — the form renders even on failure (empty = co-locate/default only).
   let runtimes: { id: string }[] = []
@@ -95,10 +83,6 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
             models={models}
             sources={sources}
             assignments={assignments}
-            teams={ownerChoices.teams}
-            {...(ownerChoices.defaultTeamId !== undefined
-              ? { defaultTeamId: ownerChoices.defaultTeamId }
-              : {})}
           />
         </Card>
       ) : (

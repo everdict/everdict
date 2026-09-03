@@ -7,7 +7,7 @@ import type { Harness } from './schema'
 //
 // 팀이 축의 하나인 것이 이 목록의 핵심 변화다. 한동안 팀은 경로였지만(`…/team/ENG/harnesses`), 사람은
 // "우리 팀 하네스"를 팀 화면에서 찾는 게 아니라 하네스 목록에서 좁혀 찾는다.
-export const HARNESS_FACETS = ['team', 'category', 'kind', 'creator', 'tag'] as const
+export const HARNESS_FACETS = ['category', 'kind', 'creator', 'tag'] as const
 export const HARNESS_GROUPINGS = [
   'none',
   'template',
@@ -49,8 +49,6 @@ export function harnessTags(harness: Harness): string[] {
 export const harnessListSpec: ListViewSpec<Harness> = {
   facetValues: (harness, facet) => {
     switch (facet) {
-      case 'team':
-        return harness.teamId === undefined ? [] : [harness.teamId]
       case 'category':
         return harness.category === undefined ? [] : [harness.category]
       case 'kind':
@@ -82,8 +80,6 @@ export const harnessListSpec: ListViewSpec<Harness> = {
         return harness.category ?? null
       case 'kind':
         return harness.kind ?? null
-      case 'team':
-        return harness.teamId ?? null
       case 'creator':
         return harness.createdBy ?? null
       default:

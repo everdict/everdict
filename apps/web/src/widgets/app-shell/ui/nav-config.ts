@@ -24,7 +24,6 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-import { matchTeamPath } from '@/entities/team'
 import { singularSegment } from '@/shared/lib/resource-routes'
 
 export interface NavItem {
@@ -284,16 +283,12 @@ export const ALL_SIDEBAR_ROWS: NavItem[] = [...NAV_SECTIONS, RESOURCES_SECTION].
 
 // Which row owns the current path — the ONE place the app nav answers that, so no two rows can both claim it.
 //
-// A row owns its href and everything under it, EXCEPT what a more specific owner already claims: a team-scoped
-// path (`/{workspace}/teams/ENG/...`) belongs to that team's group in the sidebar, so no workspace-level row
-// matches there. Without that carve-out `/teams` prefix-matched every page a team owns, lighting the workspace
-// `Teams` row alongside the team's own row (and force-expanding the `More` group that holds it).
+// A row owns its href and everything under it.
 export function isNavItemActive(
   item: Pick<NavItem, 'href' | 'exact'>,
   pathname: string,
   workspace: string
 ): boolean {
-  if (matchTeamPath(pathname, workspace) !== null) return false
   const full = `/${workspace}${item.href}`
   if (item.exact === true) return pathname === full
   if (pathname === full || pathname.startsWith(`${full}/`)) return true

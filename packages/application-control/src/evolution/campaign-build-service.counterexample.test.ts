@@ -198,7 +198,6 @@ function service(store: FakeBuildStore, sessions: BuildSession, over: Partial<Ca
     campaigns: {
       get: async (_t, id) => ({
         id,
-        teamId: "team-a",
         subjectType: "harness",
         subjectId: "scaffold",
         baselineVersion: "1.0.0",
@@ -355,7 +354,6 @@ describe("[COUNTEREXAMPLE] a build set — several slots, one pull request, one 
       campaigns: {
         get: async (_t, id) => ({
           id,
-          teamId: "team-a",
           subjectType: "harness",
           subjectId: "shop",
           baselineVersion: "1.0.0",
@@ -528,7 +526,6 @@ describe("[COUNTEREXAMPLE] an environment campaign builds the world and mints a 
       campaigns: {
         get: async (_t, id) => ({
           id,
-          teamId: "team-a",
           subjectType: "environment",
           subjectId: "shop",
           baselineVersion: "1.0.0",

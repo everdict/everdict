@@ -407,86 +407,6 @@ describe("ScorecardService.submit — judge version pinning (reproducibility)", 
   });
 });
 
-describe("ScorecardService.moveToTeam — evidence is re-filed, and both teams are checked", () => {
-  const member = (teams: string[]): Principal => ({
-    subject: "alice",
-    workspace: "acme",
-    roles: ["member"],
-    via: "oidc",
-    teams,
-  });
-
-  it("re-files the batch and reports the team it came from", async () => {
-    const store = new InMemoryScorecardStore();
-    await store.create(record("sc1", { teamId: "team_eng" }));
-
-    const moved = await svc(store).moveToTeam({
-      principal: member(["team_eng", "team_platform"]),
-      id: "sc1",
-      teamId: "team_platform",
-    });
-
-    expect(moved.teamId).toBe("team_platform");
-    expect((await store.get("sc1"))?.teamId).toBe("team_platform");
-  });
-
-  it("refuses a source team the caller is not on — a batch cannot be taken out of someone else's team", async () => {
-    const store = new InMemoryScorecardStore();
-    await store.create(record("sc1", { teamId: "team_eng" }));
-
-    await expect(
-      svc(store).moveToTeam({ principal: member(["team_platform"]), id: "sc1", teamId: "team_platform" }),
-    ).rejects.toBeInstanceOf(ForbiddenError);
-    expect((await store.get("sc1"))?.teamId).toBe("team_eng"); // nothing moved
-  });
-
-  it("refuses a destination team the caller is not on", async () => {
-    const store = new InMemoryScorecardStore();
-    await store.create(record("sc1", { teamId: "team_eng" }));
-
-    await expect(
-      svc(store).moveToTeam({ principal: member(["team_eng"]), id: "sc1", teamId: "team_secret" }),
-    ).rejects.toBeInstanceOf(ForbiddenError);
-  });
-
-  it("another workspace's / a missing batch is 404, and a move that changes nothing is 409", async () => {
-    const store = new InMemoryScorecardStore();
-    await store.create(record("sc1", { teamId: "team_eng" }));
-    await store.create(record("theirs", { tenant: "beta", teamId: "team_eng" }));
-    const service = svc(store);
-    const alice = member(["team_eng"]);
-
-    await expect(service.moveToTeam({ principal: alice, id: "nope", teamId: "team_eng" })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
-    await expect(service.moveToTeam({ principal: alice, id: "theirs", teamId: "team_eng" })).rejects.toBeInstanceOf(
-      NotFoundError,
-    );
-    await expect(service.moveToTeam({ principal: alice, id: "sc1", teamId: "team_eng" })).rejects.toBeInstanceOf(
-      ConflictError,
-    );
-  });
-
-  it("records the transfer as a fact on the same write as the ownership change (E0 outbox)", async () => {
-    const log = new InMemoryPlatformEventStore();
-    const store = new InMemoryScorecardStore(log);
-    await store.create(record("sc1", { teamId: "team_eng" }));
-
-    await new ScorecardService({ dispatcher, store, datasets: new InMemoryDatasetRegistry() }).moveToTeam({
-      principal: member(["team_eng", "team_platform"]),
-      id: "sc1",
-      teamId: "team_platform",
-    });
-
-    const moved = (await log.list(storedExecutionId("acme"))).find((e) => e.kind === "scorecard.moved");
-    expect(moved).toMatchObject({
-      kind: "scorecard.moved",
-      subject: { type: "scorecard", id: "sc1" },
-      payload: { id: "sc1", from: "team_eng", to: "team_platform" },
-    });
-  });
-});
-
 describe("ScorecardService — constitution seed (verdict-authority declarations)", () => {
   it("a member declaring ground_truth authority for a run-time grader is refused; an admin passes and the composed policy is sealed", async () => {
     const datasets = new InMemoryDatasetRegistry();
@@ -6947,11 +6867,11 @@ describe("Per-revision immutable analysis artifacts (I7)", () => {
       (bundle as { cases: Array<{ scores: Array<{ metric: string }> }> }).cases.flatMap((c) =>
         c.scores.map((s) => s.metric),
       );
-    expect(asJudged(await service.analysisBundle("acme", record.id, undefined, 1))).not.toContain("judge:quality");
-    expect(asJudged(await service.analysisBundle("acme", record.id, undefined, 2))).toContain("judge:quality");
+    expect(asJudged(await service.analysisBundle("acme", record.id, 1))).not.toContain("judge:quality");
+    expect(asJudged(await service.analysisBundle("acme", record.id, 2))).toContain("judge:quality");
     expect(asJudged(await service.analysisBundle("acme", record.id))).toContain("judge:quality");
     // A revision the ledger never appended reads NotFound — never a silent fallback to the current bundle.
-    await expect(service.analysisBundle("acme", record.id, undefined, 99)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.analysisBundle("acme", record.id, 99)).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

@@ -100,17 +100,8 @@ export const PLATFORM_EVENT_KINDS = [
   // regresses" as a payload filter instead of forcing a kind per outcome. Facts, not judgments: `regression`
   // states that a linked scorecard's pass rate fell below the resolution scorecard's — arithmetic over sealed
   // results. Durable per-issue history lives ON the record (the log is swept); these facts are the live half.
-  // Teams group issues inside a workspace (records/team.ts). Creation and roster changes are workspace-shaping
-  // news — who can now file under which prefix — so they are facts; a rename is content editing and emits none,
-  // the same split the issue aggregate already makes between update() and its status transitions.
-  "team.created",
-  "team.member_added",
-  "team.member_removed",
   "issue.created",
   "issue.status_changed",
-  // An issue changed teams — which re-mints its identifier, so this is the fact that explains why the name in
-  // everyone's links stopped being the name in the list. It carries both identifiers and both team ids.
-  "issue.moved",
   "issue.linked", // a capability (harness/dataset/judge/scorecard/run/view) was attached to an issue
   // The evolution campaign — the settlement behind the agent-evolve loop (docs/architecture/evolution-lineage.md
   // Track D): opened with a frozen frame, one fact per hypothesis round, closed with the adoption gate's answer.
@@ -135,13 +126,9 @@ export const PLATFORM_EVENT_KINDS = [
   // (docs/architecture/code-evolution-loop.md, D2). The driver waits on the first to run the round's batch.
   "campaign.candidate_built",
   "campaign.candidate_build_failed",
-  // A team's iteration was planned, or closed with whatever was left. `cycle.completed` carries `carriedOver`,
-  // which is the number a retro actually asks for — and the wake signal for "write the iteration summary".
-  "cycle.created",
-  "cycle.completed",
   // The workspace label vocabulary (records/tracker.ts). Defining or retiring a label reshapes how the whole
-  // workspace classifies its work — that is news in the same sense a new team is. A recolour/rename is content
-  // editing on an existing label, so it emits `updated` rather than pretending to be a new definition.
+  // workspace classifies its work. A recolour/rename is content editing on an existing label, so it emits
+  // `updated` rather than pretending to be a new definition.
   "issue_label.created",
   "issue_label.updated",
   "issue_label.deleted",

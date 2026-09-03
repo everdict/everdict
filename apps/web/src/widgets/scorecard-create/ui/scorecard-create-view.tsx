@@ -6,7 +6,6 @@ import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
-import { ownerChoicesFor, teamsSchema, type OwnerChoices } from '@/entities/team'
 import { traceSourcesResponseSchema, type TraceSourceConfig } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -38,15 +37,7 @@ export async function ScorecardCreateView({ workspace }: { workspace: string }) 
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
   let traceSources: TraceSourceConfig[] = []
-  // Owning-team choices for the batch (only teams the caller can create into). Empty = picker hidden.
-  let ownerChoices: OwnerChoices = { teams: [] }
   if (allowed) {
-    try {
-      const teams = teamsSchema.parse(await controlPlane.listTeams(ctx))
-      ownerChoices = ownerChoicesFor(principal, teams, 'scorecards:run')
-    } catch {
-      ownerChoices = { teams: [] }
-    }
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
@@ -107,10 +98,6 @@ export async function ScorecardCreateView({ workspace }: { workspace: string }) 
           runners={runners}
           hasWorkspaceRunners={hasWorkspaceRunners}
           traceSources={traceSources}
-          teams={ownerChoices.teams}
-          {...(ownerChoices.defaultTeamId !== undefined
-            ? { defaultTeamId: ownerChoices.defaultTeamId }
-            : {})}
         />
       ) : (
         <EmptyState title={t('noRunPermTitle')} hint={t('noPermHint')} />

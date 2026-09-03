@@ -3,7 +3,6 @@ export {
   createIssueAction,
   declineTriageAction,
   deleteIssueAction,
-  moveIssueAction,
   moveIssuesToCycleAction,
   setIssueStatusAction,
   updateIssueAction,
@@ -14,7 +13,6 @@ export { CreateIssueDialog, type CreateIssueDialogProps } from './ui/create-issu
 export { EditIssueDialog } from './ui/edit-issue-dialog'
 export { IssueActions } from './ui/issue-actions'
 export { IssueAssigneeControl } from './ui/issue-assignee-control'
-export { IssueCycleControl, type IssueCycleOption } from './ui/issue-cycle-control'
 export { IssueLabelControl } from './ui/issue-label-control'
 export { IssueMilestoneControl, type IssueMilestoneOption } from './ui/issue-milestone-control'
 export { IssueParentControl, type IssueParentOption } from './ui/issue-parent-control'
@@ -22,5 +20,4 @@ export { IssuePriorityControl } from './ui/issue-priority-control'
 export { IssueProjectControl, type IssueProjectOption } from './ui/issue-project-control'
 export { IssueStatusControl } from './ui/issue-status-control'
 export { IssueTriageActions } from './ui/issue-triage-actions'
-export { IssueTeamControl, type IssueTeamOption } from './ui/issue-team-control'
 export { ResolveIssueDialog, type ResolvableScorecard } from './ui/resolve-issue-dialog'

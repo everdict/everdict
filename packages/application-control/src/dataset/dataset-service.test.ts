@@ -32,14 +32,8 @@ class FakeDatasetRegistry implements DatasetRegistry {
   // Ownership is not what these cores decide (they gate on creator-or-admin), and a double that ANSWERS a
   // question it does not model would be answering it wrongly — so this throws rather than returning
   // `undefined`, which every gate reads as "unowned" and lets through (rule `testing`).
-  teamOfVersion(): string | undefined {
-    throw unused();
-  }
   // Unused by the delete cores.
   register(): Promise<void> {
-    throw unused();
-  }
-  moveToTeam(): Promise<void> {
     throw unused();
   }
   has(): Promise<boolean> {

@@ -1,5 +1,5 @@
 import type { IssueGroupBy, IssueGroupCount, IssuePage, IssueRecord } from "@everdict/contracts";
-import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import { issueCountsByGroup, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
   GithubIssue,
@@ -7,18 +7,18 @@ import type {
   GithubRepoWriter,
   GithubRepoWriterFactory,
 } from "../ports/github-repo-writer.js";
-import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore } from "../ports/issue-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import { GithubIssueSync } from "./github-issue-sync.js";
 import { IssueService } from "./issue-service.js";
 
 // Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
-const teamAllocator = (() => {
+const numberAllocator = (() => {
   let n = 0;
   return {
     async allocateForIssue() {
       n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+      return { number: n, identifier: `EVD-${n}` };
     },
   };
 })();
@@ -66,9 +66,6 @@ class FakeIssueStore implements IssueStore {
   // Derived from this fake's own `list` via the kernel helpers, so it cannot disagree with production.
   async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
     return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
-  }
-  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
-    return issueCountsByTeam(await this.list(tenant));
   }
   async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
     return issueCountsByGroup(await this.list(tenant, filter), groupBy);
@@ -178,11 +175,11 @@ describe("GithubIssueSync — import", () => {
   let remote: RemoteState;
 
   function build() {
-    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
+    const issues = new IssueService({ store, numbers: numberAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
-      teams: teamAllocator,
+      numbers: numberAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
       // GitHub owns labels by NAME; the sync maps them onto registry ids first. Deriving the id from the
@@ -256,11 +253,11 @@ describe("GithubIssueSync — pull", () => {
   let remote: RemoteState;
 
   function build() {
-    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
+    const issues = new IssueService({ store, numbers: numberAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
-      teams: teamAllocator,
+      numbers: numberAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
       // GitHub owns labels by NAME; the sync maps them onto registry ids first. Deriving the id from the
@@ -349,11 +346,11 @@ describe("GithubIssueSync — push", () => {
   let remote: RemoteState;
 
   function build() {
-    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
+    const issues = new IssueService({ store, numbers: numberAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
-      teams: teamAllocator,
+      numbers: numberAllocator,
       tokens: { tokenForRepository: async () => ({ token: "tok" }) },
       writers: fakeWriters(remote),
       // GitHub owns labels by NAME; the sync maps them onto registry ids first. Deriving the id from the
@@ -439,11 +436,11 @@ describe("GithubIssueSync — attachments", () => {
   let tokenScopes: Array<{ repository: string; permissions: Record<string, string>; host?: string }>;
 
   function build() {
-    const issues = new IssueService({ store, teams: teamAllocator, now: () => NOW });
+    const issues = new IssueService({ store, numbers: numberAllocator, now: () => NOW });
     const sync = new GithubIssueSync({
       store,
       issues,
-      teams: teamAllocator,
+      numbers: numberAllocator,
       tokens: {
         tokenForRepository: async (_tenant, repository, permissions, host) => {
           tokenScopes.push({ repository, permissions, ...(host !== undefined ? { host } : {}) });
@@ -511,7 +508,7 @@ describe("GithubIssueSync — attachments", () => {
 
   it("refuses an issue that was never imported — there is no installation to read it with", async () => {
     const { sync } = build();
-    const local = await new IssueService({ store, teams: teamAllocator, now: () => NOW }).create({
+    const local = await new IssueService({ store, numbers: numberAllocator, now: () => NOW }).create({
       tenant: "acme",
       title: "filed here",
       createdBy: "dana",

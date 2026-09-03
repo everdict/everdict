@@ -156,9 +156,7 @@ function harness() {
       client: {
         post: async () => {},
         verify: async () => ({ reachable: true, detail: "stub" }),
-        listChannels: async () => [
-          { id: "c1", name: "town-square", displayName: "Town Square", teamId: "t1", type: "O" },
-        ],
+        listChannels: async () => [{ id: "c1", name: "town-square", displayName: "Town Square", type: "O" }],
         getChannelPosts: async () => [{ id: "p1", userId: "u1", message: "hi", createdAt: 1 }],
       },
       secretsFor: async () => ({ MM_BOT: "xoxb-test" }),
@@ -879,12 +877,6 @@ describe("MCP tools", () => {
       "list_workspace_owned_runners",
       "list_workspace_runners",
       "list_workspace_trace_sources",
-      // Ownership transfer — the write half of the team axis, one tool per re-fileable resource.
-      "move_dataset",
-      "move_harness",
-      "move_harness_template",
-      "move_judge",
-      "move_scorecard",
       "open_github_pr",
       "override_scorecard_gate",
       "pair_runner",
@@ -996,30 +988,6 @@ describe("MCP tools", () => {
     const other = await connect(deps, ["member"], "acme", "someone-else");
     const theirs = await other.callTool({ name: "list_harnesses", arguments: {} });
     expect((JSON.parse(text(theirs)) as Array<{ id: string }>).map((e) => e.id)).not.toContain("bu-cli");
-  });
-
-  it("pin_harness_images is gated by the harness's owning team — BFF↔MCP parity (review wave C)", async () => {
-    // The HTTP re-pin authorizes against the ENTITY's owning team (`teamOfEntity`); this tool authorized the
-    // bare action only, so an agent on MCP could re-pin another team's harness that the route refused. Seen
-    // RED: the outsider's pin succeeded and minted a version.
-    const deps = harness();
-    await deps.harnessTemplates.register("acme", JSON.parse(HARNESS_TEMPLATE));
-    await deps.harnessInstances.register("acme", JSON.parse(HARNESS_INSTANCE), "alice", "team-x");
-    const outsider = await connect(deps, ["member"], "acme", "not-on-team-x");
-    const digest = `img@sha256:${"d".repeat(64)}`;
-    const pinned = await outsider.callTool({
-      name: "pin_harness_images",
-      arguments: { id: "bu", pins: { "agent-server": digest } },
-    });
-    expect(pinned.isError).toBe(true);
-    expect(await deps.harnessInstances.versions("acme", "bu")).toEqual(["1.0.0"]); // nothing was minted
-    // …while an admin (governs every team) still can — same rule the routes' gate applies.
-    const admin = await connect(deps, ["admin"], "acme", "boss");
-    const ok = await admin.callTool({
-      name: "pin_harness_images",
-      arguments: { id: "bu", pins: { "agent-server": digest } },
-    });
-    expect(ok.isError).toBeFalsy();
   });
 
   it("pin_harness_images records the merge base and via 'mcp' as the new version's origin", async () => {
@@ -2369,19 +2337,6 @@ describe("MCP tools", () => {
     const res = await client.callTool({ name: "diff_scorecards", arguments: { baseline: "x", candidate: "y" } });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain("NOT_FOUND");
-  });
-
-  it("ingest_scorecard: naming a team the caller is not on is FORBIDDEN — the MCP twin gates like the route", async () => {
-    // Regression: the tool resolved the named team (teamForNew) but never authorized AGAINST it, so an agent
-    // could file an ingested batch under another team while the identical HTTP request 403'd.
-    const client = await connect(harness(), ["member"]);
-    const body = JSON.stringify({
-      teamId: "team-not-mine",
-      traces: [{ caseId: "c1", trace: [{ t: 0, kind: "log", stream: "stdout", text: "x" }] }],
-    });
-    const res = await client.callTool({ name: "ingest_scorecard", arguments: { body } });
-    expect(res.isError).toBe(true);
-    expect(text(res)).toMatch(/FORBIDDEN|NOT_FOUND/); // refused (403) or the team ref refuses to resolve — never accepted
   });
 
   it("trend_scorecards: the trend surface has an MCP twin (policyMixed semantics reach agents)", async () => {

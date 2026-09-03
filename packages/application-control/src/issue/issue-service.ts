@@ -40,22 +40,16 @@ export interface IssueActor {
 export interface CreateIssueInput {
   tenant: string;
   createdBy: string;
-  // Absent = the workspace's default team. Teams exist so an issue has an owner; making the caller name one
-  // every time would just push that decision onto every transport for no gain.
-  teamId?: string;
   title: string;
   description?: string;
   status?: IssueStatus;
   // File it into the team's triage inbox instead of straight into the workflow — what an import or an agent
   // does when the team asked for a queue in front of it.
-  inTriage?: boolean;
   priority?: IssuePriority;
   estimate?: number;
   dueDate?: string;
   // The issue this one breaks out of — a sub-issue is an ordinary issue with a parent, not a nested record.
   parentId?: string;
-  // The team iteration it is pulled into, and the project checkpoint it belongs to.
-  cycleId?: string;
   milestoneId?: string;
   projectId?: string;
   assignee?: string;
@@ -82,43 +76,33 @@ export interface IssueGithubPusher {
 }
 
 // Composed the same way as the GitHub pusher: this service owns the issue transition, the collaborator owns
-// team resolution and the identifier sequence. TeamService satisfies it structurally, so the two stay peers
-// instead of one reaching into the other.
-export interface IssueTeamAllocator {
-  allocateForIssue(
-    tenant: string,
-    teamId: string | undefined,
-    by: string,
-  ): Promise<{ team: { id: string }; grant: { number: number; identifier: string } }>;
-}
-
-// The cycle half is composed like the GitHub and team collaborators: this service owns the issue transition,
-// the seam answers "does this cycle exist, and whose is it". Absent = cycles are simply not validated, which is
-// the P0 shape (a deployment without the cycle service still tracks issues).
-export interface IssueCycleResolver {
-  get(tenant: string, id: string): Promise<{ id: string; teamId: string } | undefined>;
+// the identifier sequence. `WorkspaceService` satisfies it structurally, so the two stay peers instead of one
+// reaching into the other.
+//
+// The sequence used to belong to a TEAM — `ENG-12` said whose list the issue was on. With the workspace as the
+// only boundary there is one counter and one prefix, so the grant is the whole answer and there is no owner
+// left to resolve alongside it.
+export interface IssueNumberAllocator {
+  allocateForIssue(tenant: string, by: string): Promise<{ number: number; identifier: string }>;
 }
 
 // "Is this checkpoint one of that project's" — the only question an issue asks about a milestone. Composed like
 // the cycle resolver; absent = milestones are not validated in this deployment.
 export interface IssueStateResolver {
-  get(tenant: string, id: string): Promise<{ id: string; teamId: string; status: IssueStatus } | undefined>;
+  get(tenant: string, id: string): Promise<{ id: string; status: IssueStatus } | undefined>;
 }
 
 // "Does this project exist, whose is it, and what checkpoints does it have" — composed like the cycle resolver;
 // absent = projects are not composed in this deployment and the field is simply not validated. `ProjectStore`
 // satisfies it structurally, so the two stay peers instead of one service reaching into the other.
 export interface IssueProjectResolver {
-  get(
-    tenant: string,
-    projectId: string,
-  ): Promise<{ teamIds: readonly string[]; milestones: readonly { id: string }[] } | undefined>;
+  get(tenant: string, projectId: string): Promise<{ milestones: readonly { id: string }[] } | undefined>;
 }
 
 export interface IssueServiceDeps {
   store: IssueStore;
   // Required: an issue cannot exist without an owning team, so there is no degraded mode to fall back to.
-  teams: IssueTeamAllocator;
+  numbers: IssueNumberAllocator;
   // Evidence validation only — `resolution.scorecardId` must exist in this workspace. Plain links stay
   // unvalidated pointers (platform-event subject semantics).
   scorecards?: ScorecardStore;
@@ -129,7 +113,6 @@ export interface IssueServiceDeps {
   comments?: CommentStore;
   // "Does this cycle exist, and whose is it" — the one question an issue asks about an iteration. Absent =
   // cycles are not composed in this deployment, and the field is simply not validated.
-  cycles?: IssueCycleResolver;
   projects?: IssueProjectResolver;
   // "Which column is this, and whose board is it on" — the only question an issue asks about a workflow state.
   states?: IssueStateResolver;
@@ -165,13 +148,11 @@ export class IssueService {
     // (`ENG-12`) just as readily as the uuid, and the sub-issue query keys on the id — so filing by identifier
     // used to mint a child that its own parent's detail could never list. Re-parenting already resolved.
     const parent = input.parentId === undefined ? undefined : await this.get(input.tenant, input.parentId);
-    const { team, grant } = await this.deps.teams.allocateForIssue(input.tenant, input.teamId, input.createdBy);
-    if (input.cycleId !== undefined) await this.assertCycleOfTeam(input.tenant, input.cycleId, team.id);
-    if (input.projectId !== undefined) await this.assertProjectOfTeam(input.tenant, input.projectId, team.id);
+    const grant = await this.deps.numbers.allocateForIssue(input.tenant, input.createdBy);
+    if (input.projectId !== undefined) await this.assertProjectExists(input.tenant, input.projectId);
     const record = Issue.newIssue({
       id: this.newId(),
       tenant: input.tenant,
-      teamId: team.id,
       number: grant.number,
       identifier: grant.identifier,
       title: input.title,
@@ -181,9 +162,7 @@ export class IssueService {
       ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
       ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
       ...(parent !== undefined ? { parentId: parent.id } : {}),
-      ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
       ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {}),
-      ...(input.inTriage !== undefined ? { inTriage: input.inTriage } : {}),
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),
       ...(input.assignee !== undefined ? { assignee: input.assignee } : {}),
       ...(input.labelIds !== undefined ? { labelIds: input.labelIds } : {}),
@@ -208,7 +187,7 @@ export class IssueService {
     // The record arrives assembled, so the project edge is checked HERE — an import that files a batch into a
     // project the destination team is not on would otherwise be the one way into the state every other path
     // refuses, and it is the path that files the most issues at once.
-    if (record.projectId !== undefined) await this.assertProjectOfTeam(record.tenant, record.projectId, record.teamId);
+    if (record.projectId !== undefined) await this.assertProjectExists(record.tenant, record.projectId);
     return this.persistNew(record, agent);
   }
 
@@ -278,13 +257,10 @@ export class IssueService {
     }
     // A cycle belongs to a team, so an issue can only be pulled into one of ITS team's iterations — otherwise
     // the issue sits on a board it can never appear on, which is work made invisible rather than planned.
-    if (fields.cycleId !== undefined && fields.cycleId !== null)
-      await this.assertCycleOfTeam(tenant, fields.cycleId, record.teamId);
-    // A project names its teams, so an issue can only join one its own team is on — the same rule as the cycle,
-    // one level up. (`teamId` is deliberately absent from an edit: a re-address is `move`, never a side effect
+    // (A re-address used to be `move`; with one workspace there is nowhere to move to.)
     // of a rename, so the issue's team here is the one it already has.)
     if (fields.projectId !== undefined && fields.projectId !== null)
-      await this.assertProjectOfTeam(tenant, fields.projectId, record.teamId);
+      await this.assertProjectExists(tenant, fields.projectId);
     // A checkpoint belongs to a project, so an issue can only sit under one of ITS project's — the same reason
     // a cycle has to be its team's. `projectId` may be changing in the same edit, so the check reads whichever
     // project the issue will end up in.
@@ -299,17 +275,10 @@ export class IssueService {
   private async resolveState(
     tenant: string,
     stateId: string,
-    teamId: string,
   ): Promise<{ id: string; status: IssueStatus } | undefined> {
     if (!this.deps.states) return undefined; // the board is not composed — the caller's canonical status stands
     const state = await this.deps.states.get(tenant, stateId);
     if (!state) throw new NotFoundError("NOT_FOUND", { state: stateId }, `workflow state '${stateId}' not found.`);
-    if (state.teamId !== teamId)
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { state: stateId, team: teamId },
-        "That column belongs to another team's board.",
-      );
     return { id: state.id, status: state.status };
   }
 
@@ -334,41 +303,13 @@ export class IssueService {
       );
   }
 
-  // A project names the teams working it, so an issue can only join one its OWN team is on — the same rule a
-  // cycle has, and for the same reason: a project the issue's team is not part of is a list the issue can never
-  // be seen in from the team that owns it. This is also what makes "this team's projects" a real answer rather
-  // than a hint: the picker a member is offered and the set the control plane accepts are the same set.
-  private async assertProjectOfTeam(tenant: string, projectId: string, teamId: string): Promise<void> {
-    if (!this.deps.projects) return; // projects not composed — nothing to validate against
+  // "Does this project exist" — all an issue asks about a project now that the workspace is the only owner.
+  // It used to also ask whose it was: a project named its teams and an issue could only join one its OWN team
+  // was on. With one workspace both sides of that comparison are the same value, so the question is existence.
+  private async assertProjectExists(tenant: string, projectId: string): Promise<void> {
+    if (!this.deps.projects) return;
     const project = await this.deps.projects.get(tenant, projectId);
     if (!project) throw new NotFoundError("NOT_FOUND", { project: projectId }, `project '${projectId}' not found.`);
-    if (!project.teamIds.includes(teamId))
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { project: projectId, team: teamId },
-        "That project is not one of this team's — add the team to the project first, or file the issue on a team that is on it.",
-      );
-  }
-
-  // The same edge read as a question instead of a guard — a move asks it, and an unanswerable one keeps the
-  // project: projects that are not composed (or a pointer that no longer resolves) are not a reason for a team
-  // move to quietly empty a field.
-  private async projectHoldsTeam(tenant: string, projectId: string, teamId: string): Promise<boolean> {
-    if (!this.deps.projects) return true;
-    const project = await this.deps.projects.get(tenant, projectId);
-    return project === undefined || project.teamIds.includes(teamId);
-  }
-
-  private async assertCycleOfTeam(tenant: string, cycleId: string, teamId: string): Promise<void> {
-    if (!this.deps.cycles) return; // cycles not composed — nothing to validate against
-    const cycle = await this.deps.cycles.get(tenant, cycleId);
-    if (!cycle) throw new NotFoundError("NOT_FOUND", { cycle: cycleId }, `cycle '${cycleId}' not found.`);
-    if (cycle.teamId !== teamId)
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { cycle: cycleId, team: teamId },
-        "That cycle belongs to another team — an issue can only join its own team's iterations.",
-      );
   }
 
   // Walks UP from `candidate` looking for `ancestor`. Bounded by a visited set, so even a cycle written by an
@@ -385,72 +326,6 @@ export class IssueService {
     return false;
   }
 
-  // Triage: accept the issue into the team's workflow, or decline it (which is a cancellation with a reason —
-  // the issue stays on the record rather than vanishing, because "we said no to this" is an answer somebody
-  // will look for). Both route through the same choke point as every other transition.
-  async acceptTriage(tenant: string, ref: string, to: IssueStatus, actor: IssueActor): Promise<IssueRecord> {
-    const record = await this.get(tenant, ref);
-    return this.applyTransition(record, Issue.from(record).acceptFromTriage(to, actor.subject, this.now()), actor);
-  }
-
-  async declineTriage(tenant: string, ref: string, note: string | undefined, actor: IssueActor): Promise<IssueRecord> {
-    const record = await this.get(tenant, ref);
-    if (!record.inTriage)
-      throw new ConflictError(
-        "CONFLICT",
-        { issue: record.id },
-        "This issue is not in triage — it is already in the workflow.",
-      );
-    const cancelled = await this.applyTransition(
-      record,
-      Issue.from(record).setStatus("cancelled", actor.subject, this.now(), {
-        ...(note !== undefined ? { note } : {}),
-      }),
-      actor,
-    );
-    // The flag clears with the decline: a declined issue is settled, and leaving it in the inbox would make the
-    // queue grow with things nobody has to look at again.
-    const cleared = await this.deps.store.update(tenant, cancelled.id, { inTriage: false, updatedAt: this.now() });
-    return cleared ?? cancelled;
-  }
-
-  // Hand the issue to another team. The number comes from the DESTINATION's counter through the same allocator
-  // filing uses, so a moved issue is numbered exactly like one filed there — and the old identifier keeps
-  // resolving (the record remembers it), which is what makes re-minting safe for links already in the wild.
-  async move(tenant: string, ref: string, teamId: string, actor: IssueActor): Promise<IssueRecord> {
-    const record = await this.get(tenant, ref);
-    // The aggregate refuses a no-op move too; this earlier copy of the guard exists so the refusal does not
-    // burn a number off the destination's counter on the way to being rejected.
-    if (record.teamId === teamId)
-      throw new ConflictError(
-        "CONFLICT",
-        { issue: record.id, team: teamId },
-        "This issue already belongs to that team.",
-      );
-    const { team, grant } = await this.deps.teams.allocateForIssue(tenant, teamId, actor.subject);
-    // Whether the issue keeps its project is a store question (does the project name the destination team), so
-    // it is answered here and handed to the aggregate as a fact. A project spans teams, so moving INSIDE the
-    // project's own set of teams keeps it; moving out of that set drops it, because an issue in a project its
-    // team is not on is exactly the state every other path refuses. Asked with the RESOLVED id — the caller may
-    // have named the destination by key (`PLT`), and the project's list holds ids.
-    const projectHoldsTeam =
-      record.projectId === undefined ? undefined : await this.projectHoldsTeam(tenant, record.projectId, team.id);
-    return this.applyTransition(
-      record,
-      Issue.from(record).moveToTeam(
-        {
-          teamId: team.id,
-          number: grant.number,
-          identifier: grant.identifier,
-          ...(projectHoldsTeam !== undefined ? { projectHoldsTeam } : {}),
-        },
-        actor.subject,
-        this.now(),
-      ),
-      actor,
-    );
-  }
-
   // The one status entry point: it routes to the domain transition that fits the current state, so callers
   // (routes, MCP tools, the regression watch) never have to know whether a move is a resolve or a reopen.
   async setStatus(tenant: string, id: string, input: SetIssueStatusInput, actor: IssueActor): Promise<IssueRecord> {
@@ -458,10 +333,8 @@ export class IssueService {
     const issue = Issue.from(record);
     const now = this.now();
     const cause = input.cause ?? "manual";
-    // Moving by column: the column names the canonical status, so it decides — and it has to be one of the
-    // issue's OWN team's columns, for the same reason a cycle has to be its team's.
-    const state =
-      input.stateId === undefined ? undefined : await this.resolveState(tenant, input.stateId, record.teamId);
+    // Moving by column: the column names the canonical status, so it decides.
+    const state = input.stateId === undefined ? undefined : await this.resolveState(tenant, input.stateId);
     const to = state?.status ?? input.status;
     let transition: IssueTransition;
     if (to === "done") {

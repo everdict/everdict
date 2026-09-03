@@ -1,19 +1,10 @@
 import { deleteModelVersion, deleteModelVersions } from "@everdict/application-control";
 import { ModelSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { SaveModelBodySchema } from "./request/save-model.js";
 import { TestModelConnectionBodySchema } from "./request/test-connection.js";
-
-// Model MCP tools — the MCP twin of model.routes.ts.
-// A private team's authored entry is that team's — the same ceiling the HTTP twin stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
 
 export function registerModelTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
@@ -27,7 +18,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
         description: "Models visible to this workspace (inference/judge models: owned + _shared)",
         inputSchema: {},
       },
-      () => run(principal, "models:read", async () => ok(await keepVisible(ctx, await models.list(ws)))),
+      () => run(principal, "models:read", async () => ok(await models.list(ws))),
     );
 
     server.registerTool(
@@ -40,7 +31,6 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, version }) =>
         run(principal, "models:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, models, ws, id, "model");
           return ok(await models.get(ws, id, version ?? "latest"));
         }),
     );
@@ -96,8 +86,7 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
         },
       },
       ({ model, team }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "models:write", team, async (teamId) => {
+        run(ctx.principal, "models:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(model);
@@ -106,8 +95,8 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
           }
           const result = ModelSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await models.register(ws, result.data, principal.subject, teamId); // creator = subject (delete permission)
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+          await models.register(ws, result.data, principal.subject); // creator = subject (delete permission)
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
 
@@ -183,27 +172,17 @@ export function registerModelTools(server: McpServer, ctx: McpToolContext): void
         },
       },
       async ({ id, model }) => {
-        // The same gate the HTTP twin carries (arch-review 119): saving over a model is a WRITE to somebody's
-        // model, and the service preserves the owner — so an unscoped `models:write` mints a Team-A-owned
-        // version for a caller who is not on Team A. `run` takes the scope, so the entity is resolved before
-        // the action rather than inside it. BFF↔MCP parity is structural (rule `api-layer`).
-        const owner = await teamOfEntity(deps.modelRegistry, ws, id);
-        return run(
-          principal,
-          "models:write",
-          async () => {
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(model);
-            } catch {
-              return fail("BAD_REQUEST: not a valid model JSON.");
-            }
-            const result = SaveModelBodySchema.safeParse(parsed);
-            if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-            return ok(await modelService.saveConnection(ws, principal.subject, id, result.data));
-          },
-          owner,
-        );
+        return run(principal, "models:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(model);
+          } catch {
+            return fail("BAD_REQUEST: not a valid model JSON.");
+          }
+          const result = SaveModelBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await modelService.saveConnection(ws, principal.subject, id, result.data));
+        });
       },
     );
   }

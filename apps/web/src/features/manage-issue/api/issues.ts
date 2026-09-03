@@ -90,13 +90,12 @@ export async function updateIssueAction(
 // 그래서 결과도 부분 실패를 그대로 말한다 — 열아홉 건이 옮겨졌는데 "실패"라고만 하면 다시 누르게 된다.
 export async function moveIssuesToCycleAction(
   ids: string[],
-  cycleId: string | null
 ): Promise<{ moved: number; failed: number; error?: string }> {
   const ctx = await authContext()
   const results = await Promise.all(
     ids.map((id) =>
       controlPlane
-        .updateIssue(ctx, id, { cycleId })
+        .updateIssue(ctx, id, {})
         .then(() => ({ ok: true }) as const)
         .catch(
           (e: unknown) =>
@@ -139,17 +138,6 @@ export async function setIssueStatusAction(
   }
 }
 
-// 다른 팀으로 넘기기. 식별자가 도착지 팀의 카운터로 다시 찍히므로, 성공하면 이슈의 주소 자체가 바뀐다 —
-// 호출한 쪽은 돌아온 identifier 로 이동해야 한다(예전 이름도 계속 해석되지만, 정규 주소는 새 이름이다).
-export async function moveIssueAction(id: string, teamId: string): Promise<IssueActionResult> {
-  const ctx = await authContext()
-  try {
-    const issue = issueSchema.parse(await controlPlane.moveIssue(ctx, id, teamId))
-    return { ok: true, issue }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
 
 // 트리아지에서 나가는 두 길. 받아들이기는 워크플로로 들여보내고, 거절은 사유와 함께 취소한다 — 레코드는
 // 남는다("우리가 거절했다"는 나중에 찾는 답이다).

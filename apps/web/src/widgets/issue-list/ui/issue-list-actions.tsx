@@ -9,7 +9,6 @@ import {
 import { CreateIssueButton } from '@/features/manage-issue'
 import { githubAppRepoSchema } from '@/entities/github-app'
 import { issuePageSchema, type IssueSummary } from '@/entities/issue'
-import type { TeamWithSummary } from '@/entities/team'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Link } from '@/shared/ui/link'
@@ -24,36 +23,21 @@ const MAX_SYNCED_ROSTER = 200
 // 것이 GitHub App 설치 상태 + 동기화 저장소 목록(이슈 200행) + 팀 목록인데, 예전에는 그 셋이 목록과 같은
 // `Promise.all` 에 묶여 있었다: 이슈 50행은 벌써 도착했는데 툴바가 못 와서 화면 전체가 서 있었다. 이제 이
 // 컴포넌트는 Suspense 경계 뒤에서 스트리밍되고, 목록은 자기 데이터만 기다린다.
-//
-// 팀 목록은 PROMISE 로 받는다 — 워크스페이스 전체 목록에서는 팀 칩이 이미 그 값을 쓰므로 부모가 기다린
-// 결과를 그대로 넘겨받고(중복 호출 없음), 팀 스코프에서는 칩이 렌더되지 않아 부모가 기다리지 않는다.
-// 어느 쪽이든 호출은 한 번, 임계 경로에는 필요한 화면에서만 오른다.
 export async function IssueListActions({
   workspace,
-  teams,
   projects,
-  cycles = [],
-  defaultTeamId,
   canReadIntegrations,
-  team,
 }: {
   workspace: string
-  teams: Promise<TeamWithSummary[]>
   projects: { id: string; name: string }[]
-  // 이 팀의 열린 이터레이션 — 접수하면서 바로 주기에 넣기 위해. 팀 스코프에서만 채워진다.
-  cycles?: { id: string; name: string }[]
-  defaultTeamId?: string
   // The import picker reads the workspace App's repo list (github:read, member+) — the entry point is only
   // offered to someone who can actually complete the flow.
   canReadIntegrations: boolean
-  // 팀 스코프면 그 팀의 동기화 저장소만 센다.
-  team?: TeamWithSummary
 }) {
   const t = await getTranslations('issuesPage')
   const ctx = await authContext()
 
-  const [resolvedTeams, githubConnected, syncedRoster] = await Promise.all([
-    teams,
+  const [githubConnected, syncedRoster] = await Promise.all([
     // "Is GitHub connected?" is asked through the REPO list, not the installation view: the installation view is
     // App administration (settings:read, admin-only), so a member asking it got a silent false from the catch and
     // an import entry point that claimed nothing was connected. The repo list answers the same question with the
@@ -68,7 +52,6 @@ export async function IssueListActions({
     controlPlane
       .listIssues(ctx, {
         syncPull: true,
-        ...(team ? { team: team.id } : {}),
         limit: MAX_SYNCED_ROSTER,
       })
       .then((r) => issuePageSchema.parse(r).items)
@@ -93,7 +76,6 @@ export async function IssueListActions({
 
   // 새 이슈가 처음 앉을 팀: 팀 목록 안에서 열었으면 그 팀, 아니면 워크스페이스의 기본 팀. 지금 보고 있는
   // 목록에 나타나지 않을 곳에 이슈를 만드는 일이 없도록 한다.
-  const initialTeamId = defaultTeamId ?? resolvedTeams.find((x) => x.isDefault)?.id
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -115,9 +97,6 @@ export async function IssueListActions({
       <CreateIssueButton
         workspace={workspace}
         projects={projects}
-        cycles={cycles}
-        teams={resolvedTeams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
-        {...(initialTeamId !== undefined ? { defaultTeamId: initialTeamId } : {})}
       />
     </div>
   )

@@ -5,9 +5,6 @@ import type { CapabilityOrigin, Dataset, DatasetProvenance } from "@everdict/con
 // from the registration history (createdAt=first registration, updatedAt=latest registration).
 // _shared and file-seeded versions have no createdBy (undefined). GET /datasets and MCP list_datasets emit this shape verbatim.
 export interface DatasetListEntry {
-  // The owning team, from the latest version — a list can only be narrowed by team if the row carries it.
-  // Absent = unowned.
-  teamId?: string;
   id: string;
   owner: string;
   versions: string[]; // live versions (semver ascending)
@@ -31,13 +28,7 @@ export interface DatasetListEntry {
 // Harness-agnostic — the same dataset runs against several harness@version for baseline comparison. async — Postgres shares the contract.
 export interface DatasetRegistry {
   // createdBy: subject that registered this version (for soft-delete authz — the creator themselves). No system seed / file loader (undefined).
-  register(
-    tenant: string,
-    dataset: Dataset,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void>;
+  register(tenant: string, dataset: Dataset, createdBy?: string, origin?: CapabilityOrigin): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<Dataset>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded
@@ -45,21 +36,6 @@ export interface DatasetRegistry {
   list(tenant: string): Promise<DatasetListEntry[]>;
   // Creator subject of a live version this tenant directly owns (undefined if none). Missing/deleted/non-owned version → NotFound — no fallback.
   creatorOf(tenant: string, id: string, version: string): Promise<string | undefined>;
-  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (`_shared`/seeded),
-  // which the gate lets through; it is NOT "everyone's".
-  // ── REQUIRED, BECAUSE EVERY IMPLEMENTATION HAS IT (arch-review 119) ────────────────────────────
-  //
-  // Declared optional, this is the permissive arm of an authorization read: `registry.teamOfVersion?.(…)`
-  // answers `undefined` for a registry that does not implement it, which every gate reads as "unowned" and
-  // lets through. Twenty implementations exist and not one is missing it, so the optionality bought nothing
-  // and cost the ability to write a gate that cannot be skipped (rule `protocol`).
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
-  // Ownership transfer — the ENTITY moves, so every version of it moves (see VersionedStore.moveToTeam for why
-  // it is never per-version). Ownership is metadata beside createdBy, so a transfer mints no version and leaves
-  // content immutability untouched. Tenant directly-owned only (a `_shared` benchmark is not a workspace's to
-  // re-file) and only while something of it is live → NotFound otherwise. Authorization (may this subject move
-  // it, and to a team they are on) lives in the caller, exactly as it does for softDelete.
-  moveToTeam(tenant: string, id: string, teamId: string): Promise<void>;
   // Soft delete (tombstone) — preserve the data but exclude it from reads (keeps reproducibility). Tenant directly-owned only; missing/already-deleted version → NotFound.
   softDelete(tenant: string, id: string, version: string): Promise<void>;
   // Version tags (free-form label, full replacement) — mutable registry metadata (outside content immutability). Tenant-owned live versions only; _shared → NotFound.

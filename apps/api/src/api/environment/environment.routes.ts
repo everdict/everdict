@@ -1,9 +1,8 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { EnvironmentSpecSchema } from "@everdict/contracts";
-import { imageWarnings, ownedByVisibleTeam } from "@everdict/domain";
+import { imageWarnings } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { environmentDocs } from "./environment.docs.js";
 
 // environments (workspace-owned SSOT: the world a case ACTS ON — harness-definability-spec.md §2).
@@ -21,17 +20,15 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
     if (!principal) return reply;
     // Resolve the owning team FIRST and gate against it — registering "as a team you are not on" is refused
     // for the same reason writing another team's asset is (the sibling doors all do this).
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "datasets:write", owner.gate);
+      gate(principal, "datasets:write");
     } catch (err) {
       return sendError(reply, err);
     }
     const parsed = EnvironmentSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.environmentRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
+      await deps.environmentRegistry.register(principal.workspace, parsed.data, principal.subject);
       // The world's bytes get the same advice every other image-bearing door gives (harness register, a
       // capability save): unqualified or local-only refs run on a self-hosted runner and nowhere else.
       const warnings =
@@ -42,7 +39,6 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
         workspace: principal.workspace,
         id: parsed.data.id,
         version: parsed.data.version,
-        ...(owner.teamId ? { teamId: owner.teamId } : {}),
         ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
       });
     } catch (err) {
@@ -57,9 +53,8 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
     try {
       gate(principal, "datasets:read");
       // A private team's environment is that team's — the ceiling every other team-owned read stays under.
-      const seen = await visibleTeamsFor(deps, principal);
       const entries = await deps.environmentRegistry.list(principal.workspace);
-      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
+      return reply.send(entries);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -74,14 +69,6 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
       if (!principal) return reply;
       try {
         gate(principal, "datasets:read");
-        await assertEntityVisible(
-          deps,
-          principal,
-          deps.environmentRegistry,
-          principal.workspace,
-          req.params.id,
-          "environment",
-        );
         return reply.send(await deps.environmentRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err);

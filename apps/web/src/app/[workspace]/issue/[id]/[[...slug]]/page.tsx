@@ -17,24 +17,13 @@ import {
   CreateIssueButton,
   IssueActions,
   IssueAssigneeControl,
-  IssueCycleControl,
   IssueLabelControl,
   IssueMilestoneControl,
   IssueParentControl,
   IssuePriorityControl,
   IssueProjectControl,
   IssueStatusControl,
-  IssueTeamControl,
-  IssueTriageActions,
 } from '@/features/manage-issue'
-import {
-  cycleHref,
-  cycleLabel,
-  cyclesSchema,
-  cycleStateOf,
-  todayIso,
-  type Cycle,
-} from '@/entities/cycle'
 import { datasetsSchema, type DatasetSummary } from '@/entities/dataset'
 import { harnessesSchema, type Harness } from '@/entities/harness'
 import {
@@ -57,12 +46,6 @@ import { issueLabelsSchema, type IssueLabel } from '@/entities/issue-label'
 import { judgesSchema, type JudgeSummary } from '@/entities/judge'
 import { memberDirectoryOf, memberNameOf, membersSchema, type Member } from '@/entities/member'
 import { isPastDue, projectsSchema, type Project } from '@/entities/project'
-import {
-  teamHref,
-  teamsWithSummarySchema,
-  teamWithSummarySchema,
-  type TeamWithSummary,
-} from '@/entities/team'
 import { TrackerHistory } from '@/entities/tracker-history'
 import { workflowStatesSchema, type WorkflowState } from '@/entities/workflow-state'
 import { can } from '@/shared/auth/can'
@@ -194,18 +177,15 @@ export default async function IssueDetailPage({
     )
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
-  // degrades only its own slot (팀을 못 읽으면 브레드크럼이 한 칸 짧아질 뿐이다).
+  // degrades only its own slot.
   const [
     evaluation,
     projects,
     members,
-    team,
-    teams,
     states,
     siblings,
     labels,
     children,
-    cycles,
     parent,
     harnesses,
     datasets,
@@ -218,33 +198,22 @@ export default async function IssueDetailPage({
       .listIssueScorecards(ctx, current.id)
       .then((r) => issueScorecardsSchema.parse(r))
       .catch(() => ({ scorecards: [], linked: [] })),
-    // 이 이슈가 들어갈 수 있는 프로젝트 — 자기 팀의 것뿐이다. 프로젝트는 자기 팀들을 이름으로 들고 있고,
-    // 이슈는 자기 팀이 올라 있는 프로젝트에만 들어간다(제어 평면이 거부한다). 워크스페이스 전체를 그려 놓으면
-    // 고를 수는 있는데 저장은 실패하는 항목이 목록의 대부분이 된다.
+    // 이 이슈가 들어갈 수 있는 프로젝트 — 워크스페이스의 것 전부다.
     controlPlane
-      .listProjects(ctx, { team: current.teamId })
+      .listProjects(ctx, {})
       .then((r) => projectsSchema.parse(r))
       .catch((): Project[] => []),
     controlPlane
       .listMembers(ctx)
       .then((r) => membersSchema.parse(r))
       .catch((): Member[] => []),
+    // 워크스페이스의 보드 — 상태 드롭다운이 거기 붙은 이름을 쓴다.
     controlPlane
-      .getTeam(ctx, current.teamId)
-      .then((r) => teamWithSummarySchema.parse(r))
-      .catch((): TeamWithSummary | undefined => undefined),
-    // 팀 목록은 "다른 팀으로 넘기기" 하나 때문에 읽는다 — 컨트롤이 고를 것이 없으면 드롭다운을 내지 않는다.
-    controlPlane
-      .listTeams(ctx)
-      .then((r) => teamsWithSummarySchema.parse(r))
-      .catch((): TeamWithSummary[] => []),
-    // 이 이슈가 속한 팀의 보드 — 상태 드롭다운이 팀이 붙인 이름을 쓴다.
-    controlPlane
-      .listWorkflowStates(ctx, current.teamId)
+      .listWorkflowStates(ctx)
       .then((r) => workflowStatesSchema.parse(r))
       .catch((): WorkflowState[] => []),
     controlPlane
-      .listIssues(ctx, { team: current.teamId, limit: SIBLING_WINDOW })
+      .listIssues(ctx, { limit: SIBLING_WINDOW })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
     controlPlane
@@ -256,12 +225,6 @@ export default async function IssueDetailPage({
       .listIssues(ctx, { parent: current.id })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
-    // 이 이슈가 들어갈 수 있는 이터레이션 — 자기 팀의 것뿐이다(제어 평면이 거절한다). 이미 붙어 있는
-    // 사이클도 이 목록 안에 있으므로 읽기는 하나면 된다. 사이클을 쓰지 않는 팀에서는 빈 목록이 온다.
-    controlPlane
-      .listCycles(ctx, { team: current.teamId })
-      .then((r) => cyclesSchema.parse(r))
-      .catch((): Cycle[] => []),
     current.parentId === undefined
       ? Promise.resolve(undefined)
       : controlPlane
@@ -269,8 +232,6 @@ export default async function IssueDetailPage({
           .then((r) => issueSchema.parse(r))
           .catch((): Issue | undefined => undefined),
     // 이 이슈를 검증하는 능력으로 고를 수 있는 것들 — 워크스페이스에 등록된 하네스·데이터셋·저지 전부다.
-    // 팀으로 좁히지 않는 이유: 링크는 포인터일 뿐 제어 평면이 팀을 따지지 않고(docs/tracker.md), 다른 팀이
-    // 만든 데이터셋으로 우리 이슈를 검증하는 것은 정상적인 일이다. 읽을 수 없는 것(비공개 팀)은 애초에 오지 않는다.
     controlPlane
       .listHarnesses(ctx)
       .then((r) => harnessesSchema.parse(r))
@@ -344,24 +305,7 @@ export default async function IssueDetailPage({
   const milestone = current.milestoneId
     ? milestoneOptions.find((m) => m.id === current.milestoneId)
     : undefined
-  // 이터레이션. 주소는 팀 아래의 번호(`…/teams/ENG/cycles/7`)이고, 팀을 못 읽었을 때만 예전 주소로 보낸다
-  // (그 주소가 팀을 찾아 정식 주소로 넘겨 준다) — 링크가 죽는 경우는 만들지 않는다.
-  const today = todayIso()
-  const cycleHrefOf = (c: Cycle): string =>
-    team
-      ? cycleHref(workspace, team.key, c.number)
-      : `/${workspace}/cycle/${encodeURIComponent(c.id)}`
-  const cycleOptionOf = (c: Cycle) => ({
-    id: c.id,
-    label: cycleLabel(c),
-    state: cycleStateOf(c, today),
-    href: cycleHrefOf(c),
-  })
-  const cycle = current.cycleId ? cycles.find((c) => c.id === current.cycleId) : undefined
-  // 고를 수 있는 것은 열려 있는 이터레이션뿐이다 — 닫힌 주기는 계획이 아니라 기록이고, 거기에 새 일을 넣는 것은
-  // 어느 팀도 하려는 일이 아니다.
-  const cycleOptions = cycles.filter((c) => c.completedAt === undefined).map(cycleOptionOf)
-  // 상위로 세울 수 있는 이슈 — 같은 팀의 이슈들이다. 형제 이동이 이미 읽어 둔 창을 그대로 쓰므로 읽기가
+  // 상위로 세울 수 있는 이슈 — 워크스페이스의 이슈들이다. 형제 이동이 이미 읽어 둔 창을 그대로 쓰므로 읽기가
   // 하나 늘지 않는다. 자기 자신과 자기 하위 이슈는 뺀다(자기 자손 아래로 들어가면 고리가 닫힌다); 더 깊은
   // 자손은 살아 있는 트리를 봐야 알 수 있어 제어 평면이 판정하고, 거절은 컨트롤이 그대로 띄운다.
   const childIds = new Set(children.map((child) => child.id))
@@ -436,17 +380,6 @@ export default async function IssueDetailPage({
             >
               {t('title')}
             </Link>
-            {team && (
-              <>
-                <ChevronRight className="size-3 shrink-0 text-faint" />
-                <Link
-                  href={teamHref(workspace, team.key)}
-                  className="truncate text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {team.name}
-                </Link>
-              </>
-            )}
             {parent && (
               <>
                 <ChevronRight className="size-3 shrink-0 text-faint" />
@@ -548,22 +481,9 @@ export default async function IssueDetailPage({
                 />
               </PropertyRow>
             )}
-            <PropertyRow label={t('fieldTeam')}>
-              {/* 팀은 상태와 함께 속성 열 안에서 바꿀 수 있는 둘뿐인 속성이다 — 옮기면 식별자가 다시 찍히므로
-                  컨트롤이 성공 후 새 슬러그로 주소를 바꾼다. */}
-              <IssueTeamControl
-                workspace={workspace}
-                id={current.id}
-                {...(team !== undefined
-                  ? { team: { id: team.id, key: team.key, name: team.name } }
-                  : { team: undefined })}
-                teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
-                canWrite={canWrite}
-              />
-            </PropertyRow>
             {/* 상위 이슈 — 이 이슈가 무엇에서 쪼개져 나왔는지. 브레드크럼에도 있지만 그건 위치이지 속성이
                 아니라, 하위 이슈인 것을 알아채고 붙였다 뗄 수 있는 자리는 여기다(예전에는 그 자리가 화면
-                어디에도 없어서 에이전트만 부모를 바꿀 수 있었다). 세울 수 있는 이슈가 하나도 없는 팀에서는
+                어디에도 없어서 에이전트만 부모를 바꿀 수 있었다). 세울 수 있는 이슈가 하나도 없으면
                 빈 행을 내지 않는다(빈 섹션 숨김). */}
             {(parent !== undefined || (canWrite && parentOptions.length > 0)) && (
               <PropertyRow label={t('fieldParent')}>
@@ -613,19 +533,6 @@ export default async function IssueDetailPage({
                   id={current.id}
                   milestone={milestone}
                   milestones={milestoneOptions}
-                  canWrite={canWrite}
-                />
-              </PropertyRow>
-            )}
-            {/* 사이클도 이 열에서 바로 넣고 뺀다 — 예전에는 붙어 있을 때만 링크 한 줄로 보였고, "이 이슈를
-                이번 주기에 넣자"에 답할 자리가 화면 어디에도 없었다(사이클을 만들 수는 있는데 이슈를 넣을
-                길이 없었다). 사이클을 쓰지 않는 팀에서는 빈 행을 내지 않는다(빈 섹션 숨김). */}
-            {(cycle !== undefined || (canWrite && cycleOptions.length > 0)) && (
-              <PropertyRow label={t('fieldCycle')}>
-                <IssueCycleControl
-                  id={current.id}
-                  cycle={cycle ? cycleOptionOf(cycle) : undefined}
-                  cycles={cycleOptions}
                   canWrite={canWrite}
                 />
               </PropertyRow>
@@ -796,9 +703,6 @@ export default async function IssueDetailPage({
               An imported GitHub issue's body IS markdown — render it as such (GFM), never as flat text. */}
           {/* imageProxy: 본문의 GitHub 첨부 이미지는 브라우저가 직접 못 받아온다(GHE·비공개 리포는 리포와 같은
               인증 뒤에 있고 크로스사이트 img 요청에는 그 세션이 안 실린다) — 우리 라우트를 거쳐 서버가 받아온다. */}
-          {/* 트리아지에 있는 이슈에 지금 할 일은 "받을까 말까" 하나뿐이라, 본문 맨 위에 선다. */}
-          {current.inTriage && canWrite && <IssueTriageActions id={current.id} />}
-
           {/* mermaid: an issue body is where a design gets argued, and the drawing IS the argument — a
               ```mermaid fence renders as the diagram (GitHub does the same). Safe to opt in here because
               this body is finished text, not a stream: nothing re-parses it per chunk. */}
@@ -829,9 +733,6 @@ export default async function IssueDetailPage({
                         workspace={workspace}
                         projects={projects.map((p) => ({ id: p.id, name: p.name }))}
                         parentId={current.id}
-                        // 하위 이슈는 부모의 팀에서 태어난다 — 팀이 식별자를 찍으므로, 물려주지 않으면
-                        // `ENG-12` 의 자식이 워크스페이스 기본 팀에서 찍혀 나온다.
-                        defaultTeamId={current.teamId}
                         label={t('subIssueAdd')}
                       />
                     )}

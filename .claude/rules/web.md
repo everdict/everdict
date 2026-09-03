@@ -51,8 +51,7 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   (non-`server-only`, importable from middleware).
 - **A collection is PLURAL, one thing is SINGULAR** (Linear's spelling): `/{ws}/scorecards` is the list,
   `/{ws}/scorecard/{id}` is one — and the collection's own named screens keep the plural (`…/scorecards/new`).
-  `/teams` is the directory; one team is `/{ws}/team/ENG/…`. Moved addresses redirect via `next.config.ts`
-  `DETAIL_MOVES`. An issue's title rides as a decorative trailing slug that nothing reads.
+  Moved addresses redirect via `next.config.ts` `DETAIL_MOVES`. An issue's title rides as a decorative trailing slug that nothing reads.
 - **A list's FILTERS live in the URL; its DISPLAY lives with the reader.** Which issues (status/priority/label/…)
   is a query parameter, so a pasted link opens the same set for everyone. How they are drawn (grouping, ordering,
   layout, show-completed, sub-issues) is NEVER in the URL — a link must not rearrange the recipient's screen — and
@@ -77,9 +76,9 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   evidence: a task body, a judge rationale, an error text and a base64 screenshot per case are none of them
   drawn by a row, and multiplied by the case count they ARE the lag. The detail dialog fetches them for the
   one case it opened.
-- **Evaluation collections are workspace-wide, not team paths.** Harness · dataset · judge · scorecard have ONE
-  address each and sit in the sidebar's `평가` group; the owning team is the `team` FILTER on that list, not a
-  path segment (`TEAM_SECTIONS` is issues/triage/cycles/projects only). Old team addresses 307 in `next.config.ts`.
+- **Every collection is workspace-wide.** Harness · dataset · judge · scorecard · issue · project have ONE
+  address each — the workspace is the only boundary, so there is no second axis for a path to carry and no
+  ownership facet on the list. Addresses from the era that had one 307 in `next.config.ts`.
 - **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (**Linear-style**: indigo `#5e6ad2` primary,
   tight radius `0.5rem`, near-black `#08090a` dark surface, thin low-alpha borders, top indigo glow + subtle
   grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the

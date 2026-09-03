@@ -7,14 +7,12 @@ import { InMemoryIssueStore, PgIssueStore } from "./issue-store.js";
 const issue = (over: Partial<IssueRecord>): IssueRecord => ({
   id: "iss-1",
   tenant: "acme",
-  teamId: "team-eng",
   number: 1,
   identifier: "ENG-1",
   formerIdentifiers: [],
   title: "Agent drops the tool result on retry",
   status: "todo",
   priority: "none",
-  inTriage: false,
   labelIds: [],
   links: [],
   history: [],
@@ -278,19 +276,6 @@ describe("InMemoryIssueStore", () => {
     expect(row?.github).toEqual({ repository: "acme/agent", pull: true });
   });
 
-  it("counts issues per team in one pass, with regressed counting as OPEN", async () => {
-    const store = new InMemoryIssueStore();
-    await store.create(issue({ id: "a", teamId: "eng", status: "todo" }));
-    await store.create(issue({ id: "b", teamId: "eng", status: "regressed" }));
-    await store.create(issue({ id: "c", teamId: "eng", status: "done" }));
-    await store.create(issue({ id: "d", teamId: "eng", status: "cancelled" }));
-    await store.create(issue({ id: "e", teamId: "mob", status: "todo" }));
-    await store.create(issue({ id: "f", tenant: "globex", teamId: "eng", status: "todo" }));
-    const counts = await store.countByTeam("acme");
-    expect(counts.find((row) => row.teamId === "eng")).toEqual({ teamId: "eng", total: 4, open: 2 });
-    expect(counts.find((row) => row.teamId === "mob")).toEqual({ teamId: "mob", total: 1, open: 1 });
-  });
-
   it("update and remove only reach the tenant's own row", async () => {
     const store = new InMemoryIssueStore();
     await store.create(issue({ id: "a" }));
@@ -447,27 +432,16 @@ describe("PgIssueStore", () => {
     ]);
   });
 
-  it("counts issues per team in ONE aggregate, taking the closed vocabulary as a parameter", async () => {
-    const { client, queries } = fakeClient();
-    await new PgIssueStore(client).countByTeam("acme");
-    expect(queries).toHaveLength(1); // not one query per team
-    expect(queries[0]?.text).toContain("count(*) FILTER (WHERE status <> ALL($2::text[]))");
-    expect(queries[0]?.text).toContain("GROUP BY team_id");
-    expect(queries[0]?.params).toEqual(["acme", ["done", "cancelled"]]);
-  });
-
   it("maps a projected row to a summary — NULL github means no copy, not an empty one", async () => {
     const { client } = fakeClient([
       {
         id: "a",
         tenant: "acme",
-        team_id: "team-eng",
         number: 12,
         identifier: "ENG-12",
         title: "t",
         status: "todo",
         priority: "none",
-        inTriage: false,
         project_id: null,
         assignee: null,
         label_ids: ["lbl_bug"],
@@ -510,7 +484,6 @@ describe("PgIssueStore", () => {
       {
         id: "a",
         tenant: "acme",
-        team_id: "team-eng",
         number: 12,
         identifier: "ENG-12",
         formerIdentifiers: [],
@@ -518,7 +491,6 @@ describe("PgIssueStore", () => {
         description: null,
         status: "regressed",
         priority: "none",
-        inTriage: false,
         project_id: "prj-1",
         assignee: null,
         label_ids: ["lbl_bug"],

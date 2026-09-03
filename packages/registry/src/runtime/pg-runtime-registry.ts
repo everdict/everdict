@@ -14,7 +14,6 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
       column: "runtime",
       label: "runtime",
       parse: (v) => RuntimeSpecSchema.parse(v),
-      teamId: true,
       tags: true,
       origin: true,
     });
@@ -25,18 +24,8 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
   // refuse: a runtime registered by one team looked unowned to everyone. `createdBy` stays unthreaded — the
   // table carries no such column — and the parameter is kept so `origin` lands in the 5th slot every other
   // registry uses.
-  register(
-    tenant: string,
-    spec: RuntimeSpec,
-    _createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    return this.store.register(tenant, spec, undefined, teamId, origin);
-  }
-  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
-  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
-    return this.store.teamOfVersion(tenant, id, version);
+  register(tenant: string, spec: RuntimeSpec, _createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    return this.store.register(tenant, spec, undefined, origin);
   }
 
   has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -63,14 +52,11 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
     const out: RuntimeListEntry[] = [];
     for (const { id, owner, versions } of await this.store.listIds(tenant)) {
       const versionTags = await this.store.versionTags(owner, id);
-      // Ownership belongs to the thing, not to one release of it — read it off the newest version.
-      const teamId = await this.store.teamOfVersion(owner, id, versions[versions.length - 1] ?? "");
       const capabilities = (await this.store.get(owner, id)).capabilities; // latest (default ref)
       out.push({
         id,
         owner,
         versions,
-        ...(teamId !== undefined ? { teamId } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
         ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
       });

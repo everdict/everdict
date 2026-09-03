@@ -37,7 +37,6 @@ export function buildCampaignBuild(deps: CampaignBuildWiring): CampaignBuildServ
       const record = await deps.campaigns.get(tenant, id);
       return {
         id: record.id,
-        ...(record.teamId !== undefined ? { teamId: record.teamId } : {}),
         subjectType: record.frame.subject.type,
         subjectId: record.frame.subject.id,
         baselineVersion: record.frame.subject.baselineVersion,
@@ -106,7 +105,7 @@ export function buildCampaignBuild(deps: CampaignBuildWiring): CampaignBuildServ
       get: (tenant, id, version) => deps.environments.get(tenant, id, version),
       mint: async ({ tenant, by, id, version, image, note }) => {
         const base = await deps.environments.get(tenant, id, version.split("-build-")[0] ?? version);
-        await deps.environments.registerPreservingOwner(tenant, { ...base, version, image }, by, { via: "ci", note });
+        await deps.environments.register(tenant, { ...base, version, image }, by, { via: "ci", note });
         return { version };
       },
     },

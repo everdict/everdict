@@ -33,7 +33,6 @@ export interface CreateIssueDialogProps {
   cycles?: { id: string; name: string }[]
   // 팀이 하나뿐이면 고를 게 없다 — 필드를 숨기고 서버가 기본팀으로 보낸다.
   teams?: { id: string; key: string; name: string }[]
-  defaultTeamId?: string
   // 하위 이슈로 접수할 부모. 있으면 제목이 "하위 이슈 추가"로 읽히고, 만든 뒤에도 부모 화면에 남는다 —
   // 쪼개는 중에 매번 자식 화면으로 튕겨 나가면 다음 조각을 이어서 적을 수 없다.
   parentId?: string
@@ -46,8 +45,6 @@ export function CreateIssueDialog({
   workspace,
   projects,
   cycles = [],
-  teams = [],
-  defaultTeamId,
   parentId,
   open,
   onClose,
@@ -61,7 +58,6 @@ export function CreateIssueDialog({
   const [status, setStatus] = useState<IssueStatus>('backlog')
   const [projectId, setProjectId] = useState('')
   const [cycleId, setCycleId] = useState('')
-  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [priority, setPriority] = useState<IssuePriority>('none')
   const [estimate, setEstimate] = useState('')
   const [dueDate, setDueDate] = useState('')
@@ -77,9 +73,7 @@ export function CreateIssueDialog({
           title: trimmed,
           ...(description.trim() ? { description: description.trim() } : {}),
           status,
-          ...(teamId ? { teamId } : {}),
           ...(projectId ? { projectId } : {}),
-          ...(cycleId ? { cycleId } : {}),
           ...(priority !== 'none' ? { priority } : {}),
           ...(estimate ? { estimate: Number(estimate) } : {}),
           ...(dueDate ? { dueDate } : {}),
@@ -150,17 +144,6 @@ export function CreateIssueDialog({
               }))}
             />
           </div>
-          {teams.length > 1 && (
-            <div className="space-y-1.5">
-              <Label htmlFor="issue-team">{t('fieldTeam')}</Label>
-              <Combobox
-                id="issue-team"
-                value={teamId}
-                onChange={setTeamId}
-                options={teams.map((x) => ({ value: x.id, label: `${x.key} · ${x.name}` }))}
-              />
-            </div>
-          )}
           <div className="space-y-1.5">
             <Label htmlFor="issue-priority">{t('fieldPriority')}</Label>
             <Combobox

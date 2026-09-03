@@ -209,26 +209,15 @@ export interface CampaignSnapshot {
   candidate: CampaignComparisonSide;
 }
 
-// The team-visibility ceiling the caller resolved for its principal — REQUIRED, because the round's diff
-// reads two scorecards and must refuse the ones a direct read would refuse (no side channel around the
-// team axis). `{}` states full visibility (an admin), never "forgot".
-export interface TeamAccess {
-  visibleTeams?: string[];
-}
-
 export interface CampaignServiceDeps {
   store: EvolutionCampaignStore;
   // The intent hub the campaign journals into — an unreadable issue refuses the open (its `get` throws).
-  // …and the TEAM it belongs to. A campaign journals into this issue, so they cannot be owned by different
-  // teams without one of them being a lie — the campaign's authority is frozen from here at open
-  // (arch-review 76 P1-security).
   issues: {
     get(
       tenant: string,
       ref: string,
     ): Promise<{
       id: string;
-      teamId?: string;
       // The issue's links, for a frame derived `fromIssue` — the `case` links name the exam.
       links?: ReadonlyArray<{ type: string; id: string; version?: string; dataset?: string }>;
     }>;
@@ -252,7 +241,7 @@ export interface CampaignServiceDeps {
       tenant: string,
       baselineId: string,
       candidateId: string,
-      opts?: { minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] },
+      opts?: { minDelta?: number; fdrAlpha?: number },
     ): Promise<CampaignSnapshot>;
   };
   // ── WHERE THE AUTHORIZATION CAN BE READ (arch-review 73) ────────────────────────────────────────
@@ -354,7 +343,6 @@ export interface NewCampaignInput {
   // Same law as the registry's `expectedOwnerTeamId`: an authorization and the effect it authorizes read the
   // mutable fact ONCE. Absent means the caller stated no expectation (a headless or seeded open); present
   // and different is a refusal, not a quiet re-file.
-  expectedIssueTeamId?: string;
 }
 
 export interface NewRoundInput {
@@ -403,15 +391,6 @@ export class CampaignService {
     // The issue is resolved BEFORE the campaign exists — a campaign journaling into a ghost would strand
     // its narrative; `get` throws NotFound and the open refuses with it.
     const issue = await this.deps.issues.get(tenant, input.issueId);
-    // …and it is still the issue the caller was authorized over. `expectedIssueTeamId === undefined` inside a
-    // declared expectation is a real claim ("it was unowned when I was cleared"), which is why the presence of
-    // the FIELD is what enables the check rather than the presence of a team.
-    if ("expectedIssueTeamId" in input && issue.teamId !== input.expectedIssueTeamId)
-      throw new ConflictError(
-        "CONFLICT",
-        { issue: input.issueId, authorized: input.expectedIssueTeamId ?? null, current: issue.teamId ?? null },
-        "this issue changed teams while the campaign was being opened — read it back and open again",
-      );
     // The exam: the caller's, or derived from the issue's `case` links (evolution-routing-spec.md §3).
     const frame = "fromIssue" in input.frame ? await this.frameFromIssue(tenant, issue, input.frame) : input.frame;
     // …and if this campaign says it CONTINUES another, the claim is verified before anything is written.
@@ -422,7 +401,6 @@ export class CampaignService {
       id: this.newId(),
       tenant,
       issueId: issue.id,
-      ...(issue.teamId !== undefined ? { teamId: issue.teamId } : {}),
       frame,
       frameDigest: contentDigest(frame),
       rounds: [],
@@ -666,12 +644,8 @@ export class CampaignService {
   // `subject` = one capability's whole evolution memory (evolution-routing-spec.md §5): every campaign ever
   // opened on it, each with its rounds — verdicts, evidence references, `learned` — and its close. The brief for
   // a new campaign reads this so the same dead hypothesis is not spent twice.
-  async list(
-    tenant: string,
-    visibleTeams?: string[],
-    subject?: CampaignSubjectRef,
-  ): Promise<EvolutionCampaignRecord[]> {
-    return this.deps.store.list(tenant, visibleTeams, subject);
+  async list(tenant: string, subject?: CampaignSubjectRef): Promise<EvolutionCampaignRecord[]> {
+    return this.deps.store.list(tenant, subject);
   }
 
   // The pure gate over the current trace — a read, never an effect.
@@ -706,7 +680,6 @@ export class CampaignService {
     id: string,
     input: NewRoundInput,
     by: string,
-    access: TeamAccess,
   ): Promise<{ record: EvolutionCampaignRecord; round: CampaignRound; answer: CampaignGateAnswer }> {
     const record = await this.get(tenant, id);
     if (record.state !== "open")
@@ -775,7 +748,6 @@ export class CampaignService {
     const snapshot = await this.deps.diffs.diffSnapshot(tenant, input.baselineScorecardId, input.candidateScorecardId, {
       ...(minDelta !== undefined ? { minDelta } : {}),
       fdrAlpha: fdrAlpha / heldOutFamilySize,
-      ...(access.visibleTeams !== undefined ? { visibleTeams: access.visibleTeams } : {}),
     });
     // IDENTITY is refused, not recorded: a round whose declared coordinates disagree with what the
     // scorecards actually evaluated is a mislabeled request, and logging it would let the loop name the

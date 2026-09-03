@@ -1,24 +1,15 @@
 import { deleteAgentVersion, deleteAgentVersions } from "@everdict/application-control";
 import { AgentSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { SaveAgentBodySchema } from "./request/save-agent.js";
-
-// Agent MCP tools — the MCP twin of agent.routes.ts (the workspace's conversational-agent configuration).
-// A private team's authored entry is that team's — the same ceiling the HTTP twin stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
 
 export function registerAgentTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
@@ -33,7 +24,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           "Agent configurations visible to this workspace (instructions + MCP servers + model; owned + _shared)",
         inputSchema: {},
       },
-      () => run(principal, "agents:read", async () => ok(await keepVisible(ctx, await agents.list(ws)))),
+      () => run(principal, "agents:read", async () => ok(await agents.list(ws))),
     );
 
     server.registerTool(
@@ -46,7 +37,6 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, version }) =>
         run(principal, "agents:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, agents, ws, id, "agent config");
           return ok(await agents.get(ws, id, version ?? "latest"));
         }),
     );
@@ -101,8 +91,7 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
         },
       },
       ({ agent, team }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "agents:write", team, async (teamId) => {
+        run(ctx.principal, "agents:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(agent);
@@ -111,8 +100,8 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
           }
           const result = AgentSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await agents.register(ws, result.data, principal.subject, teamId); // creator = subject (delete permission)
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+          await agents.register(ws, result.data, principal.subject); // creator = subject (delete permission)
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
 
@@ -163,37 +152,27 @@ export function registerAgentTools(server: McpServer, ctx: McpToolContext): void
         },
       },
       async ({ id, agent, fromIssue, originNote }) => {
-        // The same gate the HTTP twin now carries (arch-review 118): saving over an agent is a WRITE to
-        // somebody's agent, and the service preserves the owner — so an unscoped `agents:write` mints a
-        // Team-A-owned version for a caller who is not on Team A. `run` takes the scope, so the entity is
-        // resolved before the action rather than inside it.
-        const owner = await teamOfEntity(deps.agentRegistry, ws, id);
-        return run(
-          principal,
-          "agents:write",
-          async () => {
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(agent);
-            } catch {
-              return fail("BAD_REQUEST: not a valid agent JSON.");
-            }
-            const result = SaveAgentBodySchema.safeParse(parsed);
-            if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-            // The declared issue applies to a FIRST version (born_from intent); a bump's `from` is the base
-            // the service resolves — it knows the ancestor, the caller may not restate it (Track A).
-            const origin = await capabilityOriginFor(
-              deps,
-              ws,
-              "mcp",
-              ctx.agent,
-              declaredOriginFromIssue(fromIssue, originNote),
-              { type: "agent", id },
-            );
-            return ok(await agentService.saveAgent(ws, principal.subject, id, result.data, origin));
-          },
-          owner,
-        );
+        return run(principal, "agents:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(agent);
+          } catch {
+            return fail("BAD_REQUEST: not a valid agent JSON.");
+          }
+          const result = SaveAgentBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          // The declared issue applies to a FIRST version (born_from intent); a bump's `from` is the base
+          // the service resolves — it knows the ancestor, the caller may not restate it (Track A).
+          const origin = await capabilityOriginFor(
+            deps,
+            ws,
+            "mcp",
+            ctx.agent,
+            declaredOriginFromIssue(fromIssue, originNote),
+            { type: "agent", id },
+          );
+          return ok(await agentService.saveAgent(ws, principal.subject, id, result.data, origin));
+        });
       },
     );
   }

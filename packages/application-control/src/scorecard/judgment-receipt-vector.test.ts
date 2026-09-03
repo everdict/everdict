@@ -69,9 +69,6 @@ const unusedStore: ScorecardStore = {
 const unusedDatasets: DatasetRegistry = {
   // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the double
   // from silently supplying the permissive arm of a gate it does not model (arch-review 119).
-  async teamOfVersion(): Promise<string | undefined> {
-    throw new Error("unused");
-  },
   async register() {
     throw new Error("unused");
   },
@@ -92,9 +89,6 @@ const unusedDatasets: DatasetRegistry = {
   },
   async creatorOf() {
     return undefined;
-  },
-  async moveToTeam() {
-    throw new Error("unused");
   },
   async softDelete() {
     throw new Error("unused");
@@ -121,9 +115,6 @@ const judgeSpec: JudgeSpec = {
 const judgeRegistry: JudgeRegistry = {
   // Ownership is not a question these cores ask. Throwing rather than answering `undefined` keeps the double
   // from silently supplying the permissive arm of a gate it does not model (arch-review 119).
-  async teamOfVersion(): Promise<string | undefined> {
-    throw new Error("unused");
-  },
   async register() {
     throw new Error("unused");
   },
@@ -141,9 +132,6 @@ const judgeRegistry: JudgeRegistry = {
   },
   async list() {
     return [];
-  },
-  async moveToTeam() {
-    throw new Error("unused");
   },
   async creatorOfVersion() {
     return undefined;

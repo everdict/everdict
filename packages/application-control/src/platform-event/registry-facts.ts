@@ -21,7 +21,7 @@ interface RegisterableSpec {
 export function withRegisteredFact<
   S extends RegisterableSpec,
   R extends {
-    register(tenant: string, spec: S, createdBy?: string, teamId?: string, origin?: CapabilityOrigin): Promise<void>;
+    register(tenant: string, spec: S, createdBy?: string, origin?: CapabilityOrigin): Promise<void>;
   },
 >(
   registry: R,
@@ -29,14 +29,8 @@ export function withRegisteredFact<
   subjectType: "harness" | "dataset" | "judge",
   events: PlatformEventEmitter,
 ): R {
-  const register = async (
-    tenant: string,
-    spec: S,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> => {
-    await registry.register(tenant, spec, createdBy, teamId, origin); // a refused registration (409/validation) emits nothing
+  const register = async (tenant: string, spec: S, createdBy?: string, origin?: CapabilityOrigin): Promise<void> => {
+    await registry.register(tenant, spec, createdBy, origin); // a refused registration (409/validation) emits nothing
     if (tenant === SHARED_TENANT) return;
     // The payload carries the origin summary so a consumer learns FROM WHAT without a registry read — the
     // fact must hold every value its rendering/filtering needs (rule `events`). A re-pin is a registration

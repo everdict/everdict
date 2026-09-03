@@ -29,7 +29,6 @@ import type {
   CampaignBuildService,
   CampaignService,
   CheckpointService,
-  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueLabelService,
@@ -40,13 +39,12 @@ import type {
   ProjectService,
   SubscriptionService,
   TaskService,
-  TeamService,
   ViewService,
   ViewSnapshotService,
 } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
-import { type Action, type Principal, type ResourceScope, authorize } from "@everdict/auth";
+import { type Action, type Principal, authorize } from "@everdict/auth";
 import { AppError, type RuntimeSpec } from "@everdict/contracts";
 import type { InspectRuntimeResult, RuntimeControlCommand, RuntimeControlResult } from "@everdict/contracts/wire";
 import type { SecretStore, TenantKeyStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -69,7 +67,6 @@ import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveFrameStore } from "../common/live-frame-store.js";
 import type { LiveLogStore } from "../common/live-log-store.js";
 import type { LiveTraceStore } from "../common/live-trace-store.js";
-import { teamForNew } from "../common/team-scope.js";
 import type { TicketStore } from "../common/ticket-store.js";
 import type { AgentMemberToolingService } from "../core/agent/agent-member-tooling-service.js";
 import type { AgentService } from "../core/agent/agent-service.js";
@@ -110,7 +107,6 @@ export type AgentTryRelay = (input: AgentTryRelayInput) => Promise<unknown>;
 
 export interface McpDeps {
   service: RunService;
-  cycleService?: CycleService;
   workflowStateService?: WorkflowStateService;
   scorecardService?: ScorecardService;
   // The receipts constitutional declarations leave — the MCP twin of the attest route (BFF↔MCP parity).
@@ -134,7 +130,6 @@ export interface McpDeps {
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/list/get
   taskService?: TaskService; // workspace task ledger — cross-agent coordination
   // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.
-  teamService?: TeamService;
   issueService?: IssueService;
   issueLabelService?: IssueLabelService;
   projectService?: ProjectService;
@@ -252,46 +247,14 @@ export async function run(
   principal: Principal,
   action: Action,
   fn: () => Promise<CallToolResult>,
-  resource?: ResourceScope,
 ): Promise<CallToolResult> {
   try {
-    // `resource` carries the owning team when the tool targets one — the MCP twin of the routes' gate(), so an
-    // agent cannot write another team's asset through a tool call that the HTTP route would have refused.
-    authorize(principal, action, resource);
+    authorize(principal, action);
     return await fn();
   } catch (err) {
     if (err instanceof AppError) return failFrom(err);
     return fail(err instanceof Error ? err.message : String(err));
   }
-}
-
-// Create-with-an-owner, gated: resolve the team the caller named (id or key), authorize the action AGAINST it,
-// then run. The MCP twin of a route's `teamForNew` + `gate(…, owner.gate)` pair, calling the same helper — an
-// agent naming a team its creator is not on is refused here exactly as the HTTP route refuses it. `fn` receives
-// the owner to stamp; undefined means "none named", which the service resolves by its own default rule.
-export async function runForTeam(
-  ctx: McpToolContext,
-  action: Action,
-  requested: string | undefined,
-  fn: (teamId: string | undefined) => Promise<CallToolResult>,
-): Promise<CallToolResult> {
-  try {
-    // Resolved before the gate: comparing a KEY against the id list a principal carries would refuse a member of
-    // the very team they named.
-    const owner = await teamForNew(ctx.principal, ctx.deps, requested);
-    return await run(ctx.principal, action, () => fn(owner.teamId), owner.gate);
-  } catch (err) {
-    if (err instanceof AppError) return failFrom(err);
-    return fail(err instanceof Error ? err.message : String(err));
-  }
-}
-
-// A team named by id or by key (`ENG`) → the id a store indexes by. The MCP twin of the routes' resolveTeamRef,
-// so an agent may name a team the way a person does — and gets a 404-shaped failure for an unknown one instead
-// of an empty list that reads as "this team has nothing".
-export async function resolveTeam(ctx: McpToolContext, ref: string): Promise<string> {
-  const teams = ctx.deps.teamService;
-  return teams ? teams.resolveId(ctx.ws, ref) : ref;
 }
 
 // Tools with no role gate (workspace self-serve list/create). AppError → isError conversion only.

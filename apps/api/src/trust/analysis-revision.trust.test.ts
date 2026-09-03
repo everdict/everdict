@@ -118,15 +118,15 @@ describeTrust("TRUST-41 — per-revision analysis artifacts are distinct, immuta
       (bundle as { cases: Array<{ scores: Array<{ metric: string; value?: number }> }> }).cases.flatMap((c) =>
         c.scores.filter((s) => s.metric === "judge:quality"),
       );
-    expect(judgeRows(await service.analysisBundle("acme", record.id, undefined, 1))).toHaveLength(0);
-    expect(judgeRows(await service.analysisBundle("acme", record.id, undefined, 2))).toEqual([
+    expect(judgeRows(await service.analysisBundle("acme", record.id, 1))).toHaveLength(0);
+    expect(judgeRows(await service.analysisBundle("acme", record.id, 2))).toEqual([
       { metric: "judge:quality", value: 1, graderId: "judge:quality", pass: true } as never,
     ]);
-    expect(judgeRows(await service.analysisBundle("acme", record.id, undefined, 3))[0]).toMatchObject({ value: 0 });
+    expect(judgeRows(await service.analysisBundle("acme", record.id, 3))[0]).toMatchObject({ value: 0 });
     // The CURRENT bundle is the latest pass — same content as revision 3, different address.
     expect(judgeRows(await service.analysisBundle("acme", record.id))[0]).toMatchObject({ value: 0 });
 
     // A revision the ledger never appended reads 404 — never a silent fallback to the current bundle.
-    await expect(service.analysisBundle("acme", record.id, undefined, 99)).rejects.toBeInstanceOf(NotFoundError);
+    await expect(service.analysisBundle("acme", record.id, 99)).rejects.toBeInstanceOf(NotFoundError);
   });
 });

@@ -42,14 +42,8 @@ export function judgeDerived(
 export class InMemoryJudgeRegistry implements JudgeRegistry {
   private readonly store = new VersionedStore<JudgeSpec>("judge");
 
-  async register(
-    tenant: string,
-    spec: JudgeSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId, origin);
+  async register(tenant: string, spec: JudgeSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    this.store.register(tenant, spec, createdBy, origin);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
@@ -62,14 +56,6 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
   }
   async get(tenant: string, id: string, ref?: string): Promise<JudgeSpec> {
     return this.store.get(tenant, id, ref);
-  }
-  // Owning-team delegation — the authz kernel's team-axis input.
-  async teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
-    return await this.store.teamOfVersion(tenant, id, version);
-  }
-  // Ownership transfer — every version of the entity, tenant-owned only (see VersionedStore.moveToTeam).
-  async moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
-    this.store.moveToTeam(tenant, id, teamId);
   }
 
   async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
@@ -100,7 +86,6 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
         versionCount: meta.versionCount,
         ...judgeDerived(latestSpec),
         ...(meta.createdBy !== undefined ? { createdBy: meta.createdBy } : {}),
-        ...(meta.teamId !== undefined ? { teamId: meta.teamId } : {}),
         ...(meta.createdAt !== undefined ? { createdAt: meta.createdAt } : {}),
         ...(meta.updatedAt !== undefined ? { updatedAt: meta.updatedAt } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),

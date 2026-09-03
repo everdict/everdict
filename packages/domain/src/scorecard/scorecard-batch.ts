@@ -81,7 +81,6 @@ export interface NewQueuedBatchInput {
   harness: { id: string; version: string }; // resolved concrete version (never "latest")
   origin?: ScorecardOrigin; // trigger provenance (submit) / retry lineage (retryOf)
   createdBy?: string; // the runner — the "who" paired with origin (the "where")
-  teamId?: string; // owning team — the "whose", beside the "who"; absent = unowned (the workspace's)
   runtime?: string; // placed runtime (work-queue axis) — unset = default backend
   subset?: ScorecardSubset; // partial-run marker — consumers know it's "not the whole thing"
   // Everything a re-drive needs (restart resume / retry-failed) — persisted at submit so the batch can be
@@ -105,7 +104,6 @@ export interface NewQueuedIngestInput {
   harness: { id: string; version: string }; // the harness that produced the trace (label)
   origin?: ScorecardOrigin;
   createdBy?: string;
-  teamId?: string; // owning team — an ingested batch is a team's result too, so it is not born unowned
   now: string;
 }
 
@@ -180,7 +178,6 @@ export class ScorecardBatch {
       status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.createdBy ? { createdBy: input.createdBy } : {}),
-      ...(input.teamId ? { teamId: input.teamId } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(input.subset ? { subset: input.subset } : {}),
       orchestration: input.orchestration,
@@ -202,7 +199,6 @@ export class ScorecardBatch {
       status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.createdBy ? { createdBy: input.createdBy } : {}),
-      ...(input.teamId ? { teamId: input.teamId } : {}),
       createdAt: input.now,
       updatedAt: input.now,
     };

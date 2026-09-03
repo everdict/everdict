@@ -1,7 +1,6 @@
 import type {
   AgentTaskStore,
   ApprovalStore,
-  CycleStore,
   InitiativeStore,
   IssueStore,
   PlatformEventStore,
@@ -37,7 +36,8 @@ import {
 //
 // It composes STORES, never peer services (the api-layer rule): cross-resource data comes from the owning store.
 // The two questions it does NOT answer itself are handed in by the transport, because only the transport knows
-// them — who is asking (`visibleTeams`, resolved by the one place team privacy is decided) and when "now" is.
+// The one question it does NOT answer itself is handed in by the transport, because only the transport knows
+// it: when "now" is.
 
 // A project counts as "in flight" while somebody could still work on it. `paused` is in: work that stopped
 // without being abandoned is still a commitment the workspace carries, and hiding it is how a paused project
@@ -49,12 +49,8 @@ const LIVE_PROJECT_STATUSES = new Set<ProjectStatus>(["backlog", "planned", "in_
 // that says zero about something you can see in the list is worse than no tile.
 const LIVE_INITIATIVE_STATUSES = new Set<InitiativeStatus>(["planned", "active"]);
 
-// A cycle closing within this many days is what a planning conversation is about.
-const ENDING_SOON_DAYS = 7;
-
 export interface WorkspacePulseDeps {
   issues: IssueStore;
-  cycles: CycleStore;
   projects: ProjectStore;
   initiatives: InitiativeStore;
   tasks: AgentTaskStore;
@@ -70,8 +66,6 @@ export interface WorkspacePulseQuery {
   tenant: string;
   // How many days the trend covers, today included.
   days: number;
-  // The teams whose work this caller may read — `undefined` means nothing is hidden, never "no teams".
-  visibleTeams?: string[];
 }
 
 export class WorkspacePulseService {
@@ -93,25 +87,9 @@ export class WorkspacePulseService {
     // The window before this one, same length — the other half of every "vs. previous" delta.
     const priorFrom = `${addCalendarDays(firstDay, -days)}T00:00:00.000Z`;
     const spine = calendarSpan(firstDay, today);
-    const teamScope = query.visibleTeams === undefined ? {} : { teamIds: query.visibleTeams };
 
-    const [
-      byStatus,
-      openCycles,
-      cycleTotals,
-      cycleOpen,
-      projects,
-      initiatives,
-      pending,
-      running,
-      approvals,
-      batches,
-      buckets,
-    ] = await Promise.all([
-      this.deps.issues.countByGroup(tenant, "status", teamScope),
-      this.deps.cycles.list(tenant, { open: true }),
-      this.deps.issues.countByGroup(tenant, "cycle", teamScope),
-      this.deps.issues.countByGroup(tenant, "cycle", { ...teamScope, statuses: [...OPEN_ISSUE_STATUSES] }),
+    const [byStatus, projects, initiatives, pending, running, approvals, batches, buckets] = await Promise.all([
+      this.deps.issues.countByGroup(tenant, "status"),
       // ── EVERY READ HERE IS NARROWED IN THE STORE (perf review) ──────────────────────────────────
       //
       // This aggregate is the home screen: one request, eleven reads, issued together. Three of them used to
@@ -131,20 +109,12 @@ export class WorkspacePulseService {
       this.deps.approvals.list(tenant, { status: "pending" }),
       this.deps.scorecards.list(tenant, {
         createdSince: priorFrom,
-        ...(query.visibleTeams === undefined ? {} : { visibleTeams: query.visibleTeams }),
       }),
       this.deps.events?.dailyCounts(tenant, { from: window.from, to: window.to }) ?? Promise.resolve([]),
     ]);
 
     const issueCount = (status: IssueStatus): number => byStatus.find((g) => g.key === status)?.count ?? 0;
     const open = OPEN_ISSUE_STATUSES.reduce((sum, status) => sum + issueCount(status), 0);
-
-    // A cycle's commitment is the issues it holds; what is finished is the rest of them. Both come from the same
-    // grouped aggregate, so the two halves cannot disagree the way two separate reads would.
-    const activeCycleIds = new Set(openCycles.map((cycle) => cycle.id));
-    const committed = sumForKeys(cycleTotals, activeCycleIds);
-    const stillOpen = sumForKeys(cycleOpen, activeCycleIds);
-    const endingBy = addCalendarDays(today, ENDING_SOON_DAYS);
 
     const liveProjects = projects.filter((project) => LIVE_PROJECT_STATUSES.has(project.status));
     const liveInitiatives = initiatives.filter((initiative) => LIVE_INITIATIVE_STATUSES.has(initiative.status));
@@ -164,12 +134,6 @@ export class WorkspacePulseService {
         open,
         inProgress: issueCount("in_progress") + issueCount("in_review"),
         regressed: issueCount("regressed"),
-      },
-      cycles: {
-        active: openCycles.length,
-        committed,
-        done: committed - stillOpen,
-        endingSoon: openCycles.filter((cycle) => cycle.endsAt <= endingBy).length,
       },
       goals: {
         initiatives: liveInitiatives.length,
@@ -206,12 +170,6 @@ export class WorkspacePulseService {
       },
     };
   }
-}
-
-// The counts for a chosen set of group keys. A group whose key is absent (`null` — issues in no cycle at all)
-// never matches, which is the point: uncommitted work is not part of any iteration's commitment.
-function sumForKeys(groups: readonly { key: string | null; count: number }[], keys: ReadonlySet<string>): number {
-  return groups.reduce((sum, group) => (group.key !== null && keys.has(group.key) ? sum + group.count : sum), 0);
 }
 
 function countKinds(buckets: readonly PlatformEventDailyCount[], kinds: readonly string[]): number {

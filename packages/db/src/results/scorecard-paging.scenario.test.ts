@@ -39,7 +39,7 @@ const RECORDS: ScorecardRecord[] = [
   at("b1", "2026-08-01T10:00:00.000Z", { runtime: "local", createdBy: "sam" }),
   at("a4", "2026-08-02T23:30:00.000Z", { runtime: "nomad-eu", createdBy: "sam", status: "failed" }),
   at("a3", "2026-08-02T23:30:00.000Z", { runtime: "nomad-eu", createdBy: "dana" }),
-  at("a2", "2026-08-02T09:00:00.000Z", { teamId: "eng" }),
+  at("a2", "2026-08-02T09:00:00.000Z", {}),
   at("a1", "2026-08-01T00:00:00.000Z", { harness: { id: "codex-cli", version: "2" } }),
 ];
 
@@ -117,8 +117,8 @@ describe.skipIf(!DATABASE_URL)("the scorecards page over real Postgres", () => {
       { runtimes: [""] },
       { creators: ["dana"] },
       { creators: [""] },
-      { teamIds: ["eng"] },
-      { teamIds: [""] },
+      {},
+      {},
       { harnesses: ["codex-cli"] },
     ];
 
@@ -149,19 +149,12 @@ describe.skipIf(!DATABASE_URL)("the scorecards page over real Postgres", () => {
     const sorted = (rows: { key: string | null; count: number }[]) =>
       [...rows].sort((a, b) => `${a.key}`.localeCompare(`${b.key}`));
 
-    for (const axis of ["day", "status", "harness", "dataset", "team", "creator"] as const) {
+    for (const axis of ["day", "status", "harness", "dataset", "creator"] as const) {
       expect({ axis, rows: sorted(await pg.countByGroup("paging-acme", axis)) }).toEqual({
         axis,
         rows: sorted(await twin.countByGroup("paging-acme", axis)),
       });
     }
-    // `team` is the axis with an unset bucket here — five batches carry no team.
-    expect(await pg.countByGroup("paging-acme", "team")).toEqual(
-      expect.arrayContaining([
-        { key: "eng", count: 1 },
-        { key: null, count: 5 },
-      ]),
-    );
   });
 
   it("counts the SET even while a page is requested", async () => {

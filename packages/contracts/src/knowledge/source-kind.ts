@@ -27,9 +27,6 @@ export const SOURCE_KINDS = [
   "issue",
   "project",
   "initiative",
-  "team",
-  "cycle",
-
   // STRUCTURED registry specs
   "harness_spec",
   "dataset_spec",

@@ -11,7 +11,7 @@ import type { HarnessTemplateListEntry, HarnessTemplateRegistry } from "@everdic
 // list, so without this it would be a bare id — and the catalog exists precisely to make those visible.
 // A version that fails to load degrades to meta-only (the catalog still lists it) — same discipline as the harness list.
 export async function enrichTemplateList(
-  metas: Array<{ id: string; versions: string[]; owner: string; teamId?: string }>,
+  metas: Array<{ id: string; versions: string[]; owner: string }>,
   getTemplate: (id: string, version: string) => Promise<HarnessTemplateSpec>,
 ): Promise<HarnessTemplateListEntry[]> {
   const out: HarnessTemplateListEntry[] = [];
@@ -43,19 +43,9 @@ export class InMemoryHarnessTemplateRegistry implements HarnessTemplateRegistry 
     tenant: string,
     spec: HarnessTemplateSpec,
     createdBy?: string,
-    teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId, origin);
-  }
-  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (_shared/seeded),
-  // which is NOT "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.store.teamOfVersion(tenant, id, version);
-  }
-  // Ownership transfer — every version of the entity, tenant-owned only (see VersionedStore.moveToTeam).
-  async moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
-    this.store.moveToTeam(tenant, id, teamId);
+    this.store.register(tenant, spec, createdBy, origin);
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -77,7 +67,6 @@ export class InMemoryHarnessTemplateRegistry implements HarnessTemplateRegistry 
         id: m.id,
         versions: m.versions,
         owner: m.owner,
-        ...(m.teamId !== undefined ? { teamId: m.teamId } : {}),
       })),
       (id, version) => this.get(tenant, id, version),
     );

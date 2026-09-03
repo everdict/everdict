@@ -125,8 +125,6 @@ export interface SubmitInput {
   // submitter (principal.subject) — the owner used to resolve a personally-owned connection for a private-repo seed ("clone with my connection").
   // HTTP/MCP routes always carry principal.subject; if unset, resolveRepoToken falls back to tenant (test compatibility).
   submittedBy?: string;
-  // The team that owns this run — the same axis assets carry (the route decides and passes it).
-  teamId?: string;
   harness: { id: string; version: string };
   case: EvalCase;
   runtime?: string; // the tenant Runtime id to run on (placement.target). If absent, the default backend (same symmetry as scorecard).
@@ -517,7 +515,6 @@ export class RunService {
       // Recorded, not remembered: the callback outlives this process and this driver (mig 0171).
       ...(effective.webhookUrl ? { webhookUrl: effective.webhookUrl } : {}),
       ...(effective.submittedBy ? { submittedBy: effective.submittedBy } : {}),
-      ...(effective.teamId ? { teamId: effective.teamId } : {}),
       origin: standaloneRunOrigin(effective.trigger, effective.submittedBy, effective.causedByRunId),
       // Caused work is background by default (§5.4 — autonomous fan-out never starves a human's click).
       ...(effective.causedByRunId ? { class: "background" as const } : {}),

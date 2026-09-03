@@ -6,7 +6,6 @@ import type { MemberDirectory } from '@/entities/member'
 // 무엇보다 행마다 조회하는 목록이 이 화면이 없애려던 바로 그 모양이다.
 export interface IssueDirectories {
   projectName: Record<string, string>
-  cycleName: Record<string, string>
   labels: Record<string, IssueLabel>
   actors: MemberDirectory
   // 담당자 드롭다운이 고를 수 있는 사람들 — 지금 워크스페이스 멤버인 사람만. `actors` 는 이미 나간

@@ -1,10 +1,9 @@
 import { setVersionTags } from "@everdict/application-control";
 import { EnvironmentSpecSchema } from "@everdict/contracts";
-import { imageWarnings, ownedByVisibleTeam } from "@everdict/domain";
+import { imageWarnings } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 // Environment MCP tools — the MCP twin of environment.routes.ts (BFF↔MCP parity is structural).
 export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext): void {
@@ -22,8 +21,7 @@ export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext)
     },
     () =>
       run(principal, "datasets:read", async () => {
-        const seen = await visibleTeamsFor(deps, principal);
-        return ok((await environments.list(ws)).filter((row) => ownedByVisibleTeam(row, seen)));
+        return ok(await environments.list(ws));
       }),
   );
 
@@ -36,7 +34,6 @@ export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext)
     },
     ({ id, version }) =>
       run(principal, "datasets:read", async () => {
-        await assertEntityVisible(deps, principal, environments, ws, id, "environment");
         return ok(await environments.get(ws, id, version ?? "latest"));
       }),
   );
@@ -57,8 +54,7 @@ export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext)
       },
     },
     ({ environment, team }) =>
-      // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-      runForTeam(ctx, "datasets:write", team, async (teamId) => {
+      run(ctx.principal, "datasets:write", async () => {
         let parsed: unknown;
         try {
           parsed = JSON.parse(environment);
@@ -68,7 +64,7 @@ export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext)
         const result = EnvironmentSpecSchema.safeParse(parsed);
         if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
         // …and the creator stamp the HTTP twin writes (HTTP parity).
-        await environments.register(ws, result.data, principal.subject, teamId);
+        await environments.register(ws, result.data, principal.subject);
         // HTTP parity: the same image advice its twin gives.
         const warnings =
           result.data.image !== undefined
@@ -78,7 +74,6 @@ export function registerEnvironmentTools(server: McpServer, ctx: McpToolContext)
           workspace: ws,
           id: result.data.id,
           version: result.data.version,
-          ...(teamId ? { teamId } : {}),
           ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
         });
       }),

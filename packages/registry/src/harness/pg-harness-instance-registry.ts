@@ -34,7 +34,6 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
       parse: (v) => HarnessInstanceSpecSchema.parse(v),
       softDelete: true,
       createdBy: true,
-      teamId: true,
       tags: true,
       origin: true,
     });
@@ -44,35 +43,14 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     tenant: string,
     instance: HarnessInstanceSpec,
     createdBy?: string,
-    teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
     assertRegistrableInstance(template, instance);
-    await this.store.register(tenant, instance, createdBy, teamId, origin);
-  }
-  // Same validation, and the owner resolved inside the write rather than by the caller (arch-review 77).
-  async registerPreservingOwner(
-    tenant: string,
-    instance: HarnessInstanceSpec,
-    createdBy?: string,
-    origin?: CapabilityOrigin,
-    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
-  ): Promise<"registered" | "owner_moved"> {
-    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    assertRegistrableInstance(template, instance);
-    return await this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);
+    await this.store.register(tenant, instance, createdBy, origin);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
-  }
-  // Owning-team delegation — the authz kernel's team-axis input.
-  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
-    return this.store.teamOfVersion(tenant, id, version);
-  }
-  // Ownership transfer — every version of the entity, tenant-owned only (see PgVersionedStore.moveToTeam).
-  moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
-    return this.store.moveToTeam(tenant, id, teamId);
   }
 
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {

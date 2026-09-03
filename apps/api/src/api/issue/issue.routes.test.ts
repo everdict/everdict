@@ -1,10 +1,4 @@
-import {
-  InitiativeService,
-  IssueService,
-  ProjectService,
-  RunService,
-  TeamService,
-} from "@everdict/application-control";
+import { InitiativeService, IssueService, ProjectService, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
 import {
   InMemoryInitiativeStore,
@@ -13,10 +7,21 @@ import {
   InMemoryProjectStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
-  InMemoryTeamStore,
 } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
+
+// The workspace mints one sequence, so an issue's identifier is a prefix and a counter — deterministic here
+// because a test that asserts on `EVD-1` needs to know which issue that is.
+const numberAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { number: n, identifier: `EVD-${n}` };
+    },
+  };
+})();
 
 const unusedDispatcher: Dispatcher = {
   async dispatch() {
@@ -30,16 +35,14 @@ function build() {
   const issueStore = new InMemoryIssueStore();
   const projectStore = new InMemoryProjectStore();
   const initiativeStore = new InMemoryInitiativeStore();
-  const teamStore = new InMemoryTeamStore();
   const scorecardStore = new InMemoryScorecardStore();
   // The real team service, not a stand-in: an issue and a project have to land on the SAME default team, since
   // an issue may only join a project its own team is on. A fake allocator that answered with a team the project
   // store never heard of made that invariant untestable here — the wiring is production's.
-  const teamService = new TeamService({ store: teamStore, issues: issueStore });
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     issueService: new IssueService({
-      teams: teamService,
+      numbers: numberAllocator,
       store: issueStore,
       scorecards: scorecardStore,
       projects: projectStore,
@@ -47,8 +50,6 @@ function build() {
     projectService: new ProjectService({
       store: projectStore,
       issues: issueStore,
-      teams: teamStore,
-      defaultTeam: teamService,
       initiatives: initiativeStore,
     }),
     initiativeService: new InitiativeService({
@@ -658,42 +659,6 @@ describe("issue list — the grouped screen's query", () => {
     );
     await app.close();
   });
-
-  // The scope helper's three team reads (my teams · the teams I may see · the team the URL names) now go out
-  // TOGETHER instead of one after another — they decide nothing about each other, and this helper runs in front
-  // of EVERY list query, once per group on a grouped screen. Overlapping them puts an unknown team's rejection
-  // inside a `Promise.all`, where the naive spelling loses it: a sibling that settles first would let the whole
-  // block reject with something else, or the rejection would surface as a 500 rather than the 404 the URL earned.
-  // A team that does not exist must still read as ABSENT, on the rows and on the counts alike.
-  it("still 404s an unknown team ref on both list endpoints, now that the scope reads overlap", async () => {
-    // This one composes the team service on the SERVER (the shared fixture leaves it out, and without it
-    // `resolveTeamRef` keeps a ref verbatim by design — there is nothing to resolve against). The 404 being
-    // tested is the team service's answer, so it only exists in a deployment that has one.
-    const issueStore = new InMemoryIssueStore();
-    const teamStore = new InMemoryTeamStore();
-    const teamService = new TeamService({ store: teamStore, issues: issueStore });
-    const app = buildServer({
-      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-      issueService: new IssueService({ teams: teamService, store: issueStore }),
-      teamService,
-    });
-    await createIssue(app, { title: "one", status: "todo" });
-
-    for (const url of ["/issues?team=NOPE", "/issues/counts?groupBy=status&team=NOPE"]) {
-      const res = await app.inject({ method: "GET", url, headers: H });
-      expect(res.statusCode).toBe(404);
-      expect(res.json().code).toBe("NOT_FOUND");
-    }
-
-    // And the happy path still narrows rather than 404-ing: the default team the issue was filed into is
-    // nameable by its KEY, which is what the team-scoped URL actually sends.
-    const teams = await app.inject({ method: "GET", url: "/teams", headers: H });
-    const key = teams.json()[0].key;
-    const scoped = await app.inject({ method: "GET", url: `/issues?team=${key}`, headers: H });
-    expect(scoped.statusCode).toBe(200);
-    expect(scoped.json().items.map((i: { title: string }) => i.title)).toEqual(["one"]);
-    await app.close();
-  });
 });
 
 // A project's checkpoints, on the issues that are supposed to reach them. The project screen has counted the
@@ -795,78 +760,6 @@ describe("PATCH /issues/:id — the project checkpoint", () => {
 
     expect(cleared.statusCode).toBe(200);
     expect(cleared.json().milestoneId).toBeUndefined();
-  });
-});
-
-// ── THE TRIAGE QUEUE HAS A DOOR, AND BOTH WAYS OUT OF IT (arch-review 106) ────────────────────────
-//
-// `Issue.create` says the queue is "entered explicitly by the surfaces that bring work in from outside
-// (import, an agent)". No surface wrote `inTriage: true`, so accept and decline — two endpoints, two domain
-// transitions, a store filter and the `?triage=` list param — were unreachable in production and untested
-// anywhere. Nothing in this repository exercised either route before this file.
-//
-// Seen RED before the door: "an issue filed into triage was in the workflow instead: expected false to be
-// true", and the accept then answered 409 "not in triage".
-describe("issue triage — the queue in front of the workflow", () => {
-  it("a caller files into triage, accepts out of it, and cannot accept twice", async () => {
-    const { app } = build();
-    const filed = await createIssue(app, { title: "Retry drops tool results", inTriage: true });
-    expect(filed.inTriage, "an issue filed into triage was in the workflow instead").toBe(true);
-
-    // The list filter the queue is read through — it filters on a flag that until now nothing set.
-    const queued = await app.inject({ method: "GET", url: "/issues?triage=true", headers: H });
-    expect(queued.json().items.map((i: { id: string }) => i.id)).toEqual([filed.id]);
-
-    const accepted = await app.inject({
-      method: "POST",
-      url: `/issues/${filed.id}/triage/accept`,
-      headers: H,
-      payload: { status: "in_progress" },
-    });
-    expect(accepted.statusCode).toBe(200);
-    expect(accepted.json().inTriage).toBe(false);
-    expect(accepted.json().status).toBe("in_progress");
-
-    // Leaving the queue is once — a second accept is the domain's conflict, not a silent no-op.
-    const again = await app.inject({
-      method: "POST",
-      url: `/issues/${filed.id}/triage/accept`,
-      headers: H,
-      payload: {},
-    });
-    expect(again.statusCode).toBe(409);
-  });
-
-  it("declining cancels the issue and keeps it on the record", async () => {
-    const { app } = build();
-    const filed = await createIssue(app, { title: "Rewrite it all in Rust", inTriage: true });
-    const declined = await app.inject({
-      method: "POST",
-      url: `/issues/${filed.id}/triage/decline`,
-      headers: H,
-      payload: { note: "out of scope this quarter" },
-    });
-    expect(declined.statusCode).toBe(200);
-    expect(declined.json().inTriage).toBe(false);
-
-    // "We said no to this" is an answer somebody looks for later, so the issue survives its own decline.
-    const readBack = await app.inject({ method: "GET", url: `/issues/${filed.id}`, headers: H });
-    expect(readBack.statusCode, "the declined issue vanished from the record").toBe(200);
-  });
-
-  it("refuses to triage an issue that is already in the workflow", async () => {
-    const { app } = build();
-    const filed = await createIssue(app, { title: "Filed straight into the workflow" });
-    expect(filed.inTriage).toBe(false);
-    for (const path of ["accept", "decline"]) {
-      const res = await app.inject({
-        method: "POST",
-        url: `/issues/${filed.id}/triage/${path}`,
-        headers: H,
-        payload: {},
-      });
-      expect(res.statusCode, `${path} moved an issue that was never in the queue`).toBe(409);
-    }
   });
 });
 

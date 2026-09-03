@@ -8,19 +8,11 @@ import {
 } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertTeamVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, ok, resolveTeam, run } from "../mcp-context.js";
+import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // MCP twin of the issue routes (BFF↔MCP parity). This is the surface an agent uses to triage its own
 // regressions: find the issue that watches a harness, read how it was closed last time, and move it.
 // ctx.agent rides into the service so an agent's transitions stamp causedBy — the trigger loop guard.
-// The team narrowing every issue READ shares — `TeamService.visibleTeamIds` is the one place privacy is decided,
-// and `undefined` from it means nothing is hidden (so the filter key stays absent rather than becoming "none").
-async function teamNarrow(ctx: McpToolContext): Promise<{ teamIds?: string[] }> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return seen === undefined ? {} : { teamIds: seen };
-}
-
 export function registerIssueTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
   if (!deps.issueService) return;
@@ -57,10 +49,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         estimate: z.number().int().nonnegative().max(1000).optional().describe("points on the team's scale"),
         dueDate: z.string().optional().describe("YYYY-MM-DD — when this issue is due"),
         parentId: z.string().optional().describe("file it as a sub-issue of this issue (id or identifier)"),
-        cycleId: z
-          .string()
-          .optional()
-          .describe("file it straight into an iteration — one of the issue team's cycles (list_cycles?team=)"),
         projectId: z
           .string()
           .optional()
@@ -82,13 +70,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         // `Issue.create`'s comment names an agent as one of the two surfaces that files INTO triage; until
         // arch-review 106 neither surface had a door, so nothing in the repository ever set this and the whole
         // triage lifecycle was unreachable. An agent filing work for a human to admit is the point of the queue.
-        inTriage: z
-          .boolean()
-          .optional()
-          .describe(
-            "file into the team's TRIAGE queue instead of straight into the workflow — a member then accepts " +
-              "or declines it. Use this when filing work somebody should agree to before it becomes the team's.",
-          ),
       },
     },
     (a) =>
@@ -99,7 +80,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             createdBy: principal.subject,
             // Resolved here (id or key) so an unknown team is a 404 rather than an issue quietly filed under
             // the default one.
-            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
             title: a.title,
             ...(a.description !== undefined ? { description: a.description } : {}),
             ...(a.status !== undefined ? { status: a.status } : {}),
@@ -107,12 +87,10 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             ...(a.estimate !== undefined ? { estimate: a.estimate } : {}),
             ...(a.dueDate !== undefined ? { dueDate: a.dueDate } : {}),
             ...(a.parentId !== undefined ? { parentId: a.parentId } : {}),
-            ...(a.cycleId !== undefined ? { cycleId: a.cycleId } : {}),
             ...(a.projectId !== undefined ? { projectId: a.projectId } : {}),
             ...(a.assignee !== undefined ? { assignee: a.assignee } : {}),
             ...(a.labelIds !== undefined ? { labelIds: a.labelIds } : {}),
             ...(a.links !== undefined ? { links: a.links } : {}),
-            ...(a.inTriage !== undefined ? { inTriage: a.inTriage } : {}),
             ...(agent ? { agent } : {}),
           }),
         ),
@@ -158,10 +136,8 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
             ...issueFilterOfArgs(a),
             // A private team's issues are not the workspace's — the same narrowing the HTTP list applies. An
             // agent reading through this tool must not see what the person it acts for cannot.
-            ...(await teamNarrow(ctx)),
             // `team` is the NARROW on top of that ceiling (the HTTP list's `?team=`): naming a team you cannot
             // see returns nothing rather than that team's issues.
-            ...(a.team !== undefined ? { teamId: await resolveTeam(ctx, a.team) } : {}),
             ...(a.order !== undefined ? { order: a.order } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
             ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
@@ -198,7 +174,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
       run(principal, "issues:read", async () => {
         const groups = await issues.countByGroup(ws, a.groupBy, {
           ...issueFilterOfArgs(a),
-          ...(await teamNarrow(ctx)),
         });
         return ok({ groupBy: a.groupBy, groups, total: groups.reduce((sum, group) => sum + group.count, 0) });
       }),
@@ -218,7 +193,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
       run(principal, "issues:read", async () => {
         const issue = await issues.get(ws, a.id);
         // Same answer the HTTP read gives: an issue you may not see is ABSENT, not forbidden.
-        await assertTeamVisible(ctx.deps, principal, issue.teamId, `issue '${a.id}'`);
         return ok(issue);
       }),
   );
@@ -242,7 +216,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         labelIds: z.array(z.string()).max(50).optional(),
         assignee: z.string().nullable().optional(),
         projectId: z.string().nullable().optional(),
-        cycleId: z.string().nullable().optional().describe("one of the issue's own team's cycles; null takes it out"),
         milestoneId: z
           .string()
           .nullable()
@@ -259,25 +232,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         const { id, ...fields } = a;
         return ok(await issues.update(ws, id, fields, actor));
       }),
-  );
-
-  server.registerTool(
-    "move_issue",
-    {
-      annotations: { readOnlyHint: false },
-      description:
-        "Hand an issue to another team. Its identifier is RE-MINTED from the destination team's counter — the " +
-        "prefix says whose list an issue is on — so the issue you moved comes back under a NEW name. Every " +
-        "name it has answered to keeps resolving, so a reference you already handed someone still works; use " +
-        "the returned identifier from here on. Moving it to the team it is already on is refused. The move " +
-        "also DROPS what the destination team does not own: its cycle, its board column, and its project " +
-        "unless the destination team is on that project too (the history entry names what it lost).",
-      inputSchema: {
-        id: z.string().describe("issue id or identifier (ENG-12)"),
-        teamId: z.string().describe("the destination team"),
-      },
-    },
-    (a) => run(principal, "issues:write", async () => ok(await issues.move(ws, a.id, a.teamId, actor))),
   );
 
   server.registerTool(
@@ -310,48 +264,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           ),
         ),
       ),
-  );
-
-  // ── TRIAGE, ON THE TRANSPORT AGENTS ACTUALLY USE (arch-review 106) ────────────────────────────────
-  //
-  // This file's own header says it is "the surface an agent uses to triage its own regressions" and it had no
-  // triage tool: both routes read `agentAttributionFrom(req.headers)`, so the HTTP side was built expecting an
-  // agent actor, while the transport an agent reaches the control plane through exposed neither move. Rule
-  // `api-layer` calls parity structural for exactly this reason — a capability with one transport is a
-  // capability half the callers do not have, and the half missing here is the autonomous one.
-  server.registerTool(
-    "accept_issue_triage",
-    {
-      annotations: { readOnlyHint: false },
-      description:
-        "Take an issue OUT of triage and INTO the team's workflow. `status` says where it lands (todo by " +
-        "default). An issue that is not in triage is refused — read it first. Declining instead is " +
-        "decline_issue_triage; the two are the only ways out of the queue.",
-      inputSchema: {
-        id: z.string().describe("issue id or identifier (ENG-12)"),
-        status: z
-          .enum(["backlog", "todo", "in_progress", "in_review"])
-          .default("todo")
-          .describe("where the issue lands in the workflow"),
-      },
-    },
-    (a) => run(principal, "issues:write", async () => ok(await issues.acceptTriage(ws, a.id, a.status, actor))),
-  );
-
-  server.registerTool(
-    "decline_issue_triage",
-    {
-      annotations: { readOnlyHint: false },
-      description:
-        "Decline an issue in triage — it is cancelled, with the reason on the record. The issue is NOT deleted: " +
-        '"we said no to this" is an answer somebody will look for later, and a declined issue is the evidence ' +
-        "the request was seen.",
-      inputSchema: {
-        id: z.string().describe("issue id or identifier (ENG-12)"),
-        note: z.string().max(2000).optional().describe("why it was declined — read by whoever asks later"),
-      },
-    },
-    (a) => run(principal, "issues:write", async () => ok(await issues.declineTriage(ws, a.id, a.note, actor))),
   );
 
   server.registerTool(
@@ -450,7 +362,6 @@ function issueFilterOfArgs(a: {
     ...(a.project !== undefined ? { projectIds: a.project } : {}),
     ...(a.assignee !== undefined ? { assignees: a.assignee } : {}),
     ...(a.priority !== undefined ? { priorities: a.priority } : {}),
-    ...(a.cycle !== undefined ? { cycleIds: a.cycle } : {}),
     ...(a.label !== undefined ? { labelIds: a.label } : {}),
     ...(a.parent !== undefined ? { parentId: a.parent === "none" ? null : a.parent } : {}),
     ...(a.linkType !== undefined && a.linkId !== undefined ? { link: { type: a.linkType, id: a.linkId } } : {}),

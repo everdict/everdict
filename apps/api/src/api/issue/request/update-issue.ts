@@ -19,7 +19,6 @@ export const UpdateIssueBodySchema = z
     // surface that puts work in a cycle sent a key this schema stripped: a cycle-only edit came back 400
     // "Nothing to update.", and one bundled with another field answered 200 having changed nothing. The service
     // checks the cycle is the issue's OWN team's, which is why the value has to reach it verbatim.
-    cycleId: z.string().min(1).max(200).nullable().optional(),
     // The project checkpoint, and the same omission one level up: the project screen has counted the issues on
     // each milestone since it existed, and no transport ever accepted the field that would make one of those
     // counts non-zero. Only the EDIT path offers it, because only the edit path validates it — the service

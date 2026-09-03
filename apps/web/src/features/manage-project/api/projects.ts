@@ -34,7 +34,6 @@ const errorEnvelopeSchema = z.object({
 export async function createProjectAction(input: {
   name: string
   description?: string
-  teamIds?: string[]
   initiativeIds?: string[]
   targetDate?: string
 }): Promise<ProjectActionResult> {
@@ -53,7 +52,6 @@ export async function updateProjectAction(
     name?: string
     description?: string | null
     // 목록은 통째로 대체된다 — 빈 배열이 "전부 떼기"를 표현하는 유일한 방법이다.
-    teamIds?: string[]
     initiativeIds?: string[]
     targetDate?: string | null
   }

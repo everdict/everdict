@@ -45,10 +45,8 @@ export interface NewIssueLinkInput {
 export interface NewIssueInput {
   id: string;
   tenant: string;
-  // The owning team plus the identity it minted. The caller (IssueService) resolves the team — explicit or the
-  // workspace default — and allocates the number from that team's counter, so the aggregate only records what
-  // was decided rather than reaching for a store.
-  teamId: string;
+  // The identity the WORKSPACE minted. The caller (IssueService) allocates the number from the workspace's
+  // own counter, so the aggregate only records what was decided rather than reaching for a store.
   number: number;
   identifier: string;
   title: string;
@@ -63,7 +61,6 @@ export interface NewIssueInput {
   cycleId?: string;
   milestoneId?: string;
   stateId?: string;
-  inTriage?: boolean;
   projectId?: string;
   assignee?: string;
   // Registry ids, already resolved by the caller — the aggregate is pure, so name→id resolution (and the
@@ -93,18 +90,6 @@ export interface IssueEditInput {
   cycleId?: string | null;
   // The project checkpoint. `null` detaches it.
   milestoneId?: string | null;
-}
-
-// A team move carries the destination AND the identity that team minted for the issue — the same pairing
-// creation uses, because the aggregate must never reach for a store to learn its own name.
-export interface IssueMoveInput {
-  teamId: string;
-  number: number;
-  identifier: string;
-  // Whether the destination team is on the issue's project. The SERVICE answers it (it holds the project
-  // store); the aggregate decides what a "no" means — see `moveToTeam`. Absent = the issue is in no project,
-  // or projects are not composed in this deployment, and there is nothing to decide.
-  projectHoldsTeam?: boolean;
 }
 
 export interface IssueStatusChangeOptions {
@@ -169,7 +154,6 @@ export function issueSummaryOf(record: IssueRecord): IssueSummary {
   return {
     id: record.id,
     tenant: record.tenant,
-    teamId: record.teamId,
     number: record.number,
     identifier: record.identifier,
     title: record.title,
@@ -178,10 +162,8 @@ export function issueSummaryOf(record: IssueRecord): IssueSummary {
     ...(record.estimate !== undefined ? { estimate: record.estimate } : {}),
     ...(record.dueDate !== undefined ? { dueDate: record.dueDate } : {}),
     ...(record.parentId !== undefined ? { parentId: record.parentId } : {}),
-    ...(record.cycleId !== undefined ? { cycleId: record.cycleId } : {}),
     ...(record.milestoneId !== undefined ? { milestoneId: record.milestoneId } : {}),
     ...(record.stateId !== undefined ? { stateId: record.stateId } : {}),
-    inTriage: record.inTriage,
     ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
     ...(record.assignee !== undefined ? { assignee: record.assignee } : {}),
     labelIds: record.labelIds,
@@ -220,8 +202,6 @@ export function issueGroupKey(record: IssueRecord, groupBy: IssueGroupBy): strin
       return record.assignee ?? null;
     case "project":
       return record.projectId ?? null;
-    case "cycle":
-      return record.cycleId ?? null;
   }
 }
 
@@ -323,19 +303,6 @@ export function isIssueAfterCursor(
   return record.id < after.id;
 }
 
-// Counts per team over records already in hand — the in-memory half of `IssueStore.countByTeam`, shared so a
-// fake and the real in-memory store cannot disagree about what "open" means.
-export function issueCountsByTeam(records: readonly IssueRecord[]): { teamId: string; total: number; open: number }[] {
-  const counts = new Map<string, { teamId: string; total: number; open: number }>();
-  for (const record of records) {
-    const entry = counts.get(record.teamId) ?? { teamId: record.teamId, total: 0, open: 0 };
-    entry.total += 1;
-    if (isOpenIssueStatus(record.status)) entry.open += 1;
-    counts.set(record.teamId, entry);
-  }
-  return [...counts.values()];
-}
-
 // The addressable identity of the GitHub issue a copy came from, in the ONE shape every audit surface reads:
 // the creation history entry, the `issue.created` fact, and the detach entry. `host` appears only for a GitHub
 // Enterprise deployment (unset = github.com), the same convention WorkspaceCiLink uses.
@@ -362,7 +329,6 @@ export class Issue {
     return {
       id: input.id,
       tenant: input.tenant,
-      teamId: input.teamId,
       number: input.number,
       identifier: input.identifier,
       formerIdentifiers: [],
@@ -372,7 +338,6 @@ export class Issue {
       priority: input.priority ?? "none",
       // A filed issue is IN the workflow; triage is the queue in front of it, entered explicitly by the
       // surfaces that bring work in from outside (import, an agent) — never the default for a member filing.
-      inTriage: input.inTriage ?? false,
       ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
       ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
@@ -423,7 +388,6 @@ export class Issue {
         payload: {
           status: record.status,
           source: record.github !== undefined ? "github" : "manual",
-          teamId: record.teamId,
           identifier: record.identifier,
           // The fact is what feeds render — without the title a reader sees "ENG-12" and has to open it to
           // learn what was filed. Facts carry what a human needs to read the line, not just what filters match.
@@ -510,21 +474,6 @@ export class Issue {
         changed.push("dueDate");
       }
     }
-    // The cycle move is the one edit whose VALUES go into the history, not just the field name. Everything else
-    // can be answered by reading the issue as it stands; "which iteration was this in on the 9th" cannot, and
-    // that is exactly what a burn-down replays. Without it an issue pulled in halfway through counts against the
-    // whole window, and every cycle graph quietly lies about the days before the work existed.
-    let cycleMove: { cycleFrom: string | null; cycleTo: string | null } | undefined;
-    if (fields.cycleId !== undefined) {
-      const next = fields.cycleId === null ? undefined : fields.cycleId;
-      if (next !== this.record.cycleId) {
-        patch.cycleId = next;
-        changed.push("cycle");
-        // Both ends, always, with `null` for "no cycle" — an absent key would be indistinguishable from an
-        // edit made before this was recorded, which is the one case the replay has to treat differently.
-        cycleMove = { cycleFrom: this.record.cycleId ?? null, cycleTo: next ?? null };
-      }
-    }
     if (fields.milestoneId !== undefined) {
       const next = fields.milestoneId === null ? undefined : fields.milestoneId;
       if (next !== this.record.milestoneId) {
@@ -548,112 +497,10 @@ export class Issue {
       at: now,
       by,
       event: "updated",
-      detail: { changed, ...(cycleMove !== undefined ? cycleMove : {}) },
+      detail: { changed },
     });
     patch.updatedAt = now;
     return { patch, facts: [] };
-  }
-
-  // Hand the issue to another team. The identifier is RE-MINTED from the destination's counter — the prefix's
-  // whole job is to say whose list the issue is on, so a moved issue keeping `ENG-12` under the Platform team
-  // would make the name a lie. The previous name is kept on the record (and stays resolvable) so every link
-  // already pasted into a pull request still lands here, which is what makes re-minting affordable at all.
-  // The service allocates the number from the destination team, exactly as filing does.
-  //
-  // A move also DROPS whatever the destination team does not own. Everything the issue points at across the
-  // team axis was checked against the OLD team when it was set — its cycle, its board column, and (unless the
-  // destination is on it too) its project with the milestone inside it. Carrying those across would leave the
-  // issue in an iteration it can never appear in and a column that is not on its board: the invariant every
-  // other path enforces, quietly false for exactly the issues that moved. What it loses is named in the
-  // history, so the move never reads as a rename that silently emptied three fields.
-  moveToTeam(input: IssueMoveInput, by: string, now: string): IssueTransition {
-    if (input.teamId === this.record.teamId)
-      throw new ConflictError(
-        "CONFLICT",
-        { issue: this.record.id, team: input.teamId },
-        "This issue already belongs to that team.",
-      );
-    const fromTeamId = this.record.teamId;
-    const fromIdentifier = this.record.identifier;
-    // The project stays only when the destination team is on it — a project spans teams, so a move inside the
-    // project's own set of teams is not a departure from the project.
-    const keepsProject = this.record.projectId === undefined || input.projectHoldsTeam === true;
-    const dropped = [
-      ...(this.record.cycleId !== undefined ? ["cycle"] : []),
-      ...(this.record.stateId !== undefined ? ["state"] : []),
-      ...(keepsProject ? [] : ["project"]),
-      ...(keepsProject || this.record.milestoneId === undefined ? [] : ["milestone"]),
-    ];
-    const detail = {
-      fromTeamId,
-      toTeamId: input.teamId,
-      fromIdentifier,
-      toIdentifier: input.identifier,
-      ...(dropped.length > 0 ? { dropped } : {}),
-    };
-    return {
-      patch: {
-        teamId: input.teamId,
-        number: input.number,
-        identifier: input.identifier,
-        // Counters only ever move forward, so a re-mint can never collide with a name this issue already had —
-        // the Set is here for the shape's own sake, not to paper over a possible duplicate.
-        formerIdentifiers: [...new Set([...this.record.formerIdentifiers, fromIdentifier])],
-        cycleId: undefined,
-        stateId: undefined,
-        ...(keepsProject ? {} : { projectId: undefined, milestoneId: undefined }),
-        history: appendHistory(this.record.history, { at: now, by, event: "moved", detail }),
-        updatedAt: now,
-      },
-      facts: [
-        {
-          kind: "issue.moved",
-          subject: { type: "issue", id: this.record.id },
-          actor: by,
-          payload: detail,
-        },
-      ],
-    };
-  }
-
-  // Accept the issue INTO the team's workflow: the triage flag clears and the issue lands where the member
-  // said (`todo` by default). It is its own transition rather than an `update`, because leaving the queue is a
-  // lifecycle move — the history has to be able to answer "when did this stop being a request".
-  acceptFromTriage(to: IssueStatus, by: string, now: string): IssueTransition {
-    if (!this.record.inTriage)
-      throw new ConflictError(
-        "CONFLICT",
-        { issue: this.record.id },
-        "This issue is not in triage — it is already in the workflow.",
-      );
-    if (to === "done" || to === "regressed")
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { issue: this.record.id, status: to },
-        "Accepting an issue puts it into the workflow — close it afterwards, with its evidence.",
-      );
-    const from = this.record.status;
-    return {
-      patch: {
-        inTriage: false,
-        status: to,
-        history: appendHistory(this.record.history, {
-          at: now,
-          by,
-          event: "status_changed",
-          detail: { from, to, triage: "accepted" },
-        }),
-        updatedAt: now,
-      },
-      facts: [
-        {
-          kind: "issue.status_changed",
-          subject: { type: "issue", id: this.record.id },
-          actor: by,
-          payload: { from, to, cause: "manual", triage: "accepted", identifier: this.record.identifier },
-        },
-      ],
-    };
   }
 
   // Ordinary workflow movement between OPEN states, plus cancellation. Reaching `done` goes through resolve()
@@ -1016,7 +863,6 @@ export class Issue {
             from,
             to,
             cause,
-            teamId: this.record.teamId,
             identifier: this.record.identifier,
             title: this.record.title,
             ...(this.record.projectId !== undefined ? { projectId: this.record.projectId } : {}),

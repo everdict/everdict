@@ -48,7 +48,6 @@ export function completionFact(operation: AdoptionOperation, causedBy?: string):
       version: operation.registeredVersion ?? operation.proof.candidate.version,
       issueId: operation.proof.issueId,
       provingScorecardId: operation.proof.provingScorecardId,
-      ...(operation.proof.teamId !== undefined ? { teamId: operation.proof.teamId } : {}),
     },
   };
 }

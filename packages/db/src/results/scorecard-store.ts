@@ -202,10 +202,7 @@ function matchesScorecardFilter(
   if (filter.dataset !== undefined && c.dataset.id !== filter.dataset) return false;
   if (filter.harness !== undefined && c.harness.id !== filter.harness) return false;
   if (filter.status !== undefined && c.status !== filter.status) return false;
-  if (filter.teamId !== undefined && c.teamId !== filter.teamId) return false;
   // Ownership ceiling — another team's batch is not visible at all; an unowned one is the workspace's.
-  if (filter.visibleTeams !== undefined && c.teamId !== undefined && !filter.visibleTeams.includes(c.teamId))
-    return false;
   if (filter.judge !== undefined && !(c.orchestration?.judges ?? []).some((j) => j.id === filter.judge)) return false;
   if (filter.scheduleId !== undefined && c.origin?.scheduleId !== filter.scheduleId) return false;
   if (filter.productId !== undefined && c.origin?.productId !== filter.productId) return false;
@@ -225,7 +222,6 @@ function matchesScorecardFilter(
   if (filter.harnesses !== undefined && !filter.harnesses.includes(c.harness.id)) return false;
   if (filter.runtimes !== undefined && !filter.runtimes.includes(c.runtime ?? "")) return false;
   if (filter.creators !== undefined && !filter.creators.includes(c.createdBy ?? "")) return false;
-  if (filter.teamIds !== undefined && !filter.teamIds.includes(c.teamId ?? "")) return false;
   // The dashboard's half-open window (perf review) — the twin filters it here so a service that narrows the
   // READ behaves the same against either store.
   if (filter.createdSince !== undefined && c.createdAt < filter.createdSince) return false;

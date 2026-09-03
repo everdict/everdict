@@ -132,20 +132,6 @@ describe("scorecard counts — the number a page cannot know", () => {
     );
   });
 
-  it("puts a batch with no owner in the unset bucket rather than inventing one", async () => {
-    const store = await seeded([
-      at("r1", "2026-08-02T09:00:00.000Z", { teamId: "eng" }),
-      at("r2", "2026-08-02T10:00:00.000Z"),
-    ]);
-
-    expect(await store.countByGroup("acme", "team")).toEqual(
-      expect.arrayContaining([
-        { key: "eng", count: 1 },
-        { key: null, count: 1 },
-      ]),
-    );
-  });
-
   it("answers another workspace nothing — the ceiling every read stays under", async () => {
     const store = await seeded([
       at("mine", "2026-08-02T09:00:00.000Z"),

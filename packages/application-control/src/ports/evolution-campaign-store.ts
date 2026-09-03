@@ -46,7 +46,7 @@ export interface EvolutionCampaignStore {
   // is built from what the caller may see rather than filtered after it (arch-review 76 P1-security).
   // `subject` narrows to one capability's campaigns — every version of it, every walk ever tried on it — the
   // memory a new campaign's first brief reads (docs/architecture/evolution-routing-spec.md §5). In the query too.
-  list(tenant: string, visibleTeams?: string[], subject?: CampaignSubjectRef): Promise<EvolutionCampaignRecord[]>;
+  list(tenant: string, subject?: CampaignSubjectRef): Promise<EvolutionCampaignRecord[]>;
   // Append-only, CAS on the current round count — contiguity of `seq` is the store's to enforce.
   appendRound(
     tenant: string,

@@ -13,7 +13,6 @@ import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CreateIssueBodySchema, IssueLinkInputSchema } from "./request/create-issue.js";
-import { AcceptTriageBodySchema, DeclineTriageBodySchema, MoveIssueBodySchema } from "./request/move-issue.js";
 import { SetIssueStatusBodySchema } from "./request/set-issue-status.js";
 import { UpdateIssueBodySchema } from "./request/update-issue.js";
 
@@ -23,19 +22,7 @@ import { UpdateIssueBodySchema } from "./request/update-issue.js";
 // additionally creator-or-admin. Facts issue.created / issue.status_changed / issue.linked feed the event log;
 // the first two are trigger-matchable (payload.cause distinguishes a regression from a member's move).
 export const issueDocs: Record<
-  | "create"
-  | "list"
-  | "counts"
-  | "get"
-  | "update"
-  | "setStatus"
-  | "move"
-  | "acceptTriage"
-  | "declineTriage"
-  | "link"
-  | "unlink"
-  | "scorecards"
-  | "delete",
+  "create" | "list" | "counts" | "get" | "update" | "setStatus" | "link" | "unlink" | "scorecards" | "delete",
   FastifySchema
 > = {
   create: {
@@ -165,46 +152,6 @@ export const issueDocs: Record<
     body: toJsonSchema(SetIssueStatusBodySchema),
     response: {
       200: { description: "The moved issue", ...toJsonSchema(IssueRecordSchema) },
-      ...errorResponses(400, 401, 403, 404, 409),
-    },
-  },
-  move: {
-    summary: "Move an issue to another team",
-    description:
-      "Hand the issue to another team. Its identifier is RE-MINTED from the destination team's counter (the " +
-      "prefix says whose list an issue is on, so a moved issue keeping its old name would be a lie), and the " +
-      "previous name keeps resolving — links already pasted elsewhere still land here, and reads redirect to " +
-      "the canonical one. The move DROPS what the destination team does not own — the cycle, the board column, " +
-      "and the project unless the destination is on that project too — and the history entry names what it " +
-      "lost. Moving it to the team it is already on is a 409. Requires issues:write.",
-    tags: ["issue"],
-    body: toJsonSchema(MoveIssueBodySchema),
-    response: {
-      200: { description: "The moved issue, under its new identifier", ...toJsonSchema(IssueRecordSchema) },
-      ...errorResponses(400, 401, 403, 404, 409),
-    },
-  },
-  acceptTriage: {
-    summary: "Accept an issue out of triage",
-    description:
-      "Move an issue from the team's triage inbox INTO its workflow, landing on the status you name (`todo` by " +
-      "default). An issue that is not in triage is a 409. Requires issues:write.",
-    tags: ["issue"],
-    body: toJsonSchema(AcceptTriageBodySchema),
-    response: {
-      200: { description: "The accepted issue", ...toJsonSchema(IssueRecordSchema) },
-      ...errorResponses(400, 401, 403, 404, 409),
-    },
-  },
-  declineTriage: {
-    summary: "Decline an issue in triage",
-    description:
-      "Say no: the issue is cancelled with an optional note and leaves the inbox. It stays on the record — " +
-      "'we declined this' is an answer somebody looks for later. Requires issues:write.",
-    tags: ["issue"],
-    body: toJsonSchema(DeclineTriageBodySchema),
-    response: {
-      200: { description: "The declined issue", ...toJsonSchema(IssueRecordSchema) },
       ...errorResponses(400, 401, 403, 404, 409),
     },
   },

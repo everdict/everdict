@@ -17,134 +17,48 @@ The tracker is the missing layer, and it is Linear-shaped.
 
 | | what it is | what it answers |
 |---|---|---|
-| **Team** | who owns a slice of the evaluation, and the prefix its issues are named with | whose list is this issue on |
 | **Issue** | the unit of intent: one problem under evaluation | what are we evaluating, how was it verified, why did it come back |
-| **Project** | issues under one target date, worked by one or more teams | did we finish the evaluation in time |
+| **Project** | issues under one target date | did we finish the evaluation in time |
 | **Initiative** | a goal several projects work toward | how far along are we — is everything it asked for finished |
 
-Two axes cross here, exactly as they do in Linear: the **team axis** owns issues, and the **project/initiative
-axis** owns dates and goals. Neither contains the other — a project spans teams, and an initiative spans
-projects — which is what lets one goal be pursued across several teams without any of them owning it.
+One containment chain, and the workspace holds all of it: an initiative spans projects, a project spans issues,
+and nothing else owns any of them.
 
 An initiative is a GOAL, not a release train. Nothing about it is shipping-shaped: it holds the outcome a group
 is trying to reach ("agents people trust", "cost per case under a cent"), its progress is arithmetic over every
 issue underneath, and its health is what the person answerable for it says on top of that arithmetic. Completing
 one is a gate for exactly one reason — a goal with open work under it has not been reached yet.
 
-## Team
+## The workspace is the boundary
 
-Teams were originally left out on the argument that "a workspace already IS the team boundary". That holds while
-a workspace evaluates one thing; it stops holding the moment two groups evaluate different surfaces under one
-billing and integration boundary, because every issue list becomes everyone's issue list.
+There WAS a team here — a group inside a workspace that owned issues, named them (`ENG-12`), carried a roster,
+could be private, ran its own cycles and had its own board. It is gone. Migrations `0211`/`0212` collapsed all
+seven of those jobs into the workspace, and `scripts/live/migrate-teams-to-workspace.mjs` moved what teams held:
+every asset and result is the workspace's, every identifier was RE-ISSUED under one prefix (the old name is kept
+on the issue's `formerIdentifiers`, so history still says what a row used to be called), and the board is one
+board.
 
-A team is the smallest thing that fixes it, and deliberately no bigger:
+Two consequences worth stating plainly, because they were real properties that no longer hold:
 
-- **It owns issues — and, since the ownership axis landed, every eval asset and result beside them** (harness ·
-  dataset · judge · rubric · runtime · model · agent · scorecard · run all carry a `teamId`; migration `0106`,
-  and the stores filter on it — see `docs/auth.md` "The team axis"). What stays workspace-level is PROJECTS and
-  INITIATIVES, so a goal several teams contribute to still has ONE progress read: scoping a project to a team
-  would make "how far along is this goal" unanswerable at exactly the moment it matters. A project names several
-  teams (`teamIds`) rather than belonging to one.
-- **It names them.** `key` (`ENG`) + a per-team counter → `ENG-12`, stored on the issue. The key is immutable
-  after creation because it is baked into every identifier the team has already minted, and those get pasted
-  into pull requests and chat. Allocation is a single conditional `UPDATE … RETURNING` on the team's counter, so
-  two concurrent filings can never be handed the same number.
-- **It may sit under another team.** `parentId` nests teams so a large group keeps one issue list per working
-  unit while still having a name for the whole ("Platform" over "Runtime" and "Storage"). The nesting is
-  organisational only: a sub-team mints its OWN identifiers and owns its OWN issues, so nothing about an issue's
-  address depends on where its team sits in the tree. Re-parenting under one's own descendant is a `409`, and a
-  team with children cannot be deleted (that would strand them).
-- **It has its own roster**, separate from workspace membership — "my teams" is only a useful filter if belonging
-  is a real statement. The roster carries no role — *what* you may do still comes from the workspace role — but it
-  does decide *what you may do it to*: writing an **eval asset or result** owned by a team you are not on is
-  refused (`canReachTeam`, 403), while reading is decided by team **privacy** rather than by membership. The
-  tracker's own records keep the roster as a filing and visibility statement only: an issue, project or
-  initiative is not roster-gated on write, which is why none of their routes passes a `teamId` to `gate`. The
-  trust zone stays `workspace = tenant` either way — the team axis lives INSIDE a workspace, it does not add a
-  tenancy boundary. `docs/auth.md` §"The team axis" is the SSOT for which resources each half covers.
+- **A private team's work is no longer hidden.** Reads were narrowed by team privacy; the workspace is the only
+  boundary now, so everything a workspace holds is readable by everyone in it. This was chosen deliberately and
+  it is not reversible by re-running anything.
+- **`ENG-12` no longer resolves.** The prefix moved to the workspace's own `issue_key`, and the re-issue is what
+  makes `GET /issues/EVD-12` a unique lookup again. `former_identifiers` keeps the old name findable in the
+  record; the ADDRESS is the new one.
 
-  > ⚠️ This paragraph used to read "never a second authorization axis", which stopped being true two days after
-  > it was written — the commit that made it false is titled *"a team is an authorization axis, not just a
-  > label"*. Nothing caught it: `docs-check` verifies that cited paths and symbols are alive, and every name here
-  > was. A reader adding a team-owned resource would have concluded no write gate was needed and shipped exactly
-  > the gap that change closed (arch-review 108).
+### The workspace mints the identifier
 
-**A workspace always has at least one team, and exactly one of them is the default.** The default is where an
-issue filed without a team lands, which is what lets `teamId` stay required on an issue while callers stay free
-to ignore teams entirely. Both halves are enforced by the database (a partial unique index on `is_default`) and
-repaired lazily by `TeamService.ensureDefault`, called on the list paths — workspaces come into existence through
-several routes (`POST /workspaces`, the api-key bootstrap, the dev fallback), and an invariant that depends on
-remembering to call it at each of them is not an invariant. Deleting is refused for the default team, for the
-last remaining team, and for a team that still holds issues (409, naming the count).
-
-Facts: `team.created`, `team.member_added`, `team.member_removed`. A rename emits none — it is content editing,
-the same split the issue aggregate makes between `update()` and its status transitions. None are
-trigger-matchable: there is no automation whose wake signal is "a team was renamed".
-
-### Private teams — visibility, not permission
-
-`isPrivate` hides a team's work from everyone outside its roster. It is deliberately NOT a second authorization
-axis: the trust zone stays `workspace = tenant`, `can()` still reads exactly the roles it always did, and the
-filter sits ON TOP of `issues:read`.
-
-It is also the ONLY thing that hides a team's work — and not only the tracker's. The eval assets (harness ·
-dataset · judge · rubric) and the results (scorecard · run) follow the same rule, and so do projects, which are
-workspace records naming the teams that work on them (visible when ANY of those teams is). For a while they did
-not: reads were gated on the roster itself, so a member of Web could not reuse the judge Mobile wrote, and an
-initiative listed a project's progress while the evaluations proving it answered "not found" on the same screen.
-One workspace, one rule — public by default, private by choice. See `docs/auth.md`.
-
-- The narrowing rides the **same `teamIds` filter** the "my teams" view already uses (`visibleTeamIds` is the
-  one place that decides it), so there is one code path in the store and no second place to forget it. Asking
-  for `mine` intersects with it — your teams, minus the ones you may not see.
-- A refused read answers **404, never 403** — the same no-existence-leak rule cross-workspace reads follow. A
-  403 would confirm the team exists, which is the whole thing the privacy is for.
-- **Admins see everything, on purpose.** An admin can add themselves to any roster in one click, so hiding the
-  data from them would be theatre — and a workspace administrator who cannot answer "what is this team blocked
-  on" is a worse failure than the privacy it pretends to buy.
-
-AuthZ is its own pair, unlike the rest of the tracker: **`teams:read`** (viewer+) and **`teams:write`**
-(**admin**). Creating a team mints an identifier prefix every future issue inherits and decides whose list issues
-land in — that is workspace administration, not the collaborative eval *content* `issues:write` covers.
-The one deliberate carve-out is **`teams:join`** (member+): putting YOURSELF on (or off) a public team's roster
-is how a member subscribes to a stream of work, not roster governance — `POST /teams/:id/join` / `…/leave`
-(MCP `join_team`/`leave_team`) only ever move the caller, answer 404 for a private team the caller cannot see
-(joining must not be the probe that confirms it exists) and 409 for a duplicate join, and reuse the ordinary
-`team.member_added`/`member_removed` facts with `addedBy` = the joiner. The web offers it in the teams
-directory, Settings › Teams, and the sidebar's "Join teams" entry under "Your teams" (Linear's pattern).
-
-### The key is the address, and what a team owns lives under it
-
-The key does for the team what the identifier does for the issue: `GET /teams/ENG`, `PATCH /teams/eng`,
-`/{workspace}/team/ENG/issues` in the web. Resolution happens ONCE, in `TeamService.get` — the method every
-mutation already routes through — so a key-shaped ref (`TEAM_KEY_REF_PATTERN` in `@everdict/contracts`) is
-uppercased, read off the key index, **then falls back to the id**; a uuid costs one lookup, as before. Every
-method that resolves then writes uses the RESOLVED id, never the ref it was handed. The id keeps working
-forever, and the web redirects an id-spelled URL to the canonical key rather than leaving two live spellings.
-
-The same ref is what a team-scoped LIST takes (`?team=ENG` on issues · projects · cycles · scorecards ·
-harnesses · datasets · judges, via `resolveTeamRef` at the route and `resolveTeam` in the MCP twin). An unknown
-ref answers **404 rather than an empty list** — a list filtered to nothing reads as "this team has nothing",
-which is a different and wrong answer to "no such team".
-
-**In the web, a team's WORK is a PATH, not a query parameter**: `/{workspace}/team/ENG/{issues, triage, cycles,
-projects}`, with the team home at `/{workspace}/team/ENG`. `?team=<uuid>` said "the same list, filtered", and
-that is not what those are — each team holds different things, its triage inbox exists only if it turned one on,
-and its cycles are numbered in its own sequence. The workspace-wide `/issues` and `/projects` stay (they answer a
-real question: every team's), and one component renders both addresses; `/cycles` is a redirect to a team's,
-because "Cycle 3" has no meaning without whose third it is — and so is `/cycle/<id>`, which now lands on
-`…/team/ENG/cycle/7`. Old `?team=` links redirect to the new path, so nothing pasted before this change breaks.
-
-The team's EVALUATION assets are the exception, and deliberately so (user decision 2026-08-05). Harness · dataset
-· judge · scorecard briefly had team paths too; they now have ONE workspace address each and the owning team is a
-FILTER on that list (`?team=`, the same spelling the old links used, with a team key resolved to its id). The
-registry's `team_id` still decides who may CHANGE one — ownership did not move, only the way you navigate to it.
-The control plane's `?team=` narrowing on those lists is unchanged.
+`issue_key` (the prefix) and `issue_counter` (the sequence) live on the workspace row. Allocation is a single
+conditional `UPDATE … RETURNING` (`PgIssueNumberAllocator`), so two issues filed at the same instant cannot take
+the same number — a read-then-write would let them. A workspace the backfill never reached settles its prefix in
+that same statement, from `deriveIssueKey`, which the migration script imports rather than re-deriving: a
+workspace whose first issue is `EVD-1` and whose backfill then decides the prefix is `ACME` would have two names
+for one sequence.
 
 ## Issue
 
-Every issue belongs to exactly one team (`teamId`, required) and carries the identity that team minted
-(`number`, `identifier`). An issue gathers the capabilities that verify it (`links[]`: harness · dataset · judge · scorecard · run ·
+Every issue carries the identity the workspace minted (`number`, `identifier`). An issue gathers the capabilities that verify it (`links[]`: harness · dataset · judge · scorecard · run ·
 view · issue · product · release · **case**), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
 the normal RBAC-gated reads at render time, exactly like a platform event's subject. The one validated
 reference is `resolution.scorecardId`, because that one is evidence rather than navigation.
@@ -159,35 +73,14 @@ from two datasets are two exams, and the derivation refuses them by name rather 
 **One issue can point at another** (`type: "issue"`) — the cross-reference GitHub spells `#123`. It is stored like
 every other link, on the MENTIONING issue and one-directional, and the mentioned issue reads its backlinks with the
 same reverse query a harness uses (`?linkType=issue&linkId=`), so both screens show the pair without a second
-record to keep in step. Two deliberate details: the id is the target's **UUID**, not its identifier, because a team
-move re-mints `ENG-12` into `PLT-3` and a containment query on the old spelling would stop matching; and a mention
+record to keep in step. Two deliberate details: the id is the target's **UUID**, not its identifier, because an
+identifier is a name a record can be re-issued under and a containment query on the old spelling would stop
+matching; and a mention
 is made by PICKING (the web's issue picker, `add_issue_link` over MCP), never by parsing `ENG-12` out of a
 description — a link nobody chose is one nobody can explain, and edited text would leave the graph to garbage-collect.
 Finding the issue to pick is what `GET /issues?q=` answers: a case-insensitive substring of the identifier (including
 the ones it used to answer to) or the title. Not the description — a picker row cannot show a paragraph to say why it
 matched.
-
-### Moving between teams
-
-`POST /issues/:id/team` hands an issue to another team, and the identifier is **re-minted** from the
-destination's counter (`ENG-12` → `PLT-3`). The prefix's whole job is to say whose list the issue is on, so a
-moved issue keeping its old name would make the name a lie. What makes re-minting affordable is that the old
-name keeps working: every identifier the issue has answered to is kept on the record (`formerIdentifiers`), the
-store's `getByIdentifier` falls back to it (GIN-indexed, current spelling always wins), and the web redirects an
-old slug to the canonical one. A link pasted into a pull request last month still lands on the right issue.
-
-It is a transition, not an edit — `teamId` is deliberately absent from `PATCH /issues/:id`, so a rename can
-never carry a re-address as a side effect. It emits `issue.moved` (both team ids, both identifiers) and appends
-the durable `moved` history entry, and moving to the team the issue is already on is a `409`.
-
-**A move drops what the destination team does not own.** Everything the issue points at across the team axis was
-checked against the OLD team when it was set, so the move clears its **cycle** and its **board column**
-unconditionally, and its **project** (with the milestone inside it) unless the destination team is on that
-project too — a project spans teams, so moving *inside* the project's own set of teams is not a departure from
-it. Carrying them across would leave the issue in an iteration it can never appear in and a column that is not
-on its board: the invariant every other write path enforces, quietly false for exactly the issues that moved.
-What it lost is named in the `moved` history entry and on the fact (`dropped: ["cycle", "state", …]`), so an
-emptied field never reads as data going missing on its own.
 
 ### The identifier is the address
 
@@ -214,14 +107,14 @@ keeps working forever, so links minted before the identifier existed still resol
   is a rule that lives nowhere it can be read. `issuePriorityRank` (`@everdict/domain`) owns the ordering
   instead. `none` is defaulted rather than optional: "unprioritised" is a real answer every list draws, and an
   absent field would make each consumer invent the same fallback.
-- **An estimate is a bare number.** The SCALE (linear / fibonacci / t-shirt) is a team setting, so the same `3`
-  renders as "3" or "M" depending on the owning team — the record stores the value, never its rendering.
+- **An estimate is a bare number.** The SCALE (linear / fibonacci / t-shirt) is a rendering choice, so the same
+  `3` reads as "3" or "M" — the record stores the value, never its rendering.
 
 `dueDate` is a calendar date, treated exactly like a project's target date. Overdue is a READ concern: the web
 colours it only while the issue is open, because a closed issue's passed deadline is history, not an alarm.
 
-**Sub-issues are a pointer, not a containment.** A child is an ordinary issue — its own status, its own team,
-counted in every rollup exactly once — that names a parent. The service refuses a cycle (nothing may be its own
+**Sub-issues are a pointer, not a containment.** A child is an ordinary issue — its own status, counted in
+every rollup exactly once — that names a parent. The service refuses a loop (nothing may be its own
 ancestor, checked against the live tree) and refuses deleting an issue that still has children, naming the
 count: where they should go instead is the member's decision. `GET /issues?parent=<id>` lists one parent's
 children and `?parent=none` the top-level ones, which is what a board needs so a child never appears twice.
@@ -243,23 +136,26 @@ is derived from the same table, so "open" cannot mean one thing in TypeScript an
 `regressed` sits in `started`, which is the whole argument for having categories: a resolution that stopped
 holding is work IN FLIGHT, not an untouched backlog item and not a finished one.
 
-### Workflow states — a team's own names for its board
+### Workflow states — the workspace's own names for its board
 
-A team's board is `WorkflowState` rows (`/teams/:id/states`): name · colour · position · and the **canonical
-status the state is a view onto**. A team renames "Todo" to "Up next", recolours it, reorders the board, or adds
-"In QA" beside "In review" — and the completion gate, the rollups, the regression watch and the GitHub sync keep
-reading `status`, so none of it can be broken by a rename.
+The board is `WorkflowState` rows (`/workflow-states`): name · colour · position · and the **canonical status
+the state is a view onto**. Rename "Todo" to "Up next", recolour it, reorder the board, add "In QA" beside "In
+review" — and the completion gate, the rollups, the regression watch and the GitHub sync keep reading `status`,
+so none of it can be broken by a rename.
 
-This is the one place we deliberately stop short of Linear: **the canonical vocabulary stays closed**. Letting a
-team mint arbitrary statuses would mean either teaching every programmatic reader an open vocabulary, or adding
-a category field that duplicates the status enum we already have — and the progress arithmetic is the product's
-central claim, so it does not get to depend on what somebody named a column. `regressed` is not offerable as a
-column at all: an issue reaches it by a resolution falling, never by somebody dragging a card.
+This is the one place we deliberately stop short of Linear: **the canonical vocabulary stays closed**. Minting
+arbitrary statuses would mean either teaching every programmatic reader an open vocabulary, or adding a category
+field that duplicates the status enum we already have — and the progress arithmetic is the product's central
+claim, so it does not get to depend on what somebody named a column. `regressed` is not offerable as a column at
+all: an issue reaches it by a resolution falling, never by somebody dragging a card.
 
-Every team is seeded with the default six on creation (and idempotently on the list path, the same repair
-`ensureDefault` does for the default team). An issue names its column with `stateId`; absent means "the team's
-default state for that status", which is what every issue that predates the board reads as — and what the
-regression watch leaves behind, honestly, because nobody put that issue in a column.
+The board is seeded with the default six on the list path, idempotently, so a workspace that has never opened
+Settings still has one. An issue names its column with `stateId`; absent means "the default state for that
+status", which is what every issue that predates the board reads as — and what the regression watch leaves
+behind, honestly, because nobody put that issue in a column.
+
+Reading the board is `issues:read` (viewer+ — knowing the column names is as benign as knowing the issues);
+every write is `settings:write`, because shaping a workspace is administration.
 
 Re-mapping a column's `status` MOVES every issue in it in the same operation, and a state still holding issues
 cannot be deleted (409 naming the count) — the board and the record can never disagree.
@@ -301,12 +197,11 @@ Kinds are folded per subject rather than per verb:
 
 | kind | payload | triggerable |
 |---|---|---|
-| `issue.created` | `status`, `source: manual\|github`, `teamId`, `identifier`, `projectId?`, and for a GitHub copy the addressable origin `repository`/`number`/`url` (+ `host?` on GHE) | ✅ |
+| `issue.created` | `status`, `source: manual\|github`, `identifier`, `projectId?`, and for a GitHub copy the addressable origin `repository`/`number`/`url` (+ `host?` on GHE) | ✅ |
 | `issue.status_changed` | `from`, `to`, `cause: manual\|github_sync\|regression`, `projectId?`, `scorecardId?` | ✅ |
-| `issue.moved` | `fromTeamId`, `toTeamId`, `fromIdentifier`, `toIdentifier`, `dropped?` (what the destination team does not own: `cycle`/`state`/`project`/`milestone`) | — |
 | `issue.linked` | `linkType`, `linkId`, `version?` | — |
-| `project.created` / `project.status_changed` | `from`, `to`, `openIssues`, `teamIds`, `initiativeIds`, `onTime?`, `forced?` | status only |
-| `project.update_posted` | `health`, `from?`, `teamIds`, `initiativeIds` | ✅ |
+| `project.created` / `project.status_changed` | `from`, `to`, `openIssues`, `initiativeIds`, `onTime?`, `forced?` | status only |
+| `project.update_posted` | `health`, `from?`, `initiativeIds` | ✅ |
 | `initiative.created` / `initiative.status_changed` | `from`, `to`, `openIssues`, `onTime?`, `forced?` | status only |
 | `initiative.update_posted` | `health`, `from?` | ✅ |
 
@@ -341,10 +236,9 @@ face and a display name, exactly as the detail view does. Rendering the raw subj
 showing a uuid where a person should be.
 
 This is not a micro-optimisation. Serving whole records made a 2,000-issue workspace's list a 4 MB, 150 ms
-response of which the page rendered a few kilobytes, and it made `GET /teams` — which derived each row's counts
-by *listing that team's issues* — cost the same as `GET /issues` for a 1.6 KB answer. Team summaries now come
-from two workspace aggregates (`IssueStore.countByTeam` + `TeamStore.countMembersByTeam`), the same rule the
-project list already followed: **the detail carries the rollup, the list stays lean.**
+response of which the page rendered a few kilobytes. Summaries now come
+from one workspace aggregate (`IssueStore.countByGroup`), the same rule the project list already followed:
+**the detail carries the rollup, the list stays lean.**
 
 `syncPull=true` narrows to the GitHub bulk sync's working set. It is exposed for a reason worth stating: without
 it the only way to answer "which repositories can I refresh" was to read the entire issue list and filter it
@@ -362,14 +256,14 @@ reusing a token with a different `order` is a **400**, not a window that silentl
 position in one sequence means nothing in another. A two-field token from before orderings existed still
 resolves — it can only ever have meant `updated`.
 
-**Sets, not values.** `status`, `priority`, `project`, `assignee`, `cycle` and `label` are repeatable
+**Sets, not values.** `status`, `priority`, `project`, `assignee` and `label` are repeatable
 (`?status=todo&status=in_progress`): ANY within a facet, AND across facets — which is how a filter bar reads.
 "Everything still in flight" is one query, where before it was three that no cursor could merge correctly. An
 EMPTY value reaches the unset bucket (`?assignee=` = unassigned), because a query parameter has no null and
 "nobody" is a group members really do filter to. A facet named with no values selects **nothing** rather than
 widening back to everything.
 
-**Group counts.** `GET /issues/counts?groupBy=status|assignee|priority|project|cycle` (`count_issues` on MCP)
+**Group counts.** `GET /issues/counts?groupBy=status|assignee|priority|project` (`count_issues` on MCP)
 answers how many issues each group holds *under the same filter*, largest-first, unset bucket last with
 `key: null`. It is its own endpoint because a grouped screen holds one PAGE PER GROUP: there is no single
 response the counts could ride on, and counting the rows it received would only report the page size back to
@@ -386,19 +280,17 @@ sort, deliberately: they are chosen from a display menu, and agreeing with the i
 there than an index.
 
 **What the list is indexed for** (migration 0116, measured with `EXPLAIN ANALYZE` on a 5,000-issue workspace).
-Only the team-scoped newest-first read was covered before, and every other shape the screen offers fell off it:
-a label filter had no index at all and seq-scanned; the workspace-wide list had nothing leading with
-`(tenant, updated_at DESC)` and sorted the whole workspace to serve fifty rows; a facet inside a team seeked on
-the team index and then discarded thousands of rows, because that index carries the ordering but not the
-predicate. All three are LINEAR in workspace size, which is why the list feels fine on a demo workspace and not
-on a real one. 0116 adds a GIN index on `label_ids` (default `jsonb_ops` — `?|` is unsupported by
-`jsonb_path_ops`), `(tenant, updated_at DESC, id DESC)` and its `created_at` twin for the two column orderings
-and their cursors, and `(tenant, team_id, status, updated_at DESC)` with the status BETWEEN the team and the
-ordering, so an equality on it leaves `updated_at DESC` still sorted. That last one is insurance the planner is
-meant to ignore for a broad facet (scanning the sorted twin and filtering really is cheaper) and to reach for on
-a selective one — "show me what regressed" is a rare status, and it used to walk the whole team to answer.
-Still uncovered on purpose: `countByTeam` reads every row of the workspace by definition, so it stays a seq
-scan; making it cheaper is a counter or a rollup, not an index.
+Only the newest-first read was covered before, and every other shape the screen offers fell off it:
+a label filter had no index at all and seq-scanned, and the list had nothing leading with
+`(tenant, updated_at DESC)` and sorted the whole workspace to serve fifty rows. Both are LINEAR in workspace
+size, which is why the list feels fine on a demo workspace and not on a real one. 0116 adds a GIN index on
+`label_ids` (default `jsonb_ops` — `?|` is unsupported by `jsonb_path_ops`) plus
+`(tenant, updated_at DESC, id DESC)` and its `created_at` twin for the two column orderings and their cursors.
+Migration `0211` re-cut the rest for the workspace-wide list the product draws now — `(tenant, updated_at DESC)`
+and `(tenant, status, updated_at DESC)`, with the status BETWEEN the tenant and the ordering so an equality on
+it leaves `updated_at DESC` still sorted. Every index from 0105/0116 led with `(tenant, team_id, …)`, which the
+planner can use for none of these reads. Still uncovered on purpose: a workspace-wide count reads every row by
+definition, so it stays a seq scan; making it cheaper is a counter or a rollup, not an index.
 
 ### Evaluation history
 
@@ -439,101 +331,15 @@ capability→issue write endpoint — the link is one fact, and a second place t
 "which issues watch this harness". So both directions are the same record, reached from whichever screen you are
 standing on.
 
-## Cycles — a team's iteration
+## What went with the team
 
-A cycle is a numbered, dated window that issues are pulled into, so "what are we doing this fortnight" has an
-answer instead of a filter someone remembers to apply. It belongs to exactly one **team**: an iteration is how a
-working group paces itself. Projects and initiatives keep answering the other question ("did we finish by the
-date"), and the two axes never merge.
-
-- **The state is derived, never stored** (`cycleStateOf`): `upcoming` before the start date, `active` from it,
-  `completed` only after an explicit close. A cycle whose end date passed but which nobody closed is NOT
-  completed — it is a cycle somebody forgot, and every list keeps showing it. `open=true` therefore means "no
-  explicit close", never "the dates say so".
-- **The number comes from the team's own counter** (`cycleCounter`, the same conditional-UPDATE allocation an
-  issue number uses), so `Cycle 7` means the seventh iteration THAT team ran.
-- **A team switches cycles ON** (`cyclesEnabled`, off by default — the same reasoning triage has). Until it
-  does, it has no cycles, no sidebar row and no cycle row on its issues. Its cadence is three fields:
-  `cycleDurationWeeks` (how long one runs), `cycleStartDay` (0 = Sunday … 6 = Saturday, Monday by default) and
-  `upcomingCycleCount` (how many stay standing in front of the active one, 2 by default).
-- **The pipeline is provisioned on the READ, never on a timer** (`CycleService.list` with a `teamId` →
-  `cyclePipelinePlan`). Asking for one team's cycles stands up the iteration it is in plus `upcomingCycleCount`
-  more, so a member never has to plan a cycle before filing work into it. Three properties make that safe: the
-  plan is computed from what already exists (idempotent), it only ever APPENDS after the latest end date (a team
-  that paused for a month gets one cycle starting this week, not a month of backfill), and a failed plant simply
-  leaves the next read to plan again. Provisioned cycles are credited to `CYCLE_CADENCE_ACTOR`, not to whoever
-  opened the screen. This runtime has no scheduler that owns tenant data, and the tracker already recovers its
-  other structural invariant — a workspace always has a default team — on exactly this kind of read.
-- **Creating one by hand still proposes its window** from the same cadence: the day after the latest cycle ends,
-  or the team's start weekday on or before today when there is no live sequence to continue. Passing both dates
-  overrides it; passing one is a `400`, because half a window is a mistake rather than a shorthand.
-- **Progress counts two things** (`cycleProgress`, derived on the detail read): issues by COUNT and points by
-  ESTIMATE. An unestimated issue is real work worth zero points — counting it as one would inflate every
-  burn-down a team draws, so `estimated` says how many carry an estimate at all.
-- **The burn-down is replayed, not stored** (`cycleBurndown`, on the same detail read): one point per ELAPSED
-  day carrying what was committed (`scope`) and what was still open (`remaining`). There is no daily-snapshot
-  table on purpose — a stored series is a second truth to reconcile, while a replay of the issues can only ever
-  agree with them. TWO histories feed it, which is what makes it honest: `status_changed` says when work was
-  finished, and the recorded cycle move says when it was in this iteration at all, so work pulled in mid-cycle
-  RAISES the scope line on the day it arrived instead of pretending it was always committed. "We did less than
-  planned" and "we were given more" are different answers and the graph now distinguishes them. The remaining
-  limit is historical only: issues moved before cycle moves were recorded carry no arrival date and count for
-  the whole window — the honest fallback, stated on the screen rather than hidden.
-- **Closing is not a gate.** An iteration ending with unfinished work is the normal case, which is what the next
-  cycle is for. `POST /cycles/:id/complete {moveUnfinishedTo}` closes it and carries everything still open into
-  another OPEN cycle of the SAME team in one operation — after the close, so a failed carry-over leaves the
-  cycle open (the recoverable half) rather than issues stranded outside a running iteration. The carry-over goes
-  through the ISSUE AGGREGATE, never straight at the store, so each moved issue records the move in its own
-  history; a silent row update would make the destination's burn-down count carried work as if it had been there
-  since day one. The `cycle.completed` fact carries `carriedOver`, which is the number a retro actually asks
-  for, and it is trigger-matchable ("the iteration closed — write the summary").
-- **Ending an iteration automatically is OPT-IN** (`cycleAutoClose`, off by default). The default is the
-  deliberate half: a cycle whose dates passed but which nobody closed is a cycle somebody FORGOT, and every list
-  keeps showing it rather than tidying it away — for a team still finding its pace, the forgotten cycle is the
-  signal. A team on a settled rhythm wants the iteration to simply end, so it switches this on and the same
-  provisioning read closes what expired and rolls the leftovers into the next standing cycle, through the same
-  transitions a member's own close uses (so an auto-closed cycle is indistinguishable from a hand-closed one
-  afterwards, down to the `carriedOver` count). Order matters: the pipeline is stocked FIRST, because an expired
-  cycle already fails the "standing" test, so the iteration the leftovers move into exists by the time the close
-  runs. Closing first would strand that work in a closed cycle until the next read.
-- An issue joins a cycle through the ordinary edit (`cycleId`), because pulling work into an iteration is a plan
-  change, not a workflow transition. It may only join **its own team's** cycles: an issue on a board it can
-  never appear on is work made invisible. The move is the ONE edit whose values go into the history
-  (`cycleFrom` / `cycleTo` on the `updated` entry, `null` for "no cycle") — everything else can be answered by
-  reading the issue as it stands, but "which iteration was this in on the 9th" cannot, and that is what the
-  burn-down replays. An absent key and a `null` are deliberately different: absent means the edit predates this
-  being recorded, which is the only case that licenses "it was in the cycle all along".
-- **Three surfaces put work into an iteration**, because one was not enough: the issue's property column
-  (`IssueCycleControl`, beside status/priority/team/project), the create form, and — the one that makes cycles
-  usable — MULTI-SELECT in the issue list with a floating "move to cycle" bar. Filing twenty issues into a
-  fortnight through a per-issue picker means opening twenty pages, which is how a cycle feature ends up unused.
-  Selection lives only where a team scopes the list (an issue may only join its own team's cycles, so "this
-  cycle" is meaningless on a mixed workspace list), and all three offer OPEN cycles only — a closed iteration is
-  a record, not somewhere to put new work. The bulk move fans the ordinary per-issue edit out rather than adding
-  a batch endpoint: the "is this the issue's own team's cycle" judgement must not exist in two places, and
-  partial failure is a normal result the screen reports as such.
-- **The web's cycle screens** are Linear-shaped. `/{workspace}/team/ENG/cycles` is not a list: it opens the
-  iteration the team is IN (falling back to the next one, then the most recent), because everyone who clicks
-  "Cycles" is asking about this fortnight and a list answers that only after another click. The title itself is
-  the switcher; `…/cycles/7` addresses one iteration by the number people cite, `…/cycles/all` is the full index
-  grouped by state, and the old `/{workspace}/cycles/<id>` redirects to the canonical team address the same way
-  an id-spelled issue URL redirects to `ENG-12`. The board reuses `IssueListView` under a cycle scope rather
-  than growing a second issue list — grouping, filters and the board layout have to be one component, or the two
-  copies drift.
-
-## Triage — the queue in front of the workflow
-
-`TeamRecord.triageEnabled` (off by default) turns on an inbox for work that arrives from outside — an import, an
-agent, a request. An issue waiting there carries `inTriage`, a **flag rather than a status**: the status
-vocabulary IS the workflow, and something waiting to enter the workflow has not started it. Two transitions
-leave the queue, both through the usual choke point:
-
-- `POST /issues/:id/triage/accept {status}` — into the workflow, landing where the member said (`todo` by
-  default). Closing straight from triage is refused: an issue is closed with its evidence, not waved through.
-- `POST /issues/:id/triage/decline {note}` — cancelled with a reason, and the flag clears. The issue stays on
-  the record, because "we said no to this" is an answer somebody looks for later.
-
-`GET /issues?triage=true` is the inbox; `?cycle=<id>` is one iteration's board.
+**Cycles** (a numbered, dated iteration with a carry-over report) and **triage** (a queue in front of the
+workflow, with accept/decline) were the team's, not the workspace's: a cycle is numbered in one group's own
+sequence, and a triage inbox is a queue in front of one group's workflow. Neither has a meaning once the
+workspace is the only boundary — "Cycle 3" answers nothing without whose third it is — so both were removed
+rather than re-homed, with their tables (`everdict_cycles`), columns (`issues.cycle_id`, `issues.in_triage`),
+routes, tools and event kinds. `scripts/live/migrate-teams-to-workspace.mjs` does not preserve them; the
+preflight record says so by name (`docs/migration/preflight/0212-drop-team-axis.md`).
 
 ## GitHub import + manual sync
 
@@ -608,37 +414,22 @@ something the browser can know, and a slower image beats a broken one.
 
 ## Project and Initiative
 
-**Both edges are many-to-many, and that is the point.** A project carries `teamIds` (who is working it) and
-`initiativeIds` (which umbrellas it rolls up into) — never a single id of either:
+**The umbrella edge is many-to-many, and that is the point.** A project carries `initiativeIds` — never a single
+id: a project routinely serves two umbrellas (a migration that is both "Q3 reliability" and "cost down"), and a
+single `initiativeId` silently dropped whichever lost.
 
-- A project that could name only ONE team would be that team's backlog with a date on it, not a release unit.
-  The teams are stored on the project rather than derived from its issues, because the derived answer was "no
-  teams" for exactly as long as the project was still being planned — the window where the question is asked.
-  Creating one without naming a team lands it on the workspace's default team, the same courtesy `teamId` gets
-  on an issue — through the same lazily-repairing `ensureDefault` seam, so a brand-new workspace's first act can
-  be creating a project.
-- **At least one team, always.** There is ONE kind of project. An empty `teamIds` used to be legal and mean
-  "workspace-wide", which quietly made a second kind: a project in no team's sidebar that — under the rule
-  below — no issue could ever join. Emptying the list is a `400`, and removing a team whose issues are still in
-  the project is a `409` naming the count (which of those issues leaves is the member's decision, not ours).
-- A project routinely serves two umbrellas (a migration that is both "Q3 reliability" and "cost down"), and a
-  single `initiativeId` silently dropped whichever lost.
+A project used to carry a second list, `teamIds`, and the rules around it (at least one, an issue may only join
+a project its own team is on, removing a team with issues still in it is a 409) went with the team axis. Every
+project is the workspace's, and every issue may join any of them.
 
-**An issue only joins a project its own team is on** — the same rule a cycle has, one level up: a project the
-issue's team is not part of is a list the issue can never be seen in from the team that owns it. Enforced on
-`POST /issues` and `PATCH /issues/:id` (a `400` naming the project and the team; an unknown project is a `404`),
-so the picker a member is offered and the set the control plane accepts are the same set — which is what makes
-"this team's projects" a real answer rather than a hint. The web reads that picker's options with
-`GET /projects?team=<the issue's team>` for exactly that reason, and a team move re-decides it (above).
-
-Both lists are validated against the workspace on write (`400` naming the unknown ids) — unlike an issue LINK,
-which stays an unvalidated pointer. These edges decide which sidebar a project appears in and which goal counts
-it, so a dangling id would hide real work rather than merely render a dead chip.
+`initiativeIds` is validated against the workspace on write (`400` naming the unknown ids) — unlike an issue LINK,
+which stays an unvalidated pointer. This edge decides which goal counts the project, so a dangling id would
+hide real work rather than merely render a dead chip.
 
 **Initiatives nest** (`parentId`), and progress rolls UP: a parent counts its own projects plus every
 descendant's, so decomposing a big goal can never hide work from it. Each project in the progress summary
 carries `viaInitiativeId` when it came up through a descendant, so remaining work points at where it actually
-sits. Cycles are refused (`409`) and an initiative with sub-initiatives cannot be deleted.
+sits. A parent loop is refused (`409`) and an initiative with sub-initiatives cannot be deleted.
 
 **A goal starts `planned`**, not active: what it means and which projects serve it is still being decided, and
 calling that active made every idea look like work in flight. Moving to `active` is a transition somebody makes
@@ -680,8 +471,8 @@ with what is left listed regressions-first, and each project summarized with its
 them from ONE aggregate (`countByGroup` over the issue table, twice — total and open) rolled up the tree by
 `initiativeProgress` in the kernel, because a list of 20 goals cannot be 20 fan-outs. The two paths share the
 rules, not the code, so `initiativeProgress` is tested AGAINST `initiativeReadiness` on the same data: a row
-that disagrees with the page it links to is worse than no row. List endpoints stay lean. `GET /projects?team=` and `?initiative=` are containment tests on
-the project's own lists (GIN-indexed), so they answer without touching the issue table.
+that disagrees with the page it links to is worse than no row. List endpoints stay lean. `GET /projects?initiative=` is a containment test on the
+project's own list (GIN-indexed), so it answers without touching the issue table.
 
 **The load-bearing invariant:** initiative progress counts open issues across every non-cancelled project
 *regardless of that project's own status*. A project marked completed whose issue later regressed is still
@@ -703,19 +494,18 @@ Cross-workspace reads are `404`, never `403` (no existence leak).
 
 ## Surface
 
-Full BFF↔MCP parity. HTTP under `/teams`, `/issues`, `/projects`, `/initiatives`. Teams expose
-`list_teams`/`get_team`/`create_team`/`update_team`/`set_default_team`/`delete_team` plus
-`list_team_members`/`add_team_member`/`remove_team_member`; the issue MCP twins are `create_issue`,
-`list_issues`, `get_issue`, `update_issue`, `set_issue_status`, `add_issue_link`, `remove_issue_link`,
-`list_issue_scorecards`, `move_issue`, `delete_issue` plus the eight-tool sets for projects and initiatives —
+Full BFF↔MCP parity. HTTP under `/issues`, `/projects`, `/initiatives`, `/workflow-states`. The issue MCP twins
+are `create_issue`, `list_issues`, `get_issue`, `update_issue`, `set_issue_status`, `add_issue_link`,
+`remove_issue_link`, `list_issue_scorecards`, `delete_issue` plus the eight-tool sets for projects and
+initiatives —
 create/list/get/update/set-status/delete on both, each with its update pair (`post_project_update`/
 `list_project_updates`, `post_initiative_update`/`list_initiative_updates`). Every `/issues/:id`
-route and every issue tool takes the id OR the identifier (`ENG-12`), so an agent can act on the reference a
+route and every issue tool takes the id OR the identifier (`EVD-12`), so an agent can act on the reference a
 member pasted at it. The MCP surface is how an agent triages its own regressions: find the issue watching a
 harness, read how it was closed last time, move it.
 
 Issues, projects and initiatives are commentable (`COMMENT_RESOURCE_TYPES`), including the `@everdict` agent
-answer branch — an issue is where a team argues about how something was evaluated, and threading that
+answer branch — an issue is where people argue about how something was evaluated, and threading that
 discussion anywhere else splits the record.
 
 ## The regression watch
@@ -745,23 +535,23 @@ is the agent loop guard's key and must stay honest about who actually acted.
 ## Where the code lives
 
 ```
-packages/contracts/src/records/team.ts         the Team + TeamMember records, the key pattern, the identifier format
+packages/contracts/src/records/issue-identifier.ts  the key pattern + the identifier format the workspace mints
 packages/contracts/src/records/tracker.ts      the three records + the derived read models
 packages/contracts/src/wire/tracker/*          response DTOs (detail = record + rollup/readiness)
-packages/domain/src/tracker/                   Team/Issue/Cycle/Project/Initiative aggregates + readiness
-                                               arithmetic + cycle progress/date algebra
+packages/domain/src/tracker/                   Issue/Project/Initiative aggregates + readiness arithmetic
+                                               + the calendar algebra the target dates use
 packages/application-control/src/{issue,project,initiative}/   use-cases; IssueService.applyTransition is
                                                the ONE choke point for facts AND the GitHub push
+packages/application-control/src/workflow-state/               the workspace's board (seed, re-map, delete gate)
 packages/application-control/src/issue/github-issue-sync.ts    import + manual two-way sync (no webhook, no sweep)
 packages/application-control/src/issue/regression-watch.ts     scorecard.completed → auto-reopen as regressed
-packages/db/src/tracker/                       InMemory + Pg stores (migrations 0103, 0105 = teams + backfill,
+packages/db/src/tracker/issue-number-store.ts  the workspace's counter — one conditional UPDATE … RETURNING
+packages/db/src/tracker/                       InMemory + Pg stores (migrations 0103,
                                                0108 = the many-to-many edges + nesting + former identifiers,
-                                               0109 = priority/estimate/due date/sub-issues, 0110 = cycles+triage,
+                                               0109 = priority/estimate/due date/sub-issues,
                                                0111 = project lead/health/milestones + the update timeline,
-                                               0112 = per-team workflow states + issue.state_id,
-                                               0113 = private teams,
-                                               0117 = initiative lead/health + its own update timeline)
-packages/application-control/src/team/team-service.ts          team use-cases; ensureDefault is the invariant's repair point
-packages/application-control/src/cycle/cycle-service.ts        iteration use-cases (number, window, close+carry)
-apps/api/src/api/{team,cycle,issue,project,initiative}/   routes + MCP + OpenAPI docs
+                                               0112 = workflow states + issue.state_id,
+                                               0117 = initiative lead/health + its own update timeline,
+                                               0211/0212 = the workspace becomes the only owner and minter)
+apps/api/src/api/{issue,project,initiative,workflow-state}/    routes + MCP + OpenAPI docs
 ```

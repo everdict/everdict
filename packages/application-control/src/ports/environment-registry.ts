@@ -14,30 +14,12 @@ export interface EnvironmentListEntry {
   id: string;
   versions: string[];
   owner: string;
-  teamId?: string;
   versionTags?: Record<string, string[]>; // version → free-form label — mutable registry metadata (outside the spec)
   versionOrigins?: Record<string, CapabilityOrigin>;
 }
 
 export interface EnvironmentRegistry {
-  register(
-    tenant: string,
-    spec: EnvironmentSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void>;
-  // The adoption lane's write (arch-review 77/115, and the campaign subject of harness-definability-spec §2):
-  // the successor keeps the entity's owner, the write asserts the owner the AUTHORIZATION was granted
-  // against, and where there is no local owner to preserve the authority that caused the write owns it.
-  registerPreservingOwner(
-    tenant: string,
-    spec: EnvironmentSpec,
-    createdBy?: string,
-    origin?: CapabilityOrigin,
-    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
-  ): Promise<"registered" | "owner_moved">;
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
+  register(tenant: string, spec: EnvironmentSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<EnvironmentSpec>;
   versions(tenant: string, id: string): Promise<string[]>;

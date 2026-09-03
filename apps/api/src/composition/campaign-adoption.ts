@@ -88,7 +88,7 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
     // `resolveHarnessInstance(template, instance)` — a pure function in contracts, which is exactly what
     // `HarnessInstanceRegistry.get` composes. So the digest is computed from the same composition the
     // registry would produce, compared, and only then written.
-    register: async ({ tenant, by, via, proof, spec, expectedOwnerTeamId }) => {
+    register: async ({ tenant, by, via, proof, spec }) => {
       const { type, id, version } = proof.candidate;
       // The origin the adopted version is born with: the campaign's ISSUE is the intent hub, and the note
       // names the campaign, the round and the scorecard that proved it — so "why does this version exist"
@@ -108,18 +108,6 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
       const measured = proof.candidate.specDigest;
       const digestOf = (document: unknown): string | undefined =>
         measured === undefined ? undefined : digestUnder(measured, document);
-      // ── THE OWNER MOVED BETWEEN THE GATE AND THE WRITE (arch-review 115) ────────────────────────
-      //
-      // Not a server error and not a mismatch of the caller's making: the entity changed teams after the
-      // route authorized against its owner, so the authorization no longer describes the resource. The
-      // caller re-reads and decides again; nothing was written.
-      const refuseOwnerMoved = (entityId: string): never => {
-        throw new ConflictError(
-          "CONFLICT",
-          { campaign: proof.campaignId, candidate: entityId },
-          "this candidate changed teams after the adoption was authorized, so nothing was registered — read it back and adopt again",
-        );
-      };
       const refuseSpec = (specId: string, specVersion: string): never => {
         throw new BadRequestError(
           "BAD_REQUEST",
@@ -149,10 +137,6 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         // ── THE ADOPTED VERSION STAYS WITH ITS TEAM, WITHOUT A WINDOW (wave C · 74 · 77) ─────────────
         //
         // Ownership is read off the entity, so a successor registered with no team re-files the whole agent
-        // out of its team's list the moment it becomes latest (wave C, re-learned in 74). Reading the owner
-        // HERE and writing it below leaves a window an ownership transfer fits through — and detecting that
-        // afterwards is the write-then-verify shape arch-review 76 removed. So the store resolves the owner
-        // inside the statement that writes (arch-review 77).
         // ── LOCAL EXISTENCE, NOT RESOLVE-EXISTENCE (arch-review 115) ──────────────────────────────
         //
         // `has()` falls back to `_shared`, so a candidate that exists only there answered TRUE while this
@@ -160,15 +144,7 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         // version being born. The harness lane below already used `ownVersions` (tenant-local, "no fallback
         // — for conflict checks"); one fact, two lanes, two meanings.
         const existed = (await deps.agents.ownVersions(tenant, id)).includes(version);
-        // …and the same `_shared` asymmetry decides OWNERSHIP: the owner lookup is tenant-local, so a
-        // `_shared`-only candidate had no owner to preserve and its first local version was born UNOWNED —
-        // a private team's campaign minting a capability every other team can see and write. The campaign's
-        // team is the authority that caused this write, so it owns what it makes.
-        const landed = await deps.agents.registerPreservingOwner(tenant, parsed, by, origin, {
-          ...(expectedOwnerTeamId !== undefined ? { expectedOwnerTeamId: expectedOwnerTeamId } : {}),
-          ...(proof.teamId !== undefined ? { initialTeamId: proof.teamId } : {}),
-        });
-        if (landed === "owner_moved") refuseOwnerMoved(id);
+        await deps.agents.register(tenant, parsed, by, origin);
         // Read back anyway: defence in depth, and the only thing that can see a registry which stored
         // something other than what it was handed. The correctness gate is above; this is the audit.
         const held = digestOf(await deps.agents.get(tenant, id, version));
@@ -190,11 +166,7 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         const wouldEnv = digestOf(parsedEnv);
         if (measured !== undefined && wouldEnv !== measured) refuseDigest(wouldEnv);
         const existedEnv = (await deps.environments.ownVersions(tenant, id)).includes(version);
-        const landedEnv = await deps.environments.registerPreservingOwner(tenant, parsedEnv, by, origin, {
-          ...(expectedOwnerTeamId !== undefined ? { expectedOwnerTeamId: expectedOwnerTeamId } : {}),
-          ...(proof.teamId !== undefined ? { initialTeamId: proof.teamId } : {}),
-        });
-        if (landedEnv === "owner_moved") refuseOwnerMoved(id);
+        await deps.environments.register(tenant, parsedEnv, by, origin);
         const heldEnv = digestOf(await deps.environments.get(tenant, id, version));
         return {
           kind: existedEnv ? ("already_exists" as const) : ("created" as const),
@@ -214,11 +186,7 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
       const existed = (await deps.harnesses.ownVersions(tenant, id)).includes(version);
       // Same authority precondition and same initial owner as the agent lane — one shape, both lanes, because
       // a guarantee one lane carries and the other does not is how this axis has come apart every time.
-      const landedHarness = await deps.harnesses.registerPreservingOwner(tenant, parsed, by, origin, {
-        ...(expectedOwnerTeamId !== undefined ? { expectedOwnerTeamId: expectedOwnerTeamId } : {}),
-        ...(proof.teamId !== undefined ? { initialTeamId: proof.teamId } : {}),
-      });
-      if (landedHarness === "owner_moved") refuseOwnerMoved(id);
+      await deps.harnesses.register(tenant, parsed, by, origin);
       const held = digestOf(await deps.harnesses.get(tenant, id, version));
       return {
         kind: existed ? ("already_exists" as const) : ("created" as const),

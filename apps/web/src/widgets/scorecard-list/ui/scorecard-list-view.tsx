@@ -10,7 +10,6 @@ import {
   SCORECARD_ORDERS,
   scorecardGroupCountsSchema,
 } from '@/entities/scorecard'
-import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -40,11 +39,6 @@ export async function ScorecardListView({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
-  // 팀 축의 이름표 — 실패하면 그 축만 조용히 사라진다.
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch((): Team[] => [])
 
   // For run-by display — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
@@ -77,7 +71,7 @@ export async function ScorecardListView({
   // "what does this workspace have" — a question a filter must not change — so they are counted ONCE,
   // unnarrowed, while the list below is narrowed by whatever the address says.
   const view = {
-    filters: withResolvedTeamFilter(scope.filters, teams),
+    filters: scope.filters,
     search: scope.search,
     display: scope.display,
   }
@@ -143,7 +137,6 @@ export async function ScorecardListView({
           stats={stats}
           authors={authors}
           runnerLabels={runnerLabels}
-          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
           scope={{ ...scope, filters: view.filters }}
           viewer={viewer}
         />

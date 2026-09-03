@@ -7,7 +7,7 @@ import { can } from '@/shared/auth/can'
 
 import { CommandPalette } from './command-palette'
 import { PageTransition } from './page-transition'
-import { Sidebar, type SidebarTeam } from './sidebar'
+import { Sidebar } from './sidebar'
 import { TopControls } from './top-controls'
 
 // Shared dashboard shell — left sectioned sidebar (workspace switcher + Cmd+K + nav + footer user menu) + body.
@@ -28,7 +28,6 @@ export function AppShell({
   email,
   profile,
   fileExecution = false,
-  teams,
   children,
 }: {
   workspace: string
@@ -40,7 +39,6 @@ export function AppShell({
   email?: string
   profile?: { name?: string; username?: string; avatarUrl?: string }
   fileExecution?: boolean // this deployment can run a workspace file (GET /me config) — gates the viewer's Run
-  teams?: SidebarTeam[] // 사이드바의 팀 섹션(Linear 의 "Your teams") — 내가 속한 팀만
   children: ReactNode
 }) {
   // 대화 패널의 사용자 턴 아바타 — 사이드바 계정 표시와 같은 해석(프로필 이름 > 사용자명 > 이메일 > subject).
@@ -57,7 +55,6 @@ export function AppShell({
           showLogin={showLogin}
           {...(email !== undefined ? { email } : {})}
           {...(profile !== undefined ? { profile } : {})}
-          {...(teams !== undefined ? { teams } : {})}
         />
         {/* md:basis-0 pairs with the panel's flex-1 basis-0 — when the infra panel is open the two split the remaining space 50:50. */}
         <main className="flex min-w-0 flex-1 flex-col md:basis-0">

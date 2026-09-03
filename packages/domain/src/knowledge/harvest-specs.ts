@@ -40,7 +40,6 @@ export interface SpecHarvestMeta {
   createdBy?: string;
   tags?: string[];
   origin?: CapabilityOrigin;
-  teamId?: string;
 }
 
 // A registered-Model binding resolves to a `model` node only when it is a REF (an object) — a bare string is a raw
@@ -74,8 +73,6 @@ function common(
   if (meta.createdBy !== undefined && meta.createdBy !== "")
     b.ref("created_by", { type: "user", key: meta.createdBy }, "createdBy");
   tags.forEach((t, i) => b.ref("tagged_with", { type: "tag", key: t }, `tags[${i}]`));
-  if (meta.teamId !== undefined && meta.teamId !== "")
-    b.ref("belongs_to", { type: "team", key: meta.teamId }, "teamId");
   // A FORK — another id's version this one was copied from (identity spec §1). Recorded at the register, never
   // inferred from similarity; the digest the fork named rides the edge so a reader can check it later.
   const fork = meta.origin?.forkedFrom;

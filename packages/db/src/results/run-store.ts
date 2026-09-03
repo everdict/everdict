@@ -1,5 +1,5 @@
 import { CANCELLED_ERROR_CODE, type RunRecord } from "@everdict/contracts";
-import { canReadRun, isRunTerminal, ownedByVisibleTeam, usageFromTrace } from "@everdict/domain";
+import { canReadRun, isRunTerminal, usageFromTrace } from "@everdict/domain";
 
 // On read, fills the DERIVED usage from the run's result trace (no stored column → it always matches the
 // result, and needs no migration). The VERDICT is deliberately NOT derived here: which policy judged a
@@ -196,7 +196,7 @@ export class InMemoryRunStore implements RunStore {
     const viewer = opts?.viewer;
     const audience = viewer === undefined ? inTenant : inTenant.filter((r) => canReadRun(r, viewer));
     // A private team's runs are that team's work — the same ceiling every other team-owned read stays under.
-    const teamScoped = audience.filter((r) => ownedByVisibleTeam(r, opts?.visibleTeams));
+    const teamScoped = audience;
     // …and the lifecycle narrowing the adapter applies in its WHERE (perf review). Before the page, like
     // every other predicate here: a twin that filtered after paging would answer a different size.
     const statuses = opts?.statuses;

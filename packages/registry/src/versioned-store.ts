@@ -14,7 +14,6 @@ interface Entry<T> {
   // The OWNING TEAM. Metadata like createdBy, deliberately outside the versioned content: ownership can be
   // transferred, and rewriting a spec to do it would mint a new version of something that did not change.
   // Absent = unowned (seed/_shared/legacy) → the team gate does not apply. See can() in @everdict/domain.
-  teamId?: string;
   deletedAt?: number; // soft-delete tombstone — once set, excluded from every read (content preserved, same pattern as datasets)
   tags?: string[]; // version tags — free-form labels attached because a version is hard to tell apart by number alone. Mutable metadata (outside content immutability, on par with createdBy)
   // WHERE this version came from (the issue it was built for, the agent + conversation that shaped it). Metadata
@@ -41,64 +40,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return undefined;
   }
 
-  // ── REGISTERING A SUCCESSOR WITHOUT A READ-THEN-WRITE WINDOW (arch-review 77) ────────────────────
-  //
-  // A caller that resolves the entity's owning team and then registers under it has a window: an ownership
-  // transfer landing between the two writes the successor under a team that no longer owns the entity, and
-  // the versions come apart — the exact split `teamOfVersion` was made REQUIRED to prevent.
-  //
-  //     owner value exists   ≠   owner value remains valid until the write
-  //
-  // Detecting that afterwards is the write-then-verify shape this repository just spent a wave removing. So
-  // the value is not carried at all: the store resolves the current owner where the write happens. Ownership
-  // moves the ENTITY (`moveToTeam` re-files every version), so any live version answers for all of them.
-  // ── …AND THE OWNER THE CALLER WAS AUTHORIZED AGAINST (arch-review 115) ──────────────────────────
-  //
-  // Resolving the owner here closed the WRITER's window. The AUTHORIZER's is the same shape one frame out:
-  // the route reads `teamOfEntity` to gate and this re-reads it to write, so a transfer landing between them
-  // files the successor under a team the caller may not write to. `authority.expectedOwnerTeamId` is what the
-  // gate saw — asserted here, where the current owner is read — and a mismatch writes NOTHING.
-  //
-  // `initialTeamId` is the other half. `ownerOf` falls back to `_shared`; `entityTeam` is tenant-local by
-  // construction. So a candidate living only in `_shared` has no local owner and its first workspace version
-  // was born UNOWNED — visible to every team, writable without a team gate — even when a private team's
-  // campaign is what caused it. Where there is nothing to preserve, the authority that caused the write owns
-  // what it made.
-  registerPreservingOwner(
-    tenant: string,
-    item: T,
-    createdBy?: string,
-    origin?: CapabilityOrigin,
-    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
-  ): "registered" | "owner_moved" {
-    const current = this.entityTeam(tenant, item.id);
-    // Only a LOCAL entity has an owner to have moved. A `_shared`-only or brand-new id has no claim to check,
-    // which is exactly when `initialTeamId` applies.
-    if (
-      authority !== undefined &&
-      this.hasLiveLocalVersion(tenant, item.id) &&
-      current !== authority.expectedOwnerTeamId
-    )
-      return "owner_moved";
-    this.register(tenant, item, createdBy, current ?? authority?.initialTeamId, origin);
-    return "registered";
-  }
-
-  private hasLiveLocalVersion(tenant: string, id: string): boolean {
-    for (const entry of this.byOwner.get(tenant)?.get(id)?.values() ?? [])
-      if (entry.deletedAt === undefined) return true;
-    return false;
-  }
-
-  // The entity's owning team, read from its live versions. Undefined = unowned, which is the workspace's —
-  // never "everyone's" (rule `api-layer`).
-  private entityTeam(tenant: string, id: string): string | undefined {
-    for (const entry of this.byOwner.get(tenant)?.get(id)?.values() ?? [])
-      if (entry.deletedAt === undefined && entry.teamId !== undefined) return entry.teamId;
-    return undefined;
-  }
-
-  register(tenant: string, item: T, createdBy?: string, teamId?: string, origin?: CapabilityOrigin): void {
+  register(tenant: string, item: T, createdBy?: string, origin?: CapabilityOrigin): void {
     // Non-empty version is a registry invariant (defense-in-depth for seed/file paths that bypass the contract
     // VersionSchema): an empty/blank version is non-semver, so compareVersions sorts it to the tail → it silently
     // becomes `latest` and corrupts resolution + the detail view. Reject it here too.
@@ -129,47 +71,17 @@ export class VersionedStore<T extends { id: string; version: string }> {
         );
       }
       existing.deletedAt = undefined; // re-registering identical content = revive — content immutability is preserved
-      // Ownership is metadata, so a revive may set it — but it never SILENTLY moves an owned version to another
-      // team: transferring ownership is its own act, and doing it as a side effect of re-registering identical
-      // content would move a resource out from under whoever could write it.
-      if (existing.teamId === undefined && teamId !== undefined) existing.teamId = teamId;
-      // Same rule for provenance: a revive may FILL an unstamped version, but never rewrites one that already
+      // Provenance: a revive may FILL an unstamped version, but never rewrites one that already
       // says where it came from — the first answer is the true one, and re-registering identical content is not
       // a new birth.
       if (existing.origin === undefined && origin !== undefined) existing.origin = origin;
       return;
     }
-    // ── A NEW VERSION MAY NOT RE-FILE THE ENTITY (arch-review 119) ─────────────────────────────────
-    //
-    // The revive path above already refuses to move an owned version as a side effect. The BIRTH path did
-    // not, and it is the one every create door reaches: ownership is read off an entity's newest version, so
-    // a member of another team registering `2.0.0` under their own team took the whole entity over —
-    // verified through the real `create_agent` door, no error, and the owning team could no longer write
-    // their own agent. arch-review 118 closed that at the SAVE door and left the CREATE door beside it open.
-    //
-    // The same write is what made the two ownership predicates disagree: the gate reads the newest version's
-    // team, `registerPreservingOwner` resolves the oldest live one that has a team, and only a SPLIT entity
-    // can tell them apart. Refusing the split here is what keeps them one answer, so neither reader has to be
-    // chosen over the other.
-    //
-    //   · a team that DIFFERS is a transfer — `moveToTeam` owns that act, and it moves every version at once;
-    //   · SILENCE preserves the owner rather than unowning the entity, which is the same takeover with no
-    //     name on it (an unowned entity is writable by every team). Registering is not a way to disown.
-    const owner = this.entityTeam(tenant, item.id);
-    if (owner !== undefined && teamId !== undefined && teamId !== owner) {
-      throw new ConflictError(
-        "CONFLICT",
-        { tenant, id: item.id, owner, requested: teamId },
-        `${this.label} '${item.id}' belongs to another team — registering a version cannot move it. Transfer it first, then register.`,
-      );
-    }
-    const effectiveTeamId = owner ?? teamId;
     versions.set(item.version, {
       item,
       seq: this.seq++,
       createdAt: new Date().toISOString(),
       ...(createdBy !== undefined ? { createdBy } : {}),
-      ...(effectiveTeamId !== undefined ? { teamId: effectiveTeamId } : {}),
       ...(origin !== undefined ? { origin } : {}),
     });
   }
@@ -187,33 +99,8 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return entry;
   }
 
-  // Which team owns this version — the input the authz kernel's team axis needs. Undefined for an unowned
-  // (seed/_shared/legacy) version, which is NOT the same as "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.byOwner.get(tenant)?.get(id)?.get(version)?.teamId;
-  }
-
   creatorOfVersion(tenant: string, id: string, version: string): string | undefined {
     return this.ownLiveEntry(tenant, id, version).createdBy;
-  }
-
-  // Ownership transfer — the ENTITY moves, so every one of its versions moves with it.
-  //
-  // Per-version transfer was the alternative and it is incoherent: reads already answer "whose is this?" off the
-  // newest version (`teamOfEntity`), so a split id would change owner whenever a new release landed. Ownership
-  // belongs to the thing, not to one release of it.
-  //
-  // Tombstones move too. They are excluded from every read, but re-registering identical content REVIVES one —
-  // and a revived version reappearing under the team that no longer owns the id is a resource that walked back
-  // across a boundary on its own.
-  //
-  // Tenant directly-owned only, and only while something of it is live: a `_shared` first-party asset is not a
-  // workspace's to re-file, and an id whose every version is a tombstone is invisible to reads, so moving it
-  // would be moving something that (as far as this workspace can tell) does not exist.
-  moveToTeam(tenant: string, id: string, teamId: string): void {
-    if (this.ownerVersions(tenant, id).length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' not found.`);
-    for (const entry of this.byOwner.get(tenant)?.get(id)?.values() ?? []) entry.teamId = teamId;
   }
 
   // version tag replacement (full-array PUT semantics) — tenant directly-owned + live versions only (same discipline as softDelete; _shared can't be tagged).
@@ -309,7 +196,6 @@ export class VersionedStore<T extends { id: string; version: string }> {
         versionCount: versions.length,
         ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
         ...(latestVersionEntry?.createdBy !== undefined ? { latestCreatedBy: latestVersionEntry.createdBy } : {}),
-        ...(latestVersionEntry?.teamId !== undefined ? { teamId: latestVersionEntry.teamId } : {}),
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),

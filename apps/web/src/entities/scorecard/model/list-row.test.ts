@@ -37,7 +37,6 @@ const wire = {
     pinOverrides: { agent: `ghcr.io/acme/agent@sha256:${'a'.repeat(64)}` },
   },
   createdBy: 'oidc|00u1a2b3c4d5e6f7g8h9',
-  teamId: 'team-01J8ZQAAAAAAAAAAAAAAAAAA',
   runtime: 'self:ws:01J8ZQRUNNER0000000000',
   // A subset run names every case it selected — the single heaviest thing on a row that draws "120/500".
   subset: {
@@ -67,8 +66,7 @@ describe('scorecard list row — a row carries what a row draws', () => {
     expect(row.status).toBe('succeeded')
     expect(row.model).toBe('claude-opus-5')
     expect(row.createdBy).toBe(record.createdBy)
-    expect(row.teamId).toBe(record.teamId)
-    expect(row.runtime).toBe(record.runtime)
+        expect(row.runtime).toBe(record.runtime)
     expect(row.createdAt).toBe(record.createdAt)
     expect(row.updatedAt).toBe(record.updatedAt)
   })

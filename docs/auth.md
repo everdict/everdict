@@ -77,60 +77,29 @@ A flat role → action matrix; `can(principal, action)` / `authorize(principal, 
 
 Roles are cumulative (`member` ⊃ `viewer`, `admin` ⊃ `member`).
 
-### The team axis (write = the roster, read = team privacy)
-The role says what you may DO; the owning team says what you may do it TO. Every eval asset (harness · dataset ·
-judge · rubric · runtime · model · agent) and every result (scorecard · run) records a `teamId` beside its
-`createdBy` (migration `0106`); a project names several (`teamIds`). It is a column, never a field inside a
-versioned spec, because transferring a team must not mint a new version of something whose content did not change.
+### There is no second ownership axis — the workspace is the boundary
 
-The axis answers two different questions, and conflating them was a bug worth naming:
+The role says what you may DO. Nothing says what you may do it TO, because everything a workspace holds is the
+workspace's.
 
-- **WRITING another team's asset is refused** — `can(principal, action, { teamId })` → `canReachTeam`, 403. A
-  team's work is theirs to change, and the roster is what says who "they" are. An explicit claim about another
-  team (`teamId` in the body) is refused rather than quietly redirected.
-- **READING is not membership's business.** A workspace whose teams cannot see each other's work has stopped
-  being one workspace: a member of Web could not reuse the judge Mobile wrote, and a goal's projects were
-  readable while the evaluations proving them answered "not found" on the same screen. So everything a team owns
-  is visible by default, and the narrowing is the team choosing to be **private** (`isPrivate`, migration `0113`)
-  — an explicit, per-team opt-in, exactly Linear's model.
+There WAS a second axis: every eval asset and result recorded a `teamId`, a project named several, writing one
+you were not on was refused, and a *private* team narrowed reads. Migrations `0211`/`0212` removed it —
+the column from fifteen tables, the roster, the privacy flag, the transfer endpoints, and the `ResourceScope`
+parameter `can`/`authorize` took. `can(principal, action)` answers two questions now (does the role grant it,
+does the api-key scope still carry it) and there is no third.
 
-Privacy is decided in ONE place, `TeamService.visibleTeamIds(tenant, subject, isAdmin)` / `canSeeTeam(...)`, and
-never re-derived in a route. `undefined` from it means "nothing is hidden" — never "no teams", which is the
-failure mode a `[]` would silently produce. The API layer wraps it as `visibleTeamsFor` / `teamCeiling` /
-`assertTeamVisible` / `assertEntityVisible` (`apps/api` `common/team-scope.ts`), and the pure predicates
-`ownedByVisibleTeam` / `ownedByAnyVisibleTeam` (`@everdict/domain`) apply it to a loaded row.
+What is left, and what it costs to forget it:
 
-- A refused read answers **404**, never 403 — a private team must not be discoverable by the shape of the error.
-- `teamId: undefined` means unowned, which means the workspace's (`_shared` seeds, operator rows, anything from
-  before the axis). Never read "no owner" as "everyone's team" in the other direction.
-- An ADMIN reaches every team (one they are not on would otherwise be un-administrable), and so does a MACHINE
-  credential acting for the workspace (`via ∈ {runner, github-actions}`) — a paired device and a repo-linked CI
-  token have no roster to be isolated by. An `agent` credential is NOT exempt: it acts as its creator.
-- **Aggregates are counted over everything, listings are narrowed.** An initiative's progress is one number for
-  everybody — "how far along is this goal" stops meaning anything if it depends on who asks — but the projects
-  and blockers it NAMES are only the ones the reader may see. A total identifies nothing; a name does.
-- **What a new asset gets**: `teamForNew` separates the owner it WILL get from what the gate checks — only an
-  EXPLICIT choice is authorized, an implicit fallback is the caller's team, else the workspace's default. A
-  scorecard resolves one step earlier: an explicit choice → **the team that owns the harness it runs** → the
-  submitter's team. That middle step is what gives a schedule, a CI token or a chat command an owner at all.
-- **Ownership is TRANSFERABLE, and the transfer is its own act.** `POST /<resource>/:id/team` +
-  `move_<resource>` (harness · harness template · dataset · judge · scorecard; an issue's is `POST
-  /issues/:id/team` / `move_issue`, which additionally re-mints its identifier). Teams split and work is handed
-  over, so an asset filed under the wrong team on a Tuesday must not stay there forever — visible to the wrong
-  people and editable by the wrong people. Three rules make it safe:
-  - **BOTH teams are authorized** — the source (or moving something out of a team you are not on would be a way
-    to take it) and the destination (or this becomes a way to push work into other teams' hands, and if that team
-    is private, out of your own sight). An admin passes both; an unowned asset has no source to authorize.
-  - **The ENTITY moves, not one version.** Reads already answer ownership off the newest version
-    (`teamOfEntity`), so a split id would change owner on its next release. Tombstoned versions move too, or a
-    revived one would reappear under the previous team. A transfer mints **no version**: ownership is metadata
-    beside `created_by`, so content immutability is untouched.
-  - **No new action.** It gates on the resource's existing content-mutation action (`datasets:write`,
-    `harnesses:register`, `templates:write`, `judges:write`, `scorecards:run`) — whoever may change a thing may
-    re-file it. The core is `moveCapabilityToTeam` (`@everdict/application-control`), one core for both
-    transports; a `_shared` first-party asset is **404** (not a workspace's to re-file) and a no-op move is 409.
-  A capability's transfer does NOT drag its past scorecards along — evidence is re-filed separately, because a
-  result belongs to whoever ran it.
+- **Tenancy is the whole boundary.** Every read and write is workspace-scoped, and another workspace's resource
+  is answered **404**, never 403 — a 403 confirms the id exists.
+- **A capability's tenancy is structural.** Registry calls are keyed `(tenant, id, version)` with the tenant
+  taken from the caller's own principal, so a door cannot name another workspace's harness at all.
+- **A globally-addressed record's is not.** A scorecard id and a run id are uuids that no signature scopes, so
+  the door asks before it answers: `scorecardIsOurs` / `runVisible`, 404 on refusal. `pnpm guard-siblings` is
+  what stops one door in a resource from forgetting what its neighbours do — it was written when a door gained
+  an ownership gate and its sibling did not, and the shape it refuses outlived the axis it was written for.
+- **A run has one narrowing that is NOT tenancy**: its own audience (`runAudience` — another member's agent turn
+  or shell session answers 404 to you). That is a per-record visibility field, not an ownership axis.
 
 ## How `apps/api` enforces it
 `resolvePrincipal(req)` is called by **every** route:

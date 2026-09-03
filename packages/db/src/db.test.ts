@@ -63,25 +63,6 @@ describe("PgRunStore", () => {
     expect(calls[0]?.params?.[6]).toBeNull(); // no result
   });
 
-  it("create persists the owning team, and get maps it back (mig 0106 — the column existed, nothing wrote it)", async () => {
-    const { client, calls } = fakeClient(() => ({ rows: [] }));
-    await new PgRunStore(client).create({
-      id: "r4",
-      tenant: "acme",
-      teamId: "team-eng",
-      harness: { id: "scripted", version: "0" },
-      caseId: "c1",
-      status: "queued",
-      createdAt: "2026-08-03T00:00:00.000Z",
-      updatedAt: "2026-08-03T00:00:00.000Z",
-    });
-    expect(calls[0]?.text).toMatch(/created_by, team_id/);
-    expect(calls[0]?.params?.[11]).toBe("team-eng");
-
-    const { client: reader } = fakeClient(() => ({ rows: [{ ...ROW, team_id: "team-eng" }] }));
-    expect((await new PgRunStore(reader).get("r4"))?.teamId).toBe("team-eng");
-  });
-
   it("round-trips caseSpec (mig 0051, single-run durability): INSERT stringifies it, get maps it back", async () => {
     const caseSpec: EvalCase = {
       id: "c1",
@@ -103,7 +84,7 @@ describe("PgRunStore", () => {
       createdAt: "2026-06-18T00:00:00.000Z",
       updatedAt: "2026-06-18T00:00:00.000Z",
     });
-    expect(calls[0]?.params?.[13]).toBe(JSON.stringify(caseSpec)); // case_spec column, jsonb
+    expect(calls[0]?.params?.[12]).toBe(JSON.stringify(caseSpec)); // case_spec column, jsonb
 
     const { client: reader } = fakeClient(() => ({ rows: [{ ...ROW, case_spec: caseSpec }] }));
     const rec = await new PgRunStore(reader).get("r2");
@@ -129,12 +110,12 @@ describe("PgRunStore", () => {
     });
     // Column order (mig 0092 tail, shifted one by team_id in mig 0106): …case_spec($14), kind, class, lifetime,
     // origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at
-    expect(calls[0]?.params?.[14]).toBe("eval");
-    expect(calls[0]?.params?.[15]).toBe("batch");
-    expect(calls[0]?.params?.[16]).toBe("task");
-    expect(calls[0]?.params?.[17]).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
-    expect(calls[0]?.params?.[19]).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
-    expect(calls[0]?.params?.[21]).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
+    expect(calls[0]?.params?.[13]).toBe("eval");
+    expect(calls[0]?.params?.[14]).toBe("batch");
+    expect(calls[0]?.params?.[15]).toBe("task");
+    expect(calls[0]?.params?.[16]).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
+    expect(calls[0]?.params?.[18]).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
+    expect(calls[0]?.params?.[20]).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
 
     const { client: reader } = fakeClient(() => ({
       rows: [
@@ -260,22 +241,21 @@ describe("PgRunStore", () => {
     const store = new PgRunStore(client);
     // params: [tenant, scorecardId, includeChildren, runnerId, limit, offset, viewer, personalKinds]
     const PERSONAL = ["agent", "sandbox"]; // the audience filter's kind list ($8) — unset viewer ($7) disables it
-    const SEEN = null; // the team ceiling ($9) — NULL = nothing is hidden
-    const ANY_STATUS = null; // the lifecycle narrowing ($10) — NULL = every status (perf review)
+    const ANY_STATUS = null; // the lifecycle narrowing ($9) — NULL = every status (perf review)
     await store.list("acme");
-    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0, null, PERSONAL, SEEN, ANY_STATUS]);
+    expect(calls[0]?.params).toEqual(["acme", null, false, null, null, 0, null, PERSONAL, ANY_STATUS]);
     await store.list("acme", { includeChildren: true });
-    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0, null, PERSONAL, SEEN, ANY_STATUS]);
+    expect(calls[1]?.params).toEqual(["acme", null, true, null, null, 0, null, PERSONAL, ANY_STATUS]);
     await store.list("acme", { scorecardId: "sc1" });
-    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0, null, PERSONAL, SEEN, ANY_STATUS]);
+    expect(calls[2]?.params).toEqual(["acme", "sc1", false, null, null, 0, null, PERSONAL, ANY_STATUS]);
     // runner activity feed — jsonb provenance filter + capped
     await store.list("acme", { runnerId: "r1", limit: 20 });
-    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0, null, PERSONAL, SEEN, ANY_STATUS]);
+    expect(calls[3]?.params).toEqual(["acme", null, false, "r1", 20, 0, null, PERSONAL, ANY_STATUS]);
     expect(calls[3]?.text).toMatch(/result->'provenance'->>'runner' = \$4/);
     expect(calls[3]?.text).toMatch(/LIMIT \$5 OFFSET \$6/);
     // offset pagination — the runner feed's next page skips the first N ($6)
     await store.list("acme", { runnerId: "r1", limit: 20, offset: 40 });
-    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40, null, PERSONAL, SEEN, ANY_STATUS]);
+    expect(calls[4]?.params).toEqual(["acme", null, false, "r1", 20, 40, null, PERSONAL, ANY_STATUS]);
   });
 
   it("deleteByScorecard → parameterized DELETE on parent_scorecard_id; RETURNING rows = removed count", async () => {
@@ -418,7 +398,7 @@ describe("PgRunStore — which replica drives the row (multi-replica boot recove
     await new PgRunStore(client, "cp-abc").create(queued);
 
     expect(calls[0]?.text).toMatch(/session, owner_replica, visibility, webhook_url, execution_id, created_at/);
-    expect(calls[0]?.params?.[25]).toBe("cp-abc");
+    expect(calls[0]?.params?.[24]).toBe("cp-abc");
   });
 
   it("leaves the owner NULL when the store has no replica identity (the single-process shape)", async () => {
@@ -426,7 +406,7 @@ describe("PgRunStore — which replica drives the row (multi-replica boot recove
 
     await new PgRunStore(client).create(queued);
 
-    expect(calls[0]?.params?.[25]).toBeNull();
+    expect(calls[0]?.params?.[24]).toBeNull();
   });
 
   it("transfers ownership on update — the replica that resumes an orphan becomes its driver", async () => {
@@ -602,23 +582,6 @@ describe("RunStore — the audience filter (personal executions are their owner'
     const bobSees = (await store.list("acme", { viewer: "bob" })).map((r) => r.id);
     expect(bobSees).toContain("headless-alice"); // fleet observability
     expect(bobSees).not.toContain("chat-alice"); // still alice's conversation
-  });
-
-  it("hides a PRIVATE team's runs — a second ceiling beside the audience one, both above the LIMIT", async () => {
-    const store = new InMemoryRunStore();
-    await store.create(mk("ours", { teamId: "team-web" }));
-    await store.create(mk("theirs", { teamId: "team-secret" }));
-    await store.create(mk("unowned", {})); // no team = the workspace's
-    expect((await store.list("acme", { visibleTeams: ["team-web"] })).map((r) => r.id).sort()) //
-      .toEqual(["ours", "unowned"]);
-    // undefined = nothing is hidden, never "no teams".
-    expect(await store.list("acme")).toHaveLength(3);
-
-    const { client, calls } = fakeClient(() => ({ rows: [] }));
-    await new PgRunStore(client).list("acme", { visibleTeams: ["team-web"] });
-    expect(calls[0]?.text).toMatch(/team_id IS NULL OR team_id = ANY\(\$9::text\[\]\)/);
-    expect(calls[0]?.params?.[8]).toEqual(["team-web"]);
-    expect(calls[0]?.text.indexOf("team_id = ANY")).toBeLessThan(calls[0]?.text.indexOf("LIMIT $5") ?? 0);
   });
 
   it("Pg impl asks the same question IN the query, so a limited page stays full for the reader", async () => {

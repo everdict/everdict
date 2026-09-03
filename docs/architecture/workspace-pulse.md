@@ -80,9 +80,9 @@ Two honest limits, both by construction:
 ## Authorization
 
 One gate — `issues:read`. Every action the pulse composes (issues · scorecards · events · agents) is viewer+,
-so gating each separately asks the same question five times. Team privacy is applied the same way every other
-read applies it: the transport resolves `visibleTeamsFor(principal)` and hands it in; the service never decides
-who may see what. Same shape for both transports — the route and the MCP tool call one service.
+so gating each separately asks the same question five times. There is nothing further to narrow by: the
+workspace is the only boundary, and everything this reads is the workspace's. Same shape for both transports —
+the route and the MCP tool call one service.
 
 ## Adding to it
 

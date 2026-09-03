@@ -25,13 +25,7 @@ export function pgConstitutionalPublisher(client: SqlClient): ConstitutionalPubl
       // the BYTES agree, and it cannot make that claim about a shape it never validated.
       const dataset: Dataset = DatasetSchema.parse(input.dataset);
       await withTransaction(client, "publishing a dataset that declares ground_truth authority", async (tx) => {
-        await new PgDatasetRegistry(tx).register(
-          input.tenant,
-          dataset,
-          input.createdBy,
-          input.teamId,
-          input.origin as never,
-        );
+        await new PgDatasetRegistry(tx).register(input.tenant, dataset, input.createdBy, input.origin as never);
         await new PgConstitutionApprovalStore(tx).record(input.tenant, input.approval);
       });
     },

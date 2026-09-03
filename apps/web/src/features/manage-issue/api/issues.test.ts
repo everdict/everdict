@@ -15,7 +15,6 @@ vi.mock('@/shared/auth/principal', () => ({ authContext: async () => ({ devTenan
 const ISSUE = {
   id: 'i1',
   tenant: 'acme',
-  teamId: 't1',
   number: 12,
   identifier: 'ENG-12',
   title: 'the judge drops cost scores',

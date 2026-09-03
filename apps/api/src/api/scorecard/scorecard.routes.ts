@@ -5,25 +5,13 @@ import {
   originSource,
 } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
-import { agentAttributionFrom } from "../fs/fs-actor.js";
-import {
-  type ServerDeps,
-  gate,
-  resolvePrincipal,
-  resolveTeamRef,
-  sendError,
-  teamForNew,
-  zodIssues,
-} from "../route-context.js";
-import { MoveToTeamBodySchema } from "../team-move.js";
+import {} from "../fs/fs-actor.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { GateScorecardsBodySchema, OverrideGateBodySchema } from "./request/gate-scorecards.js";
 import {
-  type ListScorecardsQuery,
   ScorecardCountsQuerySchema,
   ScorecardPageQuerySchema,
   scorecardFilterOf,
@@ -37,26 +25,19 @@ import { serveScorecard, serveScorecardListItem } from "./serve.js";
 // scorecards (dataset×harness batch eval → aggregated result): run/retry, push+pull trace ingest,
 // list/get, estimate, baseline↔candidate diff, leaderboard/trend, flexible analysis pivot (query) +
 // offloaded analysis bundle, model backfill.
-// ── WHOSE BATCH IS THIS (arch-review 119) ──────────────────────────────────────────────────────────
+// ── IS THIS BATCH THIS WORKSPACE'S (arch-review 119) ───────────────────────────────────────────────
 //
-// The read door has always been ceilinged (`ownedByVisibleTeam`, 404) and every OPERATIONAL door gated a
-// bare `scorecards:run` — so a member of another team, answered 404 for the same id on GET, could stop a
-// running batch, RE-DRIVE it (a 202 and real compute spent on somebody else's evidence), rescore it, or
-// override its gate decision. Reading was narrower than writing, which is the inversion the axis exists to
-// prevent: docs/auth.md names results — "every result (scorecard · run) records a `teamId`".
+// Every OPERATIONAL door gated a bare `scorecards:run` and read nothing, so a caller in ANOTHER workspace —
+// answered 404 for the same id on GET — could stop a running batch, RE-DRIVE it (a 202 and real compute spent
+// on somebody else's evidence), rescore it, or override its gate decision. Reading was narrower than writing,
+// which is the inversion tenancy exists to prevent.
 //
 // One resolver for all of them, so a door added later inherits the answer instead of re-deriving it. It
-// answers 404 rather than 403 for the same reason the read does: a private team must not be discoverable by
-// the shape of the error, and this id already reads as absent to this caller.
-async function scorecardOwner(
-  deps: ServerDeps,
-  principal: Principal,
-  id: string,
-): Promise<{ teamId?: string } | undefined> {
+// answers 404 rather than 403 for the same reason the read does: another workspace's batch must not be
+// discoverable by the shape of the error, and this id already reads as absent to this caller.
+async function scorecardIsOurs(deps: ServerDeps, principal: Principal, id: string): Promise<boolean> {
   const record = await deps.scorecardService?.get(id);
-  if (!record || record.tenant !== principal.workspace) return undefined;
-  if (!ownedByVisibleTeam(record, await visibleTeamsFor(deps, principal))) return undefined;
-  return record.teamId === undefined ? {} : { teamId: record.teamId };
+  return record !== undefined && record.tenant === principal.workspace;
 }
 
 export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps): void {
@@ -65,13 +46,8 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // 이 배치를 소유할 팀 — 자산과 같은 축이라 "우리 팀이 무엇을 평가했나"가 답 가능해진다. 명시 지정만
-    // 인가 대상이고(남의 팀 앞으로 돌리는 것은 거절), 지정이 없으면 내 팀 → 워크스페이스 기본 팀 순이다.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
-      // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "scorecards:run", owner.gate);
+      gate(principal, "scorecards:run");
     } catch (err) {
       return sendError(reply, err);
     }
@@ -90,11 +66,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           tenant: principal.workspace,
           submittedBy: principal.subject,
           submitterRoles: principal.roles, // the constitution seed reads them (ground_truth declarations are admin-only)
-          // Only what the caller actually NAMED is an owner claim (owner.gate carries exactly that); the rest is
-          // the fallback the service reaches for after the harness's own team. Passing owner.teamId as `teamId`
-          // would make "whichever membership loaded first" outrank what was run.
-          ...(owner.gate.teamId !== undefined ? { teamId: owner.gate.teamId } : {}),
-          ...(owner.teamId !== undefined ? { submitterTeamId: owner.teamId } : {}),
           ...body,
           origin: { source: originSource(principal.via), ...(body.origin ?? {}) },
         }),
@@ -116,11 +87,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
       // the order `server.test.ts` pins by name ("gated before the service runs").
       gate(principal, "scorecards:run");
-      // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
-      // handed to the gate so an outsider cannot operate on it (arch-review 119).
-      const owner = await scorecardOwner(deps, principal, req.params.id);
-      if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-      gate(principal, "scorecards:run", owner);
+      // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, so an outsider
+      // cannot operate on it (arch-review 119).
+      if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       // Optional failure-class filter (?class=infra) — re-run only that class's casualties (agent FAILs stay carried).
       const cls = (req.query as { class?: string } | undefined)?.class;
       if (cls !== undefined && !["infra", "config", "harness", "agent"].includes(cls))
@@ -153,11 +123,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
         // the order `server.test.ts` pins by name ("gated before the service runs").
         gate(principal, "scorecards:run");
-        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
-        // handed to the gate so an outsider cannot operate on it (arch-review 119).
-        const owner = await scorecardOwner(deps, principal, req.params.id);
-        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-        gate(principal, "scorecards:run", owner);
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, so an outsider
+        // cannot operate on it (arch-review 119).
+        if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
         return reply.send(
           await deps.scorecardService.rescoreUnmeasured({
             tenant: principal.workspace,
@@ -185,11 +154,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
       // the order `server.test.ts` pins by name ("gated before the service runs").
       gate(principal, "scorecards:run");
-      // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
-      // handed to the gate so an outsider cannot operate on it (arch-review 119).
-      const owner = await scorecardOwner(deps, principal, req.params.id);
-      if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-      gate(principal, "scorecards:run", owner);
+      // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, so an outsider
+      // cannot operate on it (arch-review 119).
+      if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -229,11 +197,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
         // the order `server.test.ts` pins by name ("gated before the service runs").
         gate(principal, "scorecards:run");
-        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
-        // handed to the gate so an outsider cannot operate on it (arch-review 119).
-        const owner = await scorecardOwner(deps, principal, req.params.id);
-        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-        gate(principal, "scorecards:run", owner);
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, so an outsider
+        // cannot operate on it (arch-review 119).
+        if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
         const record = await deps.scorecardService.cancel({ tenant: principal.workspace, id: req.params.id });
         return reply.send(serveScorecard(record));
       } catch (err) {
@@ -257,43 +224,14 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  // Re-file a batch under another team. A scorecard is the EVIDENCE a capability produced and is read through
-  // the same team lens the capability is, so it moves the same way — otherwise handing a harness to another team
-  // strands every result it ever produced. Both teams are authorized in the service.
-  app.post<{ Params: { id: string } }>("/scorecards/:id/team", { schema: scorecardDocs.move }, async (req, reply) => {
-    if (!deps.scorecardService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const body = MoveToTeamBodySchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    try {
-      const agent = agentAttributionFrom(req.headers);
-      return reply.send(
-        await deps.scorecardService.moveToTeam({
-          principal,
-          id: req.params.id,
-          // Resolved here (id or key, `ENG`) so an unknown team is a 404 rather than a puzzling 403.
-          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
-          ...(agent ? { agent } : {}),
-        }),
-      );
-    } catch (err) {
-      return sendError(reply, err); // not on one of the teams 403 / unknown scorecard 404 / already there 409
-    }
-  });
-
   // Trace ingest — upload traces already produced externally (TraceEvent[]) and turn them into a scorecard (no harness run). Validated at the boundary.
   app.post("/scorecards/ingest", { schema: scorecardDocs.ingest }, async (req, reply) => {
     if (!deps.scorecardService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // Same owner resolution a live run gets — an ingested batch is a result, and a result belongs to a team.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "scorecards:run", owner.gate);
+      gate(principal, "scorecards:run");
     } catch (err) {
       return sendError(reply, err);
     }
@@ -304,7 +242,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.ingest({
           tenant: principal.workspace,
           submittedBy: principal.subject, // executor label/filter (createdBy)
-          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
@@ -320,11 +257,8 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // Same owner resolution a live run gets — an ingested batch is a result, and a result belongs to a team.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "scorecards:run", owner.gate);
+      gate(principal, "scorecards:run");
     } catch (err) {
       return sendError(reply, err);
     }
@@ -335,7 +269,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         await deps.scorecardService.ingestPull({
           tenant: principal.workspace,
           submittedBy: principal.subject, // executor label/filter (createdBy)
-          ...(owner.teamId !== undefined ? { teamId: owner.teamId } : {}),
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
@@ -354,11 +287,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     try {
       gate(principal, "scorecards:read");
-      const scope = await scorecardScopeOf(query.data, principal, deps);
       // The page's bounds are OPTIONAL: without them this answers the whole collection, exactly as it always
       // did, so no existing caller changes behaviour. With them it answers the newest `limit` rows older than
       // the cursor — see the query schema for why the cursor is the last row rather than an opaque token.
-      const filter = { ...scorecardFilterOf(query.data, scope), ...scorecardPageOf(query.data) };
+      const filter = { ...scorecardFilterOf(query.data), ...scorecardPageOf(query.data) };
       return reply.send((await deps.scorecardService.list(principal.workspace, filter)).map(serveScorecardListItem));
     } catch (err) {
       return sendError(reply, err);
@@ -377,11 +309,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     try {
       gate(principal, "scorecards:read");
-      const scope = await scorecardScopeOf(query.data, principal, deps);
       const groups = await deps.scorecardService.countByGroup(
         principal.workspace,
         query.data.groupBy,
-        scorecardFilterOf(query.data, scope),
+        scorecardFilterOf(query.data),
       );
       return reply.send({
         groupBy: query.data.groupBy,
@@ -443,7 +374,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           candidate: body.data.candidate,
           ...(body.data.policy ? { policy: body.data.policy } : {}),
           decidedBy: principal.subject,
-          ...(await teamCeiling(deps, principal)),
         }),
       );
     } catch (err) {
@@ -466,11 +396,10 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
         // the order `server.test.ts` pins by name ("gated before the service runs").
         gate(principal, "scorecards:run");
-        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, and
-        // handed to the gate so an outsider cannot operate on it (arch-review 119).
-        const owner = await scorecardOwner(deps, principal, req.params.id);
-        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-        gate(principal, "scorecards:run", owner);
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, so an outsider
+        // cannot operate on it (arch-review 119).
+        if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
         return reply.send(
           await deps.scorecardService.overrideGate({
             tenant: principal.workspace,
@@ -504,7 +433,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           await deps.scorecardService.flake(principal.workspace, {
             datasetId: dataset,
             ...(harness ? { harnessId: harness } : {}),
-            ...(await teamCeiling(deps, principal)),
           }),
         );
       } catch (err) {
@@ -526,9 +454,8 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         // The ROLE first, then WHOSE batch it is — the same pair every other operational door here carries,
         // and the MCP twin too (arch-review 119). Reading a manifest verification is reading the batch.
         gate(principal, "scorecards:read");
-        const owner = await scorecardOwner(deps, principal, req.params.id);
-        if (!owner) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
-        gate(principal, "scorecards:read", owner);
+        if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
         return reply.send(await deps.scorecardService.verifyManifest(principal.workspace, req.params.id));
       } catch (err) {
         return sendError(reply, err);
@@ -561,7 +488,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
         return reply.send(
           await deps.scorecardService.diff(principal.workspace, baseline, candidate, {
             ...(zThreshold !== undefined ? { zThreshold } : {}),
-            ...(await teamCeiling(deps, principal)),
           }),
         );
       } catch (err) {
@@ -592,7 +518,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           ...(from ? { from } : {}),
           ...(to ? { to } : {}),
           ...(baseline ? { baseline } : {}),
-          ...(await teamCeiling(deps, principal)),
         }),
       );
     } catch (err) {
@@ -629,7 +554,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
           ...(model ? { model } : {}),
           ...(judgeModel ? { judgeModel } : {}),
           window: window === "best" ? "best" : "latest", // anything else/unset = latest
-          ...(await teamCeiling(deps, principal)),
         }),
       );
     } catch (err) {
@@ -652,9 +576,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     const parsed = AnalysisQueryBodySchema.safeParse(req.body ?? {});
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error) });
     try {
-      return reply.send(
-        await deps.scorecardService.analysis(principal.workspace, parsed.data, await visibleTeamsFor(deps, principal)),
-      );
+      return reply.send(await deps.scorecardService.analysis(principal.workspace, parsed.data));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -685,11 +607,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       // browser-openable (the stored ones point at the in-network object store and have expired). Same in the MCP twin.
       const record = await deps.scorecardService.getForDisplay(req.params.id);
       // Another team's batch is answered exactly like another workspace's, and like one that never existed.
-      if (
-        !record ||
-        record.tenant !== principal.workspace ||
-        !ownedByVisibleTeam(record, await visibleTeamsFor(deps, principal))
-      )
+      if (!record || record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       // Which child run is each (case, trial)'s answer — served, never re-derived by the client (the web used
       // to pair result rows with children positionally, which opens a retried case's SUPERSEDED attempt).
@@ -720,7 +638,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
             { scorecards: deps.scorecardService, datasets: deps.datasetRegistry },
             principal.workspace,
             req.params.id,
-            await visibleTeamsFor(deps, principal),
             { allowProxy },
           ),
         );
@@ -744,40 +661,11 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       try {
         gate(principal, "scorecards:read");
         return reply.send(
-          await deps.scorecardService.analysisBundle(
-            principal.workspace,
-            req.params.id,
-            await visibleTeamsFor(deps, principal),
-            revisionParse.data,
-          ),
+          await deps.scorecardService.analysisBundle(principal.workspace, req.params.id, revisionParse.data),
         );
       } catch (err) {
         return sendError(reply, err);
       }
     },
   );
-}
-
-// The two team narrows, resolved once for both doors. `?team=` is the NARROW ("of the ones I can see, this
-// team's", named by id or key); `visibleTeams` is the separate CEILING every read stays under — naming a team
-// you are not on returns nothing rather than that team's work.
-async function scorecardScopeOf(
-  query: ListScorecardsQuery,
-  principal: Principal,
-  deps: ServerDeps,
-): Promise<{ teamId?: string; visibleTeams?: string[]; teamIds?: string[] }> {
-  const teamId = query.team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, query.team);
-  // The team FACET names teams the same way the scope does — id or key — so each value is resolved here too.
-  // The unset bucket ("") stays as it is: it is a bucket, not a team.
-  const teamIds =
-    query.teams === undefined
-      ? undefined
-      : await Promise.all(
-          query.teams.map(async (ref) => (ref === "" ? "" : await resolveTeamRef(deps, principal.workspace, ref))),
-        );
-  return {
-    ...(teamId !== undefined ? { teamId } : {}),
-    ...(teamIds !== undefined ? { teamIds } : {}),
-    ...(await teamCeiling(deps, principal)),
-  };
 }

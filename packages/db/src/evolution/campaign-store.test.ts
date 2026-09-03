@@ -171,49 +171,6 @@ describe("PgEvolutionCampaignStore — the guards live in the statement", () => 
     return { client, calls };
   }
 
-  it("WRITES the owning team and FILTERS the list on it, in the statement (arch-review 82)", async () => {
-    // The team axis was added to the record, the in-memory twin and every transport — and the Postgres half
-    // had no test at all. Two halves can be wrong here in ways the twin cannot show: a column missing from
-    // the INSERT (the campaign is stored unowned, so every team sees it) and a list built without the
-    // predicate (filtered after the page, which lets one team's rows push everyone else's off it).
-    //
-    // Seen RED before the column reached the insert, observed:
-    //   the owning team never reached the INSERT: expected [...] to contain 'team-a'
-    const { client, calls } = fakeClient([]);
-    const store = new PgEvolutionCampaignStore(client);
-
-    await store.create(record({ id: "camp_t", teamId: "team-a" }));
-    const insert = calls[0];
-    expect(insert?.text, "the team column never reached the INSERT").toContain("team_id");
-    expect(insert?.params, "the owning team never reached the INSERT").toContain("team-a");
-
-    // …and a campaign with no team stores NULL rather than a string: unowned is a real state, not a gap.
-    const { client: c2, calls: calls2 } = fakeClient([]);
-    await new PgEvolutionCampaignStore(c2).create(record({ id: "camp_u" }));
-    expect(calls2[0]?.params).toContain(null);
-
-    // The ceiling is applied IN THE QUERY. `IS NULL OR = ANY` because an unowned row is the workspace's and
-    // belongs on every caller's page.
-    const { client: c3, calls: calls3 } = fakeClient([{ match: "SELECT *", rows: [] }]);
-    await new PgEvolutionCampaignStore(c3).list("acme", ["team-b"]);
-    expect(calls3[0]?.text, "the list page was not filtered by the caller's teams").toContain("team_id IS NULL");
-    expect(calls3[0]?.params).toContain("acme");
-
-    // No ceiling (an admin, or a deployment with no teams) reads the unfiltered statement — a query that
-    // always carried the predicate would make `undefined` mean "sees nothing" instead of "nothing hidden".
-    const { client: c4, calls: calls4 } = fakeClient([{ match: "SELECT *", rows: [] }]);
-    await new PgEvolutionCampaignStore(c4).list("acme");
-    expect(calls4[0]?.text).not.toContain("team_id IS NULL");
-
-    // …and the SUBJECT narrows in the statement too (evolution-routing-spec.md §5): one capability's memory is
-    // a query, not a page filtered after the fact.
-    const { client: c5, calls: calls5 } = fakeClient([{ match: "SELECT *", rows: [] }]);
-    await new PgEvolutionCampaignStore(c5).list("acme", ["team-b"], { type: "harness", id: "shop" });
-    expect(calls5[0]?.text).toContain("frame->'subject'->>'type' = $3");
-    expect(calls5[0]?.text).toContain("frame->'subject'->>'id' = $4");
-    expect(calls5[0]?.params).toEqual(["acme", ["team-b"], "harness", "shop"]);
-  });
-
   it("appendRound CASes on the round count and the open state IN THE WHERE, and reads the landed count back", async () => {
     const { client, calls } = fakeClient([{ match: "WITH upd AS", rows: [{ n: 3 }] }]);
     const store = new PgEvolutionCampaignStore(client);
@@ -289,13 +246,13 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     },
   };
   const snapshots = new Map<string, CampaignSnapshot>();
-  const diffCalls: Array<{ opts?: { minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } }> = [];
+  const diffCalls: Array<{ opts?: { minDelta?: number; fdrAlpha?: number } }> = [];
   const diffs = {
     async diffSnapshot(
       _tenant: string,
       _b: string,
       candidateId: string,
-      opts?: { minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] },
+      opts?: { minDelta?: number; fdrAlpha?: number },
     ): Promise<CampaignSnapshot> {
       diffCalls.push({ ...(opts !== undefined ? { opts } : {}) });
       const snap = snapshots.get(candidateId);
@@ -378,99 +335,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     expect(store.outbox().map((e) => e.kind)).toEqual(["campaign.opened"]);
   });
 
-  it("FREEZES the issue's team at open, and lists only what a caller may see (arch-review 76)", async () => {
-    // A campaign drove a team-owned effect while carrying no team of its own, so the read surface could
-    // only filter by tenant and the adopt mutation could only be gated by a workspace-level action — which
-    // asks nothing about the resource it changes. The team is frozen from the ISSUE: the campaign journals
-    // into it, so they cannot belong to different teams without one of them being a lie.
-    //
-    // Seen RED before the column existed, observed:
-    //   a private team's campaign was listed to every member: expected 0 to be 1 (filtered length)
-    const store = new InMemoryEvolutionCampaignStore();
-    const teamed = new CampaignService({
-      store,
-      operations: store,
-      changes: noChanges,
-      runs: noRuns,
-      datasets: noDatasets,
-      seedProvenance: noSeedProvenance,
-      shape: noShape,
-      evidence: new InMemoryCampaignEvidenceStore(),
-      issues: {
-        async get(_t: string, ref: string) {
-          return { id: ref, teamId: ref === "iss_a" ? "team-a" : "team-b" };
-        },
-      },
-      diffs,
-      newId: () => `camp_${Math.random().toString(36).slice(2, 8)}`,
-      now: () => "2026-08-27T02:00:00.000Z",
-    });
-
-    const a = await teamed.open("acme", { issueId: "iss_a", frame }, "alice");
-    const b = await teamed.open("acme", { issueId: "iss_b", frame }, "bob");
-    expect(a.teamId, "the campaign did not inherit its issue's team").toBe("team-a");
-    expect(b.teamId).toBe("team-b");
-
-    // A ceiling of team-a sees only team-a's.
-    const forA = await teamed.list("acme", ["team-a"]);
-    expect(
-      forA.map((c) => c.id),
-      "a private team's campaign was listed to another team",
-    ).toEqual([a.id]);
-    // No ceiling (an admin, or a deployment with no teams) sees both.
-    expect((await teamed.list("acme")).length).toBe(2);
-
-    // …and a row with NO team is UNOWNED — the workspace's, visible to every ceiling. That is the legacy
-    // row's honest reading, and it is why the column is nullable and not backfilled.
-    await store.create({
-      ...a,
-      id: "camp-legacy-unowned",
-      teamId: undefined,
-    });
-    expect((await teamed.list("acme", ["team-a"])).map((c) => c.id)).toContain("camp-legacy-unowned");
-    expect((await teamed.list("acme", ["team-zzz"])).map((c) => c.id)).toEqual(["camp-legacy-unowned"]);
-  });
-
-  it("refuses an open whose issue moved after the caller was authorized (arch-review 115)", async () => {
-    const store = new InMemoryEvolutionCampaignStore();
-    // ── THE TEAM THE TRANSPORT AUTHORIZED, ASSERTED WHERE IT IS STAMPED (arch-review 115) ─────────
-    //
-    // The route reads the issue to gate `scorecards:run` on its team and `open` reads the SAME issue again to
-    // stamp the campaign's. `POST /issues/:id/team` between the two files a Team B campaign for a caller
-    // cleared only for Team A — and every later gate on that campaign then answers for a team this caller was
-    // never authorized over. Same law as the registry's `expectedOwnerTeamId`: an authorization and the effect
-    // it authorizes read the mutable fact once.
-    //
-    // Seen RED without the check: the campaign was opened with `teamId: "team-b"`.
-    const moving = new CampaignService({
-      store,
-      operations: store,
-      changes: noChanges,
-      runs: noRuns,
-      datasets: noDatasets,
-      seedProvenance: noSeedProvenance,
-      shape: noShape,
-      evidence: new InMemoryCampaignEvidenceStore(),
-      issues: {
-        // The transport read team-a; by the time `open` reads it, the issue has moved.
-        async get(_t: string, ref: string) {
-          return { id: ref, teamId: "team-b" };
-        },
-      },
-      diffs,
-      newId: () => `camp_${Math.random().toString(36).slice(2, 8)}`,
-      now: () => "2026-08-27T02:00:00.000Z",
-    });
-    await expect(
-      moving.open("acme", { issueId: "iss_a", frame, expectedIssueTeamId: "team-a" }, "alice"),
-      "a caller cleared for team-a opened a team-b campaign",
-    ).rejects.toBeInstanceOf(ConflictError);
-    // …and a caller that stated no expectation is unaffected — headless and seeded opens still work.
-    await expect(moving.open("acme", { issueId: "iss_a", frame }, "alice")).resolves.toMatchObject({
-      teamId: "team-b",
-    });
-  });
-
   it("REFUSES to decide, log or settle on a frame that predates the current rules (arch-review 75)", async () => {
     // arch-review 72 split creation from storage so a legacy campaign stays READABLE. It left the other
     // half open: such a campaign is still `open`, and a fresh round logged after the upgrade builds a
@@ -522,7 +386,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
           candidateScorecardId: "sc-c",
         },
         "alice",
-        {},
       ),
       "a legacy frame manufactured a held-out block",
     ).rejects.toThrow(/predates the current adoption rules/);
@@ -537,7 +400,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const svc = service(store);
     const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
     snapshots.set("sc-win", snapshot(comparison()));
-    const { round: logged, answer } = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    const { round: logged, answer } = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     // `toMatchObject`: the verdict also names its evidence object (key + digest), pinned by its own cases below.
     expect(logged.verdict).toMatchObject({
       comparable: true,
@@ -554,21 +417,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       confoundedAxes: [],
     });
     expect(answer.kind).toBe("adopt");
-  });
-
-  it("the frame's FROZEN significance reaches the diff, and the caller's team ceiling rides along", async () => {
-    const store = new InMemoryEvolutionCampaignStore();
-    const svc = service(store);
-    const strict: CampaignFrame = {
-      ...frame,
-      significance: { minDelta: 0.1, fdrAlpha: 0.05, heldOutFamilySize: 5 },
-    };
-    const rec = await svc.open("acme", { issueId: "iss_1", frame: strict }, "alice");
-    snapshots.set("sc-win", snapshot(comparison()));
-    diffCalls.length = 0;
-    await svc.logRound("acme", rec.id, LOG, "agent:everdict", { visibleTeams: ["team-a"] });
-    // …divided by the pre-registered held-out family: 0.05 over 5 rounds is 0.01 a round.
-    expect(diffCalls[0]?.opts).toEqual({ minDelta: 0.1, fdrAlpha: 0.01, visibleTeams: ["team-a"] });
   });
 
   // ── THE HELD-OUT SET IS TESTED ONCE PER ROUND AND NOTHING WAS COUNTING (counterexample) ──────────
@@ -597,7 +445,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const rec = await svc.open("acme", { issueId: "iss_1", frame: framed }, "alice");
       snapshots.set("sc-win", snapshot(comparison()));
       diffCalls.length = 0;
-      await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, LOG, "agent:everdict");
       return diffCalls[0]?.opts?.fdrAlpha;
     };
     // A campaign that plans twice the rounds spends half the alpha on each — the whole point, and the cost.
@@ -614,17 +462,17 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
     // Candidate scorecard actually ran 1.0.0 — the declared 1.0.1 would name a graduate nobody examined.
     snapshots.set("sc-win", snapshot(comparison(), { candidate: side("1.0.0") }));
-    await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+    await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict")).rejects.toBeInstanceOf(BadRequestError);
     // Wrong subject entirely.
     snapshots.set("sc-win", {
       diff: comparison(),
       baseline: { record: { harness: { id: "other-agent", version: "1.0.0" } } },
       candidate: { record: { harness: { id: "other-agent", version: "1.0.1" } } },
     });
-    await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+    await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict")).rejects.toBeInstanceOf(BadRequestError);
     // Baseline drifted off the frame's baseline version.
     snapshots.set("sc-win", snapshot(comparison(), { baseline: side("1.0.9") }));
-    await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+    await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict")).rejects.toBeInstanceOf(BadRequestError);
     expect((await svc.get("acme", rec.id)).rounds).toHaveLength(0); // nothing was logged
   });
 
@@ -647,7 +495,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         }),
       ),
     );
-    const easy = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    const easy = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     expect(easy.round.verdict.comparable).toBe(false);
     expect(easy.round.verdict.detail).toContain("missing: c2");
     // Thin trials: the frame demands 5.
@@ -665,7 +513,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         }),
       ),
     );
-    const thin = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    const thin = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     expect(thin.round.verdict.comparable).toBe(false);
     expect(thin.round.verdict.detail).toContain("fewer than the frame's 5 trials");
   });
@@ -680,7 +528,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       baseline: side("1.0.0", ["other-judge"]),
       candidate: side("1.0.1", ["other-judge"]),
     });
-    const wrong = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    const wrong = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     expect(wrong.round.verdict.comparable).toBe(false);
     expect(wrong.round.verdict.detail).toContain("judges are not the frame's");
   });
@@ -703,7 +551,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         }),
       ),
     );
-    const { round: logged, answer } = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    const { round: logged, answer } = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     expect(logged.verdict.comparable).toBe(false);
     expect(logged.verdict.confoundedAxes).toEqual(["execution_world"]);
     expect(logged.verdict.detail).toContain("confounded");
@@ -726,7 +574,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         }),
       ),
     );
-    await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-unv" }, "agent:everdict", {});
+    await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-unv" }, "agent:everdict");
     await expect(svc.settle("acme", rec.id, "alice")).rejects.toBeInstanceOf(ConflictError);
     expect((await svc.get("acme", rec.id)).state).toBe("open");
   });
@@ -739,7 +587,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const svc = service(store);
     const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
     snapshots.set("sc-win", snapshot(comparison()));
-    await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     await svc.settle("acme", rec.id, "alice");
 
     const op = await store.forCampaign("acme", rec.id);
@@ -754,7 +602,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const svc = service(store);
     const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
     snapshots.set("sc-win", snapshot(comparison()));
-    await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     const { record: settled, answer } = await svc.settle("acme", rec.id, "alice");
     expect(answer).toEqual({
       kind: "adopt",
@@ -787,7 +635,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const svc = service(store);
       const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
       snapshots.set("sc-win", snapshot(comparison()));
-      await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, LOG, "agent:everdict");
       await svc.settle("acme", rec.id, "alice"); // adopts 1.0.1, one round spent
       return { svc, id: rec.id };
     };
@@ -884,7 +732,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
       const origin = { source: "github-actions", repo: "acme/harness", sha: "abc123", prNumber: 7 };
       snapshots.set("sc-pr", snapshot(comparison(), { candidate: { record: { ...side("1.0.1").record, origin } } }));
-      await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-pr" }, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-pr" }, "agent:everdict");
       await svc.settle("acme", rec.id, "alice");
       const operation = await store.forCampaign("acme", rec.id);
       expect(operation?.code?.state, "the fixture recorded no code debt, so the case measures nothing").toBe("owed");
@@ -946,7 +794,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       });
       snapshots.set("sc-sibling", snapshot(nothing, { baseline: side("1.0.1"), candidate: side("1.0.2") }));
       const log = { ...LOG, candidateVersion: "1.0.2", candidateScorecardId: "sc-sibling" };
-      for (let i = 0; i < 3; i += 1) await svc.logRound("acme", sibling.id, log, "agent:everdict", {});
+      for (let i = 0; i < 3; i += 1) await svc.logRound("acme", sibling.id, log, "agent:everdict");
       const halted = await svc.settle("acme", sibling.id, "alice");
       expect(halted.record.state, "the sibling did not halt, so the case measures nothing").toBe("no_improvement");
 
@@ -967,7 +815,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const svc = service(store);
     const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
     snapshots.set("sc-win", snapshot(comparison()));
-    await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+    await svc.logRound("acme", rec.id, LOG, "agent:everdict");
     // A concurrent loop logs round 2 AFTER the settle computed its answer over 1 round — modeled by a store
     // wrapper that interleaves the append between the settle's read and its close.
     const raced: EvolutionCampaignStore & AdoptionOperationStore = {
@@ -1027,7 +875,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       rec.id,
       { ...LOG, candidateScorecardId: "sc-bad" },
       "agent:everdict",
-      {},
     );
     expect(logged.verdict.comparable).toBe(false);
     expect((await svc.decision("acme", rec.id)).kind).toBe("continue");
@@ -1066,11 +913,11 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       snapshots.set("sc-lose", snapshot(nothing()));
       snapshots.set("sc-win", snapshot(comparison()));
       const lose = { ...LOG, candidateScorecardId: "sc-lose" };
-      await svc.logRound("acme", rec.id, lose, "agent:everdict", {});
-      await svc.logRound("acme", rec.id, lose, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, lose, "agent:everdict");
+      await svc.logRound("acme", rec.id, lose, "agent:everdict");
       expect(await svc.decision("acme", rec.id)).toMatchObject({ kind: "halt", reason: "budget_exhausted" });
       const before = diffCalls.length;
-      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toThrow(/budget/);
+      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict")).rejects.toThrow(/budget/);
       expect(diffCalls.length, "the diff ran for a round the frame does not admit").toBe(before);
       expect((await svc.get("acme", rec.id)).rounds).toHaveLength(2);
     });
@@ -1082,9 +929,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       snapshots.set("sc-lose", snapshot(nothing()));
       snapshots.set("sc-win", snapshot(comparison()));
       const lose = { ...LOG, candidateScorecardId: "sc-lose" };
-      for (let i = 0; i < 3; i += 1) await svc.logRound("acme", rec.id, lose, "agent:everdict", {});
+      for (let i = 0; i < 3; i += 1) await svc.logRound("acme", rec.id, lose, "agent:everdict");
       expect(await svc.decision("acme", rec.id)).toMatchObject({ kind: "halt", reason: "no_improvement" });
-      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(ConflictError);
+      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict")).rejects.toBeInstanceOf(ConflictError);
       expect((await svc.get("acme", rec.id)).rounds).toHaveLength(3);
       // …and the settle still closes it as the ending it reached.
       expect((await svc.settle("acme", rec.id, "alice")).record.state).toBe("no_improvement");
@@ -1111,13 +958,13 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         { ...LOG, learned: "x".repeat(4001) },
         { ...LOG, candidateVersion: "9".repeat(101) },
       ]) {
-        await expect(svc.logRound("acme", rec.id, bad, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+        await expect(svc.logRound("acme", rec.id, bad, "agent:everdict")).rejects.toBeInstanceOf(BadRequestError);
       }
       expect(diffCalls.length, "the diff ran for a round that could never be stored").toBe(before);
       const stored = await svc.get("acme", rec.id);
       expect(stored.rounds).toHaveLength(0);
       // …and a round that IS accepted decodes through the schema the Postgres read applies.
-      await svc.logRound("acme", rec.id, { ...LOG, learned: "y".repeat(4000) }, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, { ...LOG, learned: "y".repeat(4000) }, "agent:everdict");
       expect(EvolutionCampaignRecordSchema.safeParse(await svc.get("acme", rec.id)).success).toBe(true);
     });
   });
@@ -1152,7 +999,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-ledger" },
         "agent:everdict",
-        {},
       );
       expect(ok.verdict.comparable, ok.verdict.detail).toBe(true);
     });
@@ -1170,7 +1016,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-drift" },
         "agent:everdict",
-        {},
       );
       expect(drifted.verdict.comparable).toBe(false);
       expect(drifted.verdict.detail).toMatch(/judges are not the frame's/);
@@ -1210,7 +1055,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-cov" },
         "agent:everdict",
-        {},
       );
       expect(r.verdict.observations).toEqual({ divergent: 0, unclear: 0, assessed: 2, eligible: 2 });
     });
@@ -1243,7 +1087,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-built" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.candidateSource).toEqual(origin);
       const settled = await svc.settle("acme", rec.id, "alice");
@@ -1318,7 +1161,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-built" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.candidateSource).toMatchObject({
         source: "everdict-build",
@@ -1396,7 +1238,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-built-nopr" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable, logged.verdict.detail).toBe(true);
       expect(changes.calls).toEqual([{ repo: "acme/scaffold", pr: 7 }]);
@@ -1425,7 +1266,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-built-otherpr" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable, "the oracle was checked against a pull request Everdict did not build").toBe(
         false,
@@ -1448,7 +1288,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
       snapshots.set("sc-ledger-down", snapshot(comparison(), { candidate: built("1.0.1") }));
       await expect(
-        svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-ledger-down" }, "agent:everdict", {}),
+        svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-ledger-down" }, "agent:everdict"),
       ).rejects.toMatchObject({ status: 500, extra: { candidateVersion: "1.0.1" } });
       // Nothing was logged: the round did not go in wearing the caller's provenance.
       expect((await store.get("acme", rec.id))?.rounds).toHaveLength(0);
@@ -1487,7 +1327,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-targets" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.targets).toEqual({ flipped: ["c1"], unflipped: [] });
       expect(logged.verdict.heldOut).toEqual({ improvements: 1, regressions: 0 });
@@ -1499,7 +1338,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         plain.id,
         { ...LOG, candidateScorecardId: "sc-plain" },
         "agent:everdict",
-        {},
       );
       expect(r2.verdict.targets).toBeUndefined();
     });
@@ -1567,7 +1405,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-evidence" },
         "agent:everdict",
-        {},
       );
       const ref = logged.verdict.evidence;
       expect(ref?.key).toMatch(new RegExp(`^campaigns/${rec.id}/rounds/1/`));
@@ -1621,7 +1458,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
       snapshots.set("sc-no-evidence", snapshot(comparison()));
       await expect(
-        svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-no-evidence" }, "agent:everdict", {}),
+        svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-no-evidence" }, "agent:everdict"),
       ).rejects.toThrow(/object store down/);
       expect((await store.get("acme", rec.id))?.rounds).toHaveLength(0);
     });
@@ -1668,7 +1505,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-seeded" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable, "a candidate seeded with the exam logged as comparable").toBe(false);
       expect(logged.verdict.seedLeak).toEqual(["knowledge:k-exam"]);
@@ -1681,7 +1517,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec2.id,
         { ...LOG, candidateScorecardId: "sc-seeded" },
         "agent:everdict",
-        {},
       );
       expect(r2.verdict.comparable, r2.verdict.detail).toBe(true);
       expect(r2.verdict.seedLeak).toBeUndefined();
@@ -1696,7 +1531,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec3.id,
         { ...LOG, candidateScorecardId: "sc-seeded" },
         "agent:everdict",
-        {},
       );
       expect(r3.verdict.comparable).toBe(false);
       expect(r3.verdict.detail).toMatch(/could not be checked/);
@@ -1776,7 +1610,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         ),
       );
       const rec = await svc.open("acme", { issueId: "iss_1", frame: harnessFrame }, "alice");
-      await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-diag" }, "agent:everdict", {});
+      await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-diag" }, "agent:everdict");
       const evidence = await svc.roundEvidence("acme", rec.id, 1);
       const c1 = evidence.cases.find((c) => c.caseId === "c1");
       expect(c1?.verdict).toBe("regressed");
@@ -1792,7 +1626,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const svc = service(store);
       const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
       snapshots.set("sc-win", snapshot(comparison()));
-      const { round: logged } = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      const { round: logged } = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
       expect(logged.verdict.candidateSource).toBeUndefined();
     });
 
@@ -1806,7 +1640,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-built-bad" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable).toBe(false);
       expect(logged.verdict.candidateSource?.prNumber).toBe(7);
@@ -1864,7 +1697,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-oracle" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable, "a candidate that rewrote its exam logged as a win").toBe(false);
       expect(logged.verdict.oracleTouched).toEqual(["datasets/tb.json", "tests/unit/loop.test.ts"]);
@@ -1883,7 +1715,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-clean" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable, logged.verdict.detail).toBe(true);
       expect(logged.verdict.oracleTouched).toBeUndefined();
@@ -1899,29 +1730,17 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
       // No pull request named at all: nothing to read.
       snapshots.set("sc-nopr", snapshot(comparison()));
-      const noPr = await svc.logRound(
-        "acme",
-        rec.id,
-        { ...LOG, candidateScorecardId: "sc-nopr" },
-        "agent:everdict",
-        {},
-      );
+      const noPr = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-nopr" }, "agent:everdict");
       expect(noPr.round.verdict.comparable).toBe(false);
       expect(noPr.round.verdict.detail).toMatch(/names no pull request/);
       // A listing the reader could not complete is not a listing.
       snapshots.set("sc-trunc", snapshot(comparison(), { candidate: built("1.0.1", { prNumber: 8 }) }));
-      const trunc = await svc.logRound(
-        "acme",
-        rec.id,
-        { ...LOG, candidateScorecardId: "sc-trunc" },
-        "agent:everdict",
-        {},
-      );
+      const trunc = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-trunc" }, "agent:everdict");
       expect(trunc.round.verdict.comparable).toBe(false);
       expect(trunc.round.verdict.detail).toMatch(/more files than could be listed/);
       // A read that failed is UNKNOWN, never clean.
       snapshots.set("sc-unk", snapshot(comparison(), { candidate: built("1.0.1", { prNumber: 9 }) }));
-      const unk = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-unk" }, "agent:everdict", {});
+      const unk = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-unk" }, "agent:everdict");
       expect(unk.round.verdict.comparable).toBe(false);
       expect(unk.round.verdict.detail).toMatch(/github said 502/);
     });
@@ -1937,7 +1756,6 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         rec.id,
         { ...LOG, candidateScorecardId: "sc-unscoped" },
         "agent:everdict",
-        {},
       );
       expect(logged.verdict.comparable).toBe(true);
       expect(changes.calls).toEqual([]);
@@ -1981,13 +1799,12 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const svc = withRuns(store, { "run-ok": sandbox(600, 0.75) });
       const rec = await svc.open("acme", { issueId: "iss_1", frame: budgeted }, "alice");
       snapshots.set("sc-win", snapshot(comparison()));
-      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict", {})).rejects.toBeInstanceOf(BadRequestError);
+      await expect(svc.logRound("acme", rec.id, LOG, "agent:everdict")).rejects.toBeInstanceOf(BadRequestError);
       const { round: logged } = await svc.logRound(
         "acme",
         rec.id,
         { ...LOG, delegationRunId: "run-ok" },
         "agent:everdict",
-        {},
       );
       expect(logged.delegation).toEqual({ runId: "run-ok", ttlSec: 600, usd: 0.75 });
     });
@@ -2002,10 +1819,10 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       snapshots.set("sc-win", snapshot(comparison()));
       for (const runId of ["run-ghost", "run-theirs"])
         await expect(
-          svc.logRound("acme", rec.id, { ...LOG, delegationRunId: runId }, "agent:everdict", {}),
+          svc.logRound("acme", rec.id, { ...LOG, delegationRunId: runId }, "agent:everdict"),
         ).rejects.toBeInstanceOf(NotFoundError);
       await expect(
-        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-case" }, "agent:everdict", {}),
+        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-case" }, "agent:everdict"),
       ).rejects.toBeInstanceOf(BadRequestError);
       expect((await svc.get("acme", rec.id)).rounds).toHaveLength(0);
     });
@@ -2016,10 +1833,10 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const rec = await svc.open("acme", { issueId: "iss_1", frame: budgeted }, "alice");
       snapshots.set("sc-win", snapshot(comparison()));
       await expect(
-        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-long" }, "agent:everdict", {}),
+        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-long" }, "agent:everdict"),
       ).rejects.toThrow(/frame budgets 900s/);
       await expect(
-        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-dear" }, "agent:everdict", {}),
+        svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-dear" }, "agent:everdict"),
       ).rejects.toThrow(/frame budgets \$2 per round/);
       expect((await svc.get("acme", rec.id)).rounds).toHaveLength(0);
     });
@@ -2029,45 +1846,41 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const svc = withRuns(store, { "run-any": sandbox(7200, 9) });
       const rec = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
       snapshots.set("sc-win", snapshot(comparison()));
-      const bare = await svc.logRound("acme", rec.id, LOG, "agent:everdict", {});
+      const bare = await svc.logRound("acme", rec.id, LOG, "agent:everdict");
       expect(bare.round.delegation).toBeUndefined();
-      const named = await svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-any" }, "agent:everdict", {});
+      const named = await svc.logRound("acme", rec.id, { ...LOG, delegationRunId: "run-any" }, "agent:everdict");
       expect(named.round.delegation).toEqual({ runId: "run-any", ttlSec: 7200, usd: 9 });
     });
   });
 });
 
 // ── ONE CAPABILITY'S MEMORY IS A SUBJECT FILTER (docs/architecture/evolution-routing-spec.md §5) ──────
-describe("InMemoryEvolutionCampaignStore.list — the subject narrows like the team ceiling does", () => {
-  it("returns only the campaigns whose frame subject matches, newest first", async () => {
-    const store = new InMemoryEvolutionCampaignStore();
-    const on = (
-      id: string,
-      subjectId: string,
-      type: "agent" | "harness" = "harness",
-      createdAt = "2026-09-02T00:00:00.000Z",
-    ) =>
-      store.create({
-        id,
-        tenant: "acme",
-        issueId: "iss_1",
-        frame: { ...frame, subject: { type, id: subjectId, baselineVersion: "1.0.0" } },
-        frameDigest: `d-${id}`,
-        rounds: [],
-        state: "open",
-        createdBy: "alice",
-        createdAt,
-        updatedAt: createdAt,
-      });
-    await on("c1", "shop", "harness", "2026-09-01T00:00:00.000Z");
-    await on("c2", "shop", "harness", "2026-09-02T00:00:00.000Z");
-    await on("c3", "other");
-    await on("c4", "shop", "agent");
-    expect((await store.list("acme", undefined, { type: "harness", id: "shop" })).map((r) => r.id)).toEqual([
-      "c2",
-      "c1",
-    ]);
-    expect((await store.list("acme", undefined, { type: "harness", id: "nobody" })).map((r) => r.id)).toEqual([]);
-    expect((await store.list("acme")).map((r) => r.id)).toHaveLength(4);
-  });
+
+it("returns only the campaigns whose frame subject matches, newest first", async () => {
+  const store = new InMemoryEvolutionCampaignStore();
+  const on = (
+    id: string,
+    subjectId: string,
+    type: "agent" | "harness" = "harness",
+    createdAt = "2026-09-02T00:00:00.000Z",
+  ) =>
+    store.create({
+      id,
+      tenant: "acme",
+      issueId: "iss_1",
+      frame: { ...frame, subject: { type, id: subjectId, baselineVersion: "1.0.0" } },
+      frameDigest: `d-${id}`,
+      rounds: [],
+      state: "open",
+      createdBy: "alice",
+      createdAt,
+      updatedAt: createdAt,
+    });
+  await on("c1", "shop", "harness", "2026-09-01T00:00:00.000Z");
+  await on("c2", "shop", "harness", "2026-09-02T00:00:00.000Z");
+  await on("c3", "other");
+  await on("c4", "shop", "agent");
+  expect((await store.list("acme", { type: "harness", id: "shop" })).map((r) => r.id)).toEqual(["c2", "c1"]);
+  expect((await store.list("acme", { type: "harness", id: "nobody" })).map((r) => r.id)).toEqual([]);
+  expect((await store.list("acme")).map((r) => r.id)).toHaveLength(4);
 });

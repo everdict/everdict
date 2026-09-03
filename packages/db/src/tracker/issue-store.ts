@@ -1,13 +1,6 @@
-import type {
-  IssueListFilter,
-  IssuePageFilter,
-  IssueStore,
-  IssueTeamCounts,
-  OutboxEvent,
-} from "@everdict/application-control";
+import type { IssueListFilter, IssuePageFilter, IssueStore, OutboxEvent } from "@everdict/application-control";
 import {
   BadRequestError,
-  CLOSED_ISSUE_STATUSES,
   ISSUE_PRIORITIES,
   type IssueGroupBy,
   type IssueGroupCount,
@@ -24,7 +17,6 @@ import {
   compareIssuesForList,
   isIssueAfterCursor,
   issueCountsByGroup,
-  issueCountsByTeam,
   issueOrderKey,
   issueSummaryOf,
   orderIssueGroupCounts,
@@ -44,7 +36,6 @@ const GROUP_COLUMN: Record<IssueGroupBy, string> = {
   priority: "priority",
   assignee: "assignee",
   project: "project_id",
-  cycle: "cycle_id",
 };
 
 function clampLimit(limit: number | undefined): number {
@@ -103,15 +94,11 @@ function decodeCursor(cursor: string, order: IssueOrder): CursorPosition {
 function matchesFilter(record: IssueRecord, filter: IssueListFilter | undefined): boolean {
   if (!filter) return true;
   if (filter.status !== undefined && record.status !== filter.status) return false;
-  if (filter.teamId !== undefined && record.teamId !== filter.teamId) return false;
-  if (filter.teamIds !== undefined && !filter.teamIds.includes(record.teamId)) return false;
   if (filter.projectId !== undefined && record.projectId !== filter.projectId) return false;
   if (filter.assignee !== undefined && record.assignee !== filter.assignee) return false;
   if (filter.priority !== undefined && record.priority !== filter.priority) return false;
-  if (filter.cycleId !== undefined && record.cycleId !== filter.cycleId) return false;
   if (filter.milestoneId !== undefined && record.milestoneId !== filter.milestoneId) return false;
   if (filter.stateId !== undefined && record.stateId !== filter.stateId) return false;
-  if (filter.inTriage !== undefined && record.inTriage !== filter.inTriage) return false;
   // `null` means "top-level only", so it is checked against absence rather than against an id.
   if (filter.parentId === null && record.parentId !== undefined) return false;
   if (typeof filter.parentId === "string" && record.parentId !== filter.parentId) return false;
@@ -140,7 +127,6 @@ function matchesFilter(record: IssueRecord, filter: IssueListFilter | undefined)
   if (filter.priorities !== undefined && !filter.priorities.includes(record.priority)) return false;
   if (filter.assignees !== undefined && !matchesOptional(record.assignee, filter.assignees)) return false;
   if (filter.projectIds !== undefined && !matchesOptional(record.projectId, filter.projectIds)) return false;
-  if (filter.cycleIds !== undefined && !matchesOptional(record.cycleId, filter.cycleIds)) return false;
   // Labels intersect rather than equal — an issue matches when it carries ANY of the asked-for labels.
   if (filter.labelIds !== undefined && !record.labelIds.some((id) => filter.labelIds?.includes(id))) return false;
   return true;
@@ -214,10 +200,6 @@ export class InMemoryIssueStore implements IssueStore {
     };
   }
 
-  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
-    return issueCountsByTeam([...this.byId.values()].filter((record) => record.tenant === tenant));
-  }
-
   async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
     return issueCountsByGroup(
       [...this.byId.values()].filter((record) => record.tenant === tenant && matchesFilter(record, filter)),
@@ -260,7 +242,6 @@ export class InMemoryIssueStore implements IssueStore {
 }
 
 interface IssueRow extends TrackerRow {
-  team_id: string;
   number: number;
   identifier: string;
   former_identifiers: unknown;
@@ -271,10 +252,8 @@ interface IssueRow extends TrackerRow {
   estimate: number | null;
   due_date: string | null;
   parent_id: string | null;
-  cycle_id: string | null;
   milestone_id: string | null;
   state_id: string | null;
-  in_triage: boolean;
   project_id: string | null;
   assignee: string | null;
   label_ids: unknown;
@@ -289,7 +268,6 @@ interface IssueRow extends TrackerRow {
 interface IssueSummaryRow {
   id: string;
   tenant: string;
-  team_id: string;
   number: number;
   identifier: string;
   title: string;
@@ -298,10 +276,8 @@ interface IssueSummaryRow {
   estimate: number | null;
   due_date: string | null;
   parent_id: string | null;
-  cycle_id: string | null;
   milestone_id: string | null;
   state_id: string | null;
-  in_triage: boolean;
   project_id: string | null;
   assignee: string | null;
   label_ids: unknown;
@@ -319,7 +295,6 @@ function rowToSummary(row: IssueSummaryRow): IssueSummary {
   return IssueSummarySchema.parse({
     id: row.id,
     tenant: row.tenant,
-    teamId: row.team_id,
     number: row.number,
     identifier: row.identifier,
     title: row.title,
@@ -328,10 +303,8 @@ function rowToSummary(row: IssueSummaryRow): IssueSummary {
     ...(row.estimate !== null ? { estimate: row.estimate } : {}),
     ...(row.due_date !== null ? { dueDate: row.due_date } : {}),
     ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
-    ...(row.cycle_id !== null ? { cycleId: row.cycle_id } : {}),
     ...(row.milestone_id !== null ? { milestoneId: row.milestone_id } : {}),
     ...(row.state_id !== null ? { stateId: row.state_id } : {}),
-    inTriage: row.in_triage,
     ...(row.project_id !== null ? { projectId: row.project_id } : {}),
     ...(row.assignee !== null ? { assignee: row.assignee } : {}),
     labelIds: row.label_ids ?? [],
@@ -355,7 +328,7 @@ function rowToSummary(row: IssueSummaryRow): IssueSummary {
 }
 
 const ISSUE_COLUMNS =
-  "(id, tenant, team_id, number, identifier, former_identifiers, title, description, status, priority, estimate, due_date, parent_id, cycle_id, milestone_id, state_id, in_triage, project_id, assignee, label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)";
+  "(id, tenant, number, identifier, former_identifiers, title, description, status, priority, estimate, due_date, parent_id, milestone_id, state_id, project_id, assignee, label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)";
 const ISSUE_VALUES =
   "($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,$24::jsonb,$25,$26::jsonb,$27::timestamptz,$28::timestamptz)";
 
@@ -363,7 +336,6 @@ function insertParams(record: IssueRecord): unknown[] {
   return [
     record.id,
     record.tenant,
-    record.teamId,
     record.number,
     record.identifier,
     JSON.stringify(record.formerIdentifiers),
@@ -374,10 +346,8 @@ function insertParams(record: IssueRecord): unknown[] {
     record.estimate ?? null,
     record.dueDate ?? null,
     record.parentId ?? null,
-    record.cycleId ?? null,
     record.milestoneId ?? null,
     record.stateId ?? null,
-    record.inTriage,
     record.projectId ?? null,
     record.assignee ?? null,
     JSON.stringify(record.labelIds),
@@ -396,7 +366,6 @@ function rowToRecord(row: IssueRow): IssueRecord {
   return IssueRecordSchema.parse({
     id: row.id,
     tenant: row.tenant,
-    teamId: row.team_id,
     number: row.number,
     identifier: row.identifier,
     formerIdentifiers: trackerIds(row.former_identifiers),
@@ -407,10 +376,8 @@ function rowToRecord(row: IssueRow): IssueRecord {
     ...(row.estimate !== null ? { estimate: row.estimate } : {}),
     ...(row.due_date !== null ? { dueDate: row.due_date } : {}),
     ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
-    ...(row.cycle_id !== null ? { cycleId: row.cycle_id } : {}),
     ...(row.milestone_id !== null ? { milestoneId: row.milestone_id } : {}),
     ...(row.state_id !== null ? { stateId: row.state_id } : {}),
-    inTriage: row.in_triage,
     ...(row.project_id !== null ? { projectId: row.project_id } : {}),
     ...(row.assignee !== null ? { assignee: row.assignee } : {}),
     labelIds: row.label_ids ?? [],
@@ -493,18 +460,6 @@ export class PgIssueStore implements IssueStore {
       conds.push(`status = ${next()}`);
       params.push(filter.status);
     }
-    if (filter?.teamId !== undefined) {
-      conds.push(`team_id = ${next()}`);
-      params.push(filter.teamId);
-    }
-    if (filter?.teamIds !== undefined) {
-      // Empty roster = no rows, expressed as a false predicate rather than an `IN ()` the parser rejects.
-      if (filter.teamIds.length === 0) conds.push("false");
-      else {
-        conds.push(`team_id = ANY(${next()}::text[])`);
-        params.push(filter.teamIds);
-      }
-    }
     if (filter?.projectId !== undefined) {
       conds.push(`project_id = ${next()}`);
       params.push(filter.projectId);
@@ -513,10 +468,6 @@ export class PgIssueStore implements IssueStore {
       conds.push(`priority = ${next()}`);
       params.push(filter.priority);
     }
-    if (filter?.cycleId !== undefined) {
-      conds.push(`cycle_id = ${next()}`);
-      params.push(filter.cycleId);
-    }
     if (filter?.milestoneId !== undefined) {
       conds.push(`milestone_id = ${next()}`);
       params.push(filter.milestoneId);
@@ -524,9 +475,6 @@ export class PgIssueStore implements IssueStore {
     if (filter?.stateId !== undefined) {
       conds.push(`state_id = ${next()}`);
       params.push(filter.stateId);
-    }
-    if (filter?.inTriage !== undefined) {
-      conds.push(filter.inTriage ? "in_triage" : "NOT in_triage");
     }
     if (filter?.parentId === null) conds.push("parent_id IS NULL");
     else if (typeof filter?.parentId === "string") {
@@ -591,7 +539,6 @@ export class PgIssueStore implements IssueStore {
     for (const [column, values] of [
       ["assignee", filter?.assignees],
       ["project_id", filter?.projectIds],
-      ["cycle_id", filter?.cycleIds],
     ] as const) {
       if (values === undefined) continue;
       const named = values.filter((value) => value !== "");
@@ -679,8 +626,8 @@ export class PgIssueStore implements IssueStore {
       params.push(after.key, after.updatedAt, after.id);
     }
     const { rows } = await this.client.query<IssueSummaryRow>(
-      `SELECT id, tenant, team_id, number, identifier, title, status, priority, estimate, due_date,
-              parent_id, cycle_id, milestone_id, state_id, in_triage, project_id, assignee,
+      `SELECT id, tenant, number, identifier, title, status, priority, estimate, due_date,
+              parent_id, milestone_id, state_id, project_id, assignee,
               label_ids, resolution, created_by, created_at, updated_at,
               COALESCE(jsonb_array_length(links), 0) AS link_count,
               github->>'repository' AS github_repository,
@@ -720,16 +667,6 @@ export class PgIssueStore implements IssueStore {
   // One GROUP BY over the issue table instead of a fetch per team. `FILTER` is what keeps "how many, and how
   // many open" a single pass; the closed vocabulary rides in as a parameter so the SQL and `isOpenIssueStatus`
   // are the same statement.
-  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
-    const { rows } = await this.client.query<{ team_id: string; total: string | number; open: string | number }>(
-      `SELECT team_id,
-              count(*) AS total,
-              count(*) FILTER (WHERE status <> ALL($2::text[])) AS open
-       FROM everdict_issues WHERE tenant = $1 GROUP BY team_id`,
-      [tenant, [...CLOSED_ISSUE_STATUSES]],
-    );
-    return rows.map((row) => ({ teamId: row.team_id, total: Number(row.total), open: Number(row.open) }));
-  }
 
   // Fetch-merge-write: the tracker is low-contention (a human or one consumer at a time), and the merge keeps
   // the jsonb columns whole rather than hand-writing a SET clause per optional field.
@@ -742,18 +679,17 @@ export class PgIssueStore implements IssueStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: IssueRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    // team_id/number/identifier are in the SET clause because a team move rewrites all three (plus the former
+    // number/identifier are in the SET clause because a re-issue rewrites both (plus the former
     // names) — the whole record is written on every update, so a field that transitions must be listed here or
     // the transition silently does nothing.
-    const sets = `team_id=$3, number=$4, identifier=$5, former_identifiers=$6::jsonb, title=$7, description=$8,
-       status=$9, priority=$10, estimate=$11, due_date=$12, parent_id=$13, cycle_id=$14, milestone_id=$15,
-       state_id=$16, in_triage=$17, project_id=$18, assignee=$19, label_ids=$20::jsonb, links=$21::jsonb,
-       resolution=$22::jsonb, github=$23::jsonb, history=$24::jsonb, origin=$25::jsonb,
-       updated_at=$26::timestamptz`;
+    const sets = `number=$3, identifier=$4, former_identifiers=$5::jsonb, title=$6, description=$7,
+       status=$8, priority=$9, estimate=$10, due_date=$11, parent_id=$12, milestone_id=$13,
+       state_id=$14, project_id=$15, assignee=$16, label_ids=$17::jsonb, links=$18::jsonb,
+       resolution=$19::jsonb, github=$20::jsonb, history=$21::jsonb, origin=$22::jsonb,
+       updated_at=$23::timestamptz`;
     const params: unknown[] = [
       tenant,
       id,
-      next.teamId,
       next.number,
       next.identifier,
       JSON.stringify(next.formerIdentifiers),
@@ -764,10 +700,8 @@ export class PgIssueStore implements IssueStore {
       next.estimate ?? null,
       next.dueDate ?? null,
       next.parentId ?? null,
-      next.cycleId ?? null,
       next.milestoneId ?? null,
       next.stateId ?? null,
-      next.inTriage,
       next.projectId ?? null,
       next.assignee ?? null,
       JSON.stringify(next.labelIds),

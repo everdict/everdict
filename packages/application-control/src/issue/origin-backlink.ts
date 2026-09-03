@@ -36,17 +36,11 @@ interface RegisterableSpec {
 export function withOriginBacklink<
   S extends RegisterableSpec,
   R extends {
-    register(tenant: string, spec: S, createdBy?: string, teamId?: string, origin?: CapabilityOrigin): Promise<void>;
+    register(tenant: string, spec: S, createdBy?: string, origin?: CapabilityOrigin): Promise<void>;
   },
 >(registry: R, linkType: Extract<IssueLinkType, "harness" | "dataset" | "judge">, issues: IssueBacklinkPort): R {
-  const register = async (
-    tenant: string,
-    spec: S,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> => {
-    await registry.register(tenant, spec, createdBy, teamId, origin); // a refused registration links nothing
+  const register = async (tenant: string, spec: S, createdBy?: string, origin?: CapabilityOrigin): Promise<void> => {
+    await registry.register(tenant, spec, createdBy, origin); // a refused registration links nothing
     if (tenant === SHARED_TENANT) return; // seeding a first-party catalogue is not workspace news
     if (origin?.from?.type !== "issue" || createdBy === undefined) return;
     const issueId = origin.from.id;

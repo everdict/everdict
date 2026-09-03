@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
-import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
@@ -47,20 +46,11 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       // …and now the gate's input is unambiguous. An `issue?.teamId` here would hand authorization an
       // `undefined` that means "the issue is missing" while authz reads it as "no team constraint" — the
       // permissive arm, reached for a reason that has nothing to do with the resource (arch-review 79).
-      await assertTeamVisible(deps, principal, issue.teamId, "Issue");
-      gate(principal, "scorecards:run", { teamId: issue.teamId });
+      gate(principal, "scorecards:run");
       // …and the SERVICE re-reads this issue to stamp the campaign's team, so the team it stamps must be the
       // one this gate cleared. `POST /issues/:id/team` between the two reads would otherwise file a Team B
       // campaign for a caller authorized only for Team A (arch-review 115).
-      return reply
-        .code(201)
-        .send(
-          await deps.campaignService.open(
-            principal.workspace,
-            { ...body, expectedIssueTeamId: issue.teamId },
-            principal.subject,
-          ),
-        );
+      return reply.code(201).send(await deps.campaignService.open(principal.workspace, { ...body }, principal.subject));
     } catch (err) {
       return sendError(reply, err); // unknown issue → 404
     }
@@ -83,10 +73,7 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       // neither: a type without an id (or the reverse) names nothing and is refused rather than read as "all".
       const subject = CampaignSubjectQuerySchema.safeParse(req.query);
       if (!subject.success) return reply.code(400).send({ code: "BAD_REQUEST", message: subject.error.message });
-      // The caller's team ceiling, applied in the store's query — a private team's campaigns are answered as
-      // nonexistent to everybody else (arch-review 76 P1-security).
-      const { visibleTeams } = await teamCeiling(deps, principal);
-      return reply.send(await deps.campaignService.list(principal.workspace, visibleTeams, subject.data));
+      return reply.send(await deps.campaignService.list(principal.workspace, subject.data));
     },
   );
 
@@ -104,7 +91,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       const record = await deps.campaignService.get(principal.workspace, req.params.id);
       // A private team's campaign reads as nonexistent to everybody else — the same 404 an absent one gets,
       // so the surface does not leak which ids exist (arch-review 76 P1-security).
-      await assertTeamVisible(deps, principal, record.teamId, "Campaign");
       // ⚠️ THE ROW CHECKED IS THE ROW RETURNED (arch-review 83). This read the campaign twice — once to
       // authorize, once to answer — so the value the check passed on was not the value the caller received.
       // A campaign's team happens to be immutable after open, which makes this harmless TODAY and not a
@@ -131,22 +117,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
       }
       try {
-        // Appending a round MUTATES the campaign's append-only evidence, so it is gated against the
-        // campaign's own team — not just a workspace action (arch-review 78 P1-security).
-        const record = await deps.campaignService.get(principal.workspace, req.params.id);
-        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
-        gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
+        gate(principal, "scorecards:run");
         return reply
           .code(201)
-          .send(
-            await deps.campaignService.logRound(
-              principal.workspace,
-              req.params.id,
-              body,
-              principal.subject,
-              await teamCeiling(deps, principal),
-            ),
-          );
+          .send(await deps.campaignService.logRound(principal.workspace, req.params.id, body, principal.subject));
       } catch (err) {
         return sendError(reply, err); // missing scorecard 404 / concurrent round · closed campaign 409
       }
@@ -167,10 +141,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return sendError(reply, err);
       }
       try {
-        const record = await deps.campaignService.get(principal.workspace, req.params.id);
-        // A private team's campaign reads as nonexistent to everybody else — the same 404 an absent one gets,
-        // so the surface does not leak which ids exist (arch-review 76 P1-security).
-        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
         return reply.send(await deps.campaignService.decision(principal.workspace, req.params.id));
       } catch (err) {
         return sendError(reply, err);
@@ -196,7 +166,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       }
       try {
         const { campaign, operation } = await deps.campaignService.adoption(principal.workspace, req.params.id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         // `operation: null` is an ANSWER — this campaign authorized nothing — never a 404 that reads as "no
         // such campaign". The state it closed in says which of the two absences this is.
         return reply.send({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
@@ -240,7 +209,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     // gated without `{ teamId }` has asked neither question about the resource it is about to change.
     //
     // Declared out here so the EFFECT below can assert the same owner this block authorized against.
-    let authorizedOwner: string | undefined;
     try {
       // ⚠️ NOT `deps.campaignService?.get(...)` (arch-review 78). The optional call made the campaign's team
       // check vanish whenever the settlement service was absent — `undefined` reads as UNOWNED, which is
@@ -251,34 +219,14 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return reply
           .code(404)
           .send({ code: "NOT_FOUND", message: "campaign service not configured — an adoption cannot be authorized" });
-      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
-      // Two authorities, both required: the campaign this proof came from, and the entity being written.
-      // The campaign's team is frozen at open, so a later ownership move cannot widen what it authorizes.
-      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-      // ⚠️ THE CAMPAIGN'S team, off the record read above — not `body.proof.teamId`. The proof's copy is the
-      // caller's bytes: equal to the record's on a genuine proof (the proof is minted from the record), and
-      // only a FORGED proof can differ — a proof with the field stripped skipped this gate entirely and was
-      // refused several reads later on its digest, as a 409 where a member of another team owes a 403. A
-      // caller-authored value deciding whether a team gate runs is rule `protocol` L3's shape exactly.
-      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      gate(principal, "scorecards:run");
       const candidate = body.proof.candidate;
       // THREE subject types, three registries, three actions (harness-definability-spec.md §2). This was
       // `agent ? … : harness`, so an environment candidate would have had its owner read from — and its
       // write authorized against — the HARNESS registry, which is the "a new lane inherits every constraint"
       // failure rule `protocol` names. The registry that answers here is the one the effect writes through.
-      const registryFor = {
-        agent: deps.agentRegistry,
-        environment: deps.environmentRegistry,
-        harness: deps.harnessInstances,
-      }[candidate.type];
-      const owner = await teamOfEntity(registryFor, principal.workspace, candidate.id);
       const action = { agent: "agents:write", environment: "datasets:write", harness: "harnesses:register" } as const;
-      gate(principal, action[candidate.type], owner);
-      // …and the EFFECT is told what this gate was granted against. Reading the owner here to authorize and
-      // letting the registry re-read it to write leaves a window an ownership transfer fits through: the
-      // successor lands under a team the caller may not write to, and owner preservation "succeeded"
-      // (arch-review 115). Carried, not re-derived — only this frame knows what it actually gated on.
-      authorizedOwner = owner.teamId;
+      gate(principal, action[candidate.type]);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -306,7 +254,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
           spec: body.spec,
           by: principal.subject,
           via: "web",
-          ...(authorizedOwner !== undefined ? { expectedOwnerTeamId: authorizedOwner } : {}),
           // The agent that acted, from the same attribution headers every other write reads — an agent
           // drives this door over HTTP too, and a fact without the loop guard's key wakes its own author
           // (arch-review 85). Read ONCE: two calls are two reads of the same request (L1).
@@ -342,12 +289,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
     try {
-      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
-      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      gate(principal, "scorecards:run");
       // Minting the candidate version is a harness register, so the harness family's write action is required
       // too — a build is a re-pin that also compiles.
-      gate(principal, "harnesses:register", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      gate(principal, "harnesses:register");
       const build = deps.campaignBuild;
       // A build SET (evolution-routing-spec.md §4): every slot from one head, one minted version.
       if (body.slots !== undefined) {
@@ -401,8 +346,6 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       if (!Number.isInteger(seq) || seq < 1)
         return reply.code(400).send({ code: "BAD_REQUEST", message: "seq must be a positive integer." });
       try {
-        const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         return reply.send(await deps.campaignService.roundEvidence(principal.workspace, req.params.id, seq));
       } catch (err) {
         return sendError(reply, err);
@@ -425,8 +368,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return sendError(reply, err);
       }
       try {
-        const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+        // The campaign is READ so an id from another workspace is a 404: the build reads below are
+        // tenant-scoped in the store, so they answer an EMPTY LIST rather than refusing, and an empty list is
+        // indistinguishable from a campaign that has simply built nothing.
+        await deps.campaignService.get(principal.workspace, req.params.id);
         return reply.send(await deps.campaignBuild.setsForCampaign(principal.workspace, req.params.id));
       } catch (err) {
         return sendError(reply, err);
@@ -445,8 +390,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return sendError(reply, err);
     }
     try {
-      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
-      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
+      // The campaign is READ so an id from another workspace is a 404: the build reads below are
+      // tenant-scoped in the store, so they answer an EMPTY LIST rather than refusing, and an empty list is
+      // indistinguishable from a campaign that has simply built nothing.
+      await deps.campaignService.get(principal.workspace, req.params.id);
       return reply.send(await deps.campaignBuild.forCampaign(principal.workspace, req.params.id));
     } catch (err) {
       return sendError(reply, err);
@@ -481,22 +428,14 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
         return reply
           .code(404)
           .send({ code: "NOT_FOUND", message: "campaign service not configured — a merge cannot be authorized" });
-      const campaign = await deps.campaignService.get(principal.workspace, req.params.id);
-      await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-      gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+      gate(principal, "scorecards:run");
       const candidate = body.proof.candidate;
       // THREE subject types, three registries, three actions (harness-definability-spec.md §2). This was
       // `agent ? … : harness`, so an environment candidate would have had its owner read from — and its
       // write authorized against — the HARNESS registry, which is the "a new lane inherits every constraint"
       // failure rule `protocol` names. The registry that answers here is the one the effect writes through.
-      const registryFor = {
-        agent: deps.agentRegistry,
-        environment: deps.environmentRegistry,
-        harness: deps.harnessInstances,
-      }[candidate.type];
-      const owner = await teamOfEntity(registryFor, principal.workspace, candidate.id);
       const action = { agent: "agents:write", environment: "datasets:write", harness: "harnesses:register" } as const;
-      gate(principal, action[candidate.type], owner);
+      gate(principal, action[candidate.type]);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -527,10 +466,7 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return sendError(reply, err);
     }
     try {
-      const record = await deps.campaignService.get(principal.workspace, req.params.id);
-      // Settling is a WRITE on the campaign, so the gate carries its team — not just the workspace action.
-      await assertTeamVisible(deps, principal, record.teamId, "Campaign");
-      gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
+      gate(principal, "scorecards:run");
       return reply.send(await deps.campaignService.settle(principal.workspace, req.params.id, principal.subject));
     } catch (err) {
       return sendError(reply, err); // continue/identity_unverified refusals + lost settle races → 409

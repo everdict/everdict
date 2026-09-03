@@ -7,8 +7,8 @@ import { CLOSED_ISSUE_STATUSES, ISSUE_STATUSES, OPEN_ISSUE_STATUSES } from "./tr
 // service and the workspace pulse — while `@everdict/domain` already exported `isOpenIssueStatus` and this file
 // already exported the closed half. They had not diverged; L3's point is that a predicate written five times is
 // in the state a duplicated predicate is in BEFORE it diverges, and the bill arrives the day one copy learns
-// something the others do not. arch-review 106 made `inTriage` reachable and immediately raised such a
-// question — does a queued request count as open work — which with five copies would have been five answers.
+// something the others do not — does a given status count as open work — which with five copies would have
+// been five answers.
 //
 // What this pins is the PARTITION, not the membership list: open and closed cover the vocabulary exactly once
 // between them, so a status added tomorrow lands in exactly one and cannot land in neither. A membership

@@ -47,16 +47,7 @@ describe("renderFactMessage — the one place a fact becomes a sentence", () => 
         fact("issue.status_changed", "i1", { identifier: "ENG-1", from: "backlog", to: "in_progress", title: "T" }),
       ),
     ).toBe("ENG-1 backlog → in_progress — T");
-    expect(renderFactMessage(fact("issue.status_changed", "i1", { identifier: "ENG-1", triage: "accepted" }))).toBe(
-      "ENG-1 accepted from triage",
-    );
     expect(renderFactMessage(fact("issue.created", "i1", { identifier: "ENG-1", title: "T" }))).toBe("ENG-1 filed — T");
-    expect(renderFactMessage(fact("team.member_added", "t1", { member: "alice", name: "Engineering" }))).toBe(
-      "alice joined Engineering",
-    );
-    expect(renderFactMessage(fact("cycle.completed", "c1", { number: 3, carriedOver: 2 }))).toBe(
-      "Cycle 3 closed — 2 carried over",
-    );
     expect(renderFactMessage(fact("project.update_posted", "p1", { name: "P", health: "at_risk" }))).toBe(
       "P — at risk",
     );

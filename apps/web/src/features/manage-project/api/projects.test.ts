@@ -13,7 +13,6 @@ const PROJECT = {
   tenant: 'acme',
   name: 'Hermes evaluation',
   status: 'planned',
-  teamIds: ['t1'],
   initiativeIds: [],
   createdBy: 'dev',
   createdAt: '2026-08-04T00:00:00.000Z',

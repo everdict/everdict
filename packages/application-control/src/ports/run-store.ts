@@ -25,11 +25,6 @@ export interface RunListOptions {
   // runs off the reader's screen. Unset = an internal read (recovery, reapers, the usage meter) that is not
   // serving a person — never pass it through from a transport.
   viewer?: string;
-  // The teams whose runs this caller may see — `TeamService.visibleTeamIds`, the one place team privacy is
-  // decided. A run of a PRIVATE team is that team's work; an unowned one (no `teamId`) is the workspace's and is
-  // always kept. `undefined` = nothing is hidden, never "no teams". Orthogonal to `viewer` above: that hides one
-  // MEMBER's personal executions, this hides one TEAM's work, and both narrow the same page.
-  visibleTeams?: string[];
   // ── "ONLY THE RUNS IN THESE STATES", BECAUSE THAT IS WHAT THE CALLERS WANTED (perf review) ────────
   //
   // Two readers asked for the whole run ledger and then kept the handful of ACTIVE rows: the queue snapshot

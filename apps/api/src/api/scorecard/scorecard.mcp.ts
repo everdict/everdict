@@ -5,28 +5,19 @@ import {
   originSource,
 } from "@everdict/application-control";
 import { NotFoundError, type ScorecardStatus, ScorecardStatusSchema } from "@everdict/contracts";
-import { type Action, authorize, ownedByVisibleTeam } from "@everdict/domain";
+import { type Action, authorize } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { teamCeiling, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
-import { moveToolDescription } from "../team-move.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { AnalysisDimensionSchema } from "./request/analysis-query.js";
 import { ScorecardGroupBySchema, scorecardFilterOf, scorecardPageOf } from "./request/list-scorecards.js";
 import { serveScorecard, serveScorecardListItem } from "./serve.js";
 
-// The owning team a JSON body names, if any. The shared body schemas do not carry `teamId` (it is transport
-// metadata, not ingest content), so both transports read it off the raw object before validation.
-function teamIdIn(body: unknown): string | undefined {
-  const named = (body as { teamId?: unknown } | null)?.teamId;
-  return typeof named === "string" ? named : undefined;
-}
-
 // Scorecard resource MCP tools — the MCP twin of scorecard.routes.ts (same ScorecardService core, second transport).
 // ── WHOSE BATCH IS THIS — THE MCP HALF (arch-review 119) ───────────────────────────────────────────
 //
-// The HTTP twin's `scorecardOwner`, spelled here because the two transport files may not import each other.
-// Every OPERATIONAL tool gated a bare `scorecards:run` while `get_scorecard` was ceilinged, so an agent
+// The HTTP twin's `scorecardIsOurs`, spelled here because the two transport files may not import each other.
+// Every OPERATIONAL tool gated a bare `scorecards:run` while `get_scorecard` was tenant-scoped, so an agent
 // acting for a member of another team — answered NOT_FOUND for the same id on read — could stop a running
 // batch, RE-DRIVE it (real compute on somebody else's evidence), rescore it, or override its gate decision.
 // Reading was narrower than writing, which is the inversion the axis exists to prevent; docs/auth.md names
@@ -37,14 +28,12 @@ function teamIdIn(body: unknown): string | undefined {
 // answers NOT_FOUND to somebody whose actual problem is permission, and the HTTP twin's suite pins that
 // ordering by name ("gated before the service runs").
 //
-// `undefined` means "not this caller's to touch", answered NOT_FOUND — the same answer the read gives,
-// because a refusal that leaks existence is what team privacy is for.
+// A batch from another workspace is answered NOT_FOUND — the same answer the read gives, because a refusal
+// that leaks existence tells an outsider the id is real.
 async function assertBatchReachable(ctx: McpToolContext, action: Action, id: string): Promise<void> {
   const record = await ctx.deps.scorecardService?.get(id);
   if (!record || record.tenant !== ctx.ws) throw new NotFoundError("NOT_FOUND", { id }, "scorecard not found.");
-  if (!ownedByVisibleTeam(record, await visibleTeamsFor(ctx.deps, ctx.principal)))
-    throw new NotFoundError("NOT_FOUND", { id }, "scorecard not found.");
-  authorize(ctx.principal, action, record.teamId === undefined ? {} : { teamId: record.teamId });
+  authorize(ctx.principal, action);
 }
 
 export function registerScorecardTools(server: McpServer, ctx: McpToolContext): void {
@@ -184,20 +173,14 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         cases,
         trace_sink,
         oom_auto_boost,
-        team_id,
         origin,
       }) =>
-        // Owner resolved (id or key) and gated before the work starts — the same two steps the HTTP route takes,
-        // through the same helper, so an agent cannot file a batch under a team its creator is not on.
-        runForTeam(ctx, "scorecards:run", team_id, async (owner) =>
+        run(ctx.principal, "scorecards:run", async () =>
           ok(
             await scorecards.submit({
               tenant: ws,
               submittedBy: principal.subject, // clone private-repo cases via my personal connection
               submitterRoles: principal.roles, // constitution seed (ground_truth declarations are admin-only)
-              // Named → the owner; unnamed → the service inherits the harness's team, else this fallback.
-              ...(team_id !== undefined && owner !== undefined ? { teamId: owner } : {}),
-              ...(owner !== undefined ? { submitterTeamId: owner } : {}),
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
               harness: {
                 id: harness_id,
@@ -360,26 +343,17 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       day?: string;
       q?: string;
     }) => ({
-      ...scorecardFilterOf(
-        {
-          ...(input.judge !== undefined ? { judge: input.judge } : {}),
-          ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
-          ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
-          ...(input.harness !== undefined ? { harness: input.harness } : {}),
-          ...(input.status !== undefined ? { status: input.status } : {}),
-          ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
-          ...(input.creator !== undefined ? { creator: input.creator } : {}),
-          ...(input.day !== undefined ? { day: input.day } : {}),
-          ...(input.q !== undefined ? { q: input.q } : {}),
-        },
-        {
-          // `team` COMBINES with the narrows above rather than replacing them — "of these, which are ours".
-          ...(input.team !== undefined ? { teamId: await resolveTeam(ctx, input.team) } : {}),
-          // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-          // person's teams and no more. The narrow above never reaches past this ceiling.
-          ...(await teamCeiling(ctx.deps, principal)),
-        },
-      ),
+      ...scorecardFilterOf({
+        ...(input.judge !== undefined ? { judge: input.judge } : {}),
+        ...(input.schedule !== undefined ? { schedule: input.schedule } : {}),
+        ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
+        ...(input.harness !== undefined ? { harness: input.harness } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.runtime !== undefined ? { runtime: input.runtime } : {}),
+        ...(input.creator !== undefined ? { creator: input.creator } : {}),
+        ...(input.day !== undefined ? { day: input.day } : {}),
+        ...(input.q !== undefined ? { q: input.q } : {}),
+      }),
     });
 
     server.registerTool(
@@ -470,33 +444,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
     );
 
     server.registerTool(
-      "move_scorecard",
-      {
-        description: moveToolDescription(
-          "Re-file a scorecard under another team. A scorecard is the EVIDENCE a capability produced and is " +
-            "read through the same team lens, so handing a harness or dataset to another team does not drag " +
-            "its past results along — move those here. Results and scores are untouched.",
-        ),
-        inputSchema: {
-          id: z.string(),
-          team: z.string().describe('the destination team — id or key ("ENG")'),
-        },
-      },
-      ({ id, team }) =>
-        // The service authorizes BOTH teams, so this runs unguarded here rather than re-asking half the question.
-        plain(async () =>
-          ok(
-            await scorecards.moveToTeam({
-              principal,
-              id,
-              teamId: await resolveTeam(ctx, team),
-              ...(ctx.agent?.agentId !== undefined ? { agent: ctx.agent } : {}),
-            }),
-          ),
-        ),
-    );
-
-    server.registerTool(
       "get_scorecard",
       {
         annotations: { readOnlyHint: true },
@@ -507,12 +454,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       ({ id }) =>
         run(principal, "scorecards:read", async () => {
           const record = await scorecards.getForDisplay(id); // BFF parity — the agent gets openable artifact refs too
-          if (
-            !record ||
-            record.tenant !== ws ||
-            !ownedByVisibleTeam(record, await visibleTeamsFor(ctx.deps, principal))
-          )
-            return fail("NOT_FOUND: scorecard not found.");
+          if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard not found.");
           // BFF parity — the agent gets the same receipt-canonical case→run map the screen does.
           return ok(serveScorecard(record, await scorecards.canonicalCaseRuns(record.id)));
         }),
@@ -539,7 +481,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           ok(
             await scorecards.diff(ws, baseline, candidate, {
               ...(zThreshold !== undefined ? { zThreshold } : {}),
-              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -672,7 +613,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
                 ...(fdr_alpha !== undefined ? { fdrAlpha: fdr_alpha } : {}),
               },
               decidedBy: principal.subject,
-              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -722,7 +662,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             await scorecards.flake(ws, {
               datasetId: dataset,
               ...(harness ? { harnessId: harness } : {}),
-              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -805,7 +744,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               ...(from ? { from } : {}),
               ...(to ? { to } : {}),
               ...(baseline ? { baseline } : {}),
-              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -836,7 +774,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               ...(model ? { model } : {}),
               ...(judge_model ? { judgeModel: judge_model } : {}),
               window: window ?? "latest",
-              ...(await teamCeiling(ctx.deps, principal)),
             }),
           ),
         ),
@@ -883,21 +820,17 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       ({ group_by, pivot_by, metric, measure, viz, sort_by, sort_dir, search, include_incomplete, filters }) =>
         run(principal, "scorecards:read", async () =>
           ok(
-            await scorecards.analysis(
-              ws,
-              {
-                filters: filters ?? {},
-                groupBy: group_by ?? ["harness"],
-                ...(pivot_by ? { pivotBy: pivot_by } : {}),
-                ...(metric ? { metric } : {}),
-                measure: measure ?? "passRate",
-                sort: { by: sort_by ?? "measure", dir: sort_dir ?? "desc" },
-                ...(search ? { search } : {}),
-                viz: viz ?? "table",
-                ...(include_incomplete !== undefined ? { includeIncomplete: include_incomplete } : {}),
-              },
-              await visibleTeamsFor(ctx.deps, principal),
-            ),
+            await scorecards.analysis(ws, {
+              filters: filters ?? {},
+              groupBy: group_by ?? ["harness"],
+              ...(pivot_by ? { pivotBy: pivot_by } : {}),
+              ...(metric ? { metric } : {}),
+              measure: measure ?? "passRate",
+              sort: { by: sort_by ?? "measure", dir: sort_dir ?? "desc" },
+              ...(search ? { search } : {}),
+              viz: viz ?? "table",
+              ...(include_incomplete !== undefined ? { includeIncomplete: include_incomplete } : {}),
+            }),
           ),
         ),
     );
@@ -920,13 +853,9 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         run(principal, "scorecards:read", async () => {
           if (!ctx.deps.datasetRegistry) return fail("NOT_FOUND: dataset registry is not configured.");
           return ok(
-            await citableReport(
-              { scorecards, datasets: ctx.deps.datasetRegistry },
-              ws,
-              id,
-              await visibleTeamsFor(ctx.deps, principal),
-              { allowProxy: allow_proxy === true },
-            ),
+            await citableReport({ scorecards, datasets: ctx.deps.datasetRegistry }, ws, id, {
+              allowProxy: allow_proxy === true,
+            }),
           );
         }),
     );
@@ -951,9 +880,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ id, revision }) =>
-        run(principal, "scorecards:read", async () =>
-          ok(await scorecards.analysisBundle(ws, id, await visibleTeamsFor(ctx.deps, principal), revision)),
-        ),
+        run(principal, "scorecards:read", async () => ok(await scorecards.analysisBundle(ws, id, revision))),
     );
 
     server.registerTool(
@@ -982,17 +909,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         } catch {
           return fail("BAD_REQUEST: not a valid IngestScorecard JSON.");
         }
-        // Owner resolved AND GATED like the HTTP twin (teamForNew + gate(owner.gate)) — resolving the team
-        // without authorizing against it let an agent file an ingested batch under a team its member is not
-        // on, a request the route 403s. runForTeam is the one helper both transports' semantics live in.
-        return runForTeam(ctx, "scorecards:run", teamIdIn(parsed), async (owner) => {
+        return run(ctx.principal, "scorecards:run", async () => {
           const result = IngestScorecardBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           return ok(
             await scorecards.ingest({
               tenant: ws,
               submittedBy: principal.subject,
-              ...(owner !== undefined ? { teamId: owner } : {}),
               ...result.data,
               // Same trigger provenance the route stamps — without it, MCP-ingested batches fall out of the
               // originSource filter dimension.
@@ -1018,15 +941,13 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         } catch {
           return fail("BAD_REQUEST: not a valid PullIngest JSON.");
         }
-        // Same gate as the HTTP twin — the named team is authorized against, never just resolved.
-        return runForTeam(ctx, "scorecards:run", teamIdIn(parsed), async (owner) => {
+        return run(ctx.principal, "scorecards:run", async () => {
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           return ok(
             await scorecards.ingestPull({
               tenant: ws,
               submittedBy: principal.subject,
-              ...(owner !== undefined ? { teamId: owner } : {}),
               ...result.data,
               origin: { source: originSource(principal.via) },
             }),

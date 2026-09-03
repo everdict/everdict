@@ -17,12 +17,12 @@ import { buildServer } from "../server.js";
 // decorator), because the two halves only mean something together: the stamp is what the detail view reads, and
 // the link is what lets the issue notice its own regression later.
 
-const teamAllocator = (() => {
+const numberAllocator = (() => {
   let n = 0;
   return {
     async allocateForIssue() {
       n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+      return { number: n, identifier: `EVD-${n}` };
     },
   };
 })();
@@ -46,7 +46,7 @@ const CODE_JUDGE = {
 function build() {
   const issueStore = new InMemoryIssueStore();
   const issueService = new IssueService({
-    teams: teamAllocator,
+    numbers: numberAllocator,
     store: issueStore,
     scorecards: new InMemoryScorecardStore(),
   });
@@ -171,7 +171,7 @@ describe("capability origin — a registration records where it came from", () =
       method: "POST",
       url: "/judges",
       headers: H,
-      payload: { ...CODE_JUDGE, origin: { from: { type: "issue", id: issue.identifier }, note: "built for ENG-1" } },
+      payload: { ...CODE_JUDGE, origin: { from: { type: "issue", id: issue.identifier }, note: "built for EVD-1" } },
     });
     expect(res.statusCode).toBe(201);
 
@@ -184,7 +184,7 @@ describe("capability origin — a registration records where it came from", () =
         id: issue.id,
         label: `${issue.identifier} Judge misses truncated answers`,
       },
-      note: "built for ENG-1",
+      note: "built for EVD-1",
     });
   });
 
@@ -241,14 +241,14 @@ describe("capability origin — a registration records where it came from", () =
       method: "POST",
       url: "/judges",
       headers: H,
-      payload: { ...CODE_JUDGE, origin: { from: { type: "issue", id: "ENG-404" } } },
+      payload: { ...CODE_JUDGE, origin: { from: { type: "issue", id: "EVD-404" } } },
     });
 
     // No label (nothing to snapshot) and the id stays as written — a note about an issue the caller cannot read
     // is still better than none, and it renders as plain text rather than a link.
     expect(await judgeOrigin(app, "truncation", "1.0.0")).toEqual({
       via: "web",
-      from: { type: "issue", id: "ENG-404" },
+      from: { type: "issue", id: "EVD-404" },
     });
   });
 
@@ -320,7 +320,7 @@ describe("agent save origin — the upsert records why the version exists, and w
     const agents = new InMemoryAgentRegistry();
     const issueStore = new InMemoryIssueStore();
     const issueService = new IssueService({
-      teams: teamAllocator,
+      numbers: numberAllocator,
       store: issueStore,
       scorecards: new InMemoryScorecardStore(),
     });
@@ -435,7 +435,6 @@ describe("agent save origin — the upsert records why the version exists, and w
         enabled: true,
       },
       "alice",
-      "team-eng",
     );
     const bumped = await app.inject({
       method: "PUT",
@@ -445,210 +444,5 @@ describe("agent save origin — the upsert records why the version exists, and w
     });
     expect(bumped.statusCode).toBe(200);
     expect((bumped.json() as { version: string }).version).toBe("1.0.1");
-    const entry = (await agents.list("acme")).find((e) => e.id === "helper");
-    expect(entry?.teamId).toBe("team-eng");
-  });
-});
-
-// ── [R118 COUNTEREXAMPLE] SAVING AN AGENT IS A WRITE TO SOMEBODY'S AGENT ────────────────────────────
-//
-// `PUT /agents/:id` gates a bare `agents:write` with NO resource scope, on both transports. The service then
-// PRESERVES the owner — correctly — so a member of another team saving over Team A's agent mints a new
-// immutable Team-A-owned version they were never authorized to write. Preserving an owner and being allowed
-// to write to it are different questions, which is the sentence the campaign adopt route already carries:
-//
-//   "a member of Team B holding `agents:write` could adopt a candidate owned by Team A and mint a
-//    Team-A-owned successor"
-//
-// arch-review 76 closed that for the ADOPT door and did not look at the ordinary save door, where the same
-// `agents:write` mints the same kind of version. The harness twin gates on `teamOfEntity` at both its write
-// doors (register and re-pin); the agent lane gates on it at neither.
-//
-// ⚠️ `requireAuth` + a MEMBER authenticator: the dev-header fallback hands out `roles: ["admin"]`, and an
-// admin governs every team BY DESIGN — an admin fixture "passes" this by bypassing the gate.
-describe("[R118 COUNTEREXAMPLE] another team's agent cannot be saved over", () => {
-  const AGENT_BODY = {
-    description: "workspace assistant",
-    instructions: "be brief",
-    mcpServers: [],
-    capabilities: [],
-    tags: [],
-  };
-
-  async function memberOf(teams: string[]) {
-    const { InMemoryAgentRegistry } = await import("@everdict/registry");
-    const { AgentService } = await import("../core/agent/agent-service.js");
-    const agents = new InMemoryAgentRegistry();
-    const app = buildServer({
-      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-      agentRegistry: agents,
-      agentService: new AgentService({ agents }),
-      teamService: {
-        async list() {
-          return teams.map((id) => ({ id }));
-        },
-        async defaultTeam() {
-          return undefined;
-        },
-        async visibleTeamIds() {
-          return undefined; // nothing hidden — this is about WRITING, not seeing
-        },
-        async canSeeTeam() {
-          return true;
-        },
-      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
-      requireAuth: true,
-      authenticator: {
-        async authenticate() {
-          return { subject: "u-b", workspace: "acme", roles: ["member"], teams, via: "oidc" as const };
-        },
-      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
-    });
-    return { app, agents };
-  }
-
-  it("REFUSES a save over an agent owned by a team the caller is not on", async () => {
-    const { app, agents } = await memberOf(["team-b"]);
-    await agents.register(
-      "acme",
-      {
-        ...AGENT_BODY,
-        id: "helper",
-        version: "1.0.0",
-        disabledDefaults: [],
-        toolSecretBindings: {},
-        triggers: [],
-        enabled: true,
-      } as never,
-      "u-a",
-      "team-a",
-    );
-
-    const res = await app.inject({
-      method: "PUT",
-      url: "/agents/helper",
-      headers: { authorization: "Bearer t" },
-      payload: { ...AGENT_BODY, instructions: "do something else entirely" },
-    });
-
-    expect(res.statusCode, "another team's agent gained a version").toBe(403);
-    expect(await agents.ownVersions("acme", "helper"), "the refused save registered a version anyway").toEqual([
-      "1.0.0",
-    ]);
-  });
-
-  it("ALLOWS the owning team — the control that keeps the gate from being a wall", async () => {
-    const { app, agents } = await memberOf(["team-a"]);
-    await agents.register(
-      "acme",
-      {
-        ...AGENT_BODY,
-        id: "helper",
-        version: "1.0.0",
-        disabledDefaults: [],
-        toolSecretBindings: {},
-        triggers: [],
-        enabled: true,
-      } as never,
-      "u-a",
-      "team-a",
-    );
-
-    const res = await app.inject({
-      method: "PUT",
-      url: "/agents/helper",
-      headers: { authorization: "Bearer t" },
-      payload: { ...AGENT_BODY, instructions: "do something else entirely" },
-    });
-
-    expect(res.statusCode, "the agent's own team was refused its edit").toBe(200);
-    expect(res.json().created).toBe(true);
-  });
-});
-
-// ── [R119 COUNTEREXAMPLE] AND THE MODEL SAVE DOOR, WHICH THE SAME WAVE DID NOT LOOK AT ──────────────
-//
-// R118 above closed the AGENT upsert. There are three version-free upsert doors — agent, model, capability
-// — and it looked at one. The capability door is covered by its own service (creator-or-admin, refused
-// before any write); the MODEL door had nothing: `ModelService.saveConnection` runs no authorization at all
-// and both transports gated a bare `models:write` (member+). The one-lane-only shape, one wave later, in the
-// door whose comment header is a near copy of the agent one.
-//
-// ⚠️ Its SHAPE changed mid-wave rather than appearing. Before the registry learned to preserve an entity's
-// owner (arch-review 119), this door registered the successor with no team at all, which re-filed the model
-// out of Team A — the quieter takeover. The store fix turned that into "a version minted inside a team the
-// caller cannot write to". Both are wrong, and only the gate answers either.
-//
-// Same `requireAuth` + MEMBER authenticator, for the same reason: the dev-header fallback is an admin, and an
-// admin governs every team by design.
-describe("[R119 COUNTEREXAMPLE] another team's model cannot be saved over", () => {
-  const MODEL_BODY = { provider: "anthropic", model: "claude-opus-4-8" };
-
-  async function memberOf(teams: string[]) {
-    const { InMemoryModelRegistry } = await import("@everdict/registry");
-    const { ModelService } = await import("../core/model/model-service.js");
-    const models = new InMemoryModelRegistry();
-    const app = buildServer({
-      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-      modelRegistry: models,
-      modelService: new ModelService({ models, scopedSecretsFor: async () => ({ workspace: {}, user: {} }) }),
-      teamService: {
-        async list() {
-          return teams.map((id) => ({ id }));
-        },
-        async defaultTeam() {
-          return undefined;
-        },
-        async visibleTeamIds() {
-          return undefined;
-        },
-        async canSeeTeam() {
-          return true;
-        },
-      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["teamService"]>,
-      requireAuth: true,
-      authenticator: {
-        async authenticate() {
-          return { subject: "u-b", workspace: "acme", roles: ["member"], teams, via: "oidc" as const };
-        },
-      } as unknown as NonNullable<Parameters<typeof buildServer>[0]["authenticator"]>,
-    });
-    return { app, models };
-  }
-
-  const seed = async (models: { register: (...a: never[]) => Promise<void> }) =>
-    models.register(
-      ...(["acme", { ...MODEL_BODY, id: "opus", version: "1.0.0" }, "u-a", "team-a"] as unknown as never[]),
-    );
-
-  it("REFUSES a save over a model owned by a team the caller is not on, and writes nothing", async () => {
-    const { app, models } = await memberOf(["team-b"]);
-    await seed(models);
-
-    const res = await app.inject({
-      method: "PUT",
-      url: "/models/opus",
-      headers: { authorization: "Bearer t" },
-      payload: { ...MODEL_BODY, model: "claude-sonnet-5" },
-    });
-
-    expect(res.statusCode, "another team's model gained a version").toBe(403);
-    expect(await models.ownVersions("acme", "opus"), "the refused save registered a version anyway").toEqual(["1.0.0"]);
-  });
-
-  it("ALLOWS the owning team — the control", async () => {
-    const { app, models } = await memberOf(["team-a"]);
-    await seed(models);
-
-    const res = await app.inject({
-      method: "PUT",
-      url: "/models/opus",
-      headers: { authorization: "Bearer t" },
-      payload: { ...MODEL_BODY, model: "claude-sonnet-5" },
-    });
-
-    expect(res.statusCode, "the model's own team was refused its edit").toBe(200);
-    expect(res.json().created).toBe(true);
-    expect(models.teamOfVersion("acme", "opus", "1.0.1"), "the successor left its team").toBe("team-a");
   });
 });

@@ -1,18 +1,10 @@
 import { setVersionTags } from "@everdict/application-control";
 import { RuntimeSpecSchema } from "@everdict/contracts";
 import { RuntimeControlCommandSchema } from "@everdict/contracts/wire";
-import { ownedByVisibleTeam, runtimeSpecWithCapabilities } from "@everdict/domain";
+import { runtimeSpecWithCapabilities } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
-
-// Runtime MCP tools — the MCP twin of runtime.routes.ts.
-// A private team's registered infra is that team's — the same ceiling the HTTP twin stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
@@ -26,7 +18,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
         description: "Execution infra visible to this workspace (Runtime: owned + _shared)",
         inputSchema: {},
       },
-      () => run(principal, "runtimes:read", async () => ok(await keepVisible(ctx, await runtimes.list(ws)))),
+      () => run(principal, "runtimes:read", async () => ok(await runtimes.list(ws))),
     );
 
     server.registerTool(
@@ -39,7 +31,6 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "runtimes:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, runtimes, ws, id, "runtime");
           return ok(await runtimes.get(ws, id, version ?? "latest"));
         }),
     );
@@ -110,8 +101,7 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       ({ runtime, team }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "runtimes:write", team, async (teamId) => {
+        run(ctx.principal, "runtimes:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(runtime);
@@ -123,8 +113,8 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
           // Fill capabilities server-side (declared ∪ auto-derived) — same SSOT as the HTTP route.
           const spec = runtimeSpecWithCapabilities(result.data);
           // …and the creator stamp the HTTP twin writes: without it nobody owns the delete right (HTTP parity).
-          await runtimes.register(ws, spec, principal.subject, teamId);
-          return ok({ workspace: ws, id: spec.id, version: spec.version, ...(teamId ? { teamId } : {}) });
+          await runtimes.register(ws, spec, principal.subject);
+          return ok({ workspace: ws, id: spec.id, version: spec.version });
         }),
     );
   }
@@ -169,7 +159,6 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "runtimes:read", async () => {
           // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
           // already carries, on the door that returns the same bytes (arch-review 119).
-          await assertEntityVisible(ctx.deps, principal, runtimes, ws, id, "runtime");
           // get() resolves the registered spec (NOT_FOUND on non-owned/missing) before any live I/O.
           const spec = await runtimes.get(ws, id, version ?? "latest");
           return ok(await inspectRuntime(ws, spec));

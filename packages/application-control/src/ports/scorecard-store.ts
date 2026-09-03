@@ -7,14 +7,6 @@ export interface ScorecardListFilter {
   dataset?: string; // dataset.id
   harness?: string; // harness.id
   status?: ScorecardStatus;
-  // The owning team — "what has THIS team evaluated", the read the team page is.
-  teamId?: string;
-  // The teams the CALLER may see, which is a different question from the one above: `teamId` narrows to a team on
-  // purpose, `visibleTeams` is the ceiling every read stays under. A batch owned by a team outside this list is not
-  // returned at all (ownership isolates, it does not merely sort). Unowned batches (no `teamId` — `_shared` seeds,
-  // rows from before the axis existed) belong to the whole workspace and are always kept. Unset = no ceiling: an
-  // admin governs every team, and internal reads (recovery, cascade-cancel) are not acting for anyone.
-  visibleTeams?: string[];
   judge?: string; // applied Agent Judge id (orchestration.judges[].id, any version) — the judge detail's evaluation history
   scheduleId?: string; // the schedule that fired the run (origin.scheduleId) — the schedule detail's run history
   // The product timeline's trend read (origin.productId / origin.seriesKey — docs/architecture/product-timeline.md):
@@ -47,7 +39,6 @@ export interface ScorecardListFilter {
   harnesses?: string[];
   runtimes?: string[];
   creators?: string[];
-  teamIds?: string[];
   // ── A TIME WINDOW, BECAUSE THE HOME SCREEN ASKS ONE (perf review) ─────────────────────────────────
   //
   // `day` narrows to a single calendar day and `before` pages backwards; neither says "everything since T".
@@ -80,9 +71,9 @@ export interface ScorecardListFilter {
 
 // The axes a batch can be grouped by — the list's own grouping vocabulary, answered by the store because a
 // page cannot count what it does not hold. `day` is the UTC calendar day (see `ScorecardListFilter.day`).
-export type ScorecardGroupBy = "day" | "status" | "harness" | "dataset" | "team" | "creator";
+export type ScorecardGroupBy = "day" | "status" | "harness" | "dataset" | "creator";
 
-// `key` is null for the UNSET bucket (no team, no creator) — the same "unset" bucket the list draws last.
+// `key` is null for the UNSET bucket (no creator) — the same "unset" bucket the list draws last.
 export interface ScorecardGroupCount {
   key: string | null;
   count: number;
@@ -104,8 +95,6 @@ export function scorecardGroupKey(record: ScorecardRecord, groupBy: ScorecardGro
       return record.harness.id;
     case "dataset":
       return record.dataset.id;
-    case "team":
-      return record.teamId ?? null;
     case "creator":
       return record.createdBy ?? null;
   }

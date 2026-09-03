@@ -1,7 +1,6 @@
 import { CampaignAdoptionProofSchema, CampaignFrameFromIssueSchema, CampaignFrameSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertTeamVisible, teamCeiling, teamOfEntity } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 import { gate } from "../route-context.js";
 import { LogCampaignRoundBodySchema } from "./request/log-campaign-round.js";
@@ -34,23 +33,14 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     },
     ({ issue_id, frame }) =>
       run(principal, "scorecards:run", async () => {
-        // The issue's team, asked both questions — the campaign inherits it, so opening one against another
-        // team's private issue is a write into that team (arch-review 78 P1-security). Parity with the route.
-        // NOT `deps.issueService?.get(...)` — see the route (arch-review 79): the optional call deletes the
-        // team check whenever the tracker is absent.
+        // The issue is READ before the campaign opens, not for a gate but because a campaign against an issue
+        // that is not there is a campaign about nothing — the service would fail the same way, later and with
+        // a worse message. Parity with the route.
         if (!deps.issueService) return fail("NOT_FOUND: issue service is not configured.");
         const issue = await deps.issueService.get(ws, issue_id);
         if (issue === undefined) return fail("NOT_FOUND: issue not found.");
-        // See the route: an `issue?.teamId` hands authorization an `undefined` that means "missing issue"
-        // while authz reads it as "no constraint" (arch-review 79).
-        await assertTeamVisible(deps, principal, issue.teamId, "Issue");
-        gate(principal, "scorecards:run", { teamId: issue.teamId });
-        // The team this gate cleared, carried into the write that stamps it — the service re-reads the issue,
-        // and a move between the two reads would file a campaign under a team this caller was never cleared
-        // for (arch-review 115). Same wiring as the HTTP twin.
-        return ok(
-          await campaigns.open(ws, { issueId: issue_id, frame, expectedIssueTeamId: issue.teamId }, principal.subject),
-        );
+        gate(principal, "scorecards:run");
+        return ok(await campaigns.open(ws, { issueId: issue_id, frame }, principal.subject));
       }),
   );
 
@@ -73,7 +63,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
           return fail("BAD_REQUEST: subject_type and subject_id go together — name both, or neither.");
         const subject =
           subject_type !== undefined && subject_id !== undefined ? { type: subject_type, id: subject_id } : undefined;
-        return ok(await campaigns.list(ws, (await teamCeiling(deps, principal)).visibleTeams, subject));
+        return ok(await campaigns.list(ws, subject));
       }),
   );
 
@@ -87,7 +77,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     ({ id }) =>
       run(principal, "scorecards:read", async () => {
         const record = await campaigns.get(ws, id);
-        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
         return ok(record);
       }),
   );
@@ -139,9 +128,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       delegation_run_id,
     }) =>
       run(principal, "scorecards:run", async () => {
-        const record = await campaigns.get(ws, id);
-        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
-        gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
+        gate(principal, "scorecards:run");
         return ok(
           await campaigns.logRound(
             ws,
@@ -155,7 +142,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
               ...(delegation_run_id !== undefined ? { delegationRunId: delegation_run_id } : {}),
             },
             principal.subject,
-            await teamCeiling(deps, principal),
           ),
         );
       }),
@@ -173,7 +159,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     },
     ({ id }) =>
       run(principal, "scorecards:read", async () => {
-        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
         return ok(await campaigns.decision(ws, id));
       }),
   );
@@ -194,7 +179,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     ({ id }) =>
       run(principal, "scorecards:read", async () => {
         const { campaign, operation } = await campaigns.adoption(ws, id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
         return ok({ campaignId: campaign.id, state: campaign.state, operation: operation ?? null });
       }),
   );
@@ -231,32 +215,19 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         }
         const checked = CampaignAdoptionProofSchema.safeParse(parsedProof);
         if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
-        // The family's write action AND the team that owns the entity, gated like the route: preserving an
-        // owner team is not the same question as being allowed to write to it (arch-review 76 P1-security).
-        // The campaign's own authority, like the route — BFF↔MCP parity means the same GUARDS, not just the
-        // same service (arch-review 78: this transport checked the entity's team and not the campaign's).
-        const campaign = await campaigns.get(ws, id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-        // The campaign's OWN team, off the record just read — never the copy on the proof the caller handed
-        // over. The two are equal on a genuine proof (the proof is minted from the record), and only a forged
-        // one can differ; gating on the presented copy let a proof with the field STRIPPED skip this gate and
-        // fail several reads later on its digest instead, as a 409 (rule `protocol` L3). Same as the route.
-        gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        // The campaign is READ before the adoption is authorized — its own record, never the copy on the proof
+        // the caller handed over (rule `protocol` L3). Same as the route: BFF↔MCP parity means the same
+        // GUARDS, not just the same service.
+        gate(principal, "scorecards:run");
         const candidate = checked.data.candidate;
         // Three subject types, three registries, three actions — the HTTP twin's routing, verbatim
         // (harness-definability-spec.md §2).
-        const registryFor = {
-          agent: deps.agentRegistry,
-          environment: deps.environmentRegistry,
-          harness: deps.harnessInstances,
-        }[candidate.type];
-        const owner = await teamOfEntity(registryFor, ws, candidate.id);
         const action = {
           agent: "agents:write",
           environment: "datasets:write",
           harness: "harnesses:register",
         } as const;
-        gate(principal, action[candidate.type], owner);
+        gate(principal, action[candidate.type]);
         return ok(
           await deps.campaignAdoption.adopt({
             tenant: ws,
@@ -271,12 +242,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
             spec: parsedSpec,
             by: principal.subject,
             via: "mcp",
-            // The owner this gate was granted against, asserted again where the successor is written — the
-            // registry re-reads it otherwise, and a transfer landing in between files the version under a
-            // team this caller may not write to (arch-review 115). Same wiring as the HTTP twin, because a
-            // guarantee one transport carries and the other does not is the parity failure rule `api-layer`
-            // exists to prevent.
-            ...(owner.teamId !== undefined ? { expectedOwnerTeamId: owner.teamId } : {}),
             // The agent that acted, so the fact this write emits carries the loop guard's key — without it
             // the agent that adopted a candidate is woken by its own adoption (arch-review 85).
             ...(ctx.agent !== undefined ? { agent: ctx.agent } : {}),
@@ -315,10 +280,8 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     ({ id, ref, repo, pr_number, slot, slots }) =>
       run(principal, "scorecards:run", async () => {
         if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
-        const campaign = await campaigns.get(ws, id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-        gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
-        gate(principal, "harnesses:register", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        gate(principal, "scorecards:run");
+        gate(principal, "harnesses:register");
         if (slots !== undefined && slot !== undefined)
           return fail("BAD_REQUEST: name slots for a build set, or slot for one build — not both.");
         if (slots !== undefined) {
@@ -368,7 +331,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     },
     ({ id, seq }) =>
       run(principal, "scorecards:read", async () => {
-        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
         return ok(await campaigns.roundEvidence(ws, id, seq));
       }),
   );
@@ -384,7 +346,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     ({ id }) =>
       run(principal, "scorecards:read", async () => {
         if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
-        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
         return ok(await deps.campaignBuild.setsForCampaign(ws, id));
       }),
   );
@@ -400,7 +361,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     ({ id }) =>
       run(principal, "scorecards:read", async () => {
         if (!deps.campaignBuild) return fail("NOT_FOUND: campaign build is not configured.");
-        await assertTeamVisible(deps, principal, (await campaigns.get(ws, id)).teamId, "Campaign");
         return ok(await deps.campaignBuild.forCampaign(ws, id));
       }),
   );
@@ -435,24 +395,16 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
         // The same two gates adopt carries — the campaign's own team and the entity's owner — because this is the
         // same authorization spent on its second effect (parity with the route).
-        const campaign = await campaigns.get(ws, id);
-        await assertTeamVisible(deps, principal, campaign.teamId, "Campaign");
-        gate(principal, "scorecards:run", campaign.teamId !== undefined ? { teamId: campaign.teamId } : {});
+        gate(principal, "scorecards:run");
         const candidate = checked.data.candidate;
         // Three subject types, three registries, three actions — the HTTP twin's routing, verbatim
         // (harness-definability-spec.md §2).
-        const registryFor = {
-          agent: deps.agentRegistry,
-          environment: deps.environmentRegistry,
-          harness: deps.harnessInstances,
-        }[candidate.type];
-        const owner = await teamOfEntity(registryFor, ws, candidate.id);
         const action = {
           agent: "agents:write",
           environment: "datasets:write",
           harness: "harnesses:register",
         } as const;
-        gate(principal, action[candidate.type], owner);
+        gate(principal, action[candidate.type]);
         return ok(
           await deps.campaignAdoption.merge({
             tenant: ws,
@@ -484,9 +436,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     },
     ({ id }) =>
       run(principal, "scorecards:run", async () => {
-        const record = await campaigns.get(ws, id);
-        await assertTeamVisible(deps, principal, record.teamId, "Campaign");
-        gate(principal, "scorecards:run", record.teamId !== undefined ? { teamId: record.teamId } : {});
+        gate(principal, "scorecards:run");
         return ok(await campaigns.settle(ws, id, principal.subject));
       }),
   );

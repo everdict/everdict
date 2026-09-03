@@ -7,12 +7,12 @@ import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
 // An issue is numbered by its owning team; these transport tests only need that to be deterministic.
-const teamAllocator = (() => {
+const numberAllocator = (() => {
   let n = 0;
   return {
     async allocateForIssue() {
       n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+      return { number: n, identifier: `EVD-${n}` };
     },
   };
 })();
@@ -89,9 +89,9 @@ function build(opts: { issues?: GithubIssue[]; tokenError?: Error } = {}) {
   };
   const writers: GithubRepoWriterFactory = { for: () => writer };
   const store = new InMemoryIssueStore();
-  const issueService = new IssueService({ teams: teamAllocator, store });
+  const issueService = new IssueService({ numbers: numberAllocator, store });
   const issueSync = new GithubIssueSync({
-    teams: teamAllocator,
+    numbers: numberAllocator,
     store,
     issues: issueService,
     tokens: {
@@ -296,7 +296,7 @@ describe("issue GitHub sync routes", () => {
 
     const bare = buildServer({
       service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-      issueService: new IssueService({ teams: teamAllocator, store: new InMemoryIssueStore() }),
+      issueService: new IssueService({ numbers: numberAllocator, store: new InMemoryIssueStore() }),
     });
     expect(
       (await bare.inject({ method: "GET", url: "/issues/import/candidates?repository=acme/agent", headers: H }))

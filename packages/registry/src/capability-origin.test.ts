@@ -25,8 +25,8 @@ describe("VersionedStore — a version remembers where it came from", () => {
   it("reports the stamp per version through listMeta", () => {
     // Given: two versions, only the first born from an issue
     const store = new VersionedStore<Spec>("judge");
-    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", undefined, ISSUE_ORIGIN);
-    store.register("acme", { id: "correctness", version: "1.1.0" }, "alice", undefined, { via: "web" });
+    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", ISSUE_ORIGIN);
+    store.register("acme", { id: "correctness", version: "1.1.0" }, "alice", { via: "web" });
 
     // When
     const meta = store.listMeta("acme")[0];
@@ -44,28 +44,26 @@ describe("VersionedStore — a version remembers where it came from", () => {
   it("keeps provenance out of content identity — a differing origin is not a conflict", () => {
     // Given: a registered version
     const store = new VersionedStore<Spec>("judge");
-    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", undefined, ISSUE_ORIGIN);
+    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", ISSUE_ORIGIN);
 
     // When: the same content is registered again claiming a different origin
     // Then: no throw (immutability is about the SPEC), and the first answer stands — re-registering identical
     // content is not a second birth.
-    expect(() =>
-      store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", undefined, { via: "ci" }),
-    ).not.toThrow();
+    expect(() => store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", { via: "ci" })).not.toThrow();
     expect(store.listMeta("acme")[0]?.versionOrigins?.["1.0.0"]).toEqual(ISSUE_ORIGIN);
   });
 
   it("fills an UNSTAMPED version on a later registration — provenance arriving late is still provenance", () => {
     const store = new VersionedStore<Spec>("judge");
     store.register("acme", { id: "correctness", version: "1.0.0" }, "alice");
-    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", undefined, ISSUE_ORIGIN);
+    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", ISSUE_ORIGIN);
     expect(store.listMeta("acme")[0]?.versionOrigins?.["1.0.0"]).toEqual(ISSUE_ORIGIN);
   });
 
   it("does not let a deleted version's origin leak into the map", () => {
     const store = new VersionedStore<Spec>("judge");
-    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", undefined, ISSUE_ORIGIN);
-    store.register("acme", { id: "correctness", version: "1.1.0" }, "alice", undefined, { via: "web" });
+    store.register("acme", { id: "correctness", version: "1.0.0" }, "alice", ISSUE_ORIGIN);
+    store.register("acme", { id: "correctness", version: "1.1.0" }, "alice", { via: "web" });
     store.softDelete("acme", "correctness", "1.0.0");
     expect(store.listMeta("acme")[0]?.versionOrigins).toEqual({ "1.1.0": { via: "web" } });
   });
@@ -143,7 +141,7 @@ describe("PgVersionedStore — the origin column is written and read back", () =
     // Given: an empty table
     const { client, queries } = fake([]);
     // When
-    await pgStore(client, true).register("acme", { id: "correctness", version: "1.0.0" }, "alice", undefined, {
+    await pgStore(client, true).register("acme", { id: "correctness", version: "1.0.0" }, "alice", {
       via: "mcp",
       from: { type: "issue", id: "issue-1" },
     });

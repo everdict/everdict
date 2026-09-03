@@ -6,7 +6,6 @@ import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-pan
 import { CapabilityLineage, loadLinkedIssues } from '@/features/capability-lineage'
 import { DeleteJudgeButton } from '@/features/delete-judge'
 import { JudgeHistory, type JudgeHistoryEntry } from '@/features/judge-history'
-import { moveDestinationsFor, TeamOwnerControl } from '@/features/move-to-team'
 import { pickOrigin } from '@/entities/capability-origin'
 import {
   isRubricRef,
@@ -17,7 +16,6 @@ import {
 } from '@/entities/judge'
 import { isMachineSubject, membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
-import { teamsSchema } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -73,12 +71,6 @@ export default async function JudgeDetailPage({
   // Delete (versions / whole judge) — admin only (the creator exception is server-side) + workspace-owned
   // (_shared/first-party delete 404s at the control plane, so the affordance is hidden for them).
   const currentWorkspace = principal?.workspace ?? workspace
-  // 소유 팀을 이름으로 부르고, 넘길 수 있는 사람에게는 그 자리에서 넘기게 하기 위한 로스터.
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch(() => [])
-  const teamMove = moveDestinationsFor(principal, teams, 'judges:write')
   const canDeleteJudge =
     can(principal?.roles, 'judges:delete') && summary.owner === currentWorkspace
 
@@ -245,13 +237,6 @@ export default async function JudgeDetailPage({
           {judge.kind === 'harness' && judge.runtime && <RuntimeChip label={judge.runtime} />}
           {summary.owner === currentWorkspace && (
             <span className="text-[12px] text-muted-foreground">
-              <TeamOwnerControl
-                kind="judges"
-                id={judge.id}
-                {...(summary.teamId !== undefined ? { teamId: summary.teamId } : {})}
-                teams={teamMove.teams}
-                writableIds={teamMove.writableIds}
-              />
             </span>
           )}
         </div>

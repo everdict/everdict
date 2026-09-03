@@ -1,5 +1,4 @@
 import {
-  CycleRecordSchema,
   InitiativeRecordSchema,
   type IssueRecord,
   IssueRecordSchema,
@@ -12,7 +11,6 @@ import {
 import {
   InMemoryAgentTaskStore,
   InMemoryApprovalStore,
-  InMemoryCycleStore,
   InMemoryInitiativeStore,
   InMemoryIssueStore,
   InMemoryPlatformEventStore,
@@ -23,13 +21,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { WorkspacePulseService } from "./workspace-pulse-service.js";
 
 // The pulse is arithmetic over five domains, so these tests are about what the numbers MEAN — which issues
-// count as open, what a cycle's commitment is, when a goal is "at risk", and where the window's edges fall.
+// count as open, when a goal is "at risk", and where the window's edges fall.
 
 const TENANT = "acme";
 const NOW = new Date("2026-08-04T09:00:00.000Z"); // a Tuesday, mid-morning
 
 let issues: InMemoryIssueStore;
-let cycles: InMemoryCycleStore;
 let projects: InMemoryProjectStore;
 let initiatives: InMemoryInitiativeStore;
 let tasks: InMemoryAgentTaskStore;
@@ -40,7 +37,6 @@ let seq = 0;
 
 beforeEach(() => {
   issues = new InMemoryIssueStore();
-  cycles = new InMemoryCycleStore();
   projects = new InMemoryProjectStore();
   initiatives = new InMemoryInitiativeStore();
   tasks = new InMemoryAgentTaskStore();
@@ -53,7 +49,6 @@ beforeEach(() => {
 function service(days = 7): { read: () => ReturnType<WorkspacePulseService["read"]> } {
   const svc = new WorkspacePulseService({
     issues,
-    cycles,
     projects,
     initiatives,
     tasks,
@@ -71,7 +66,6 @@ async function issue(status: IssueStatus, extra: Partial<IssueRecord> = {}): Pro
     IssueRecordSchema.parse({
       id: `i-${seq}`,
       tenant: TENANT,
-      teamId: extra.teamId ?? "team-eng",
       number: seq,
       identifier: `ENG-${seq}`,
       title: `issue ${seq}`,
@@ -80,23 +74,6 @@ async function issue(status: IssueStatus, extra: Partial<IssueRecord> = {}): Pro
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-01T00:00:00.000Z",
       ...extra,
-    }),
-  );
-}
-
-async function cycle(id: string, endsAt: string, completedAt?: string): Promise<void> {
-  await cycles.create(
-    CycleRecordSchema.parse({
-      id,
-      tenant: TENANT,
-      teamId: "team-eng",
-      number: 1,
-      startsAt: "2026-07-28",
-      endsAt,
-      ...(completedAt !== undefined ? { completedAt } : {}),
-      createdBy: "u-1",
-      createdAt: "2026-07-28T00:00:00.000Z",
-      updatedAt: "2026-07-28T00:00:00.000Z",
     }),
   );
 }
@@ -125,7 +102,6 @@ async function project(status: string, health?: TrackerHealth): Promise<void> {
       tenant: TENANT,
       name: `project ${seq}`,
       status,
-      teamIds: ["team-eng"],
       ...(health !== undefined ? { health } : {}),
       createdBy: "u-1",
       createdAt: "2026-07-01T00:00:00.000Z",
@@ -177,34 +153,6 @@ describe("the tracker's state right now", () => {
     // Then: five are still open, the two started ones plus the review are in flight, and the regression is
     // called out on its own — a resolution that stopped holding is the one number somebody must act on
     expect(pulse.work).toEqual({ open: 5, inProgress: 2, regressed: 1 });
-  });
-});
-
-describe("the iterations that are running", () => {
-  it("takes the commitment from the issues the active cycles hold, and calls the rest done", async () => {
-    // Given: an open cycle holding four issues (two finished), a CLOSED cycle holding one, and unassigned work
-    await cycle("c-open", "2026-08-10");
-    await cycle("c-closed", "2026-07-27", "2026-07-27T00:00:00.000Z");
-    await issue("todo", { cycleId: "c-open" });
-    await issue("in_progress", { cycleId: "c-open" });
-    await issue("done", { cycleId: "c-open" });
-    await issue("cancelled", { cycleId: "c-open" });
-    await issue("todo", { cycleId: "c-closed" });
-    await issue("todo");
-
-    // When: the pulse is read
-    const pulse = await service().read();
-
-    // Then: only the open cycle's four issues are the commitment, and the closed cycle's and the uncommitted
-    // issue are not part of any iteration's number
-    expect(pulse.cycles).toMatchObject({ active: 1, committed: 4, done: 2 });
-  });
-
-  it("flags an iteration closing within the week", async () => {
-    await cycle("c-soon", "2026-08-09");
-    await cycle("c-later", "2026-08-30");
-    const pulse = await service().read();
-    expect(pulse.cycles).toMatchObject({ active: 2, endingSoon: 1 });
   });
 });
 
@@ -325,7 +273,6 @@ describe("without an event log", () => {
     await issue("todo");
     const svc = new WorkspacePulseService({
       issues,
-      cycles,
       projects,
       initiatives,
       tasks,

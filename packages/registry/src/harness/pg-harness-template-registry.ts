@@ -15,28 +15,12 @@ export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
       parse: (v) => HarnessTemplateSpecSchema.parse(v),
       softDelete: true,
       createdBy: true,
-      teamId: true,
       tags: true,
       origin: true,
     });
   }
-  register(
-    tenant: string,
-    spec: HarnessTemplateSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    return this.store.register(tenant, spec, createdBy, teamId, origin);
-  }
-  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (_shared/seeded),
-  // which is NOT "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
-    return this.store.teamOfVersion(tenant, id, version);
-  }
-  // Ownership transfer — every version of the entity, tenant-owned only (see PgVersionedStore.moveToTeam).
-  moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
-    return this.store.moveToTeam(tenant, id, teamId);
+  register(tenant: string, spec: HarnessTemplateSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    return this.store.register(tenant, spec, createdBy, origin);
   }
 
   has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -58,7 +42,6 @@ export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
         id: m.id,
         versions: m.versions,
         owner: m.owner,
-        ...(m.teamId !== undefined ? { teamId: m.teamId } : {}),
       })),
       (id, version) => this.get(tenant, id, version),
     );

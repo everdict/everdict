@@ -9,7 +9,6 @@ import {
   judgesSchema,
 } from '@/entities/judge'
 import { membersSchema } from '@/entities/member'
-import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -47,10 +46,6 @@ export async function JudgeListView({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch((): Team[] => [])
 
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
   for (const m of members)
@@ -103,8 +98,7 @@ export async function JudgeListView({
           judges={judges}
           currentWorkspace={currentWorkspace}
           authors={authors}
-          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
-          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
+          scope={scope}
           canDelete={canDeleteJudges}
         />
       )}

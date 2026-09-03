@@ -59,22 +59,6 @@ tenant's own harness and falls back to the **`_shared`** owner for first-party h
 registers under `_shared` by default). `loadHarnessDir(dir, { into, tenant })` chooses the owner. The HTTP
 surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/tenancy.md`.
 
-### Handing an entity to another team (`moveToTeam`)
-The owning team (`team_id`, migration `0106`) is registry metadata beside `created_by`, so it can be **changed**
-without touching content — which is the whole reason it lives outside the versioned spec. `moveToTeam(tenant, id,
-teamId)` on the harness-instance / harness-template / dataset / judge registries is that change:
-
-- **Entity-wide, never per version.** Reads answer ownership off the newest own version (`teamOfEntity`), so a
-  split id would change owner the next time somebody registered a release. Tombstoned versions move too — a
-  tombstone is revived by re-registering identical content, and it must not come back under the team that no
-  longer owns the id.
-- **Tenant directly-owned and live only.** A `_shared` first-party entry is not a workspace's to re-file, and an
-  id whose every version is a tombstone is invisible to every read → `NotFoundError` for both, no separate check.
-- **No version is minted** and `specsEqual`/immutability are untouched: nothing about the content changed.
-- Authorization is the CALLER's (`moveCapabilityToTeam` in `@everdict/application-control`) — the same split
-  `softDelete` follows. It authorizes BOTH the source and the destination team, on the entity's existing
-  content-mutation action, and emits `<subject>.moved`. See `docs/auth.md` §The team axis.
-
 ## Rubrics (`RubricRegistry`)
 Rubrics — HOW to judge: freeform `text` and/or named `criteria` plus an optional `promptTemplate`
 (`docs/architecture/eval-domain-model.md` S3) — are their own versioned entity, mirroring the judge registry:
@@ -152,13 +136,11 @@ away.
 
 Three rules make it work:
 
-- **Metadata beside the spec, never inside it** — the same layer `created_by`, `team_id` and version tags live
-  on. Versions are immutable, so a spec-resident origin would mean two versions born from the same issue stop
+- **Metadata beside the spec, never inside it** — the same layer `created_by` and version tags live on. Versions are immutable, so a spec-resident origin would mean two versions born from the same issue stop
   being comparable, and re-stating where something came from would mint a version of unchanged content. It is
   excluded from `specsEqual`, so a differing origin is never a 409.
-- **First answer wins.** `register` fills an UNSTAMPED version and never rewrites a stamped one (`origin IS NULL`
-  is the guard, exactly like the team-adoption rule beside it): re-registering identical content is not a second
-  birth.
+- **First answer wins.** `register` fills an UNSTAMPED version and never rewrites a stamped one (`origin IS NULL` is the guard):
+  re-registering identical content is not a second birth.
 - **Record-embedded, not derived from the event log.** The `*.registered` facts are swept
   (`deleteOlderThan`), and "why does this judge exist" is asked long after — the same reasoning behind the
   tracker's durable per-record history.
@@ -168,8 +150,8 @@ route/tool decides `via`, the agent identity comes from the attribution the call
 (`x-everdict-agent-id` / `-name` / `-conversation-id`, the same headers `RevisionedWorkspaceFs` records), and
 `from` is DECLARED — an `origin` sibling on the register body (the spec schema strips it) or the `fromIssue` /
 `originNote` arguments on `create_judge` / `create_dataset` / `create_harness`. A declared **issue** reference is
-resolved to the issue's stable record id with its identifier+title snapshotted as `label`, because `ENG-12` is
-re-minted when an issue moves team.
+resolved to the issue's stable record id with its identifier+title snapshotted as `label`, because the
+identifier is a name the record can be re-issued under (migration `0211` did exactly that) while the id is not.
 
 Storage: an `origin jsonb` column on every versioned table (migration `0111_capability_origin`), read back
 defensively (`parseCapabilityOrigin` — a malformed stamp degrades to "unknown origin" and never breaks the list

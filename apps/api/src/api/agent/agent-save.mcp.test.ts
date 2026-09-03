@@ -13,6 +13,18 @@ import { type McpDeps, buildMcpServer } from "../../mcp.js";
 // the evolve loop adopts a winning candidate through THIS tool, so the declared issue must land as the
 // version's origin the same way the HTTP door records it (BFF↔MCP parity).
 
+// The workspace mints one sequence, so an issue's identifier is a prefix and a counter — deterministic here
+// because a test that asserts on `EVD-1` needs to know which issue that is.
+const numberAllocator = (() => {
+  let n = 0;
+  return {
+    async allocateForIssue() {
+      n += 1;
+      return { number: n, identifier: `EVD-${n}` };
+    },
+  };
+})();
+
 const unusedDispatcher: Dispatcher = {
   async dispatch() {
     throw new Error("dispatcher is unused in agent-save MCP tests");
@@ -30,11 +42,7 @@ const AGENT = JSON.stringify({
 function makeDeps(): { deps: McpDeps; agents: InMemoryAgentRegistry; issues: IssueService } {
   const agents = new InMemoryAgentRegistry();
   const issues = new IssueService({
-    teams: {
-      async allocateForIssue() {
-        return { team: { id: "team-eng" }, grant: { number: 1, identifier: "ENG-1" } };
-      },
-    },
+    numbers: numberAllocator,
     store: new InMemoryIssueStore(),
     scorecards: new InMemoryScorecardStore(),
   });
@@ -100,80 +108,5 @@ describe("save_agent origin — the MCP save records the declared issue, and a b
       via: "mcp",
       from: { type: "agent", id: "helper", version: "1.0.0" },
     });
-  });
-});
-
-// ── [R118 COUNTEREXAMPLE] THE MCP SAVE DOOR GATES ON THE AGENT'S TEAM TOO ───────────────────────────
-//
-// `save_agent` ran a bare `agents:write` with no resource scope while `saveAgent` PRESERVES the owner — so
-// an agent on team-b could save over team-a's agent and mint a team-a-owned version. BFF↔MCP parity is
-// structural (rule `api-layer`): a gate one transport carries and the other does not is the whole shape.
-//
-// Seen RED with the scope removed: "another team's agent gained a version through MCP".
-describe("[R118 COUNTEREXAMPLE] save_agent refuses another team's agent", () => {
-  it("REFUSES, and registers nothing", async () => {
-    const { deps, agents } = makeDeps();
-    await agents.register(
-      "acme",
-      {
-        id: "helper",
-        version: "1.0.0",
-        description: "d",
-        instructions: "be brief",
-        mcpServers: [],
-        capabilities: [],
-        tags: [],
-        disabledDefaults: [],
-        toolSecretBindings: {},
-        triggers: [],
-        enabled: true,
-      } as never,
-      "u-a",
-      "team-a",
-    );
-    const client = await connect(deps, ["team-b"]);
-
-    const res = await client.callTool({
-      name: "save_agent",
-      arguments: { id: "helper", agent: JSON.stringify({ instructions: "something else", mcpServers: [] }) },
-    });
-
-    expect(textOf(res), "another team's agent gained a version through MCP").toMatch(
-      /FORBIDDEN|not on the team|permission/i,
-    );
-    expect(await agents.ownVersions("acme", "helper"), "the refused save registered a version anyway").toEqual([
-      "1.0.0",
-    ]);
-  });
-
-  it("ALLOWS the owning team — the control", async () => {
-    const { deps, agents } = makeDeps();
-    await agents.register(
-      "acme",
-      {
-        id: "helper",
-        version: "1.0.0",
-        description: "d",
-        instructions: "be brief",
-        mcpServers: [],
-        capabilities: [],
-        tags: [],
-        disabledDefaults: [],
-        toolSecretBindings: {},
-        triggers: [],
-        enabled: true,
-      } as never,
-      "u-a",
-      "team-a",
-    );
-    const client = await connect(deps, ["team-a"]);
-
-    const res = await client.callTool({
-      name: "save_agent",
-      arguments: { id: "helper", agent: JSON.stringify({ instructions: "something else", mcpServers: [] }) },
-    });
-
-    expect(textOf(res), "the agent's own team was refused its edit").not.toMatch(/FORBIDDEN/i);
-    expect((await agents.ownVersions("acme", "helper")).length).toBe(2);
   });
 });

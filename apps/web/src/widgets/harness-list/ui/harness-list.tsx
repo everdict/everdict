@@ -114,7 +114,6 @@ export function HarnessList({
   harnesses,
   relations,
   authors,
-  teams,
   scope,
   canDelete = false,
 }: {
@@ -123,7 +122,6 @@ export function HarnessList({
   relations: Record<string, HarnessRelation>
   authors: Record<string, Author>
   // 팀 축의 이름표 — id 를 사람이 부르는 이름으로 바꾸는 데만 쓴다.
-  teams: TeamOption[]
   scope: ListViewScope
   // Admin — reveal a per-row delete (removes the whole harness); all listed harnesses are workspace-owned (delete-eligible).
   canDelete?: boolean
@@ -162,10 +160,6 @@ export function HarnessList({
     return { name: '—', known: false }
   }
 
-  const teamName = useMemo(
-    () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
-    [teams]
-  )
   const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
 
   // 축의 값은 **이 컬렉션에 있는 것만** 제시한다 — 고르면 언제나 빈 목록인 선택지를 내밀지 않기 위해서다.
@@ -181,14 +175,13 @@ export function HarnessList({
       ),
     })
     return [
-      of('team', (id) => teamName[id] ?? id, list('unset.team')),
       of('category', (value) => value, list('unset.category')),
       of('kind', (value) => value, list('unset.kind')),
       of('creator', creatorName, list('unset.creator')),
       of('tag', (value) => value, list('unset.tag')),
       // 팀이 하나도 없는 워크스페이스에 팀 축을 세워 봐야 고를 것이 없다.
     ].filter((facet) => facet.options.length > 0)
-  }, [harnesses, teamName, list, authors])
+  }, [harnesses, list, authors])
 
   const { total, groups } = useMemo(
     () =>
@@ -210,7 +203,6 @@ export function HarnessList({
           <span className="truncate font-mono text-[11.5px]">{key}</span>
         </span>
       )
-    if (view.display.grouping === 'team') return teamName[key] ?? key
     if (view.display.grouping === 'creator') return creatorName(key)
     return key
   }

@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { opsReportDocs } from "./ops-report.docs.js";
 
@@ -22,12 +21,10 @@ export function registerWorkspaceOpsReportRoutes(app: FastifyInstance, deps: Ser
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     try {
       gate(principal, "scorecards:read");
-      const visibleTeams = await visibleTeamsFor(deps, principal);
       return reply.send(
         await deps.scorecardService.opsReport(principal.workspace, {
           ...(query.data.from !== undefined ? { from: query.data.from } : {}),
           ...(query.data.to !== undefined ? { to: query.data.to } : {}),
-          ...(visibleTeams !== undefined ? { visibleTeams } : {}),
         }),
       );
     } catch (err) {
@@ -46,10 +43,7 @@ export function registerWorkspaceOpsReportRoutes(app: FastifyInstance, deps: Ser
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:read");
-      const visibleTeams = await visibleTeamsFor(deps, principal);
-      const report = await deps.scorecardService.opsReport(principal.workspace, {
-        ...(visibleTeams !== undefined ? { visibleTeams } : {}),
-      });
+      const report = await deps.scorecardService.opsReport(principal.workspace, {});
       const out: string[] = [];
       const gauge = (name: string, help: string, rows: Array<[string, number]>): void => {
         out.push(`# HELP ${name} ${help}`, `# TYPE ${name} gauge`);
@@ -100,12 +94,10 @@ export function registerWorkspaceOpsReportRoutes(app: FastifyInstance, deps: Ser
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     try {
       gate(principal, "scorecards:read");
-      const visibleTeams = await visibleTeamsFor(deps, principal);
       return reply.send(
         await deps.scorecardService.gateAudit(principal.workspace, {
           ...(query.data.from !== undefined ? { from: query.data.from } : {}),
           ...(query.data.to !== undefined ? { to: query.data.to } : {}),
-          ...(visibleTeams !== undefined ? { visibleTeams } : {}),
         }),
       );
     } catch (err) {

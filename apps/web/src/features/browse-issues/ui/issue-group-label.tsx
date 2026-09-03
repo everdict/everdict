@@ -72,8 +72,7 @@ export function IssueGroupLabel({
     )
   }
 
-  const name =
-    groupBy === 'project' ? directories.projectName[groupKey] : directories.cycleName[groupKey]
+  const name = directories.projectName[groupKey]
   // 이름을 못 찾으면 id 를 낸다 — 삭제된 프로젝트를 가리키는 이슈가 그룹을 통째로 잃는 것보다 낫다.
   return <span className="truncate">{name ?? groupKey}</span>
 }

@@ -29,14 +29,12 @@ export function IssueFilterMenu({
   filters,
   directories,
   projects,
-  cycles,
   onToggle,
   onClear,
 }: {
   filters: IssueFilters
   directories: IssueDirectories
   projects: { id: string; name: string }[]
-  cycles: { id: string; name: string }[]
   onToggle: (facet: string, value: string) => void
   onClear: () => void
 }) {
@@ -85,11 +83,6 @@ export function IssueFilterMenu({
             ...projects.map((project) => ({ value: project.id, label: project.name })),
             { value: UNSET, label: t('groupUnset.project') },
           ]
-        case 'cycle':
-          return [
-            ...cycles.map((cycle) => ({ value: cycle.id, label: cycle.name })),
-            { value: UNSET, label: t('groupUnset.cycle') },
-          ]
       }
     }
     return ISSUE_FILTER_FACETS.map((facet) => ({
@@ -97,7 +90,7 @@ export function IssueFilterMenu({
       label: t(`facet.${facet}`),
       options: optionsOf(facet),
     }))
-  }, [directories, projects, cycles, t, tracker])
+  }, [directories, projects, t, tracker])
 
   // 이슈의 필터는 축이 고정된 형태라(어느 축이 있는지 타입이 안다) 공용 메뉴가 쓰는 열린 레코드로 한 번 옮긴다.
   const selected = useMemo((): ListFilters => {

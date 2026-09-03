@@ -10,7 +10,6 @@ import {
 } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
-import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -58,11 +57,6 @@ export async function HarnessListView({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
-  // 팀 축의 이름표 — 필터 메뉴에 uuid 를 늘어놓지 않기 위한 것이라, 실패하면 축만 조용히 사라진다.
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch((): Team[] => [])
 
   const relations = buildHarnessRelations(scorecards)
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
@@ -120,8 +114,7 @@ export async function HarnessListView({
           harnesses={ownHarnesses}
           relations={relations}
           authors={authors}
-          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
-          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
+          scope={scope}
           canDelete={can(principal?.roles, 'harnesses:delete')}
         />
       )}

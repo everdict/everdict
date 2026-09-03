@@ -24,12 +24,6 @@ import {
   type ProjectDetail,
   type ProjectUpdate,
 } from '@/entities/project'
-import {
-  teamHref,
-  TeamKeyBadge,
-  teamsWithSummarySchema,
-  type TeamWithSummary,
-} from '@/entities/team'
 import { HealthBadge } from '@/entities/tracker-health'
 import { TrackerHistory } from '@/entities/tracker-history'
 import { can } from '@/shared/auth/can'
@@ -106,7 +100,7 @@ export default async function ProjectDetailPage({
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
   // degrades only its own slot.
-  const [issues, initiatives, members, teams, updates] = await Promise.all([
+  const [issues, initiatives, members, updates] = await Promise.all([
     controlPlane
       // 프로젝트 상세의 상태별 보드 — 한 프로젝트의 이슈는 한 장에 들어가는 규모이고, 롤업 숫자는 서버가
       // 따로 파생한다(rollup). 여기서 필요한 건 그릴 행뿐이다.
@@ -121,10 +115,6 @@ export default async function ProjectDetailPage({
       .listMembers(ctx)
       .then((r) => membersSchema.parse(r))
       .catch(() => []),
-    controlPlane
-      .listTeams(ctx)
-      .then((r) => teamsWithSummarySchema.parse(r))
-      .catch((): TeamWithSummary[] => []),
     // 올라온 업데이트 — health 색이 바뀐 이유가 여기 있다.
     controlPlane
       .listProjectUpdates(ctx, id)
@@ -139,9 +129,6 @@ export default async function ProjectDetailPage({
     .map((initiativeId) => initiatives.find((i) => i.id === initiativeId))
     .filter((i): i is Initiative => i !== undefined)
   const initiative = projectInitiatives[0]
-  const projectTeams = current.teamIds
-    .map((teamId) => teams.find((x) => x.id === teamId))
-    .filter((x): x is TeamWithSummary => x !== undefined)
   const overdue =
     current.status !== 'completed' &&
     current.status !== 'cancelled' &&
@@ -190,7 +177,6 @@ export default async function ProjectDetailPage({
             workspace={workspace}
             project={current}
             initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
-            teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
           />
         )}
       </div>
@@ -237,26 +223,6 @@ export default async function ProjectDetailPage({
                     <span key={subject} className="truncate">
                       {memberNameOf(actors, subject)}
                     </span>
-                  ))}
-                </span>
-              </PropertyRow>
-            )}
-            {projectTeams.length > 0 && (
-              <PropertyRow label={t('fieldTeams')}>
-                {/* A team key is 2–6 characters, so the chip's width differs per team — flowing them wrapped
-                    each name to its own ragged start once several teams stack. Sharing the key column through
-                    subgrid sizes it to the widest key, so the rows keep the same column rhythm as the goal row
-                    right above (whose icon is fixed-width) no matter how many teams there are. */}
-                <span className="grid min-w-0 grid-cols-[max-content_minmax(0,1fr)] gap-y-1">
-                  {projectTeams.map((row) => (
-                    <Link
-                      key={row.id}
-                      href={teamHref(workspace, row.key)}
-                      className="col-span-2 grid grid-cols-subgrid items-center gap-x-2 transition-colors hover:text-foreground"
-                    >
-                      <TeamKeyBadge teamKey={row.key} />
-                      <span className="truncate">{row.name}</span>
-                    </Link>
                   ))}
                 </span>
               </PropertyRow>

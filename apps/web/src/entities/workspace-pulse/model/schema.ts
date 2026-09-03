@@ -40,12 +40,6 @@ export const workspacePulseSchema = z.object({
     inProgress: z.number(),
     regressed: z.number(),
   }),
-  cycles: z.object({
-    active: z.number(),
-    committed: z.number(),
-    done: z.number(),
-    endingSoon: z.number(),
-  }),
   goals: z.object({
     initiatives: z.number(),
     projects: z.number(),

@@ -48,7 +48,6 @@ export interface ConstitutionalPublisher {
     dataset: { id: string; version: string } & Record<string, unknown>;
     approval: ConstitutionApproval;
     createdBy?: string;
-    teamId?: string;
     origin?: unknown;
   }): Promise<void>;
 }

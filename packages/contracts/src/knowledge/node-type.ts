@@ -24,8 +24,6 @@ export const NODE_TYPES = [
   "issue", // the unit of intent — the problem under evaluation (IssueRecord; key = record id, identifier in attrs)
   "project", // issues under one target date (ProjectRecord)
   "initiative", // the GOAL several projects work toward (InitiativeRecord)
-  "team", // the tracker's grouping layer inside a workspace — owns issues and names them (`ENG-12`)
-  "cycle", // a team's numbered, dated iteration window
 
   // UNDER TEST — the versioned eval subjects & configuration (registry entities keyed by (tenant, id, version))
   "harness", // the agent under test (process | service | command | agent)

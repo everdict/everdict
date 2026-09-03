@@ -11,7 +11,6 @@ import {
 import { harnessesSchema } from '@/entities/harness'
 import { membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
-import { teamsSchema, withResolvedTeamFilter, type Team } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -61,11 +60,6 @@ export async function DatasetListView({
     .listHarnesses(ctx)
     .then((r) => new Set(harnessesSchema.parse(r).map((h) => h.id)))
     .catch(() => undefined)
-  // 팀 축의 이름표 — 실패하면 그 축만 조용히 사라진다.
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch((): Team[] => [])
 
   const relations = buildDatasetRelations(scorecards, liveHarnessIds)
   // For displaying the creator — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
@@ -123,8 +117,7 @@ export async function DatasetListView({
           datasets={ownDatasets}
           relations={relations}
           authors={authors}
-          teams={teams.map((team) => ({ id: team.id, key: team.key, name: team.name }))}
-          scope={{ ...scope, filters: withResolvedTeamFilter(scope.filters, teams) }}
+          scope={scope}
         />
       )}
     </div>

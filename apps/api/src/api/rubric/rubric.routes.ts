@@ -1,9 +1,7 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { RubricSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { rubricDocs } from "./rubric.docs.js";
 
 // rubrics (workspace-owned SSOT, HOW to judge: text and/or criteria + optional prompt template — referenced by judges)
@@ -17,18 +15,16 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
     if (!principal) return reply;
     // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로,
     // 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
       // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "judges:write", owner.gate);
+      gate(principal, "judges:write");
     } catch (err) {
       return sendError(reply, err); // no permission 403 (gate before validation)
     }
     const parsed = RubricSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.rubricRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId);
+      await deps.rubricRegistry.register(principal.workspace, parsed.data, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409
@@ -68,8 +64,7 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
       gate(principal, "judges:read");
       // A rubric is owned like every other eval asset — another team's does not appear, an unowned one does.
       const entries = await deps.rubricRegistry.list(principal.workspace);
-      const seen = await visibleTeamsFor(deps, principal);
-      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
+      return reply.send(entries);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -86,7 +81,6 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
       if (!principal) return reply;
       try {
         gate(principal, "judges:read");
-        await assertEntityVisible(deps, principal, deps.rubricRegistry, principal.workspace, req.params.id, "rubric");
         return reply.send(await deps.rubricRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404

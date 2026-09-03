@@ -15,8 +15,6 @@ import type { InitiativeStore } from "../ports/initiative-store.js";
 import type { IssueStore } from "../ports/issue-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
 import type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "../ports/project-store.js";
-import type { TeamStore } from "../ports/team-store.js";
-
 // Projects group issues under a target date. The service owns the counting (it holds the stores); the domain
 // owns what the count MEANS — completing a project with open issues is refused there, not here.
 
@@ -30,9 +28,6 @@ export interface CreateProjectInput {
   createdBy: string;
   name: string;
   description?: string;
-  // Both many-to-many. Absent teams fall back to the workspace's default team, the same courtesy an issue gets
-  // — a project that names no team would be invisible in the one place people look for their work.
-  teamIds?: string[];
   initiativeIds?: string[];
   // Who is answerable, and who is on it.
   lead?: string;
@@ -55,7 +50,6 @@ export interface ProjectServiceDeps {
   // Read-only, and stores rather than the peer services: the project's own edges have to point at things that
   // exist in THIS workspace, and that check is a store read, not a service call (see the api-layer skill —
   // peer services never call each other).
-  teams: TeamStore;
   defaultTeam?: ProjectDefaultTeamResolver;
   initiatives: InitiativeStore;
   // The posted-update timeline. Absent = this deployment does not carry project updates, and the health routes
@@ -76,14 +70,12 @@ export class ProjectService {
   }
 
   async create(input: CreateProjectInput): Promise<ProjectRecord> {
-    const teamIds = await this.resolveTeams(input.tenant, input.createdBy, input.teamIds);
     await this.assertInitiativesExist(input.tenant, input.initiativeIds ?? []);
     const record = Project.newProject({
       id: this.newId(),
       tenant: input.tenant,
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
-      teamIds,
       initiativeIds: input.initiativeIds ?? [],
       ...(input.lead !== undefined ? { lead: input.lead } : {}),
       ...(input.memberIds !== undefined ? { memberIds: input.memberIds } : {}),
@@ -108,38 +100,6 @@ export class ProjectService {
     return this.deps.store.list(tenant, filter);
   }
 
-  // An edge has to point at something real in THIS workspace: a project claiming a team that does not exist
-  // would sit in a list nobody can open, and one claiming a stranger's initiative would leak that it exists.
-  // Unknown ids are a 400 naming them, never a silent drop — a caller that mistyped one wants to hear about it.
-  private async assertTeamsExist(tenant: string, ids: readonly string[]): Promise<void> {
-    if (ids.length === 0) return;
-    const known = new Set((await this.deps.teams.list(tenant)).map((team) => team.id));
-    const unknown = ids.filter((id) => !known.has(id));
-    if (unknown.length > 0)
-      throw new BadRequestError("BAD_REQUEST", { teamIds: unknown }, `Unknown team(s): ${unknown.join(", ")}.`);
-  }
-
-  // Dropping a team whose issues are still in the project would strand them: an issue may only sit in a project
-  // its own team is on, so those issues would land in a state no write path can produce and no team-scoped list
-  // would show. Refused with the count (the "still holds issues" gate deletion already uses) rather than
-  // silently detaching them — which of those issues leaves the project is the member's decision, not ours.
-  private async assertNoStrandedIssues(
-    tenant: string,
-    record: ProjectRecord,
-    nextTeamIds: readonly string[],
-  ): Promise<void> {
-    const removed = record.teamIds.filter((teamId) => !nextTeamIds.includes(teamId));
-    if (removed.length === 0) return;
-    const issues = await this.deps.issues.list(tenant, { projectId: record.id });
-    const stranded = issues.filter((issue) => removed.includes(issue.teamId));
-    if (stranded.length > 0)
-      throw new ConflictError(
-        "CONFLICT",
-        { project: record.id, teamIds: removed, issues: stranded.length },
-        `${stranded.length} issue(s) in this project belong to the team(s) being removed — move them out of the project first.`,
-      );
-  }
-
   private async assertInitiativesExist(tenant: string, ids: readonly string[]): Promise<void> {
     if (ids.length === 0) return;
     const known = new Set((await this.deps.initiatives.list(tenant)).map((initiative) => initiative.id));
@@ -150,28 +110,6 @@ export class ProjectService {
         { initiativeIds: unknown },
         `Unknown initiative(s): ${unknown.join(", ")}.`,
       );
-  }
-
-  // Named teams are validated; naming none lands the project on the workspace's default team, so it shows up
-  // in the sidebar of the people who will work on it — the same courtesy `teamId` gets on an issue, and now a
-  // requirement rather than a nicety: a project with no team appears in nobody's list and no issue may join it.
-  // The default is resolved through the same lazily-repairing seam filing uses, so the first thing a brand-new
-  // workspace does can be creating a project.
-  private async resolveTeams(tenant: string, by: string, teamIds: string[] | undefined): Promise<string[]> {
-    if (teamIds !== undefined && teamIds.length > 0) {
-      await this.assertTeamsExist(tenant, teamIds);
-      return teamIds;
-    }
-    const fallback = this.deps.defaultTeam
-      ? await this.deps.defaultTeam.ensureDefault(tenant, by)
-      : await this.deps.teams.getDefault(tenant);
-    if (!fallback)
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { tenant },
-        "This workspace has no team yet — create one and name it on the project.",
-      );
-    return [fallback.id];
   }
 
   async get(tenant: string, id: string): Promise<ProjectRecord> {
@@ -190,14 +128,6 @@ export class ProjectService {
 
   async update(tenant: string, id: string, fields: ProjectEditInput, actor: ProjectActor): Promise<ProjectRecord> {
     const record = await this.get(tenant, id);
-    // A list REPLACES what is there, so these run on the value given rather than through the create path's
-    // default-team fallback. Emptying the team list is refused by the aggregate (a project is always somebody's
-    // work); removing a team that still has issues IN this project is refused here, because that store read is
-    // the service's to make.
-    if (fields.teamIds !== undefined) {
-      await this.assertTeamsExist(tenant, fields.teamIds);
-      await this.assertNoStrandedIssues(tenant, record, fields.teamIds);
-    }
     if (fields.initiativeIds !== undefined) await this.assertInitiativesExist(tenant, fields.initiativeIds);
     return this.applyTransition(record, Project.from(record).update(fields, actor.subject, this.now()));
   }

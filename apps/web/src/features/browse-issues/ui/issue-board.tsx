@@ -63,7 +63,7 @@ export function IssueBoard({
   const [resolving, setResolving] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  const draggable = canWrite && groupBy !== 'cycle'
+  const draggable = canWrite
 
   function move(
     id: string,

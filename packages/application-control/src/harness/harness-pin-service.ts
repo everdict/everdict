@@ -1,4 +1,4 @@
-import { BadRequestError, type CapabilityOrigin, ConflictError, type HarnessInstanceSpec } from "@everdict/contracts";
+import { BadRequestError, type CapabilityOrigin, type HarnessInstanceSpec } from "@everdict/contracts";
 import { z } from "zod";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 
@@ -104,25 +104,7 @@ export async function repinHarnessImages(
     from: { type: "harness", id, version: base.version },
     note: origin.note ?? `re-pin: ${Object.keys(body.pins).sort().join(", ")}`.slice(0, 500),
   };
-  // The successor stays with the team that owns the harness (review wave C): ownership is read off the
-  // newest own version, so registering the new latest with no team re-files the entity out of its team.
-  // The base's team is the registry's own answer — same source the transports gate on.
-  // The owner is resolved INSIDE the write (arch-review 92): reading it here and passing it below leaves a
-  // window an ownership transfer fits through — the same window arch-review 77 closed in the adoption lane
-  // and did not look for in its siblings. Re-registering the same content is a no-op; different content at
-  // the same version is a 409 (immutable).
-  const landed = await instances.registerPreservingOwner(
-    tenant,
-    next,
-    subject,
-    stamped,
-    ...(authority !== undefined ? ([authority] as const) : ([] as const)),
-  );
-  if (landed === "owner_moved")
-    throw new ConflictError(
-      "CONFLICT",
-      { harness: id, authorized: authority?.expectedOwnerTeamId ?? null },
-      "this harness changed teams after the re-pin was authorized, so nothing was registered — read it back and try again",
-    );
+  // Re-registering the same content is a no-op; different content at the same version is a 409 (immutable).
+  await instances.register(tenant, next, subject, stamped);
   return { workspace: tenant, id, version, base: base.version, unchanged: false, pins: merged };
 }

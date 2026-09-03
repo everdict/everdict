@@ -143,7 +143,6 @@ describe("spec harvest — the born_from lineage and team scoping", () => {
     const res = harvestDataset(
       {
         ...meta,
-        teamId: "team-eng",
         origin: { via: "mcp", from: { type: "issue", id: "i1", label: "ENG-12" }, agentId: "agent-7" },
       },
       ds,
@@ -152,7 +151,6 @@ describe("spec harvest — the born_from lineage and team scoping", () => {
     expect(p.get("born_from")).toBe(nodeId("acme", { type: "issue", key: "i1" }));
     const born = res.edges.find((e) => e.predicate === "born_from");
     expect(born?.edgeAttrs).toMatchObject({ via: "mcp", agentId: "agent-7" });
-    expect(p.get("belongs_to")).toBe(nodeId("acme", { type: "team", key: "team-eng" }));
     valid(res);
   });
 
@@ -164,7 +162,6 @@ describe("spec harvest — the born_from lineage and team scoping", () => {
   it("emits no lineage edges when the registry has no origin stamp for the version", () => {
     const res = harvestDataset(meta, ds);
     expect(res.edges.some((e) => e.predicate === "born_from")).toBe(false);
-    expect(res.edges.some((e) => e.predicate === "belongs_to")).toBe(false);
   });
 });
 

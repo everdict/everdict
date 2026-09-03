@@ -324,7 +324,6 @@ export class CampaignAdoptionService {
         // about an adoption that landed: did this create the version, or did the campaign prove a version
         // that already existed? Those are different stories about the same `registered` state.
         created: landed.kind === "created",
-        ...(recorded.proof.teamId !== undefined ? { teamId: recorded.proof.teamId } : {}),
       },
     };
     const spent = await this.deps.operations.markRegistered(
@@ -419,7 +418,6 @@ export class CampaignAdoptionService {
         prNumber: debt.prNumber,
         mergedSha: landed.sha,
         issueId: recorded.proof.issueId,
-        ...(recorded.proof.teamId !== undefined ? { teamId: recorded.proof.teamId } : {}),
       },
     };
     const paid = await this.deps.operations.markMerged(

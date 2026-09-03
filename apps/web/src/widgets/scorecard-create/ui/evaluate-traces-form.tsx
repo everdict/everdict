@@ -8,7 +8,6 @@ import { useTranslations } from 'next-intl'
 import { TraceBrowser, type TraceSelection } from '@/features/browse-traces'
 import { evaluateTracesAction } from '@/features/ingest-scorecard'
 import { JudgePicker, type JudgePickerChoice, type JudgeRef } from '@/entities/judge'
-import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import type { TraceSummary } from '@/entities/trace'
 import type { TraceSourceConfig } from '@/entities/trace-source'
 import { Button } from '@/shared/ui/button'
@@ -23,21 +22,14 @@ import { InfoTip } from '@/shared/ui/tooltip'
 export function EvaluateTracesForm({
   judges,
   traceSources,
-  teams = [],
-  defaultTeamId,
 }: {
   judges: JudgePickerChoice[]
   traceSources: TraceSourceConfig[]
-  // The owning-team choices for the ingested batch (only teams the caller can create into). With no harness to
-  // inherit from, the default mirrors the control plane's fallback — the caller's own team.
-  teams?: TeamPickerOption[]
-  defaultTeamId?: string
 }) {
   const t = useTranslations('evaluateTraces')
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [sel, setSel] = useState<{ sourceName: string; ids: Set<string> } | null>(null)
-  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [judgeRefs, setJudgeRefs] = useState<JudgeRef[]>([])
   const [serverError, setServerError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -65,7 +57,6 @@ export function EvaluateTracesForm({
       sourceName: sel.sourceName,
       traceIds: [...sel.ids],
       judges: judgeRefs,
-      ...(teamId ? { teamId } : {}),
     })
     setBusy(false)
     if (res.ok && res.id) router.push(`/${workspace}/scorecard/${res.id}`)
@@ -97,7 +88,6 @@ export function EvaluateTracesForm({
           <p className="text-[12px] text-muted-foreground">{t('judgesHelp')}</p>
         </div>
 
-        <TeamPicker id="eval-team" teams={teams} value={teamId} onChange={setTeamId} />
 
         {serverError && <Callout tone="danger">{serverError}</Callout>}
 

@@ -34,23 +34,6 @@ function queued(overrides: Partial<Parameters<typeof ScorecardBatch.newQueued>[0
 }
 
 describe("ScorecardBatch — factories", () => {
-  it("carries the owning team onto the record — a factory that drops it leaves every batch unowned", () => {
-    // The route resolves the owner and hands it in; a field the factory does not copy is silently lost, and the
-    // whole team axis then reads as "nobody's" no matter what the store or the list filter do.
-    expect(queued({ teamId: "team-eng" }).teamId).toBe("team-eng");
-    expect(queued().teamId).toBeUndefined(); // ...and absent stays absent (unowned = the workspace's)
-    expect(
-      ScorecardBatch.newQueuedIngest({
-        id: "sc2",
-        tenant: "acme",
-        dataset: { id: "d", version: "1.0.0" },
-        harness: { id: "h", version: "1" },
-        teamId: "team-eng",
-        now: NOW,
-      }).teamId,
-    ).toBe("team-eng");
-  });
-
   it("newQueued assembles a schema-valid queued batch record with the full re-drive envelope", () => {
     const record = queued({
       origin: { source: "github-actions", repo: "acme/app", prNumber: 7 },

@@ -64,7 +64,6 @@ export interface CampaignBuildDeps {
       id: string,
     ): Promise<{
       id: string;
-      teamId?: string;
       // Widened for the environment subject (harness-definability-spec.md §2); this service still refuses
       // anything but a harness — building a candidate IMAGE is a harness slot's recipe, and an environment
       // candidate is authored and registered rather than built.
@@ -279,7 +278,6 @@ export class CampaignBuildService {
           buildSetId: setId,
           slot,
           error,
-          ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
         },
       };
       await this.deps.builds.settleSet(
@@ -325,7 +323,6 @@ export class CampaignBuildService {
           sha,
           candidateVersion: version,
           image: Object.values(images).join(" "),
-          ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
         },
       };
       const outcome = await this.deps.builds.settleSet(
@@ -625,7 +622,6 @@ export class CampaignBuildService {
                   sha: observedSha,
                   candidateVersion: minted.version,
                   image: ref,
-                  ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
                 },
               },
             ]
@@ -666,7 +662,6 @@ export class CampaignBuildService {
           buildId: id,
           slot: record.slot,
           error,
-          ...(campaign.teamId !== undefined ? { teamId: campaign.teamId } : {}),
         },
       };
       await this.deps.builds

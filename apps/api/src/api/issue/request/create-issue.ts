@@ -22,7 +22,6 @@ const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a Y
 export const CreateIssueBodySchema = z.object({
   // Absent = the workspace's default team. Teams give an issue an owner; making every caller name one would
   // just move that decision outward for no gain.
-  teamId: z.string().min(1).max(200).optional(),
   title: z.string().min(1).max(300),
   description: z.string().max(50_000).optional(),
   // A member filing by hand usually starts in the backlog; `done` is refused here because closing an issue
@@ -39,7 +38,6 @@ export const CreateIssueBodySchema = z.object({
   // File it straight into an iteration. The service already validated this on create (it may only be one of the
   // owning team's cycles) — the body simply never offered it, so the only way to put a NEW issue in the current
   // cycle was to create it and then edit it.
-  cycleId: z.string().min(1).max(200).optional(),
   projectId: z.string().min(1).max(200).optional(),
   assignee: z.string().min(1).max(200).optional(),
   // Registry ids (GET /issue-labels), not names — a label is a record now, so an issue points at one.
@@ -54,8 +52,4 @@ export const CreateIssueBodySchema = z.object({
   // producer, which no gate can see because the field is required on the record with a legal default.
   //
   // Opt-in, so a member filing by hand is unaffected: absent still means "straight into the workflow".
-  inTriage: z
-    .boolean()
-    .optional()
-    .describe("file into the team's triage queue instead of the workflow — accept or decline decides"),
 });

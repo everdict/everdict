@@ -9,7 +9,7 @@ import type { PlatformEventKind } from "./platform-event.js";
 // dashboard that fans out eight list reads is a dashboard that gets slower every time the product grows.
 //
 // Two halves, deliberately named apart:
-//   • the COUNTS are the state right now (open issues, active cycles, pending approvals) — exact, from the
+//   • the COUNTS are the state right now (open issues, live goals, pending approvals) — exact, from the
 //     aggregates the stores already answer;
 //   • the TREND is the recorded past — derived from the platform-event log, which is the only place the
 //     workspace's history is written down in one shape. That log has a retention window (EO4 pruning), so the
@@ -30,7 +30,6 @@ const ACTIVITY_AXIS_BY_KIND = {
   // The tracker — the "why we evaluate" layer, plus the coordination around it.
   "issue.created": "work",
   "issue.status_changed": "work",
-  "issue.moved": "work",
   "issue.linked": "work",
   "issue_label.created": "work",
   "issue_label.updated": "work",
@@ -41,11 +40,6 @@ const ACTIVITY_AXIS_BY_KIND = {
   "initiative.created": "work",
   "initiative.status_changed": "work",
   "initiative.update_posted": "work",
-  "cycle.created": "work",
-  "cycle.completed": "work",
-  "team.created": "work",
-  "team.member_added": "work",
-  "team.member_removed": "work",
   "task.created": "work",
   "task.claimed": "work",
   "task.completed": "work",
@@ -164,13 +158,6 @@ export const WorkspacePulseSchema = z.object({
     open: z.number().int().nonnegative(), // everything not done/cancelled, `regressed` included
     inProgress: z.number().int().nonnegative(),
     regressed: z.number().int().nonnegative(), // a resolution that stopped holding — the alarm
-  }),
-  // The iterations that are running, and how much of what they committed to is finished.
-  cycles: z.object({
-    active: z.number().int().nonnegative(),
-    committed: z.number().int().nonnegative(),
-    done: z.number().int().nonnegative(),
-    endingSoon: z.number().int().nonnegative(), // closing within a week — what a planning conversation is about
   }),
   // What the workspace is trying to achieve, and how much of it somebody has flagged.
   goals: z.object({

@@ -13,7 +13,6 @@ class FakeRegistry {
     tenant: string,
     spec: { id: string; version: string },
     _createdBy?: string,
-    _teamId?: string,
     _origin?: CapabilityOrigin,
   ): Promise<void> {
     if (spec.version === "boom") throw new Error("registry refused");
@@ -50,7 +49,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const registry = withOriginBacklink(new FakeRegistry(), "judge", issues);
 
     // When
-    await registry.register("acme", { id: "truncation", version: "1.0.0" }, "alice", undefined, FROM_ISSUE);
+    await registry.register("acme", { id: "truncation", version: "1.0.0" }, "alice", FROM_ISSUE);
 
     // Then: linked at ID level — an issue means "this judge", not "this judge at 1.0.0" (the regression watch
     // matches at id level for the same reason).
@@ -68,7 +67,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const { calls, issues } = linkRecorder();
     const registry = withOriginBacklink(new FakeRegistry(), "dataset", issues);
 
-    await registry.register("acme", { id: "truncated-answers", version: "1.0.0" }, "alice", undefined, FROM_ISSUE);
+    await registry.register("acme", { id: "truncated-answers", version: "1.0.0" }, "alice", FROM_ISSUE);
 
     expect(calls[0]?.actor).toEqual({
       subject: "alice",
@@ -83,7 +82,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const registry = withOriginBacklink(new FakeRegistry(), "judge", issues);
 
     await expect(
-      registry.register("acme", { id: "truncation", version: "2.0.0" }, "alice", undefined, FROM_ISSUE),
+      registry.register("acme", { id: "truncation", version: "2.0.0" }, "alice", FROM_ISSUE),
     ).resolves.toBeUndefined();
     expect(calls).toHaveLength(1);
   });
@@ -98,7 +97,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     });
 
     await expect(
-      registry.register("acme", { id: "truncation", version: "1.0.0" }, "alice", undefined, FROM_ISSUE),
+      registry.register("acme", { id: "truncation", version: "1.0.0" }, "alice", FROM_ISSUE),
     ).resolves.toBeUndefined();
   });
 
@@ -106,9 +105,9 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const { calls, issues } = linkRecorder();
     const registry = withOriginBacklink(new FakeRegistry(), "judge", issues);
 
-    await expect(
-      registry.register("acme", { id: "truncation", version: "boom" }, "alice", undefined, FROM_ISSUE),
-    ).rejects.toThrow("registry refused");
+    await expect(registry.register("acme", { id: "truncation", version: "boom" }, "alice", FROM_ISSUE)).rejects.toThrow(
+      "registry refused",
+    );
     expect(calls).toHaveLength(0);
   });
 
@@ -116,7 +115,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const { calls, issues } = linkRecorder();
     const registry = withOriginBacklink(new FakeRegistry(), "judge", issues);
 
-    await registry.register("acme", { id: "a", version: "1.0.0" }, "alice", undefined, {
+    await registry.register("acme", { id: "a", version: "1.0.0" }, "alice", {
       via: "web",
       from: { type: "scorecard", id: "sc-1" },
     });
@@ -129,7 +128,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const { calls, issues } = linkRecorder();
     const registry = withOriginBacklink(new FakeRegistry(), "judge", issues);
 
-    await registry.register("_shared", { id: "first-party", version: "1.0.0" }, "alice", undefined, FROM_ISSUE);
+    await registry.register("_shared", { id: "first-party", version: "1.0.0" }, "alice", FROM_ISSUE);
 
     expect(calls).toHaveLength(0);
   });
@@ -138,7 +137,7 @@ describe("withOriginBacklink — a capability born from an issue links itself ba
     const { issues } = linkRecorder();
     const registry = withOriginBacklink(new FakeRegistry(), "judge", issues);
 
-    await registry.register("acme", { id: "truncation", version: "1.0.0" }, "alice", undefined, FROM_ISSUE);
+    await registry.register("acme", { id: "truncation", version: "1.0.0" }, "alice", FROM_ISSUE);
 
     expect(await registry.versions("acme", "truncation")).toEqual(["1.0.0"]);
   });

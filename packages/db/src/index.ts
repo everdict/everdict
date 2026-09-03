@@ -197,14 +197,13 @@ export {
   PgVerificationDecisionStore,
 } from "./activity/verification-decision-store.js";
 // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, facts on the E0 same-tx outbox.
-export { InMemoryCycleStore, PgCycleStore } from "./tracker/cycle-store.js";
 export { InMemoryIssueStore, PgIssueStore } from "./tracker/issue-store.js";
+export { InMemoryIssueNumberAllocator, PgIssueNumberAllocator } from "./tracker/issue-number-store.js";
 export { PgAdoptionOperationStore } from "./evolution/adoption-operation-store.js";
 export { InMemoryEvolutionCampaignStore, PgEvolutionCampaignStore } from "./evolution/campaign-store.js";
 export { InMemoryCampaignBuildStore, PgCampaignBuildStore } from "./evolution/campaign-build-store.js";
 export { InMemoryCampaignEvidenceStore, PgCampaignEvidenceStore } from "./evolution/campaign-evidence-store.js";
 export { InMemoryIssueLabelStore, PgIssueLabelStore } from "./tracker/issue-label-store.js";
-export { InMemoryTeamStore, PgTeamStore } from "./tracker/team-store.js";
 export { InMemoryWorkflowStateStore, PgWorkflowStateStore } from "./tracker/workflow-state-store.js";
 export {
   InMemoryProjectStore,

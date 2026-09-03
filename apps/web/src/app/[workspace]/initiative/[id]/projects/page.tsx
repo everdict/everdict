@@ -15,7 +15,7 @@ import {
   type ProjectStatus,
 } from '@/entities/project'
 import { HealthBadge } from '@/entities/tracker-health'
-import { canInTeam } from '@/shared/auth/can'
+import { can } from '@/shared/auth/can'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
@@ -49,7 +49,7 @@ export default async function InitiativeProjectsPage({
     .catch((): Project[] => [])
   const candidates = projectCandidatesFor(id, allProjects)
   // 프로젝트를 목표에 넣고 빼는 것은 프로젝트를 고치는 일이다 — 트래커 쓰기 권한과 같은 판정.
-  const canEdit = canInTeam({ roles }, 'issues:write', undefined)
+  const canEdit = can(roles, 'issues:write')
 
   const { readiness } = initiative
   const actors = memberDirectoryOf(members)

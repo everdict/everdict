@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import { TEAM_SECTIONS, teamHref, teamSectionHref } from '@/entities/team'
 
 import { ALL_NAV_ITEMS, ALL_SIDEBAR_ROWS, isNavItemActive } from './nav-config'
 
@@ -51,18 +50,6 @@ describe('sidebar active state — at most one row owns a path', () => {
     // A resource with NO workspace-wide row (the all-issues list is palette-only) still lights nothing — a
     // detail address must not invent an owner the collection never had.
     expect(activeRows('/acme/issue/ENG-12')).toEqual([])
-  })
-
-  // 회귀: `/teams` 행이 접두사만 보고 팀 하위 페이지를 자기 것이라 주장해, 팀의 자기 행과 함께 두 개가 켜졌다.
-  // 팀 스코프 경로의 주인은 사이드바의 팀 그룹이며, 워크스페이스 나브의 어떤 행도 그 경로를 갖지 않는다.
-  it('hands every team-scoped path to the team group, claiming none of it', () => {
-    expect(activeRows(teamHref('acme', 'ENG'))).toEqual([])
-    // 섹션 목록 자체를 읽어 온다 — 팀이 소유하는 자원이 늘거나 줄어도 이 불변식이 같이 따라간다.
-    for (const section of TEAM_SECTIONS) {
-      expect(activeRows(teamSectionHref('acme', 'ENG', section))).toEqual([])
-    }
-    // 상세 화면도 그 섹션의 것이다. 주소는 빌더로 만든다 — 팀 세그먼트 철자가 바뀌어도 이 진술은 살아남는다.
-    expect(activeRows(`${teamSectionHref('acme', 'ENG', 'issues')}/ENG-12`)).toEqual([])
   })
 
   // 에이전트 저작 표면이 아직 얇아서 사이드바 행을 내리기로 했다 — 그렇다고 주소가 사라진 것은 아니다.

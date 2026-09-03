@@ -71,22 +71,6 @@ describe("InMemoryRubricRegistry (tenant-owned)", () => {
     await expect(r.setVersionTags("acme", "r", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("list shows owned + shared and layers on owner + list metadata (subtitle/versionCount)", async () => {
-    const r = new InMemoryRubricRegistry();
-    await r.register(SHARED_TENANT, rubric("correctness", "1.0.0"));
-    await r.register("acme", rubric("mine", "1.0.0", { criteria: [{ id: "accuracy", description: "is it right" }] }));
-    const list = await r.list("acme");
-    expect(list.map((x) => x.id)).toEqual(["correctness", "mine"]);
-    expect(list[1]).toMatchObject({
-      id: "mine",
-      owner: "acme",
-      versions: ["1.0.0"],
-      latestVersion: "1.0.0",
-      versionCount: 1,
-      subtitle: "text · 1 criteria",
-    });
-  });
-
   it("register's createdBy (subject) is surfaced as list metadata (first-registered version)", async () => {
     const r = new InMemoryRubricRegistry();
     await r.register("acme", rubric("mine", "1.0.0"), "user-carol");
@@ -173,11 +157,12 @@ function fakePg(): SqlClient {
         // (arch-review 119).
         return { rows: [{}] as R[] };
       }
-      // `WITH authorized AS (…) SELECT 1 FROM authorized` — the exact-version lane's settle (arch-review 120).
+      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane's settle.
       // This double holds no team_id, so the authority arm it models is always satisfied and the statement
       // returns its row. A double that answered `[]` here would report every idempotent re-register as a
       // refusal, which is the always-succeeds-double law with the polarity flipped (rule `testing`).
-      if (/^WITH authorized AS /.test(t)) return { rows: [{ one: 1 }] as R[] };
+      if (/^WITH revived AS \(UPDATE/.test(t) || /^WITH origined AS \(UPDATE/.test(t))
+        return { rows: [{ one: 1 }] as R[] };
       return { rows: [] };
     },
   };
@@ -208,5 +193,21 @@ describe("PgRubricRegistry (tenant-owned)", () => {
     await r.setVersionTags("acme", "r", "1.0.0", []);
     expect(await r.versionTags("acme", "r")).toEqual({});
     await expect(r.setVersionTags("acme", "r", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("list shows owned + shared and layers on owner + list metadata (subtitle/versionCount)", async () => {
+    const r = new InMemoryRubricRegistry();
+    await r.register(SHARED_TENANT, rubric("correctness", "1.0.0"));
+    await r.register("acme", rubric("mine", "1.0.0", { criteria: [{ id: "accuracy", description: "is it right" }] }));
+    const list = await r.list("acme");
+    expect(list.map((x) => x.id)).toEqual(["correctness", "mine"]);
+    expect(list[1]).toMatchObject({
+      id: "mine",
+      owner: "acme",
+      versions: ["1.0.0"],
+      latestVersion: "1.0.0",
+      versionCount: 1,
+      subtitle: "text · 1 criteria",
+    });
   });
 });

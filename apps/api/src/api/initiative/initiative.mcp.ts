@@ -1,7 +1,6 @@
 import { InitiativeStatusSchema, TrackerHealthSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 const CalendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a YYYY-MM-DD date.");
@@ -101,7 +100,7 @@ export function registerInitiativeTools(server: McpServer, ctx: McpToolContext):
     (a) =>
       run(principal, "issues:read", async () =>
         // The goal is workspace-level; what narrows is which projects and blockers under it are NAMED.
-        ok(await initiatives.detail(ws, a.id, await visibleTeamsFor(ctx.deps, principal))),
+        ok(await initiatives.detail(ws, a.id)),
       ),
   );
 

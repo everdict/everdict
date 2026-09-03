@@ -5,7 +5,6 @@ import { useParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 
 import { EnvironmentPicker } from '@/features/pick-environment'
-import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -43,16 +42,10 @@ export function RegisterDatasetForm({
   existingDatasets = [],
   prefill,
   lockId = false,
-  teams = [],
-  defaultTeamId,
 }: {
   existingDatasets?: { id: string; versions: string[] }[]
   prefill?: DatasetPrefill
   lockId?: boolean
-  // The owning-team choices (new-dataset page only — a new VERSION keeps its owner; moving is the move
-  // endpoint's job). Empty = no picker, the control plane's own fallback decides.
-  teams?: TeamPickerOption[]
-  defaultTeamId?: string
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -60,7 +53,6 @@ export function RegisterDatasetForm({
   const [id, setId] = useState(prefill?.id ?? '')
   const [version, setVersion] = useState('1.0.0')
   const existing = versionsForId(existingDatasets, id)
-  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [description, setDescription] = useState(prefill?.description ?? '')
   const [tagsText, setTagsText] = useState((prefill?.tags ?? []).join(', '))
   const [casesText, setCasesText] = useState(prefill?.casesText ?? SAMPLE_CASES)
@@ -74,7 +66,6 @@ export function RegisterDatasetForm({
       id,
       version,
       // The owning team rides BESIDE the spec — the route reads it, the spec schema strips it.
-      ...(teamId ? { teamId } : {}),
       ...(description ? { description } : {}),
       cases: JSON.parse(casesText),
       tags: tagsText
@@ -167,23 +158,6 @@ export function RegisterDatasetForm({
         />
       </div>
       <VersionField existing={existing} value={version} onChange={setVersion} />
-
-      {/* A new VERSION keeps its owner — the rule this file's `teams` prop already states, applied to the
-          case where the typed id turns out to exist. The control plane refuses a register that would move an
-          entity between teams, so offering the choice here would offer something that cannot be chosen. */}
-      {existing.length === 0 && (
-        <TeamPicker id="dataset-team" teams={teams} value={teamId} onChange={setTeamId} />
-      )}
-
-      <div className="space-y-1.5">
-        <Label htmlFor="description">{t('descriptionLabel')}</Label>
-        <Input
-          id="description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder={t('descriptionPlaceholder')}
-        />
-      </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="tags">{t('tagsLabel')}</Label>

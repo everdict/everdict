@@ -7,9 +7,9 @@ import type {
   PlatformEventRecord,
   ScorecardRecord,
 } from "@everdict/contracts";
-import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import { issueCountsByGroup, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore } from "../ports/issue-store.js";
 import type { NotificationStore } from "../ports/notification-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import {
@@ -23,12 +23,12 @@ import { IssueService } from "./issue-service.js";
 import { regressionWatch } from "./regression-watch.js";
 
 // Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
-const teamAllocator = (() => {
+const numberAllocator = (() => {
   let n = 0;
   return {
     async allocateForIssue() {
       n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
+      return { number: n, identifier: `EVD-${n}` };
     },
   };
 })();
@@ -65,9 +65,6 @@ class FakeIssueStore implements IssueStore {
   // Derived from this fake's own `list` via the kernel helpers, so it cannot disagree with production.
   async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
     return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
-  }
-  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
-    return issueCountsByTeam(await this.list(tenant));
   }
   async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
     return issueCountsByGroup(await this.list(tenant, filter), groupBy);
@@ -199,7 +196,7 @@ describe("regressionWatch", () => {
   function watcher() {
     return regressionWatch({
       issues,
-      issueService: new IssueService({ store: issues, scorecards, teams: teamAllocator, now: () => NOW }),
+      issueService: new IssueService({ store: issues, scorecards, numbers: numberAllocator, now: () => NOW }),
       scorecards,
       feed,
     });
@@ -209,14 +206,12 @@ describe("regressionWatch", () => {
     const record: IssueRecord = {
       id: "iss-1",
       tenant: "acme",
-      teamId: "team-eng",
       number: 1,
-      identifier: "ENG-1",
+      identifier: "EVD-1",
       formerIdentifiers: [],
       title: "Agent drops the tool result on retry",
       status: "done",
       priority: "none",
-      inTriage: false,
       labelIds: [],
       links: [
         { type: "dataset", id: "regression-suite", addedBy: "dana", addedAt: RESOLVED_AT },

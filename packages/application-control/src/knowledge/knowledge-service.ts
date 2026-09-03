@@ -21,7 +21,6 @@ import {
   anchorRelation,
   edgeId,
   harvestAgent,
-  harvestCycle,
   harvestDataset,
   harvestHarness,
   harvestInitiative,
@@ -36,11 +35,9 @@ import {
   harvestSchedule,
   harvestScorecard,
   harvestSkill,
-  harvestTeam,
   nodeId,
 } from "@everdict/domain";
 import type { AgentRegistry } from "../ports/agent-registry.js";
-import type { CycleStore } from "../ports/cycle-store.js";
 import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { InitiativeStore } from "../ports/initiative-store.js";
@@ -56,7 +53,6 @@ import type { RuntimeRegistry } from "../ports/runtime-registry.js";
 import type { ScheduleStore } from "../ports/schedule-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { SkillStore } from "../ports/skill-store.js";
-import type { TeamStore } from "../ports/team-store.js";
 import { type LatestVersionResolver, resolveCoverage } from "./freshness-resolver.js";
 import { ingestHarvest } from "./ingest-harvest.js";
 import {
@@ -86,8 +82,6 @@ export interface KnowledgeReindexSources {
   issues?: Pick<IssueStore, "list">;
   projects?: Pick<ProjectStore, "list">;
   initiatives?: Pick<InitiativeStore, "list">;
-  teams?: Pick<TeamStore, "list">;
-  cycles?: Pick<CycleStore, "list">;
   datasets?: Pick<DatasetRegistry, "list" | "get">;
   judges?: Pick<JudgeRegistry, "list" | "get">;
   runtimes?: Pick<RuntimeRegistry, "list" | "get">;
@@ -353,11 +347,11 @@ export class KnowledgeService {
     const referencePins = (pins: { type: string; key: string }[]): void => {
       for (const p of pins) if (p.type === "run" || p.type === "scorecard") referenceExecution(p.type, p.key);
     };
-    // Registry metadata for one entity's latest version: ownership + team scoping + the version's origin stamp
+    // Registry metadata for one entity's latest version: ownership + the version's origin stamp
     // (whose `from` may itself admit an execution record — a judge born from a scorecard keeps that scorecard on
     // the map). Entry shapes vary per registry; the fields are read structurally and absent ones simply skip.
     const specMeta = (
-      entry: { createdBy?: string; teamId?: string; versionOrigins?: Record<string, CapabilityOrigin> },
+      entry: { createdBy?: string; versionOrigins?: Record<string, CapabilityOrigin> },
       version: string,
     ): SpecHarvestMeta => {
       const origin = entry.versionOrigins?.[version];
@@ -367,14 +361,11 @@ export class KnowledgeService {
       return {
         ...meta(entry.createdBy),
         ...(origin !== undefined ? { origin } : {}),
-        ...(entry.teamId !== undefined && entry.teamId !== "" ? { teamId: entry.teamId } : {}),
       };
     };
 
-    // The intent stratum — teams/cycles first (issues point at them), then the plan, then the issues whose links
+    // The intent stratum — the plan first, then the issues whose links
     // and resolutions are the graph's main execution-admission gate.
-    if (src?.teams) for (const t of await src.teams.list(tenant)) await apply(harvestTeam(t));
-    if (src?.cycles) for (const c of await src.cycles.list(tenant)) await apply(harvestCycle(c));
     if (src?.initiatives) for (const n of await src.initiatives.list(tenant)) await apply(harvestInitiative(n));
     if (src?.projects) for (const p of await src.projects.list(tenant)) await apply(harvestProject(p));
     if (src?.issues) {
@@ -388,7 +379,7 @@ export class KnowledgeService {
     // Schedules (config-cardinality, harvested whole).
     if (src?.schedules) for (const s of await src.schedules.list(tenant)) await apply(harvestSchedule(s));
 
-    // Versioned registries — harvest each entity's latest version, with its origin/team registry metadata.
+    // Versioned registries — harvest each entity's latest version, with its origin registry metadata.
     if (src?.datasets) {
       for (const e of await src.datasets.list(tenant)) {
         const spec = await src.datasets.get(tenant, e.id);

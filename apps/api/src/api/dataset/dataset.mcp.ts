@@ -1,29 +1,17 @@
 import { setVersionTags } from "@everdict/application-control";
 import { attestDatasetConstitution, deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
-import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import { TerminalBenchTaskSchema, diffDatasets, terminalBenchToDataset } from "@everdict/datasets";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 import { assertDatasetConstitution, datasetImageWarnings, publishDataset } from "../route-context.js";
-import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
-
-// Dataset MCP tools — the MCP twin of dataset.routes.ts.
-// A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
-
 export function registerDatasetTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -41,10 +29,8 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "datasets:read", async () => {
           // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
           // person's teams and no more. `team` is the NARROW on top of that ceiling, never a way past it.
-          const visible = await keepVisible(ctx, await datasets.list(ws));
-          if (team === undefined) return ok(visible);
-          const teamId = await resolveTeam(ctx, team);
-          return ok(visible.filter((entry) => entry.teamId === teamId));
+          const visible = await datasets.list(ws);
+          return ok(visible);
         }),
     );
 
@@ -61,7 +47,6 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "datasets:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, datasets, ws, id, "dataset");
           return ok(await datasets.get(ws, id, version ?? "latest"));
         }),
     );
@@ -82,7 +67,6 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "datasets:read", async () => {
           // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
           // already carries, on the door that returns the same bytes (arch-review 119).
-          await assertEntityVisible(ctx.deps, principal, datasets, ws, id, "dataset");
           const [baseDs, candidateDs] = await Promise.all([
             datasets.get(ws, id, base),
             datasets.get(ws, id, candidate),
@@ -144,9 +128,8 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       ({ dataset, team, fromIssue, originNote }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair) — an agent
         // must not be able to file a dataset under a team the person it acts for is not on.
-        runForTeam(ctx, "datasets:write", team, async (teamId) => {
+        run(ctx.principal, "datasets:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(dataset);
@@ -166,7 +149,6 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           const constitutional = assertDatasetConstitution(principal, result.data); // same door as the REST create
           // Bytes + receipt + capability generation, as ONE publication (creator = subject, delete permission).
           await publishDataset(ctx.deps, { ...principal, workspace: ws }, result.data, constitutional, {
-            ...(teamId ? { teamId } : {}),
             origin,
           });
           const warnings = await datasetImageWarnings(ctx.deps, ws, result.data.id, result.data.version);
@@ -174,21 +156,10 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
             workspace: ws,
             id: result.data.id,
             version: result.data.version,
-            ...(teamId ? { teamId } : {}),
             ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
           });
         }),
     );
-
-    registerCapabilityMoveTool(server, ctx, {
-      tool: "move_dataset",
-      registry: datasets,
-      capability: TEAM_TRANSFERABLE_CAPABILITIES.dataset,
-      description: moveToolDescription(
-        "Hand a dataset to another team. EVERY version moves — ownership belongs to the dataset, not to one " +
-          "release of it — and no version is minted, so content and immutability are untouched.",
-      ),
-    });
 
     server.registerTool(
       "import_terminal_bench",

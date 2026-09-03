@@ -36,7 +36,6 @@ export interface RunScorecardResult {
 export async function runScorecardAction(input: RunScorecardInput): Promise<RunScorecardResult> {
   const ctx = await authContext()
   const body = {
-    ...(input.teamId ? { teamId: input.teamId } : {}),
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     // When runtime is selected the control plane injects it as each case's placement.target → RuntimeDispatcher routing.

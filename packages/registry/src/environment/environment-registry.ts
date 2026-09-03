@@ -13,28 +13,8 @@ import type { EnvironmentListEntry, EnvironmentRegistry } from "@everdict/applic
 export class InMemoryEnvironmentRegistry implements EnvironmentRegistry {
   private readonly store = new VersionedStore<EnvironmentSpec>("environment");
 
-  async register(
-    tenant: string,
-    spec: EnvironmentSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId, origin);
-  }
-  async registerPreservingOwner(
-    tenant: string,
-    spec: EnvironmentSpec,
-    createdBy?: string,
-    origin?: CapabilityOrigin,
-    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
-  ): Promise<"registered" | "owner_moved"> {
-    return this.store.registerPreservingOwner(tenant, spec, createdBy, origin, authority);
-  }
-  // The owning team — the value the authz kernel's team axis reads. Undefined = unowned (_shared/seed), which
-  // is NOT the same as "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.store.teamOfVersion(tenant, id, version);
+  async register(tenant: string, spec: EnvironmentSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    this.store.register(tenant, spec, createdBy, origin);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
@@ -60,13 +40,10 @@ export class InMemoryEnvironmentRegistry implements EnvironmentRegistry {
     for (const { id, owner, versions } of this.store.listIds(tenant)) {
       const versionTags = this.store.versionTags(owner, id);
       const versionOrigins = this.store.versionOrigins(owner, id);
-      // Ownership belongs to the thing, not to one release of it — read it off the newest version.
-      const teamId = this.store.teamOfVersion(owner, id, versions[versions.length - 1] ?? "");
       out.push({
         id,
         owner,
         versions,
-        ...(teamId !== undefined ? { teamId } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
         ...(Object.keys(versionOrigins).length > 0 ? { versionOrigins } : {}),
       });

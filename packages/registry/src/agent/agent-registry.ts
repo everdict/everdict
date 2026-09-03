@@ -12,29 +12,8 @@ import type { AgentRegistry } from "@everdict/application-control";
 export class InMemoryAgentRegistry implements AgentRegistry {
   private readonly store = new VersionedStore<AgentSpec>("agent");
 
-  async register(
-    tenant: string,
-    spec: AgentSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId, origin);
-  }
-
-  async registerPreservingOwner(
-    tenant: string,
-    spec: AgentSpec,
-    createdBy?: string,
-    origin?: CapabilityOrigin,
-    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
-  ): Promise<"registered" | "owner_moved"> {
-    return this.store.registerPreservingOwner(tenant, spec, createdBy, origin, authority);
-  }
-  // The owning team — the value the authz kernel's team axis reads. Undefined = unowned (_shared/seed),
-  // which is NOT the same as "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.store.teamOfVersion(tenant, id, version);
+  async register(tenant: string, spec: AgentSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    this.store.register(tenant, spec, createdBy, origin);
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -55,7 +34,6 @@ export class InMemoryAgentRegistry implements AgentRegistry {
       versions: string[];
       owner: string;
       createdBy?: string;
-      teamId?: string;
       versionOrigins?: Record<string, CapabilityOrigin>;
     }>
   > {
@@ -66,7 +44,6 @@ export class InMemoryAgentRegistry implements AgentRegistry {
       versions: m.versions,
       owner: m.owner,
       ...(m.createdBy !== undefined ? { createdBy: m.createdBy } : {}),
-      ...(m.teamId !== undefined ? { teamId: m.teamId } : {}),
       ...(m.versionOrigins !== undefined ? { versionOrigins: m.versionOrigins } : {}),
     }));
   }

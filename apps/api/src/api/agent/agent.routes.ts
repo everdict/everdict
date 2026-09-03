@@ -1,11 +1,9 @@
 import { deleteAgentVersion, deleteAgentVersions, firstPartyDefaults } from "@everdict/application-control";
 import { AgentSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
-import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew, zodIssues } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { agentDocs } from "./agent.docs.js";
 import { DeleteAgentVersionsBodySchema } from "./request/delete-agent-versions.js";
 import { SaveAgentBodySchema } from "./request/save-agent.js";
@@ -19,18 +17,16 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!principal) return reply;
     // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로,
     // 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
       // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "agents:write", owner.gate);
+      gate(principal, "agents:write");
     } catch (err) {
       return sendError(reply, err); // no permission 403 (gate before validation)
     }
     const parsed = AgentSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.agentRegistry.register(principal.workspace, parsed.data, principal.subject, owner.teamId); // creator = subject (delete rights)
+      await deps.agentRegistry.register(principal.workspace, parsed.data, principal.subject); // creator = subject (delete rights)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // immutable 409
@@ -93,10 +89,8 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     // this gate is closed one layer down instead: the registry refuses any register that would re-file an
     // entity and preserves the owner on silence, so an `expectedOwnerTeamId` carried from here could never
     // mismatch. A guard nobody can drive is worse than no guard; the gate is the whole fix at this door.
-    let owner: Awaited<ReturnType<typeof teamOfEntity>>;
     try {
-      owner = await teamOfEntity(deps.agentRegistry, principal.workspace, req.params.id);
-      gate(principal, "agents:write", owner);
+      gate(principal, "agents:write");
     } catch (err) {
       return sendError(reply, err);
     }
@@ -151,9 +145,8 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     try {
       gate(principal, "agents:read");
       // A private team's authored entry is that team's — the ceiling every other team-owned read stays under.
-      const seen = await visibleTeamsFor(deps, principal);
       const entries = await deps.agentRegistry.list(principal.workspace);
-      return reply.send(entries.filter((e) => ownedByVisibleTeam(e, seen)));
+      return reply.send(entries);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -170,14 +163,6 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
       if (!principal) return reply;
       try {
         gate(principal, "agents:read");
-        await assertEntityVisible(
-          deps,
-          principal,
-          deps.agentRegistry,
-          principal.workspace,
-          req.params.id,
-          "agent config",
-        );
         return reply.send(await deps.agentRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404

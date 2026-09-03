@@ -14,33 +14,14 @@ export class PgEnvironmentRegistry implements EnvironmentRegistry {
       column: "environment",
       label: "environment",
       parse: (v) => EnvironmentSpecSchema.parse(v),
-      teamId: true,
       tags: true,
       origin: true,
       createdBy: true,
     });
   }
 
-  register(
-    tenant: string,
-    spec: EnvironmentSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    return this.store.register(tenant, spec, createdBy, teamId, origin);
-  }
-  registerPreservingOwner(
-    tenant: string,
-    spec: EnvironmentSpec,
-    createdBy?: string,
-    origin?: CapabilityOrigin,
-    authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
-  ): Promise<"registered" | "owner_moved"> {
-    return this.store.registerPreservingOwner(tenant, spec, createdBy, origin, authority);
-  }
-  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
-    return this.store.teamOfVersion(tenant, id, version);
+  register(tenant: string, spec: EnvironmentSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    return this.store.register(tenant, spec, createdBy, origin);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
@@ -66,12 +47,10 @@ export class PgEnvironmentRegistry implements EnvironmentRegistry {
     for (const { id, owner, versions } of await this.store.listIds(tenant)) {
       const versionTags = await this.store.versionTags(owner, id);
       const versionOrigins = await this.store.versionOrigins(owner, id);
-      const teamId = await this.store.teamOfVersion(owner, id, versions[versions.length - 1] ?? "");
       out.push({
         id,
         owner,
         versions,
-        ...(teamId !== undefined ? { teamId } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
         ...(Object.keys(versionOrigins).length > 0 ? { versionOrigins } : {}),
       });

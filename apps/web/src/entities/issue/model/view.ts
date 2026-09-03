@@ -21,7 +21,7 @@ import { ISSUE_PRIORITIES, ISSUE_STATUSES, type IssuePriority, type IssueStatus 
 
 // 묶는 기준. 전부 이슈의 스칼라 필드라 한 이슈는 정확히 한 그룹에 속한다 — 라벨이 빠진 이유는 제어 평면과
 // 같다(이슈 하나가 여러 라벨을 들고 있어서 그룹 합이 목록보다 커진다).
-export const ISSUE_GROUP_BYS = ['status', 'assignee', 'priority', 'project', 'cycle'] as const
+export const ISSUE_GROUP_BYS = ['status', 'assignee', 'priority', 'project'] as const
 export const issueGroupBySchema = z.enum(ISSUE_GROUP_BYS)
 export type IssueGroupBy = WireIssueGroupBy
 
@@ -78,7 +78,6 @@ export const ISSUE_FILTER_FACETS = [
   'assignee',
   'label',
   'project',
-  'cycle',
 ] as const
 export type IssueFilterFacet = (typeof ISSUE_FILTER_FACETS)[number]
 

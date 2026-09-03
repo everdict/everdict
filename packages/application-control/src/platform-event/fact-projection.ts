@@ -66,11 +66,7 @@ function template(fact: DomainFact): string | undefined {
     case "issue.created":
       return `${s(p, "identifier")} filed — ${s(p, "title")}`;
     case "issue.status_changed":
-      return p?.triage === "accepted"
-        ? `${s(p, "identifier")} accepted from triage`
-        : `${s(p, "identifier")} ${s(p, "from")} → ${s(p, "to")} — ${s(p, "title")}`;
-    case "issue.moved":
-      return `${s(p, "fromIdentifier")} moved to another team as ${s(p, "toIdentifier")}`;
+      return `${s(p, "identifier")} ${s(p, "from")} → ${s(p, "to")} — ${s(p, "title")}`;
     case "issue.linked":
       return `Issue linked to ${s(p, "linkType")} ${s(p, "linkId")} — ${s(p, "title")}`;
     // ── evolution campaign (docs/architecture/evolution-lineage.md, Track D) ──
@@ -114,18 +110,6 @@ function template(fact: DomainFact): string | undefined {
       return `${s(p, "name")} — ${health(p)}`;
     case "initiative.status_changed":
       return `Initiative ${s(p, "from")} → ${s(p, "to")} — ${s(p, "name")}`;
-    case "team.created":
-      return `Team created — ${s(p, "name")} (${s(p, "key")})`;
-    case "team.member_added":
-      return `${s(p, "member")} joined ${s(p, "name")}`;
-    case "team.member_removed":
-      return `${s(p, "member")} left ${s(p, "name")}`;
-    case "cycle.created":
-      return `Cycle ${s(p, "number")} planned`;
-    case "cycle.completed": {
-      const carried = n(p, "carriedOver") ?? 0;
-      return `Cycle ${s(p, "number")} closed${carried > 0 ? ` — ${carried} carried over` : ""}`;
-    }
     // ── product timeline ──
     case "product.created":
       return `Product created — ${s(p, "name")}`;

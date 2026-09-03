@@ -19,7 +19,6 @@ import {
   type ProjectIssueCount,
   initiativeProgress,
   initiativeReadiness,
-  ownedByAnyVisibleTeam,
 } from "@everdict/domain";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "../ports/initiative-store.js";
@@ -149,37 +148,22 @@ export class InitiativeService {
     return record;
   }
 
-  // `visibleTeams` is the reader's ceiling (`TeamService.visibleTeamIds` — undefined when nothing is hidden).
-  // It narrows WHAT IS LISTED, never what is counted: a goal's progress is one number, the same for everybody,
-  // because "how far along is this" stops meaning anything if it depends on who asks. What a private team is
-  // owed is that its projects and its open issues are not NAMED to outsiders — a total identifies nothing.
-  async detail(tenant: string, id: string, visibleTeams?: string[]): Promise<InitiativeDetailResponse> {
+  async detail(tenant: string, id: string): Promise<InitiativeDetailResponse> {
     const record = await this.get(tenant, id);
-    return { ...record, readiness: await this.readiness(tenant, id, visibleTeams) };
+    return { ...record, readiness: await this.readiness(tenant, id) };
   }
 
   // How far along the goal is: every project under it — including the ones claimed by a DESCENDANT initiative —
   // each project's issues, one answer. Nesting exists so a big bet can decompose, and a parent that reported
   // "nothing left" while a sub-initiative was still working would make the decomposition a way to hide work
   // from the goal it belongs to.
-  async readiness(tenant: string, id: string, visibleTeams?: string[]): Promise<InitiativeReadiness> {
+  async readiness(tenant: string, id: string): Promise<InitiativeReadiness> {
     const scope = await this.subtreeIds(tenant, id);
     const projects = await this.deps.projects.list(tenant, { initiativeIds: scope });
     const issuesByProject = new Map<string, IssueRecord[]>();
     for (const project of projects)
       issuesByProject.set(project.id, await this.deps.issues.list(tenant, { projectId: project.id }));
-    const full = initiativeReadiness(id, projects, issuesByProject);
-    if (visibleTeams === undefined) return full;
-    // Counted over everything (above), listed only where the reader may look. A blocker names an issue by its
-    // identifier and title, so it is hidden with the project it sits in.
-    const teamsOf = new Map(projects.map((project) => [project.id, project]));
-    const visible = (projectId: string | undefined): boolean =>
-      projectId === undefined || ownedByAnyVisibleTeam(teamsOf.get(projectId) ?? {}, visibleTeams);
-    return {
-      ...full,
-      projects: full.projects.filter((project) => visible(project.id)),
-      blockers: full.blockers.filter((blocker) => visible(blocker.projectId)),
-    };
+    return initiativeReadiness(id, projects, issuesByProject);
   }
 
   // The initiative plus every descendant. One list of the workspace's initiatives and an in-memory walk: a

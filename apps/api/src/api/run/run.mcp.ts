@@ -2,7 +2,6 @@ import { EvalCaseSchema, type RunRecord } from "@everdict/contracts";
 import { canReadRun } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { teamCeiling } from "../../common/team-scope.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 import { runActivityPage } from "./request/run-page.js";
 import { serveBatchChildren } from "./serve.js";
@@ -71,7 +70,6 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
           // The viewer keeps another member's agent turns and shell sessions off this page (BFF parity), and
           // the team ceiling keeps a private team's runs off it (same parity).
           viewer: principal.subject,
-          ...(await teamCeiling(ctx.deps, principal)),
           // The same page size the BFF applies, from the same owner — parity is structural here, and so was
           // the defect: both transports resolved an absent `limit` to "every run this workspace ever ran".
           ...(scorecard_id

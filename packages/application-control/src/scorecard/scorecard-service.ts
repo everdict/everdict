@@ -43,7 +43,6 @@ import {
   ScorecardBatch,
   type ScorecardTrend,
   applyInputTrust,
-  authorize,
   can,
   composeVerdictPolicy,
   contentDigest,
@@ -421,17 +420,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // Trials — run each case N times for pass@k / flakiness. Clamp to >=1; 1 keeps single-run behavior byte-identical.
     const trials = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
 
-    // Whose batch this is (see RunScorecardInput). An explicit choice wins — the transport already authorized
-    // it. Otherwise the batch INHERITS THE HARNESS'S OWNER: evaluating a team's harness produces that team's
-    // result, and it is the only answer available to the callers that have no person to ask (a schedule firing
-    // at 3am, a CI token, a chat command). It also beats "the submitter's first team" for a person on several —
-    // which team you meant is said by what you ran, not by the order your memberships happen to load in. Only
-    // an unowned harness falls through to the submitter's own team, so nothing is born ownerless.
-    const teamId =
-      input.teamId ??
-      (await this.deps.harnesses?.teamOfVersion?.(input.tenant, input.harness.id, harnessVersion)) ??
-      input.submitterTeamId;
-
     // Record assembly is the domain's job (ScorecardBatch.newQueued) — the service only orchestrates.
     // The harness model closure, computed ONCE: the manifest seals it AND the executed spec pins to it —
     // the seal IS the pin (I6), not a submit-time observation dispatch re-resolves out from under.
@@ -445,7 +433,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       harness: { id: input.harness.id, version: harnessVersion }, // resolved concrete version (never "latest")
       ...(origin ? { origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
-      ...(teamId ? { teamId } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),
       ...(subset ? { subset } : {}),
       orchestration: {
@@ -934,7 +921,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
       // A re-run belongs to whoever the original belonged to. Recomputing the owner would quietly move the batch
       // to the re-runner's team, and the pair would stop being comparable as one team's history.
-      ...(src.teamId ? { teamId: src.teamId } : {}),
       dataset: { id: src.dataset.id, version: src.dataset.version },
       harness: {
         id: src.harness.id,
@@ -1500,63 +1486,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return requested;
   }
 
-  // Re-file a batch under a different team. A scorecard is the EVIDENCE a capability produced, and it is read
-  // through the same team lens the capability is (a private team's results are its own), so it needs the same
-  // transfer the capability has — otherwise moving a harness leaves every result it ever produced behind, under
-  // a team that no longer owns the thing that made them.
-  //
-  // Both teams are authorized for the reason the capability transfer states: the SOURCE so a batch cannot be
-  // taken out of a team you are not on, the DESTINATION so results cannot be pushed onto (or hidden inside)
-  // someone else's team. An admin passes both; an unowned batch has no source to authorize. `scorecards:run` is
-  // the existing write action — re-filing evidence is not a new permission.
-  //
-  // `teamId` arrives ALREADY resolved (transports accept `ENG` and resolve at the boundary), so the gate below
-  // compares ids to ids.
-  async moveToTeam(input: {
-    principal: Principal;
-    id: string;
-    teamId: string;
-    agent?: { agentId?: string; conversationId?: string };
-  }): Promise<ScorecardRecord> {
-    const ws = input.principal.workspace;
-    const rec = await this.deps.store.get(input.id);
-    if (!rec || rec.tenant !== ws)
-      throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "Scorecard not found.");
-    if (rec.teamId === input.teamId)
-      throw new ConflictError(
-        "CONFLICT",
-        { workspace: ws, scorecard: rec.id, team: input.teamId },
-        "This scorecard already belongs to that team.",
-      );
-    authorize(input.principal, "scorecards:run", rec.teamId === undefined ? {} : { teamId: rec.teamId });
-    authorize(input.principal, "scorecards:run", { teamId: input.teamId });
-
-    const fact = stampFacts(
-      ws,
-      [
-        {
-          kind: "scorecard.moved" as const,
-          subject: { type: "scorecard", id: rec.id },
-          actor: input.principal.subject,
-          payload: { id: rec.id, to: input.teamId, ...(rec.teamId !== undefined ? { from: rec.teamId } : {}) },
-          ...(input.agent?.agentId !== undefined
-            ? { causedBy: `agent:${input.agent.agentId}:${input.agent.conversationId ?? "unknown"}` }
-            : {}),
-          message: `scorecard ${rec.id} moved to team ${input.teamId}`,
-        },
-      ],
-      { newId: this.newId, now: this.now },
-    );
-    // E0 outbox: the fact persists in the same write as the ownership change it describes.
-    const updated = await this.deps.store.update(
-      rec.id,
-      { teamId: input.teamId },
-      fact.map((f) => f.record),
-    );
-    if (fact.length > 0) void this.deps.events?.pushPersisted?.(fact);
-    return updated ?? { ...rec, teamId: input.teamId };
-  }
-
   // A dispatched scorecard doesn't embed the heavy scorecard (case results), storing only runIds (storage dedup) →
   // get hydrates the scorecard from the child runs' final results (response shape/web/diff identical to the embed era).
   // If an embed already exists (no-runStore / ingest / old record), return it as-is. Without a runStore, hydration is impossible → as-is.
@@ -1855,7 +1784,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // `fdrAlpha` is DECLARED here, not merely forwarded: the campaign settlement passes its frozen alpha
     // through this facade, and a contract that omitted it survived only by whole-object passthrough — the
     // exact allowlist-rebuild shape that has eaten two fields already (rule `option-forwarding`).
-    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number } = {},
   ): ReturnType<ScorecardAnalyticsService["diff"]> {
     return this.analytics.diff(tenant, baselineId, candidateId, opts);
   }
@@ -1867,7 +1796,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number } = {},
   ): ReturnType<ScorecardAnalyticsService["diffSnapshot"]> {
     return this.analytics.diffSnapshot(tenant, baselineId, candidateId, opts);
   }
@@ -1878,9 +1807,8 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     tenant: string,
     baselineId: string,
     candidateId: string,
-    visibleTeams?: string[],
   ): ReturnType<ScorecardAnalyticsService["comparisonPins"]> {
-    return this.analytics.comparisonPins(tenant, baselineId, candidateId, visibleTeams);
+    return this.analytics.comparisonPins(tenant, baselineId, candidateId);
   }
 
   trend(
@@ -1892,7 +1820,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       from?: string;
       to?: string;
       baseline?: string;
-      visibleTeams?: string[];
     },
   ): Promise<ScorecardTrend> {
     return this.analytics.trend(tenant, opts);
@@ -1907,7 +1834,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       model?: string;
       judgeModel?: string;
       window?: "latest" | "best";
-      visibleTeams?: string[];
     },
   ): Promise<Leaderboard> {
     return this.analytics.leaderboard(tenant, opts);
@@ -1919,21 +1845,21 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
 
   opsReport(
     tenant: string,
-    opts: { from?: string; to?: string; visibleTeams?: string[] } = {},
+    opts: { from?: string; to?: string } = {},
   ): ReturnType<ScorecardAnalyticsService["opsReport"]> {
     return this.analytics.opsReport(tenant, opts);
   }
 
   flake(
     tenant: string,
-    opts: { datasetId: string; harnessId?: string; visibleTeams?: string[] },
+    opts: { datasetId: string; harnessId?: string },
   ): ReturnType<ScorecardAnalyticsService["flake"]> {
     return this.analytics.flake(tenant, opts);
   }
 
   gateAudit(
     tenant: string,
-    opts: { from?: string; to?: string; visibleTeams?: string[] } = {},
+    opts: { from?: string; to?: string } = {},
   ): ReturnType<ScorecardAnalyticsService["gateAudit"]> {
     return this.analytics.gateAudit(tenant, opts);
   }
@@ -2281,7 +2207,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     candidate: string;
     policy?: Partial<GatePolicy>;
     decidedBy?: string;
-    visibleTeams?: string[];
   }): Promise<GateDecision> {
     // Only what the caller actually SENT is embedded (beyond maxRegressions' long-standing 0 default): the
     // stamped policy is the caller's own document, so an already-recorded `{maxRegressions: 0}` keeps its
@@ -2311,12 +2236,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // arithmetic never runs — the pre-fix order computed the numbers first and downgraded the decision
     // after, so persisted evidence and the decided-fact message carried counts derived from input the
     // decision itself declared unauthoritative. Same scope/status contract as the diff read (no leak).
-    const preRead = await this.analytics.comparisonPins(
-      input.tenant,
-      input.baseline,
-      input.candidate,
-      input.visibleTeams,
-    );
+    const preRead = await this.analytics.comparisonPins(input.tenant, input.baseline, input.candidate);
     const trustRefusal = refuseGateForInputTrust(preRead, policy);
     if (trustRefusal !== undefined) {
       const record = await this.deps.store.get(input.candidate);
@@ -2329,7 +2249,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // between the diff and the pin read stamped a revision that did not produce the compared numbers (and
     // I3's pass marker means a mid-pass plane refuses upstream, in the same read).
     const snapshot = await this.analytics.diffSnapshot(input.tenant, input.baseline, input.candidate, {
-      ...(input.visibleTeams ? { visibleTeams: input.visibleTeams } : {}),
       ...(policy.zThreshold !== undefined ? { zThreshold: policy.zThreshold } : {}),
       ...(policy.minDelta !== undefined ? { minDelta: policy.minDelta } : {}),
       ...(policy.fdrAlpha !== undefined ? { fdrAlpha: policy.fdrAlpha } : {}),
@@ -2491,11 +2410,11 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return overridden;
   }
 
-  analysis(tenant: string, config: AnalysisConfig, visibleTeams?: string[]): Promise<AnalysisResult> {
-    return this.analytics.analysis(tenant, config, visibleTeams);
+  analysis(tenant: string, config: AnalysisConfig): Promise<AnalysisResult> {
+    return this.analytics.analysis(tenant, config);
   }
 
-  analysisBundle(tenant: string, id: string, visibleTeams?: string[], revision?: number): Promise<unknown> {
-    return this.analytics.analysisBundle(tenant, id, visibleTeams, revision);
+  analysisBundle(tenant: string, id: string, revision?: number): Promise<unknown> {
+    return this.analytics.analysisBundle(tenant, id, revision);
   }
 }

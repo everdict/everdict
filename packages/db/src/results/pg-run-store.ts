@@ -37,7 +37,6 @@ interface RunRow {
   parent_scorecard_id: string | null;
   trigger: string | null;
   created_by: string | null;
-  team_id: string | null; // owning team (mig 0106) — beside created_by, because ownership is metadata, not content
   runtime: string | null;
   case_spec: unknown | null;
   // The universal-run shape (mig 0092) — nullable; absent = legacy eval run.
@@ -76,7 +75,6 @@ function rowToRecord(row: RunRow): RunRecord {
     parentScorecardId: row.parent_scorecard_id ?? undefined,
     trigger: row.trigger ?? undefined,
     createdBy: row.created_by ?? undefined,
-    teamId: row.team_id ?? undefined,
     runtime: row.runtime ?? undefined,
     ...(row.case_spec ? { caseSpec: row.case_spec } : {}),
     ...(row.kind ? { kind: row.kind } : {}),
@@ -102,9 +100,9 @@ function rowToRecord(row: RunRow): RunRecord {
 }
 
 const RUN_COLUMNS =
-  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, team_id, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, owner_replica, visibility, webhook_url, execution_id, created_at, updated_at)";
+  "(id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, case_spec, kind, class, lifetime, origin, envelope, placement, attach, group_ref, lineage, outputs, session, owner_replica, visibility, webhook_url, execution_id, created_at, updated_at)";
 const RUN_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)";
+  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)";
 
 // A conditional insert that matched nothing is a driver that has been replaced — the same answer the
 // authority proof gives, so the caller aborts through the path it already has.
@@ -130,7 +128,6 @@ function runInsertParams(r: RunRecord, replicaId?: string): unknown[] {
     r.parentScorecardId ?? null,
     r.trigger ?? null,
     r.createdBy ?? null,
-    r.teamId ?? null,
     r.runtime ?? null,
     r.caseSpec ? JSON.stringify(r.caseSpec) : null,
     r.kind ?? null,
@@ -435,7 +432,7 @@ export class PgRunStore implements RunStore {
     // `origin.actor` falling back to `created_by`, and an ownerless one stays the workspace's. This restates
     // `runAudience` (@everdict/domain, the SSOT) because the filter must run BEFORE LIMIT — filtering the page
     // afterwards would let one member's chat history push everyone else's runs off the reader's screen. The
-    // store tests assert this clause and the in-memory `canReadRun` path agree. visibleTeams ($9, NULL = nothing
+    // store tests assert this clause and the in-memory `canReadRun` path agree. statuses ($9, NULL = every
     // is hidden) is the second, orthogonal ceiling: a PRIVATE team's runs are that team's work, and an unowned
     // run is the workspace's. Both narrow before LIMIT for the same reason.
     const res = await this.client.query<RunRow>(
@@ -454,8 +451,7 @@ export class PgRunStore implements RunStore {
            OR COALESCE(origin->>'actor', created_by) IS NULL
            OR COALESCE(origin->>'actor', created_by) = $7
          )
-         AND ($9::text[] IS NULL OR team_id IS NULL OR team_id = ANY($9::text[]))
-         AND ($10::text[] IS NULL OR status = ANY($10::text[]))
+         AND ($9::text[] IS NULL OR status = ANY($9::text[]))
        ORDER BY created_at DESC, id DESC
        LIMIT $5 OFFSET $6`,
       [
@@ -467,8 +463,7 @@ export class PgRunStore implements RunStore {
         opts?.offset ?? 0,
         opts?.viewer ?? null,
         [...PERSONAL_RUN_KINDS],
-        opts?.visibleTeams ?? null,
-        // The lifecycle narrowing ($10) — the queue snapshot and boot recovery want only what is still
+        // The lifecycle narrowing ($9) — the queue snapshot and boot recovery want only what is still
         // moving, and reading the whole ledger to filter it afterwards is what made both grow without bound
         // (perf review). NULL = every status, which is what every other caller passes.
         opts?.statuses === undefined ? null : [...opts.statuses],

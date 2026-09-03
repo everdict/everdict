@@ -190,7 +190,7 @@ Three strata, with a deliberate tiering:
 2. **Capability (WHAT)** — the versioned eval subjects/config, unchanged, plus the **`born_from` lineage**: a
    registered version's `CapabilityOrigin.from` (stored per-version in the registries, exposed on list entries as
    `versionOrigins`) becomes `harness/dataset/judge/… -[born_from]-> issue|scorecard|…` — "which issue was this
-   judge built to evaluate" is now a graph query. Registry `teamId` metadata adds the spec's `belongs_to` edge.
+   judge built to evaluate" is now a graph query.
 3. **Execution (EVIDENCE — demoted)** — run/scorecard records are materialised **only while something references
    them**: an issue link, an issue resolution, a knowledge entry's refs/evidence, a skill's refs, or a capability
    origin. Reindex collects those references first, harvests only the referenced execution records, and **prunes**
@@ -371,9 +371,9 @@ Following everdict's one-way spine (no new package — schemas belong at the con
 5. ✅ **API + MCP** — an isolated `knowledge/` slice: `GET /knowledge/node|related|subgraph` + `POST /knowledge/reindex`
    (read = `scorecards:read`; reindex = `settings:write`) and the four matching MCP tools, over a `KnowledgeService`
    facade. The `KnowledgeStore` is `InMemory`/`Pg` by `DATABASE_URL`; `reindex` is a pull harvest of the tracker
-   stores (issues/projects/initiatives/teams/cycles), the record stores (schedules, plus runs/scorecards under the
+   stores (issues/projects/initiatives), the record stores (schedules, plus runs/scorecards under the
    execution-admission rule), AND the registries (dataset/judge/runtime/model/rubric/harness/agent, at each entity's
-   latest version, with `versionOrigins`/`teamId` registry metadata) — so a reindex materialises the intent stratum
+   latest version, with `versionOrigins` registry metadata) — so a reindex materialises the intent stratum
    and every eval-config node, while execution records enter only by reference and stale execution nodes are PRUNED
    (`KnowledgeStore.listNodeIds`/`deleteNodes`; §The intent stratum). Write-path ingest-on-write (keeping the graph
    current without a manual reindex) is the follow-up.

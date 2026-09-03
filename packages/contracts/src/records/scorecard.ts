@@ -819,10 +819,6 @@ export type ScorecardDecisionContext = z.infer<typeof ScorecardDecisionContextSc
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // The team that produced this result — the same axis the eval assets carry, so "what has our team
-  // evaluated" is answerable without walking every harness. Optional because pre-team rows and ownerless
-  // runs genuinely exist: absence means "no owner", never "everyone's".
-  teamId: z.string().optional(),
   // Group kind (execution-model.md P1, decision O3: the RunGroup generalizes ScorecardRecord IN CONCEPT, the
   // table is kept). "experiment" = phase 1 alone — same fan-out, same child runs, NO judges/graders and no
   // verdict pressure (caseVerdict stays undefined; analytics exclude it). Absent = a scorecard (the default);

@@ -54,8 +54,6 @@ export function scorecardGroupKeyOf(row: ScorecardRow, grouping: string): string
       return row.harness.id
     case 'dataset':
       return row.dataset.id
-    case 'team':
-      return row.teamId ?? null
     case 'creator':
       return row.createdBy ?? null
     default:

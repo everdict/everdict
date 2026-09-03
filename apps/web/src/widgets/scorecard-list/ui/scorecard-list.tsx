@@ -101,7 +101,6 @@ export function ScorecardList({
   stats,
   authors,
   runnerLabels,
-  teams,
   scope,
   viewer,
 }: {
@@ -114,7 +113,6 @@ export function ScorecardList({
   // have", which a filter must not change, so they are read once by the page and never again.
   stats: { total: number; succeeded: number; running: number; failed: number }
   authors: Record<string, Author>
-  teams: TeamOption[]
   scope: ListViewScope
   // Self-hosted runner id → friendly device name, for resolving a row's self:<id> runtime to a readable chip.
   runnerLabels: Record<string, string>
@@ -234,10 +232,6 @@ export function ScorecardList({
     return () => window.removeEventListener('keydown', onKey)
   }, [selectionMode, confirming, selectionStorageKey])
 
-  const teamName = useMemo(
-    () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
-    [teams]
-  )
   const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
   // 예약된 트레이스 평가 표식은 친절한 이름으로 — 목록에 `_traces` 라는 내부 문자열이 뜨면 안 된다.
   const refName = (id: string): string => (id === TRACE_EVAL_REF ? t('traceEvaluation') : id)
@@ -284,11 +278,10 @@ export function ScorecardList({
       of('status', statusName),
       of('harness', refName),
       of('dataset', refName),
-      of('team', (id) => teamName[id] ?? id, list('unset.team')),
       of('runtime', runtimeName, list('unset.runtime')),
       of('creator', creatorName, list('unset.creator')),
     ].filter((facet) => facet.options.length > 0)
-  }, [data.facets, teamName, runnerLabels, list, t, authors])
+  }, [data.facets, runnerLabels, list, t, authors])
 
   // Row-level delete gating — terminal batches only (a live one must be stopped first, same as the detail page).
   const canDeleteRow = (s: ScorecardRow) =>
@@ -337,7 +330,6 @@ export function ScorecardList({
       case 'dataset':
         return refName(key)
       case 'team':
-        return teamName[key] ?? key
       case 'creator':
         return creatorName(key)
       default:

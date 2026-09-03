@@ -57,11 +57,10 @@ export async function PulseTiles({
 }) {
   const t = await getTranslations('overviewPage')
   const base = `/${workspace}`
-  const { work, cycles, goals, agents, evaluation, trend } = pulse
+  const { work, goals, agents, evaluation, trend } = pulse
 
   // 사이클의 진행률은 활성 사이클들이 커밋한 일 전체에 대한 완료 비율이다. 커밋한 것이 없으면 비율도 없다 —
   // 0% 로 그리면 "아무것도 못 했다"로 읽히는데, 사실은 "아직 아무것도 담지 않았다"이다.
-  const cycleProgress = cycles.committed > 0 ? fmtPct(cycles.done / cycles.committed) : '–'
   const activityTotal = trend.activity.reduce((sum, point) => sum + point.total, 0)
   const perDay = trend.activity.length > 0 ? Math.round(activityTotal / trend.activity.length) : 0
   const delta =
@@ -84,20 +83,6 @@ export async function PulseTiles({
         {...(work.regressed > 0
           ? { tone: 'danger' as const, hint: t('tileRegressedHint') }
           : { hint: t('tileRegressedNone') })}
-      />
-      <Tile
-        href={`${base}/cycles`}
-        label={t('tileCycle')}
-        value={cycleProgress}
-        hint={
-          cycles.active === 0
-            ? t('tileCycleNone')
-            : t('tileCycleHint', {
-                active: cycles.active,
-                done: cycles.done,
-                committed: cycles.committed,
-              })
-        }
       />
       <Tile
         href={`${base}/initiatives`}

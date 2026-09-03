@@ -55,7 +55,6 @@ export const datasetSummarySchema = z.object({
   // The owning team (mig 0106). It decides who may CHANGE this and — for a private team — who sees it at
   // all, and it is re-fileable (`POST /<resource>/:id/team`), so the detail shows it and offers the move.
   // Absent = unowned (a `_shared` entry, or one from before the axis), which is the workspace's.
-  teamId: z.string().optional(),
   versions: z.array(z.string()),
   latestVersion: z.string().optional(),
   caseCount: z.number().optional(),

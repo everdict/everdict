@@ -51,26 +51,18 @@ token courier, never an auth authority. See `docs/auth.md`.
 - **AuthZ is a flat matrix** (`authz.ts`): `can`/`authorize(principal, action)`; `authorize` throws
   `ForbiddenError` → **403**. Roles are cumulative (`admin ⊃ member ⊃ viewer`). Gate every mutating route;
   reads of another workspace's resource return **404** (no existence leak), not 403.
-- **The team axis: WRITE = the roster, READ = team privacy.** An eval asset/result carries a `teamId` (mig
-  `0106`), a project names several (`teamIds`). Writing one you are not on is refused (`canReachTeam`, 403).
-  Reading is NOT membership's business — a workspace whose teams cannot see each other's work stops being one
-  workspace — so what a team owns is visible by default and the only narrowing is that team being **private**
-  (`isPrivate`, mig `0113`), which is Linear's model. Privacy is decided in ONE place
-  (`TeamService.visibleTeamIds` / `canSeeTeam`) and never re-derived in a route; `undefined` = nothing is hidden,
-  never "no teams". The API wraps it as `visibleTeamsFor`/`teamCeiling`/`assertTeamVisible`/`assertEntityVisible`
-  (`common/team-scope.ts`) over the pure `ownedByVisibleTeam`/`ownedByAnyVisibleTeam` (`@everdict/domain`). A
-  refused read is **404**, never 403. `teamId: undefined` = unowned = the workspace's. Admins and machine
-  credentials (`via ∈ {runner, github-actions}`) reach every team; an `agent` does not. **Counts are computed
-  over everything, listings are narrowed** — an initiative's progress is one number for everybody, but it names
-  only the projects/blockers the reader may see.
-- **Ownership is transferable, and BOTH teams are authorized.** `POST /<resource>/:id/team` + MCP
-  `move_<resource>` (harness · harness template · dataset · judge · scorecard; an issue moves via its own
-  identifier-re-minting endpoint). One core — `moveCapabilityToTeam` / `ScorecardService.moveToTeam` — gates the
-  SOURCE (else moving something out of a team you are not on is a way to take it) AND the DESTINATION (else it is
-  a way to push work into other teams' hands), on the resource's EXISTING write action (never a new one). An
-  admin passes both; an unowned asset has no source to authorize. A capability re-files EVERY version at once and
-  mints none; its past scorecards do NOT follow it (evidence belongs to whoever ran it). `_shared` → 404, no-op
-  move → 409. See `docs/auth.md` §The team axis.
+- **THE WORKSPACE IS THE ONLY BOUNDARY — there is no second ownership axis.** There WAS one: an eval
+  asset/result carried a `teamId`, a project named several, writing one you were not on was refused and a
+  private team narrowed reads. It is gone (migrations `0211`/`0212`), and with it the roster, the read ceiling,
+  the transfer endpoints and the identifier prefix that team minted — the workspace mints `EVD-12` now, from one
+  counter on its own row. So `can`/`authorize` answer TWO questions (does the role grant this action, does the
+  api-key scope still carry it) and not a third; the per-resource scope parameter they used to take is gone, and a
+  door that wants one is describing a rule this product does not have.
+  What survives unchanged is TENANCY: every read and write is workspace-scoped, another workspace's resource
+  reads **404** and never 403, and a capability's registry calls are keyed `(tenant, id, version)` with the
+  tenant taken from the caller's own principal. Where an id is GLOBAL rather than tenant-keyed — a scorecard
+  id, a run id — the door asks whose it is before answering (`scorecardIsOurs` / `runVisible`), which is what
+  `pnpm guard-siblings` refuses to let one door forget.
 - **Resource-ownership override (use sparingly).** A few actions are "admin **or** the resource's creator". Keep
   the **admin** half in the flat matrix (e.g. `datasets:delete` = admin-only) and put the **creator** half in the
   service layer that knows who created the row (`dataset-service.ts` `deleteDatasetVersion`: `creatorOf` vs

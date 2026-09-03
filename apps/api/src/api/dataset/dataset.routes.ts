@@ -1,11 +1,8 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
 import { attestDatasetConstitution, deleteDatasetVersion, deleteDatasetVersions } from "@everdict/application-control";
-import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import { DatasetSchema } from "@everdict/contracts";
 import { diffDatasets, terminalBenchToDataset } from "@everdict/datasets";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import { capabilityOriginFor, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import {
@@ -15,12 +12,9 @@ import {
   gate,
   publishDataset,
   resolvePrincipal,
-  resolveTeamRef,
   sendError,
-  teamForNew,
   zodIssues,
 } from "../route-context.js";
-import { MoveToTeamBodySchema } from "../team-move.js";
 import { datasetDocs } from "./dataset.docs.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
@@ -34,11 +28,9 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!principal) return reply;
     // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로, 속하지 않은
     // 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다. (게이트는 여전히 검증보다 앞선다.)
-    let owner: Awaited<ReturnType<typeof teamForNew>>;
     try {
       // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
-      owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "datasets:write", owner.gate);
+      gate(principal, "datasets:write");
     } catch (err) {
       return sendError(reply, err); // no permission 403 (gate before validation — don't leak validation info to the unauthorized)
     }
@@ -58,7 +50,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       // so the artifact can later say who authorized it (arch-review 23 P1).
       const constitutional = assertDatasetConstitution(principal, parsed.data);
       // Bytes + receipt + capability generation, as ONE publication (creator = subject, for delete rights).
-      await publishDataset(deps, principal, parsed.data, constitutional, { teamId: owner.teamId, origin });
+      await publishDataset(deps, principal, parsed.data, constitutional, { origin });
       // What the registered cases will actually pull — advice, never a refusal (see `datasetImageWarnings`).
       const warnings = await datasetImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
       return reply.code(201).send({
@@ -150,11 +142,8 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       // see, so it never appears (an unowned `_shared` entry is the workspace's and always does). `?team=` is the
       // NARROW on top of it — "of the ones I can see, this team's" — named by id or by key (`?team=ENG`), the
       // same ref the team-scoped URL carries.
-      const seen = await visibleTeamsFor(deps, principal);
-      const visible = entries.filter((e) => ownedByVisibleTeam(e, seen));
-      const team = req.query.team;
-      const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-      return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
+      const visible = entries;
+      return reply.send(visible);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -171,44 +160,12 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "datasets:read");
-        await assertEntityVisible(deps, principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
         return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
       } catch (err) {
         return sendError(reply, err); // not found → NotFoundError → 404
       }
     },
   );
-
-  // Hand the dataset to another team. A transition, not an edit: it re-files EVERY version at once (ownership
-  // belongs to the dataset, not to one release of it) and emits `dataset.moved`, so it gets its own endpoint
-  // exactly like the issue's team move does. Both teams are authorized inside the service — the one it is
-  // leaving and the one it is joining.
-  app.post<{ Params: { id: string } }>("/datasets/:id/team", { schema: datasetDocs.move }, async (req, reply) => {
-    if (!deps.datasetRegistry)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const body = MoveToTeamBodySchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    try {
-      const agent = agentAttributionFrom(req.headers);
-      return reply.send(
-        await moveCapabilityToTeam({
-          registry: deps.datasetRegistry,
-          capability: TEAM_TRANSFERABLE_CAPABILITIES.dataset,
-          principal,
-          id: req.params.id,
-          // Resolved here (id or key, `ENG`) so an unknown team is a 404 before the gate compares it against
-          // the teams the principal carries — which are ids.
-          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
-          ...(deps.platformEvents ? { events: deps.platformEvents } : {}),
-          ...(agent ? { agent } : {}),
-        }),
-      );
-    } catch (err) {
-      return sendError(reply, err); // not on one of the teams 403 / unknown dataset 404 / already there 409
-    }
-  });
 
   // Soft-delete a dataset version — only that version's own creator or a workspace admin (deleteDatasetVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecards stay reproducible. Missing/already-deleted/non-owned version = 404.
@@ -325,7 +282,6 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
           .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
       try {
         gate(principal, "datasets:read");
-        await assertEntityVisible(deps, principal, deps.datasetRegistry, principal.workspace, req.params.id, "dataset");
         const [baseDs, candidateDs] = await Promise.all([
           deps.datasetRegistry.get(principal.workspace, req.params.id, base),
           deps.datasetRegistry.get(principal.workspace, req.params.id, candidate),

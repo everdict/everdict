@@ -1,27 +1,15 @@
 import { deleteJudgeVersion, setVersionTags } from "@everdict/application-control";
-import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { JudgeSpecSchema, UntrustedTraceEventSchema } from "@everdict/contracts";
 import { diffJudgeSpecs } from "@everdict/domain";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
-import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
-
-// Judge MCP tools — the MCP twin of judge.routes.ts.
-// A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
-
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -39,10 +27,8 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       ({ team }) =>
         run(principal, "judges:read", async () => {
           // The visible-team ceiling first; `team` is the narrow on top of it, never a way past it.
-          const visible = await keepVisible(ctx, await judges.list(ws));
-          if (team === undefined) return ok(visible);
-          const teamId = await resolveTeam(ctx, team);
-          return ok(visible.filter((entry) => entry.teamId === teamId));
+          const visible = await judges.list(ws);
+          return ok(visible);
         }),
     );
 
@@ -55,7 +41,6 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, version }) =>
         run(principal, "judges:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, judges, ws, id, "judge");
           return ok(await judges.get(ws, id, version ?? "latest"));
         }),
     );
@@ -76,7 +61,6 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
         run(principal, "judges:read", async () => {
           // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
           // already carries, on the door that returns the same bytes (arch-review 119).
-          await assertEntityVisible(ctx.deps, principal, judges, ws, id, "judge");
           const [baseSpec, candidateSpec] = await Promise.all([
             judges.get(ws, id, base),
             judges.get(ws, id, candidate),
@@ -166,8 +150,7 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
         },
       },
       ({ judge, team, fromIssue, originNote }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "judges:write", team, async (teamId) => {
+        run(ctx.principal, "judges:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(judge);
@@ -184,20 +167,10 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
             declaredOriginFromIssue(fromIssue, originNote),
             { type: "judge", id: result.data.id },
           );
-          await judges.register(ws, result.data, principal.subject, teamId, origin); // creator stamp — HTTP parity
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+          await judges.register(ws, result.data, principal.subject, origin); // creator stamp — HTTP parity
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
-    registerCapabilityMoveTool(server, ctx, {
-      tool: "move_judge",
-      registry: judges,
-      capability: TEAM_TRANSFERABLE_CAPABILITIES.judge,
-      description: moveToolDescription(
-        "Hand a judge to another team. EVERY version moves — ownership belongs to the judge, not to one " +
-          "release of it — and no version is minted, so past scorecards keep the judge coordinates they " +
-          "snapshotted.",
-      ),
-    });
   }
 
   if (deps.judgePreviewService) {

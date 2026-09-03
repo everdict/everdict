@@ -27,7 +27,6 @@ import { DeleteDatasetButton } from '@/features/delete-dataset'
 import { CommentsSection } from '@/features/discuss'
 import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
-import { moveDestinationsFor, TeamOwnerControl } from '@/features/move-to-team'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { pickOrigin } from '@/entities/capability-origin'
 import {
@@ -40,7 +39,6 @@ import {
 import { harnessesSchema } from '@/entities/harness'
 import { isMachineSubject, membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
-import { teamsSchema } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -119,12 +117,6 @@ export default async function DatasetDetailPage({
     .catch(() => undefined)
   // 이 데이터셋을 지켜보는 이슈들 + 태어난 자리 — 보조 정보라 실패해도 상세는 그대로 그린다.
   const linkedIssues = await loadLinkedIssues(ctx, 'dataset', id)
-  // 소유 팀을 이름으로 부르고, 넘길 수 있는 사람에게는 그 자리에서 넘기게 하기 위한 로스터.
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch(() => [])
-  const teamMove = moveDestinationsFor(principal, teams, 'datasets:write')
   const relation = buildDatasetRelations(scorecards, liveHarnessIds)[id]
   const currentWorkspace = principal?.workspace ?? workspace
   // Creator — profile name+avatar (if any). Seed/_shared are shown as first-party (no avatar).
@@ -345,15 +337,6 @@ export default async function DatasetDetailPage({
             )}
             {author.name}
           </span>
-          {summary?.owner === currentWorkspace && (
-            <TeamOwnerControl
-              kind="datasets"
-              id={dataset.id}
-              {...(summary?.teamId !== undefined ? { teamId: summary.teamId } : {})}
-              teams={teamMove.teams}
-              writableIds={teamMove.writableIds}
-            />
-          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 border-t pt-3">

@@ -8,7 +8,7 @@ import {
 import { Issue } from "@everdict/domain";
 import type { GithubAsset, GithubIssue, GithubRepoWriterFactory } from "../ports/github-repo-writer.js";
 import type { IssueStore } from "../ports/issue-store.js";
-import type { IssueActor, IssueService, IssueTeamAllocator } from "./issue-service.js";
+import type { IssueActor, IssueNumberAllocator, IssueService } from "./issue-service.js";
 
 // GitHub issue import + MANUAL two-way sync (docs/tracker.md). There is no webhook and no periodic sweep —
 // everdict stays the client (docs/architecture/workspace-scoped-integrations.md), so a pull happens when a
@@ -30,8 +30,6 @@ export interface GithubRepositoryTokenSource {
 }
 
 export interface ImportGithubIssuesInput {
-  // Which team the imported copies land in. Absent = the workspace default, same as a hand-filed issue.
-  teamId?: string;
   repository: string;
   host?: string;
   numbers: number[];
@@ -58,7 +56,7 @@ export interface GithubIssueSyncDeps {
   // Transitions go back through the service so a sync-driven close emits the SAME fact a member's close does.
   issues: IssueService;
   // Same collaborator IssueService uses — an imported copy is numbered by the team it lands in.
-  teams: IssueTeamAllocator;
+  numbers: IssueNumberAllocator;
   // GitHub owns labels by NAME, everdict stores ids — so every pull maps the remote names onto the workspace
   // registry (defining what is missing) before the pure aggregate sees them. Absent = the deployment has no
   // registry wired and imported labels are dropped rather than half-applied.
@@ -200,12 +198,11 @@ export class GithubIssueSync {
       };
       const now = this.now();
       // Imported copies get an identifier from the same allocator a hand-filed issue uses, so a GitHub copy is
-      // a first-class issue from birth — ENG-12 regardless of where it came from.
-      const { team, grant } = await this.deps.teams.allocateForIssue(tenant, input.teamId, actor.subject);
+      // a first-class issue from birth — numbered from the workspace's own sequence regardless of where it came from.
+      const grant = await this.deps.numbers.allocateForIssue(tenant, actor.subject);
       const record = Issue.newIssue({
         id: crypto.randomUUID(),
         tenant,
-        teamId: team.id,
         number: grant.number,
         identifier: grant.identifier,
         title: remote.title,

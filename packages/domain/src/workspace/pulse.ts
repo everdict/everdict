@@ -9,7 +9,7 @@ import {
   type WorkspaceQualityPoint,
   activityAxisOf,
 } from "@everdict/contracts";
-import { addCalendarDays, daysBetween } from "../tracker/cycle.js";
+import { addCalendarDays, daysBetween } from "../tracker/calendar.js";
 
 // The workspace pulse's arithmetic — how the recorded past becomes the series a dashboard draws.
 //

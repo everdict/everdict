@@ -23,11 +23,6 @@ export interface NewProjectInput {
   name: string;
   description?: string;
   status?: ProjectStatus;
-  // The contributing teams and the umbrellas this project rolls up into — both lists, because a project spans
-  // teams and can serve more than one initiative (records/tracker.ts explains why neither may be a single id).
-  // The team list must not be EMPTY, though: the caller resolves "no teams named" to the workspace's default
-  // team before it gets here, so an empty one at this point is a project nobody would ever see.
-  teamIds?: string[];
   initiativeIds?: string[];
   lead?: string;
   memberIds?: string[];
@@ -39,10 +34,6 @@ export interface NewProjectInput {
 export interface ProjectEditInput {
   name?: string;
   description?: string | null;
-  // A list REPLACES what is there — there is no add/remove verb, because a membership editor sends the
-  // resulting set and a patch that merged would make removal unexpressible. `initiativeIds: []` detaches every
-  // umbrella (a project under none is still a project); `teamIds: []` is refused — see `assertTeamed`.
-  teamIds?: string[];
   initiativeIds?: string[];
   // `null` clears the lead (nobody is answerable yet); the member list REPLACES, like the other lists.
   lead?: string | null;
@@ -54,19 +45,6 @@ export interface ProjectEditInput {
 // would double-count the same team in every rollup that walks it.
 function normalizeIds(ids: readonly string[]): string[] {
   return [...new Set(ids)];
-}
-
-// A project is always somebody's work. Enforced in the aggregate rather than only at the edges because both
-// ways in — creating one and editing its team list — end here, and an empty list is not a smaller project: it
-// is one that appears in no team's sidebar and that no issue may join (an issue can only be in a project its
-// own team is on), which is work made invisible rather than planned.
-function assertTeamed(teamIds: readonly string[], project: string): void {
-  if (teamIds.length === 0)
-    throw new BadRequestError(
-      "BAD_REQUEST",
-      { project },
-      "A project is worked by at least one team — name the team it belongs to instead of detaching the last one.",
-    );
 }
 
 function sameIds(a: readonly string[], b: readonly string[]): boolean {
@@ -97,8 +75,6 @@ export class Project {
 
   static newProject(input: NewProjectInput): ProjectRecord {
     const status = input.status ?? "planned";
-    const teamIds = normalizeIds(input.teamIds ?? []);
-    assertTeamed(teamIds, input.id);
     const initiativeIds = normalizeIds(input.initiativeIds ?? []);
     return {
       id: input.id,
@@ -106,7 +82,6 @@ export class Project {
       name: input.name,
       ...(input.description !== undefined ? { description: input.description } : {}),
       status,
-      teamIds,
       initiativeIds,
       ...(input.lead !== undefined ? { lead: input.lead } : {}),
       memberIds: normalizeIds(input.memberIds ?? []),
@@ -117,7 +92,6 @@ export class Project {
           at: input.now,
           by: input.createdBy,
           event: "created",
-          detail: { status, teamIds, initiativeIds },
         },
       ],
       createdBy: input.createdBy,
@@ -137,7 +111,6 @@ export class Project {
           // The name a feed row cites — the record's id is a uuid, and a "project created" line that names
           // nothing tells a reader nothing.
           name: record.name,
-          teamIds: record.teamIds,
           initiativeIds: record.initiativeIds,
           ...(record.targetDate !== undefined ? { targetDate: record.targetDate } : {}),
         },
@@ -161,14 +134,6 @@ export class Project {
       if (next !== this.record.description) {
         patch.description = next;
         changed.push("description");
-      }
-    }
-    if (fields.teamIds !== undefined) {
-      const next = normalizeIds(fields.teamIds);
-      assertTeamed(next, this.record.id);
-      if (!sameIds(next, this.record.teamIds)) {
-        patch.teamIds = next;
-        changed.push("teams");
       }
     }
     if (fields.initiativeIds !== undefined) {
@@ -246,7 +211,6 @@ export class Project {
               // The same excerpt an initiative update carries, for the same reason: a bell row or a chat post
               // that only says the colour explains nothing, and neither can re-read the timeline.
               excerpt: excerptOf(update.body),
-              teamIds: this.record.teamIds,
               initiativeIds: this.record.initiativeIds,
             },
           },
@@ -366,7 +330,6 @@ export class Project {
             to,
             name: this.record.name,
             openIssues,
-            teamIds: this.record.teamIds,
             initiativeIds: this.record.initiativeIds,
             ...(onTime !== undefined ? { onTime } : {}),
             ...(forced ? { forced: true } : {}),

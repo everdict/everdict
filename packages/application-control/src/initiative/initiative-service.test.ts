@@ -8,10 +8,10 @@ import type {
   ProjectRecord,
 } from "@everdict/contracts";
 import { ConflictError } from "@everdict/contracts";
-import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import { issueCountsByGroup, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { InitiativeListFilter, InitiativeStore } from "../ports/initiative-store.js";
-import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore } from "../ports/issue-store.js";
 import type { ProjectListFilter, ProjectStore } from "../ports/project-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import { InitiativeService } from "./initiative-service.js";
@@ -69,9 +69,6 @@ class FakeIssueStore extends FakeStore<IssueRecord> implements IssueStore {
   async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
     return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
   }
-  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
-    return issueCountsByTeam(await this.list(tenant));
-  }
   async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
     return issueCountsByGroup(await this.list(tenant, filter), groupBy);
   }
@@ -101,14 +98,12 @@ function issue(id: string, projectId: string, status: IssueRecord["status"]): Is
   return {
     id,
     tenant: "acme",
-    teamId: "team-eng",
     number: 1,
     identifier: "ENG-1",
     formerIdentifiers: [],
     title: `issue ${id}`,
     status,
     priority: "none",
-    inTriage: false,
     projectId,
     labelIds: [],
     links: [],
@@ -128,7 +123,6 @@ function project(id: string, initiativeId: string, status: ProjectRecord["status
     tenant: "acme",
     name: `project ${id}`,
     status,
-    teamIds: ["team-1"],
     initiativeIds: [initiativeId],
     memberIds: [],
     milestones: [],

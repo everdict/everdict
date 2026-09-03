@@ -8,8 +8,8 @@ import { PREDICATES } from "./predicate.js";
 // pattern): a change to the count here is a deliberate, reviewed vocabulary extension, not an accident.
 describe("knowledge vocabularies are closed", () => {
   it("has the expected node and predicate cardinality with no duplicates", () => {
-    expect(NODE_TYPES).toHaveLength(32);
-    expect(PREDICATES).toHaveLength(42); // +forked_from (harness-identity-and-seeds-spec.md §1)
+    expect(NODE_TYPES).toHaveLength(30); // -team, -cycle (the workspace is the only boundary)
+    expect(PREDICATES).toHaveLength(41); // -belongs_to (its only producer was the team-scoping edge)
     expect(new Set(NODE_TYPES).size).toBe(NODE_TYPES.length);
     expect(new Set(PREDICATES).size).toBe(PREDICATES.length);
   });

@@ -18,10 +18,8 @@ export class InMemoryWorkflowStateStore implements WorkflowStateStore {
     return record && record.tenant === tenant ? record : undefined;
   }
 
-  async listByTeam(tenant: string, teamId: string): Promise<WorkflowStateRecord[]> {
-    return [...this.byId.values()]
-      .filter((record) => record.tenant === tenant && record.teamId === teamId)
-      .sort((a, b) => a.position - b.position);
+  async listByTenant(tenant: string): Promise<WorkflowStateRecord[]> {
+    return [...this.byId.values()].filter((record) => record.tenant === tenant).sort((a, b) => a.position - b.position);
   }
 
   async update(
@@ -45,7 +43,6 @@ export class InMemoryWorkflowStateStore implements WorkflowStateStore {
 interface WorkflowStateRow {
   id: string;
   tenant: string;
-  team_id: string;
   name: string;
   description: string | null;
   status: string;
@@ -59,7 +56,6 @@ function rowToRecord(row: WorkflowStateRow): WorkflowStateRecord {
   return WorkflowStateRecordSchema.parse({
     id: row.id,
     tenant: row.tenant,
-    teamId: row.team_id,
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
@@ -76,12 +72,11 @@ export class PgWorkflowStateStore implements WorkflowStateStore {
   async create(record: WorkflowStateRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO everdict_workflow_states
-         (id, tenant, team_id, name, description, status, color, position, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,$10::timestamptz)`,
+         (id, tenant, name, description, status, color, position, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::timestamptz)`,
       [
         record.id,
         record.tenant,
-        record.teamId,
         record.name,
         record.description ?? null,
         record.status,
@@ -101,10 +96,10 @@ export class PgWorkflowStateStore implements WorkflowStateStore {
     return rows[0] ? rowToRecord(rows[0]) : undefined;
   }
 
-  async listByTeam(tenant: string, teamId: string): Promise<WorkflowStateRecord[]> {
+  async listByTenant(tenant: string): Promise<WorkflowStateRecord[]> {
     const { rows } = await this.client.query<WorkflowStateRow>(
-      "SELECT * FROM everdict_workflow_states WHERE tenant=$1 AND team_id=$2 ORDER BY position",
-      [tenant, teamId],
+      "SELECT * FROM everdict_workflow_states WHERE tenant=$1 ORDER BY position",
+      [tenant],
     );
     return rows.map(rowToRecord);
   }

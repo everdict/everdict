@@ -33,7 +33,6 @@ export function JudgeList({
   judges,
   currentWorkspace,
   authors,
-  teams,
   scope,
   canDelete,
 }: {
@@ -42,7 +41,6 @@ export function JudgeList({
   // 「출처」축의 이름표를 고르는 기준 — 이 워크스페이스가 만든 것인가, 기본 제공인가.
   currentWorkspace: string
   authors: Record<string, Author>
-  teams: TeamOption[]
   scope: ListViewScope
   canDelete: boolean
 }) {
@@ -58,10 +56,6 @@ export function JudgeList({
     initialDisplay: scope.display,
   })
 
-  const teamName = useMemo(
-    () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
-    [teams]
-  )
   const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
   const ownerName = (owner: string): string =>
     owner === SHARED_OWNER || owner !== currentWorkspace
@@ -78,11 +72,10 @@ export function JudgeList({
     // 전부 워크스페이스 것(또는 전부 기본 제공)인 목록에서 그 축은 아무것도 걸러 주지 못한다.
     const minimum = (facet: string): number => (facet === 'owner' ? 2 : 1)
     return [
-      of('team', (id) => teamName[id] ?? id, list('unset.team')),
       of('owner', ownerName),
       of('creator', creatorName, list('unset.creator')),
     ].filter((facet) => facet.options.length >= minimum(facet.key))
-  }, [judges, teamName, list, authors, currentWorkspace])
+  }, [judges, list, authors, currentWorkspace])
 
   const { total, groups } = useMemo(
     () =>
@@ -96,7 +89,6 @@ export function JudgeList({
 
   function groupLabel(key: string | null): string {
     if (key === null) return list(`unset.${view.display.grouping}`)
-    if (view.display.grouping === 'team') return teamName[key] ?? key
     if (view.display.grouping === 'creator') return creatorName(key)
     if (view.display.grouping === 'owner') return ownerName(key)
     return key

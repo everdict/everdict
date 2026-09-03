@@ -2,7 +2,6 @@ import type { RunListOptions } from "@everdict/application-control";
 
 // ── THE ACTIVITY LIST IS A PAGE, AND IT HAD NO PAGE SIZE (perf review) ──────────────────────────────
 //
-// `GET /runs` and `list_runs` both resolved to `RunStore.list(workspace, { viewer, teamCeiling })` when the
 // caller named no limit — and the store's `limit` is deliberately "ABSENT = every match", because internal
 // readers (boot recovery, the reapers, the usage meter) want exactly that. So the DEFAULT answer to "show me
 // this workspace's runs" was every standalone run it had ever executed, projected as `SELECT *`, which

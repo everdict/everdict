@@ -35,7 +35,6 @@ import type { ScorecardService } from "@everdict/application-control";
 import type { TraceSourceService } from "@everdict/application-control";
 import type {
   CheckpointService,
-  CycleService,
   GithubIssueSync,
   InitiativeService,
   IssueLabelService,
@@ -46,7 +45,6 @@ import type {
   ProjectService,
   SubscriptionService,
   TaskService,
-  TeamService,
   ViewService,
   ViewSnapshotService,
 } from "@everdict/application-control";
@@ -56,7 +54,7 @@ import type { FileExecutionService, FsService } from "@everdict/application-cont
 import type { CapabilityService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import type { CampaignService } from "@everdict/application-control";
-import { type Action, type Authenticator, type Principal, type ResourceScope, authorize } from "@everdict/auth";
+import { type Action, type Authenticator, type Principal, authorize } from "@everdict/auth";
 import type { ImageWarning } from "@everdict/contracts";
 import {
   AppError,
@@ -146,8 +144,6 @@ export interface ServerDeps {
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/read (routes disabled if absent)
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
-  teamService?: TeamService; // teams own issues and name them (ENG-12); a workspace always keeps one default
-  cycleService?: CycleService;
   workflowStateService?: WorkflowStateService;
   issueService?: IssueService;
   // The workspace label registry an issue's labelIds point at (docs/tracker.md).
@@ -346,40 +342,6 @@ export function workspaceHintOf(req: FastifyRequest): string | undefined {
   return typeof header === "string" && header.length > 0 ? header : undefined;
 }
 
-// The subject's TEAM MEMBERSHIPS in the resolved workspace — an authorization input, not decoration: a write
-// against a resource owned by a team the subject is not on is refused by can() in @everdict/domain. Loaded here,
-// beside the membership role, because both answer "what may this request do in THIS workspace" and both must come
-// from the control plane rather than the client.
-//
-// A failure loads NO teams rather than throwing: the request then behaves as a subject on no team — it writes and
-// reads the workspace's unowned rows and nothing owned. That is the right side to err on (a lookup we could not
-// do must never widen access) and it never takes the whole request down, but since ownership now isolates READS
-// too, the same failure also empties this caller's lists — so it is logged rather than swallowed, because
-// "your team has nothing" and "we could not find out which teams are yours" look identical on screen.
-async function withTeams(principal: Principal, deps: ServerDeps, req: FastifyRequest): Promise<Principal> {
-  const service = deps.teamService;
-  if (!service || !principal.workspace) return principal;
-  const [teams, fallback] = await Promise.all([
-    service.list(principal.workspace, { member: principal.subject }).catch((err) => {
-      req.log.warn(
-        { subject: principal.subject, workspace: principal.workspace, err },
-        "auth: team roster lookup failed — the request proceeds as a subject on no team (owned resources are hidden)",
-      );
-      return [];
-    }),
-    // Every workspace MEMBER is on the default team whether or not anyone wrote them into its roster. The default
-    // team is not a team someone chose to be on: it is where an unnamed asset lands and where the ownership
-    // migration put everything that predates the axis, so isolating it would empty the screen of every member an
-    // admin has not got around to rostering. Teams people actually created stay isolated, which is the point.
-    service
-      .defaultTeam(principal.workspace)
-      .catch(() => undefined),
-  ]);
-  const ids = new Set(teams.map((team) => team.id));
-  if (fallback) ids.add(fallback.id);
-  return { ...principal, teams: [...ids] };
-}
-
 export async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
   // A runner token (via=runner) has a fixed workspace + minimal perms (roles:["runner"]) — exclude it from membership bootstrap / role promotion.
   // (Without the exclusion it would be promoted to the owner's membership role and the device credential would gain admin.)
@@ -418,11 +380,11 @@ export async function applyActiveWorkspace(base: Principal, req: FastifyRequest,
   const requested = workspaceHintOf(req) ?? base.workspace;
   if (requested && requested !== base.workspace) {
     const role = await store.roleFor(requested, subject);
-    if (role) return withTeams({ ...base, workspace: requested, roles: [role] }, deps, req);
+    if (role) return { ...base, workspace: requested, roles: [role] };
   }
 
   // Fall back to the default workspace (membership role if present). Otherwise keep workspace="" (onboarding target).
-  return base.workspace ? withTeams({ ...base, roles: [baseRole as string] }, deps, req) : base;
+  return base.workspace ? { ...base, roles: [baseRole as string] } : base;
 }
 
 // Final Principal with both authentication and active workspace resolved (used by every human/HTTP route).
@@ -491,18 +453,14 @@ export function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyR
 
 // Team OWNERSHIP resolution + the read guard live in `common/team-scope.ts` (both transports need them, and
 // an MCP tool file cannot import this module without closing a cycle): teamOfVersion / teamOfEntity /
-// assertEntityVisible / assertTeamVisible / visibleTeamsFor / teamCeiling.
 
 // Re-exported so a ROUTE keeps one import surface (this module, beside gate/sendError) while an MCP tool file
 // imports the same functions straight from `common/team-scope.js` — it cannot import this one without a cycle.
-export { resolveTeamRef, teamForNew } from "../common/team-scope.js";
 
-// authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.
-// `resource` carries the OWNING TEAM when the target has one: a write against another team's harness/dataset/…
-// is refused even though the role allows the action in general. Omit it for workspace-level actions; for READS
-// use `assertTeamVisible` below instead, which answers the same refusal as 404.
-export function gate(principal: Principal, action: Action, resource?: ResourceScope): void {
-  authorize(principal, action, resource);
+// authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403. The WORKSPACE is the only
+// boundary, so an action the role grants reaches every asset the workspace holds; there is no per-resource arm.
+export function gate(principal: Principal, action: Action): void {
+  authorize(principal, action);
 }
 
 // CONSTITUTIONAL AUTHORITY BELONGS TO THE DECLARATION ARTIFACT AT ITS WRITE BOUNDARY, not to whichever
@@ -599,13 +557,7 @@ export async function publishDataset(
   // be atomic with, and demanding a transaction for it would make a routine publish depend on a capability
   // this deployment may not have.
   if (metrics.length === 0) {
-    await registry.register(
-      principal.workspace,
-      dataset,
-      principal.subject,
-      provenance.teamId,
-      provenance.origin as never,
-    );
+    await registry.register(principal.workspace, dataset, principal.subject, provenance.origin as never);
     return;
   }
   if (deps.constitutionalPublisher === undefined)
@@ -630,7 +582,6 @@ export async function publishDataset(
       approvedAt: new Date().toISOString(),
     },
     createdBy: principal.subject,
-    ...(provenance.teamId !== undefined ? { teamId: provenance.teamId } : {}),
     ...(provenance.origin !== undefined ? { origin: provenance.origin } : {}),
   });
 }
@@ -648,7 +599,6 @@ export function runVisible(
 }
 
 // The READ half of the team axis lives in `common/team-scope.ts` (both transports need it, and the MCP tool files
-// cannot import this module without closing a cycle): `assertTeamVisible` / `visibleTeamsFor` / `teamCeiling`.
 
 // AppError → flat error response; anything else → 500. Every route funnels failures through this.
 export function sendError(reply: FastifyReply, err: unknown): FastifyReply {

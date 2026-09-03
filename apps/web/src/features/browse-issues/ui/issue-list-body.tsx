@@ -46,11 +46,8 @@ export function IssueListBody({
   initialData,
   directories,
   projects,
-  cycles,
   canWrite,
   timeZone,
-  chips,
-  footer,
 }: {
   workspace: string
   basePath: string
@@ -61,13 +58,10 @@ export function IssueListBody({
   initialData: IssueViewData
   directories: IssueDirectories
   projects: { id: string; name: string }[]
-  cycles: { id: string; name: string }[]
   canWrite: boolean
   timeZone: string
   // 워크스페이스 전체 목록의 팀 칩 — 서버가 그려 넘긴다(보기와 무관하고, 링크일 뿐이다).
-  chips?: ReactNode
   // 일괄 편집 바 — 고를 대상이 있는 화면에서만.
-  footer?: ReactNode
 }) {
   const t = useTranslations('issuesPage')
   const [view, setView] = useState(initialView)
@@ -125,7 +119,6 @@ export function IssueListBody({
           filters={view.filters}
           directories={directories}
           projects={projects}
-          cycles={cycles}
           onToggle={(facet, value) => {
             // 공용 메뉴는 축을 문자열로 돌려준다 — 이슈가 아는 축인지 여기서 좁힌다(단언 대신).
             const known = ISSUE_FILTER_FACETS.find((candidate) => candidate === facet)
@@ -143,7 +136,6 @@ export function IssueListBody({
           <IssueDisplayMenu display={view} onChange={(next) => apply({ ...view, ...next })} />
         </div>
       </div>
-      {chips}
 
       {/* 새 목록을 기다리는 동안 이전 목록이 그대로 서 있는다 — 스켈레톤으로 비우면 방금 본 것이 사라진다. */}
       <div
@@ -220,7 +212,6 @@ export function IssueListBody({
           </p>
         )}
       </div>
-      {footer}
     </>
   )
 }

@@ -23,19 +23,8 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
   // the `_` prefix was the tell. `createdBy` genuinely stays unthreaded — that column does not exist, so
   // carrying it here would make the in-memory store MORE capable than production, which is the same divergence
   // pointing the other way.
-  async register(
-    tenant: string,
-    spec: RuntimeSpec,
-    _createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.register(tenant, spec, undefined, teamId, origin);
-  }
-  // The owning team — the value the authz kernel's team axis reads. Undefined = unowned (_shared/seed),
-  // which is NOT the same as "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.store.teamOfVersion(tenant, id, version);
+  async register(tenant: string, spec: RuntimeSpec, _createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    this.store.register(tenant, spec, undefined, origin);
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -62,14 +51,11 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
     const out: RuntimeListEntry[] = [];
     for (const { id, owner, versions } of this.store.listIds(tenant)) {
       const versionTags = this.store.versionTags(owner, id);
-      // Ownership belongs to the thing, not to one release of it — read it off the newest version.
-      const teamId = this.store.teamOfVersion(owner, id, versions[versions.length - 1] ?? "");
       const capabilities = this.store.get(owner, id).capabilities; // latest (default ref)
       out.push({
         id,
         owner,
         versions,
-        ...(teamId !== undefined ? { teamId } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
         ...(capabilities && capabilities.length > 0 ? { capabilities } : {}),
       });

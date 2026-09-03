@@ -12,18 +12,8 @@ import type { ModelRegistry } from "@everdict/application-control";
 export class InMemoryModelRegistry implements ModelRegistry {
   private readonly store = new VersionedStore<ModelSpec>("model");
 
-  async register(
-    tenant: string,
-    spec: ModelSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.register(tenant, spec, createdBy, teamId, origin);
-  }
-  // 소유 팀 — 인가 커널의 팀 축이 읽는 값. undefined = 소유자 없음(_shared/시드)이며 "모두의 것"이 아니다.
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.store.teamOfVersion(tenant, id, version);
+  async register(tenant: string, spec: ModelSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    this.store.register(tenant, spec, createdBy, origin);
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -38,16 +28,13 @@ export class InMemoryModelRegistry implements ModelRegistry {
   async get(tenant: string, id: string, ref?: string): Promise<ModelSpec> {
     return this.store.get(tenant, id, ref);
   }
-  async list(
-    tenant: string,
-  ): Promise<Array<{ id: string; versions: string[]; owner: string; createdBy?: string; teamId?: string }>> {
+  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string; createdBy?: string }>> {
     // listMeta carries the first-registered creator (createdBy) alongside the id/versions/owner summary the model list needs.
     return this.store.listMeta(tenant).map((m) => ({
       id: m.id,
       versions: m.versions,
       owner: m.owner,
       ...(m.createdBy !== undefined ? { createdBy: m.createdBy } : {}),
-      ...(m.teamId !== undefined ? { teamId: m.teamId } : {}),
     }));
   }
   async creatorOf(tenant: string, id: string, version: string): Promise<string | undefined> {

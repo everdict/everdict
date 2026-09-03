@@ -1,19 +1,8 @@
 import { setVersionTags } from "@everdict/application-control";
 import { RubricSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, plain, run, runForTeam } from "../mcp-context.js";
-
-// Rubric MCP tools — the MCP twin of rubric.routes.ts.
-// AuthZ reuses the judge actions (rubrics are the judging domain — no new action, mirroring how views reuse
-// scorecards:*): read = judges:read, write = judges:write.
-// A private team's work is not the workspace's — the same ceiling the HTTP list stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 
 export function registerRubricTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
@@ -27,7 +16,7 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
         description: "Rubrics visible to this workspace (owned + _shared default rubrics)",
         inputSchema: {},
       },
-      () => run(principal, "judges:read", async () => ok(await keepVisible(ctx, await rubrics.list(ws)))),
+      () => run(principal, "judges:read", async () => ok(await rubrics.list(ws))),
     );
 
     server.registerTool(
@@ -40,7 +29,6 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
       },
       ({ id, version }) =>
         run(principal, "judges:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, rubrics, ws, id, "rubric");
           return ok(await rubrics.get(ws, id, version ?? "latest"));
         }),
     );
@@ -110,8 +98,7 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
         },
       },
       ({ rubric, team }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "judges:write", team, async (teamId) => {
+        run(ctx.principal, "judges:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(rubric);
@@ -120,8 +107,8 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
           }
           const result = RubricSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await rubrics.register(ws, result.data, principal.subject, teamId); // creator stamp — HTTP parity
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+          await rubrics.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
   }

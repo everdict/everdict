@@ -55,16 +55,6 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
     );
   });
 
-  it("list returns owned + shared with owner", async () => {
-    const r = new InMemoryRuntimeRegistry();
-    await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
-    await r.register("acme", rt("mine", "1.0.0"));
-    expect(await r.list("acme")).toEqual([
-      { id: "mine", owner: "acme", versions: ["1.0.0"] },
-      { id: "shared", owner: SHARED_TENANT, versions: ["1.0.0"] },
-    ]);
-  });
-
   it("list surfaces the latest version's declared capabilities (submit-time fit preview); omits when none", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register("acme", rt("cap", "1.0.0", { capabilities: ["docker"] }));
@@ -167,11 +157,12 @@ function fakePg(): SqlClient {
         // (arch-review 119).
         return { rows: [{}] as R[] };
       }
-      // `WITH authorized AS (…) SELECT 1 FROM authorized` — the exact-version lane's settle (arch-review 120).
+      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane's settle.
       // This double holds no team_id, so the authority arm it models is always satisfied and the statement
       // returns its row. A double that answered `[]` here would report every idempotent re-register as a
       // refusal, which is the always-succeeds-double law with the polarity flipped (rule `testing`).
-      if (/^WITH authorized AS /.test(t)) return { rows: [{ one: 1 }] as R[] };
+      if (/^WITH revived AS \(UPDATE/.test(t) || /^WITH origined AS \(UPDATE/.test(t))
+        return { rows: [{ one: 1 }] as R[] };
       return { rows: [] };
     },
   };
@@ -198,5 +189,15 @@ describe("PgRuntimeRegistry (tenant-owned)", () => {
     await r.setVersionTags("acme", "mine", "1.0.0", []);
     expect(await r.versionTags("acme", "mine")).toEqual({});
     await expect(r.setVersionTags("acme", "mine", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("list returns owned + shared with owner", async () => {
+    const r = new InMemoryRuntimeRegistry();
+    await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
+    await r.register("acme", rt("mine", "1.0.0"));
+    expect(await r.list("acme")).toEqual([
+      { id: "mine", owner: "acme", versions: ["1.0.0"] },
+      { id: "shared", owner: SHARED_TENANT, versions: ["1.0.0"] },
+    ]);
   });
 });

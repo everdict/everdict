@@ -109,7 +109,6 @@ export function mattermostHttpClient(fetchImpl: typeof fetch = fetch): Mattermos
             id: c.id,
             name: typeof c.name === "string" ? c.name : "",
             displayName: typeof c.display_name === "string" ? c.display_name : "",
-            teamId: typeof c.team_id === "string" ? c.team_id : teamId,
             type: typeof c.type === "string" ? c.type : "",
           });
         }

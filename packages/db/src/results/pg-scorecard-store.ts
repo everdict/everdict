@@ -25,7 +25,6 @@ interface ScorecardRow {
   judge_models: unknown;
   origin: unknown;
   created_by: string | null;
-  team_id: string | null; // owning team (mig 0106) — beside created_by, because ownership is metadata, not content
   runtime: string | null;
   subset: unknown;
   scorecard: unknown;
@@ -68,7 +67,6 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     judgeModels: row.judge_models ?? undefined, // lightweight → included in list too (judge-axis filter/display)
     origin: row.origin ?? undefined, // lightweight → included in list too (trigger-provenance chip/commit link)
     createdBy: row.created_by ?? undefined, // lightweight → included in list too (runner display/filter)
-    teamId: row.team_id ?? undefined, // lightweight → included in list too (the team axis is what the team page reads)
     runtime: row.runtime ?? undefined, // lightweight → included in list too (work-queue runtime axis)
     subset: row.subset ?? undefined, // lightweight → included in list too (partial-run badge)
     orchestration: row.orchestration ?? undefined, // resume/retry inputs (mig 0049) — lightweight
@@ -120,7 +118,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, team_id, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world, publication)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world, publication)";
 const SCORECARD_VALUES =
   "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)";
 
@@ -139,7 +137,6 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     r.judgeModels ? JSON.stringify(r.judgeModels) : null,
     r.origin ? JSON.stringify(r.origin) : null,
     r.createdBy ?? null,
-    r.teamId ?? null,
     r.runtime ?? null,
     r.subset ? JSON.stringify(r.subset) : null,
     r.orchestration ? JSON.stringify(r.orchestration) : null,
@@ -562,7 +559,7 @@ export class PgScorecardStore implements ScorecardStore {
       // batches a live replica is still driving. It is one text column, not a heavy one.
       // …and `publication` rides it for the same kind of reason (mig 0187): the publication reconciler finds
       // owed settlements through list(), so a column omitted here is a settlement nobody converges.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, team_id, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, publication, owner_replica, owner_epoch, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, publication, owner_replica, owner_epoch, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC${limit}`,
@@ -599,7 +596,6 @@ const GROUP_KEY_SQL: Record<ScorecardGroupBy, string> = {
   status: "status",
   harness: "harness_id",
   dataset: "dataset_id",
-  team: "team_id",
   creator: "created_by",
 };
 
@@ -619,13 +615,6 @@ function scorecardFilterSql(
   if (filter?.dataset) conds.push(`dataset_id = ${put(filter.dataset)}`);
   if (filter?.harness) conds.push(`harness_id = ${put(filter.harness)}`);
   if (filter?.status) conds.push(`status = ${put(filter.status)}`);
-  if (filter?.teamId) conds.push(`team_id = ${put(filter.teamId)}`);
-  if (filter?.visibleTeams) {
-    // Ownership isolation — the caller may only see their own teams' batches. NULL (unowned: `_shared` seeds,
-    // rows from before the team axis) is everyone's, so it is kept rather than swept up by a team the caller
-    // does not happen to be on. An empty array is a real answer (on no team ⇒ only unowned), never "no filter".
-    conds.push(`(team_id IS NULL OR team_id = ANY(${put(filter.visibleTeams)}::text[]))`);
-  }
   // jsonb containment on the persisted orchestration.judges — matches the judge id at any version.
   if (filter?.judge) conds.push(`orchestration->'judges' @> ${put(JSON.stringify([{ id: filter.judge }]))}::jsonb`);
   // jsonb field match on the persisted origin — the runs a schedule fired (source === "schedule").
@@ -654,7 +643,6 @@ function scorecardFilterSql(
   if (filter?.harnesses) conds.push(`harness_id = ANY(${put(filter.harnesses)}::text[])`);
   if (filter?.runtimes) conds.push(`coalesce(runtime, '') = ANY(${put(filter.runtimes)}::text[])`);
   if (filter?.creators) conds.push(`coalesce(created_by, '') = ANY(${put(filter.creators)}::text[])`);
-  if (filter?.teamIds) conds.push(`coalesce(team_id, '') = ANY(${put(filter.teamIds)}::text[])`);
   // The half-open window the dashboard reads, same index as `day` (`everdict_scorecards_tenant_created_idx`).
   if (filter?.createdSince) conds.push(`created_at >= ${put(filter.createdSince)}::timestamptz`);
   if (filter?.day) {

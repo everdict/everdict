@@ -105,7 +105,6 @@ export function IssueActions({
         workspace={workspace}
         projects={projects}
         parentId={issue.id}
-        defaultTeamId={issue.teamId}
         open={addingSub}
         onClose={() => setAddingSub(false)}
       />

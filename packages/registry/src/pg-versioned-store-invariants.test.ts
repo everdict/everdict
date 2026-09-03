@@ -131,7 +131,7 @@ function fakePg(): FakePg {
       }
       if (
         t.startsWith(
-          "SELECT version, dataset, created_at, created_by, team_id, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -216,11 +216,10 @@ function fakePg(): FakePg {
         // (arch-review 119).
         return { rows: [{}] as R[] };
       }
-      // `WITH authorized AS (…) revived AS (UPDATE …) SELECT 1 FROM authorized` — the exact-version lane
-      // settles in ONE data-modifying CTE (arch-review 120). These doubles hold no team_id, so the authority
-      // arm they model is satisfied; what they must still DO is the revive the CTE performs, or they report
-      // a success whose effect never happened.
-      if (/^WITH authorized AS /.test(t)) {
+      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane settles in ONE
+      // data-modifying CTE (arch-review 120). What this double must still DO is the revive the CTE performs,
+      // or it reports a success whose effect never happened.
+      if (/^WITH revived AS \(UPDATE/.test(t) || /^WITH origined AS \(UPDATE/.test(t)) {
         if (/revived AS \(UPDATE/.test(t)) {
           const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
           if (r) r.deleted_at = null;

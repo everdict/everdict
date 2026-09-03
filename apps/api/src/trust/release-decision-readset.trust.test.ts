@@ -144,13 +144,13 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
       // building a full IssueRecord would couple the scenario to every column the tracker later grows.
       await pg.client.query(
         `INSERT INTO everdict_issues
-           (id, tenant, team_id, number, identifier, former_identifiers, title, description, status, priority,
+           (id, tenant, number, identifier, former_identifiers, title, description, status, priority,
             estimate, due_date, parent_id, cycle_id, milestone_id, state_id, in_triage, project_id, assignee,
             label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)
          VALUES ($1,'trust','team-trust',$3::int,'TRU-' || $3::text,'[]'::jsonb,'regression in checkout',NULL,'in_progress','none',
                  NULL,NULL,NULL,NULL,NULL,NULL,false,NULL,NULL,
                  '[]'::jsonb,$2::jsonb,NULL,NULL,'[]'::jsonb,'dana',NULL,now(),now())`,
-        // (team_id, number) is unique, and this suite runs against a SHARED database — a fixed number
+        // (number) is unique, and this suite runs against a SHARED database — a fixed number
         // collides with the previous run rather than testing anything.
         [trustId("iss"), JSON.stringify([{ type: "release", id: release.id }]), Date.now() % 1_000_000],
       );

@@ -224,7 +224,6 @@ export {
   Issue,
   ISSUE_PRIORITIES_BY_RANK,
   issueCountsByGroup,
-  issueCountsByTeam,
   issueGroupKey,
   issueOrderKey,
   issueSummaryOf,
@@ -269,34 +268,6 @@ export {
   type ProjectIssueCount,
 } from "./tracker/readiness.js";
 export { excerptOf, TRACKER_UPDATE_EXCERPT_LIMIT } from "./tracker/update-excerpt.js";
-export {
-  addCalendarDays,
-  alignToStartDay,
-  Cycle,
-  cycleBurndown,
-  type CycleCadence,
-  cycleDaysRemaining,
-  type CycleEditInput,
-  cyclePipelinePlan,
-  cycleProgress,
-  cycleStateOf,
-  type CycleTransition,
-  daysBetween,
-  issueInCycleOn,
-  issueStatusOn,
-  type NewCycleInput,
-  nextCycleWindow,
-  weekdayOf,
-} from "./tracker/cycle.js";
-export {
-  type IssueNumberAllocation,
-  type NewTeamInput,
-  normalizeTeamKey,
-  Team,
-  type TeamEditInput,
-  type TeamTransition,
-} from "./tracker/team.js";
-
 // product — the product timeline's aggregates (Product ⊃ Release over the imported version ledger) + the
 // readiness arithmetic that gates a release (docs/architecture/product-timeline.md).
 export {
@@ -663,11 +634,7 @@ export {
   API_KEY_SCOPES,
   type ApiKeyScope,
   authorize,
-  canReachTeam,
-  type ResourceScope,
   can,
-  ownedByVisibleTeam,
-  ownedByAnyVisibleTeam,
   EVERDICT_ROLES,
   type EverdictRole,
 } from "./auth/authz.js";
@@ -739,16 +706,12 @@ export {
   SKILL_HARVESTER,
 } from "./knowledge/harvest-knowledge.js";
 export {
-  CYCLE_HARVESTER,
-  harvestCycle,
   harvestInitiative,
   harvestIssue,
   harvestProject,
-  harvestTeam,
   INITIATIVE_HARVESTER,
   ISSUE_HARVESTER,
   PROJECT_HARVESTER,
-  TEAM_HARVESTER,
 } from "./knowledge/harvest-tracker.js";
 export {
   type AnchorRelation,
@@ -782,3 +745,5 @@ export {
   type VerifierReceipt,
   verifierReceiptOf,
 } from "./execution/verifier-receipt.js";
+
+export { addCalendarDays, daysBetween, weekdayOf } from "./tracker/calendar.js";

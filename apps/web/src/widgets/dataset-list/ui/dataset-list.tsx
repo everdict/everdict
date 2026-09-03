@@ -57,14 +57,12 @@ export function DatasetList({
   datasets,
   relations,
   authors,
-  teams,
   scope,
 }: {
   workspace: string
   datasets: DatasetSummary[]
   relations: Record<string, DatasetRelation>
   authors: Record<string, Author>
-  teams: TeamOption[]
   scope: ListViewScope
 }) {
   const t = useTranslations('datasetList')
@@ -97,10 +95,6 @@ export function DatasetList({
     return { name: '—', known: false }
   }
 
-  const teamName = useMemo(
-    () => Object.fromEntries(teams.map((team) => [team.id, team.name])),
-    [teams]
-  )
   const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
 
   const facets = useMemo((): FacetSpec[] => {
@@ -115,11 +109,10 @@ export function DatasetList({
       ),
     })
     return [
-      of('team', (id) => teamName[id] ?? id, list('unset.team')),
       of('creator', creatorName, list('unset.creator')),
       of('tag', (value) => value, list('unset.tag')),
     ].filter((facet) => facet.options.length > 0)
-  }, [datasets, teamName, list, authors])
+  }, [datasets, list, authors])
 
   const { total, groups } = useMemo(
     () =>
@@ -133,7 +126,6 @@ export function DatasetList({
 
   function groupLabel(key: string | null): string {
     if (key === null) return list(`unset.${view.display.grouping}`)
-    if (view.display.grouping === 'team') return teamName[key] ?? key
     if (view.display.grouping === 'creator') return creatorName(key)
     return key
   }

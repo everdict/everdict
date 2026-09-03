@@ -25,7 +25,6 @@ export const workflowStateColorSchema = z.enum(WORKFLOW_STATE_COLORS)
 export const workflowStateSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  teamId: z.string(),
   name: z.string(),
   description: z.string().optional(),
   status: issueStatusSchema,

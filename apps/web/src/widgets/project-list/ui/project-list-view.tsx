@@ -1,7 +1,6 @@
 import { CalendarClock, FolderKanban } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { TeamScopeBar, type TeamScope } from '@/widgets/team-scope-bar'
 import { CreateProjectButton } from '@/features/manage-project'
 import { initiativesSchema, type Initiative } from '@/entities/initiative'
 import {
@@ -11,8 +10,7 @@ import {
   ProjectStatusBadge,
   type Project,
 } from '@/entities/project'
-import { teamSectionHref, teamsWithSummarySchema, type TeamWithSummary } from '@/entities/team'
-import { canInTeam } from '@/shared/auth/can'
+import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { cn } from '@/shared/lib/utils'
@@ -22,26 +20,14 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
-// 새 프로젝트가 기본으로 올라갈 팀 — 워크스페이스의 기본 팀 하나, 없으면 첫 팀. 팀이 아예 없는 워크스페이스
-// (아직 아무 이슈도 안 낸 곳)는 빈 배열이고, 그때는 제어 평면이 기본 팀을 만들어 얹는다.
-function defaultTeamIdsOf(teams: readonly TeamWithSummary[]): string[] {
-  const fallback = teams.find((team) => team.isDefault) ?? teams[0]
-  return fallback ? [fallback.id] : []
-}
-
 // Projects — issues under one target date. The list stays lean by contract (rollups are derived per detail
 // read), so a row shows the deadline and its status, not counts.
 //
-// ONE component behind TWO addresses: `/{workspace}/projects` and `/{workspace}/teams/ENG/projects`. A project
-// NAMES its teams, so the team-scoped address answers "what is this team working on" — a different resource,
-// not the same one filtered.
 export async function ProjectListView({
   workspace,
-  team,
   filters,
 }: {
   workspace: string
-  team?: TeamWithSummary
   filters: { status?: string; initiative?: string }
 }) {
   const { status, initiative } = filters
@@ -57,30 +43,21 @@ export async function ProjectListView({
       await controlPlane.listProjects(ctx, {
         ...(status ? { status } : {}),
         ...(initiative ? { initiative } : {}),
-        // 팀은 경로가 정한다 — 필터가 아니라 이 목록의 주소다.
-        ...(team ? { team: team.id } : {}),
       })
     )
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
 
-  const teams: TeamWithSummary[] = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsWithSummarySchema.parse(r))
-    .catch((): TeamWithSummary[] => [])
 
   const initiatives: Initiative[] = await controlPlane
     .listInitiatives(ctx)
     .then((r) => initiativesSchema.parse(r))
     .catch(() => [])
   const initiativeName = new Map(initiatives.map((i) => [i.id, i.name]))
-  // 역할 + 팀 두 축. 속하지 않은 팀의 화면에서 「프로젝트 만들기」는 확정된 403 이다.
-  const canWrite = canInTeam(principal, 'issues:write', team?.id)
+  const canWrite = can(principal?.roles, 'issues:write')
 
-  const basePath = team
-    ? teamSectionHref(workspace, team.key, 'projects')
-    : `/${workspace}/projects`
+  const basePath = `/${workspace}/projects`
 
   function filterHref(nextStatus?: string): string {
     const q = new URLSearchParams()
@@ -98,11 +75,8 @@ export async function ProjectListView({
         : 'border-border text-muted-foreground hover:text-foreground'
     )
 
-  const scope: TeamScope | undefined = team ? { workspace, team, section: 'projects' } : undefined
-
   return (
     <div className="@container space-y-6">
-      {scope && <TeamScopeBar scope={scope} />}
       <PageHeader
         title={t('title')}
         description={t('description')}
@@ -111,13 +85,6 @@ export async function ProjectListView({
             <CreateProjectButton
               workspace={workspace}
               initiatives={initiatives.map((i) => ({ id: i.id, name: i.name }))}
-              teams={teams.map((x) => ({ id: x.id, key: x.key, name: x.name }))}
-              // 팀 아래에서 열었으면 그 팀, 워크스페이스 목록에서 열었으면 기본 팀 — 어느 쪽이든 한 팀은
-              // 미리 골라져 있다. 프로젝트는 반드시 어느 팀의 일이고(제어 평면이 강제한다), 서버가 조용히
-              // 기본 팀에 얹어 주는 것보다 어디로 가는지 보이는 편이 낫다.
-              {...(team
-                ? { defaultTeamIds: [team.id] }
-                : { defaultTeamIds: defaultTeamIdsOf(teams) })}
             />
           ) : null
         }

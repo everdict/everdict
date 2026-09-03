@@ -29,8 +29,6 @@ function registry(
   return {
     get,
     register: async () => {},
-    registerPreservingOwner: async () => "registered" as const,
-    teamOfVersion: () => undefined,
     has: async () => true,
     versions: async () => versions.map((v) => v.version),
     ownVersions: async () => versions.map((v) => v.version),

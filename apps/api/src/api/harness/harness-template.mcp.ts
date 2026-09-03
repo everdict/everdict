@@ -1,19 +1,7 @@
-import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { HarnessTemplateSpecSchema } from "@everdict/contracts";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, visibleTeamsFor } from "../../common/team-scope.js";
-import { type McpToolContext, fail, ok, resolveTeam, run, runForTeam } from "../mcp-context.js";
-import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
-
-// Harness-template MCP tools — the MCP twin of harness-template.routes.ts.
-// A private team's authored entry is that team's — the same ceiling the HTTP twin stays under.
-async function keepVisible<T extends { teamId?: string }>(ctx: McpToolContext, rows: T[]): Promise<T[]> {
-  const seen = await visibleTeamsFor(ctx.deps, ctx.principal);
-  return rows.filter((row) => ownedByVisibleTeam(row, seen));
-}
-
+import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
 
@@ -31,10 +19,8 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
       },
       ({ team }) =>
         run(principal, "harnesses:read", async () => {
-          const visible = await keepVisible(ctx, await templates.list(ws));
-          if (team === undefined) return ok(visible);
-          const teamId = await resolveTeam(ctx, team);
-          return ok(visible.filter((entry) => entry.teamId === teamId));
+          const visible = await templates.list(ws);
+          return ok(visible);
         }),
     );
 
@@ -48,7 +34,6 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
       },
       ({ id, version }) =>
         run(principal, "harnesses:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, templates, ws, id, "harness template");
           return ok(await templates.get(ws, id, version));
         }),
     );
@@ -70,8 +55,7 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
         },
       },
       ({ spec, team }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "templates:write", team, async (teamId) => {
+        run(ctx.principal, "templates:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(spec);
@@ -80,19 +64,9 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
           }
           const result = HarnessTemplateSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await templates.register(ws, result.data, principal.subject, teamId); // creator stamp — HTTP parity
-          return ok({ workspace: ws, id: result.data.id, version: result.data.version, ...(teamId ? { teamId } : {}) });
+          await templates.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
-
-    registerCapabilityMoveTool(server, ctx, {
-      tool: "move_harness_template",
-      registry: templates,
-      capability: TEAM_TRANSFERABLE_CAPABILITIES.harnessTemplate,
-      description: moveToolDescription(
-        "Hand a harness template (the SHAPE) to another team. EVERY version of the shape moves; instances that " +
-          "pin it are their own entities and keep their own team (move those with move_harness).",
-      ),
-    });
   }
 }

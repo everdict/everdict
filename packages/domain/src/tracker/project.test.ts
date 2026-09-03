@@ -11,9 +11,6 @@ function newProject(targetDate?: string) {
     id: "prj-1",
     tenant: "acme",
     name: "v1 agent launch",
-    // A project is always somebody's work — the service resolves "no teams named" to the workspace's default
-    // team before the aggregate ever sees it, so every project here has one.
-    teamIds: ["team-eng"],
     createdBy: "dana",
     now: NOW,
     ...(targetDate !== undefined ? { targetDate } : {}),
@@ -75,21 +72,12 @@ describe("Project — issues under one target date", () => {
     expect(() => project.update({ name: "v1 agent launch" }, "dana", LATER)).toThrow(BadRequestError);
   });
 
-  it("refuses to exist without a team — there is no workspace-wide project", () => {
-    // Given a creation that names no team (the service's default-team fallback did not run)
-    // Then the aggregate refuses it rather than minting a project no team's list would ever show.
-    expect(() =>
-      Project.newProject({ id: "prj-2", tenant: "acme", name: "orphan", teamIds: [], createdBy: "dana", now: NOW }),
-    ).toThrow(BadRequestError);
-  });
-
-  it("refuses to detach its last team, while an umbrella may be detached freely", () => {
-    // Given a project worked by one team and under one initiative
+  it("lets an umbrella be detached freely — a project under no goal is still somebody's work", () => {
+    // Given a project under one initiative
     const project = Project.from({ ...newProject(), initiativeIds: ["ini-1"] });
 
-    // When the edit empties the team list / the initiative list
-    // Then only the team list is refused — a project under no umbrella is still somebody's work.
-    expect(() => project.update({ teamIds: [] }, "dana", LATER)).toThrow(BadRequestError);
+    // When the edit empties the initiative list
+    // Then it is allowed — a project under no umbrella is still somebody's work.
     expect(project.update({ initiativeIds: [] }, "dana", LATER).patch.initiativeIds).toEqual([]);
   });
 });

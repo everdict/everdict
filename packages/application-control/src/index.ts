@@ -204,22 +204,13 @@ export {
 export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";
-export type { CycleListFilter, CycleStore } from "./ports/cycle-store.js";
 export type { WorkflowStateStore } from "./ports/workflow-state-store.js";
 export {
   type CreateWorkflowStateInput,
   WorkflowStateService,
   type WorkflowStateServiceDeps,
-} from "./team/workflow-state-service.js";
-export {
-  type CreateCycleInput,
-  CYCLE_CADENCE_ACTOR,
-  type CycleActor,
-  type CycleDetail,
-  CycleService,
-  type CycleServiceDeps,
-} from "./cycle/cycle-service.js";
-export type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "./ports/issue-store.js";
+} from "./workflow-state/workflow-state-service.js";
+export type { IssueListFilter, IssuePageFilter, IssueStore } from "./ports/issue-store.js";
 export {
   type CreateIssueLabelInput,
   type IssueLabelActor,
@@ -227,7 +218,6 @@ export {
   type IssueLabelServiceDeps,
 } from "./issue/issue-label-service.js";
 export type { IssueLabelStore } from "./ports/issue-label-store.js";
-export type { IssueNumberGrant, TeamListFilter, TeamStore } from "./ports/team-store.js";
 export type { ProjectListFilter, ProjectStore, ProjectUpdateStore } from "./ports/project-store.js";
 export type { InitiativeListFilter, InitiativeStore, InitiativeUpdateStore } from "./ports/initiative-store.js";
 export type {
@@ -330,19 +320,11 @@ export {
   type IssueGithubPusher,
   IssueService,
   type IssueServiceDeps,
-  type IssueTeamAllocator,
+  type IssueNumberAllocator,
   type SetIssueStatusInput,
 } from "./issue/issue-service.js";
 // A capability born from an issue links itself back to it — one act, both directions (composition-root decorator).
 export { type IssueBacklinkPort, withOriginBacklink } from "./issue/origin-backlink.js";
-export {
-  type CreateTeamInput,
-  DEFAULT_TEAM_KEY,
-  DEFAULT_TEAM_NAME,
-  type TeamActor,
-  TeamService,
-  type TeamServiceDeps,
-} from "./team/team-service.js";
 export { REGRESSION_WATCH_ACTOR, regressionWatch, type RegressionWatchDeps } from "./issue/regression-watch.js";
 export {
   GithubIssueSync,
@@ -424,14 +406,6 @@ export {
   type CapabilityVersions,
   type SaveCapabilityResult,
 } from "./capability/capability-service.js";
-export {
-  type CapabilityMoved,
-  type MoveCapabilityInput,
-  moveCapabilityToTeam,
-  TEAM_TRANSFERABLE_CAPABILITIES,
-  type TeamTransferableRegistry,
-  type TransferableCapability,
-} from "./capability/move-capability-team.js";
 export {
   type FirstPartyDefault,
   firstPartyCatalogExtras,
@@ -532,7 +506,6 @@ export {
   type CampaignSnapshot,
   type NewCampaignInput,
   type NewRoundInput,
-  type TeamAccess,
 } from "./evolution/campaign-service.js";
 export {
   CampaignBuildService,

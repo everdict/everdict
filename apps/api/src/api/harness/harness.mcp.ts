@@ -6,21 +6,17 @@ import {
   verifyForkLineage,
 } from "@everdict/application-control";
 import { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "@everdict/application-control";
-import { TEAM_TRANSFERABLE_CAPABILITIES } from "@everdict/application-control";
 import { HarnessInstanceSpecSchema } from "@everdict/contracts";
-import { diffHarnessSpecs, ownedByVisibleTeam } from "@everdict/domain";
+import { diffHarnessSpecs } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import {
   FROM_ISSUE_TOOL_DESCRIPTION,
   ORIGIN_NOTE_TOOL_DESCRIPTION,
   capabilityOriginFor,
   declaredOriginFromIssue,
 } from "../capability-origin.js";
-import { type McpToolContext, fail, ok, plain, resolveTeam, run, runForTeam } from "../mcp-context.js";
-import { moveToolDescription, registerCapabilityMoveTool } from "../team-move.js";
-
+import { type McpToolContext, fail, ok, plain, run } from "../mcp-context.js";
 // Harness-instance MCP tools — the MCP twin of harness.routes.ts.
 export function registerHarnessTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
@@ -41,15 +37,8 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
-          const seen = await visibleTeamsFor(ctx.deps, principal);
-          const visible = entries
-            .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
-            .filter((e) => ownedByVisibleTeam(e, seen));
-          if (team === undefined) return ok(visible);
-          // The narrow sits ON TOP of the ceiling above — naming a team you cannot see returns nothing rather
-          // than that team's work.
-          const teamId = await resolveTeam(ctx, team);
-          return ok(visible.filter((e) => e.teamId === teamId));
+          const visible = entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject);
+          return ok(visible);
         }),
     );
 
@@ -63,7 +52,6 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "harnesses:read", async () => {
-          await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
           return ok(await instances.getInstance(ws, id, version));
         }),
     );
@@ -84,7 +72,6 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is owner-only — its existence is hidden from others (same as the HTTP route).
           if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
-          await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
           const [baseSpec, candidateSpec] = await Promise.all([
             instances.get(ws, id, base),
             instances.get(ws, id, candidate),
@@ -109,14 +96,13 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         run(principal, "harnesses:read", async () => {
           if ((await instances.versions(ws, id)).length === 0) return fail("NOT_FOUND: harness not found.");
           if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
-          await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
           const campaigns = deps.campaignService;
           return ok(
             await harnessLineage(
               {
                 instances,
                 ...(campaigns !== undefined
-                  ? { campaigns: { forSubject: (tenant, subject) => campaigns.list(tenant, undefined, subject) } }
+                  ? { campaigns: { forSubject: (tenant, subject) => campaigns.list(tenant, subject) } }
                   : {}),
               },
               ws,
@@ -148,7 +134,6 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         ({ id, version, slot }) =>
           run(principal, "harnesses:read", async () => {
             if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
-            await assertEntityVisible(ctx.deps, principal, instances, ws, id, "harness");
             return ok(await resolveHarnessDelegate(instances, templates, ws, id, version ?? "latest", slot));
           }),
       );
@@ -217,8 +202,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       ({ spec, team, fromIssue, originNote, forkedFrom }) =>
-        // Owner resolved and AUTHORIZED before the write (the HTTP twin's teamForNew + gate pair).
-        runForTeam(ctx, "harnesses:register", team, async (teamId) => {
+        run(ctx.principal, "harnesses:register", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(spec);
@@ -242,7 +226,6 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             ws,
             result.data,
             principal.subject,
-            teamId,
             forkedFrom !== undefined ? { ...origin, forkedFrom } : origin,
           ); // resolve validation (missing template / absent pins → error)
           // Visibility tradeoff surfaced at write time (HTTP parity): user-scope secretRef → visible to you only.
@@ -251,22 +234,10 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             workspace: ws,
             id: result.data.id,
             version: result.data.version,
-            ...(teamId ? { teamId } : {}),
             ...(isPrivate ? { private: true } : {}),
           });
         }),
     );
-
-    registerCapabilityMoveTool(server, ctx, {
-      tool: "move_harness",
-      registry: instances,
-      capability: TEAM_TRANSFERABLE_CAPABILITIES.harness,
-      description: moveToolDescription(
-        "Hand a harness to another team. EVERY version moves — ownership belongs to the harness, not to one " +
-          "release of it — and no version is minted, so pins and reproducibility are untouched. Scorecards it " +
-          "already produced keep their own team (move those with move_scorecard).",
-      ),
-    });
 
     server.registerTool(
       "pin_harness_images",
@@ -286,41 +257,29 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
         },
       },
       async ({ id, pins, version, base, allow_tags }) => {
-        // Same gate as the HTTP re-pin (BFF↔MCP parity, review wave C): the write targets an EXISTING
-        // harness, so it is authorized against the entity's owning team. This tool used to check the bare
-        // action, so an agent could re-pin another team's harness through a call the route refused. A
-        // registry read failure here refuses the pin (fail-closed), same as the route's gate would.
-        const owner = await teamOfEntity(instances, ws, id);
-        return run(
-          principal,
-          "harnesses:register",
-          async () =>
-            ok(
-              await repinHarnessImages(
-                instances,
-                ws,
-                principal.subject,
-                id,
-                {
-                  pins,
-                  ...(version !== undefined ? { version } : {}),
-                  ...(base !== undefined ? { base } : {}),
-                  allowTags: allow_tags ?? false,
-                },
-                // Channel + attribution only — the merge base half of the origin is the service's to construct.
-                {
-                  via: "mcp",
-                  ...(ctx.agent?.agentId !== undefined ? { agentId: ctx.agent.agentId } : {}),
-                  ...(ctx.agent?.agentName !== undefined ? { agentName: ctx.agent.agentName } : {}),
-                  ...(ctx.agent?.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
-                  ...(ctx.agent?.runId !== undefined ? { runId: ctx.agent.runId } : {}),
-                },
-                // The owner this gate was granted against, asserted where the successor is written — the
-                // store re-reads it otherwise (arch-review 117). Same wiring as the HTTP twin.
-                { expectedOwnerTeamId: owner.teamId },
-              ),
+        return run(principal, "harnesses:register", async () =>
+          ok(
+            await repinHarnessImages(
+              instances,
+              ws,
+              principal.subject,
+              id,
+              {
+                pins,
+                ...(version !== undefined ? { version } : {}),
+                ...(base !== undefined ? { base } : {}),
+                allowTags: allow_tags ?? false,
+              },
+              // Channel + attribution only — the merge base half of the origin is the service's to construct.
+              {
+                via: "mcp",
+                ...(ctx.agent?.agentId !== undefined ? { agentId: ctx.agent.agentId } : {}),
+                ...(ctx.agent?.agentName !== undefined ? { agentName: ctx.agent.agentName } : {}),
+                ...(ctx.agent?.conversationId !== undefined ? { conversationId: ctx.agent.conversationId } : {}),
+                ...(ctx.agent?.runId !== undefined ? { runId: ctx.agent.runId } : {}),
+              },
             ),
-          owner,
+          ),
         );
       },
     );

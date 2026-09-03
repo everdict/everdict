@@ -12,7 +12,6 @@ import { ValidateDatasetResultSchema } from "@everdict/contracts/wire";
 import type { FastifySchema } from "fastify";
 import { withOriginDoc } from "../capability-origin.js";
 import { errorResponses, toJsonSchema } from "../openapi.js";
-import { teamMoveDocs } from "../team-move.js";
 import { DeleteDatasetVersionsBodySchema } from "./request/delete-dataset-versions.js";
 import { ImportTerminalBenchBodySchema } from "./request/import-terminal-bench.js";
 
@@ -188,16 +187,6 @@ const docs = {
       ...errorResponses(400, 401, 403, 404),
     },
   },
-  move: teamMoveDocs({
-    resource: "dataset",
-    tag: "dataset",
-    idDescription: "Dataset id",
-    action: "datasets:write",
-    extra:
-      "EVERY version moves — ownership belongs to the dataset, not to one release of it — including retired " +
-      "(tombstoned) ones, so a revived version does not reappear under the previous team. Content is untouched: " +
-      "no version is minted, and immutability is unaffected.",
-  }),
 } satisfies Record<string, FastifySchema>;
 
 // Widened re-export (team convention): the descriptors' literal response keys would otherwise make Fastify

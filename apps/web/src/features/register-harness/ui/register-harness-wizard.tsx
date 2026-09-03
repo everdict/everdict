@@ -9,7 +9,6 @@ import { useTranslations } from 'next-intl'
 import { TopologyGraph } from '@/features/inspect-harness'
 import { EnvironmentPicker } from '@/features/pick-environment'
 import type { HarnessSpec } from '@/entities/harness'
-import { TeamPicker, type TeamPickerOption } from '@/entities/team'
 import { TraceSourceFields } from '@/entities/trace-source'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -57,13 +56,6 @@ import { EnvEditor, type ScopedSecretNames } from './env-editor'
 import { SpanMappingEditor } from './span-mapping-editor'
 
 const EMPTY_SECRETS: ScopedSecretNames = { workspace: [], user: [] }
-
-// The owning team rides BESIDE the spec (the route reads it, the spec schema strips it) — merged only when the
-// body is an object, so JSON-mode input that is not one still reaches the control plane's own validation untouched.
-function withOwner(body: unknown, teamId: string): unknown {
-  if (!teamId || body === null || typeof body !== 'object' || Array.isArray(body)) return body
-  return { ...(body as Record<string, unknown>), teamId }
-}
 
 // Example hint for the front-door submit body value override editor (free-form JSON object).
 const BODY_PLACEHOLDER = `{ "max_steps": 30, "system_prompt": "..." }`
@@ -194,8 +186,6 @@ export function RegisterHarnessWizard({
   baseline = EMPTY_BASELINE,
   templateKind,
   startTab = 'template',
-  teams = [],
-  defaultTeamId,
 }: {
   secrets?: ScopedSecretNames
   modelIds?: string[] // registered Model ids — offered as options for a command/service model binding
@@ -206,9 +196,6 @@ export function RegisterHarnessWizard({
   baseline?: OverrideBaseline
   templateKind?: Kind
   startTab?: Tab
-  // The owning-team choices, threaded into both tabs (only teams the caller can create into). Empty = no picker.
-  teams?: TeamPickerOption[]
-  defaultTeamId?: string
 }) {
   const { workspace } = useParams<{ workspace: string }>()
   const router = useRouter()
@@ -234,8 +221,6 @@ export function RegisterHarnessWizard({
           existingVersions={[]}
           secrets={secrets}
           modelIds={modelIds}
-          teams={teams}
-          {...(defaultTeamId !== undefined ? { defaultTeamId } : {})}
         />
       ) : (
         <InstanceForm
@@ -245,8 +230,6 @@ export function RegisterHarnessWizard({
           existingVersions={[]}
           secrets={secrets}
           templates={templates}
-          teams={teams}
-          {...(defaultTeamId !== undefined ? { defaultTeamId } : {})}
           baseline={baseline}
           {...(instanceInitial ? { initial: instanceInitial } : {})}
           {...(templateKind ? { kind: templateKind } : {})}
@@ -276,8 +259,6 @@ export function TemplateForm({
   existingVersions,
   secrets = EMPTY_SECRETS,
   modelIds = [],
-  teams = [],
-  defaultTeamId,
 }: {
   workspace: string
   initial?: TemplateState
@@ -286,15 +267,10 @@ export function TemplateForm({
   existingVersions?: string[]
   secrets?: ScopedSecretNames
   modelIds?: string[] // registered Model ids — options for the command/service model binding
-  // The owning-team choices (new-template screen only — the new-version screens pass none, so a content
-  // edit never carries an ownership change; that is the move endpoint's job).
-  teams?: TeamPickerOption[]
-  defaultTeamId?: string
 }) {
   const router = useRouter()
   const t = useTranslations('registerHarness')
   const [s, setS] = useState<TemplateState>(initial ?? INITIAL_TEMPLATE)
-  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [mode, setMode] = useState<'form' | 'json'>('form')
   const [jsonText, setJsonText] = useState('')
   const [result, setResult] = useState<ValidateHarnessResult>()
@@ -324,7 +300,7 @@ export function TemplateForm({
     setRegError(undefined)
     let res: RegisterHarnessResult
     try {
-      res = await registerHarnessTemplateAction(withOwner(spec(), teamId))
+      res = await registerHarnessTemplateAction(spec())
     } catch {
       setBusy(false)
       setRegError(t('jsonParseFailed'))
@@ -406,12 +382,6 @@ export function TemplateForm({
         rawId="tver"
         placeholder="1"
       />
-
-      {/* A new VERSION keeps its owner: the control plane refuses a register that would move an entity
-          between teams, so an id that already exists has nothing to choose here. */}
-      {(existingVersions ?? []).length === 0 && (
-        <TeamPicker id="tteam" teams={teams} value={teamId} onChange={setTeamId} />
-      )}
 
       {mode === 'form' && s.kind === 'service' && (
         <div className="space-y-6">
@@ -873,8 +843,6 @@ export function InstanceForm({
   baseline = EMPTY_BASELINE,
   templates,
   onPickTemplate,
-  teams = [],
-  defaultTeamId,
 }: {
   workspace: string
   initial?: InstanceState
@@ -890,15 +858,10 @@ export function InstanceForm({
   // 고를 수 있는 형상 목록(신규 등록 화면). 주면 template id/version 이 자유 입력 대신 피커가 된다.
   templates?: { id: string; versions: string[] }[]
   onPickTemplate?: (id: string, version: string) => void
-  // The owning-team choices (new-harness screen only — the new-version screens pass none, so a content
-  // edit never carries an ownership change; that is the move endpoint's job).
-  teams?: TeamPickerOption[]
-  defaultTeamId?: string
 }) {
   const router = useRouter()
   const t = useTranslations('registerHarness')
   const [s, setS] = useState<InstanceState>(initial ?? INITIAL_INSTANCE)
-  const [teamId, setTeamId] = useState(defaultTeamId ?? '')
   const [result, setResult] = useState<ValidateHarnessResult>()
   const [regError, setRegError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -933,7 +896,7 @@ export function InstanceForm({
     if (bodyError) return setRegError(t('bodyJsonError', { error: bodyError }))
     setBusy(true)
     setRegError(undefined)
-    const res = await registerHarnessAction(withOwner(buildInstance(s, baseline), teamId))
+    const res = await registerHarnessAction(buildInstance(s, baseline))
     setBusy(false)
     if (res.ok) {
       // If a new version (redirectDetailId), go to that version's detail; otherwise the list.
@@ -1008,12 +971,6 @@ export function InstanceForm({
         rawId="iver"
         placeholder="pr-123-sha-abc"
       />
-
-      {/* A new VERSION keeps its owner: the control plane refuses a register that would move an entity
-          between teams, so an id that already exists has nothing to choose here. */}
-      {(existingVersions ?? []).length === 0 && (
-        <TeamPicker id="iteam" teams={teams} value={teamId} onChange={setTeamId} />
-      )}
 
       <div className="space-y-1.5">
         <FieldLabel htmlFor="idesc" tip={t('descriptionTip')}>

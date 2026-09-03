@@ -36,7 +36,7 @@ export {
   issueDisplayFor,
   saveIssueDisplay,
   issueDisplaySchema,
-  issueViewKeyOf,
+  WORKSPACE_ISSUES_VIEW_KEY,
   normalizeIssueDisplay,
   withIssueDisplay,
   type IssueDisplay,

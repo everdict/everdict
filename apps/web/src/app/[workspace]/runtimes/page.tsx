@@ -1,3 +1,4 @@
+import { WorkspaceRunnersSection } from './workspace-runners'
 import { Server } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -15,7 +16,6 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
-import { TeamRunnersSection } from './team-runners'
 
 export const dynamic = 'force-dynamic'
 
@@ -67,12 +67,12 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
 
   // Team shared runners — workspace-owned (build servers / CI). Admin-managed, so fetched only for admins (the
   // owned-roster read + GitHub-App snapshot are settings:write-gated); members target the pool via the run form.
-  const canManageTeam = can(principal?.roles, 'settings:write')
-  let teamRunners: RunnerMeta[] = []
+  const canManageWorkspaceRunners = can(principal?.roles, 'settings:write')
+  let workspaceRunners: RunnerMeta[] = []
   let githubApp: GithubAppView = { installations: [], providers: { githubCom: false } }
-  if (canManageTeam) {
+  if (canManageWorkspaceRunners) {
     try {
-      teamRunners = runnersResponseSchema.parse(
+      workspaceRunners = runnersResponseSchema.parse(
         await controlPlane.listWorkspaceOwnedRunners(ctx)
       ).runners
       githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
@@ -137,12 +137,12 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
         />
       </Section>
 
-      {canManageTeam && (
-        <Section title={t('teamRunners')} description={t('teamRunnersDescription')}>
-          <TeamRunnersSection
+      {canManageWorkspaceRunners && (
+        <Section title={t('workspaceRunners')} description={t('workspaceRunnersDescription')}>
+          <WorkspaceRunnersSection
             workspace={workspace}
-            runners={teamRunners}
-            canWrite={canManageTeam}
+            runners={workspaceRunners}
+            canWrite={canManageWorkspaceRunners}
             githubApp={githubApp}
           />
         </Section>

@@ -67,11 +67,10 @@ prefixed at render; switching workspace = `router.push('/'+id)`. Slug-less entry
 
 **A COLLECTION is plural; ONE THING is singular** (Linear's spelling). `/{workspace}/scorecards` is the list;
 `/{workspace}/scorecard/{id}` is one scorecard — a different screen, so a different word. Holds for every
-resource with a detail route (issue · project · initiative · cycle · dataset · harness · judge · rubric · run ·
-runtime · schedule · scorecard · skill · view · team · tool), and for a team's own cycle
-(`/{workspace}/team/ENG/cycle/7`). The collection's NAMED screens keep its plural (`…/scorecards/new`,
-`…/datasets/import`, `…/scorecards/analyze`) — they are that collection's screens, not one thing. `/teams` stays
-plural too: it is the directory of teams. Old plural detail addresses redirect in `next.config.ts`
+resource with a detail route (issue · project · initiative · dataset · harness · judge · rubric · run ·
+runtime · schedule · scorecard · skill · view · tool). The collection's NAMED screens keep its plural
+(`…/scorecards/new`, `…/datasets/import`, `…/scorecards/analyze`) — they are that collection's screens, not one
+thing. Old plural detail addresses redirect in `next.config.ts`
 (`DETAIL_MOVES`, reserved names excluded by lookahead); they are 307 until the scheme is confirmed live.
 An ISSUE carries its title as a trailing decorative slug — `/{workspace}/issue/ENG-12/the-judge-drops-cost-scores`
 (`issueHref(workspace, identifier, title)`; the route is `issue/[id]/[[...slug]]`). Nothing reads the slug: the
@@ -81,64 +80,22 @@ A PRODUCT is addressed by a LOAD-BEARING slug instead — `/{workspace}/product/
 the control plane resolves slug-or-id, so old uuid links keep working and the detail route redirects them to
 the canonical spelling — the same normalization the issue detail does for a lowercased `eng-12`.
 
-**A scope is a PATH; a filter is a query parameter — when the path really names a different collection.** What a
-TEAM owns lives under the team's slug — `/{workspace}/team/ENG/{issues,triage,cycles,projects}` (`TEAM_SECTIONS`)
-— never `?team=<id>` on the workspace-wide list. Each team holds different things there (its triage inbox exists
-only if it turned one on, its cycles are numbered in its own sequence), so "the same list, filtered" is the wrong
-description of it. Status, priority, project and the page cursor stay query parameters, because those really are
-filters over whichever list the path named.
-The EVALUATION collections (harness · dataset · judge · scorecard) were team paths for a while and are not any
-more (user decision 2026-08-05): a team owns one the way it owns a document — the registry's `team_id` decides who
-may CHANGE it — but nobody looks for a harness by first choosing a team, and four collections repeated under every
-team turned the sidebar's team group into a wall. So each has ONE workspace address, they sit in the sidebar's
-`평가` group beside the agent group, and "our team's only" is the `team` FACET on that list. The old addresses
-(both team spellings, `…/scorecards/new` included) 307 to the workspace list in `next.config.ts`, and a legacy
-`?team=` needs no redirect at all — the same parameter name IS the new filter, with a team KEY resolved to its id
-by `withResolvedTeamFilter` (`entities/team`). Slug = the team KEY (`ENG`), decided in `entities/team/lib/href.ts` (`teamHref` /
-`teamSectionHref` / `teamSettingsHref`) — every link goes through those, never a hand-built string.
-The team's SHORT address is the issue list itself (`/{workspace}/team/ENG` renders `IssueListView`, with
-`…/issues` as the canonical twin) — Linear's landing, and the reason `matchTeamPath` reads a bare team path as
-`issues` and the sidebar has no separate "Home" row.
-`app/[workspace]/team-scope.ts` is the one entry procedure: resolve the slug (`GET /teams/:ref` takes key or id),
-**redirect an id-spelled or lowercased URL to the canonical key** (same normalization the issue detail does for
-`ENG-12`), and `notFound()` on a team that is absent or invisible. Legacy `?team=` URLs redirect through
-`redirectLegacyTeamScope` in the same module.
+**Every collection has ONE workspace address.** Some were scoped under a team for a while — the team axis is
+gone (migrations `0211`/`0212`), so there is no second boundary for a path to name and no ownership facet on a
+list. The evaluation collections sit in the sidebar's `평가` group beside the agent group; the tracker's live at
+`/{workspace}/{issues,projects,initiatives}`. Every old team spelling 307s to the workspace list in
+`next.config.ts`. Status, priority, project and the page cursor stay query parameters, because those really are
+filters over the one list the path names.
 
-**A list that has two addresses is ONE component**, not two pages: the fetch-and-render body lives in a widget
-(`widgets/{issue,project,cycle}-list` — `<Resource>ListView`, a server component taking an optional `team`), and
-both route files are thin adapters. A team address NARROWS the read (`?team=` on the control-plane call) and adds
-the scope bar; it never gates it. Duplicating a list to scope it is how the two copies drift.
-The rule holds when a screen EMBEDS the list too: the cycle board (`widgets/cycle-board`) draws its own header,
-progress and burn-down and then renders `IssueListView` with a `cycle` scope — the widget suppresses its own
-header, pins the facet and re-bases its filter links, rather than a second issue list growing under `cycles/`.
+**Gating is the ROLE, and only the role.** `can(principal?.roles, action)` (`shared/auth/can.ts`) mirrors the
+domain's matrix — the workspace is the only boundary, so everything it holds is readable by everyone in it and
+there is nothing further to ask. A record the caller may not see simply never arrives, and asking for it by id
+answers NOT FOUND, never 403 ("you may not see this" still confirms it exists).
 
-**A section's landing answers the question people came with.** `…/team/ENG/cycles` opens the iteration the team
-is IN (then the next, then the most recent) — not a list of iterations, because everyone who clicks "Cycles" is
-asking about this fortnight. The index gets its own address (`…/cycles/all`) and a specific one is addressed by
-the number people cite (`…/cycles/7`, built by `entities/cycle/lib/cycle-view.ts` — one href builder, same rule
-the team slug follows). A team-owned section that the team has switched OFF (`cyclesEnabled`, `triageEnabled`)
-shows neither a sidebar row nor a scope-bar tab: an entry whose only content is "we don't use this" is worse
-than no entry. The one exception is the tab for the screen you are standing on.
-Gating on those screens is `canInTeam(principal, action, team?.id)` (`shared/auth/can.ts`, mirroring the domain's
-`canReachTeam`): a create button on a team you are not on is a guaranteed 403, and a link into its assets is a
-guaranteed 403. **Reads are NOT gated on the roster** — a workspace whose teams cannot see each other's work has
-stopped being one workspace, so a team's harnesses, datasets, judges, rubrics and scorecards are the workspace's
-to read. The one narrowing is a team choosing to be PRIVATE (`isPrivate`), decided server-side: a hidden row
-simply never arrives, and asking for it by id answers NOT FOUND (never 403 — "you may not see this" still
-confirms it exists). That is why `canInTeam` passes every `:read` action.
-
-**Creating happens at the OWNER's address.** `…/team/ENG/scorecards/new` files the batch as that team's because
-the URL says so; the workspace-level `…/scorecards/new` pins nothing and the control plane files the result
-under the team that owns the harness chosen. Both are the same server component (`<ScorecardCreateView>`, an
-optional `team`), and `teamNewHref` builds the link. A normalizing redirect on a create screen must pass
-`create: true` to `loadTeamScope`, or fixing the slug silently drops the form.
-
-**A picker offers exactly what the control plane accepts.** Where the team axis constrains a relation, the
-options are FETCHED narrowed rather than drawn wide and filtered client-side: an issue's project picker reads
-`listProjects(ctx, { team: issue.teamId })`, because an issue may only join a project its own team is on
-(`docs/tracker.md`) and a wider list is a menu of guaranteed 400s. The narrowing lives in the server component
-that fetches; the client island renders what it was handed and never re-filters, so there is one answer to
-"what may I choose", not two that drift.
+**A picker offers exactly what the control plane accepts.** Where a relation is constrained, the options are
+FETCHED narrowed rather than drawn wide and filtered client-side — a wider list is a menu of guaranteed 400s.
+The narrowing lives in the server component that fetches; the client island renders what it was handed and never
+re-filters, so there is one answer to "what may I choose", not two that drift.
 
 ## Styling
 Tailwind v4 tokens in `app/globals.css` `@theme inline` (Linear indigo `#5e6ad2`, tight `0.5rem` radius,
@@ -161,7 +118,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   (a toolbar's data, a side panel) goes in its OWN async component behind `<Suspense>` and streams: it must
   never join the `Promise.all` the rows are waiting on. `widgets/issue-list` is the reference — the list waits
   for its page + directories, while `IssueListActions` streams the GitHub-App state and the synced-repo roster
-  in behind it. A read with two consumers (the team list: filter chips + the create dialog) is started ONCE as a
+  in behind it. A read with two consumers (filter chips + the create dialog) is started ONCE as a
   promise and awaited only on the path that renders it, so the screen that does not draw it does not wait for it.
 - **Format atoms**: score/model/version/time formatting goes through `shared/lib/format.ts` +
   `shared/ui/{score,chip}.tsx`, NEVER per-page inline.
@@ -170,7 +127,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   says which version is running. Same file owns `imageRepositoryOf` (tag/digest-blind repository matching).
 - **A dashboard reads ONE aggregate, and the aggregate is the server's.** The home screen
   (`widgets/workspace-pulse`, `GET /workspace/pulse`) does not fan out over the list endpoints of every domain
-  it summarizes: the arithmetic behind each number — what counts as an OPEN issue, what an active cycle
+  it summarizes: the arithmetic behind each number — what counts as an OPEN issue, what an active goal
   committed to, which metric is the headline pass rate, when a goal is at risk — is a domain decision with one
   right answer, and a screen re-deriving it is a second answer waiting to drift. A trend over time comes from
   the platform-event log's day aggregate, never from paging records to tally them. The page's own job is the
@@ -227,17 +184,16 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   topic: discrete controls (switch, combobox) call the action on change — reverting local state and reporting the
   failure with `toast.error` — while typed fields (name, description) collect into one dirty-gated Save. Put the two
   kinds in separate cards; a card mixing them cannot say which of its rows is already live. A setting that only
-  matters once a feature is ON is rendered only then (the cycle cadence under `cyclesEnabled`), and a value picked
-  from a fixed range is a `Combobox`, not a number input (`1..12` weeks reads as "2 weeks", so the label drops the unit).
-  `app/[workspace]/settings/teams/[key]` is the reference — one team's settings is a TABBED ROUTE (General · Members ·
-  Workflow · Cycles) for the same reason an initiative detail is: four unrelated questions do not belong on one page.
+  matters once a feature is ON is rendered only then, and a value picked from a fixed range is a `Combobox`, not
+  a number input. Where a settings area is asked several unrelated questions, it is a TABBED ROUTE for the same
+  reason an initiative detail is: they do not belong on one page.
 - **Guide/help copy is never inline** — render an info icon via `shared/ui/tooltip.tsx` (`InfoTip`), reveal
   on hover. Field-level `<p>` hints under inputs are fine; panel/list guidance is not.
 - **Detail views**: hide empty sections entirely (no "none" placeholder); entities show a meta strip, not a
   bare `dl` grid. **An entity detail is a ROUTED PAGE, never a dialog** — the right infra panel is half the
   workflow (edit/experiment on what the left half shows), and a modal makes that split impossible.
   **A record whose title is CONTENT (the tracker's issue) takes the Linear issue-view shape instead of the meta
-  strip** (`app/[workspace]/issues/[id]` is the reference): ① a breadcrumb bar — list → team → identifier —
+  strip** (`app/[workspace]/issues/[id]` is the reference): ① a breadcrumb bar — list → identifier —
   carrying the record-scoped actions (`CopyLinkButton`, the `⋯` menu) right after it and the prev/next SIBLING
   navigation at the far right; ② the title alone at content size (a plain `h1`, not `PageHeader` — that atom is
   for pages whose title is a NAME and truncates); ③ a container-queried two-column grid (`@3xl`) with the body
@@ -265,7 +221,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   description (user decision): `IssueSearchOptions` (`entities/issue`) is the one search list — debounced,
   abort-on-retype, server-narrowed through `/api/issues/search` → `?q=`, because a picker that filters a fetched
   window silently stops finding issues once the workspace outgrows it. The chip shows what people CITE (status
-  icon + identifier + title); the stored id is the UUID, so a team move cannot break it.
+  icon + identifier + title); the stored id is the UUID, so a re-issued identifier cannot break it.
   **The reverse direction is the capability's own page, and it is writable too**: `CapabilityLineage`
   (`features/capability-lineage`, `GET /issues?linkType=&linkId=`) lists the issues watching it under a
   "Linked issues (n)" heading with `LinkIssueButton` beside it. That button writes the SAME
@@ -281,7 +237,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   tab is its own `page.tsx` under it, so a soft nav re-renders only the body. Two rules make it cheap and honest:
   the shared read is a module-level `cache()`d loader (`load-initiative.ts`) the layout AND each tab call — a
   fan-out detail read must not run twice per screen — and the tab addresses come from ONE href builder
-  (`entities/<x>/lib/href.ts`, same rule the team slug follows), with the active tab decided by
+  (`entities/<x>/lib/href.ts`), with the active tab decided by
   `useSelectedLayoutSegment()` rather than by comparing path strings. A tab renders `null` when the record failed to
   load: the layout already drew that failure, and saying it twice is worse than saying it once.
   **Settings › Agent › Skills lists only what the workspace OWNS** — no "built-in"/"shared" tier: an Everdict or
@@ -373,7 +329,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
 - **A view change must not re-render the route.** Filtering and grouping are the two things people do most on a
   list, and both used to cost a full RSC render: `router.push` for a filter, a server action + `router.refresh()`
   for a grouping. The route is `force-dynamic` with a loading boundary, so the screen blanked to a skeleton and
-  every read the page does — members, projects, labels, cycles, the team roster, the GitHub-App state — ran again
+  every read the page does — members, projects, labels, the GitHub-App state — ran again
   to produce a list that was the only thing that changed. Two shapes replace it, and which one applies is decided
   by whether the collection fits in one read:
   · **Server-backed (the issue list)** — the body is a client island (`features/browse-issues` `IssueListBody`)
@@ -411,7 +367,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   behaves differently on one screen is the drift this exists to prevent. A resource declares its axes once in
   `entities/<x>/model/list-view.ts` (`<X>_FACETS` / `_GROUPINGS` / `_ORDERS` / `DEFAULT_<X>_DISPLAY` + a
   `ListViewSpec`), the server reads filters-from-URL + display-from-cookie in one call (`loadListViewScope`), and
-  the axis labels come from the SHARED `listView.*` catalog so "team" is not two different words on two screens.
+  the axis labels come from the SHARED `listView.*` catalog so an axis is not two different words on two screens.
   A facet only offers values PRESENT in the collection (`facetOptionsOf`) — an option whose only possible answer
   is an empty list is not an option. A SUB-list inside a detail page uses the same grammar and declares its axes
   in the same place (`entities/scorecard/model/case-list-view.ts` — a scorecard's cases), with `preserve` on
@@ -460,7 +416,7 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   `issueViewHref`) and a pasted link opens the same issues for everybody. Grouping · ordering · layout ·
   "show completed" · sub-issues decide only presentation, so they are **never** in the URL: sending someone a
   link must not rearrange their screen. They live per reader in the `everdict-issue-display` COOKIE, keyed by the
-  list's address (`issueViewKeyOf` — workspace list / team issues / team triage / cycle board), written straight
+  list's address (`WORKSPACE_ISSUES_VIEW_KEY` — one issue list, one key), written straight
   from the browser (`saveIssueDisplay` → `shared/lib/keyed-preference`; it is a preference, not data, and the
   cookie is not httpOnly, so a server-action round trip bought nothing). Cookie, not localStorage, because the
   FIRST paint is a server render that needs the grouping before it can ask for group counts — localStorage would
@@ -472,17 +428,15 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   count** (`GET /issues/counts`), never the rows received: a grouped screen fetches one page PER GROUP, so
   counting what it holds reports the page size back to itself. Empty columns of a CLOSED vocabulary (status,
   priority) are still stood up — a board needs somewhere to drop a card — while open vocabularies (assignee,
-  project, cycle) show only groups that hold issues, so a 200-member workspace does not get 200 empty columns.
+  project) show only groups that hold issues, so a 200-member workspace does not get 200 empty columns.
   Rows carry the mutations inline (status · priority · assignee dropdowns), which is why a row is NOT a
-  `<Link>`: the title zone is the link and the controls are its siblings. **Bulk editing is the same grammar as
-  the scorecard list** (`features/browse-issues` `IssueSelectionProvider` + `IssueBulkBar`): hover-revealed
-  checkbox, shift-click range, click-toggles-instead-of-opening while selecting, Esc clears, action bar portaled
-  to `<body>` and measured against the enclosing `<main>`. Two deltas from the scorecard list, both deliberate —
-  the selection is NOT persisted (the filters live in the URL, so one back navigation makes a restored
-  selection unanswerable), and shift-ranges resolve against **DOM order** (`[data-issue-id]`) because groups
-  append rows client-side and the server's ordering can no longer describe what is on screen. The provider is
-  only mounted where an action exists (a team scope); elsewhere rows render exactly as before. Beyond a group cap the screen SAYS how
-  many groups it did not stand up (`groupsTruncated`) — silent truncation reads as "that's all of them".
+  `<Link>`: the title zone is the link and the controls are its siblings. The issue list has **no bulk-edit
+  selection** — it had one, and its only action was "move these into this cycle", which went with cycles when
+  the team axis was removed; a checkbox column that selects things nothing can act on is worse than none. What
+  survived is `ISSUE_ROW_ATTR` (`data-issue-id`, declared on the row): a row is addressed by identity rather
+  than by position, which is what a later range-select would need and what tests already use. The scorecard
+  list keeps its own bulk grammar. Beyond a group cap the screen SAYS how many groups it did not stand up
+  (`groupsTruncated`) — silent truncation reads as "that's all of them".
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
 - **Infra split view** (`widgets/infra-panel`): infra concerns (schedules · runtimes · runs · work queue · a

@@ -62,16 +62,6 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
     );
   });
 
-  it("list shows owned + shared and marks the owner", async () => {
-    const r = new InMemoryModelRegistry();
-    await r.register(SHARED_TENANT, model("opus", "1.0.0"));
-    await r.register("acme", model("mine", "1.0.0"));
-    expect(await r.list("acme")).toEqual([
-      { id: "mine", owner: "acme", versions: ["1.0.0"] },
-      { id: "opus", owner: SHARED_TENANT, versions: ["1.0.0"] },
-    ]);
-  });
-
   it("records createdBy and returns it via creatorOf + list (seed is undefined)", async () => {
     const r = new InMemoryModelRegistry();
     await r.register("acme", model("m", "1.0.0"), "alice");
@@ -193,7 +183,7 @@ function fakePg(): SqlClient {
       // listMeta per-id — version/created_at/created_by/team_id/origin of live versions (no tags column on models).
       if (
         t.startsWith(
-          "SELECT version, created_at, created_by, team_id, origin FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, created_at, created_by, origin FROM everdict_models WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -259,11 +249,10 @@ function fakePg(): SqlClient {
         // (arch-review 119).
         return { rows: [{}] as R[] };
       }
-      // `WITH authorized AS (…) revived AS (UPDATE …) SELECT 1 FROM authorized` — the exact-version lane
-      // settles in ONE data-modifying CTE (arch-review 120). These doubles hold no team_id, so the authority
-      // arm they model is satisfied; what they must still DO is the revive the CTE performs, or they report
-      // a success whose effect never happened.
-      if (/^WITH authorized AS /.test(t)) {
+      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane
+      // settles in ONE data-modifying CTE (arch-review 120). What this double must still DO is the revive the
+      // CTE performs, or it reports a success whose effect never happened.
+      if (/^WITH revived AS \(UPDATE/.test(t) || /^WITH origined AS \(UPDATE/.test(t)) {
         if (/revived AS \(UPDATE/.test(t)) {
           const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
           if (r) r.deleted_at = null;
@@ -307,5 +296,15 @@ describe("PgModelRegistry (tenant-owned)", () => {
 
     await r.register("acme", model("m", "1.0.0")); // re-registering identical content → revive
     expect((await r.get("acme", "m")).version).toBe("1.0.0");
+  });
+
+  it("list shows owned + shared and marks the owner", async () => {
+    const r = new InMemoryModelRegistry();
+    await r.register(SHARED_TENANT, model("opus", "1.0.0"));
+    await r.register("acme", model("mine", "1.0.0"));
+    expect(await r.list("acme")).toEqual([
+      { id: "mine", owner: "acme", versions: ["1.0.0"] },
+      { id: "opus", owner: SHARED_TENANT, versions: ["1.0.0"] },
+    ]);
   });
 });

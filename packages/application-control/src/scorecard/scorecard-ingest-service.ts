@@ -102,7 +102,6 @@ export class ScorecardIngestService {
       harness, // the harness that produced the trace (label) — sentinel when unspecified
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
-      ...(input.teamId ? { teamId: input.teamId } : {}),
       now: this.now(),
     });
     await this.deps.store.create(record);
@@ -133,7 +132,6 @@ export class ScorecardIngestService {
       harness, // the harness that produced the trace (label) — sentinel when unspecified
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
-      ...(input.teamId ? { teamId: input.teamId } : {}),
       now: this.now(),
     });
     await this.deps.store.create(record);

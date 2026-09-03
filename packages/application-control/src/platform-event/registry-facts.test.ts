@@ -5,7 +5,6 @@ import { withRegisteredFact } from "./registry-facts.js";
 
 // A class (not an object literal) on purpose: real registries are classes, and the decorator must keep
 // prototype methods reachable with `this` bound — the exact thing an object spread would silently break.
-// Its `register` takes the REAL registry's full parameter list (createdBy + teamId + origin): a fake that stops
 // at createdBy cannot observe an argument the decorator forgets to pass on, which is exactly how the drop
 // survived here unnoticed.
 class FakeRegistry {
@@ -14,14 +13,12 @@ class FakeRegistry {
     id: string;
     version: string;
     createdBy?: string;
-    teamId?: string;
     origin?: CapabilityOrigin;
   }> = [];
   async register(
     tenant: string,
     spec: { id: string; version: string },
     createdBy?: string,
-    teamId?: string,
     origin?: CapabilityOrigin,
   ): Promise<void> {
     if (spec.version === "boom") throw new Error("registry refused");
@@ -29,7 +26,6 @@ class FakeRegistry {
       tenant,
       ...spec,
       ...(createdBy !== undefined ? { createdBy } : {}),
-      ...(teamId !== undefined ? { teamId } : {}),
       ...(origin !== undefined ? { origin } : {}),
     });
   }
@@ -82,22 +78,6 @@ describe("withRegisteredFact — a registration is a transition, so it emits its
     expect(emitted).toEqual([]);
   });
 
-  it("passes the owning team and the origin stamp through to the registry", async () => {
-    const { emitter } = collector();
-    const inner = new FakeRegistry();
-    const registry = withRegisteredFact(inner, "dataset.registered", "dataset", emitter);
-    const origin: CapabilityOrigin = { via: "mcp", from: { type: "issue", id: "iss_1" } };
-
-    await registry.register("acme", { id: "swe-mini", version: "1.0.0" }, "alice", "team_eng", origin);
-
-    // The decorator sits at the composition root, so every registration in the product goes through it. Dropping
-    // an argument here is invisible at the type level (the extra parameters are optional, so a narrower
-    // `register` still satisfies the constraint) and silently unowns every capability the workspace registers.
-    expect(inner.registered).toEqual([
-      { tenant: "acme", id: "swe-mini", version: "1.0.0", createdBy: "alice", teamId: "team_eng", origin },
-    ]);
-  });
-
   it("the fact's payload carries the origin summary, so a consumer learns FROM WHAT without a registry read", async () => {
     // A re-pin is a registration whose origin names its own family — the evolution event is not a new kind,
     // it is this payload saying so (docs/architecture/evolution-lineage.md, Track A). RED before Track A:
@@ -106,7 +86,7 @@ describe("withRegisteredFact — a registration is a transition, so it emits its
     const registry = withRegisteredFact(new FakeRegistry(), "harness.registered", "harness", emitter);
     const origin: CapabilityOrigin = { via: "ci", from: { type: "harness", id: "bu", version: "1.0.0" } };
 
-    await registry.register("acme", { id: "bu", version: "1.0.1" }, "ci-bot", undefined, origin);
+    await registry.register("acme", { id: "bu", version: "1.0.1" }, "ci-bot", origin);
 
     expect(emitted).toHaveLength(1);
     expect(emitted[0]?.payload).toEqual({
@@ -124,5 +104,21 @@ describe("withRegisteredFact — a registration is a transition, so it emits its
     await registry.register("acme", { id: "d", version: "1.0.0" });
     await expect(registry.versions("acme", "d")).resolves.toEqual(["1.0.0"]);
     expect(inner.registered).toHaveLength(1); // the wrap writes through to the real instance
+  });
+
+  it("passes the origin stamp through to the registry", async () => {
+    const { emitter } = collector();
+    const inner = new FakeRegistry();
+    const registry = withRegisteredFact(inner, "dataset.registered", "dataset", emitter);
+    const origin: CapabilityOrigin = { via: "mcp", from: { type: "issue", id: "iss_1" } };
+
+    await registry.register("acme", { id: "swe-mini", version: "1.0.0" }, "alice", origin);
+
+    // The decorator sits at the composition root, so every registration in the product goes through it. Dropping
+    // an argument here is invisible at the type level (the extra parameters are optional, so a narrower
+    // `register` still satisfies the constraint) and silently loses the provenance of every version.
+    expect(inner.registered).toEqual([
+      { tenant: "acme", id: "swe-mini", version: "1.0.0", createdBy: "alice", origin },
+    ]);
   });
 });

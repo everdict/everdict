@@ -138,7 +138,7 @@ export interface IssueListQuery {
   cursor?: string
 }
 
-const ISSUE_FACETS = ['status', 'priority', 'assignee', 'project', 'cycle', 'label'] as const
+const ISSUE_FACETS = ['status', 'priority', 'assignee', 'project', 'label'] as const
 
 function issueListParams(filter?: IssueListQuery): URLSearchParams {
   const q = new URLSearchParams()
@@ -577,18 +577,6 @@ export const controlPlane = {
   // GET /harnesses/:id — a harness's instance version tag list.
   getHarness: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}`),
-  // 다른 팀으로 넘기기. 소유는 릴리스가 아니라 대상 자체의 것이라 모든 버전이 함께 옮겨가고, 버전은 새로
-  // 찍히지 않는다(내용이 바뀐 게 아니다). 제어 평면이 출발 팀과 도착 팀을 둘 다 인가한다.
-  moveCapabilityTeam: <T>(
-    auth: AuthContext,
-    kind: 'harnesses' | 'harness-templates' | 'datasets' | 'judges' | 'scorecards',
-    id: string,
-    teamId: string
-  ) =>
-    call<T>(auth, `/${kind}/${encodeURIComponent(id)}/team`, {
-      method: 'POST',
-      body: JSON.stringify({ teamId }),
-    }),
   // Replace version tags (PUT the whole array; empty array = remove) — free-form labels outside the spec (to distinguish versions). The gate is each entity's
   // content mutation action (harnesses:register / datasets:write / runtimes:write) — the control plane enforces.
   setHarnessVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
@@ -734,42 +722,17 @@ export const controlPlane = {
     }),
   deleteTask: (auth: AuthContext, id: string) =>
     callVoid(auth, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 팀 — 워크스페이스 안에서 이슈를 소유하고 이름 붙이는 그룹(docs/tracker.md).
-  // 읽기 teams:read(viewer+) / 쓰기 teams:write(admin). 목록 읽기가 곧 불변식 복구 지점이라
-  // (기본팀이 없으면 서버가 만든다) 첫 진입에서 팀이 비어 보이는 상태는 존재하지 않는다.
-  listTeams: <T>(auth: AuthContext, filter?: { mine?: boolean }) =>
-    call<T>(auth, filter?.mine ? '/teams?mine=true' : '/teams'),
-  getTeam: <T>(auth: AuthContext, id: string) => call<T>(auth, `/teams/${encodeURIComponent(id)}`),
-  createTeam: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/teams', { method: 'POST', body: JSON.stringify(body) }),
-  updateTeam: <T>(auth: AuthContext, id: string, patch: unknown) =>
-    call<T>(auth, `/teams/${encodeURIComponent(id)}`, {
+  // 워크스페이스의 보드 — 컬럼 이름·색·순서, 그리고 각 컬럼이 어느 정규 상태인지.
+  listWorkflowStates: <T>(auth: AuthContext) => call<T>(auth, '/workflow-states'),
+  createWorkflowState: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workflow-states', { method: 'POST', body: JSON.stringify(body) }),
+  updateWorkflowState: <T>(auth: AuthContext, stateId: string, patch: unknown) =>
+    call<T>(auth, `/workflow-states/${encodeURIComponent(stateId)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  setDefaultTeam: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/teams/${encodeURIComponent(id)}/default`, { method: 'POST' }),
-  deleteTeam: (auth: AuthContext, id: string) =>
-    callVoid(auth, `/teams/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 팀의 보드 — 컬럼 이름·색·순서, 그리고 각 컬럼이 어느 정규 상태인지.
-  listWorkflowStates: <T>(auth: AuthContext, teamId: string) =>
-    call<T>(auth, `/teams/${encodeURIComponent(teamId)}/states`),
-  createWorkflowState: <T>(auth: AuthContext, teamId: string, body: unknown) =>
-    call<T>(auth, `/teams/${encodeURIComponent(teamId)}/states`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  updateWorkflowState: <T>(auth: AuthContext, teamId: string, stateId: string, patch: unknown) =>
-    call<T>(auth, `/teams/${encodeURIComponent(teamId)}/states/${encodeURIComponent(stateId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
-  deleteWorkflowState: (auth: AuthContext, teamId: string, stateId: string) =>
-    call<unknown>(
-      auth,
-      `/teams/${encodeURIComponent(teamId)}/states/${encodeURIComponent(stateId)}`,
-      { method: 'DELETE' }
-    ),
+  deleteWorkflowState: (auth: AuthContext, stateId: string) =>
+    call<unknown>(auth, `/workflow-states/${encodeURIComponent(stateId)}`, { method: 'DELETE' }),
   listTeamMembers: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/teams/${encodeURIComponent(id)}/members`),
   addTeamMember: <T>(auth: AuthContext, id: string, subject: string) =>
@@ -901,7 +864,7 @@ export const controlPlane = {
   moveIssue: <T>(auth: AuthContext, id: string, teamId: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/team`, {
       method: 'POST',
-      body: JSON.stringify({ teamId }),
+      body: JSON.stringify({ }),
     }),
   addIssueLink: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/links`, {

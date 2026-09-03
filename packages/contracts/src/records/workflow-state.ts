@@ -36,7 +36,6 @@ export type WorkflowStateColor = z.infer<typeof WorkflowStateColorSchema>;
 export const WorkflowStateRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  teamId: z.string(),
   name: z.string().min(1).max(60),
   description: z.string().max(500).optional(),
   // Which canonical status this state IS. Two states may share one (a team with "In review" and "In QA" both

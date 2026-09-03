@@ -3,7 +3,6 @@ import { getTranslations } from 'next-intl/server'
 
 import { RegisterDatasetForm } from '@/features/register-dataset'
 import { datasetsSchema } from '@/entities/dataset'
-import { ownerChoicesFor, teamsSchema, type OwnerChoices } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -26,19 +25,11 @@ export default async function NewDatasetPage({
 
   // System-managed versioning: pass existing dataset id→versions to the form to suggest the next semver.
   let existingDatasets: { id: string; versions: string[] }[] = []
-  // Owning-team choices for the new dataset (only teams the caller can create into). Empty = picker hidden.
-  let ownerChoices: OwnerChoices = { teams: [] }
   if (allowed) {
     try {
       existingDatasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     } catch {
       existingDatasets = []
-    }
-    try {
-      const teams = teamsSchema.parse(await controlPlane.listTeams(ctx))
-      ownerChoices = ownerChoicesFor(principal, teams, 'datasets:write')
-    } catch {
-      ownerChoices = { teams: [] }
     }
   }
 
@@ -56,10 +47,6 @@ export default async function NewDatasetPage({
         <Card className="max-w-2xl p-5">
           <RegisterDatasetForm
             existingDatasets={existingDatasets}
-            teams={ownerChoices.teams}
-            {...(ownerChoices.defaultTeamId !== undefined
-              ? { defaultTeamId: ownerChoices.defaultTeamId }
-              : {})}
           />
         </Card>
       ) : (

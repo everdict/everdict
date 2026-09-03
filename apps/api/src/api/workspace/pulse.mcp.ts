@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 import { DEFAULT_PULSE_DAYS } from "./pulse.routes.js";
 
@@ -34,12 +33,10 @@ export function registerWorkspacePulseTools(server: McpServer, ctx: McpToolConte
     },
     ({ days }) =>
       run(principal, "issues:read", async () => {
-        const visibleTeams = await visibleTeamsFor(deps, principal);
         return ok(
           await pulse.read({
             tenant: ws,
             days: days ?? DEFAULT_PULSE_DAYS,
-            ...(visibleTeams !== undefined ? { visibleTeams } : {}),
           }),
         );
       }),

@@ -1,5 +1,4 @@
 import { VersionTagsBodySchema, setVersionTags } from "@everdict/application-control";
-import { TEAM_TRANSFERABLE_CAPABILITIES, moveCapabilityToTeam } from "@everdict/application-control";
 import {
   RepinBodySchema,
   harnessLineage,
@@ -16,21 +15,10 @@ import {
   diffHarnessSpecs,
   imageWarnings,
 } from "@everdict/domain";
-import { ownedByVisibleTeam } from "@everdict/domain";
 import type { FastifyInstance } from "fastify";
-import { assertEntityVisible, teamOfEntity, visibleTeamsFor } from "../../common/team-scope.js";
 import { capabilityOriginFor, declaredForkFrom, declaredOriginFrom } from "../capability-origin.js";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
-import {
-  type ServerDeps,
-  gate,
-  resolvePrincipal,
-  resolveTeamRef,
-  sendError,
-  teamForNew,
-  zodIssues,
-} from "../route-context.js";
-import { MoveToTeamBodySchema } from "../team-move.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { harnessDocs } from "./harness.docs.js";
 
 // Individual harnesses (instances) — /harnesses is the instance surface (category = /harness-templates). template reference + pins.
@@ -48,8 +36,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     try {
       // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 곧 "이 팀 것으로 만든다"이므로,
       // 내가 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
-      const owner = await teamForNew(principal, deps, (req.body as { teamId?: string } | undefined)?.teamId);
-      gate(principal, "harnesses:register", owner.gate);
+      gate(principal, "harnesses:register");
       // Structural portability errors are hard-blocked inside the registry's register (the single chokepoint every path
       // — route/bundle/MCP — flows through). Host-literal warnings do NOT block; surface them so the author can migrate.
       // docs/architecture/topology-portability.md.
@@ -83,7 +70,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         principal.workspace,
         parsed.data,
         principal.subject,
-        owner.teamId,
         forkedFrom !== undefined ? { ...origin, forkedFrom } : origin,
       );
       // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
@@ -164,17 +150,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       const entries = await deps.harnessInstances.list(principal.workspace); // instances grouped by template id
       // A private harness (references a personal secret) is owner-only — the owner is the creator of the latest
       // version (the one that decides privacy), falling back to the id-level creator for older data.
-      // Two separate ceilings, both "not yours to see": a personal secret makes a harness its owner's, and a
-      // PRIVATE team makes its work its members'. Neither is about the roster of an ordinary team.
-      const seen = await visibleTeamsFor(deps, principal);
-      const visible = entries
-        .filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject)
-        .filter((e) => ownedByVisibleTeam(e, seen));
-      // `?team=` is the NARROW on top of them — "of the ones I can see, this team's". Named by id or by key
-      // (`?team=ENG`), the same ref the team-scoped URL carries.
-      const team = req.query.team;
-      const teamId = team === undefined ? undefined : await resolveTeamRef(deps, principal.workspace, team);
-      return reply.send(teamId === undefined ? visible : visible.filter((e) => e.teamId === teamId));
+      return reply.send(entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -191,7 +167,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
         return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-      await assertEntityVisible(deps, principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
       // versionTags: version → free label (only versions that have tags) — a display aid to tell versions apart in the switcher/list.
       const versionTags = await deps.harnessInstances.versionTags(principal.workspace, req.params.id);
       return reply.send({
@@ -224,14 +199,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // A private harness (references a personal secret) is owner-only — existence hidden from others (404, same as the reads).
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(
-          deps,
-          principal,
-          deps.harnessInstances,
-          principal.workspace,
-          req.params.id,
-          "harness",
-        );
         const [baseSpec, candidateSpec] = await Promise.all([
           deps.harnessInstances.get(principal.workspace, req.params.id, base),
           deps.harnessInstances.get(principal.workspace, req.params.id, candidate),
@@ -256,14 +223,13 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
         return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-      await assertEntityVisible(deps, principal, deps.harnessInstances, principal.workspace, req.params.id, "harness");
       const campaigns = deps.campaignService;
       return reply.send(
         await harnessLineage(
           {
             instances: deps.harnessInstances,
             ...(campaigns !== undefined
-              ? { campaigns: { forSubject: (tenant, subject) => campaigns.list(tenant, undefined, subject) } }
+              ? { campaigns: { forSubject: (tenant, subject) => campaigns.list(tenant, subject) } }
               : {}),
           },
           principal.workspace,
@@ -290,14 +256,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         gate(principal, "harnesses:read");
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(
-          deps,
-          principal,
-          deps.harnessInstances,
-          principal.workspace,
-          req.params.id,
-          "harness",
-        );
         return reply.send(
           await resolveHarnessDelegate(
             deps.harnessInstances,
@@ -330,14 +288,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // hidden). Owner semantics live in the one shared helper (latest-version creator) — no inline fork.
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(
-          deps,
-          principal,
-          deps.harnessInstances,
-          principal.workspace,
-          req.params.id,
-          "harness",
-        );
         // Served image classification (re-architecture P1g) — per-image workspace/external/local/unqualified,
         // computed against ALL workspace registries at serve time so the web badge doesn't re-implement the rule.
         const coords = await deps.imageRegistryService?.coordinates(principal.workspace);
@@ -367,14 +317,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
         // visible to other members either.
         if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
           return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
-        await assertEntityVisible(
-          deps,
-          principal,
-          deps.harnessInstances,
-          principal.workspace,
-          req.params.id,
-          "harness",
-        );
         return reply.send(
           await deps.harnessInstances.getInstance(principal.workspace, req.params.id, req.params.version),
         );
@@ -383,37 +325,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       }
     },
   );
-
-  // Hand the harness to another team. A transition, not an edit: it re-files EVERY version at once (ownership
-  // belongs to the harness, not to one release of it) and emits `harness.moved`, so it gets its own endpoint
-  // exactly like the issue's team move does. Both teams are authorized inside the service — the one it is
-  // leaving and the one it is joining.
-  app.post<{ Params: { id: string } }>("/harnesses/:id/team", { schema: harnessDocs.move }, async (req, reply) => {
-    if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const body = MoveToTeamBodySchema.safeParse(req.body);
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
-    try {
-      const agent = agentAttributionFrom(req.headers);
-      return reply.send(
-        await moveCapabilityToTeam({
-          registry: deps.harnessInstances,
-          capability: TEAM_TRANSFERABLE_CAPABILITIES.harness,
-          principal,
-          id: req.params.id,
-          // Resolved here (id or key, `ENG`) so an unknown team is a 404 before the gate compares it against the
-          // teams the principal carries — which are ids.
-          teamId: await resolveTeamRef(deps, principal.workspace, body.data.teamId),
-          ...(deps.platformEvents ? { events: deps.platformEvents } : {}),
-          ...(agent ? { agent } : {}),
-        }),
-      );
-    } catch (err) {
-      return sendError(reply, err); // not on one of the teams 403 / unknown harness 404 / already there 409
-    }
-  });
 
   // Soft-delete a harness version — only that version's own creator or a workspace admin (deleteHarnessVersion gates it).
   // Deletion is a tombstone (data preserved, excluded from reads) → past scorecard history·aggregates are unaffected (the harness coordinates are snapshotted in the record).
@@ -478,12 +389,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     const parsed = RepinBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      // 기존 엔티티의 소유 팀으로 게이트 — 재핀은 남의 팀 하네스를 바꾸는 쓰기다.
-      // Read ONCE and carried: the service lets the store re-read the owner where it writes, so a transfer
-      // landing between the gate and the write files the successor under a team this caller was never
-      // cleared for (arch-review 117 — the sibling of 115's adoption lane).
-      const owner = await teamOfEntity(deps.harnessInstances, principal.workspace, req.params.id);
-      gate(principal, "harnesses:register", owner); // same gate as instance register (ungated viewer+; CI too)
+      gate(principal, "harnesses:register"); // same gate as instance register (ungated viewer+; CI too)
       // The channel is the route's contribution to the origin; the merge base is the service's — only it
       // knows the base at the write (docs/architecture/evolution-lineage.md, Track A). The keyless GitHub
       // Actions federation authenticates as the `ci` role, which is what tells a headless re-pin apart here.
@@ -501,7 +407,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
           ...(agent?.conversationId !== undefined ? { conversationId: agent.conversationId } : {}),
           ...(agent?.runId !== undefined ? { runId: agent.runId } : {}),
         },
-        { expectedOwnerTeamId: owner.teamId },
       );
       return reply.code(result.unchanged ? 200 : 201).send(result);
     } catch (err) {

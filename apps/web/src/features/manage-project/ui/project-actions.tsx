@@ -7,7 +7,6 @@ import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import type { Project } from '@/entities/project'
-import { TeamKeyBadge } from '@/entities/team'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Dialog } from '@/shared/ui/dialog'
@@ -36,12 +35,10 @@ export function ProjectActions({
   workspace,
   project,
   initiatives,
-  teams,
 }: {
   workspace: string
   project: Project
   initiatives: { id: string; name: string }[]
-  teams: { id: string; key: string; name: string }[]
 }) {
   const t = useTranslations('projectsPage')
   const router = useRouter()
@@ -51,7 +48,6 @@ export function ProjectActions({
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description ?? '')
   const [initiativeIds, setInitiativeIds] = useState<string[]>(project.initiativeIds)
-  const [teamIds, setTeamIds] = useState<string[]>(project.teamIds)
   const [targetDate, setTargetDate] = useState(project.targetDate ?? '')
   const [pending, setPending] = useState(false)
 
@@ -62,7 +58,6 @@ export function ProjectActions({
         ? { description: cleared(description, project.description) }
         : {}),
       ...(sameIds(initiativeIds, project.initiativeIds) ? {} : { initiativeIds }),
-      ...(sameIds(teamIds, project.teamIds) ? {} : { teamIds }),
       ...(targetDate !== (project.targetDate ?? '')
         ? { targetDate: targetDate === '' ? null : targetDate }
         : {}),
@@ -155,23 +150,6 @@ export function ProjectActions({
           </div>
           <div className="grid gap-3 @md:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="edit-project-teams">{t('fieldTeams')}</Label>
-              <MultiSelect
-                id="edit-project-teams"
-                selected={teamIds}
-                onChange={setTeamIds}
-                // 마지막 한 팀은 뺄 수 없다 — 프로젝트는 언제나 누군가의 일이고, 팀을 다 빼면 어느
-                // 사이드바에도 없는 프로젝트가 된다(제어 평면도 400 으로 거부한다).
-                minSelected={1}
-                placeholder={t('fieldTeamsPlaceholder')}
-                emptyLabel={t('fieldTeamsEmpty')}
-                removeLabel={(teamName) => t('fieldTeamRemove', { name: teamName })}
-                options={teams.map((x) => ({
-                  value: x.id,
-                  label: x.name,
-                  badge: <TeamKeyBadge teamKey={x.key} />,
-                }))}
-              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="edit-project-initiative">{t('fieldInitiative')}</Label>

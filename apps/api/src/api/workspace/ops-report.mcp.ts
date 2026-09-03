@@ -1,6 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
 // MCP twin of GET /workspace/ops-report (BFF↔MCP parity) — the workspace's own execution health, the
@@ -27,12 +26,10 @@ export function registerWorkspaceOpsReportTools(server: McpServer, ctx: McpToolC
     },
     ({ from, to }) =>
       run(principal, "scorecards:read", async () => {
-        const visibleTeams = await visibleTeamsFor(deps, principal);
         return ok(
           await scorecards.opsReport(ws, {
             ...(from !== undefined ? { from } : {}),
             ...(to !== undefined ? { to } : {}),
-            ...(visibleTeams !== undefined ? { visibleTeams } : {}),
           }),
         );
       }),
@@ -53,12 +50,10 @@ export function registerWorkspaceOpsReportTools(server: McpServer, ctx: McpToolC
     },
     ({ from, to }) =>
       run(principal, "scorecards:read", async () => {
-        const visibleTeams = await visibleTeamsFor(deps, principal);
         return ok(
           await scorecards.gateAudit(ws, {
             ...(from !== undefined ? { from } : {}),
             ...(to !== undefined ? { to } : {}),
-            ...(visibleTeams !== undefined ? { visibleTeams } : {}),
           }),
         );
       }),

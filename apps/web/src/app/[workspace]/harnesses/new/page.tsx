@@ -16,7 +16,6 @@ import {
 } from '@/entities/harness'
 import { modelsSchema } from '@/entities/model'
 import { secretsSchema } from '@/entities/secret'
-import { ownerChoicesFor, teamsSchema, type OwnerChoices } from '@/entities/team'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -41,17 +40,6 @@ export default async function NewHarnessPage({
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('harnessesPage')
   const allowed = can(principal?.roles, 'harnesses:register')
-
-  // Owning-team choices for the new harness/template (only teams the caller can create into). Empty = picker hidden.
-  let ownerChoices: OwnerChoices = { teams: [] }
-  if (allowed) {
-    try {
-      const teams = teamsSchema.parse(await controlPlane.listTeams(ctx))
-      ownerChoices = ownerChoicesFor(principal, teams, 'harnesses:register')
-    } catch {
-      ownerChoices = { teams: [] }
-    }
-  }
 
   // For the env secret reference picker — shared (workspace) + my personal (user) secret names (no values). Empty list on failure/no permission.
   let secrets = { workspace: [] as string[], user: [] as string[] }
@@ -121,10 +109,6 @@ export default async function NewHarnessPage({
             secrets={secrets}
             modelIds={modelIds}
             templates={templates}
-            teams={ownerChoices.teams}
-            {...(ownerChoices.defaultTeamId !== undefined
-              ? { defaultTeamId: ownerChoices.defaultTeamId }
-              : {})}
             // 형상이 하나도 없으면 인스턴스 탭은 고를 게 없는 화면이다 — 그때만 형상부터.
             startTab={tab === 'template' || templates.length === 0 ? 'template' : 'instance'}
             {...(instanceInitial ? { instanceInitial } : {})}

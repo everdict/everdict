@@ -8,8 +8,6 @@ export interface RuntimeListEntry {
   id: string;
   versions: string[];
   owner: string;
-  // The owning team (mig 0106) — absent = unowned (a `_shared`/seeded runtime), which is the workspace's.
-  teamId?: string;
   versionTags?: Record<string, string[]>; // version → free-form label — mutable registry metadata (outside the spec)
   // version → where that version came from (only stamped versions; omitted entirely when none was).
   versionOrigins?: Record<string, CapabilityOrigin>;
@@ -19,21 +17,7 @@ export interface RuntimeListEntry {
 }
 
 export interface RuntimeRegistry {
-  register(
-    tenant: string,
-    spec: RuntimeSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void>;
-  // The owning team — the value the authz kernel's team axis reads (undefined = unowned).
-  // ── REQUIRED, BECAUSE EVERY IMPLEMENTATION HAS IT (arch-review 119) ────────────────────────────
-  //
-  // Declared optional, this is the permissive arm of an authorization read: `registry.teamOfVersion?.(…)`
-  // answers `undefined` for a registry that does not implement it, which every gate reads as "unowned" and
-  // lets through. Twenty implementations exist and not one is missing it, so the optionality bought nothing
-  // and cost the ability to write a gate that cannot be skipped (rule `protocol`).
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
+  register(tenant: string, spec: RuntimeSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<RuntimeSpec>;
   versions(tenant: string, id: string): Promise<string[]>;

@@ -33,8 +33,7 @@ export class InMemoryProjectStore implements ProjectStore {
           (filter?.statuses === undefined || filter.statuses.includes(record.status)) &&
           (filter?.initiativeId === undefined || record.initiativeIds.includes(filter.initiativeId)) &&
           (filter?.initiativeIds === undefined ||
-            record.initiativeIds.some((id) => filter.initiativeIds?.includes(id) === true)) &&
-          (filter?.teamId === undefined || record.teamIds.includes(filter.teamId)),
+            record.initiativeIds.some((id) => filter.initiativeIds?.includes(id) === true)),
       )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
@@ -68,7 +67,6 @@ interface ProjectRow extends TrackerRow {
   name: string;
   description: string | null;
   status: string;
-  team_ids: unknown;
   initiative_ids: unknown;
   lead: string | null;
   member_ids: unknown;
@@ -79,7 +77,7 @@ interface ProjectRow extends TrackerRow {
 }
 
 const PROJECT_COLUMNS =
-  "(id, tenant, name, description, status, team_ids, initiative_ids, lead, member_ids, health, milestones, target_date, completed_at, history, created_by, created_at, updated_at)";
+  "(id, tenant, name, description, status, initiative_ids, lead, member_ids, health, milestones, target_date, completed_at, history, created_by, created_at, updated_at)";
 const PROJECT_VALUES =
   "($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9::jsonb,$10,$11::jsonb,$12,$13::timestamptz,$14::jsonb,$15,$16::timestamptz,$17::timestamptz)";
 
@@ -90,7 +88,6 @@ function insertParams(record: ProjectRecord): unknown[] {
     record.name,
     record.description ?? null,
     record.status,
-    JSON.stringify(record.teamIds),
     JSON.stringify(record.initiativeIds),
     record.lead ?? null,
     JSON.stringify(record.memberIds),
@@ -112,7 +109,6 @@ function rowToRecord(row: ProjectRow): ProjectRecord {
     name: row.name,
     ...(row.description !== null ? { description: row.description } : {}),
     status: row.status,
-    teamIds: trackerIds(row.team_ids),
     initiativeIds: trackerIds(row.initiative_ids),
     ...(row.lead !== null ? { lead: row.lead } : {}),
     memberIds: trackerIds(row.member_ids),
@@ -179,10 +175,6 @@ export class PgProjectStore implements ProjectStore {
       conds.push(`initiative_ids ?| $${i++}::text[]`);
       params.push(filter.initiativeIds);
     }
-    if (filter?.teamId !== undefined) {
-      conds.push(`team_ids @> $${i++}::jsonb`);
-      params.push(JSON.stringify([filter.teamId]));
-    }
     let sql = `SELECT * FROM everdict_projects WHERE ${conds.join(" AND ")} ORDER BY updated_at DESC`;
     if (filter?.limit !== undefined) {
       sql += ` LIMIT $${i++}`;
@@ -201,16 +193,15 @@ export class PgProjectStore implements ProjectStore {
     const current = await this.get(tenant, id);
     if (!current) return undefined;
     const next: ProjectRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const sets = `name=$3, description=$4, status=$5, team_ids=$6::jsonb, initiative_ids=$7::jsonb,
-       lead=$8, member_ids=$9::jsonb, health=$10, milestones=$11::jsonb,
-       target_date=$12, completed_at=$13::timestamptz, history=$14::jsonb, updated_at=$15::timestamptz`;
+    const sets = `name=$3, description=$4, status=$5, initiative_ids=$6::jsonb,
+       lead=$7, member_ids=$8::jsonb, health=$9, milestones=$10::jsonb,
+       target_date=$11, completed_at=$12::timestamptz, history=$13::jsonb, updated_at=$14::timestamptz`;
     const params: unknown[] = [
       tenant,
       id,
       next.name,
       next.description ?? null,
       next.status,
-      JSON.stringify(next.teamIds),
       JSON.stringify(next.initiativeIds),
       next.lead ?? null,
       JSON.stringify(next.memberIds),

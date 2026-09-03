@@ -1,6 +1,5 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { visibleTeamsFor } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { pulseDocs } from "./pulse.docs.js";
 
@@ -28,12 +27,10 @@ export function registerWorkspacePulseRoutes(app: FastifyInstance, deps: ServerD
     if (!query.success) return reply.code(400).send({ code: "BAD_REQUEST", message: query.error.message });
     try {
       gate(principal, "issues:read");
-      const visibleTeams = await visibleTeamsFor(deps, principal);
       return reply.send(
         await deps.workspacePulseService.read({
           tenant: principal.workspace,
           days: query.data.days ?? DEFAULT_PULSE_DAYS,
-          ...(visibleTeams !== undefined ? { visibleTeams } : {}),
         }),
       );
     } catch (err) {

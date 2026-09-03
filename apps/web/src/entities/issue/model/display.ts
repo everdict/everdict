@@ -62,21 +62,13 @@ export const DEFAULT_ISSUE_DISPLAY: IssueDisplay = {
   subIssues: 'all',
 }
 
-// WHICH list this preference belongs to. Linear remembers display options per view, not per app, and it matters
-// here: a cycle board is a board, a team's issue list is a list, and carrying one screen's layout onto the other
-// is the exact annoyance per-view memory exists to prevent.
+// WHICH list a preference belongs to. Linear remembers display options per view, not per app, and the cookie
+// keeps that shape: a key per view, capped. The workspace's issue list is one such view — its key is a constant
+// because the workspace is the only boundary, so there is one issue list rather than one per team.
 //
-// Every cycle board shares ONE key rather than one per cycle. A key per cycle would grow the cookie by an entry
-// per fortnight forever, and "how I look at a cycle board" does not change when the cycle does.
-export function issueViewKeyOf(scope: {
-  team?: string
-  triage?: boolean
-  cycle?: boolean
-}): string {
-  if (scope.cycle === true) return 'cycle'
-  if (scope.team === undefined) return 'workspace:issues'
-  return `team:${scope.team}:${scope.triage === true ? 'triage' : 'issues'}`
-}
+// The mechanism stays per-view (a saved analysis view, a board opened from a project, anything a later screen
+// wants remembered separately) — what collapsed is the ADDRESS space of the issue list, not the store.
+export const WORKSPACE_ISSUES_VIEW_KEY = 'workspace:issues'
 
 // How many views the cookie remembers. A cookie rides every request, so this cannot grow without bound: past the
 // cap the least-recently-changed view is dropped and simply reverts to the defaults next time it is opened.

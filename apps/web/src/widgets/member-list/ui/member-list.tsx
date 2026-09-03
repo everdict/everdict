@@ -5,7 +5,6 @@ import { KeyRound, Search, Users } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
 
 import { isMachineSubject } from '@/entities/member'
-import { teamHref, TeamKeyBadge } from '@/entities/team'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { usePersistentFilters } from '@/shared/lib/use-persistent-filters'
 import { cn } from '@/shared/lib/utils'
@@ -27,12 +26,11 @@ export interface MemberRow {
   name?: string
   email?: string
   avatarUrl?: string
-  teams: { id: string; key: string; name: string }[]
 }
 
 type Sort = 'name' | 'joined' | 'role'
 
-const FILTER_DEFAULTS = { query: '', team: '', role: '', sort: 'name' as Sort }
+const FILTER_DEFAULTS = { query: '', role: '', sort: 'name' as Sort }
 
 // 역할은 서버가 소유한 열린 문자열이다 — 아는 값만 번역하고 모르는 값은 그대로 보여준다(카탈로그 미스로 화면이 깨지지 않도록).
 const ROLE_KEYS: Record<string, string> = {
@@ -71,23 +69,13 @@ export function MemberList({
     `members:${workspace}`,
     FILTER_DEFAULTS
   )
-  const { query, team, role, sort } = values
+  const { query, role, sort } = values
 
   const roleLabel = (value: string): string => {
     const key = ROLE_KEYS[value]
     return key ? t(key) : value
   }
 
-  const teamOptions = useMemo(() => {
-    const byId = new Map<string, string>()
-    for (const m of members) for (const tm of m.teams) byId.set(tm.id, tm.name)
-    return [
-      { value: '', label: t('allTeams') },
-      ...[...byId.entries()]
-        .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([id, name]) => ({ value: id, label: name })),
-    ]
-  }, [members, t])
 
   const roleOptions = useMemo(() => {
     const seen = [...new Set(members.map((m) => m.role))].sort(
@@ -102,14 +90,12 @@ export function MemberList({
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
     const matched = members.filter((m) => {
-      if (team && !m.teams.some((tm) => tm.id === team)) return false
       if (role && m.role !== role) return false
       if (!q) return true
       const hay = [
         m.name ?? '',
         m.email ?? '',
         m.subject,
-        ...m.teams.flatMap((tm) => [tm.key, tm.name]),
       ]
         .join(' ')
         .toLowerCase()
@@ -122,7 +108,7 @@ export function MemberList({
         (ROLE_RANK[a.role] ?? 9) - (ROLE_RANK[b.role] ?? 9) || labelOf(a).localeCompare(labelOf(b)),
     }
     return [...matched].sort(by[sort])
-  }, [members, query, team, role, sort])
+  }, [members, query, role, sort])
 
   const sortOptions: { value: Sort; label: string }[] = [
     { value: 'name', label: t('sortName') },
@@ -143,15 +129,6 @@ export function MemberList({
             aria-label={t('searchPlaceholder')}
           />
         </div>
-        {teamOptions.length > 1 && (
-          <Combobox
-            options={teamOptions}
-            value={team}
-            onChange={(v) => set('team', v)}
-            className="w-[150px]"
-            aria-label={t('allTeams')}
-          />
-        )}
         {roleOptions.length > 2 && (
           <Combobox
             options={roleOptions}
@@ -251,25 +228,6 @@ export function MemberList({
                         )
                       )}
                     </span>
-                  </span>
-
-                  <span className="hidden min-w-0 items-center gap-1 @lg:flex">
-                    {m.teams.length === 0 ? (
-                      <span className="text-[12px] text-faint">{t('noTeam')}</span>
-                    ) : (
-                      <>
-                        {m.teams.slice(0, 3).map((tm) => (
-                          <Tooltip key={tm.id} content={tm.name}>
-                            <Link href={teamHref(workspace, tm.key)}>
-                              <TeamKeyBadge teamKey={tm.key} />
-                            </Link>
-                          </Tooltip>
-                        ))}
-                        {m.teams.length > 3 && (
-                          <span className="text-[11px] text-faint">+{m.teams.length - 3}</span>
-                        )}
-                      </>
-                    )}
                   </span>
 
                   <span

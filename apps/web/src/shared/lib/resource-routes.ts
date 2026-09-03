@@ -22,7 +22,6 @@ export const DETAIL_ROUTES: DetailRoute[] = [
   { plural: 'issues', singular: 'issue', reserved: [] },
   { plural: 'projects', singular: 'project', reserved: [] },
   { plural: 'initiatives', singular: 'initiative', reserved: [] },
-  { plural: 'cycles', singular: 'cycle', reserved: [] },
   { plural: 'datasets', singular: 'dataset', reserved: ['new', 'import'] },
   { plural: 'harnesses', singular: 'harness', reserved: ['new'] },
   { plural: 'judges', singular: 'judge', reserved: ['new'] },
@@ -38,7 +37,6 @@ export const DETAIL_ROUTES: DetailRoute[] = [
   },
   { plural: 'skills', singular: 'skill', reserved: [] },
   { plural: 'views', singular: 'view', reserved: [] },
-  { plural: 'teams', singular: 'team', reserved: [] },
   { plural: 'tools', singular: 'tool', reserved: [] },
 ]
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_ISSUE_DISPLAY,
   issueDisplayFor,
-  issueViewKeyOf,
+  WORKSPACE_ISSUES_VIEW_KEY,
   withIssueDisplay,
   type IssueDisplay,
 } from './display'
@@ -62,31 +62,28 @@ describe('issue display — the reader’s preference, remembered per view', () 
   it('never stores a board with nothing to draw', () => {
     // Columns ARE the groups, so an ungrouped board has no shape. Normalising on the way in means no stored
     // preference can produce an empty screen.
-    const cookie = withIssueDisplay(
-      undefined,
-      'cycle',
-      display({ layout: 'board', grouping: 'none' })
-    )
-    expect(issueDisplayFor(cookie, 'cycle').grouping).toBe('status')
+    const cookie = withIssueDisplay(undefined, 'issues', display({ layout: 'board', grouping: 'none' }))
+    expect(issueDisplayFor(cookie, 'issues').grouping).toBe('status')
   })
 
   it('remembers a bounded number of views, dropping the least recently changed', () => {
     // A cookie rides every request, so this cannot grow forever. The evicted view reverts to the defaults, which
     // is a smaller loss than an unbounded header.
-    let cookie = withIssueDisplay(undefined, 'team:FIRST:issues', display({ order: 'created' }))
+    let cookie = withIssueDisplay(undefined, 'first:view', display({ order: 'created' }))
     for (let i = 0; i < 12; i += 1) {
-      cookie = withIssueDisplay(cookie, `team:T${i}:issues`, display({ order: 'due' }))
+      cookie = withIssueDisplay(cookie, `view:${i}`, display({ order: 'due' }))
     }
-    expect(issueDisplayFor(cookie, 'team:FIRST:issues')).toEqual(DEFAULT_ISSUE_DISPLAY)
-    expect(issueDisplayFor(cookie, 'team:T11:issues').order).toBe('due')
+    expect(issueDisplayFor(cookie, 'first:view')).toEqual(DEFAULT_ISSUE_DISPLAY)
+    expect(issueDisplayFor(cookie, 'view:11').order).toBe('due')
   })
 
-  it('names a view by its address, because that is what the reader thinks they are configuring', () => {
-    expect(issueViewKeyOf({})).toBe('workspace:issues')
-    expect(issueViewKeyOf({ team: 'ENG' })).toBe('team:ENG:issues')
-    expect(issueViewKeyOf({ team: 'ENG', triage: true })).toBe('team:ENG:triage')
-    // Every cycle board shares one key: a key per cycle would add an entry per fortnight, and how someone reads
-    // a cycle board does not change when the cycle does.
-    expect(issueViewKeyOf({ team: 'ENG', cycle: true })).toBe('cycle')
+  it("keeps one view's preference out of another's — the whole point of a per-view store", () => {
+    // Given: two views configured differently
+    let cookie = withIssueDisplay(undefined, WORKSPACE_ISSUES_VIEW_KEY, display({ layout: 'board' }))
+    cookie = withIssueDisplay(cookie, 'other:view', display({ layout: 'list' }))
+
+    // Then: each keeps its own. Carrying one screen's layout onto another is the annoyance this exists to stop.
+    expect(issueDisplayFor(cookie, WORKSPACE_ISSUES_VIEW_KEY).layout).toBe('board')
+    expect(issueDisplayFor(cookie, 'other:view').layout).toBe('list')
   })
 })

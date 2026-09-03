@@ -9,7 +9,6 @@ const project = (over: Partial<Project> & Pick<Project, 'id'>): Project =>
     tenant: 'acme',
     name: over.id,
     status: 'in_progress',
-    teamIds: ['team-web'],
     initiativeIds: [],
     memberIds: [],
     history: [],

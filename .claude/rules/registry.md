@@ -30,15 +30,6 @@ its own identity axis (`docs/architecture/harness-definability-spec.md` §2). Se
   `ownVersions` (no fallback) is for conflict checks; `versions`/`get`/`list` apply the fallback. Identical for
   `HarnessRegistry` / `DatasetRegistry` / `JudgeRegistry` / `RuntimeRegistry` — add a new versioned entity by
   mirroring this, not a new model.
-- **The owning team is transferable metadata.** `team_id` (mig `0106`) sits beside `created_by` — outside the
-  versioned spec precisely so ownership can CHANGE without minting a version. `moveToTeam(tenant, id, teamId)`
-  (harness instance/template · dataset · judge) re-files the **whole entity, every version including tombstones**
-  (ownership belongs to the thing, not one release; reads take it off the newest version, and a revived tombstone
-  must not reappear under the previous team). Tenant directly-owned + live only → `NotFound` (a `_shared` asset is
-  not a workspace's to re-file). Authorization lives in the caller (`moveCapabilityToTeam`, one core for both
-  transports: `POST /:id/team` + MCP `move_<resource>`) and checks BOTH teams — source and destination — on the
-  entity's EXISTING content-mutation action (no new authz action, same discipline as version tags). Emits
-  `<subject>.moved`. See `docs/registry.md` + `docs/auth.md`.
 - **Version tags are mutable metadata, NOT spec content.** Per-version free-form labels (`setVersionTags` /
   `versionTags` on all five registries — harness/dataset/judge/runtime/rubric) live beside `createdBy` — outside `specsEqual`, editable after
   registration (that's the point: label versions that already exist). Writes hit **tenant-owned live versions

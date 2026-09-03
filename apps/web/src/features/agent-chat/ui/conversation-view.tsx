@@ -35,6 +35,7 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 import { Markdown } from '@/shared/ui/markdown'
 
 import { buildTranscript, type TranscriptItem } from '../lib/transcript'
+import { TeamMenu, type TeammateSpawnInput } from './team-menu'
 import { Composer } from './composer'
 import { ContextBlock } from './context-block'
 import { DelegationCard } from './delegation-card'
@@ -43,7 +44,6 @@ import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 import { ReasoningBlock } from './reasoning-block'
 import { SessionMenu } from './session-menu'
 import { SubagentList } from './subagent-list'
-import { TeamMenu, type TeammateSpawnInput } from './team-menu'
 import { TodoList } from './todo-list'
 
 // A compact model selector in the conversation header — the member picks which registered workspace model powers

@@ -12,20 +12,13 @@ import type { OutboxEvent } from "./run-store.js";
 
 export interface IssueListFilter {
   status?: IssueStatus;
-  // The owning team, or several — "my teams" is a list of ids, not a join, because the caller already resolved
-  // the subject's roster and passing it down keeps the store free of a membership dependency.
-  teamId?: string;
-  teamIds?: string[];
   projectId?: string;
   assignee?: string;
   priority?: IssuePriority;
-  // One iteration's board, and the team's triage inbox — both are narrow slices of one team's issues.
-  cycleId?: string;
   // One project checkpoint's issues.
   milestoneId?: string;
   // One board column's issues — what a state's delete gate counts and what a re-mapped state re-stamps.
   stateId?: string;
-  inTriage?: boolean;
   // The sub-issues of one parent. `null` selects the TOP-LEVEL issues instead — "everything that is not
   // somebody's sub-issue", which is what a board wants to show so a child never appears twice.
   parentId?: string | null;
@@ -75,15 +68,6 @@ export interface IssuePageFilter extends IssueListFilter {
   order?: IssueOrder;
 }
 
-// How many issues each team holds, and how many of those are still open — the counts a team list row shows.
-// Derived on read like ProjectRollup, but as ONE aggregate over the issue table rather than a fetch per team:
-// the team list used to read (and Zod-parse) every issue in the workspace to produce three integers per row.
-export interface IssueTeamCounts {
-  teamId: string;
-  total: number;
-  open: number;
-}
-
 // The tracker's issue ledger. `events` is the E0 outbox: implementations persist the facts ATOMICALLY with the
 // write they describe (Postgres: one data-modifying-CTE statement) — the same contract RunStore/ScorecardStore
 // hold, because the tracker's aggregates are ours and their transitions are the state change.
@@ -105,7 +89,6 @@ export interface IssueStore {
   // audit trail are never fetched — let alone parsed — to draw a row that shows neither.
   listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage>;
   // Issue counts per team in one aggregate. Absent teams simply have no entry (a team with no issues).
-  countByTeam(tenant: string): Promise<IssueTeamCounts[]>;
   // How many issues fall in each group under `filter` — what a GROUPED list's headers show. One aggregate, not
   // a count per group: a screen grouped by assignee would otherwise fire a query per member to learn how many
   // rows it is not showing. Groups come back largest-first; the unset bucket carries `key: null`.

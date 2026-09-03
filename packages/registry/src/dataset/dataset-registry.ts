@@ -13,23 +13,8 @@ import type { DatasetListEntry, DatasetRegistry } from "@everdict/application-co
 export class InMemoryDatasetRegistry implements DatasetRegistry {
   private readonly store = new VersionedStore<Dataset>("Dataset");
 
-  async register(
-    tenant: string,
-    dataset: Dataset,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    this.store.register(tenant, dataset, createdBy, teamId, origin);
-  }
-  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (_shared/seeded),
-  // which is NOT "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): string | undefined {
-    return this.store.teamOfVersion(tenant, id, version);
-  }
-  // Ownership transfer — every version of the entity, tenant-owned only (see VersionedStore.moveToTeam).
-  async moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
-    this.store.moveToTeam(tenant, id, teamId);
+  async register(tenant: string, dataset: Dataset, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    this.store.register(tenant, dataset, createdBy, origin);
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -79,7 +64,6 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
         ...(latest.description !== undefined ? { description: latest.description } : {}),
         ...(latest.producedBy !== undefined ? { producedBy: latest.producedBy } : {}),
         ...(meta.createdBy !== undefined ? { createdBy: meta.createdBy } : {}),
-        ...(meta.teamId !== undefined ? { teamId: meta.teamId } : {}),
         ...(meta.versionTags !== undefined ? { versionTags: meta.versionTags } : {}),
         ...(meta.versionOrigins !== undefined ? { versionOrigins: meta.versionOrigins } : {}),
       });

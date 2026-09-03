@@ -210,9 +210,7 @@ describe("MattermostService", () => {
   });
 
   describe("read tools (agent list_mattermost_channels / get_mattermost_channel_posts)", () => {
-    const channels: MattermostChannel[] = [
-      { id: "c1", name: "town-square", displayName: "Town Square", teamId: "t1", type: "O" },
-    ];
+    const channels: MattermostChannel[] = [{ id: "c1", name: "town-square", displayName: "Town Square", type: "O" }];
     const posts: MattermostPostView[] = [{ id: "p1", userId: "u1", message: "hi", createdAt: 1 }];
 
     it("lists channels via the resolved bot token", async () => {

@@ -1,8 +1,8 @@
 import type { IssueGroupBy, IssueGroupCount, IssuePage, IssueRecord, ScorecardRecord } from "@everdict/contracts";
-import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@everdict/contracts";
-import { issueCountsByGroup, issueCountsByTeam, issueSummaryOf } from "@everdict/domain";
+import { BadRequestError, ConflictError, ForbiddenError } from "@everdict/contracts";
+import { issueCountsByGroup, issueSummaryOf } from "@everdict/domain";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { IssueListFilter, IssuePageFilter, IssueStore, IssueTeamCounts } from "../ports/issue-store.js";
+import type { IssueListFilter, IssuePageFilter, IssueStore } from "../ports/issue-store.js";
 import type { OutboxEvent } from "../ports/run-store.js";
 import {
   type ScorecardGroupBy,
@@ -13,44 +13,14 @@ import {
 } from "../ports/scorecard-store.js";
 import { IssueService } from "./issue-service.js";
 
-// Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
-const teamAllocator = (() => {
+// The workspace mints one sequence, so the allocator is a counter and a prefix. Built per test: the counter is
+// state, and a shared one would make each test's identifiers depend on the tests that ran before it.
+function workspaceAllocator() {
   let n = 0;
   return {
     async allocateForIssue() {
       n += 1;
-      return { team: { id: "team-eng" }, grant: { number: n, identifier: `ENG-${n}` } };
-    },
-  };
-})();
-
-// A move allocates from the DESTINATION team, so the test allocator answers with whichever team was asked for.
-// Built per test: the counters are state, and a shared one would make each test's identifiers depend on the
-// tests that ran before it.
-function movingAllocator() {
-  const counters = new Map<string, number>();
-  const keyOf = (teamId: string) => teamId.replace("team-", "").toUpperCase();
-  return {
-    async allocateForIssue(_tenant: string, teamId: string | undefined) {
-      const id = teamId ?? "team-eng";
-      const next = (counters.get(id) ?? 0) + 1;
-      counters.set(id, next);
-      return { team: { id }, grant: { number: next, identifier: `${keyOf(id)}-${next}` } };
-    },
-  };
-}
-
-// The project half of the team axis: a project NAMES the teams working it, and an issue may only join one its
-// own team is on. `ProjectStore` satisfies this shape structurally in production — the service asks the store,
-// never the peer service.
-function projectsWith(rows: readonly { id: string; teamIds: string[] }[]) {
-  return {
-    async get(
-      _tenant: string,
-      id: string,
-    ): Promise<{ teamIds: readonly string[]; milestones: readonly { id: string }[] } | undefined> {
-      const row = rows.find((project) => project.id === id);
-      return row === undefined ? undefined : { teamIds: row.teamIds, milestones: [] };
+      return { number: n, identifier: `EVD-${n}` };
     },
   };
 }
@@ -93,9 +63,6 @@ class FakeIssueStore implements IssueStore {
   // answer the list question differently from production. One page, no cursor: `list` already returns everything.
   async listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage> {
     return { items: (await this.list(tenant, filter)).map(issueSummaryOf) };
-  }
-  async countByTeam(tenant: string): Promise<IssueTeamCounts[]> {
-    return issueCountsByTeam(await this.list(tenant));
   }
   async countByGroup(tenant: string, groupBy: IssueGroupBy, filter?: IssueListFilter): Promise<IssueGroupCount[]> {
     return issueCountsByGroup(await this.list(tenant, filter), groupBy);
@@ -156,7 +123,6 @@ function scorecard(over: Partial<ScorecardRecord> & { id: string }): ScorecardRe
     harness: { id: "web-agent", version: "2.0.0" },
     status: "succeeded",
     priority: "none",
-    inTriage: false,
     summary: [],
     createdAt: NOW,
     updatedAt: NOW,
@@ -171,7 +137,7 @@ describe("IssueService", () => {
 
   function service(deps: { scorecards?: ScorecardStore } = {}) {
     return new IssueService({
-      teams: teamAllocator,
+      numbers: workspaceAllocator(),
       store,
       ...(deps.scorecards !== undefined ? { scorecards: deps.scorecards } : {}),
       newId: () => `id-${++ids}`,
@@ -201,51 +167,11 @@ describe("IssueService", () => {
     expect(store.events[0]?.causedBy).toBe("agent:triage-bot:c-1");
   });
 
-  it("addresses an issue by the identifier its team minted, case-insensitively", async () => {
-    const svc = service();
-    const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
-
-    expect((await svc.get("acme", record.identifier)).id).toBe(record.id);
-    expect((await svc.get("acme", record.identifier.toLowerCase())).id).toBe(record.id); // a pasted lowercase URL
-    expect((await svc.get("acme", record.id)).id).toBe(record.id); // the id still addresses it — old links keep working
-
-    // A mutation arriving by identifier writes against the RESOLVED id, so the transition lands on the row.
-    const moved = await svc.setStatus("acme", record.identifier, { status: "in_progress" }, actor);
-    expect(moved.status).toBe("in_progress");
-    expect(store.byId.get(record.id)?.status).toBe("in_progress");
-
-    // Another workspace's identifier reads as nonexistent — the same no-existence-leak rule the id path has.
-    await expect(svc.get("globex", record.identifier)).rejects.toThrow(/not found/);
-  });
-
   it("deletes the issue the identifier resolves to, not the ref it was given", async () => {
     const svc = service();
     const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
     await svc.remove("acme", record.identifier, { subject: "dana", isAdmin: false });
     expect(store.byId.has(record.id)).toBe(false);
-  });
-
-  it("setStatus routes to the transition that fits the current state — move, resolve, then reopen", async () => {
-    const svc = service();
-    const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
-
-    const moved = await svc.setStatus("acme", record.id, { status: "in_progress" }, actor);
-    expect(moved.status).toBe("in_progress");
-
-    const resolved = await svc.setStatus("acme", record.id, { status: "done", resolution: { note: "green" } }, actor);
-    expect(resolved.status).toBe("done");
-    expect(resolved.resolution).toMatchObject({ note: "green", by: "dana" });
-
-    const reopened = await svc.setStatus("acme", record.id, { status: "todo" }, actor);
-    expect(reopened.status).toBe("todo");
-    expect(reopened.resolution).toMatchObject({ note: "green" }); // the prior resolution survives the reopen
-
-    expect(store.events.map((e) => e.kind)).toEqual([
-      "issue.created",
-      "issue.status_changed",
-      "issue.status_changed",
-      "issue.status_changed",
-    ]);
   });
 
   it("validates the resolution scorecard as EVIDENCE — a foreign or missing id is a 400", async () => {
@@ -321,19 +247,40 @@ describe("IssueService", () => {
     expect(store.byId.size).toBe(0);
   });
 
+  it("setStatus routes to the transition that fits the current state — move, resolve, then reopen", async () => {
+    const svc = service();
+    const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
+
+    const moved = await svc.setStatus("acme", record.id, { status: "in_progress" }, actor);
+    expect(moved.status).toBe("in_progress");
+
+    const resolved = await svc.setStatus("acme", record.id, { status: "done", resolution: { note: "green" } }, actor);
+    expect(resolved.status).toBe("done");
+    expect(resolved.resolution).toMatchObject({ note: "green", by: "dana" });
+
+    const reopened = await svc.setStatus("acme", record.id, { status: "todo" }, actor);
+    expect(reopened.status).toBe("todo");
+    expect(reopened.resolution).toMatchObject({ note: "green" }); // the prior resolution survives the reopen
+
+    expect(store.events.map((e) => e.kind)).toEqual([
+      "issue.created",
+      "issue.status_changed",
+      "issue.status_changed",
+      "issue.status_changed",
+    ]);
+  });
+
   it("pushes to GitHub only on a status move of a push-enabled copy, and never lets it break the transition", async () => {
     const pushed: string[] = [];
     const record: IssueRecord = {
       id: "iss-1",
       tenant: "acme",
-      teamId: "team-eng",
       number: 1,
       identifier: "ENG-1",
       formerIdentifiers: [],
       title: "t",
       status: "todo",
       priority: "none",
-      inTriage: false,
       labelIds: [],
       links: [],
       history: [],
@@ -351,7 +298,7 @@ describe("IssueService", () => {
     };
     await store.create(record);
     const svc = new IssueService({
-      teams: teamAllocator,
+      numbers: workspaceAllocator(),
       store,
       github: {
         pushStatus: async (r) => {
@@ -367,128 +314,22 @@ describe("IssueService", () => {
     await svc.update("acme", "iss-1", { title: "renamed" }, actor);
     expect(pushed).toEqual(["iss-1"]); // a content edit is not a status move — no push
   });
-});
 
-describe("IssueService.move — an issue changes teams, and its name changes with it", () => {
-  const actor = { subject: "dana" };
+  it("addresses an issue by the identifier the workspace minted, case-insensitively", async () => {
+    const svc = service();
+    const record = await svc.create({ tenant: "acme", createdBy: "dana", title: "t" });
 
-  async function filed() {
-    const store = new FakeIssueStore();
-    const svc = new IssueService({ teams: movingAllocator(), store, newId: () => "ev", now: () => NOW });
-    const issue = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry" });
-    return { store, svc, issue };
-  }
+    expect((await svc.get("acme", record.identifier)).id).toBe(record.id);
+    expect((await svc.get("acme", record.identifier.toLowerCase())).id).toBe(record.id); // a pasted lowercase URL
+    expect((await svc.get("acme", record.id)).id).toBe(record.id); // the id still addresses it — old links keep working
 
-  it("re-mints the identifier from the destination team's counter", async () => {
-    // Given: an issue filed on the default team
-    const { svc, issue } = await filed();
-    expect(issue.identifier).toBe("ENG-1");
-    // When: it is handed to another team
-    const moved = await svc.move("acme", issue.id, "team-plt", actor);
-    // Then: the prefix says whose list it is on now, numbered by THAT team
-    expect(moved.teamId).toBe("team-plt");
-    expect(moved.identifier).toBe("PLT-1");
-  });
+    // A mutation arriving by identifier writes against the RESOLVED id, so the transition lands on the row.
+    const moved = await svc.setStatus("acme", record.identifier, { status: "in_progress" }, actor);
+    expect(moved.status).toBe("in_progress");
+    expect(store.byId.get(record.id)?.status).toBe("in_progress");
 
-  it("keeps the old name resolvable, so links already pasted elsewhere still land", async () => {
-    const { svc, issue } = await filed();
-    await svc.move("acme", issue.id, "team-plt", actor);
-    // When: someone follows a link that says ENG-1
-    const found = await svc.get("acme", "ENG-1");
-    // Then: it is the same issue, under its current name
-    expect(found.id).toBe(issue.id);
-    expect(found.identifier).toBe("PLT-1");
-    expect(found.formerIdentifiers).toEqual(["ENG-1"]);
-  });
-
-  it("emits issue.moved carrying both names, and appends the durable history entry", async () => {
-    const { store, svc, issue } = await filed();
-    await svc.move("acme", issue.id, "team-plt", actor);
-    const fact = store.events.find((e) => e.kind === "issue.moved");
-    expect(fact?.payload).toMatchObject({
-      fromTeamId: "team-eng",
-      toTeamId: "team-plt",
-      fromIdentifier: "ENG-1",
-      toIdentifier: "PLT-1",
-    });
-    expect(store.byId.get(issue.id)?.history.at(-1)?.event).toBe("moved");
-  });
-
-  it("refuses a move to the team the issue is already on", async () => {
-    const { svc, issue } = await filed();
-    await expect(svc.move("acme", issue.id, "team-eng", actor)).rejects.toThrow(ConflictError);
-  });
-
-  it("keeps the project when the destination team is on it, and drops it when it is not", async () => {
-    // Given two issues in projects the Engineering team works — one of them shared with Platform
-    const store = new FakeIssueStore();
-    let n = 0;
-    const svc = new IssueService({
-      teams: movingAllocator(),
-      store,
-      projects: projectsWith([
-        { id: "prj-eng", teamIds: ["team-eng"] },
-        { id: "prj-both", teamIds: ["team-eng", "team-plt"] },
-      ]),
-      newId: () => {
-        n += 1; // two issues in one test — a fixed id would make them the same record
-        return `id-${n}`;
-      },
-      now: () => NOW,
-    });
-    const alone = await svc.create({ tenant: "acme", createdBy: "dana", title: "a", projectId: "prj-eng" });
-    const shared = await svc.create({ tenant: "acme", createdBy: "dana", title: "b", projectId: "prj-both" });
-
-    // When both are handed to Platform
-    const movedAlone = await svc.move("acme", alone.id, "team-plt", actor);
-    const movedShared = await svc.move("acme", shared.id, "team-plt", actor);
-
-    // Then only the one whose project Platform does not work leaves it
-    expect(movedAlone.projectId).toBeUndefined();
-    expect(movedShared.projectId).toBe("prj-both");
-  });
-});
-
-describe("IssueService — an issue only joins a project its own team is on", () => {
-  const actor = { subject: "dana" };
-
-  function service() {
-    const store = new FakeIssueStore();
-    return {
-      store,
-      svc: new IssueService({
-        teams: teamAllocator, // files on team-eng
-        store,
-        projects: projectsWith([
-          { id: "prj-eng", teamIds: ["team-eng"] },
-          { id: "prj-plt", teamIds: ["team-plt"] },
-        ]),
-        newId: () => "ev",
-        now: () => NOW,
-      }),
-    };
-  }
-
-  it("files an issue into one of its team's projects", async () => {
-    const { svc } = service();
-    const issue = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry", projectId: "prj-eng" });
-    expect(issue.projectId).toBe("prj-eng");
-  });
-
-  it("refuses to file it into another team's project", async () => {
-    const { svc } = service();
-    await expect(
-      svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry", projectId: "prj-plt" }),
-    ).rejects.toThrow(BadRequestError);
-  });
-
-  it("refuses to move it into another team's project on an edit, and 404s an unknown one", async () => {
-    const { svc } = service();
-    const issue = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retry", projectId: "prj-eng" });
-    await expect(svc.update("acme", issue.id, { projectId: "prj-plt" }, actor)).rejects.toThrow(BadRequestError);
-    await expect(svc.update("acme", issue.id, { projectId: "ghost" }, actor)).rejects.toThrow(NotFoundError);
-    // Leaving a project is always allowed — the rule is about which one it may join.
-    expect((await svc.update("acme", issue.id, { projectId: null }, actor)).projectId).toBeUndefined();
+    // Another workspace's identifier reads as nonexistent — the same no-existence-leak rule the id path has.
+    await expect(svc.get("globex", record.identifier)).rejects.toThrow(/not found/);
   });
 });
 
@@ -503,7 +344,7 @@ describe("IssueService — sub-issues", () => {
     let n = 0;
     return {
       store,
-      svc: new IssueService({ teams: movingAllocator(), store, newId: () => `iss-${++n}`, now: () => NOW }),
+      svc: new IssueService({ numbers: workspaceAllocator(), store, newId: () => `iss-${++n}`, now: () => NOW }),
     };
   }
 
@@ -517,23 +358,6 @@ describe("IssueService — sub-issues", () => {
       parentId: parent.id,
     });
     expect(child.parentId).toBe(parent.id);
-  });
-
-  it("stores the parent's id when a sub-issue is filed under the name the team cites", async () => {
-    const { svc } = service();
-    const parent = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retries" });
-    // Every read takes `ENG-12` exactly like the uuid, and the agent-facing tool says so — so filing this way
-    // has to produce the same child. It used to store the identifier verbatim, which made the sub-issue
-    // invisible to the query its own parent's detail runs (`parentId = <uuid>`).
-    const child = await svc.create({
-      tenant: "acme",
-      createdBy: "dana",
-      title: "reproduce it",
-      parentId: parent.identifier,
-    });
-    expect(child.parentId).toBe(parent.id);
-    const under = await svc.listSummaries("acme", { parentId: parent.id });
-    expect(under.items.map((item) => item.id)).toContain(child.id);
   });
 
   it("404s on a parent that does not exist in this workspace", async () => {
@@ -571,6 +395,23 @@ describe("IssueService — sub-issues", () => {
     // And the parent can now be deleted, because nothing points at it any more.
     await expect(svc.remove("acme", parent.id, { subject: "dana", isAdmin: true })).resolves.toBeUndefined();
   });
+
+  it("stores the parent's id when a sub-issue is filed under the name people cite", async () => {
+    const { svc } = service();
+    const parent = await svc.create({ tenant: "acme", createdBy: "dana", title: "flaky retries" });
+    // Every read takes `ENG-12` exactly like the uuid, and the agent-facing tool says so — so filing this way
+    // has to produce the same child. It used to store the identifier verbatim, which made the sub-issue
+    // invisible to the query its own parent's detail runs (`parentId = <uuid>`).
+    const child = await svc.create({
+      tenant: "acme",
+      createdBy: "dana",
+      title: "reproduce it",
+      parentId: parent.identifier,
+    });
+    expect(child.parentId).toBe(parent.id);
+    const under = await svc.listSummaries("acme", { parentId: parent.id });
+    expect(under.items.map((item) => item.id)).toContain(child.id);
+  });
 });
 
 describe("IssueService — priority, estimate and due date", () => {
@@ -578,14 +419,14 @@ describe("IssueService — priority, estimate and due date", () => {
 
   it("defaults to unprioritised, which is a real answer rather than an absent field", async () => {
     const store = new FakeIssueStore();
-    const svc = new IssueService({ teams: movingAllocator(), store, newId: () => "ev", now: () => NOW });
+    const svc = new IssueService({ numbers: workspaceAllocator(), store, newId: () => "ev", now: () => NOW });
     const issue = await svc.create({ tenant: "acme", createdBy: "dana", title: "x" });
     expect(issue.priority).toBe("none");
   });
 
   it("records each planning field in the history entry, and clears them with null", async () => {
     const store = new FakeIssueStore();
-    const svc = new IssueService({ teams: movingAllocator(), store, newId: () => "ev", now: () => NOW });
+    const svc = new IssueService({ numbers: workspaceAllocator(), store, newId: () => "ev", now: () => NOW });
     const issue = await svc.create({
       tenant: "acme",
       createdBy: "dana",
@@ -636,7 +477,7 @@ describe("IssueService.listSummaries — the comment count a list row shows", ()
     let n = 0;
     // Distinct ids on purpose: the batch is keyed BY id, so a shared stub id would make the assertion pass
     // for the wrong reason.
-    const svc = new IssueService({ teams: movingAllocator(), store, newId: () => `iss-${++n}`, now: () => NOW });
+    const svc = new IssueService({ numbers: workspaceAllocator(), store, newId: () => `iss-${++n}`, now: () => NOW });
     const a = await svc.create({ tenant: "acme", createdBy: "dana", title: "a" });
     const b = await svc.create({ tenant: "acme", createdBy: "dana", title: "b" });
     return { store, a, b };
@@ -645,7 +486,7 @@ describe("IssueService.listSummaries — the comment count a list row shows", ()
   it("attaches the counts in ONE batched read for the whole page, keyed as `issue`", async () => {
     const { store, a, b } = await seeded();
     const comments = new CountingCommentStore({ [a.id]: 3 });
-    const svc = new IssueService({ teams: movingAllocator(), store, comments, now: () => NOW });
+    const svc = new IssueService({ numbers: workspaceAllocator(), store, comments, now: () => NOW });
 
     const page = await svc.listSummaries("acme");
 
@@ -660,7 +501,7 @@ describe("IssueService.listSummaries — the comment count a list row shows", ()
 
   it("leaves the count ABSENT when nothing is wired to count — undefined is not the same claim as zero", async () => {
     const { store } = await seeded();
-    const svc = new IssueService({ teams: movingAllocator(), store, now: () => NOW });
+    const svc = new IssueService({ numbers: workspaceAllocator(), store, now: () => NOW });
     const page = await svc.listSummaries("acme");
     expect(page.items.every((row) => row.commentCount === undefined)).toBe(true);
   });
@@ -668,7 +509,7 @@ describe("IssueService.listSummaries — the comment count a list row shows", ()
   it("asks the comment store nothing when the page is empty", async () => {
     const store = new FakeIssueStore();
     const comments = new CountingCommentStore({});
-    const svc = new IssueService({ teams: movingAllocator(), store, comments, now: () => NOW });
+    const svc = new IssueService({ numbers: workspaceAllocator(), store, comments, now: () => NOW });
     expect((await svc.listSummaries("acme")).items).toEqual([]);
     expect(comments.calls).toHaveLength(0);
   });

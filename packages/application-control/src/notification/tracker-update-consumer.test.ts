@@ -41,7 +41,6 @@ function project(over: Partial<ProjectRecord> = {}): ProjectRecord {
     tenant: "acme",
     name: "conversation quality",
     status: "in_progress",
-    teamIds: ["team-eng"],
     initiativeIds: ["ini-1"],
     memberIds: [],
     milestones: [],

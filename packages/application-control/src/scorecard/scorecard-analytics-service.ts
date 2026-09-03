@@ -31,7 +31,6 @@ import {
   gateAudit,
   leaderboard,
   measurementCoverage,
-  ownedByVisibleTeam,
   preferredMetric,
   resolvePolicyResolution,
   scorecardModels,
@@ -124,7 +123,7 @@ export class ScorecardAnalyticsService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number } = {},
   ): Promise<ScorecardDiffResult> {
     return (await this.diffSnapshot(tenant, baselineId, candidateId, opts)).diff;
   }
@@ -138,18 +137,10 @@ export class ScorecardAnalyticsService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number; visibleTeams?: string[] } = {},
+    opts: { zThreshold?: number; minDelta?: number; fdrAlpha?: number } = {},
   ): Promise<ComparisonSnapshot> {
-    const { scorecard: baseline, record: baseRecord } = await this.requireSucceeded(
-      tenant,
-      baselineId,
-      opts.visibleTeams,
-    );
-    const { scorecard: candidate, record: candRecord } = await this.requireSucceeded(
-      tenant,
-      candidateId,
-      opts.visibleTeams,
-    );
+    const { scorecard: baseline, record: baseRecord } = await this.requireSucceeded(tenant, baselineId);
+    const { scorecard: candidate, record: candRecord } = await this.requireSucceeded(tenant, candidateId);
     // Each side is read under ITS OWN stamped policy. A stamp that cannot be restored is the one case that
     // must not fall through to the default ladder: the comparison would then stand on verdicts re-derived
     // under rules that batch never ran under, which is exactly what a release gate would act on.
@@ -247,11 +238,9 @@ export class ScorecardAnalyticsService {
   // on the children, so each in-range record goes through the facade's hydrating get).
   async opsReport(
     tenant: string,
-    opts: { from?: string; to?: string; visibleTeams?: string[] },
+    opts: { from?: string; to?: string },
   ): Promise<ReturnType<typeof workspaceOpsReport>> {
-    const rows = await this.deps.store.list(tenant, {
-      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
-    });
+    const rows = await this.deps.store.list(tenant, {});
     const inRange = rows.filter(
       (r) => (opts.from === undefined || r.createdAt >= opts.from) && (opts.to === undefined || r.createdAt <= opts.to),
     );
@@ -269,16 +258,12 @@ export class ScorecardAnalyticsService {
   // A2 (catalog T3/T9) — the cross-batch flake index for a dataset: same (case, harness@version, runtime)
   // key across succeeded batches, verdicts derived under each batch's OWN stamped policy. Detail hydration
   // through the facade's get (verdicts need per-case results).
-  async flake(
-    tenant: string,
-    opts: { datasetId: string; harnessId?: string; visibleTeams?: string[] },
-  ): Promise<ReturnType<typeof flakeIndex>> {
+  async flake(tenant: string, opts: { datasetId: string; harnessId?: string }): Promise<ReturnType<typeof flakeIndex>> {
     const rows = await this.deps.store.list(tenant, {
       dataset: opts.datasetId,
       status: "succeeded",
       kind: "scorecard",
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
-      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
     const detailed: ScorecardRecord[] = [];
     for (const row of rows) {
@@ -290,13 +275,8 @@ export class ScorecardAnalyticsService {
 
   // B2 — the governance window over the ledger's recorded gate decisions. The numbers are the domain's
   // (gateAudit); the list rows carry the (small) gates arrays, so no detail hydration is needed.
-  async gateAudit(
-    tenant: string,
-    opts: { from?: string; to?: string; visibleTeams?: string[] },
-  ): Promise<ReturnType<typeof gateAudit>> {
-    const rows = await this.deps.store.list(tenant, {
-      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
-    });
+  async gateAudit(tenant: string, opts: { from?: string; to?: string }): Promise<ReturnType<typeof gateAudit>> {
+    const rows = await this.deps.store.list(tenant, {});
     return gateAudit(rows, {
       ...(opts.from !== undefined ? { from: opts.from } : {}),
       ...(opts.to !== undefined ? { to: opts.to } : {}),
@@ -314,9 +294,6 @@ export class ScorecardAnalyticsService {
       from?: string;
       to?: string;
       baseline?: string;
-      // The caller's ownership ceiling (undefined = none). A trend is a shape derived from batches, so a batch the
-      // caller cannot see must not bend the line either.
-      visibleTeams?: string[];
     },
   ): Promise<ScorecardTrend> {
     // Narrow at the SQL level by dataset (+optional harness)·succeeded — avoid a full workspace scan (suite defensively re-filters).
@@ -325,7 +302,6 @@ export class ScorecardAnalyticsService {
       status: "succeeded",
       kind: "scorecard", // experiments are ungraded (P1) — they never belong on a trend
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
-      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
     const metric = opts.metric ?? preferredMetric(records) ?? "tests_pass";
     return trendSeries(records, { ...opts, metric });
@@ -345,9 +321,6 @@ export class ScorecardAnalyticsService {
       model?: string;
       judgeModel?: string;
       window?: "latest" | "best";
-      // The caller's ownership ceiling (undefined = none) — a ranking that counts rows the caller cannot open is
-      // a leak dressed as an average.
-      visibleTeams?: string[];
     },
   ): Promise<Leaderboard> {
     // Narrow at the SQL level by dataset (+optional harness)·succeeded — summary-derived axes like model/judgeModel/window are filtered by suite.
@@ -356,7 +329,6 @@ export class ScorecardAnalyticsService {
       status: "succeeded",
       kind: "scorecard", // experiments are ungraded (P1) — they never rank
       ...(opts.harnessId ? { harness: opts.harnessId } : {}),
-      ...(opts.visibleTeams ? { visibleTeams: opts.visibleTeams } : {}),
     });
     const metric = opts.metric ?? preferredMetric(records) ?? "tests_pass"; // empty set: any name labels an empty board
     return leaderboard(records, { ...opts, metric });
@@ -369,7 +341,7 @@ export class ScorecardAnalyticsService {
   // defensively). docs/architecture/analysis-studio.md (V1).
   // `visibleTeams` is a separate parameter rather than a field on the config on purpose: the config is parsed from
   // the request body, and an ownership ceiling that a caller could type is not a ceiling.
-  async analysis(tenant: string, config: AnalysisConfig, visibleTeams?: string[]): Promise<AnalysisResult> {
+  async analysis(tenant: string, config: AnalysisConfig): Promise<AnalysisResult> {
     const f = config.filters;
     const dataset = f.dataset?.length === 1 ? f.dataset[0] : undefined;
     const harness = f.harness?.length === 1 ? f.harness[0] : undefined;
@@ -377,7 +349,6 @@ export class ScorecardAnalyticsService {
       kind: "scorecard", // experiments are ungraded (P1) — score-less rows would only add noise to the pivot
       ...(dataset !== undefined ? { dataset } : {}),
       ...(harness !== undefined ? { harness } : {}),
-      ...(visibleTeams ? { visibleTeams } : {}),
     });
     return computeAnalysis(records, config);
   }
@@ -389,9 +360,9 @@ export class ScorecardAnalyticsService {
   // ref answers 403) pointing at the SERVER-internal endpoint. So we read the artifact by its KEY through the store,
   // which is stable forever, and keep the ref fetch only as the fallback for an artifact this deployment's store does
   // not hold (a foreign bucket, or no store wired here). A fetch/parse failure is the upstream store's fault → UpstreamError.
-  async analysisBundle(tenant: string, id: string, visibleTeams?: string[], revision?: number): Promise<unknown> {
+  async analysisBundle(tenant: string, id: string, revision?: number): Promise<unknown> {
     const record = await this.getRecord(id);
-    if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
+    if (!record || record.tenant !== tenant)
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     // A specific scoring revision's FROZEN artifact (I7) — read by its immutable per-revision key; the
     // ledger entry's own ref is the only fallback. A revision without a frozen artifact (pre-I7 passes,
@@ -489,13 +460,12 @@ export class ScorecardAnalyticsService {
   private async requireSucceeded(
     tenant: string,
     id: string,
-    visibleTeams?: string[],
   ): Promise<{ scorecard: Scorecard; record: ScorecardRecord }> {
     // The DECISION read (arch-review 47 P1-5), not the display one: a comparison is evidence for a gate, and
     // an unreceipted membership row inside a receipted batch is an attempt the batch never committed. It
     // renders on a detail screen because a viewer should see everything that ran; it must not move a delta.
     const record = await this.getDecisionRecord(id); // hydrates dedup storage from child runs — works regardless of embed/reference
-    if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
+    if (!record || record.tenant !== tenant)
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     if (!record.scorecard)
       throw new BadRequestError(
@@ -542,11 +512,10 @@ export class ScorecardAnalyticsService {
     tenant: string,
     baselineId: string,
     candidateId: string,
-    visibleTeams?: string[],
   ): Promise<{ baseline?: GateScoringPin; candidate?: GateScoringPin }> {
     const read = async (id: string): Promise<GateScoringPin | undefined> => {
       const record = await this.deps.store.get(id);
-      if (!record || record.tenant !== tenant || !ownedByVisibleTeam(record, visibleTeams))
+      if (!record || record.tenant !== tenant)
         throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
       if (record.status !== "succeeded")
         throw new BadRequestError(

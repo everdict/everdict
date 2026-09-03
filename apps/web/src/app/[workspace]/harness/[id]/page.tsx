@@ -14,7 +14,6 @@ import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
 import { HarnessSinkSelect, HarnessSourceSelect } from '@/features/manage-trace-source'
-import { moveDestinationsFor, TeamOwnerControl } from '@/features/move-to-team'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { pickOrigin } from '@/entities/capability-origin'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
@@ -32,7 +31,6 @@ import {
   type HarnessTemplateSpec,
 } from '@/entities/harness'
 import { isMachineSubject, membersSchema } from '@/entities/member'
-import { teamsSchema } from '@/entities/team'
 import { traceSourcesResponseSchema, type TraceSourcesResponse } from '@/entities/trace-source'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -130,12 +128,6 @@ export default async function HarnessDetailPage({
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
   const currentWorkspace = principal?.workspace ?? workspace
-  // 소유 팀을 이름으로 부르고, 넘길 수 있는 사람에게는 그 자리에서 넘기게 하기 위한 로스터.
-  const teams = await controlPlane
-    .listTeams(ctx)
-    .then((r) => teamsSchema.parse(r))
-    .catch(() => [])
-  const teamMove = moveDestinationsFor(principal, teams, 'harnesses:register')
   // Creator — profile name+avatar (if any). Seed/_shared (different owner·no createdBy) are shown as first-party.
   // A machine subject (`key:<ws>`) has no human name — label it instead of leaking the raw subject as a name.
   const tMembers = await getTranslations('membersDirectory')
@@ -392,18 +384,6 @@ export default async function HarnessDetailPage({
           {author.known && <Avatar name={author.name} url={author.avatarUrl} size="sm" />}
           <span>{author.name}</span>
         </MetaItem>
-        {entry?.owner === currentWorkspace && (
-          <MetaItem label={t('metaTeam')}>
-            <TeamOwnerControl
-              kind="harnesses"
-              id={id}
-              {...(entry?.teamId !== undefined ? { teamId: entry.teamId } : {})}
-              teams={teamMove.teams}
-              writableIds={teamMove.writableIds}
-              showLabel={false}
-            />
-          </MetaItem>
-        )}
         {/* Per-harness PULL source — hide the row if there are no sources and no selection (don't render empty sections). */}
         {(traceSources.sources.length > 0 || assignedSource !== undefined) && (
           <MetaItem label={t('metaTraceSource')}>

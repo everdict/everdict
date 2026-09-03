@@ -21,29 +21,13 @@ export class PgDatasetRegistry implements DatasetRegistry {
       parse: (v) => DatasetSchema.parse(v),
       softDelete: true,
       createdBy: true,
-      teamId: true,
       tags: true,
       origin: true,
     });
   }
 
-  register(
-    tenant: string,
-    dataset: Dataset,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void> {
-    return this.store.register(tenant, dataset, createdBy, teamId, origin);
-  }
-  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned (_shared/seeded),
-  // which is NOT "everyone's".
-  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
-    return this.store.teamOfVersion(tenant, id, version);
-  }
-  // Ownership transfer — every version of the entity, tenant-owned only (see PgVersionedStore.moveToTeam).
-  moveToTeam(tenant: string, id: string, teamId: string): Promise<void> {
-    return this.store.moveToTeam(tenant, id, teamId);
+  register(tenant: string, dataset: Dataset, createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
+    return this.store.register(tenant, dataset, createdBy, origin);
   }
 
   has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -109,10 +93,9 @@ export class PgDatasetRegistry implements DatasetRegistry {
       dataset: unknown;
       created_at: string | Date;
       created_by: string | null;
-      team_id: string | null;
       tags: unknown;
     }>(
-      "SELECT version, dataset, created_at, created_by, team_id, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+      "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
       [owner, id],
     );
     const rows = r.rows;
@@ -148,7 +131,6 @@ export class PgDatasetRegistry implements DatasetRegistry {
       createdAt: new Date(earliest.created_at).toISOString(),
       updatedAt: new Date(newest.created_at).toISOString(),
       // Ownership reads off the latest version — it belongs to the entity, not to one release of it.
-      ...(latestRow.team_id != null ? { teamId: latestRow.team_id } : {}),
       ...(latest.description !== undefined ? { description: latest.description } : {}),
       ...(latest.producedBy !== undefined ? { producedBy: latest.producedBy } : {}),
       ...(earliest.created_by !== null ? { createdBy: earliest.created_by } : {}),

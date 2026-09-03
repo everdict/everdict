@@ -86,7 +86,7 @@ today.*
 **The gap.** `repinHarnessImages` (`packages/application-control/src/harness/harness-pin-service.ts`)
 computes the merge base, answers it to the caller in `RepinResult.base` — and then calls
 `instances.register(tenant, next, subject)`, dropping it. The port already accepts what is being dropped:
-`register(tenant, instance, createdBy?, teamId?, origin?)`
+`register(tenant, instance, createdBy?, origin?)`
 (`packages/application-control/src/ports/harness-instance-registry.ts`). Both repin callers (the HTTP route
 and the MCP tool) pass no origin. Separately, `withRegisteredFact` emits `harness.registered` with only
 `{id, version}` — its own comment already warns that a decorator forwarding only what it reads silently
@@ -262,9 +262,10 @@ it cannot finish says when to look again — the ordinary cadence for an issue t
 longer back-off for a read that failed, a day for one whose issue was DELETED and which no sweep can ever
 change — so a hundred unfinishable rows stop holding the head of the list while newer completable ones are
 never read. The deferral is itself a conditional write and its answer is CONSUMED: a row the statement did
-not move is counted (`undeferred`), because a deferral that never landed reads exactly like one that did. The campaign carries its
-> own `teamId` (frozen at open from the issue it journals into, mig 0198), every read is team-filtered and
-> every mutation is team-gated on both transports. **The loop review of 2026-09-02** closed four seams the
+not move is counted (`undeferred`), because a deferral that never landed reads exactly like one that did. A campaign used to carry its
+> own owning team, frozen at open from the issue it journals into; that axis went with the team (migrations
+> `0211`/`0212`), so a campaign is the workspace's like everything else. **The loop review of 2026-09-02**
+> closed four seams the
 > settlement had left to the driver: the frame's endings (budget spent, rejected streak) are enforced at the
 > WRITE — `logRound` refuses a round past either, race-safe on the append CAS, and the gate reads the ending
 > before it reads a win, so a round logged past it is not evidence whatever it scored; the caller-authored

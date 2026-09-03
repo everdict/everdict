@@ -152,7 +152,6 @@ export const issueSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   // 이슈는 정확히 한 팀에 속하고, 그 팀이 찍은 이름(`ENG-12`)을 들고 다닌다.
-  teamId: z.string(),
   number: z.number(),
   identifier: z.string(),
   // 팀을 옮기면 식별자를 다시 찍는다 — 예전 이름도 계속 해석되므로, 이미 붙여넣은 링크는 살아 있고
@@ -168,12 +167,10 @@ export const issueSchema = z.object({
   dueDate: z.string().optional(),
   parentId: z.string().optional(),
   // 이 이슈가 끌려 들어간 팀 이터레이션.
-  cycleId: z.string().optional(),
   // 이슈가 속한 프로젝트 체크포인트 — 자기 프로젝트의 것만 가리킬 수 있다.
   milestoneId: z.string().optional(),
   // 트리아지 — 팀 워크플로 바깥(임포트·에이전트·요청)에서 들어와 아직 받아들여지지 않은 상태. 상태가 아니라
   // 플래그인 이유는 상태 어휘가 곧 워크플로이고, 워크플로에 들어오기 전인 것은 그 어휘로 말할 수 없기 때문.
-  inTriage: z.boolean().default(false),
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   // Registry ids (entities/issue-label), not names — join against listIssueLabels to draw a chip.
@@ -203,7 +200,6 @@ export const issueSummaryGithubSchema = z.object({
 export const issueSummarySchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  teamId: z.string(),
   number: z.number(),
   identifier: z.string(),
   title: z.string(),
@@ -213,11 +209,9 @@ export const issueSummarySchema = z.object({
   dueDate: z.string().optional(),
   parentId: z.string().optional(),
   // 이 이슈가 끌려 들어간 팀 이터레이션.
-  cycleId: z.string().optional(),
   milestoneId: z.string().optional(),
   // 트리아지 — 팀 워크플로 바깥(임포트·에이전트·요청)에서 들어와 아직 받아들여지지 않은 상태. 상태가 아니라
   // 플래그인 이유는 상태 어휘가 곧 워크플로이고, 워크플로에 들어오기 전인 것은 그 어휘로 말할 수 없기 때문.
-  inTriage: z.boolean().default(false),
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   labelIds: z.array(z.string()).default([]),

@@ -3,8 +3,6 @@ import type { CapabilityOrigin, JudgeSpec } from "@everdict/contracts";
 // One list entry — version metadata (registration history) + display fields derived from the latest judge spec (kind/provider/model/description).
 // GET /judges and MCP list_judges emit this shape. Same feel as the dataset/harness ListEntry.
 export interface JudgeListEntry {
-  // 소유 팀 — 목록이 팀으로 걸리려면 행에 실려야 한다(최신 버전 기준). 없음 = 소유자 없음.
-  teamId?: string;
   id: string;
   owner: string;
   versions: string[];
@@ -27,32 +25,12 @@ export interface JudgeListEntry {
 // Same ownership model as harnesses/datasets: tenant-owned first, else SHARED_TENANT (first-party default judge) fallback.
 // A user registers and version-manages their own judge (model/harness) directly. async — Postgres honors the same contract.
 export interface JudgeRegistry {
-  register(
-    tenant: string,
-    spec: JudgeSpec,
-    createdBy?: string,
-    teamId?: string,
-    origin?: CapabilityOrigin,
-  ): Promise<void>;
+  register(tenant: string, spec: JudgeSpec, createdBy?: string, origin?: CapabilityOrigin): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback
   ownVersions(tenant: string, id: string): Promise<string[]>; // only versions this tenant registered directly (no fallback — for conflict checks)
   list(tenant: string): Promise<JudgeListEntry[]>;
-  // The registrant subject of this "version" — for delete authz (creator-or-admin). Non-owned/deleted/absent → NotFound (same as harnesses/datasets).
-  // The team that owns this version — the authz kernel's team-axis input. Undefined = unowned
-  // (`_shared`/seeded), which the gate lets through; it is NOT "everyone's".
-  // ── REQUIRED, BECAUSE EVERY IMPLEMENTATION HAS IT (arch-review 119) ────────────────────────────
-  //
-  // Declared optional, this is the permissive arm of an authorization read: `registry.teamOfVersion?.(…)`
-  // answers `undefined` for a registry that does not implement it, which every gate reads as "unowned" and
-  // lets through. Twenty implementations exist and not one is missing it, so the optionality bought nothing
-  // and cost the ability to write a gate that cannot be skipped (rule `protocol`).
-  teamOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
-  // Ownership transfer — the ENTITY moves, so every version of it moves (see VersionedStore.moveToTeam). A
-  // transfer mints no version: ownership is metadata beside createdBy, outside the immutable spec. Tenant
-  // directly-owned live entities only → NotFound otherwise; authorization lives in the caller.
-  moveToTeam(tenant: string, id: string, teamId: string): Promise<void>;
 
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
   // Version soft-delete (tombstone) — data is preserved (past scorecard reproducibility), excluded from every read, re-registering identical content revives it.

@@ -6,10 +6,6 @@ import { CapabilityOriginSchema } from "../../records/capability-origin.js";
 export const HarnessListEntrySchema = z.object({
   id: z.string(),
   owner: z.string().describe("Owning tenant, or _shared for first-party content"),
-  teamId: z
-    .string()
-    .optional()
-    .describe("Owning team (migration 0106) — absent means unowned (a _shared entry, or one from before the axis)"),
   versions: z.array(z.string()).describe("Live versions (semver ascending)"),
   latestVersion: z.string(),
   versionCount: z.number().int(),

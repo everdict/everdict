@@ -26,7 +26,6 @@ export interface MattermostChannel {
   id: string;
   name: string; // url-safe name
   displayName: string; // human-readable name
-  teamId: string;
   type: string;
 }
 
