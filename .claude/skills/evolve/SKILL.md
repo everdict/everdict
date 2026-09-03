@@ -136,6 +136,11 @@ So the split to hold in mind, because every mistake below is a confusion of the 
   refusal each one turns off. Read before opening a campaign.
 - `references/rejection-catalogue.md` — every refusal a round, a settle or an adoption can answer, its exact
   cause, and the repair. Read when something comes back not-comparable or 409.
+- `scripts/live/sbench-claude-campaign.mjs` — the same walk over a REAL benchmark: SpreadsheetBench tasks,
+  Claude Code inside the environment image, dispatched through a self-hosted runner so the batches come
+  through `POST /scorecards` rather than from a shell loop beside the platform. Needs docker, the images, and
+  a logged-in `claude`; spends model budget. Use it when a change touches what a campaign MEASURES rather
+  than what it decides.
 - `scripts/live/evolution-campaign.mjs` — the whole walk, driven against a running control plane: it registers
   a subject, opens a campaign, runs both sides as real batches, logs rounds without a verdict, asks the gate,
   settles and spends the authorization, then probes the refusals. The default subject needs no model and takes
