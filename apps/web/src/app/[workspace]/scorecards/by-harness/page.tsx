@@ -2,7 +2,11 @@ import { ChevronLeft } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { HarnessPicker, type HarnessOption } from '@/features/by-harness-scorecards'
-import { scorecardsSchema, type ScorecardRecord } from '@/entities/scorecard'
+import {
+  scorecardGroupCountsSchema,
+  scorecardsSchema,
+  type ScorecardRecord,
+} from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
@@ -18,6 +22,10 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 export const dynamic = 'force-dynamic'
 
+// How much of ONE harness's history this screen draws. The picker's counts are exact whatever this is — they
+// come from the server's aggregate, not from these rows — so a bounded page here costs depth, never accuracy.
+const HARNESS_HISTORY = 200
+
 export default async function ByHarnessPage({
   params,
   searchParams,
@@ -31,23 +39,42 @@ export default async function ByHarnessPage({
   const t = await getTranslations('scorecardsPage')
   const timeZone = await getTimeZone()
 
+  // ── TWO NARROW READS, NOT ONE UNBOUNDED ONE (perf review) ──────────────────────────────────────
+  //
+  // This page used to read EVERY scorecard the workspace had ever produced — jsonb summaries and all — and
+  // then count per harness and filter to one of them in JavaScript. The cost of drawing it grew with
+  // everything the workspace had ever evaluated, and the counts in the picker were only right because the
+  // read was unbounded: give that list a page size and the labels quietly become wrong, which is worse than
+  // slow. The count is a question the server already answers exactly (`GET /scorecards/counts`), so the
+  // narrowing that matters moves into the query and the page stays a page.
+  //
+  // Sequential on purpose: which harness is selected DEPENDS on the counts (the first option is the default),
+  // so the second read cannot be issued until the first has answered.
   let error: string | undefined
-  let scorecards: ScorecardRecord[] = []
+  let options: HarnessOption[] = []
   try {
-    scorecards = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
+    const counts = scorecardGroupCountsSchema.parse(
+      await controlPlane.countScorecards(ctx, 'harness')
+    )
+    options = counts.groups
+      .flatMap((g) => (g.key === null ? [] : [g]))
+      .sort((a, b) => (a.key ?? '').localeCompare(b.key ?? ''))
+      .map((g) => ({ id: g.key ?? '', label: `${g.key} (${g.count})` }))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // harness options = distinct harness ids that appear in scorecards (count label).
-  const counts = new Map<string, number>()
-  for (const s of scorecards) counts.set(s.harness.id, (counts.get(s.harness.id) ?? 0) + 1)
-  const options: HarnessOption[] = [...counts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, n]) => ({ id, label: `${id} (${n})` }))
-
   const selected = harness ?? options[0]?.id
-  const rows = selected ? scorecards.filter((s) => s.harness.id === selected) : []
+  let rows: ScorecardRecord[] = []
+  if (selected !== undefined && error === undefined) {
+    try {
+      rows = scorecardsSchema.parse(
+        await controlPlane.listScorecards(ctx, { harness: selected, limit: HARNESS_HISTORY })
+      )
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e)
+    }
+  }
 
   // Group by dataset.id (each group is created desc). "What score this harness got on which benchmark with which model".
   const byDataset = new Map<string, ScorecardRecord[]>()

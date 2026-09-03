@@ -2,7 +2,12 @@ import { ChevronLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { ComparePicker, type CompareOption } from '@/features/compare-scorecards'
-import { scorecardDiffSchema, scorecardsSchema, type ScorecardDiff } from '@/entities/scorecard'
+import {
+  scorecardDiffSchema,
+  scorecardRecordSchema,
+  scorecardsSchema,
+  type ScorecardDiff,
+} from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtMetricLabel, fmtPct } from '@/shared/lib/format'
@@ -20,6 +25,10 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
+
+// How many succeeded batches the picker offers. The two SELECTED batches are read by their own ids, so a
+// bounded picker never hides a comparison somebody linked to — it only shortens the dropdown.
+const COMPARE_OPTIONS = 200
 
 function delta(n: number): string {
   const arrow = n > 0 ? '▲' : n < 0 ? '▼' : '–'
@@ -70,17 +79,37 @@ export default async function CompareScorecardsPage({
   let baselineModel: string | undefined
   let candidateModel: string | undefined
   try {
-    const all = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
-    options = all
-      .filter((s) => s.status === 'succeeded')
+    // ── THE PICKER IS A PAGE; THE SELECTION IS FETCHED BY ID (perf review) ─────────────────────────
+    //
+    // This read every scorecard the workspace had ever produced, kept the succeeded ones for the picker, and
+    // then looked the two SELECTED ids up inside that same list. Both halves are now asked properly: the
+    // status filter and the page go into the query, and each selected batch is read by its own id — so a
+    // batch older than the page still resolves, which an unbounded list was accidentally providing.
+    options = scorecardsSchema
+      .parse(
+        await controlPlane.listScorecards(ctx, { statuses: ['succeeded'], limit: COMPARE_OPTIONS })
+      )
       .map((s) => ({
         id: s.id,
         label: `${s.dataset.id}@${s.dataset.version} → ${s.harness.id}@${s.harness.version}`,
       }))
     // Each side's model (from the selected scorecard record) — shown alongside the header.
-    const byId = new Map(all.map((s) => [s.id, s]))
-    baselineModel = baseline ? byId.get(baseline)?.models?.primary : undefined
-    candidateModel = candidate ? byId.get(candidate)?.models?.primary : undefined
+    const [baselineRecord, candidateRecord] = await Promise.all([
+      baseline
+        ? controlPlane
+            .getScorecard(ctx, baseline)
+            .then((r) => scorecardRecordSchema.parse(r))
+            .catch(() => undefined)
+        : Promise.resolve(undefined),
+      candidate
+        ? controlPlane
+            .getScorecard(ctx, candidate)
+            .then((r) => scorecardRecordSchema.parse(r))
+            .catch(() => undefined)
+        : Promise.resolve(undefined),
+    ])
+    baselineModel = baselineRecord?.models?.primary
+    candidateModel = candidateRecord?.models?.primary
   } catch {
     // Even if the list fails, the page still shows guidance
   }

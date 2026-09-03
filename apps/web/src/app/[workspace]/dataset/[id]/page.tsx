@@ -97,8 +97,12 @@ export default async function DatasetDetailPage({
   }
 
   // Related harnesses (derived from scorecards) + creator name (members join) — supplementary info; the detail view still renders even if it fails.
+  // ── NARROWED TO THIS DATASET (perf review) ───────────────────────────────────────────────────────
+  // This read every scorecard the workspace had ever produced and then kept the ones naming THIS dataset.
+  // The page is about one dataset, so `{ dataset: id }` is an EXACT narrowing — the chips are identical and
+  // the read stops growing with everything the workspace has evaluated.
   const scorecards = await controlPlane
-    .listScorecards(ctx)
+    .listScorecards(ctx, { dataset: id })
     .then((r) => scorecardsSchema.parse(r))
     .catch(() => [])
   const members = await controlPlane

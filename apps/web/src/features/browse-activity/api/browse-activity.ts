@@ -23,9 +23,16 @@ export type BatchCasesResult = { ok: true; runs: RunRowData[] } | { ok: false; e
 export async function listActivityAction(): Promise<ActivityFeedResult> {
   const ctx = await authContext()
   try {
+    // ── A FEED IS A PAGE (perf review) ───────────────────────────────────────────────────────────
+    //
+    // Both halves used to be unbounded: every standalone run the workspace had ever executed, and every
+    // scorecard it had ever produced, fetched on every open of this screen and then paginated IN THE
+    // BROWSER. The client's own comment above says the "load every child run" flood is gone — this was the
+    // same flood one level up. `/runs` now carries a server-side page size of its own; the scorecard half
+    // says its depth here, so the two agree about how far back the feed reaches.
     const [runsRaw, scRaw] = await Promise.all([
-      controlPlane.listRuns(ctx), // default = standalone (parentless) runs only; children arrive via their batch
-      controlPlane.listScorecards(ctx),
+      controlPlane.listRuns(ctx, { limit: ACTIVITY_DEPTH }), // default = standalone (parentless) runs only; children arrive via their batch
+      controlPlane.listScorecards(ctx, { limit: ACTIVITY_DEPTH }),
     ])
     return {
       ok: true,
@@ -35,6 +42,10 @@ export async function listActivityAction(): Promise<ActivityFeedResult> {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// How far back the feed reaches. Recency-ordered, so this is depth rather than completeness — somebody
+// looking further back is navigating (the scorecard list, a run's page), not scanning a feed.
+const ACTIVITY_DEPTH = 200
 
 // One batch's cases (child runs), stripped to row fields — fetched only when the user expands that batch.
 export async function listBatchCasesAction(scorecardId: string): Promise<BatchCasesResult> {
