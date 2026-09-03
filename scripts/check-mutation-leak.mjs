@@ -82,12 +82,43 @@ for (const commit of commits) {
   // match, and the check passes over exactly the rungs whose fingerprint is most distinctive. The first draft
   // of this file did that and reported the real incident (`cdef2c2a`, a two-line replacement) as CLEAN. Found
   // by driving it against that commit rather than by reading it, which is the only way this class is ever found.
+  //
+  // ⚠️ AND IT MATCHES WHOLE LINES, NOT SUBSTRINGS (perf review). `added.includes(text)` cannot tell a
+  // neutralization from the healthy code it was derived FROM, whenever a rung's `to:` is a textual prefix of
+  // its own `from:` — which is the ordinary shape for a rung that DROPS one conjunct of a multi-line
+  // condition:
+  //
+  //     from:  frame.subject.type === "harness" &&      to:  baselineSpecDigest !== undefined
+  //            baselineSpecDigest !== undefined &&
+  //            baselineSpecDigest === candidateSpecDigest
+  //
+  // The correct code contains `baselineSpecDigest !== undefined &&`, whose prefix IS the replacement — so the
+  // commit that INTRODUCED that guard was reported as carrying its own neutralization, permanently, and no
+  // later commit could clear it. A gate that fires on correct code is worse than no gate: rule `ci` says a
+  // failure blocks the push, so the only paths left are a history rewrite that removes a real guard, or
+  // learning to bypass the gate.
+  //
+  // Comparing LINES keeps the multi-line fingerprint the `+`-stripping exists for, and `&&` at the end of a
+  // line is now the difference it always was. Trimmed on both sides because the rung's `to:` is trimmed.
+  //
+  // VERIFIED BOTH WAYS, by driving it rather than by reading it — which is how the `+`-prefix defect above
+  // was found and the only way this class ever is. In a throwaway worktree off `origin/main`: a rung's exact
+  // multi-line `to:` written into its production file and committed is still reported RED
+  // (`✖ commit(s) carrying a protocol neutralization`, exit 1), while `b753b919` — which ADDS the healthy
+  // three-line condition the prefix rung is derived from — now passes. Before this change the second case
+  // failed permanently and no commit could clear it.
   const added = diff
     .split("\n")
     .filter((line) => line.startsWith("+") && !line.startsWith("+++"))
-    .map((line) => line.slice(1))
-    .join("\n");
-  for (const text of replacements) if (added.includes(text)) leaks.push({ commit, text });
+    .map((line) => line.slice(1).trim());
+  for (const text of replacements) {
+    const needle = text.split("\n").map((line) => line.trim());
+    for (let i = 0; i + needle.length <= added.length; i++)
+      if (needle.every((line, k) => added[i + k] === line)) {
+        leaks.push({ commit, text });
+        break;
+      }
+  }
 }
 
 if (leaks.length > 0) {
