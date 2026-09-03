@@ -160,6 +160,16 @@ export function RegisterDatasetForm({
       <VersionField existing={existing} value={version} onChange={setVersion} />
 
       <div className="space-y-1.5">
+        <Label htmlFor="description">{t('descriptionLabel')}</Label>
+        <Input
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder={t('descriptionPlaceholder')}
+        />
+      </div>
+
+      <div className="space-y-1.5">
         <Label htmlFor="tags">{t('tagsLabel')}</Label>
         <Input
           id="tags"

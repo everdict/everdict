@@ -138,32 +138,6 @@ export async function setIssueStatusAction(
   }
 }
 
-
-// 트리아지에서 나가는 두 길. 받아들이기는 워크플로로 들여보내고, 거절은 사유와 함께 취소한다 — 레코드는
-// 남는다("우리가 거절했다"는 나중에 찾는 답이다).
-export async function acceptTriageAction(
-  id: string,
-  status: IssueStatus
-): Promise<IssueActionResult> {
-  const ctx = await authContext()
-  try {
-    const issue = issueSchema.parse(await controlPlane.acceptTriage(ctx, id, status))
-    return { ok: true, issue }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-export async function declineTriageAction(id: string, note?: string): Promise<IssueActionResult> {
-  const ctx = await authContext()
-  try {
-    const issue = issueSchema.parse(await controlPlane.declineTriage(ctx, id, note))
-    return { ok: true, issue }
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
 export async function deleteIssueAction(id: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await authContext()
   try {

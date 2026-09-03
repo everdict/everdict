@@ -13,7 +13,6 @@ import { Badge } from '@/shared/ui/badge'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
-import { Link } from '@/shared/ui/link'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { Tooltip } from '@/shared/ui/tooltip'
 

@@ -21,7 +21,6 @@ import { projectsSchema, type Project } from '@/entities/project'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import { IssueListActions, IssueListActionsSkeleton } from './issue-list-actions'

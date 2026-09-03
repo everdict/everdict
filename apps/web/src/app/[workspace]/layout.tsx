@@ -4,7 +4,6 @@ import { redirect } from 'next/navigation'
 import { ShellSwitch } from '@/widgets/app-shell'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { keycloakConfigured } from '@/shared/config/env'
-import { controlPlane } from '@/shared/lib/control-plane'
 import { FrameEscape } from '@/shared/ui/frame-escape'
 
 export const dynamic = 'force-dynamic'
@@ -19,7 +18,7 @@ export default async function WorkspaceLayout({
   params: Promise<{ workspace: string }>
 }) {
   const { workspace: slug } = await params
-  const { principal, ctx } = await currentPrincipal()
+  const { principal } = await currentPrincipal()
 
   // Infra split view: the infra panel hosts the REAL routed pages in a same-origin iframe → render them
   // chrome-less. The server hint is sec-fetch-dest=iframe (sent only on trustworthy origins) OR the panel's

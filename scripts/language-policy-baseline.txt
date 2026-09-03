@@ -247,7 +247,7 @@
 3	apps/web/src/features/manage-issue-labels/api/manage-issue-labels.ts
 7	apps/web/src/features/manage-issue-labels/ui/issue-labels-manager.tsx
 7	apps/web/src/features/manage-issue/api/issues.test.ts
-19	apps/web/src/features/manage-issue/api/issues.ts
+17	apps/web/src/features/manage-issue/api/issues.ts
 5	apps/web/src/features/manage-issue/lib/label-selection.ts
 1	apps/web/src/features/manage-issue/ui/create-issue-button.tsx
 11	apps/web/src/features/manage-issue/ui/create-issue-dialog.tsx
@@ -265,7 +265,6 @@
 5	apps/web/src/features/manage-issue/ui/issue-project-control.test.tsx
 18	apps/web/src/features/manage-issue/ui/issue-project-control.tsx
 8	apps/web/src/features/manage-issue/ui/issue-status-control.tsx
-2	apps/web/src/features/manage-issue/ui/issue-triage-actions.tsx
 8	apps/web/src/features/manage-knowledge/api/manage-knowledge.ts
 6	apps/web/src/features/manage-knowledge/ui/entry-form-dialog.tsx
 10	apps/web/src/features/manage-knowledge/ui/knowledge-browser.tsx
@@ -355,7 +354,7 @@
 2	apps/web/src/shared/auth/principal.ts
 1	apps/web/src/shared/lib/agent-plane.ts
 29	apps/web/src/shared/lib/ansi.ts
-79	apps/web/src/shared/lib/control-plane.ts
+76	apps/web/src/shared/lib/control-plane.ts
 3	apps/web/src/shared/lib/http-bytes.test.ts
 15	apps/web/src/shared/lib/http-bytes.ts
 2	apps/web/src/shared/lib/image-resize.ts
@@ -402,7 +401,7 @@
 1	apps/web/src/widgets/app-shell/ui/nav-group-open.test.ts
 8	apps/web/src/widgets/app-shell/ui/nav-group-open.ts
 3	apps/web/src/widgets/app-shell/ui/settings-nav-config.ts
-17	apps/web/src/widgets/app-shell/ui/sidebar.tsx
+16	apps/web/src/widgets/app-shell/ui/sidebar.tsx
 2	apps/web/src/widgets/dataset-list/ui/dataset-list-view.tsx
 7	apps/web/src/widgets/harness-list/ui/harness-list-view.tsx
 8	apps/web/src/widgets/harness-list/ui/harness-list.tsx

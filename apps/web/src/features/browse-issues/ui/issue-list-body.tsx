@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { CircleDot } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 

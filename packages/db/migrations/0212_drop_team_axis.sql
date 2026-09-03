@@ -14,7 +14,7 @@
 
 -- ── ① THE OWNERSHIP AXIS ───────────────────────────────────────────────────────────────────────────
 --
--- Fourteen tables carried `team_id` (migration 0106 and its successors). The workspace owns all of it now;
+-- Sixteen tables carried `team_id` (migration 0106 and its successors). The workspace owns all of it now;
 -- `tenant` was always the column that said so.
 ALTER TABLE everdict_harness_templates    DROP COLUMN IF EXISTS team_id;
 ALTER TABLE everdict_harness_instances    DROP COLUMN IF EXISTS team_id;

@@ -28,7 +28,6 @@ import { Score } from '@/shared/ui/score'
 import { StatCard } from '@/shared/ui/stat-card'
 
 type Author = { name: string; avatarUrl?: string }
-type TeamOption = { id: string; key: string; name: string }
 
 const STATUS_KEY: Record<string, string> = {
   succeeded: 'statusSucceeded',

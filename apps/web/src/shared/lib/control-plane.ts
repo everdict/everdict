@@ -821,51 +821,6 @@ export const controlPlane = {
       `/projects/${encodeURIComponent(id)}/milestones/${encodeURIComponent(milestoneId)}`,
       { method: 'DELETE' }
     ),
-  // --- 사이클(팀 이터레이션) ---
-  listCycles: <T>(
-    auth: AuthContext,
-    filter?: { team?: string; open?: boolean; limit?: number }
-  ) => {
-    const q = new URLSearchParams()
-    if (filter?.team) q.set('team', filter.team)
-    if (filter?.open) q.set('open', 'true')
-    if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
-    const qs = q.toString()
-    return call<T>(auth, `/cycles${qs ? `?${qs}` : ''}`)
-  },
-  getCycle: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/cycles/${encodeURIComponent(id)}`),
-  createCycle: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/cycles', { method: 'POST', body: JSON.stringify(body) }),
-  updateCycle: <T>(auth: AuthContext, id: string, patch: unknown) =>
-    call<T>(auth, `/cycles/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
-  // 종료는 게이트가 아니다 — 남은 일은 이월 대상 사이클로 함께 넘어간다.
-  completeCycle: <T>(auth: AuthContext, id: string, body: unknown) =>
-    call<T>(auth, `/cycles/${encodeURIComponent(id)}/complete`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  deleteCycle: (auth: AuthContext, id: string) =>
-    call<unknown>(auth, `/cycles/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 트리아지 — 워크플로 앞의 인박스에서 나가는 두 길.
-  acceptTriage: <T>(auth: AuthContext, id: string, status: string) =>
-    call<T>(auth, `/issues/${encodeURIComponent(id)}/triage/accept`, {
-      method: 'POST',
-      body: JSON.stringify({ status }),
-    }),
-  declineTriage: <T>(auth: AuthContext, id: string, note?: string) =>
-    call<T>(auth, `/issues/${encodeURIComponent(id)}/triage/decline`, {
-      method: 'POST',
-      body: JSON.stringify(note !== undefined ? { note } : {}),
-    }),
-  moveIssue: <T>(auth: AuthContext, id: string, teamId: string) =>
-    call<T>(auth, `/issues/${encodeURIComponent(id)}/team`, {
-      method: 'POST',
-      body: JSON.stringify({ }),
-    }),
   addIssueLink: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/links`, {
       method: 'POST',

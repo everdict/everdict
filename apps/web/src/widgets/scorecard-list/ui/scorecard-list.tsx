@@ -72,7 +72,6 @@ type ListRow =
   | { kind: 'card'; key: string; item: ScorecardRow }
 
 type Author = { name: string; avatarUrl?: string }
-type TeamOption = { id: string; key: string; name: string }
 
 // The runtime a batch ran on → a display label (no link — the whole card is already a <Link>, so a nested <a> is
 // invalid). A registered runtime's id IS its name; a self-hosted runner shows its friendly device name (resolved

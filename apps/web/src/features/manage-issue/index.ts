@@ -1,7 +1,5 @@
 export {
-  acceptTriageAction,
   createIssueAction,
-  declineTriageAction,
   deleteIssueAction,
   moveIssuesToCycleAction,
   setIssueStatusAction,
@@ -19,5 +17,4 @@ export { IssueParentControl, type IssueParentOption } from './ui/issue-parent-co
 export { IssuePriorityControl } from './ui/issue-priority-control'
 export { IssueProjectControl, type IssueProjectOption } from './ui/issue-project-control'
 export { IssueStatusControl } from './ui/issue-status-control'
-export { IssueTriageActions } from './ui/issue-triage-actions'
 export { ResolveIssueDialog, type ResolvableScorecard } from './ui/resolve-issue-dialog'

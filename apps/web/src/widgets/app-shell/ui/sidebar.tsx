@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Plus, Search, Settings, X } from 'lucide-react'
+import { ArrowLeft, ChevronRight, LogIn, LogOut, Menu, Search, Settings, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
@@ -196,36 +196,6 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
         )
       })}
     </nav>
-  )
-}
-
-// 팀 그룹 안의 한 줄 — 아이콘 없이 라벨만, 활성 표시는 왼쪽 인디고 바.
-function TeamNavRow({
-  href,
-  label,
-  active,
-  onNavigate,
-}: {
-  href: string
-  label: string
-  active: boolean
-  onNavigate?: () => void
-}) {
-  return (
-    <Link
-      href={href}
-      onClick={onNavigate}
-      aria-current={active ? 'page' : undefined}
-      className={navRowClass(active)}
-    >
-      <span
-        className={cn(
-          'absolute left-0 top-1/2 h-3.5 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
-          active ? 'opacity-100' : 'opacity-0'
-        )}
-      />
-      <span className="truncate">{label}</span>
-    </Link>
   )
 }
 

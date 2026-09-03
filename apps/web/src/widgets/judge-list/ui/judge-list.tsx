@@ -24,7 +24,6 @@ import { Link } from '@/shared/ui/link'
 import { facetOptionsOf, ListSection, ListToolbar, type FacetSpec } from '@/shared/ui/list-toolbar'
 
 type Author = { name: string; avatarUrl?: string }
-type TeamOption = { id: string; key: string; name: string }
 
 // 저지 목록의 행들과 그 위의 툴바. 하네스·데이터셋 목록과 같은 문법이고, 같은 이유로 클라이언트에 있다 —
 // 컬렉션 전체가 손에 있으니 거르고 묶는 데 서버에 다녀올 이유가 없다.
