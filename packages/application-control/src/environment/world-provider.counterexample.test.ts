@@ -47,12 +47,40 @@ function provider(over: Partial<OpenedWorld> = {}, opens: CaseJob[] = []): World
   };
 }
 
+// The CREATED arm is bundled into the constructor rather than optional, so a session-only suite still has to
+// state what would happen if a `create` case arrived. These members refuse: this file drives the session arm,
+// and `created-world.counterexample.test.ts` drives the other.
+function creationFor(): ConstructorParameters<typeof WorldProvidingDispatcher>[1] {
+  return {
+    creator: {
+      create: async () => {
+        throw new Error("the session suite never creates a world");
+      },
+      destroy: async () => {
+        throw new Error("the session suite never destroys a world");
+      },
+      standing: async () => undefined,
+    },
+    store: {
+      open: async () => {
+        throw new Error("the session suite never records a created world");
+      },
+      transition: async () => false,
+      get: async () => undefined,
+      due: async () => [],
+    },
+    newId: () => "cw_1",
+    now: () => "2026-09-03T00:00:00.000Z",
+  };
+}
+
 describe("[COUNTEREXAMPLE] a session-provided world is opened, handed over, and asked to close", () => {
   it("hands the case the coordinates and never the acquire spec", async () => {
     const seen: CaseJob[] = [];
     const released: unknown[] = [];
     const d = new WorldProvidingDispatcher(
       provider(),
+      creationFor(),
       {
         dispatch: async (j) => {
           seen.push(j);
@@ -76,6 +104,7 @@ describe("[COUNTEREXAMPLE] a session-provided world is opened, handed over, and 
           throw new Error("the session pool is full");
         },
       },
+      creationFor(),
       {
         dispatch: async (j) => {
           dispatched += 1;
@@ -92,6 +121,7 @@ describe("[COUNTEREXAMPLE] a session-provided world is opened, handed over, and 
     const released: Array<{ result: { kind: string } }> = [];
     const d = new WorldProvidingDispatcher(
       provider({ release: async () => ({ kind: "not_closed", reason: "503 from the session service" }) }),
+      creationFor(),
       {
         dispatch: async () => {
           throw new Error("the harness exploded");
@@ -111,6 +141,7 @@ describe("[COUNTEREXAMPLE] a session-provided world is opened, handed over, and 
           throw new Error("nothing to open");
         },
       },
+      creationFor(),
       {
         dispatch: async (j) => {
           seen.push(j);

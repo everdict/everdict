@@ -288,6 +288,20 @@ export {
   type ResolvedCaseEnvironments,
 } from "./environment/case-environment.js";
 export {
+  CreatedWorldRecordSchema,
+  CreatedWorldStateSchema,
+  type CreatedWorldRecord,
+  type CreatedWorldState,
+  type WorldCreationStore,
+} from "./ports/world-creation-store.js";
+export {
+  createWorldFor,
+  releaseWorld,
+  sweepOwedWorlds,
+  type CreatedWorld,
+  type WorldCreator,
+} from "./environment/created-world.js";
+export {
   WorldProvidingDispatcher,
   type OpenedWorld,
   type WorldSessionProvider,

@@ -48,6 +48,7 @@ import type {
   TeamStore,
   TrajectoryStore,
   WorkflowStateStore,
+  WorldCreationStore,
 } from "@everdict/application-control";
 import {
   type BrowserProfileStore,
@@ -108,6 +109,7 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
+  InMemoryWorldCreationStore,
   type KnowledgeEntryStore,
   type KnowledgeStore,
   type NotificationStore,
@@ -174,6 +176,7 @@ import {
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
+  PgWorldCreationStore,
   type PlatformEventStore,
   type RecordingStore,
   type RunStore,
@@ -268,6 +271,8 @@ export interface Persistence {
   modelRegistry: ModelRegistry;
   agentRegistry: AgentRegistry; // the workspace's conversational-agent configuration (instructions + MCP tool servers + model)
   runtimeRegistry: RuntimeRegistry;
+  // The worklist of worlds this platform created for a case (world-and-engagement-model.md, 3.9).
+  worldCreations: WorldCreationStore;
   // The world a case ACTS ON, as a registered entity (harness-definability-spec.md §2).
   environmentRegistry: EnvironmentRegistry;
   settingsStore: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) — always available
@@ -477,6 +482,7 @@ export async function makePersistence(): Promise<Persistence> {
       modelRegistry: new InMemoryModelRegistry(),
       agentRegistry: new InMemoryAgentRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
+      worldCreations: new InMemoryWorldCreationStore(),
       environmentRegistry: new InMemoryEnvironmentRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore,
@@ -556,6 +562,7 @@ export async function makePersistence(): Promise<Persistence> {
     modelRegistry: new PgModelRegistry(client),
     agentRegistry: new PgAgentRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
+    worldCreations: new PgWorldCreationStore(client),
     environmentRegistry: new PgEnvironmentRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),

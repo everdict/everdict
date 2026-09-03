@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TopologyServiceSchema } from "../harness/harness-spec.js";
 import { BuildRecipeSchema, SourceRecipeSchema } from "./build-recipe.js";
 import type { ComputeHandle } from "./compute.js";
 import { SessionAcquireSchema } from "./session-acquire.js";
@@ -168,6 +169,18 @@ export const EnvironmentSpecSchema = z
           kind: z.literal("session"),
           endpoint: z.string().url(), // where the session API lives (the workspace's own service)
           acquire: SessionAcquireSchema,
+        }),
+        // A world EVERDICT CREATES: the services are brought up for the case and torn down after it. This is
+        // the arm that owes what the other two do not — a durable record of what was made, and a teardown
+        // that READS BACK zero (rule `protocol` L1 + L5). A world we created and cannot prove is gone is a
+        // leak that bills, which is a different promise from asking somebody else's service to close.
+        //
+        // The wiring is declared by SERVICE rather than as a URL, because the URL does not exist until the
+        // world does: `{ target_base_url: { service: "web" } }` becomes that service's base URL once it is up.
+        z.object({
+          kind: z.literal("topology"),
+          services: z.array(TopologyServiceSchema).min(1),
+          wiring: z.record(z.string().min(1), z.object({ service: z.string().min(1), path: z.string().optional() })),
         }),
       ])
       .optional(),

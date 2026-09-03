@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { EnvSnapshot } from "./environment.js";
+import type { SpanAttrMapping } from "./span-mapping.js";
 import { type TraceEvent, TraceEventSchema } from "./trace.js";
 
 // The run's trace state on the platform — the completion signal of the front-door "trace" completion mode.
@@ -188,71 +189,6 @@ export interface BrowsableTraceSource extends TraceSource {
   inspect(traceId: string, mapping?: SpanAttrMapping): Promise<TraceInspectResult>;
 }
 
-// One evidence selector — WHERE in the trace an evidence slot's value comes from. A bare string is shorthand for
-// { key } (wire-compat with the original attr-key lists). `path` reaches INSIDE a JSON attr value (an object or a
-// JSON string) with a deliberately-simple dot/bracket syntax — "final_answer", "steps[2].action" — NOT full JSONPath.
-export const EvidenceSelectorSchema = z.object({
-  key: z.string(), // the span-attribute key holding the value (or the JSON container of it)
-  path: z.string().optional(), // dot/bracket path into the attr value; absent = the whole value
-  pick: z.enum(["last", "first"]).optional(), // which span wins when several carry the key (default "last" = final state)
-});
-export type EvidenceSelector = z.infer<typeof EvidenceSelectorSchema>;
-
-// An evidence slot = ordered selectors; the FIRST selector that yields a value wins (selector-major resolution).
-export const EvidenceSlotSchema = z.array(z.union([z.string(), EvidenceSelectorSchema]));
-export type EvidenceSlot = z.infer<typeof EvidenceSlotSchema>;
-
-// Custom evidence-slot names must be template-placeholder-safe and must not shadow the structural/fixed placeholders.
-export const RESERVED_EVIDENCE_NAMES = new Set([
-  "task",
-  "rubric",
-  "criteria",
-  "dom",
-  "expected",
-  "final_answer",
-  "finalAnswer",
-  "response",
-  "trace",
-  "screenshot",
-  "verdict_instruction",
-]);
-const EVIDENCE_NAME_RE = /^[a-zA-Z_][a-zA-Z0-9_-]*$/;
-
-// Per-harness span-attribute mapping — the escape hatch for a harness that does NOT emit the OTel GenAI semantic
-// conventions the span→TraceEvent normalizer defaults to. Each field lists attribute keys to try FIRST (before the
-// built-in GenAI/MLflow defaults) when deriving that TraceEvent field. Applies to the span-based sources (otel/mlflow).
-// The evidence slots (finalAnswer/dom/screenshot + the free-form `evidence` record) have NO built-in defaults — they
-// extract judge evidence from the trace itself, so a pulled trace can carry the evidence a run-produced snapshot
-// would. Custom `evidence` names become judge promptTemplate placeholders ({<name>}) — the judge DECLARES named
-// evidence; the harness overlay REALIZES each name from its own trace (docs/architecture/judge-input-contract.md).
-export const SpanAttrMappingSchema = z.object({
-  model: z.array(z.string()).optional(), // → llm_call.model
-  inputTokens: z.array(z.string()).optional(), // → llm_call.cost.inputTokens
-  outputTokens: z.array(z.string()).optional(), // → llm_call.cost.outputTokens
-  costUsd: z.array(z.string()).optional(), // → llm_call.cost.usd
-  toolName: z.array(z.string()).optional(), // → tool_call.name
-  toolCallId: z.array(z.string()).optional(), // → tool_call.id
-  toolArgs: z.array(z.string()).optional(), // → tool_call.args
-  toolResult: z.array(z.string()).optional(), // → tool_result.output
-  messageText: z.array(z.string()).optional(), // → message.text
-  finalAnswer: EvidenceSlotSchema.optional(), // → evidence.finalAnswer (+ appended as the trace's final assistant message)
-  dom: EvidenceSlotSchema.optional(), // → evidence.dom (the final DOM a browser judge reads; URL values auto-fetch)
-  screenshot: EvidenceSlotSchema.optional(), // → evidence.screenshot* (data-URI/base64 inline, else a fetchable ref)
-  // Custom named evidence slots → evidence.custom.<name> → the judge's {<name>} placeholder (URL values auto-fetch).
-  evidence: z
-    .record(
-      z
-        .string()
-        .regex(EVIDENCE_NAME_RE, "evidence slot names must be template-placeholder-safe identifiers")
-        .refine((name) => !RESERVED_EVIDENCE_NAMES.has(name), {
-          message: "evidence slot name shadows a built-in placeholder",
-        }),
-      EvidenceSlotSchema,
-    )
-    .optional(),
-});
-export type SpanAttrMapping = z.infer<typeof SpanAttrMappingSchema>;
-
 // Config → the buildTraceSource factory input (@everdict/trace). Symmetric with TraceSinkConfig.
 export interface TraceSourceConfig {
   kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix";
@@ -274,3 +210,13 @@ export interface TraceSourceConfig {
   artifactBaseUrl?: string;
   fetchImpl?: typeof fetch;
 }
+
+// The span-mapping vocabulary moved to its own module to break an import cycle (see there); re-exported under
+// the names this module has always published, so every consumer is untouched.
+export {
+  EvidenceSelectorSchema,
+  EvidenceSlotSchema,
+  RESERVED_EVIDENCE_NAMES,
+  SpanAttrMappingSchema,
+} from "./span-mapping.js";
+export type { EvidenceSelector, EvidenceSlot, SpanAttrMapping } from "./span-mapping.js";

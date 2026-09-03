@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TopologyServiceSchema } from "../harness/harness-spec.js";
 import { NetworkPolicySchema, ResourceRequestSchema } from "../infra/world.js";
 import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
@@ -170,6 +171,16 @@ export const EvalCaseSchema = z.object({
       // before the job is dispatched — a runner receives coordinates, never the credentials-shaped means of
       // minting more of them.
       session: z.object({ endpoint: z.string().url(), acquire: SessionAcquireSchema }).optional(),
+      // …and a world still to be CREATED for this case: the services to bring up and how their endpoints
+      // become wiring. Carried the same way and for the same reason as `session`, and removed before the job
+      // is dispatched — the runner receives coordinates, never the recipe for making more worlds.
+      create: z
+        .object({
+          environment: z.string().min(1), // "id@version" — what the ledger records as the world's identity
+          services: z.array(TopologyServiceSchema).min(1),
+          wiring: z.record(z.string().min(1), z.object({ service: z.string().min(1), path: z.string().optional() })),
+        })
+        .optional(),
     })
     .optional(),
   // ── HOW THE ACTOR MEETS THE QUESTION (world-and-engagement-model.md, axis 2) ──────────────────────

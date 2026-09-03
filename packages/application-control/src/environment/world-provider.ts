@@ -1,5 +1,7 @@
 import type { CaseJob, CaseResult, SessionAcquire } from "@everdict/contracts";
 import { BadRequestError } from "@everdict/contracts";
+import type { WorldCreationStore } from "../ports/world-creation-store.js";
+import { type WorldCreator, createWorldFor } from "./created-world.js";
 
 // ── OPENING THE WORLD A CASE ACTS ON, AND CLOSING IT AFTER (world-and-engagement-model.md, axis 1) ────
 //
@@ -30,6 +32,15 @@ export interface WorldSessionProvider {
 export class WorldProvidingDispatcher {
   constructor(
     private readonly provider: WorldSessionProvider,
+    // What MAKES a world, for the arm that creates one. Bundled rather than optional: a deployment that
+    // wired the session provider and forgot this one would meet a `create` case as a silent pass-through,
+    // dispatching an agent at a world that was never brought up.
+    private readonly creation: {
+      creator: WorldCreator;
+      store: WorldCreationStore;
+      newId: () => string;
+      now: () => string;
+    },
     private readonly inner: { dispatch(job: CaseJob, opts?: unknown): Promise<CaseResult> },
     // What to do with a close that did not happen. REQUIRED: an optional reporter is how "we could not close
     // it" becomes silence, and silence about a world that may still be running is the expensive kind.
@@ -41,6 +52,8 @@ export class WorldProvidingDispatcher {
   ) {}
 
   async dispatch(job: CaseJob, opts?: unknown): Promise<CaseResult> {
+    const create = job.evalCase.world?.create;
+    if (create !== undefined) return this.dispatchCreated(job, create, opts);
     const session = job.evalCase.world?.session;
     if (session === undefined) return this.inner.dispatch(job, opts);
     const runId = job.runId;
@@ -69,6 +82,50 @@ export class WorldProvidingDispatcher {
     } finally {
       const result = await world.release();
       this.onRelease({ caseId: job.evalCase.id, endpoint: session.endpoint, result });
+    }
+  }
+
+  // The CREATED arm: make the world, hand over its coordinates, and tear it down through the ledger's own
+  // verified release. The recipe is removed before dispatch for the same reason the acquire spec is.
+  private async dispatchCreated(
+    job: CaseJob,
+    create: NonNullable<NonNullable<CaseJob["evalCase"]["world"]>["create"]>,
+    opts?: unknown,
+  ): Promise<CaseResult> {
+    const runId = job.runId;
+    if (runId === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { case: job.evalCase.id },
+        "this case creates its world and the job carries no run id — a created world could not be joined to the run that made it",
+      );
+    const world = await createWorldFor({
+      tenant: job.tenant ?? "",
+      runId,
+      ...(job.evalCase.placement?.target !== undefined ? { target: job.evalCase.placement.target } : {}),
+      create,
+      creator: this.creation.creator,
+      store: this.creation.store,
+      newId: this.creation.newId,
+      now: this.creation.now,
+    });
+    const { create: _recipe, ...restWorld } = job.evalCase.world ?? { wiring: {} };
+    const dispatched: CaseJob = {
+      ...job,
+      evalCase: {
+        ...job.evalCase,
+        world: { ...restWorld, wiring: { ...restWorld.wiring, ...world.wiring } },
+      },
+    };
+    try {
+      return await this.inner.dispatch(dispatched, opts);
+    } finally {
+      const outcome = await world.release();
+      this.onRelease({
+        caseId: job.evalCase.id,
+        endpoint: create.environment,
+        result: outcome.kind === "released" ? { kind: "closed" } : { kind: "not_closed", reason: outcome.reason },
+      });
     }
   }
 }

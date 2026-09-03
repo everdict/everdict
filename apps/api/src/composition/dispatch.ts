@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { ImageRegistryService, type IntermediateCleanupStore } from "@everdict/application-control";
 import type { AgentHalfStore, Metrics } from "@everdict/application-control";
 import {
@@ -14,7 +15,7 @@ import {
 import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
 import type { SeedReader, VerifierPassDeps } from "@everdict/application-control";
-import { WorldProvidingDispatcher } from "@everdict/application-control";
+import { type WorldCreationStore, type WorldCreator, WorldProvidingDispatcher } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type CaseRuntimeSample,
@@ -74,6 +75,11 @@ export function buildDispatch(deps: {
   // The harness version's seeds are read and verified at dispatch (harness-identity-and-seeds-spec.md §2). REQUIRED:
   // a chain without a seeder would dispatch a seeded version seedless under a digest that says otherwise.
   seeds: SeedReader;
+  // What MAKES a world and where its debt is recorded (world-and-engagement-model.md, 3.9). Both required:
+  // a deployment that wired one and not the other would meet a `create` case as a silent pass-through or as
+  // a world nothing records.
+  worldCreator: WorldCreator;
+  worldCreations: WorldCreationStore;
   browserProfileStore?: BrowserProfileStore; // browser-profiles S5 — resolve a referenced profile for eval injection
   // Managed image store (optional) — when present, a job's managed images are authorized with a minted grant
   // instead of a registered credential. docs/architecture/managed-image-store.md
@@ -459,12 +465,22 @@ export function buildDispatch(deps: {
   //
   // A close that did not happen is REPORTED rather than swallowed. The session service owns the lifetime and
   // expires its own sessions; this line is what stops "we could not close it" from being silence.
-  const worldDispatcher = new WorldProvidingDispatcher(sessionWorldProvider(), seedingDispatcher, (outcome) => {
-    if (outcome.result.kind === "closed") return;
-    console.error(
-      `[world] case ${outcome.caseId}: the session at ${outcome.endpoint} was NOT closed (${outcome.result.reason}) — the session service's own expiry is what frees it now`,
-    );
-  });
+  const worldDispatcher = new WorldProvidingDispatcher(
+    sessionWorldProvider(),
+    {
+      creator: deps.worldCreator,
+      store: deps.worldCreations,
+      newId: () => `cw_${randomUUID()}`,
+      now: () => new Date().toISOString(),
+    },
+    seedingDispatcher,
+    (outcome) => {
+      if (outcome.result.kind === "closed") return;
+      console.error(
+        `[world] case ${outcome.caseId}: the world at ${outcome.endpoint} was NOT released (${outcome.result.reason}) — a session service's own expiry frees a session; a CREATED world stays owed on the ledger until a sweep proves it gone`,
+      );
+    },
+  );
   const verifierAwareDispatcher = new VerifierAwareDispatcher(
     worldDispatcher,
     deps.dispatchVerifier,

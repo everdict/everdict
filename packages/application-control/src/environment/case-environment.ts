@@ -101,11 +101,27 @@ export async function resolveCaseEnvironments(input: {
         ? {}
         : spec.provides.kind === "static"
           ? { world: { wiring: spec.provides.wiring } }
-          : {
-              // Opened per case at dispatch, not here: this resolution runs once per BATCH, and a session
-              // acquired at submit would be held for every case that follows and expire under most of them.
-              world: { wiring: {}, session: { endpoint: spec.provides.endpoint, acquire: spec.provides.acquire } },
-            }),
+          : spec.provides.kind === "session"
+            ? {
+                // Opened per case at dispatch, not here: this resolution runs once per BATCH, and a session
+                // acquired at submit would be held for every case that follows and expire under most of them.
+                world: {
+                  wiring: {},
+                  session: { endpoint: spec.provides.endpoint, acquire: spec.provides.acquire },
+                },
+              }
+            : {
+                // Created per case at dispatch, for the same reason — and torn down after it, which is the
+                // half this arm owes and the other two do not.
+                world: {
+                  wiring: {},
+                  create: {
+                    environment: `${spec.id}@${spec.version}`,
+                    services: spec.provides.services,
+                    wiring: spec.provides.wiring,
+                  },
+                },
+              }),
     });
   }
   return { cases, seals };

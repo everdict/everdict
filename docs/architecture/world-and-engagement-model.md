@@ -150,10 +150,25 @@ case declares and refuses when it cannot — a provided world is the same decora
    strictly more than the browser-session lane does today and strictly less than a teardown Everdict could
    certify — which is the honest description, and the reason the next item is still open.
 
-3.9 **Provided worlds, CREATED** — bringing infrastructure up per case (a topology deployed for one run) and
-   tearing it down. This is the arm that needs what the others did not: a durable worklist of what was
-   created, and a verified zero (rule `protocol` L5). A world Everdict created and cannot prove is gone is a
-   leak that bills, which is a different promise from asking somebody else's service to close a session.
+3.9 ✅ **Provided worlds, CREATED** (landed 2026-09-03) — an environment declares
+   `provides: { kind: "topology", services, wiring }` and the platform brings those services up for the case,
+   hands their endpoints over as wiring, and tears them down after. What this arm owes and the other two do
+   not, both landed:
+
+   - **A durable worklist.** `everdict_created_worlds` (migration 0208) records the intent BEFORE anything is
+     created — a create whose row could not be written is refused, because compute nothing can address is
+     what a ledger exists to prevent (L1). The row carries what to tear down and WHERE, so a sweep needs no
+     registry read and no case to ask.
+   - **A verified zero.** `released` is written only after a read-back says the world is not standing. A
+     teardown that threw is settled by the read-back rather than by the throw; a world still standing, or a
+     runtime that could not say, stays owed with its reason on the row (L5).
+   - **One verifier for both paths.** The dispatch's `finally` and the reconciler call the SAME release, so a
+     sweep and the request path cannot disagree about what "gone" means. `released` is first-write-wins: a
+     late sweep may not reopen a proven ending.
+
+   **Nomad first, refused by name elsewhere** — the same call the browser-session lane made, for the same
+   reason: a world that came up on a runtime this control plane cannot then tear down is exactly the leak
+   above. A refusal is a case that does not run; a silent fallback would be a world nobody reclaims.
 3.5 ✅ **Building the world** (landed 2026-09-03) — the recipe moved to one owner (`execution/build-recipe.ts`,
    re-exported under its historical harness names), an environment declares `source`+`build` beside its
    `image`, and `CampaignBuildService` grew the second subject: same session, same captured layer, and a mint

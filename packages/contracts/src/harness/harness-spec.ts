@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SpanAttrMappingSchema } from "../execution/trace-source.js";
+import { SpanAttrMappingSchema } from "../execution/span-mapping.js";
 import { type ResourceRequest, ResourceRequestSchema } from "../infra/world.js";
 import { VersionSchema } from "../version.js";
 import { ModelBindingSchema } from "./model-spec.js";

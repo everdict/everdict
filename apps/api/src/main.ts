@@ -30,6 +30,7 @@ import {
   registryLatestVersionResolver,
   seedFirstPartyAgents,
   settleOrphanSessionRuns,
+  sweepOwedWorlds,
   whenLeader,
 } from "@everdict/application-control";
 import { ApprovalService, CancellationCoordinator } from "@everdict/application-control";
@@ -85,6 +86,7 @@ import { CaseRecorder } from "./common/case-recorder.js";
 import { LiveFrameStore } from "./common/live-frame-store.js";
 import { LiveLogStore } from "./common/live-log-store.js";
 import { LiveTraceStore } from "./common/live-trace-store.js";
+import type { ResolvedRuntime } from "./common/runtime-compute.js";
 import { TerminalTicketStore } from "./common/terminal-ticket.js";
 import { TicketStore } from "./common/ticket-store.js";
 import { buildAuthenticator } from "./composition/authenticator.js";
@@ -135,6 +137,7 @@ import {
 import { startTopologyPoolAutoscaler } from "./composition/topology-autoscaler.js";
 import { buildTrustZones } from "./composition/trust-zones.js";
 import { buildWorkspace } from "./composition/workspace.js";
+import { buildWorldCreator } from "./composition/world-creation.js";
 import { AgentMemberToolingService } from "./core/agent/agent-member-tooling-service.js";
 import { AgentService } from "./core/agent/agent-service.js";
 import { BrowserProfileCaptureService } from "./core/browser-profile/browser-profile-capture-service.js";
@@ -213,6 +216,11 @@ async function main(): Promise<void> {
   const compute = deploymentCompute();
   const k8sContext = process.env.EVERDICT_K8S_CONTEXT;
   const image = process.env.EVERDICT_AGENT_IMAGE;
+  // The world creator's runtime resolver, bound after `runtimeCompute` exists. A holder rather than a
+  // reordering: `buildRuntimeCompute` itself needs pieces this dispatch call produces.
+  const worldRuntimes: { fn: (tenant: string, id: string) => Promise<ResolvedRuntime | undefined> } = {
+    fn: async () => undefined,
+  };
 
   const {
     store,
@@ -235,6 +243,7 @@ async function main(): Promise<void> {
     agentRegistry,
     runtimeRegistry,
     environmentRegistry,
+    worldCreations,
     settingsStore,
     workspaceStore,
     userProfileStore,
@@ -637,6 +646,12 @@ async function main(): Promise<void> {
     recordingStore, // replay ② — a self-hosted RE-lease opens its own attempt here (arch-review 41 P0-evidence)
     attempts: executionAttemptStore, // …and the physical ledger records that re-lease as its own row (mig 0182)
     liveTraces, // observability ⑨ — the dispatch account's placement marks tee into the live-trace buffer
+    // WHAT MAKES A WORLD, and where its debt is recorded (world-and-engagement-model.md, 3.9). The resolver
+    // is LATE-BOUND like `dispatchVerifier` above: `runtimeCompute` is built a few lines below, and the
+    // dispatch chain is assembled once. A dispatch happens long after boot, so by the time a case creates a
+    // world the holder is set; before then the creator refuses rather than guessing at a cluster.
+    worldCreator: buildWorldCreator({ resolve: (tenant, id) => worldRuntimes.fn(tenant, id) }),
+    worldCreations,
   });
   // WHERE anything runs, answered once (composition/runtime-compute): the deployment's own compute, and any
   // workspace-registered runtime resolved with its cluster credentials and trust zone. Agent worlds, the
@@ -651,6 +666,8 @@ async function main(): Promise<void> {
     ...(nomad ? { nomad } : {}),
     ...(image ? { jobImage: image } : {}),
   });
+  // …and the world creator's resolver, now that the runtime resolution exists (see `worldCreator` above).
+  worldRuntimes.fn = (tenant, id) => runtimeCompute.resolve(tenant, id);
 
   // Revoking a runner drops its lazily-registered self:<owner>:<runnerId> placement backend (runner churn hygiene —
   // built here because the dispatcher is created after the workspace/runner services).
@@ -1212,6 +1229,29 @@ async function main(): Promise<void> {
   );
   setInterval(reconcilePublications, 60_000).unref();
   reconcilePublications();
+  // ── THE WORLDS THIS PLATFORM MADE AND HAS NOT PROVED GONE (world-and-engagement-model.md, 3.9) ────
+  //
+  // The dispatch releases a created world in its own `finally`; a process that dies between the create and
+  // that finally leaves a row nobody is holding. This is the sweep that owns it — the SAME release the
+  // request path runs (one verifier for both, rule `protocol` L5), so the two cannot disagree about what
+  // "gone" means. Leader-gated like every other reconciler: N replicas tearing down one world is one
+  // teardown and N-1 races.
+  const reconcileWorlds = whenLeader(
+    leader,
+    () =>
+      void sweepOwedWorlds({
+        store: worldCreations,
+        creator: buildWorldCreator({ resolve: (tenant, id) => worldRuntimes.fn(tenant, id) }),
+        now: () => new Date().toISOString(),
+      })
+        .then(({ swept, released, owed }) => {
+          if (swept > 0)
+            console.log(`▶ world reconciler: released ${released} of ${swept} owed world(s), ${owed} still owed`);
+        })
+        .catch(() => {}),
+  );
+  setInterval(reconcileWorlds, 120_000).unref();
+  reconcileWorlds();
   // One-shot legacy gap sweep (arch-review 51 P0): aborts decided before the settle owned its teardown row
   // (or in the best-effort era's crash window) have live children and no operation — hand them to the
   // reconciler once per boot. Leader-gated for the same reason the reconciler is.
