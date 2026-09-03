@@ -178,6 +178,7 @@ import {
   PgWorkspaceStore,
   PgWorldCreationStore,
   type PlatformEventStore,
+  type PoolTuning,
   type RecordingStore,
   type RunStore,
   type RunnerJobStore,
@@ -377,6 +378,29 @@ function named(store: TrajectoryStore): TrajectoryStore {
   return new NamingTrajectoryStore(store);
 }
 
+// A positive integer from the environment, or nothing. NOT `?? default` at the call site: `poolConfig` owns
+// the defaults, and a second copy of them here is a second thing to keep in step (rule `protocol` L3).
+function positiveIntEnv(raw: string | undefined): number | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const value = Number.parseInt(raw, 10);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+// The pool ceilings an operator may override. Every one of them has a package default; what this reads is a
+// deployment that has MEASURED its database and wants a different number, never the difference between
+// "bounded" and "unbounded".
+function poolTuningFromEnv(): PoolTuning {
+  const max = positiveIntEnv(process.env.EVERDICT_PG_POOL_MAX);
+  const statementTimeoutMs = positiveIntEnv(process.env.EVERDICT_PG_STATEMENT_TIMEOUT_MS);
+  const connectionTimeoutMs = positiveIntEnv(process.env.EVERDICT_PG_CONNECTION_TIMEOUT_MS);
+  return {
+    applicationName: "everdict-api",
+    ...(max !== undefined ? { max } : {}),
+    ...(statementTimeoutMs !== undefined ? { statementTimeoutMs } : {}),
+    ...(connectionTimeoutMs !== undefined ? { connectionTimeoutMs } : {}),
+  };
+}
+
 export async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
   // The trajectory store's ops-scale rung (native-observability N-O1 rung 2): EVERDICT_CLICKHOUSE_URL swaps
@@ -538,7 +562,18 @@ export async function makePersistence(): Promise<Persistence> {
       replicas: soloReplicas,
     };
   }
-  const client = sqlClient(makePool(url));
+  // ── THE POOL'S CEILINGS ARE A DEPLOYMENT DECISION, SO THE DEPLOYMENT CAN SAY THEM (perf review) ────
+  //
+  // `@everdict/db` picks defaults sized for this app's fan-out; an operator who has measured their own
+  // database overrides them here. Unset = the package default, never "no limit" — see `poolConfig`.
+  //
+  // ⚠️ A LONG BACKGROUND STATEMENT IS NOT A REASON TO RAISE THE REQUEST LANE'S DEADLINE. The retention
+  // sweep shares this pool deliberately: its statements are scoped to one page of expired runs, so they fit
+  // inside the same `statement_timeout` every route gets, and one that does NOT fit is reported by
+  // `runRetentionSweep` as `failed` and retried on the next interval — which is the behaviour that lane
+  // already documents. A second pool with a longer allowance would be a sibling lane with its own ceilings
+  // to keep in step, and this repository's most common defect is the lane that was not taught.
+  const client = sqlClient(makePool(url, poolTuningFromEnv()));
   const { applied } = await migrate(client);
   if (applied.length > 0) console.error(`▶ db migrations applied: ${applied.join(", ")}`);
   const harnessTemplateRegistry = new PgHarnessTemplateRegistry(client);
