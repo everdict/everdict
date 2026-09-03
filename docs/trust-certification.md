@@ -274,6 +274,12 @@ not something a reviewer remembers:
 | Neuter `applyInputTrust`, or make the settle record no input observation | TRUST-179 — the divergence and legacy scenarios return `pass` where the answer must be `not_comparable`, which is the false green light this row exists for |
 | Let `due()` return `retained` rows, or `complete()` accept one no settlement released | TRUST-180 — a sweep is handed an artifact whose case has not settled, which is the ledger destroying the recovery it exists to enable |
 | Remove `IfNoneMatch: "*"` from `S3ArtifactStore.put`, or read its 412 as success without comparing the bytes | TRUST-181 — a second attempt's document replaces an immutable object. ⚠️ The MOCKED counterexample (`packages/storage/src/immutable-conflict.counterexample.test.ts`) stays 4/4 GREEN under this mutation, verified; that gap is why this scenario is on the blocking lane |
+| Elect every acquirer of a shared world as its builder (`if (joined.created)` → always, or `xmax = 0` → `true`) | `created-world.counterexample.test.ts` in-process · TRUST-193 against the engine that arbitrates it |
+| Tear a shared world down when the holder count hits zero, or let the reaper take one somebody is inside | the same two — the batch pays for a world per case, or a live agent's world is unmade mid-case |
+| Skip the per-case reset, swallow a reset that failed, or dial it at whatever host the path resolves to | `created-world` / `world-provider` counterexamples — the batch's cases become a chain, or the control plane dials an address a case chose |
+| Let a warm pool reclaim a created world (any of the three runtimes) | `docker-runtime.test.ts` · `nomad-runtime.test.ts` · `k8s-runtime.test.ts` — two reclaimers, and the pool's clock wins |
+| Read a promised world recording that could not be fetched as an empty account, or score it 0 instead of unmeasured | `world-recording.counterexample.test.ts` · `world-state.test.ts` |
+| Run a dialogue case on a harness that cannot converse, or a model-user case with no simulator | `dialogue-engagement.counterexample.test.ts` — every turn an independent run, reported as a conversation |
 
 Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is

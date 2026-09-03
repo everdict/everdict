@@ -90,13 +90,13 @@ The `imageTemplate` (e.g. `ghcr.io/acme/tb-tasks/{id}:v1`) keeps the recipe ters
    pushed is a set that imports and then fails one case at a time. It lives in the CLI because Everdict
    references images and never builds them: this is an operator edge, and the platform still refuses a task
    whose image it cannot resolve.
-   ⚠️ **Half of this slice is still open, and the ✅ covers only the helper.** This line also asked for
-   `imageWarnings` on register, and no DATASET door classifies its case images — `imageWarnings` runs on
-   harness register/validate (`apps/api/src/api/harness/harness.routes.ts`) and on a capability save, so a
-   task set imported with unqualified or local-only refs is registered without a word, and the operator finds
-   out one case at a time at dispatch. What it needs is the existing predicate (`classifyImageRef` /
-   `imageWarnings`) applied to the produced cases' images at `POST /datasets` and `POST /benchmarks/import`,
-   warn-not-block, on both transports.
+   ✅ **And the other half — `imageWarnings` on register — has since landed too.** `datasetImageWarnings`
+   (`apps/api/src/api/route-context.ts`) reads back what was actually REGISTERED (never the caller's echo),
+   classifies its case images with the same `imageWarnings` predicate the harness doors use, and every door
+   that publishes a dataset carries it: `POST /datasets` and `POST /datasets/terminal-bench` with their MCP
+   twins, plus `POST /benchmarks/import` with its own. Warn, never block — an unqualified ref is wrong for a
+   MANAGED run and perfectly right for a self-hosted runner pulling from its own daemon, so a door that
+   refused it would be deciding a deployment question the author is better placed to answer.
 5. **Web** — ✅ the add-benchmark wizard's source picker has a third option ("Task set"). Choosing it takes
    the set as text plus an optional `{id}` image template, previews it through the same parse the import
    runs, and **skips the mapping step entirely** — a task carries its own instruction, tests and world, so

@@ -16,6 +16,247 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
+  // ── THE WORLD A CASE ACTS ON (docs/architecture/world-and-engagement-model.md) ────────────────────
+  //
+  // Slices 3.9 and 3.95 landed a created-world ledger and a world a batch's cases share. Every fence below is
+  // silent when removed: the world still comes up, the cases still run, and the number that comes back looks
+  // like an ordinary result. These are the neutralizations that were driven by hand when the slices landed,
+  // recorded here so a later refactorer meets them instead of a green suite.
+  {
+    // L5. `released` is written only after a read-back says the world is not standing. A world that IS still
+    // standing must stay owed — "the teardown was accepted" is not "it is gone".
+    name: "world — a world still standing after its teardown is settled released",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: '  if (standing) return owe("the world is still standing after its teardown");',
+    to: '  if (false) return owe("the world is still standing after its teardown");',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // L5's third value. A runtime that could not answer is `unknown` — an escalation, never a licence to
+    // settle. Reading silence as "gone" is the collapse the whole union exists to refuse.
+    name: "world — a runtime that cannot say whether the world stands is read as gone",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: '  if (standing === undefined)\n    return owe("the runtime could not say whether the world is still standing — accepted is not gone");',
+    to: '  if (standing === undefined) return { kind: "released" as const };',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // 3.95. `acquireShared` elects exactly one creator; every other case JOINS and is handed the coordinates
+    // the creator got. An acquirer that always creates makes one world per case — the reuse this arm exists
+    // for, gone — and two of them under one ledger row.
+    name: "shared world — every acquirer builds its own world instead of joining",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: "  if (joined.created) {",
+    to: "  if (true) {",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // 3.95. Leaving is not tearing down, and neither is being the last one out: releasing when the count hits
+    // zero makes a sequentially-dispatched batch build and destroy one world per case, and refuses the next
+    // case, which arrives while the teardown is in flight. The reconciler is the reaper.
+    name: "shared world — the last case out tears the world down instead of leaving it",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: '    return { kind: "held", holders: left.holders };',
+    to: '    if (left.holders > 0) return { kind: "held", holders: left.holders };\n    return releaseWorld({ tenant, id: left.row.id, runId: left.row.runId, services, creator, store });',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // 3.95. The declared reset runs before every case. Without it case N starts in the state case N-1 left,
+    // and cases that are not independent are not a comparison.
+    name: "shared world — the per-case reset never runs",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: "    await input.reset(wiring);",
+    to: "    void input.reset;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // …and a reset that FAILED refuses the case. Swallowing it runs the case in the previous one's leftovers,
+    // which is the same defect as never resetting, arriving through a catch instead of an omission.
+    name: "shared world — a reset that failed is swallowed instead of refusing the case",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: "    await input.reset(wiring);",
+    to: "    await input.reset(wiring).catch(() => undefined);",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // 3.95. A joiner waits for the creator, and a creator that FAILED (or a world being unmade) ends that wait
+    // in a refusal. Waiting on instead of refusing dispatches the case into a world that is not there.
+    name: "shared world — a joiner waits for a creator that already failed",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: '    if (row === undefined || row.state === "unknown" || row.state === "released" || row.state === "releasing") {',
+    to: "    if (false) {",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/created-world.counterexample.test.ts"],
+  },
+  {
+    // 3.95. The key is what makes two acquisitions ONE world, and the batch is its scope. Dropping the scope
+    // makes every batch that names the same environment share a world — and compare against each other's
+    // leftovers, which is the exact dependency `perCase.reset` exists to remove.
+    name: "shared world — the key forgets which batch is asking",
+    file: "packages/application-control/src/environment/created-world.ts",
+    from: '  return `${input.scope}|${input.environment}|${input.target ?? "-"}`;',
+    to: '  return (void input.scope, `${input.environment}|${input.target ?? "-"}`);',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/world-provider.counterexample.test.ts"],
+  },
+  {
+    // 3.95. The environment's declared lifecycle is what the dispatcher routes on. Ignoring it makes every
+    // per-run world a per-case one: correct-looking, and the batch pays for one world per case.
+    name: "shared world — the dispatcher ignores the declared lifecycle",
+    file: "packages/application-control/src/environment/world-provider.ts",
+    from: '      create.lifecycle === "per-run"',
+    // `void this.joinShared` keeps the now-unreachable arm READ, so `noUnusedPrivateClassMembers` does not
+    // refuse the mutated tree — the compiler objecting to the shape of a neutralization is not the protocol
+    // being enforced, and declaring it as one would record a certificate for a suite that never ran.
+    to: "      (void this.joinShared, false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/world-provider.counterexample.test.ts"],
+  },
+  {
+    // 3.95, the residue. The environment schema refuses to REGISTER a per-run world with no reset; this is the
+    // refusal for a case that reached the dispatcher any other way. Defaulting instead of refusing chains the
+    // batch's cases behind a reset nobody declared.
+    name: "shared world — a per-run world with no declared reset is run anyway",
+    file: "packages/application-control/src/environment/world-provider.ts",
+    from: "    const perCase = create.perCase;",
+    to: '    const perCase = create.perCase ?? { reset: "/reset", from: "target_base_url" };',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/world-provider.counterexample.test.ts"],
+  },
+  {
+    // 3.95, authorship. The base URL is minted by the platform for a world it created; the reset PATH is
+    // written by a workspace. Without the origin check a path that resolves elsewhere makes the control plane
+    // dial an address a tenant chose.
+    name: "shared world — the reset is dialled at whatever host the path resolves to",
+    file: "packages/application-control/src/environment/world-provider.ts",
+    from: "  if (target.origin !== origin.origin)",
+    to: "  if (false)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/application-control", "src/environment/world-provider.counterexample.test.ts"],
+  },
+  {
+    // 3.95, in the adapter. `xmax = 0` is how the winner learns its INSERT inserted; it exists only inside a
+    // real MVCC snapshot, which is why this rung drives the Postgres scenario rather than the twin.
+    name: "shared world — every acquirer is told it inserted the row (real Postgres)",
+    file: "packages/db/src/environment/world-creation-store.ts",
+    from: "                 (xmax = 0) AS mine`,",
+    to: "                 true AS mine`,",
+    build: "@everdict/db",
+    suite: ["--root", "apps/api", "src/trust/shared-world-election.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
+  },
+  {
+    // 3.95, the fence in SQL. A shared world is owed when nobody is inside it AND nobody has been for the idle
+    // window. Dropping the holder guard sweeps a world a live case is still acting in — worse than a leak,
+    // because the score that comes back reads as an ordinary agent failure.
+    name: "shared world — the reaper takes a world somebody is inside (real Postgres)",
+    file: "packages/db/src/environment/world-creation-store.ts",
+    from: "            OR (shared_key IS NOT NULL AND ((holders = 0 AND updated_at <= $1) OR expires_at <= $2))",
+    to: "            OR (shared_key IS NOT NULL AND (updated_at <= $1 OR expires_at <= $2))",
+    build: "@everdict/db",
+    suite: ["--root", "apps/api", "src/trust/shared-world-election.trust.test.ts"],
+    env: { EVERDICT_TRUST_SUITE: "1" },
+    requiresEnv: ["EVERDICT_TRUST_DATABASE_URL"],
+  },
+  {
+    // 3.95. Two reclaimers for one object. A created world is ensured ONCE and then used by every case of a
+    // batch, so the warm pool's `lastUsedAt` says idle while cases are still inside it — and the default idle
+    // TTL is thirty minutes. The ledger owns this decision; the pool defers.
+    name: "shared world — the docker warm pool reclaims a created world",
+    file: "packages/topology/src/deploy/docker-runtime.ts",
+    from: "      if (isWorldTopology(entry.spec.id)) continue;",
+    to: "      void isWorldTopology;",
+    build: "@everdict/topology",
+    suite: ["--root", "packages/topology", "src/deploy/docker-runtime.test.ts"],
+  },
+  {
+    // 3.95. Two reclaimers for one object. A created world is ensured ONCE and then used by every case of a
+    // batch, so the warm pool's `lastUsedAt` says idle while cases are still inside it — and the default idle
+    // TTL is thirty minutes. The ledger owns this decision; the pool defers.
+    name: "shared world — the nomad warm pool reclaims a created world",
+    file: "packages/topology/src/deploy/nomad-runtime.ts",
+    from: "      if (isWorldTopology(entry.spec.id)) continue;",
+    to: "      void isWorldTopology;",
+    build: "@everdict/topology",
+    suite: ["--root", "packages/topology", "src/deploy/nomad-runtime.test.ts"],
+  },
+  {
+    // 3.95. Two reclaimers for one object. A created world is ensured ONCE and then used by every case of a
+    // batch, so the warm pool's `lastUsedAt` says idle while cases are still inside it — and the default idle
+    // TTL is thirty minutes. The ledger owns this decision; the pool defers.
+    name: "shared world — the k8s warm pool reclaims a created world",
+    file: "packages/topology/src/deploy/k8s-runtime.ts",
+    from: "      if (isWorldTopology(entry.spec.id)) continue;",
+    to: "      void isWorldTopology;",
+    build: "@everdict/topology",
+    suite: ["--root", "packages/topology", "src/deploy/k8s-runtime.test.ts"],
+  },
+  {
+    // Axis 1's observation channel. A recording that was PROMISED and could not be read makes the whole
+    // observation `sampling_failed`; reading it as an empty account tells a judge the world was quiet.
+    name: "world recording — an execution site that cannot fetch a promised recording reports an empty account",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "      if (url === undefined || fetchRecording === undefined) recordingFailed = true;",
+    to: "      if (url === undefined || fetchRecording === undefined) recordingFailed = false;",
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/world-recording.counterexample.test.ts"],
+  },
+  {
+    // …and the same collapse arriving through a catch: a fetch that THREW is not a world that was quiet.
+    name: "world recording — a recording fetch that threw is read as a world that published nothing",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "        } catch {\n          recordingFailed = true;\n        }",
+    to: "        } catch {\n          recordingFailed = false;\n        }",
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/world-recording.counterexample.test.ts"],
+  },
+  {
+    // The grader that reads it. A world nobody could read is `unmeasured`, never a 0 — the L2 distinction the
+    // whole channel exists to keep, at the one place it turns into a number.
+    name: "world state — a world that published no account is scored zero instead of unmeasured",
+    file: "packages/graders/src/world-state.ts",
+    from: "        return unmeasured(`the world published no account this run (${observations.reason})`);",
+    to: '        return { graderId: "world-state", metric: "world_state", value: 0, pass: false };',
+    build: "@everdict/graders",
+    suite: ["--root", "packages/graders", "src/world-state.test.ts"],
+  },
+  {
+    // Axis 2's refusal. A dialogue case meeting a harness that cannot hold a conversation would make every
+    // turn an independent run — the exchange a fiction, and the score computed over it about nothing.
+    name: "dialogue — a harness that cannot hold a conversation is handed a dialogue case anyway",
+    file: "packages/application-execution/src/run-case.ts",
+    from: "    if (userBudget > 0 && deps.harness.conversational !== true)",
+    to: "    if (false)",
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/dialogue-engagement.counterexample.test.ts"],
+  },
+  {
+    // …and its twin: a MODEL user with no simulator. Running it as a one-shot measures a first turn and
+    // reports it as a conversation, which is the same fiction arriving through a missing capability.
+    name: "dialogue — a model-user case runs as a one-shot when no simulator was given",
+    file: "packages/application-execution/src/run-case.ts",
+    from: '    if (engagement?.user.kind === "model" && deps.simulateUser === undefined)',
+    to: "    if (false)",
+    build: "@everdict/application-execution",
+    suite: ["--root", "packages/application-execution", "src/dialogue-engagement.counterexample.test.ts"],
+  },
+  {
+    // Axis 2. The simulated user ends the exchange by SAYING its stop sentence, and that turn is dropped
+    // rather than delivered — so the transcript a judge reads carries no instruction the platform wrote.
+    name: "dialogue — the user simulator delivers its own stop sentence as a turn",
+    file: "packages/graders/src/user-simulator.ts",
+    from: "    return trimmed.length === 0 || trimmed.includes(done) ? undefined : said;",
+    to: "    return (void trimmed, void done, said);",
+    build: "@everdict/graders",
+    suite: ["--root", "packages/graders", "src/user-simulator.test.ts"],
+  },
   {
     // arch-review 59 P0. A dispatch that reserved and ACTIVATED has passed its last check; probing it now
     // answers absent, truthfully, and that counted as convergence — so the certificate said zero and the

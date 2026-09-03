@@ -116,19 +116,25 @@ describeTrust("TRUST-193 — one conditional write elects the case that builds a
     const tenant = trustId("tenant");
     tenants.push(tenant);
     const key = `${trustId("batch")}|shop@1.0.0|-`;
-    const held = await acquire(tenant, key);
+    // A long lease on purpose: this row is here to test the HOLDER guard, and a short lease would take it
+    // through the other arm before the holder question is ever asked.
+    const held = await acquire(tenant, key, { expiresAt: new Date(Date.now() + 4 * 60 * 60_000).toISOString() });
     await store.transition(tenant, held.row.id, "created", { endpoints: { web: "http://web:8080" } });
     const owedNow = async (now: string, staleMs: number) =>
       (await store.due(now, staleMs)).filter((r) => r.tenant === tenant).map((r) => r.id);
 
     const now = new Date().toISOString();
+    const later = new Date(Date.parse(now) + 60 * 60_000).toISOString();
     expect(await owedNow(now, 15 * 60_000), "a world somebody is inside is never owed").toEqual([]);
+    // THE DISCRIMINATING CASE: an hour on, the row is idle by every clock the sweep reads and a case is still
+    // inside it. Staleness alone would sweep a world a live agent is acting in, and the score would come back
+    // looking like an ordinary failure — so the holder count is the only thing keeping it out here.
+    expect(await owedNow(later, 15 * 60_000), "the holder is the fence, not the clock").toEqual([]);
 
     // Nobody inside, but only just — an empty world is not yet an idle one.
     await store.releaseShared(tenant, key);
     expect(await owedNow(now, 15 * 60_000)).toEqual([]);
     // …and an hour on, with nobody having come back, it is.
-    const later = new Date(Date.parse(now) + 60 * 60_000).toISOString();
     expect(await owedNow(later, 15 * 60_000)).toEqual([held.row.id]);
 
     // The lease is the other half: a crashed holder never leaves, so its count alone would pin the world.
