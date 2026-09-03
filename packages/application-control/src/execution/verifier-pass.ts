@@ -72,9 +72,21 @@ export interface VerifierPassDeps {
 // grader states: a number the benchmark never produced must not reach a mean, a leaderboard or a diff. The
 // metric is fixed here rather than taken from the plan, because a case that could not be judged has no plan
 // output to take it from.
-function unmeasuredVerdict(reason: "unsupported" | "missing_evidence" | "grader_error", detail: string): Score {
+function unmeasuredVerdict(
+  reason: "unsupported" | "missing_evidence" | "grader_error",
+  detail: string,
+  // WHOSE verdict is missing. It used to be the literal "verifier", and that name owns nothing: the settle
+  // reads `builtInOwnedMetrics(graderId)` and found no grant for a reserved metric, so it rewrote this score
+  // — the platform's own "we could not judge this case" — as `invalid / contract_violation`, which reads as a
+  // PRODUCER having forged a ground-truth name. The one signal that says the measurement is missing was
+  // turned into an accusation, and the reason it was missing was lost with it.
+  //
+  // The plan knows whose verdict is owed, so the score says so. Provenance at the source (rule `protocol`
+  // L3), and the authority question then has the answer it always had.
+  graderId: string,
+): Score {
   return {
-    graderId: "verifier",
+    graderId,
     metric: "tests_pass",
     status: "unmeasured",
     reason,
@@ -167,9 +179,12 @@ export async function withVerifierPass(job: CaseJob, deps: VerifierPassDeps): Pr
   // The debt is recorded by `stageAgentHalf`/`stageVerifierVerdict` themselves now, keyed by execution, so
   // EVERY ending owes it without carrying anything — including the `RATE_LIMITED` rethrow below, which
   // returns no document at all and could never have carried a stamp.
+  // The deciding grader this case's plan names — the one whose verdict is owed when the lane cannot produce
+  // it. A plan always has at least one (that is what made it a plan).
+  const decidingGraderId = plan.graders[0]?.id ?? "verifier";
   const owed = (reason: "unsupported" | "missing_evidence" | "grader_error", detail: string): CaseResult => ({
     ...result,
-    scores: [...(result.scores ?? []), unmeasuredVerdict(reason, detail)],
+    scores: [...(result.scores ?? []), unmeasuredVerdict(reason, detail, decidingGraderId)],
   });
 
   if (!deps.dispatchVerifier)

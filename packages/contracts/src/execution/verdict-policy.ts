@@ -54,6 +54,13 @@ export const RESERVED_AUTHORITY_METRICS: readonly string[] = [
 // and a `command` grader configured with `metric: "state"` is refused at the producer boundary today.
 export const BUILTIN_GRADER_OWNED_METRICS = {
   "tests-pass": ["tests_pass"],
+  // A container task's own verifier publishes the SAME ground-truth name, and had no entry here: its class
+  // claimed `tests_pass` from a local literal, the in-sandbox producer boundary read that class and let it
+  // through, and the settle — which holds only `{ id: "reward-file" }` — found no grant and stamped every
+  // verdict `invalid`. So the whole standard-task-format on-ramp (Terminal-Bench, SpreadsheetBench and any
+  // other task that ships its own tests) produced a contract violation instead of a score, on every lane,
+  // in place and through the private verifier alike.
+  "reward-file": ["tests_pass"],
   "dom-contains": ["dom_contains"],
   "url-matches": ["url_matches"],
   "answer-match": ["answer_match"],

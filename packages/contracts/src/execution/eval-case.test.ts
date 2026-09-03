@@ -79,12 +79,26 @@ describe("[COUNTEREXAMPLE] sanitizeSubmittedResult — whose name is a submitted
 });
 
 describe("the built-in ownership table is the reserved list with `state` left unowned", () => {
-  it("every reserved name but `state` has exactly one built-in owner, and the table names only reserved ones", () => {
+  // ⚠️ This used to assert EXACTLY one owner per reserved name, which described the table rather than
+  // defending anything: the settle asks `builtInOwnedMetrics(id).includes(metric)`, a question two owners
+  // answer as well as one, and nothing downstream is protected by the count (a case can already carry two
+  // `tests-pass` graders and produce two ground-truth scores).
+  //
+  // It is also false of the domain. `tests_pass` means "the task's own tests passed", and TWO first-party
+  // graders produce exactly that fact: `tests-pass` runs a command, and `reward-file` runs a container task's
+  // own verifier and reads the reward it PUBLISHES. The bijection is what left `reward-file` out of the table
+  // while its class claimed the name, so every container-task verdict settled `invalid`.
+  //
+  // What matters, and what is asserted: every reserved name that anything produces has an owner, and the
+  // table never grants a name outside the reserved list.
+  it("every reserved name but `state` is owned, and the table names only reserved ones", () => {
     const owners = new Map<string, string[]>();
     for (const [id, owned] of Object.entries(BUILTIN_GRADER_OWNED_METRICS))
       for (const metric of owned) owners.set(metric, [...(owners.get(metric) ?? []), id]);
     for (const metric of RESERVED_AUTHORITY_METRICS)
-      expect(owners.get(metric) ?? [], metric).toHaveLength(metric === "state" ? 0 : 1);
+      metric === "state"
+        ? expect(owners.get(metric) ?? [], "nothing built-in emits `state`").toHaveLength(0)
+        : expect((owners.get(metric) ?? []).length, metric).toBeGreaterThanOrEqual(1);
     for (const metric of owners.keys()) expect(RESERVED_AUTHORITY_METRICS, metric).toContain(metric);
   });
 

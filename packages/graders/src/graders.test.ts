@@ -1,4 +1,9 @@
-import { BUILTIN_GRADER_OWNED_METRICS, NO_IMAGE } from "@everdict/contracts";
+import {
+  BUILTIN_GRADER_OWNED_METRICS,
+  NO_IMAGE,
+  RESERVED_AUTHORITY_METRICS,
+  builtInOwnedMetrics,
+} from "@everdict/contracts";
 import { type GradeContext, type TraceEvent, measuredScores, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
@@ -400,6 +405,45 @@ describe("built-in ownership is the contracts table, and makeGraders hands it ou
       const [g] = makeGraders([{ id }]);
       expect(g?.ownsMetrics, id).toEqual(owned);
     }
+  });
+
+  // ⚠️ THE TEST ABOVE ITERATES THE TABLE, SO A CLASS MISSING FROM IT IS INVISIBLE TO IT. That is the direction
+  // this defect arrived from: `reward-file` claimed `tests_pass` on its class from a local literal, the
+  // in-sandbox producer boundary read the CLASS and let it through, and the settle — which holds only
+  // `{ id: "reward-file" }` — found no grant and stamped every verdict `invalid`. Every container task that
+  // ships its own tests scored a contract violation instead of a number, on every lane.
+  //
+  // So this iterates from the CLASS side: whatever `makeGraders` can build, if it claims a RESERVED name, the
+  // table the settle reads must grant it that name under that id.
+  it("every built-in that CLAIMS a reserved name is granted it by the table the settle reads", () => {
+    const builtIns = [
+      "tests-pass",
+      "command",
+      "script-score",
+      "script",
+      "reward-file",
+      "swe-bench",
+      "world-state",
+      "steps",
+      "cost",
+      "latency",
+      "dom-contains",
+      "url-matches",
+      "answer-match",
+      "store-state",
+      "text-metric",
+    ];
+    const ungranted: string[] = [];
+    for (const id of builtIns) {
+      // Enough config for every builder to construct; what is asserted is only what the grader CLAIMS.
+      const [g] = makeGraders([
+        { id, config: { cmd: "true", language: "python", code: "pass", expected: "x", pattern: "x", metric: "m" } },
+      ]);
+      for (const metric of g?.ownsMetrics ?? [])
+        if (RESERVED_AUTHORITY_METRICS.includes(metric) && !builtInOwnedMetrics(id).includes(metric))
+          ungranted.push(`${id} claims '${metric}' and the table grants it nothing`);
+    }
+    expect(ungranted, "the sandbox would accept these and the settle would call every one of them invalid").toEqual([]);
   });
 
   it("a custom grader declaring a reserved name owns nothing reserved — the sandbox and the settle agree", () => {

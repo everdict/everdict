@@ -1,4 +1,11 @@
-import { BadRequestError, type GradeContext, type Grader, type Score, shq } from "@everdict/contracts";
+import {
+  BUILTIN_GRADER_OWNED_METRICS,
+  BadRequestError,
+  type GradeContext,
+  type Grader,
+  type Score,
+  shq,
+} from "@everdict/contracts";
 
 // ── THE REWARD IS A PUBLISHED FILE, NEVER AN EXIT CODE ───────────────────────────────────────────────
 //
@@ -47,7 +54,9 @@ export interface RewardFileConfig {
 // (`reward:<key>`) so a task-authored key can never land on a constitutional name — the reward file's keys
 // come from the benchmark's shell script, which is exactly the producer-controlled surface the reserved-name
 // rule exists to keep out of the ladder.
-const PRIMARY_METRIC = "tests_pass";
+// Read from the contracts table rather than spelled here. A literal is what let this grader's ownership and
+// the settle's copy of it drift apart — the class claimed the name and the table never granted it.
+const PRIMARY_METRIC = BUILTIN_GRADER_OWNED_METRICS["reward-file"][0];
 const SECONDARY_PREFIX = "reward:";
 // The 1-D convention: a multi-key reward dict names its headline value `reward` (the same key the format's
 // `[[steps]].min_reward` float form gates on).
