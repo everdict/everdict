@@ -137,6 +137,37 @@ describe("POST /v1/traces — the OTLP door seals the owned trajectory (N0)", ()
     expect(emitted).toEqual(["trace.ingestion_throttled"]);
   });
 
+  // ── AN UNREADABLE QUOTA IS NOT "NO OVERRIDE" (rule `protocol` L2, perf review) ────────────────────
+  //
+  // `quotaFor` was read as `.catch(() => undefined)`, and `undefined` already MEANS "this workspace set no
+  // override". So a settings-store outage was indistinguishable from a workspace that had never configured
+  // one, and the door then admitted under the operator default — over a workspace that had set a lower
+  // ceiling, or throttling one that had raised it. It fails precisely when the database is already unwell.
+  //
+  // SEEN RED by restoring `.catch(() => undefined)`, observed:
+  //   AssertionError: expected 200 to be 502 // Object.is equality
+  it("refuses the export when the workspace's quota cannot be read, rather than admitting under a default", async () => {
+    // Given: a door whose settings read is failing
+    const trajectories = new InMemoryTrajectoryStore();
+    const app = buildServer({
+      service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+      otlpIngest: new OtlpIngestService(trajectories, {
+        defaultMaxEventsPerHour: 1_000,
+        quotaFor: async () => {
+          throw new Error("settings store unreachable");
+        },
+      }),
+    });
+
+    // When: an exporter pushes
+    const res = await app.inject({ method: "POST", url: "/v1/traces", headers: H, payload: exportBody("run-unknown") });
+
+    // Then: the push is refused, and nothing was sealed under a limit nobody chose
+    expect(res.statusCode).toBe(502);
+    expect(res.json()).toMatchObject({ code: "UPSTREAM_ERROR" });
+    expect(await whole(trajectories, "acme", "run-unknown")).toBeUndefined();
+  });
+
   // A service under test joins the run's trajectory by setting OTEL_SERVICE_NAME + the run correlation —
   // OTel's own attribute, no everdict-specific convention (the multi-plane rung).
   const serviceExport = (runId: string, service: string, span: string) => ({
