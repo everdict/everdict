@@ -207,11 +207,25 @@ medium leaves each keep an equal prefix rather than one keeping everything.
 **Retention deletes the bytes, not only the rows** *(arch-review 120)*. An offloaded payload is named ONLY by
 the event row carrying its ref — no listing, no index, no second pointer — so a sweep that deleted rows
 first left the objects permanently unreachable, and a workspace on a 30-day retention kept its payloads
-forever. `deleteOlderThan` enumerates the refs the doomed rows hold (`payloadRefsOlderThan`, REQUIRED on the
+forever. `deleteOlderThan` enumerates the refs the doomed rows hold (`payloadRefsOf`, REQUIRED on the
 port so the decorator chain cannot silently drop it) and removes the objects BEFORE the rows. The order is
 the design: rows-first makes an invisible orphan, objects-first leaves a visible, self-healing state for one
 sweep — a resolve fails closed, correctly, and the next pass removes the row. An object store that refuses
 stops the sweep before the rows go, so the refs still name what is owed.
+
+**…and the enumeration is scoped to the runs the sweep CLAIMED** *(perf review)*. That read took a cutoff and
+answered for every expired trajectory in the deployment, while its only caller had already narrowed itself to
+one bounded page of runs (`expiredRuns(cutoff, PAYLOAD_SWEEP_LIMIT)`) and discarded the rest in JavaScript.
+
+    a bounded page   +   an unbounded enumeration   =   an unbounded sweep
+
+So deleting N runs re-read the whole expired corpus in N-sized pages — on Postgres re-running
+`jsonb_path_query(body, '$.**')` over every expired event body and re-sorting it per page, on ClickHouse
+re-running a regex over the largest column in the system and rebuilding a full-table hash join — hourly,
+inside the API process, on a connection pool every request handler shares. Quadratic in the thing that grows
+fastest in the product, and both lines looked correct on their own. `payloadRefsOf(runIds, limit, after)`
+takes the run set as a parameter, so one drain costs one page; the old spelling is deleted rather than kept
+beside it. Counterexample: `retention-sweep-scope.counterexample.test.ts`.
 
 ### ⚠️ Resolving the record does not resolve the projection
 

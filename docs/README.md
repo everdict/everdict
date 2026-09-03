@@ -110,6 +110,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/native-observability.md](architecture/native-observability.md) — Everdict as the trace platform (OTel-first)
 - [architecture/otel-trace-model.md](architecture/otel-trace-model.md) — spans are the record; `TraceEvent` is a projection
 - [architecture/long-horizon-trace-reads.md](architecture/long-horizon-trace-reads.md) — the event is the unit; why a long run's trace exhausted the heap
+- [architecture/control-plane-read-budget.md](architecture/control-plane-read-budget.md) — no read grows with the workspace; the pool/statement ceilings and where a screen's filter belongs
 - [architecture/live-observability.md](architecture/live-observability.md) — watch a run while it runs
 - [architecture/trace-sink.md](architecture/trace-sink.md) — export judged results to the team's observability platform
 - [architecture/replay.md](architecture/replay.md) — record a run so the analysis phase can re-watch it
