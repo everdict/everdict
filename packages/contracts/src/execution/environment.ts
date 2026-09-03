@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BuildRecipeSchema, SourceRecipeSchema } from "./build-recipe.js";
 import type { ComputeHandle } from "./compute.js";
+import { SessionAcquireSchema } from "./session-acquire.js";
 
 // v1 is repo only. browser/os-use add variants to the union (no core rewrite).
 export const RepoSnapshotSchema = z.object({
@@ -148,10 +149,27 @@ export const EnvironmentSpecSchema = z
     // same names. A DYNAMIC variant — bring-up, teardown, verified zero — is the next slice and is deliberately
     // not declared here: an arm nothing provides is a plan (rule `protocol`).
     provides: z
-      .object({
-        kind: z.literal("static"),
-        wiring: z.record(z.string().min(1), z.string().min(1)),
-      })
+      .discriminatedUnion("kind", [
+        // The world already exists and the workspace hosts it: nothing to open, nothing to close.
+        z.object({
+          kind: z.literal("static"),
+          wiring: z.record(z.string().min(1), z.string().min(1)),
+        }),
+        // A world OPENED PER CASE through a session API the workspace runs — a desktop, a per-run app
+        // instance, a browser. Same protocol a browser target is acquired through, so one mechanism serves
+        // both.
+        //
+        // WHO OWNS THE LIFETIME, stated because the honest answer is not "Everdict": the SESSION SERVICE
+        // does. It hands out a session, it expires it, and this platform asks it to close early when the case
+        // ends — an ask that can fail, and is REPORTED rather than swallowed. Everdict does not bring
+        // infrastructure up or tear it down here; a world that must be CREATED (a topology deployed per case)
+        // needs a durable worklist, not another acquirer, and is deliberately not this arm.
+        z.object({
+          kind: z.literal("session"),
+          endpoint: z.string().url(), // where the session API lives (the workspace's own service)
+          acquire: SessionAcquireSchema,
+        }),
+      ])
       .optional(),
     // ── HOW THE WORLD'S BYTES ARE PRODUCED (world-and-engagement-model.md, landing order 3) ────────────
     //

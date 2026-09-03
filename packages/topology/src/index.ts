@@ -133,6 +133,7 @@ export {
   serviceAcquirer,
   targetAcquirerFor,
 } from "./front-door/target-acquirer.js";
+export { sessionWorldProvider } from "./front-door/world-session.js";
 export {
   type ObservationSource,
   type ObservationTarget,

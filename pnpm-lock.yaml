@@ -643,6 +643,9 @@ importers:
 
   packages/topology:
     dependencies:
+      '@everdict/application-control':
+        specifier: workspace:^
+        version: link:../application-control
       '@everdict/application-execution':
         specifier: workspace:*
         version: link:../application-execution

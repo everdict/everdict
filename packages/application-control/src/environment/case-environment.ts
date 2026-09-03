@@ -97,7 +97,15 @@ export async function resolveCaseEnvironments(input: {
       // …and WHERE the world is, when it is one the actor reaches by coordinates rather than by being inside
       // it (world-and-engagement-model.md). Platform-authored from the version this batch sealed, so the
       // coordinates and the identity axis are the same fact.
-      ...(spec.provides !== undefined ? { world: { wiring: spec.provides.wiring } } : {}),
+      ...(spec.provides === undefined
+        ? {}
+        : spec.provides.kind === "static"
+          ? { world: { wiring: spec.provides.wiring } }
+          : {
+              // Opened per case at dispatch, not here: this resolution runs once per BATCH, and a session
+              // acquired at submit would be held for every case that follows and expire under most of them.
+              world: { wiring: {}, session: { endpoint: spec.provides.endpoint, acquire: spec.provides.acquire } },
+            }),
     });
   }
   return { cases, seals };

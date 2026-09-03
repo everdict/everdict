@@ -14,6 +14,7 @@ import {
 import { TraceSourceService } from "@everdict/application-control";
 import type { BrowserProfileStore, WorkspaceImages } from "@everdict/application-control";
 import type { SeedReader, VerifierPassDeps } from "@everdict/application-control";
+import { WorldProvidingDispatcher } from "@everdict/application-control";
 import {
   type BackendRegistry,
   type CaseRuntimeSample,
@@ -36,6 +37,7 @@ import type { TrustZonePolicy } from "@everdict/domain";
 import { classifyFailure, isRunnerOnline } from "@everdict/domain";
 import type { HarnessInstanceRegistry, ModelRegistry, RuntimeRegistry } from "@everdict/registry";
 import { type EnvRecordSink, ServiceTopologyBackend, type ServiceTopologyBackendOptions } from "@everdict/topology";
+import { sessionWorldProvider } from "@everdict/topology";
 import type { CaseRecorder } from "../common/case-recorder.js";
 import type { LiveTraceStore } from "../common/live-trace-store.js";
 import { makeProfileSeeder } from "../core/browser-profile/browser-profile-injector.js";
@@ -448,8 +450,23 @@ export function buildDispatch(deps: {
   // The seeds a harness version ships with, materialized onto the job INSIDE the verifier split (the agent half
   // runs the harness) and outside model resolution (harness-identity-and-seeds-spec.md §2).
   const seedingDispatcher = new SeedingDispatcher(deps.seeds, resolvingDispatcher);
+  // ── THE WORLD IS OPENED BEFORE THE ACTOR (world-and-engagement-model.md, axis 1) ─────────────────
+  //
+  // A case whose environment provides its world through a SESSION API gets it opened here, its coordinates
+  // merged onto the job, and the close asked for when the case ends — including when it failed. Outside the
+  // seeding decorator because a world must exist before anything the agent reads is written into it, and
+  // inside the verifier split for the same reason seeds are: the agent half is the half that acts on it.
+  //
+  // A close that did not happen is REPORTED rather than swallowed. The session service owns the lifetime and
+  // expires its own sessions; this line is what stops "we could not close it" from being silence.
+  const worldDispatcher = new WorldProvidingDispatcher(sessionWorldProvider(), seedingDispatcher, (outcome) => {
+    if (outcome.result.kind === "closed") return;
+    console.error(
+      `[world] case ${outcome.caseId}: the session at ${outcome.endpoint} was NOT closed (${outcome.result.reason}) — the session service's own expiry is what frees it now`,
+    );
+  });
   const verifierAwareDispatcher = new VerifierAwareDispatcher(
-    seedingDispatcher,
+    worldDispatcher,
     deps.dispatchVerifier,
     // …and where the agent's half is staged, so a crash between the two halves is recoverable rather than a
     // lost case (arch-review 60 follow-through).

@@ -6,6 +6,7 @@ import { ScoreSchema, sanitizeScore } from "./grader.js";
 import { ImageProvenanceSchema } from "./image-provenance.js";
 import { ProvisionedWorldProofSchema } from "./provisioned-world.js";
 import { RecordingRefSchema } from "./recording.js";
+import { SessionAcquireSchema } from "./session-acquire.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema, stripPlatformAuthoredFields } from "./trace.js";
 import { MetricAuthoritySchema, builtInOwnedMetrics, isConstitutionalMetric } from "./verdict-policy.js";
@@ -160,7 +161,17 @@ export const EvalCaseSchema = z.object({
   // plane resolves the case's environment reference and attaches what that version says, so the value is the
   // sealed world's, never a case author's guess — a dataset that hard-coded a URL would have no identity to
   // seal and no axis to move. Absent = the world is the actor's own container (or there is none).
-  world: z.object({ wiring: z.record(z.string().min(1), z.string().min(1)) }).optional(),
+  world: z
+    .object({
+      wiring: z.record(z.string().min(1), z.string().min(1)).default({}),
+      // A world still to be OPENED for this case, carried as the platform's own intent between the moment the
+      // environment is resolved and the moment the dispatch opens it. It never crosses the process boundary:
+      // the providing dispatcher acquires the session, merges the coordinates into `wiring`, and REMOVES this
+      // before the job is dispatched — a runner receives coordinates, never the credentials-shaped means of
+      // minting more of them.
+      session: z.object({ endpoint: z.string().url(), acquire: SessionAcquireSchema }).optional(),
+    })
+    .optional(),
   // ── HOW THE ACTOR MEETS THE QUESTION (world-and-engagement-model.md, axis 2) ──────────────────────
   //
   // Every case in this repository has been ONE-SHOT: the actor is handed the task and produces a trace. A

@@ -287,6 +287,11 @@ export {
   resolveOneCaseEnvironment,
   type ResolvedCaseEnvironments,
 } from "./environment/case-environment.js";
+export {
+  WorldProvidingDispatcher,
+  type OpenedWorld,
+  type WorldSessionProvider,
+} from "./environment/world-provider.js";
 
 // Control-plane use-case services (the api services move here incrementally — re-architecture P2d).
 export {

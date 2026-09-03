@@ -96,11 +96,11 @@ provide a declared world refuses the case.
 
 | Item | Under the model | What it still needs |
 | ---- | --------------- | ------------------- |
-| `service` environment | a **provided** world with a dynamic provider | a `WorldProvider` port, a lifecycle owner, and a teardown that reads back zero |
+| `service` environment | a **provided** world | ✅ static + session-opened landed; a world Everdict CREATES still needs a durable worklist and a verified zero |
 | environment build recipe | an **in-compute** world's bytes | ✅ landed 2026-09-03 — the environment carries an image and a `source`+`build` recipe, and an environment campaign builds it |
 | tau-bench | **dialogue** engagement + a state-comparing grader | ✅ the turn loop (scripted user); still needs a model-driven user simulator and the benchmark's domain database |
 | api observation | the **provider's** obligation | a recording provider (a proxy) that yields coordinates AND events |
-| os target | a **provided** world | the same provider port; a session API is one implementation of it |
+| os target | a **provided** world | ✅ expressible now: a desktop handed out by a session API is `provides: { kind: "session" }` |
 
 The shape of the port is not invented here: `SeedingDispatcher`
 (`apps/api/src/core/execution/seeding-dispatcher.ts`) already decorates a dispatch to materialize something a
@@ -136,8 +136,24 @@ case declares and refuses when it cannot — a provided world is the same decora
    than as a change to the agent under test. Row D (WebArena on workspace-hosted sites) is expressible now.
    Nothing is brought up, so nothing must be torn down — which is what makes this slice complete on its own
    rather than half a lifecycle.
-3. **Provided worlds, dynamic** — bring-up and teardown, with the lifecycle owner and the verified-zero
-   ending. The second implementation of a port that already has a consumer.
+3. ✅ **Provided worlds, opened per case** (landed 2026-09-03) — an environment declares
+   `provides: { kind: "session", endpoint, acquire }` and `WorldProvidingDispatcher` opens the world before
+   the actor, merges its coordinates onto the job, and asks for the close when the case ends — including when
+   it FAILED. Two invariants the seam owns: a world that cannot be opened REFUSES the case (running it
+   against the harness's own default would measure a different experiment), and the acquire spec is REMOVED
+   before dispatch, so a runner receives coordinates and never the means of minting more sessions. The
+   implementation is the acquirer a browser target has always used (`serviceAcquirer`), with the environment's
+   endpoint standing in for a topology service.
+
+   **Who owns the lifetime, stated:** the SESSION SERVICE. It hands out sessions and expires them; this
+   platform asks for an early close and REPORTS one that did not happen instead of swallowing it. That is
+   strictly more than the browser-session lane does today and strictly less than a teardown Everdict could
+   certify — which is the honest description, and the reason the next item is still open.
+
+3.9 **Provided worlds, CREATED** — bringing infrastructure up per case (a topology deployed for one run) and
+   tearing it down. This is the arm that needs what the others did not: a durable worklist of what was
+   created, and a verified zero (rule `protocol` L5). A world Everdict created and cannot prove is gone is a
+   leak that bills, which is a different promise from asking somebody else's service to close a session.
 3.5 ✅ **Building the world** (landed 2026-09-03) — the recipe moved to one owner (`execution/build-recipe.ts`,
    re-exported under its historical harness names), an environment declares `source`+`build` beside its
    `image`, and `CampaignBuildService` grew the second subject: same session, same captured layer, and a mint
