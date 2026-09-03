@@ -213,6 +213,33 @@ function scorecardQueryString(query?: ScorecardListQuery): URLSearchParams {
   return q
 }
 
+// ── THE PAGE TRAVELS ON EVERY BRANCH (perf review) ───────────────────────────────────────────────────
+//
+// `limit` used to be spelled into the URL only on the `runner` branch, while the option type offered it to
+// every caller. So a caller asking the activity feed for a page passed a number that compiled, travelled as
+// far as this function, and was silently dropped — the excess-property shape rule `typescript` warns about,
+// where the value is not lost but simply never read. One builder, every branch, so the option means the same
+// thing wherever it is passed.
+//
+// The batch drill-down (`scorecardId`) still takes no page: the control plane decides which attempt is a
+// case's answer by looking at that batch's children AS A SET, so a partial page would mislabel them.
+function runListPath(opts?: {
+  scorecardId?: string
+  all?: boolean
+  runner?: string
+  limit?: number
+  offset?: number
+}): string {
+  if (opts?.scorecardId) return `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}`
+  const page = new URLSearchParams()
+  if (opts?.runner) page.set('runner', opts.runner)
+  else if (opts?.all) page.set('scope', 'all')
+  if (opts?.limit) page.set('limit', String(opts.limit))
+  if (opts?.offset) page.set('offset', String(opts.offset))
+  const qs = page.toString()
+  return qs ? `/runs?${qs}` : '/runs'
+}
+
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
   // Notification feed (personally owned; bell inbox) — qs is a raw query string like '?unread=1&limit=30'.
@@ -321,17 +348,7 @@ export const controlPlane = {
   listRuns: <T>(
     auth: AuthContext,
     opts?: { scorecardId?: string; all?: boolean; runner?: string; limit?: number; offset?: number }
-  ) =>
-    call<T>(
-      auth,
-      opts?.scorecardId
-        ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}`
-        : opts?.runner
-          ? `/runs?runner=${encodeURIComponent(opts.runner)}${opts.limit ? `&limit=${opts.limit}` : ''}${opts.offset ? `&offset=${opts.offset}` : ''}`
-          : opts?.all
-            ? '/runs?scope=all'
-            : '/runs'
-    ),
+  ) => call<T>(auth, runListPath(opts)),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   // The run's OWNED trajectory (sealed evidence; embed fallback during dual-read — meta.source says which copy served).
   //
@@ -362,7 +379,11 @@ export const controlPlane = {
   // Paged for the same reason the run-scoped twin is: an INGESTED trace belongs to somebody else's five-hour
   // agent, and this door is the one that opens it. The route has taken `after`/`limit` since the split-plane
   // read landed; passing neither meant the dialog fetched every event before it could draw one.
-  getTrajectory: <T>(auth: AuthContext, id: string, query: { after?: number; limit?: number } = {}) => {
+  getTrajectory: <T>(
+    auth: AuthContext,
+    id: string,
+    query: { after?: number; limit?: number } = {}
+  ) => {
     const qs = new URLSearchParams()
     if (query.after !== undefined) qs.set('after', String(query.after))
     if (query.limit !== undefined) qs.set('limit', String(query.limit))
