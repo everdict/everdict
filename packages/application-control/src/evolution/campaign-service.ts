@@ -366,6 +366,10 @@ export interface NewRoundInput {
   // Optional on this port because a round written before the field existed has none; the transport's DTO is
   // what requires it of new rounds (see `log-campaign-round.ts`).
   learned?: string;
+  // Which OTHER campaigns' findings shaped this proposal (parallel-evolution.md). Advice like `learned`, and
+  // provenance for a reader: branches that read each other converge, so a tree of them keeps paying for N
+  // walks while asking fewer than N distinct questions. Absent = this campaign's own trace alone.
+  informedBy?: string[];
   // The sandbox session that produced the candidate (code-evolution-loop.md, delegation budget). Required by
   // the write when the frame declares a delegation budget; recorded from the run ledger whenever named.
   delegationRunId?: string;
@@ -911,6 +915,11 @@ export class CampaignService {
       // Recorded BEFORE the verdict is derived, and recorded whatever the verdict turns out to be — a round
       // the platform judges incomparable keeps its lesson, which is the case the layer exists for.
       ...(input.learned !== undefined ? { learned: input.learned } : {}),
+      // …and whose findings shaped it. Carried from the input rather than derived: only the driver knows what
+      // it read, and a platform guessing at that would be inventing the provenance the field exists to record
+      // (rule `protocol` L3). Absent = proposed from this campaign's own trace, which is every round before
+      // the field existed.
+      informedBy: input.informedBy ?? [],
       ...(delegation !== undefined ? { delegation } : {}),
       verdict: { ...verdict, evidence: { key: evidenceKey, digest: evidenceDigest } },
       at,

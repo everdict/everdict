@@ -76,6 +76,7 @@ const frame: CampaignFrame = {
 
 const round = (seq: number, over: Partial<CampaignRound["verdict"]> = {}): CampaignRound => ({
   seq,
+  informedBy: [],
   hypothesis: "structure over phrasing",
   candidateVersion: `1.0.${seq}`,
   baselineScorecardId: "sc-base",

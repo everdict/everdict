@@ -1,7 +1,4 @@
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { type DriverMount, hasClaudeAuth } from "@everdict/job-runner";
+import { hasClaudeAuth } from "@everdict/job-runner";
 import {
   ResilientMcpSession,
   detectCapabilities,
@@ -10,6 +7,7 @@ import {
   superviseLease,
 } from "@everdict/self-hosted-runner";
 import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
+import { loginMountsFor } from "./login-mounts.js";
 
 // `everdict runner` — the self-hosted runner lease loop, extracted from main.ts so it can be bundled into a STANDALONE
 // binary (`runner-standalone.ts`) WITHOUT pulling in @everdict/orchestrator (Temporal's native Rust bindings can't be
@@ -47,37 +45,10 @@ export async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const capabilities = await detectCapabilities();
   const dockerOk = capabilities.includes("docker");
 
-  // codex login mount (opt-in): with --mount-codex-login, mount this runner's codex login directory into the
-  // containerized job's container at /codex → codex inside the image authenticates with the machine login (own-pays, no API key). The harness references it via CODEX_HOME=/codex.
-  // Security: explicit opt-in (the runner owner's decision) — because the login credential is exposed to the job container this runner runs.
-  const mounts: DriverMount[] = [];
-  if (flags.has("mount-codex-login")) {
-    const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
-    if (dockerOk && existsSync(codexHome)) {
-      mounts.push({ source: codexHome, target: "/codex" }); // rw — codex needs to write the token refresh / lock file
-      console.error(
-        `▶ codex login mount: ${codexHome} → /codex (containerized jobs). Reference it via CODEX_HOME=/codex in the harness.`,
-      );
-    } else {
-      console.error(`⚠ --mount-codex-login: ${dockerOk ? `${codexHome} not found` : "no docker"} → skipping mount.`);
-    }
-  }
-  // …and the same opt-in for Claude Code, which authenticates the same way (a machine login, own-pays) and
-  // reads its config from CLAUDE_CONFIG_DIR exactly as codex reads CODEX_HOME. The lesson was paid for on the
-  // codex lane and not learned on this one, which is the sibling-lane shape rule `protocol` names: a harness
-  // that could run in an image had no way to be authenticated there, so every containerized Claude Code case
-  // would have started unauthenticated and failed as if the agent could not do the task.
-  if (flags.has("mount-claude-login")) {
-    const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
-    if (dockerOk && existsSync(claudeHome)) {
-      mounts.push({ source: claudeHome, target: "/claude" }); // rw — claude writes token refresh + session state
-      console.error(
-        `▶ claude login mount: ${claudeHome} → /claude (containerized jobs). Reference it via CLAUDE_CONFIG_DIR=/claude in the harness.`,
-      );
-    } else {
-      console.error(`⚠ --mount-claude-login: ${dockerOk ? `${claudeHome} not found` : "no docker"} → skipping mount.`);
-    }
-  }
+  // The machine logins this runner is willing to lend a containerized job. One decision per agent CLI, in
+  // `login-mounts.ts` so it is testable — the loop around it is not.
+  const { mounts, notes } = loginMountsFor(new Set(flags.keys()), { dockerOk });
+  for (const note of notes) console.error(note);
 
   // wedge prevention: a resilient MCP session (@everdict/self-hosted-runner) that auto-reinitializes on API restart/disconnect. Lazy connect.
   const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));

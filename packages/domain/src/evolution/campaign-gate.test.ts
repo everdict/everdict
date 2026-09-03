@@ -40,6 +40,9 @@ const round = (
   return {
     seq,
     hypothesis: "structure over phrasing",
+    // Which other campaigns' findings shaped the proposal. Provenance for a reader; the gate must not read it,
+    // which the counterexample below drives.
+    informedBy: [],
     candidateVersion: `1.0.${seq}`,
     baselineScorecardId: "sc-base",
     candidateScorecardId: `sc-cand-${seq}`,
@@ -206,6 +209,23 @@ describe("[COUNTEREXAMPLE] the adoption gate cannot see what the loop says it le
     expect(told.every((r) => (r.learned ?? "").length > 0)).toBe(true);
     expect(bare.every((r) => r.learned === undefined)).toBe(true);
     expect(campaignAdoption(frame(), told)).toEqual(campaignAdoption(frame(), bare));
+  });
+
+  // …and the same for WHOSE finding it was. `informedBy` records that a proposal came from a sibling branch's
+  // lesson (parallel-evolution.md), which is provenance a reader wants and authority the gate must not have:
+  // a round proposed from another campaign's findings is not thereby better evidence, and a tree whose
+  // branches read each other must not be able to launder that into an adoption.
+  it("answers identically whether or not a round declares it read another campaign's findings", () => {
+    seq = 0;
+    const alone = [round({}), round({ significantImprovements: 2 })];
+    seq = 0;
+    const informed = [
+      round({}, { informedBy: ["evc_sibling"] }),
+      round({ significantImprovements: 2 }, { informedBy: ["evc_sibling", "evc_cousin"] }),
+    ];
+    expect(informed.every((r) => r.informedBy.length > 0)).toBe(true);
+    expect(alone.every((r) => r.informedBy.length === 0)).toBe(true);
+    expect(campaignAdoption(frame(), informed)).toEqual(campaignAdoption(frame(), alone));
   });
 
   it("a losing round keeps its finding, and still loses", () => {

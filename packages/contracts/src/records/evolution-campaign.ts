@@ -384,6 +384,26 @@ export const CampaignRoundSchema = z.object({
   // Most valuable on a round that could not be compared at all: that round scores nothing, spends a round of
   // the budget, and is the one most likely to know why.
   learned: z.string().max(4000).optional(),
+  // ── AND WHOSE FINDINGS SHAPED IT (docs/architecture/parallel-evolution.md) ───────────────────────
+  //
+  // `learned` crossing a branch boundary is SAFE — the gate does not read it, so a finding cannot contaminate
+  // evidence. What it is not is free: campaigns run in parallel are a tree, they ask ONE frozen held-out
+  // population, and the family walk already charges the whole tree for it. Branches that read each other's
+  // findings stop being independent searches and converge, so the tree keeps paying for N walks while asking
+  // fewer than N distinct questions — its one purchase, given away invisibly.
+  //
+  // So a round that was proposed from another campaign's findings SAYS SO. Not a restriction: reading a
+  // sibling's lesson is exactly the +15.0 half of WikiSkill's measurement (the proposer may see findings; the
+  // executing subject may not), and this keeps that available while making the correlation legible to whoever
+  // reads the tree afterwards — otherwise two rows that look like independent evidence are one idea counted
+  // twice.
+  //
+  // Campaign ids, because a finding is identified by the walk that produced it. Empty (the default) means
+  // this round was proposed from its own campaign's trace alone, which is what every round before this had.
+  // ⚠️ ADVICE, LIKE THE FIELD IT ANNOTATES. The gate does not read this either; it is provenance for a reader,
+  // and a round that declares nothing is not refused — a driver that reads a sibling and says nothing has
+  // written a less honest record, not an invalid one.
+  informedBy: z.array(z.string().min(1).max(200)).max(50).default([]),
   candidateVersion: z.string().min(1).max(100),
   baselineScorecardId: z.string().min(1),
   candidateScorecardId: z.string().min(1),
@@ -519,6 +539,7 @@ export const CampaignRoundInputSchema = CampaignRoundSchema.pick({
   candidateVersion: true,
   baselineScorecardId: true,
   candidateScorecardId: true,
+  informedBy: true,
 }).extend({
   // The sandbox session that produced this candidate — the caller NAMES it; what it cost is read off the run
   // ledger by the service and recorded as `round.delegation`. Required by the write when the frame budgets

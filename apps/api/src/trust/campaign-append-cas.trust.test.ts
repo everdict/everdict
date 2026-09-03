@@ -58,6 +58,7 @@ describe.skipIf(!TRUST_PG_ENABLED)(
 
     const round = (seq: number): CampaignRound => ({
       seq,
+      informedBy: [],
       hypothesis: "structure over phrasing",
       candidateVersion: `1.0.${seq}`,
       baselineScorecardId: "sc-base",
