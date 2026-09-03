@@ -2,6 +2,7 @@ import type { VerifierRunner, VerifierVerdict } from "@everdict/application-cont
 import { UpstreamError } from "@everdict/contracts";
 import type { EvidenceIdentity } from "@everdict/domain";
 import { z } from "zod";
+import { agentFetch } from "../../common/agent-fetch.js";
 
 // The VerifierRunner bound to the agent service (ownership protocol, third enforcement site).
 //
@@ -74,7 +75,7 @@ const VerifyResponseSchema = z.object({
 export function httpVerifierRunner(deps: { agentUrl: string; internalToken: string }): VerifierRunner {
   return {
     async verify(input): Promise<VerifierVerdict> {
-      const res = await fetch(new URL("/internal/verify", deps.agentUrl), {
+      const res = await agentFetch(new URL("/internal/verify", deps.agentUrl), {
         method: "POST",
         headers: { "content-type": "application/json", "x-internal-token": deps.internalToken },
         body: JSON.stringify({

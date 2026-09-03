@@ -11,6 +11,7 @@ import {
   type TraceSpan,
   type TraceSummary,
   UpstreamError,
+  deadlineFetch,
   traceIdForRun,
 } from "@everdict/contracts";
 import { extractEvidence } from "./evidence-resolve.js";
@@ -415,7 +416,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
 
   // GET the URL and parse to Span[], auto-detecting Jaeger (`{data:[{spans}]}`) vs OTLP-native (`{spans:[...]}`).
   private async getSpans(url: string): Promise<Span[]> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const res = await f(url, { ...(this.opts.headers ? { headers: this.opts.headers } : {}) });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -443,7 +444,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
     const evidence = await extractEvidence(
       spans,
       m,
-      this.opts.fetchImpl ?? fetch,
+      deadlineFetch(this.opts.fetchImpl),
       this.opts.headers,
       this.opts.endpoint,
       this.opts.artifactBaseUrl,
@@ -467,7 +468,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
     const evidence = await extractEvidence(
       spans,
       m,
-      this.opts.fetchImpl ?? fetch,
+      deadlineFetch(this.opts.fetchImpl),
       this.opts.headers,
       this.opts.endpoint,
       this.opts.artifactBaseUrl,
@@ -493,7 +494,7 @@ export class OtelTraceSource implements BrowsableTraceSource {
         "OTel (Jaeger) trace listing requires a service scope (the Jaeger service parameter).",
       );
     }
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const qs = new URLSearchParams({ service: scope, limit: String(opts?.limit ?? 50) });
     // Jaeger query API takes the time window as start/end in MICROSECONDS since epoch (ignored if the value is unparseable).
     const since = opts?.since ? Date.parse(opts.since) : Number.NaN;

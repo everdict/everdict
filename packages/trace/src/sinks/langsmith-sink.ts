@@ -6,6 +6,7 @@ import {
   type TraceSinkResult,
   type TraceSinkScore,
   UpstreamError,
+  deadlineFetch,
 } from "@everdict/contracts";
 import { seededIds } from "./idempotent-ids.js";
 
@@ -98,7 +99,7 @@ export class LangsmithTraceSink implements TraceSink {
     // Without a key there is nothing to be idempotent against — a live per-case stream is not retried — and
     // the adapter's own generator is used.
     const newId = ctx.idempotencyKey ? seededIds(ctx.idempotencyKey) : this.newId;
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const out: TraceSinkCaseResult[] = [];
     for (const c of cases) {

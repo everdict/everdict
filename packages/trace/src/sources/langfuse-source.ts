@@ -7,6 +7,7 @@ import {
   type TraceListPage,
   type TraceSummary,
   UpstreamError,
+  deadlineFetch,
 } from "@everdict/contracts";
 
 import { extractProvenance, previewOfPayload } from "./trace-source.js";
@@ -173,7 +174,7 @@ export class LangfuseTraceSource implements BrowsableTraceSource {
   // GET the trace detail (observations + metadata) — shared by fetch + inspect (inspect also reads metadata for
   // provenance). 404/parse-failure → undefined (degrade to 0 events, the shared source rule).
   private async fetchTrace(runId: string): Promise<LangfuseTraceDetail | undefined> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const res = await f(`${base}/api/public/traces/${encodeURIComponent(runId)}`, {
       ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
@@ -205,7 +206,7 @@ export class LangfuseTraceSource implements BrowsableTraceSource {
   }
 
   async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const limit = opts?.limit ?? 50;
     // Langfuse paginates by 1-based page number — the cursor IS the next page number (default page 1).

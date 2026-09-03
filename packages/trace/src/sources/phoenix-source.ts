@@ -8,6 +8,7 @@ import {
   type TraceProvenance,
   type TraceSummary,
   UpstreamError,
+  deadlineFetch,
 } from "@everdict/contracts";
 
 import { previewOfPayload, provenanceByLookup } from "./trace-source.js";
@@ -201,7 +202,7 @@ export class PhoenixTraceSource implements BrowsableTraceSource {
   private async spansForTrace(traceId: string): Promise<PhoenixSpan[]> {
     if (!this.opts.project)
       throw new UpstreamError("UPSTREAM_ERROR", {}, "A phoenix trace fetch requires the project setting.");
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const spans: PhoenixSpan[] = [];
     let cursor: string | undefined;
@@ -251,7 +252,7 @@ export class PhoenixTraceSource implements BrowsableTraceSource {
   async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
     const project = opts?.scope ?? this.opts.project;
     if (!project) throw new UpstreamError("UPSTREAM_ERROR", {}, "Phoenix trace listing requires a project scope.");
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const limit = opts?.limit ?? 50;
     // Best-effort: one recent-spans page, grouped by trace_id (Phoenix REST has no list-traces endpoint). The spans

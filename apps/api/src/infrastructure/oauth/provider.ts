@@ -1,4 +1,4 @@
-import { UpstreamError } from "@everdict/contracts";
+import { UpstreamError, deadlineFetch } from "@everdict/contracts";
 
 // Outbound OAuth client abstraction — Everdict as the OAuth "client" of an external provider (GitHub/GHE/Mattermost).
 // (The opposite direction from inbound Keycloak: we request permission from an external account.)
@@ -38,7 +38,7 @@ export interface OAuthProvider {
 export async function oauthFetchJson(url: string, init: Parameters<typeof fetch>[1]): Promise<unknown> {
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
-    res = await fetch(url, init);
+    res = await deadlineFetch()(url, init);
   } catch (e) {
     throw new UpstreamError(
       "UPSTREAM_ERROR",

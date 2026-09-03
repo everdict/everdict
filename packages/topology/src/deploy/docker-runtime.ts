@@ -5,6 +5,7 @@ import {
   type ServiceReadiness,
   type StoreReadQuery,
   UpstreamError,
+  deadlineFetch,
   serviceIsHostExec,
 } from "@everdict/contracts";
 import type { TopologyStatus } from "@everdict/contracts/wire";
@@ -96,7 +97,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
 
   constructor(private readonly opts: DockerTopologyRuntimeOptions = {}) {
     this.docker = opts.docker ?? dockerCli();
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = deadlineFetch(opts.fetchImpl);
   }
 
   async ensureTopology(spec: ServiceHarnessSpec): Promise<TopologyHandle> {

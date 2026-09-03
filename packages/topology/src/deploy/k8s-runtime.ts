@@ -7,6 +7,7 @@ import {
   type StoreReadQuery,
   type TrustZone,
   UpstreamError,
+  deadlineFetch,
 } from "@everdict/contracts";
 import type { TopologyServiceStatus, TopologyStatus } from "@everdict/contracts/wire";
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores, storeName } from "./dependencies.js";
@@ -89,7 +90,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
 
   constructor(private readonly opts: K8sTopologyRuntimeOptions = {}) {
     this.kubectl = opts.kubectl ?? kubectlCli({ context: opts.context });
-    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.fetchImpl = deadlineFetch(opts.fetchImpl);
   }
 
   // Per-zone (tenant) namespace — warm-pool separation + isolation boundary.

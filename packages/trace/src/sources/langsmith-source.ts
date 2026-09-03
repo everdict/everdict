@@ -8,6 +8,7 @@ import {
   type TraceProvenance,
   type TraceSummary,
   UpstreamError,
+  deadlineFetch,
 } from "@everdict/contracts";
 
 import { previewOfPayload, provenanceByLookup } from "./trace-source.js";
@@ -158,7 +159,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
     if (!session) {
       throw new UpstreamError("UPSTREAM_ERROR", {}, "LangSmith trace listing requires a project (session) scope.");
     }
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     // Time window → /runs/query `filter` DSL on start_time (gte/lte). Best-effort — a malformed filter 400s the whole
     // listing rather than silently widening, so this is the field to re-check first if a real server rejects the list.
@@ -213,7 +214,7 @@ export class LangsmithTraceSource implements BrowsableTraceSource {
 
   // Cursor-loop all runs of the trace (shared by fetch + inspect — inspect also extracts provenance from them).
   private async fetchRuns(runId: string): Promise<LangsmithRun[]> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const runs: LangsmithRun[] = [];
     let cursor: string | undefined;

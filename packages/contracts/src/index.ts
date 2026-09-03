@@ -78,6 +78,7 @@ export * from "./harness/agent-spec.js";
 export * from "./infra/runtime-spec.js";
 export * from "./infra/spec-transport.js";
 export * from "./infra/no-proxy.js";
+export { DEFAULT_OUTBOUND_TIMEOUT_MS, deadlineFetch } from "./infra/outbound-deadline.js";
 export * from "./infra/nomad-placement.js";
 export * from "./infra/world.js";
 export * from "./execution/git-auth.js";

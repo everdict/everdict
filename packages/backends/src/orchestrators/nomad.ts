@@ -8,6 +8,7 @@ import {
   type WorkPresence,
   adoptedResultFrom,
   caseJobPayload,
+  deadlineFetch,
   describeNomadPlacementFailure,
   evalContainerSecretEnv,
   extractLiveEvents,
@@ -102,7 +103,7 @@ export interface NomadHttp {
 // The Nomad HTTP client. If apiToken is present, attaches X-Nomad-Token (ACL auth) to every request.
 export function fetchHttp(addr: string, apiToken?: string, fetchImpl?: typeof fetch): NomadHttp {
   const base = addr.replace(/\/$/, "");
-  const f = fetchImpl ?? fetch;
+  const f = deadlineFetch(fetchImpl);
   return {
     async request(method, path, body) {
       const headers: Record<string, string> = {};

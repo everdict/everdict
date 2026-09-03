@@ -32,6 +32,7 @@ import {
   type RegistryAuth,
   type RuntimeSpec,
   UpstreamError,
+  deadlineFetch,
   storedExecutionId,
 } from "@everdict/contracts";
 import type { CallbackStore, RunnerStore, SecretCipher, SecretStore, WorkspaceSettingsStore } from "@everdict/db";
@@ -476,7 +477,7 @@ export function buildDispatch(deps: {
       // created, so the address is platform-authored rather than caller-named. A non-2xx is the case's
       // refusal, not a warning — the alternative is dispatching case N into case N-1's leftovers.
       reset: async (url: string) => {
-        const res = await fetch(url, { method: "POST", headers: { accept: "application/json" } });
+        const res = await deadlineFetch()(url, { method: "POST", headers: { accept: "application/json" } });
         if (!res.ok)
           throw new UpstreamError("UPSTREAM_ERROR", { url, status: res.status }, `world reset ${res.status}`);
       },
