@@ -149,13 +149,26 @@ Landed 2026-09-03: the Terminal-Bench on-ramp is complete (slices 4-5 — `everd
 wizard's third source kind), and BrowseComp and WebArena ship as adapters that declare `proxy` with what they
 approximate, enforced for every adapter by a test.
 
+Landed 2026-09-03, after a `trust-fast` run against a real Postgres and a real object store (the lane
+`pnpm ci:local` cannot reach) found three reds — two from this program's own commits and one older: the
+dataset doors' image advice; `docs/architecture/world-and-engagement-model.md`, which models the case space
+evolution has to support and names the two axes the domain was missing; and every slice of it that can be
+landed honestly — an environment carries its world's BYTES and its build RECIPE (a campaign builds the world
+now), declares a world PROVIDED statically or opened per case through a session API, and a case declares its
+ENGAGEMENT so a dialogue is one exchange rather than N first turns.
+
 Open, and each with its reason written where somebody will meet it:
-- **tau-bench** (`benchmark-evidence-spec.md` §1) — its case is a DIALOGUE, so the user simulator belongs in
-  the execution path rather than in a grader, and its reward compares a domain database's final state.
-- **A `service` environment and an environment build recipe** (`harness-definability-spec.md` §2, "What the
-  two deferred arms actually need") — the first needs a provisioning port, a lifecycle owner and a teardown
-  that reads back zero; the second needs an environment to be able to carry an image, which raises a
-  precedence question against `EvalCase.image` that no caller answers yet.
+- **tau-bench** (`benchmark-evidence-spec.md` §1) — the execution model it needed now exists (a case declares
+  its engagement and the exchange is one conversation); what remains is a model-driven user and the
+  benchmark's own domain database, which its reward compares against.
+- **A world Everdict CREATES** (`world-and-engagement-model.md`, landing order 3.9) — bringing infrastructure
+  up per case and tearing it down. Static and session-opened worlds landed because neither creates anything;
+  this one needs a durable worklist of what was created and a verified zero (rule `protocol` L5), because a
+  world we made and cannot prove is gone is a leak that bills.
+- **An api client's observation** — nothing records a client's exchanges, so `observe` on an api target is
+  now REFUSED rather than declared and unhonoured. A recording provider lifts the refusal.
+- **A model-driven user** for a dialogue case (`engagement.user`, beside the scripted one) — the last thing
+  tau-bench needs besides its domain database.
 - A Hermes recipe waits on its CLI's resume form.
 
 ## What would reopen this page
