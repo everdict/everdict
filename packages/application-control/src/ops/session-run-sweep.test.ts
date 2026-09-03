@@ -34,6 +34,10 @@ function fakeStore() {
     async inFlightByTenant() {
       return {};
     },
+    // No children in this fixture — the queue-progress read is not this test's subject.
+    async countChildrenByStatus() {
+      return [];
+    },
     async liveSessions(query: LiveSessionQuery = {}) {
       return [...rows.values()]
         .filter((r) => r.lifetime === "session" && (r.status === "queued" || r.status === "running"))

@@ -219,7 +219,7 @@ async function whole(
 
 // ── [R122] THE RETENTION ENUMERATION, EXECUTED BY THE ENGINE ────────────────────────────────────────
 //
-// `payloadRefsOlderThan` answers `{tenant, runId, ref}` so the sweep can join a ref against the key it names
+// `payloadRefsOf` answers `{tenant, runId, ref}` so the sweep can join a ref against the key it names
 // before deleting the bytes. Its first version selected `e.tenant` — and the EVENTS table is
 // `(run_id, emitter, seq, body, bytes, sealed_at)`, with no tenant at all. ClickHouse answered
 //
@@ -253,7 +253,7 @@ describeLive("ClickHouseTrajectoryStore — retention enumeration against a live
       ],
     });
 
-    const refs = await s.payloadRefsOlderThan("2999-01-01T00:00:00.000Z", 5_000);
+    const refs = await s.payloadRefsOf([runId], 5_000);
 
     expect(refs.map((r) => r.ref)).toContain(`artifact://trajectory-payloads/acme/${runId}/run/abc.output`);
     expect(

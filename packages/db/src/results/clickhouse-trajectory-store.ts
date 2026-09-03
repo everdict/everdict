@@ -146,29 +146,74 @@ const EVENT_COLUMNS: readonly ColumnSpec[] = [
 ];
 const EVENT_ORDER_BY = "(run_id, emitter, seq)";
 
-// Skipping indexes: a data-skipping index is part of the CREATE and has no ADD COLUMN twin, so it is listed
-// beside the columns rather than inside them (`ALTER … ADD INDEX` on an existing table only affects new
-// parts, which is why upgrading one is a deliberate act and not boot DDL).
-const TRAJECTORY_INDEXES: readonly string[] = ["INDEX idx_run run_id TYPE bloom_filter GRANULARITY 4"];
+// ── ONE DESCRIPTOR FOR A SKIPPING INDEX TOO (perf review) ───────────────────────────────────────────
+//
+// This was a raw CREATE fragment with a comment saying an upgraded install simply does not get it. That is
+// the exact drift `ColumnSpec` exists to remove, one object down: a deployment created before the index
+// existed answered every run lookup by full scan, its boot reported success, and nothing said so.
+//
+// `ALTER … ADD INDEX` is honest boot DDL — idempotent, instant, and it makes every part written FROM NOW ON
+// carry the index. What it does NOT do is index the parts already on disk; `MATERIALIZE INDEX` does, and
+// that is a mutation over the whole table, so it stays an operator's deliberate act rather than something a
+// process does to a production database while booting. `ensureSchema` logs the one statement to run.
+interface IndexSpec {
+  name: string;
+  expression: string;
+  type: string;
+  granularity: number;
+}
+
+const TRAJECTORY_INDEXES: readonly IndexSpec[] = [
+  { name: "idx_run", expression: "run_id", type: "bloom_filter", granularity: 4 },
+];
 const TRAJECTORY_ORDER_BY = "(tenant, sealed_at, run_id)";
+
+// ── PARTITIONED BY MONTH, BECAUSE RETENTION IS THE WHOLE POINT OF THIS TABLE (perf review) ───────────
+//
+// An unpartitioned MergeTree answers every delete by touching the whole table: `ALTER … DELETE` rewrites
+// every part, and even a lightweight `DELETE FROM` has to mark rows across all of them. This table exists to
+// be swept on a schedule, so "the whole table" was the hourly cost of retention, forever.
+//
+// A month is the granularity the sweep works at — evidence is retained for N days, so what expires is always
+// a time prefix — and it keeps the part count in the range MergeTree is happy with. The events table carries
+// the SAME key so a run's planes and its event rows live in the same monthly partition and expire together.
+//
+// `substring(sealed_at, 1, 7)` rather than a date parse: `sealed_at` is an ISO-8601 String here (the rung-2
+// simplification documented at the top of this file), the first seven characters ARE `YYYY-MM`, and a
+// partition expression has to be deterministic and cheap. A row written before this column had a value would
+// partition as `''`, which is a real partition and not a crash.
+//
+// ⚠️ A PARTITION KEY CANNOT BE ALTERED, so this reaches an EXISTING install only through a table rebuild —
+// `scripts/live/repartition-clickhouse-trajectories.mjs`. That is exactly the fresh-vs-upgraded divergence
+// the ONE-DESCRIPTOR rule above exists to prevent, so it is not left to a comment: `ensureSchema` READS the
+// live partition key back and says so when it differs. A deployment that silently ran a different schema is
+// the defect this file has already been fixed for twice.
+const TRAJECTORY_PARTITION_BY = "substring(sealed_at, 1, 7)";
 
 const columnDdl = (column: ColumnSpec): string =>
   `${column.name} ${column.type}${column.default !== undefined ? ` DEFAULT ${column.default}` : ""}`;
 
+const indexDdl = (index: IndexSpec): string =>
+  `INDEX ${index.name} ${index.expression} TYPE ${index.type} GRANULARITY ${index.granularity}`;
+
 const schemaSql = (table: string): string =>
-  `CREATE TABLE IF NOT EXISTS ${table} (\n  ${[...TRAJECTORY_COLUMNS.map(columnDdl), ...TRAJECTORY_INDEXES].join(
-    ",\n  ",
-  )}\n) ENGINE = MergeTree ORDER BY ${TRAJECTORY_ORDER_BY}`;
+  `CREATE TABLE IF NOT EXISTS ${table} (\n  ${[
+    ...TRAJECTORY_COLUMNS.map(columnDdl),
+    ...TRAJECTORY_INDEXES.map(indexDdl),
+  ].join(",\n  ")}\n) ENGINE = MergeTree PARTITION BY ${TRAJECTORY_PARTITION_BY} ORDER BY ${TRAJECTORY_ORDER_BY}`;
 
 const eventsSchemaSql = (table: string): string =>
   `CREATE TABLE IF NOT EXISTS ${table} (\n  ${EVENT_COLUMNS.map(columnDdl).join(
     ",\n  ",
-  )}\n) ENGINE = MergeTree ORDER BY ${EVENT_ORDER_BY}`;
+  )}\n) ENGINE = MergeTree PARTITION BY ${TRAJECTORY_PARTITION_BY} ORDER BY ${EVENT_ORDER_BY}`;
 
 // Additive DDL for installs created before a column existed — idempotent, like the CREATE above, and derived
 // from the same descriptor so the two can never disagree.
 const alterSql = (table: string, column: ColumnSpec): string =>
   `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${columnDdl(column)}`;
+
+const alterIndexSql = (table: string, index: IndexSpec): string =>
+  `ALTER TABLE ${table} ADD INDEX IF NOT EXISTS ${indexDdl(index).slice("INDEX ".length)}`;
 
 const DEFAULT_LIST_LIMIT = 50;
 const MAX_LIST_LIMIT = 200;
@@ -276,6 +321,19 @@ function decodeCursor(cursor: string): { sealedAt: string; runId: string } | und
   return { sealedAt: raw.slice(0, split), runId: raw.slice(split + 1) };
 }
 
+// ── A RUN ID IS A PRODUCER-AUTHORED STRING, SO IT TRAVELS AS A PARAMETER (perf review) ──────────────
+//
+// `deleteRuns` built its `IN (…)` list by interpolating each id into the SQL with a hand-rolled quote
+// escape. Those ids are not all ours: an OTLP exporter names its own run through the `everdict.run_id`
+// resource attribute, so the value reaching this list can be authored by whoever can push a span. Every
+// other value in this file rides `param_<name>`, and this one has no reason to be the exception.
+//
+// ClickHouse parses an `Array(String)` parameter with its own VALUE parser, never as SQL text, so the worst
+// a hostile element can do is make the literal unparseable — a refused statement instead of an injected one.
+function arrayParam(values: readonly string[]): string {
+  return `[${values.map((v) => `'${v.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`).join(",")}]`;
+}
+
 // ── ONE SPELLING OF "WHICH ATTEMPT DID YOU ASK FOR" (arch-review 122) ───────────────────────────────
 //
 // The asked attempt ranks first, an UNATTRIBUTED row second (it may be this execution's — it simply does not
@@ -284,13 +342,44 @@ function decodeCursor(cursor: string): { sealedAt: string; runId: string } | und
 // one question, and the two disagreed: a reader asking by attempt got that attempt's metadata over the
 // CLOCK-selected bytes. Mislabelled evidence is worse than either consistent answer, because both rows are
 // well-formed evidence of the same run and nothing downstream can notice (rule `protocol` L3).
+// One spelling of "this run, in this workspace". `tenant` leads the primary key, so naming it is what lets
+// a run lookup use the index at all; the unscoped form exists only for `seal`'s cross-workspace probe.
+function runScopeSql(scoped: boolean): string {
+  return scoped ? "tenant = {tenant:String} AND run_id = {runId:String}" : "run_id = {runId:String}";
+}
+
 const ATTEMPT_RANK = "if(attempt_id = {attemptId:String}, 0, if(attempt_id = '', 1, 2))";
+
+// ── A QUERY WITH NO DEADLINE IS A REQUEST HANDLER WITH NO DEADLINE (perf review) ─────────────────────
+//
+// `request` was `fetch(url, { method: "POST", body })` — no `AbortSignal`, no server-side budget. So a
+// statement this engine decided to answer slowly (a large ledger, a merge storm, a mutation backlog) held
+// the API request open for as long as ClickHouse felt like taking, and the caller had no way to stop it.
+//
+// Both halves are set, and the SERVER's is the shorter one deliberately: when the budget is exceeded we want
+// ClickHouse's own `TIMEOUT_EXCEEDED` — which names the statement and cancels the work — rather than an
+// aborted socket, which leaves the query RUNNING on the server while we stop waiting for it. The client
+// abort is the backstop for the case where the server never answers at all.
+export const DEFAULT_CLICKHOUSE_TIMEOUT_MS = 30_000;
+// The grace between the server's deadline and the client's, so the two cannot race into the wrong order.
+const CLIENT_ABORT_GRACE_MS = 2_000;
+// A read that would have to materialize more than this is refused rather than streamed into our heap. It is
+// the ClickHouse-side twin of `MAX_PAGE_BYTES` — the process is shared, so an unbounded result is everyone's
+// problem, not just the asker's.
+export const DEFAULT_CLICKHOUSE_MAX_RESULT_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_CLICKHOUSE_MAX_MEMORY_BYTES = 4 * 1024 * 1024 * 1024;
+
+export interface ClickHouseTuning {
+  timeoutMs?: number;
+  maxResultBytes?: number;
+  maxMemoryBytes?: number;
+}
 
 export class ClickHouseTrajectoryStore implements TrajectoryStore {
   private readonly fetchImpl: typeof fetch;
 
   constructor(
-    private readonly opts: { url: string; database?: string },
+    private readonly opts: { url: string; database?: string; tuning?: ClickHouseTuning },
     fetchImpl?: typeof fetch,
   ) {
     this.fetchImpl = fetchImpl ?? fetch;
@@ -301,13 +390,79 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   async ensureSchema(): Promise<void> {
     const table = this.table();
     await this.command(`CREATE DATABASE IF NOT EXISTS ${this.database()}`, {});
+    // Read BEFORE the CREATE: afterwards every table exists, and the two cases this boot has to tell apart —
+    // a fresh install and an upgraded one — become indistinguishable.
+    const existed = await this.tableExists(table);
     await this.command(schemaSql(table), {});
     for (const column of TRAJECTORY_COLUMNS) await this.command(alterSql(table, column), {});
+    // Additive for an install created before the index existed. New parts get it immediately; the parts
+    // already on disk need `MATERIALIZE INDEX`, which is a whole-table mutation and therefore the operator's
+    // call rather than a boot side effect.
+    //
+    // ⚠️ AND IT IS ONLY WORTH SAYING WHEN IT IS TRUE (perf review, caught by the live scenario). The first
+    // version printed the MATERIALIZE advice on every boot, including a FRESH install whose CREATE already
+    // carried the index and has no uncovered parts at all. An operator told to run a whole-table mutation
+    // they do not need learns to ignore this line, and then misses the boot where it mattered. So the
+    // difference is measured: an index missing from a table that ALREADY EXISTED is the case with uncovered
+    // parts behind it; anything else is silent.
+    for (const index of TRAJECTORY_INDEXES) {
+      const uncovered = existed && !(await this.hasSkippingIndex(table, index.name));
+      await this.command(alterIndexSql(table, index), {});
+      if (uncovered)
+        console.log(
+          `▶ trajectory store: skipping index ${index.name} was added to an existing ${table}. Parts written before now are not covered — run \`ALTER TABLE ${table} MATERIALIZE INDEX ${index.name}\` (a mutation) to cover existing data.`,
+        );
+    }
     // The events table gets the same treatment for the same reason: one descriptor drives both the CREATE and
     // the additive ALTERs, so a fresh install and an upgraded one cannot end up running different schemas.
     const events = this.eventsTable();
     await this.command(eventsSchemaSql(events), {});
     for (const column of EVENT_COLUMNS) await this.command(alterSql(events, column), {});
+    await this.reportPartitioning(table, events);
+  }
+
+  // ── WHAT THE LIVE TABLE ACTUALLY IS, READ BACK (perf review) ────────────────────────────────────
+  //
+  // `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, and a partition key has no `ALTER`. So an
+  // install created before `PARTITION BY` is, silently and permanently, running a different schema from a
+  // fresh one — the exact divergence the one-descriptor rule above was written for, in the one dimension
+  // that rule cannot cover.
+  //
+  // It is READ rather than assumed, because the alternative is a comment nobody executes. The repair is a
+  // table rebuild and it is NOT done here: a rebuild copies the whole ledger, and a process must not do that
+  // to a production database while booting. Boot's job is to make the difference impossible to miss.
+  private async tableExists(name: string): Promise<boolean> {
+    const [db, bare] = name.split(".");
+    const rows = await this.select<{ n: number | string }>(
+      "SELECT count() AS n FROM system.tables WHERE database = {db:String} AND name = {name:String}",
+      { db: db ?? "default", name: bare ?? name },
+    );
+    return Number(rows[0]?.n ?? 0) > 0;
+  }
+
+  private async hasSkippingIndex(name: string, index: string): Promise<boolean> {
+    const [db, bare] = name.split(".");
+    const rows = await this.select<{ n: number | string }>(
+      "SELECT count() AS n FROM system.data_skipping_indices WHERE database = {db:String} AND table = {table:String} AND name = {index:String}",
+      { db: db ?? "default", table: bare ?? name, index },
+    );
+    return Number(rows[0]?.n ?? 0) > 0;
+  }
+
+  private async reportPartitioning(table: string, events: string): Promise<void> {
+    for (const name of [table, events]) {
+      const [db, bare] = name.split(".");
+      const rows = await this.select<{ partition_key: string }>(
+        "SELECT partition_key FROM system.tables WHERE database = {db:String} AND name = {name:String}",
+        { db: db ?? "default", name: bare ?? name },
+      );
+      const live = rows[0]?.partition_key ?? "";
+      if (live === TRAJECTORY_PARTITION_BY) continue;
+      const shown = live === "" ? "(nothing)" : live;
+      console.log(
+        `▶ trajectory store: ${name} is partitioned by \`${shown}\`, not by \`${TRAJECTORY_PARTITION_BY}\`. Retention and merges touch the whole table until it is rebuilt — run scripts/live/repartition-clickhouse-trajectories.mjs (copies the ledger; do it in a window).`,
+      );
+    }
   }
 
   async seal(input: SealInput): Promise<TrajectoryMeta & { created: boolean }> {
@@ -383,7 +538,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   }
 
   async planes(tenant: string, runId: string, opts?: { attemptId: string }): Promise<SealedTrajectory | undefined> {
-    const rows = await this.planeRows(runId, opts?.attemptId);
+    const rows = await this.planeRows(runId, opts?.attemptId, tenant);
     const header = rows[0];
     if (!header || header.tenant_first !== tenant) return undefined;
     const segments = rows.map(planeOf);
@@ -408,7 +563,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   }
 
   async events(tenant: string, runId: string, window: TrajectoryWindow): Promise<TrajectoryEventsResult> {
-    const rows = await this.planeRows(runId, window.attemptId);
+    const rows = await this.planeRows(runId, window.attemptId, tenant);
     const header = rows[0];
     if (!header || header.tenant_first !== tenant) return { kind: "absent" };
     const row = planeFor(
@@ -575,7 +730,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // The Postgres twin, over the body-free plane read: emitters and summaries, no `argMin(body, …)` anywhere
   // in the statement. That absence IS the feature — see `TrajectoryUsage`.
   async usage(tenant: string, runId: string): Promise<TrajectoryUsage> {
-    const planes = await this.planeRows(runId);
+    const planes = await this.planeRows(runId, undefined, tenant);
     const header = planes[0];
     if (!header || header.tenant_first !== tenant) return { kind: "absent" };
     // The same plane `get().events` would have come from, resolved by the shared predicate rather than by a
@@ -586,12 +741,49 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     return { kind: "derived", usage: RunUsageSummarySchema.parse(JSON.parse(plane.usage_first)) };
   }
 
+  // ── THE CURSOR IS A ROW PREDICATE, AND THE WIDE AGGREGATE ONLY SEES THE PAGE (perf review) ──────
+  //
+  // One statement used to answer this: the fifteen-column per-emitter `argMin` aggregate over EVERY row the
+  // workspace had, grouped again per run, with the keyset cursor applied in a `HAVING`. A `HAVING` runs after
+  // the aggregation, so paging bought nothing — page 40 of the browse list cost exactly what page 1 did, and
+  // both cost the whole history. On a table whose entire purpose is to grow, that is the browse surface
+  // getting slower every day it is used.
+  //
+  // Two statements instead, and the split is what makes the index usable:
+  //
+  //   1. WHICH RUNS ARE ON THIS PAGE — over `run_id`/`sealed_at` only, with the cursor as a WHERE. The table
+  //      is `ORDER BY (tenant, sealed_at, run_id)`, so `tenant = … AND sealed_at <= <cursor>` is a key-range
+  //      read. It is EXACT, not an approximation: a run survives the `HAVING` only if its earliest seal is at
+  //      or before the cursor, and every row at or before the cursor is inside the prefilter — so the `min`
+  //      computed over the prefiltered rows IS the run's true earliest seal.
+  //   2. WHAT TO SHOW FOR THEM — the wide aggregate, restricted to those (at most `limit`) run ids.
+  //
+  // The page's ORDER is step 1's; step 2 is looked up by id, so the two cannot disagree about the ordering.
   async list(
     tenant: string,
     opts?: { limit?: number; cursor?: string; viewer?: string; kind?: string },
   ): Promise<TrajectoryListResult> {
     const limit = clampLimit(opts?.limit);
     const after = opts?.cursor !== undefined ? decodeCursor(opts.cursor) : undefined;
+    const cursorParams: Record<string, string> =
+      after === undefined ? {} : { afterSealedAt: after.sealedAt, afterRunId: after.runId };
+    const filterParams: Record<string, string> = {
+      tenant,
+      ...(opts?.viewer !== undefined ? { viewer: opts.viewer } : {}),
+      ...(opts?.kind !== undefined ? { kind: opts.kind } : {}),
+    };
+    const picked = await this.select<{ run_id: string; sealed_at_run: string }>(
+      `SELECT run_id, min(sealed_at) AS sealed_at_run
+         FROM ${this.table()}
+        WHERE ${listWhere(opts)}${after !== undefined ? " AND sealed_at <= {afterSealedAt:String}" : ""}
+        GROUP BY run_id
+        ${after !== undefined ? "HAVING (sealed_at_run, run_id) < ({afterSealedAt:String}, {afterRunId:String})" : ""}
+        ORDER BY sealed_at_run DESC, run_id DESC
+        LIMIT {limitPlusOne:UInt32}`,
+      { ...filterParams, ...cursorParams, limitPlusOne: String(limit + 1) },
+    );
+    const page = picked.slice(0, limit);
+    if (page.length === 0) return { items: [] };
     // ClickHouse quirk (caught live): an alias is visible EVERYWHERE in its SELECT, so aliasing
     // `min(sealed_at) AS sealed_at` makes the argMin references resolve to the aggregate itself
     // (ILLEGAL_AGGREGATION). Hence the *_first / *_run names, mapped back below.
@@ -605,35 +797,28 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               argMin(kind_first, sealed_at_first) AS kind_run,
               argMin(label_first, sealed_at_first) AS label_run,
               argMin(preview_first, sealed_at_first) AS preview_run
-       FROM (${this.perEmitterSql(listWhere(opts))})
-       GROUP BY run_id
-       ${after !== undefined ? "HAVING (sealed_at_run, run_id) < ({afterSealedAt:String}, {afterRunId:String})" : ""}
-       ORDER BY sealed_at_run DESC, run_id DESC
-       LIMIT {limitPlusOne:UInt32}`,
-      {
-        tenant,
-        limitPlusOne: String(limit + 1),
-        ...(opts?.viewer !== undefined ? { viewer: opts.viewer } : {}),
-        ...(opts?.kind !== undefined ? { kind: opts.kind } : {}),
-        ...(after !== undefined ? { afterSealedAt: after.sealedAt, afterRunId: after.runId } : {}),
-      },
+       FROM (${this.perEmitterSql(`${listWhere(opts)} AND run_id IN {runIds:Array(String)}`)})
+       GROUP BY run_id`,
+      { ...filterParams, runIds: arrayParam(page.map((r) => r.run_id)) },
     );
-    const metas = rows.map(rowToMeta);
-    const page = metas.slice(0, limit);
-    const last = page[page.length - 1];
+    // Step 1 decided the ORDER; step 2 only decided what each row says. A run that vanished between the two
+    // reads (retention swept it) is simply not on the page — never a hole with a missing name in it.
+    const byId = new Map(rows.map((row) => [row.run_id, rowToMeta(row)]));
+    const items = page.flatMap((r) => {
+      const meta = byId.get(r.run_id);
+      return meta === undefined ? [] : [meta];
+    });
+    const last = items[items.length - 1];
     return {
-      items: page,
-      ...(metas.length > limit && last !== undefined ? { nextCursor: encodeCursor(last) } : {}),
+      items,
+      ...(picked.length > limit && last !== undefined ? { nextCursor: encodeCursor(last) } : {}),
     };
   }
 
   async ingestedSince(tenant: string, sinceIso: string): Promise<{ trajectories: number; events: number }> {
     const rows = await this.select<{ trajectories: number | string; events: number | string }>(
-      `SELECT count() AS trajectories, sum(event_count_run) AS events FROM (
-         SELECT run_id, sum(event_count_first) AS event_count_run, min(sealed_at_first) AS sealed_at_run
-         FROM (${this.perEmitterSql("tenant = {tenant:String}")})
-         GROUP BY run_id
-       ) WHERE sealed_at_run > {since:String}`,
+      `SELECT uniqExact(run_id) AS trajectories, sum(event_count_first) AS events
+       FROM (${this.perEmitterSql("tenant = {tenant:String} AND sealed_at > {since:String}")})`,
       { tenant, since: sinceIso },
     );
     const row = rows[0];
@@ -648,42 +833,47 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   // output ("I saved it, see artifact://k9"), and retention deletes what this returns. One run quoting
   // another run's ref would have destroyed that run's evidence. The three impls answer the same question
   // now: a complete string value that STARTS WITH the scheme.
-  async payloadRefsOlderThan(
-    cutoffIso: string,
+  //
+  // ⚠️ SCOPED TO THE RUN SET, WHICH IS ALSO WHAT MAKES THE JOIN SAFE (perf review). This used to take a
+  // cutoff and answer for every expired trajectory in the deployment, and its `INNER JOIN` had the WHOLE
+  // trajectories table on the right — ClickHouse builds the right side in memory, so each drain page rebuilt
+  // a full-table hash while re-running a regex over the largest column in the system. Both sides are bounded
+  // by the same page of run ids now.
+  //
+  // ⚠️ THE TENANT COMES FROM THE PLANE ROW, BECAUSE THE EVENTS TABLE HAS NO SUCH COLUMN (arch-review 122).
+  // The first version selected `e.tenant` and ClickHouse answered `Code: 47 — Identifier 'e.tenant' cannot
+  // be resolved`, on every call. Since the offloading decorator awaits this read BEFORE deleting anything,
+  // that made the whole retention sweep throw on ClickHouse deployments. Verified against a live server,
+  // which is the only thing that could have said so.
+  async payloadRefsOf(
+    runIds: readonly string[],
     limit: number,
     after?: TrajectoryPayloadRef,
   ): Promise<TrajectoryPayloadRef[]> {
-    const runs = this.expiredRunsSql();
+    if (runIds.length === 0) return [];
     // Tenant and run travel WITH the ref for the reason the Postgres twin gives: the row is the only thing
     // that says which trajectory holds it, and a ref alone is a string a producer can author. `ORDER BY ref`
     // plus `after` makes the enumeration drainable, so no row is deleted before every ref it carries has
     // been accounted for (arch-review 121).
-    //
-    // ⚠️ THE TENANT COMES FROM THE PLANE ROW, BECAUSE THE EVENTS TABLE HAS NO SUCH COLUMN (arch-review 122).
-    // The first version selected `e.tenant` and ClickHouse answered `Code: 47 — Identifier 'e.tenant' cannot
-    // be resolved`, on every call. Since the offloading decorator awaits this read BEFORE deleting anything,
-    // that made the whole retention sweep throw on ClickHouse deployments — the same failure the Postgres
-    // jsonpath had, reintroduced in the sibling adapter by the change that fixed it. The events table is
-    // `(run_id, emitter, seq, body, bytes, sealed_at)`; the plane row is the one that names the workspace.
-    // Verified against a live server, which is the only thing that could have said so.
     const rows = await this.select<{ tenant: string; run_id: string; ref: string }>(
       `SELECT DISTINCT tenant, run_id, ref FROM (
          SELECT t.tenant AS tenant, e.run_id AS run_id,
                 arrayJoin(extractAll(e.body, '"(artifact://[^"]*)"')) AS ref
            FROM ${this.eventsTable()} e
-           INNER JOIN ${this.table()} t ON t.run_id = e.run_id
-          WHERE e.run_id IN (${runs})
+           INNER JOIN (SELECT run_id, tenant FROM ${this.table()} WHERE run_id IN {runIds:Array(String)}) t
+                   ON t.run_id = e.run_id
+          WHERE e.run_id IN {runIds:Array(String)}
          UNION ALL
          SELECT t.tenant AS tenant, t.run_id AS run_id,
                 arrayJoin(extractAll(t.body, '"(artifact://[^"]*)"')) AS ref
-           FROM ${this.table()} t WHERE t.run_id IN (${runs})
+           FROM ${this.table()} t WHERE t.run_id IN {runIds:Array(String)}
        )
        WHERE {afterRef:String} = ''
           OR (ref, tenant, run_id) > ({afterRef:String}, {afterTenant:String}, {afterRun:String})
        ORDER BY ref, tenant, run_id
        LIMIT {limit:UInt32}`,
       {
-        cutoff: cutoffIso,
+        runIds: arrayParam(runIds),
         limit: String(limit),
         afterRef: after?.ref ?? "",
         afterTenant: after?.tenant ?? "",
@@ -710,12 +900,18 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
 
   async deleteRuns(runIds: readonly string[]): Promise<number> {
     if (runIds.length === 0) return 0;
-    // ⚠️ MergeTree deletes are MUTATIONS: asynchronous by construction, so the count here is what we ASKED
-    // to remove rather than what has left disk. That is the same contract `deleteOlderThan` has on this
-    // engine and it is stated rather than implied — the caller uses it as a pace, never as a certificate.
-    const list = runIds.map((r) => `'${r.replace(/'/g, "\\'")}'`).join(",");
-    await this.command(`ALTER TABLE ${this.eventsTable()} DELETE WHERE run_id IN (${list})`, {});
-    await this.command(`ALTER TABLE ${this.table()} DELETE WHERE run_id IN (${list})`, {});
+    // ⚠️ LIGHTWEIGHT `DELETE FROM`, NOT `ALTER TABLE … DELETE` (perf review). The two are not spellings of one
+    // thing: `ALTER … DELETE` is a MUTATION, which rewrites every part it touches, and with no `PARTITION BY`
+    // on these tables that is the whole table — per sweep, hourly, on the table that grows fastest. The
+    // sibling path (`deleteOlderThan`) already used the lightweight form, so this was also two mechanisms for
+    // one job in one adapter.
+    //
+    // Still asynchronous by construction, so the count here is what we ASKED to remove rather than what has
+    // left disk. That is the same contract `deleteOlderThan` has on this engine and it is stated rather than
+    // implied — the caller uses it as a pace, never as a certificate.
+    const runs = { runIds: arrayParam(runIds) };
+    await this.command(`DELETE FROM ${this.eventsTable()} WHERE run_id IN {runIds:Array(String)}`, runs);
+    await this.command(`DELETE FROM ${this.table()} WHERE run_id IN {runIds:Array(String)}`, runs);
     return runIds.length;
   }
 
@@ -764,7 +960,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
 
   // The identity-ranked twin of `perEmitterSql`. Same columns, same *_first aliasing rule; the ORDER inside
   // every argMin is `(attempt_rank, sealed_at)` instead of `sealed_at` alone, and rank 2 never survives.
-  private perEmitterRankedSql(): string {
+  private perEmitterRankedSql(scoped: boolean): string {
     const cols = [
       "tenant",
       "source",
@@ -784,7 +980,7 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
               ${cols.map((c) => `argMin(${c}, (attempt_rank, sealed_at)) AS ${c}_first`).join(",\n              ")},
               argMin(sealed_at, (attempt_rank, sealed_at)) AS sealed_at_first
        FROM (SELECT *, ${ATTEMPT_RANK} AS attempt_rank
-             FROM ${this.table()} WHERE run_id = {runId:String})
+             FROM ${this.table()} WHERE ${runScopeSql(scoped)})
        GROUP BY run_id, emitter
        HAVING min(attempt_rank) < 2`;
   }
@@ -806,27 +1002,39 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
   //   2 — the plane declares a DIFFERENT attempt              → another execution's bytes
   // and rank 2 is DROPPED by the HAVING rather than served, so an emitter whose only rows belong to other
   // attempts contributes nothing and a run with no agreeing plane reads as absent.
-  private planeRows(runId: string, attemptId?: string): Promise<PlaneRow[]> {
+  // ── THE WORKSPACE IS A ROW FILTER ON EVERY READ PATH (perf review + arch-review 122's rung-2 twin) ──
+  //
+  // The table is `ORDER BY (tenant, sealed_at, run_id)`, so `tenant` is the FIRST primary-key column and
+  // `run_id` is the third. A lookup that names only the run therefore cannot use the primary index at all —
+  // it falls back to the `idx_run` bloom filter over every part in the table, and on an install created
+  // before that index existed (it is in the CREATE and `ALTER … ADD INDEX` only affects NEW parts) to a full
+  // scan. Every `GET /trajectories/:id`, every `usage()` read behind a run's cost badge, took that path.
+  //
+  // The read callers all KNOW the workspace — `planes(tenant, …)`, `events(tenant, …)`, `usage(tenant, …)` —
+  // so naming it costs one predicate and buys the key prefix. It is also what the Postgres twin already does,
+  // and for the stronger reason stated there: isolation that lives only in the WRITE path is isolation a
+  // backfill or a second writer ends silently.
+  //
+  // ⚠️ `seal` DELIBERATELY DOES NOT PASS IT. Its probe asks "do rows exist under this id that belong to
+  // ANOTHER workspace?", and a tenant-filtered read answers "no rows" to exactly the case it must refuse.
+  private planeRows(runId: string, attemptId?: string, tenant?: string): Promise<PlaneRow[]> {
+    const scope: Record<string, string> = tenant === undefined ? {} : { tenant };
     if (attemptId !== undefined)
       return this.select<PlaneRow>(
         `SELECT run_id, emitter, tenant_first, source_first, event_count_first, owner_first, kind_first,
                 label_first, preview_first, t0_first, usage_first, body_split_first, batch_first,
                 body_format_first, attempt_id_first, sealed_at_first
-         FROM (${this.perEmitterRankedSql()})
+         FROM (${this.perEmitterRankedSql(tenant !== undefined)})
          ORDER BY sealed_at_first ASC, emitter ASC`,
-        { runId, attemptId },
+        { runId, attemptId, ...scope },
       );
-    return this.planeRowsByClock(runId);
-  }
-
-  private planeRowsByClock(runId: string): Promise<PlaneRow[]> {
     return this.select<PlaneRow>(
       `SELECT run_id, emitter, tenant_first, source_first, event_count_first, owner_first, kind_first,
               label_first, preview_first, t0_first, usage_first, body_split_first, batch_first,
               body_format_first, attempt_id_first, sealed_at_first
-       FROM (${this.perEmitterSql("run_id = {runId:String}")})
+       FROM (${this.perEmitterSql(runScopeSql(tenant !== undefined))})
        ORDER BY sealed_at_first ASC, emitter ASC`,
-      { runId },
+      { runId, ...scope },
     );
   }
 
@@ -874,9 +1082,29 @@ export class ClickHouseTrajectoryStore implements TrajectoryStore {
     const url = new URL(this.opts.url);
     url.searchParams.set("query", sql);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(`param_${key}`, value);
+    // The ceilings ride as ClickHouse SETTINGS on the same URL. They are set on EVERY statement rather than
+    // on the ones we currently believe are expensive: which statement is expensive is a property of the data
+    // this deployment happens to hold, and that is exactly what nobody can predict from here.
+    const timeoutMs = this.opts.tuning?.timeoutMs ?? DEFAULT_CLICKHOUSE_TIMEOUT_MS;
+    url.searchParams.set("max_execution_time", String(Math.max(1, Math.ceil(timeoutMs / 1000))));
+    url.searchParams.set(
+      "max_result_bytes",
+      String(this.opts.tuning?.maxResultBytes ?? DEFAULT_CLICKHOUSE_MAX_RESULT_BYTES),
+    );
+    url.searchParams.set(
+      "max_memory_usage",
+      String(this.opts.tuning?.maxMemoryBytes ?? DEFAULT_CLICKHOUSE_MAX_MEMORY_BYTES),
+    );
+    // Never `result_overflow_mode=break`: a truncated answer served as a complete one is invented evidence,
+    // and this store holds the bytes a verdict rests on. Over the ceiling the statement THROWS (the default),
+    // and the caller sees a refusal it can report.
     let res: Response;
     try {
-      res = await this.fetchImpl(url, { method: "POST", body: body ?? "" });
+      res = await this.fetchImpl(url, {
+        method: "POST",
+        body: body ?? "",
+        signal: AbortSignal.timeout(timeoutMs + CLIENT_ABORT_GRACE_MS),
+      });
     } catch (err) {
       throw new UpstreamError(
         "UPSTREAM_ERROR",

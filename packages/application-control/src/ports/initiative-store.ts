@@ -4,6 +4,9 @@ import type { OutboxEvent } from "./run-store.js";
 export interface InitiativeListFilter {
   status?: InitiativeStatus;
   limit?: number;
+  // The dashboard's set filter — see `ProjectListFilter.statuses` (perf review). Empty array = chosen and
+  // nothing matches.
+  statuses?: readonly InitiativeStatus[];
 }
 
 export interface InitiativeStore {

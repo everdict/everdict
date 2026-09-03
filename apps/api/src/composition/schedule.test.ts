@@ -97,7 +97,7 @@ describe("wireScheduleService — the reserved 'everdict' source windows the OWN
       async deleteRuns() {
         return 0;
       },
-      async payloadRefsOlderThan() {
+      async payloadRefsOf() {
         return [];
       },
       async list() {

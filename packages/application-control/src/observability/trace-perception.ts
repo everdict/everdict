@@ -38,7 +38,7 @@ export function withTracePerception(
     // The THIRD decorator in this chain, and the third that would have dropped an optional method silently.
     // Retention's enumeration has to reach the concrete store or the sweep deletes rows whose payload
     // objects nothing can name afterwards (arch-review 120).
-    payloadRefsOlderThan: (cutoffIso, limit, after) => store.payloadRefsOlderThan(cutoffIso, limit, after),
+    payloadRefsOf: (runIds, limit, after) => store.payloadRefsOf(runIds, limit, after),
   };
 }
 

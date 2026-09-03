@@ -147,6 +147,7 @@ export type {
   LiveSessionRow,
   OutboxEvent,
   RunCreateGuard,
+  RunChildStatusCount,
   RunListOptions,
   RunScoringFence,
   RunUpdateGuard,

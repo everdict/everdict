@@ -77,6 +77,10 @@ function store(record: RunRecord): RunStore {
     async inFlightByTenant() {
       return {};
     },
+    // No children in this fixture — the queue-progress read is not this test's subject.
+    async countChildrenByStatus() {
+      return [];
+    },
     async liveSessions() {
       return [];
     },
@@ -130,7 +134,7 @@ function ledger(answer: TrajectoryUsage): { store: TrajectoryStore; bodyReads: s
       async deleteRuns() {
         return 0;
       },
-      async payloadRefsOlderThan() {
+      async payloadRefsOf() {
         return [];
       },
     },

@@ -30,7 +30,13 @@ export class InMemoryInitiativeStore implements InitiativeStore {
 
   async list(tenant: string, filter?: InitiativeListFilter): Promise<InitiativeRecord[]> {
     const rows = [...this.byId.values()]
-      .filter((record) => record.tenant === tenant && (filter?.status === undefined || record.status === filter.status))
+      .filter(
+        (record) =>
+          record.tenant === tenant &&
+          (filter?.status === undefined || record.status === filter.status) &&
+          // The set form (perf review) — ANDs with `status`, like the adapter's clauses.
+          (filter?.statuses === undefined || filter.statuses.includes(record.status)),
+      )
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     return filter?.limit !== undefined ? rows.slice(0, filter.limit) : rows;
   }
@@ -156,6 +162,11 @@ export class PgInitiativeStore implements InitiativeStore {
     if (filter?.status !== undefined) {
       conds.push(`status = $${i++}`);
       params.push(filter.status);
+    }
+    // "Any of these" — the dashboard's narrowing, done in SQL rather than after the read (perf review).
+    if (filter?.statuses !== undefined) {
+      conds.push(`status = ANY($${i++}::text[])`);
+      params.push([...filter.statuses]);
     }
     let sql = `SELECT * FROM everdict_initiatives WHERE ${conds.join(" AND ")} ORDER BY updated_at DESC`;
     if (filter?.limit !== undefined) {

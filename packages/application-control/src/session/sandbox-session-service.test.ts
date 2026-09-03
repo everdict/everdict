@@ -55,6 +55,10 @@ function fakeRunStore() {
     async inFlightByTenant() {
       return {};
     },
+    // No children in this fixture — the queue-progress read is not this test's subject.
+    async countChildrenByStatus() {
+      return [];
+    },
     // The ledger IS the session pool now — a per-process map counts only one replica's sessions. The real
     // stores additionally drop rows past their deadline (a crashed writer must not hold a slot forever);
     // that rule is the STORE's and is tested in @everdict/db, so this fake leaves it out rather than
@@ -152,7 +156,7 @@ function fakeTrajectories() {
       return 0;
     },
     // No offload in this fixture, so there is nothing to enumerate — the honest answer, not a stub.
-    async payloadRefsOlderThan() {
+    async payloadRefsOf() {
       return [];
     },
   };

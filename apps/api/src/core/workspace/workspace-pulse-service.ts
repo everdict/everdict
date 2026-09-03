@@ -9,9 +9,11 @@ import type {
   ScorecardStore,
 } from "@everdict/application-control";
 import {
+  type InitiativeStatus,
   type IssueStatus,
   OPEN_ISSUE_STATUSES,
   type PlatformEventDailyCount,
+  type ProjectStatus,
   type ScorecardRecord,
   type WorkspacePulse,
 } from "@everdict/contracts";
@@ -40,12 +42,12 @@ import {
 // A project counts as "in flight" while somebody could still work on it. `paused` is in: work that stopped
 // without being abandoned is still a commitment the workspace carries, and hiding it is how a paused project
 // stays paused for a quarter without anyone noticing.
-const LIVE_PROJECT_STATUSES = new Set(["backlog", "planned", "in_progress", "paused"]);
+const LIVE_PROJECT_STATUSES = new Set<ProjectStatus>(["backlog", "planned", "in_progress", "paused"]);
 
 // The same reading one level up. `planned` is IN, and finding that out cost a live drill: a goal is born
 // planned, so counting only `active` answered "0 goals" for a workspace that had just created one — a tile
 // that says zero about something you can see in the list is worse than no tile.
-const LIVE_INITIATIVE_STATUSES = new Set(["planned", "active"]);
+const LIVE_INITIATIVE_STATUSES = new Set<InitiativeStatus>(["planned", "active"]);
 
 // A cycle closing within this many days is what a planning conversation is about.
 const ENDING_SOON_DAYS = 7;
@@ -110,12 +112,27 @@ export class WorkspacePulseService {
       this.deps.cycles.list(tenant, { open: true }),
       this.deps.issues.countByGroup(tenant, "cycle", teamScope),
       this.deps.issues.countByGroup(tenant, "cycle", { ...teamScope, statuses: [...OPEN_ISSUE_STATUSES] }),
-      this.deps.projects.list(tenant),
-      this.deps.initiatives.list(tenant),
+      // ── EVERY READ HERE IS NARROWED IN THE STORE (perf review) ──────────────────────────────────
+      //
+      // This aggregate is the home screen: one request, eleven reads, issued together. Three of them used to
+      // be unfiltered — `projects.list(tenant)`, `initiatives.list(tenant)` and `scorecards.list(tenant, {})`
+      // — and the narrowing that mattered happened in JavaScript a few lines below (`LIVE_*_STATUSES`,
+      // `batchesBetween`). So the cost of drawing this screen grew with everything the workspace had ever
+      // done, on a connection pool every other route shares, once per page view.
+      //
+      // What the screen actually needs is what the filters now say: the LIVE planning records, and the
+      // batches of this window plus the one before it (`priorFrom` is the earliest instant `batchesBetween`
+      // can return, so nothing is lost — the JS filters below still run, over a set that is already the
+      // right size).
+      this.deps.projects.list(tenant, { statuses: [...LIVE_PROJECT_STATUSES] }),
+      this.deps.initiatives.list(tenant, { statuses: [...LIVE_INITIATIVE_STATUSES] }),
       this.deps.tasks.list(tenant, { status: "pending" }),
       this.deps.tasks.list(tenant, { status: "in_progress" }),
       this.deps.approvals.list(tenant, { status: "pending" }),
-      this.deps.scorecards.list(tenant, query.visibleTeams === undefined ? {} : { visibleTeams: query.visibleTeams }),
+      this.deps.scorecards.list(tenant, {
+        createdSince: priorFrom,
+        ...(query.visibleTeams === undefined ? {} : { visibleTeams: query.visibleTeams }),
+      }),
       this.deps.events?.dailyCounts(tenant, { from: window.from, to: window.to }) ?? Promise.resolve([]),
     ]);
 

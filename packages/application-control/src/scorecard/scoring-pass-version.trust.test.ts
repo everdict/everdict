@@ -74,6 +74,10 @@ describeTrust("TRUST-36 — a re-score at a NEW judge version actually re-judges
       async inFlightByTenant() {
         return {};
       },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
+      },
       async liveSessions() {
         return [];
       },

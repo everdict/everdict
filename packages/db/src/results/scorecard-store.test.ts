@@ -668,7 +668,7 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     const client: SqlClient = {
       async query(text: string, params?: unknown[]) {
         calls.push({ text, params });
-        if (text.includes("SELECT count(*)")) return { rows: [{ trajectories: "2", events: "7" }] as never[] };
+        if (text.includes("COUNT(DISTINCT run_id)")) return { rows: [{ trajectories: "2", events: "7" }] as never[] };
         if (text.startsWith("DELETE")) return { rows: [{ run_id: "a" }, { run_id: "b" }] as never[] };
         return { rows: [] as never[] };
       },
@@ -679,7 +679,13 @@ describe("TrajectoryStore — the owned evidence copy (P5 rung 1)", () => {
     expect(await store.deleteOlderThan("2026-07-01T00:00:00.000Z")).toBe(2);
     expect(calls[1]?.text).toMatch(/DELETE FROM everdict_trajectories WHERE sealed_at < \$1/);
     // Every plane's events ride the meter, not just the header's — a service segment is stored evidence too.
-    expect(calls[0]?.text).toMatch(/SUM\(event_count \+ segment_event_count\)/);
+    // ⚠️ AND EACH PLANE IS DATED BY ITS OWN STAMP (perf review). This used to read
+    // `SUM(event_count + segment_event_count)` off the header row, which attributed every segment a run had
+    // ever gathered to the header's seal moment: a late service plane metered as zero, an old one as this
+    // hour's. The segments table carries the window predicate itself now — see
+    // `ingestion-window.counterexample.test.ts` for the behavioural half.
+    expect(calls[0]?.text).toContain("everdict_trajectory_segments");
+    expect(calls[0]?.text).not.toContain("segment_event_count");
   });
 
   it("Pg impl seals with ON CONFLICT DO NOTHING (first write wins at the row level)", async () => {

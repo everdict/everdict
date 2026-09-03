@@ -1,4 +1,4 @@
-import type { RunRecord } from "@everdict/contracts";
+import type { RunRecord, RunStatus, ScorecardStatus } from "@everdict/contracts";
 import type { ReplicaRegistry } from "../ports/replica-registry.js";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
@@ -30,7 +30,10 @@ export const INTERRUPTED = {
   message: "The run was interrupted by a control-plane restart. Please run it again.",
 };
 
-const ACTIVE = new Set(["queued", "running"]);
+// Typed by the closed union so the same list can narrow the READ, not only the array (perf review).
+const ACTIVE_STATUSES: readonly RunStatus[] = ["queued", "running"];
+const ACTIVE_SCORECARD_STATUSES: readonly ScorecardStatus[] = ["queued", "running"];
+const ACTIVE = new Set<string>(ACTIVE_STATUSES);
 // "we could not read who is alive" — distinct from "nobody is alive", which would clear every owned record.
 const UNKNOWN = "unknown" as const;
 
@@ -161,7 +164,9 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   const claim = deps.owner === undefined ? undefined : { ownerReplica: deps.owner };
 
   // ① Orphaned batches — resume when possible; tombstone (plus their still-active children) when not.
-  const cards = (await deps.scorecards.list()).filter((c) => ACTIVE.has(c.status));
+  // Narrowed in the query for the reason the run read below is (perf review): this is tenant-less by design,
+  // so an unfiltered list is every batch every workspace has ever submitted, read at boot.
+  const cards = await deps.scorecards.list(undefined, { statuses: [...ACTIVE_SCORECARD_STATUSES] });
   for (const c of cards) {
     if (drivenByAnother(c.ownerReplica)) {
       liveCount += 1;
@@ -269,7 +274,14 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{
   let runsResumed = 0;
   let sessionCount = 0;
   if (deps.runs) {
-    const runs = (await deps.runs.list()).filter((r) => ACTIVE.has(r.status));
+    // ── NARROWED IN THE QUERY, ACROSS EVERY WORKSPACE (perf review) ──────────────────────────────
+    //
+    // Boot recovery is deliberately tenant-less: it adopts orphans for the whole install. That made this the
+    // single widest read in the process — `SELECT *` over the ENTIRE run ledger, every workspace, every
+    // finished run's `result` jsonb — to keep the handful of rows still in flight. Boot time therefore grew
+    // with total history, which is the worst thing to make slow: it is what a crashed replica has to get
+    // through before it can serve anything.
+    const runs = await deps.runs.list(undefined, { statuses: ACTIVE_STATUSES });
     for (const r of runs) {
       // Session runs (held-open compute: sandbox shells, worlds, browsers) are NOT resumable work — there is
       // no caseSpec to re-drive and no backend job to adopt, so the old path "resumed" them into a permanent

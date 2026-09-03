@@ -296,6 +296,12 @@ function fieldsFor(kind: string): OffloadField[] {
 // pace rather than a cap — the rows it could not account for are simply deleted by a later pass.
 export const PAYLOAD_SWEEP_LIMIT = 5_000;
 
+// How many RUNS one ref-enumeration statement may span. Not a page of results — a bound on the WORK a single
+// statement does, because that work is `runs × events-per-run × json-leaves-per-event` and only the first
+// factor is ours to choose. 250 keeps a statement in the hundreds of milliseconds on an ordinary ledger and
+// inside the shared `statement_timeout` even on a long-horizon one; the sweep simply issues more of them.
+export const REF_SCAN_RUNS = 250;
+
 export interface TrajectoryPayloadArtifacts extends ArtifactStore {
   // Retention needs an artifact store that can DELETE, which the shared `ArtifactStore` port deliberately
   // does not declare (only two owners want it, and both hold a concrete store). An outage THROWS — an
@@ -623,7 +629,7 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
   // sweep deletes the row. A window in which expired evidence reads as unresolvable is the honest cost.
   //
   // The enumeration is REQUIRED on the port, not optional, and that is this change's other half: the first
-  // draft asked `this.inner.payloadRefsOlderThan === undefined` and fell back to the plain delete — and
+  // draft asked `this.inner.payloadRefsOf === undefined` and fell back to the plain delete — and
   // `NamingTrajectoryStore` sits between this decorator and the concrete store, so the fallback is the arm
   // every production deployment would have taken (L2 — a read that did not happen is not an empty answer).
   async deleteOlderThan(cutoffIso: string): Promise<number> {
@@ -647,7 +653,6 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     const page = this.sweepLimit;
     const runs = await this.inner.expiredRuns(cutoffIso, page);
     if (runs.length === 0) return 0;
-    const wanted = new Set(runs.map((r) => r.runId));
 
     // ── FIRST, WHAT THE ROWS NAME ────────────────────────────────────────────────────────────────
     //
@@ -655,30 +660,33 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     // `limit + 1`st object permanently, named by nothing any later pass could find. The cursor pages until
     // the enumeration is exhausted, and it pages on the whole ROW because one ref legitimately has several
     // owners (arch-review 124).
-    let after: TrajectoryPayloadRef | undefined;
-    for (;;) {
-      const refs: TrajectoryPayloadRef[] = await this.inner.payloadRefsOlderThan(cutoffIso, page, after);
-      if (refs.length === 0) break;
-      for (const owned of refs) {
-        // A row outside this sweep's page is not ours to act on yet — its own sweep will take it.
-        if (!wanted.has(owned.runId)) continue;
-        const key = artifactKeyOf(owned.ref);
-        // A ref this store did not mint is not ours to delete — and it is not an error either: an event may
-        // carry a handle to somebody else's object store entirely.
-        if (key === undefined) continue;
-        // …and neither is a ref that names ANOTHER trajectory's object. `TraceEvent` is the schema a
-        // producer's submission is validated by, so a caller can write `outputRef` into its own trace; the
-        // row says which trajectory holds this ref, and the key says which one owns the bytes. They must
-        // agree or the delete is somebody else's evidence (arch-review 121).
-        if (!ownsPayloadKey(key, owned.tenant, owned.runId)) continue;
-        // Not swallowed. An outage here must stop the sweep before it deletes the rows that name these keys,
-        // because a swallowed failure is precisely how the bytes became unfindable in the first place.
-        await this.artifacts.remove(key);
-      }
-      if (refs.length < page) break;
-      after = refs[refs.length - 1];
-      if (after === undefined) break;
-    }
+    //
+    // ⚠️ AND THE ENUMERATION IS SCOPED TO THAT SET, NOT TO THE CUTOFF (perf review). It used to ask for every
+    // expired trajectory's refs and then discard all but this page's with `if (!wanted.has(owned.runId))` —
+    // so draining one page of runs re-read the WHOLE expired corpus, and the sweep's cost grew with total
+    // retained evidence rather than with what it was deleting. `payloadRefsOf(runIds, …)` puts the filter in
+    // the query, where the caller's own knowledge belongs, and the JS filter is gone with the read that
+    // needed it: a predicate that can no longer fire is not a safety net, it is a claim nobody checks.
+    //
+    // ⚠️ …AND THE SCOPE IS CHUNKED, BECAUSE A PAGE OF RUNS IS NOT A BOUND ON WORK (perf review, measured).
+    // Scoping the enumeration to the claimed runs fixed the corpus-sized drain; it left the per-statement
+    // cost proportional to `runs × events-per-run × json-leaves-per-event`, and only the FIRST factor is
+    // bounded here. Measured on a seeded ledger, one enumeration statement over a page of runs costs:
+    //
+    //     500 runs → 311 ms      2000 runs → 1.3 s      5000 runs → 3.6 s     (40 events/run)
+    //
+    // Linear in the page, as expected — and the events-per-run factor is exactly what
+    // `long-horizon-trace-reads.md` exists about: hundreds of turns, tool results holding file dumps. A
+    // workspace like that multiplies those numbers by ten or fifty, and then every enumeration exceeds the
+    // `statement_timeout` the request lane shares. The sweep would report `failed` on every pass and never
+    // converge — a bound that turns a slow sweep into a stuck one is worse than the unbounded read it
+    // replaced.
+    //
+    // So the RUN SET is walked in chunks: each statement is bounded by a small number of runs, the accounting
+    // still covers exactly the page (the sweep deletes the same rows), and total work is unchanged.
+    const runIds = runs.map((r) => r.runId);
+    for (let i = 0; i < runIds.length; i += REF_SCAN_RUNS)
+      await this.drainRefs(runIds.slice(i, i + REF_SCAN_RUNS), page);
 
     // ── THEN, WHAT IS ACTUALLY THERE ─────────────────────────────────────────────────────────────
     //
@@ -698,6 +706,33 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
     return this.inner.deleteRuns(runs.map((r) => r.runId));
   }
 
+  // One chunk of the claimed run set, drained to exhaustion. Split out of `deleteOlderThan` so the cursor
+  // loop and the chunk loop are each readable on their own — and so the bound above has a name.
+  private async drainRefs(runIds: readonly string[], page: number): Promise<void> {
+    let after: TrajectoryPayloadRef | undefined;
+    for (;;) {
+      const refs: TrajectoryPayloadRef[] = await this.inner.payloadRefsOf(runIds, page, after);
+      if (refs.length === 0) return;
+      for (const owned of refs) {
+        const key = artifactKeyOf(owned.ref);
+        // A ref this store did not mint is not ours to delete — and it is not an error either: an event may
+        // carry a handle to somebody else's object store entirely.
+        if (key === undefined) continue;
+        // …and neither is a ref that names ANOTHER trajectory's object. `TraceEvent` is the schema a
+        // producer's submission is validated by, so a caller can write `outputRef` into its own trace; the
+        // row says which trajectory holds this ref, and the key says which one owns the bytes. They must
+        // agree or the delete is somebody else's evidence (arch-review 121).
+        if (!ownsPayloadKey(key, owned.tenant, owned.runId)) continue;
+        // Not swallowed. An outage here must stop the sweep before it deletes the rows that name these keys,
+        // because a swallowed failure is precisely how the bytes became unfindable in the first place.
+        await this.artifacts.remove(key);
+      }
+      if (refs.length < page) return;
+      after = refs[refs.length - 1];
+      if (after === undefined) return;
+    }
+  }
+
   // Forwarded verbatim: which runs are expired and which rows to remove are the INNER store's questions.
   // This decorator owns only what happens to the BYTES in between — see `deleteOlderThan`.
   expiredRuns(cutoffIso: string, limit: number): Promise<Array<{ tenant: string; runId: string }>> {
@@ -710,11 +745,11 @@ export class OffloadingTrajectoryStore implements TrajectoryStore {
 
   // Forwarded verbatim: the refs are the INNER store's rows to enumerate, and this decorator's only business
   // with them is deleting what they name.
-  payloadRefsOlderThan(
-    cutoffIso: string,
+  payloadRefsOf(
+    runIds: readonly string[],
     limit: number,
     after?: TrajectoryPayloadRef,
   ): Promise<TrajectoryPayloadRef[]> {
-    return this.inner.payloadRefsOlderThan(cutoffIso, limit, after);
+    return this.inner.payloadRefsOf(runIds, limit, after);
   }
 }

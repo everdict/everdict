@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { z } from "zod";
 import { teamCeiling } from "../../common/team-scope.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, teamForNew } from "../route-context.js";
+import { runActivityPage } from "./request/run-page.js";
 import { SubmitBodySchema } from "./request/submit.js";
 import { runDocs } from "./run.docs.js";
 import { serveBatchChildren } from "./serve.js";
@@ -115,17 +116,19 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       const { scorecardId, scope, runner, limit, offset } = req.query;
       const parsedLimit = limit !== undefined && /^\d+$/.test(limit) ? Number(limit) : undefined;
       const parsedOffset = offset !== undefined && /^\d+$/.test(offset) ? Number(offset) : undefined;
+      // Every branch a PERSON reaches carries a page size (`runActivityPage` — the shared owner, so the MCP
+      // twin cannot drift). The batch drill-down is the deliberate exception; see that module.
       const opts = scorecardId
         ? { scorecardId }
         : runner
           ? {
               runnerId: runner,
-              ...(parsedLimit ? { limit: parsedLimit } : {}),
+              ...runActivityPage(parsedLimit),
               ...(parsedOffset ? { offset: parsedOffset } : {}),
             }
           : scope === "all"
-            ? { includeChildren: true }
-            : undefined;
+            ? { includeChildren: true, ...runActivityPage(parsedLimit) }
+            : runActivityPage(parsedLimit);
       const runs = await deps.service.list(principal.workspace, {
         ...opts,
         viewer: principal.subject,

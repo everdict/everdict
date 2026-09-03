@@ -371,6 +371,10 @@ describe("ScorecardScoreService scoreCase (same predicate as the plan)", () => {
       async inFlightByTenant() {
         return {};
       },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
+      },
       async liveSessions() {
         return [];
       },
@@ -488,6 +492,10 @@ describe("ScorecardScoreService prepareScore — strip-first makes the Temporal 
       },
       async inFlightByTenant() {
         return {};
+      },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
       },
       async liveSessions() {
         return [];
@@ -882,6 +890,10 @@ describe("scoring-pass ownership (arch-review 8 P0)", () => {
       },
       async countActiveByEnvelope() {
         return 0;
+      },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
       },
       async liveSessions() {
         return [];
@@ -1659,6 +1671,10 @@ describe("ScorecardScoreService carrier selection — the receipt names the row,
       },
       async inFlightByTenant() {
         return {};
+      },
+      // No children in this fixture — the queue-progress read is not this test's subject.
+      async countChildrenByStatus() {
+        return [];
       },
       async liveSessions() {
         return [];

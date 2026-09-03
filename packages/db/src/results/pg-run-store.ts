@@ -4,6 +4,7 @@ import type {
   LiveSessionQuery,
   LiveSessionRow,
   OutboxEvent,
+  RunChildStatusCount,
   RunCreateGuard,
   RunListOptions,
   RunStore,
@@ -454,6 +455,7 @@ export class PgRunStore implements RunStore {
            OR COALESCE(origin->>'actor', created_by) = $7
          )
          AND ($9::text[] IS NULL OR team_id IS NULL OR team_id = ANY($9::text[]))
+         AND ($10::text[] IS NULL OR status = ANY($10::text[]))
        ORDER BY created_at DESC, id DESC
        LIMIT $5 OFFSET $6`,
       [
@@ -466,9 +468,32 @@ export class PgRunStore implements RunStore {
         opts?.viewer ?? null,
         [...PERSONAL_RUN_KINDS],
         opts?.visibleTeams ?? null,
+        // The lifecycle narrowing ($10) — the queue snapshot and boot recovery want only what is still
+        // moving, and reading the whole ledger to filter it afterwards is what made both grow without bound
+        // (perf review). NULL = every status, which is what every other caller passes.
+        opts?.statuses === undefined ? null : [...opts.statuses],
       ],
     );
     return res.rows.map(rowToRecord);
+  }
+
+  // One grouped read for every batch on the screen — see `RunChildStatusCount`. `parent_scorecard_id` is
+  // indexed (mig 0029) and the projection is three narrow columns, so this costs nothing like the per-batch
+  // `SELECT *` it replaces. Tenant-scoped, because a count is a read and every read here is.
+  async countChildrenByStatus(tenant: string, scorecardIds: readonly string[]): Promise<RunChildStatusCount[]> {
+    if (scorecardIds.length === 0) return [];
+    const res = await this.client.query<{ parent_scorecard_id: string; status: string; n: string | number }>(
+      `SELECT parent_scorecard_id, status, count(*) AS n
+         FROM everdict_runs
+        WHERE tenant = $1 AND parent_scorecard_id = ANY($2::text[])
+        GROUP BY parent_scorecard_id, status`,
+      [tenant, [...scorecardIds]],
+    );
+    return res.rows.map((r) => ({
+      scorecardId: r.parent_scorecard_id,
+      status: r.status as RunChildStatusCount["status"],
+      count: Number(r.n),
+    }));
   }
 
   async deleteByScorecard(scorecardId: string): Promise<number> {

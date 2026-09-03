@@ -1,4 +1,4 @@
-import { NotFoundError, TRACE_EVAL_REF } from "@everdict/contracts";
+import { NotFoundError, type RunStatus, type ScorecardStatus, TRACE_EVAL_REF } from "@everdict/contracts";
 import type { RunStore } from "../ports/run-store.js";
 import type { ScorecardStore } from "../ports/scorecard-store.js";
 import type { ScheduleRecordWithNext } from "../schedule/schedule-service.js";
@@ -140,7 +140,12 @@ export interface QueueServiceDeps {
   now?: () => string;
 }
 
-const ACTIVE = new Set(["queued", "running"]);
+// The two lifecycle states this snapshot is about. Typed by the closed union so the same set can narrow the
+// READ as well as the array (perf review) — a `Set<string>` cannot be handed to a store filter that names the
+// statuses, and widening the filter to take strings would be the wrong direction.
+const ACTIVE_STATUSES: readonly RunStatus[] = ["queued", "running"];
+const ACTIVE_SCORECARD_STATUSES: readonly ScorecardStatus[] = ["queued", "running"];
+const ACTIVE = new Set<string>(ACTIVE_STATUSES);
 
 export class QueueService {
   private readonly now: () => string;
@@ -153,8 +158,14 @@ export class QueueService {
 
   async snapshot(tenant: string, subject?: string): Promise<QueueSnapshot> {
     const [cards, runs, schedules, runtimes, myRunners] = await Promise.all([
-      this.deps.scorecards.list(tenant),
-      this.deps.runs ? this.deps.runs.list(tenant) : Promise.resolve([]),
+      // ── NARROWED IN THE STORE, NOT AFTER IT (perf review) ────────────────────────────────────────
+      //
+      // Both of these read the ACTIVE rows and nothing else, and both used to fetch the whole collection to
+      // find them — `runs.list(tenant)` in particular is `SELECT *` over the run ledger with no limit, so it
+      // carried every finished run's `result` jsonb (snapshots included) to count the handful still moving.
+      // The queue screen polls; the cost of one poll grew with everything the workspace had ever executed.
+      this.deps.scorecards.list(tenant, { statuses: [...ACTIVE_SCORECARD_STATUSES] }),
+      this.deps.runs ? this.deps.runs.list(tenant, { statuses: ACTIVE_STATUSES }) : Promise.resolve([]),
       this.deps.schedules ? this.deps.schedules.list(tenant).catch(() => []) : Promise.resolve([]),
       this.deps.runtimes ? this.deps.runtimes.list(tenant).catch(() => []) : Promise.resolve([]),
       subject && this.deps.myRunners ? this.deps.myRunners(subject).catch(() => []) : Promise.resolve([]),
@@ -165,25 +176,41 @@ export class QueueService {
     const activeRuns = runs.filter((r) => ACTIVE.has(r.status));
 
     // Progress of running batches — child run counts (+ total number of dataset cases, omitted if resolution fails).
+    //
+    // ── ONE GROUPED READ, NOT ONE READ PER BATCH (perf review) ────────────────────────────────────
+    //
+    // This used to call `runs.list(tenant, { scorecardId: c.id })` inside the map — N+1 in the number of
+    // running batches, and each of the N was `SELECT *` over every child of a batch that may hold six
+    // hundred cases, carrying each one's `result` jsonb, to produce three integers. `countChildrenByStatus`
+    // asks the question the screen is actually asking, for every batch at once.
+    const running = activeCards.filter((c) => c.status === "running");
+    const childCounts =
+      this.deps.runs === undefined
+        ? []
+        : await this.deps.runs.countChildrenByStatus(
+            tenant,
+            running.map((c) => c.id),
+          );
+    const countOf = (scorecardId: string, statuses: readonly RunStatus[]): number =>
+      childCounts
+        .filter((row) => row.scorecardId === scorecardId && statuses.includes(row.status))
+        .reduce((sum, row) => sum + row.count, 0);
     const progressOf = new Map<string, QueueItem["progress"]>();
     await Promise.all(
-      activeCards
-        .filter((c) => c.status === "running")
-        .map(async (c) => {
-          const children = this.deps.runs ? await this.deps.runs.list(tenant, { scorecardId: c.id }) : [];
-          const done = children.filter((r) => r.status === "succeeded" || r.status === "failed").length;
-          const active = children.filter((r) => r.status === "running").length;
-          // Fan-out parked behind the runtime's runners/slots — dispatched but not yet leased/executing. This is the
-          // count that was previously invisible: a concurrency-8 batch on one runner reads as active 1 / waiting 7.
-          const waiting = children.filter((r) => r.status === "queued").length;
-          // A partial run's denominator is the SELECTED subset size — "9/601" for a 12-case subset misreads as 1% done.
-          const total =
-            c.subset?.selected ??
-            (this.deps.caseCountFor
-              ? await this.deps.caseCountFor(tenant, c.dataset.id, c.dataset.version).catch(() => undefined)
-              : undefined);
-          progressOf.set(c.id, { done, active, waiting, ...(total !== undefined ? { total } : {}) });
-        }),
+      running.map(async (c) => {
+        const done = countOf(c.id, ["succeeded", "failed"]);
+        const active = countOf(c.id, ["running"]);
+        // Fan-out parked behind the runtime's runners/slots — dispatched but not yet leased/executing. This is the
+        // count that was previously invisible: a concurrency-8 batch on one runner reads as active 1 / waiting 7.
+        const waiting = countOf(c.id, ["queued"]);
+        // A partial run's denominator is the SELECTED subset size — "9/601" for a 12-case subset misreads as 1% done.
+        const total =
+          c.subset?.selected ??
+          (this.deps.caseCountFor
+            ? await this.deps.caseCountFor(tenant, c.dataset.id, c.dataset.version).catch(() => undefined)
+            : undefined);
+        progressOf.set(c.id, { done, active, waiting, ...(total !== undefined ? { total } : {}) });
+      }),
     );
 
     const items: Array<{ lane: string; item: QueueItem }> = [
