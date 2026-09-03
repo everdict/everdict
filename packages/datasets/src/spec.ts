@@ -33,6 +33,10 @@ export const CaseMappingSchema = z.object({
   imageField: z.string().optional(), // per-row compute image field
   image: z.string().optional(), // common compute image (imageField wins per-row)
   placement: z.string().optional(), // placement.target for all cases (registered runtime id)
+  // A dialogue benchmark's row: the USER's brief becomes a model-driven user, bounded by maxTurns (required
+  // beside it — see the CaseMapping interface, which this schema stays isomorphic to).
+  personaField: z.string().optional(),
+  maxTurns: z.number().int().positive().max(50).optional(),
   testCmdField: z.string().optional(),
   tagFields: z.array(z.string()).optional(),
   extraGraders: z.array(GraderSpecSchema).optional(),

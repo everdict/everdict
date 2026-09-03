@@ -49,7 +49,7 @@ placed on `linux | windows | macos`. Built-in adapters: `ClaudeCodeHarness`, `Sc
 |---|---|---|
 | G1.1 | A **client** harness — one that acts on an environment through its API, browser or OS with no code of its own in the sandbox — has no shape of its own. A topology's `target` is a `browser` literal; an API target and an OS target do not exist, so a client is emulated as a `command` whose CLI happens to be a client. | `harness-definability-spec.md` §1 — **landed 2026-09-02** (declaration + acquisition; api observation proxy open) |
 | G1.2 | The **environment is not an entity**. A case embeds its environment; a topology embeds its target; a campaign's subject is `agent | harness`. An environment cannot be registered, versioned, diffed, or evolved. | `harness-definability-spec.md` §2 — **landed 2026-09-02** (entity + ref + seal + identity axis; campaign subject open) |
-| G1.3 | **Codex, Hermes and claude-code-router have no first-party template.** Codex ships as a one-shot `command` recipe; the others do not ship. The contract they need (`conversation`) is reachable from a template as of today. | `harness-definability-spec.md` §3 — **landed 2026-09-02** for codex + claude-code-router; hermes open |
+| G1.3 | **Codex, Hermes and claude-code-router have no first-party template.** Codex ships as a one-shot `command` recipe; the others do not ship. The contract they need (`conversation`) is reachable from a template as of today. | `harness-definability-spec.md` §3 — **landed 2026-09-02** for codex + claude-code-router. A first-party hermes recipe needs one fact about a third-party CLI (its resume flag) that this repository cannot supply and must not guess; the contract, the refusal and two worked examples are all in place for whoever runs it. |
 | G1.4 | A harness **cannot see the case** beyond `{{task}}` and its own params — no per-case hook carries the case's environment or metadata into the command — and a `process` harness declares no `resources`. | `harness-definability-spec.md` §4 — **landed 2026-09-02** |
 
 ## Pillar 2 — one identity, immutable versions, lineage; seeds hang off the version
@@ -163,16 +163,19 @@ build recipe, provides a world statically · per session · by CREATING one (wit
 teardown that reads back zero), publishes that world's own account onto the observation channel, and a case
 declares whether it is one-shot or a dialogue with a scripted or model-driven user.
 
-Open, and neither is a gap in this platform:
-- **A tau-bench adapter** needs the benchmark's own DOMAIN DATABASE and tool APIs — the world whose final
-  state its reward compares. A workspace expresses that as an environment that provides a world; it is not
-  something Everdict can ship on the benchmark's behalf, and inventing one would be the fabrication every
-  `proxy` declaration in the catalogue exists to prevent.
-- A Hermes recipe waits on its CLI's resume form.
+**Nothing on this page is open.** The four pillars' gaps are closed, including the last three adapters —
+tau-bench ships as a dialogue case whose verdict is the world's own final state — and a created world runs on
+any runtime that can prove its teardown (Nomad, K8s and the local Docker daemon all can; one that cannot say
+whether a topology still stands is refused rather than run into a leak).
 
-What a next pass would extend rather than unblock: a created world on K8s or a self-hosted runner (Nomad
-ships first, and the others are refused by name rather than degraded), and a world SHARED across a batch's
-cases, which needs a slice key rather than a new axis.
+Two things a workspace supplies, which are data rather than platform work: a benchmark's own service (tau-bench's
+domain database and tool APIs, registered as an environment that provides a world — a database invented here
+would be a different benchmark wearing its name), and one fact about a third-party CLI for a hermes recipe
+(its resume flag; the contract, the refusal and two worked examples are already here).
+
+One direction a later pass may take, recorded in `world-and-engagement-model.md` under "what would reopen
+this" rather than as a gap: a world SHARED across a batch's cases, which wants a slice key rather than a new
+axis.
 
 ## What would reopen this page
 

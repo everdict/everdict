@@ -7,6 +7,7 @@ import {
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
+import { worldStateGrader } from "./world-state.js";
 
 import { type Judge, JudgeGrader } from "./judge.js";
 import { RewardFileGrader } from "./reward-file.js";
@@ -147,6 +148,14 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
         failToPass: strArray(s.config?.failToPass),
         passToPass: strArray(s.config?.passToPass),
         ...(typeof s.config?.testCmd === "string" ? { testCmd: s.config.testCmd } : {}),
+      });
+    case "world-state":
+      // What the WORLD looks like after the agent acted on it, read off the platform's observation channel
+      // (world-and-engagement-model.md). No compute needed: the world published its own account and the
+      // platform already fetched it.
+      return worldStateGrader({
+        ...(s.config?.expect !== undefined ? { expect: s.config.expect } : {}),
+        ...(optStr(s.config?.path) ? { path: optStr(s.config?.path) } : {}),
       });
     case "steps":
       return stepsGrader;

@@ -97,7 +97,7 @@ add, all member+ (`datasets:write`), all immutable-on-register:
     (env-kind isomorphism above) is unchanged — it's just no longer a mandatory quiz for the common QA case.
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench (lite +
   verified)/browsecomp/webarena/mind2web/gsm8k/
-  osworld + the travel family below); `POST /benchmarks/import {benchmark}` pulls it. Each entry declares what a
+  osworld/tau-bench + the travel family below); `POST /benchmarks/import {benchmark}` pulls it. Each entry declares what a
   score from it IS (`scoring`: `official` names the evaluator it reproduces; `proxy` names what it approximates
   — browsecomp/webarena/osworld/the travel family are proxies, and a proxy number is an everdict-internal
   regression signal, never a leaderboard one). Mind the **env kind** each entry maps to: the

@@ -32,6 +32,7 @@ export {
 export { type EvidenceAssessment, assessEvidence } from "./assess-evidence.js";
 export { makeGraders } from "./make-graders.js";
 export { judgeFromEnv, makeGradersFromEnv, skipGrader } from "./judge-env.js";
+export { worldStateGrader, subsetDefects, type WorldStateConfig } from "./world-state.js";
 export {
   modelUser,
   userSimulatorFromEnv,

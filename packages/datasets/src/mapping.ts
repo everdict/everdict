@@ -9,6 +9,14 @@ import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSp
 // (the task's world on disk); otherwise a browser env (with/without startUrl).
 // Scoring: answerField→answer-match (contains|exact via answerMode), testCmdField→tests-pass (per-row cmd), extraGraders always.
 export interface CaseMapping {
+  // ── A DIALOGUE BENCHMARK'S ROW (world-and-engagement-model.md, axis 2) ─────────────────────────────
+  //
+  // `personaField` names the column holding the USER's brief — who they are and what they want — which
+  // becomes a model-driven user. `maxTurns` bounds the exchange and is REQUIRED alongside it: a scripted user
+  // runs out of lines and a model does not, so a persona with no bound maps to no engagement at all rather
+  // than to an unbounded conversation.
+  personaField?: string;
+  maxTurns?: number;
   idField: string;
   taskField: string;
   taskTemplate?: string; // If present, task = the {field}-interpolated result (composing multiple fields — e.g. question + evidence document URL). Otherwise taskField as-is.
@@ -96,10 +104,26 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   for (const g of m.extraGraders ?? []) graders.push(g);
   const tags = (m.tagFields ?? []).map((f) => str(row[f])).filter(Boolean);
   const image = m.imageField ? str(row[m.imageField]) || (m.image ?? "") : (m.image ?? ""); // per-row imageField > common image
+  // A DIALOGUE benchmark's row carries the user's brief rather than a single prompt (world-and-engagement-
+  // model.md, axis 2). Mapping it here is what lets such a benchmark arrive as data instead of as code: the
+  // persona field becomes a model-driven user, and `maxTurns` bounds it (the schema requires one).
+  const persona = m.personaField ? str(row[m.personaField]) : "";
+  const engagement =
+    persona && m.maxTurns !== undefined
+      ? {
+          kind: "dialogue" as const,
+          // `done` carries the schema's own default rather than being omitted: `EvalCase` is the PARSED
+          // shape here (the mapper returns one), and the parse is what fills a default — this function builds
+          // the object directly, so an omitted default would be a missing required field.
+          user: { kind: "model" as const, persona, done: "###STOP###" },
+          maxTurns: m.maxTurns,
+        }
+      : undefined;
   return {
     id: str(row[m.idField]) || `${meta.id}-${i}`,
     env,
     task: m.taskTemplate ? interpolateFields(m.taskTemplate, row) : str(row[m.taskField]),
+    ...(engagement ? { engagement } : {}),
     ...(expected ? { expected } : {}),
     graders,
     ...(image ? { image } : {}),

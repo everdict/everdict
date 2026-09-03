@@ -1,6 +1,12 @@
 import type { WorldCreator } from "@everdict/application-control";
-import { BadRequestError, nomadTopologyTransport } from "@everdict/contracts";
-import { NomadTopologyRuntime, topologyWorldCreator } from "@everdict/topology";
+import { BadRequestError, k8sTopologyTransport, nomadTopologyTransport } from "@everdict/contracts";
+import {
+  DockerTopologyRuntime,
+  K8sTopologyRuntime,
+  NomadTopologyRuntime,
+  type TopologyRuntime,
+  topologyWorldCreator,
+} from "@everdict/topology";
 import type { ResolvedRuntime } from "../common/runtime-compute.js";
 
 // ── THE PRODUCTION CREATOR OF WORLDS (docs/architecture/world-and-engagement-model.md, 3.9) ──────────
@@ -31,17 +37,32 @@ export function buildWorldCreator(deps: {
         { tenant, runtime: target },
         `no such runtime '${target}' in this workspace — the world was not created`,
       );
-    if (resolved.spec.kind !== "nomad")
+    // WHAT A CREATOR ACTUALLY NEEDS is narrower than what a browser session needs, and copying that lane's
+    // Nomad-only constraint was the wrong inheritance: a session needs `provisionBrowserEnv` plus a CDP this
+    // control plane can reach, while a WORLD needs only ensure/teardown/describe — which Nomad, K8s and the
+    // local Docker runtime all implement. What is genuinely required is that the runtime can PROVE a teardown
+    // (`describeTopology`), because a world we cannot say is gone is the leak the ledger exists to prevent.
+    const runtime: TopologyRuntime =
+      resolved.spec.kind === "nomad"
+        ? new NomadTopologyRuntime({
+            addr: resolved.spec.addr,
+            ...(resolved.apiToken ? { apiToken: resolved.apiToken } : {}),
+            ...nomadTopologyTransport(resolved.spec),
+          })
+        : resolved.spec.kind === "k8s"
+          ? new K8sTopologyRuntime({
+              ...(resolved.spec.context ? { context: resolved.spec.context } : {}),
+              ...k8sTopologyTransport(resolved.spec),
+            })
+          : // `local` — the deployment's own Docker daemon, which is what a self-hosted runner and a dev
+            // control plane both stand on.
+            new DockerTopologyRuntime();
+    if (runtime.describeTopology === undefined)
       throw new BadRequestError(
         "BAD_REQUEST",
         { runtime: target, kind: resolved.spec.kind },
-        `only Nomad runtimes can host a created world today (this one is '${resolved.spec.kind}') — K8s and self-hosted are follow-ups, and a world this control plane could not tear down is worse than a case that does not run`,
+        `the '${resolved.spec.kind}' runtime cannot say whether a topology is still standing, so a world created on it could never be proved gone — the case is refused rather than run into a leak`,
       );
-    const runtime = new NomadTopologyRuntime({
-      addr: resolved.spec.addr,
-      ...(resolved.apiToken ? { apiToken: resolved.apiToken } : {}),
-      ...nomadTopologyTransport(resolved.spec),
-    });
     return topologyWorldCreator(runtime);
   };
   return {

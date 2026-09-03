@@ -85,6 +85,7 @@ describe("BenchmarkAdapter catalog", () => {
       "osworld",
       "swe-bench-lite",
       "swe-bench-verified",
+      "tau-bench",
       "travelbench",
       "traveleval",
       "travelplanner",
@@ -278,5 +279,36 @@ describe("every catalog adapter states what a score from it IS", () => {
     expect(String(answer[0]?.config?.rubric)).toContain("Ada Lovelace");
     const intent = BENCHMARK_CATALOG.webarena?.graderBuilder?.({ task_id: 1, intent: "cancel the order" }) ?? [];
     expect(String(intent[0]?.config?.rubric)).toContain("cancel the order");
+  });
+});
+
+// tau-bench is the first catalog entry whose case is a CONVERSATION and whose verdict is the WORLD's state.
+// Both had to exist first (world-and-engagement-model.md), so this pins that the mapping actually produces
+// them — a recipe that mapped the row but lost the dialogue would import as a one-shot and measure a first
+// turn while calling itself tau-bench.
+describe("a dialogue benchmark maps to a dialogue case", () => {
+  it("makes the row's user instruction a model-driven user with a bound, and grades the world's state", () => {
+    const adapter = BENCHMARK_CATALOG["tau-bench"];
+    const ds = adapterToDataset(
+      adapter,
+      [
+        {
+          id: "retail-7",
+          instruction: "cancel my last order",
+          user_instruction: "you are Ada; you want order #12 cancelled and a refund to the original card",
+          expected_state: JSON.stringify({ orders: [{ id: "12", status: "cancelled" }] }),
+        },
+      ],
+      { id: "tau", version: "1.0.0" },
+    );
+    const c = ds.cases[0];
+    expect(c?.engagement).toMatchObject({
+      kind: "dialogue",
+      user: { kind: "model", persona: expect.stringContaining("Ada") },
+      maxTurns: 30,
+    });
+    expect(c?.graders?.map((g) => g.id)).toContain("world-state");
+    // The expected end state travels as the case's own data, which is what `world-state` compares against.
+    expect(c?.expected).toContain("cancelled");
   });
 });

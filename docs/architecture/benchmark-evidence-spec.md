@@ -54,16 +54,18 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 > adapter, present and future: an `official` claim names its evaluator and approximates nothing; a `proxy`
 > says what it approximates. One half of slice 4 stayed open and is named where it belongs
 > (`standard-task-formats.md`): no dataset door classifies its case images, so a task set imported with
-> unqualified or local-only refs is registered without a word. **Still open — tau-bench**, and the reason is sharper than "it needs a simulated
-> user": its case is not a task with a trace but a DIALOGUE, so the user simulator belongs in the execution
-> path rather than in a grader, and its reward compares the domain database's final state against the
-> benchmark's own. *(Since 2026-09-03 the first of those exists: a case declares its engagement and `runCase`
-> drives the exchange over the harness's continuity contract — `docs/architecture/world-and-engagement-model.md`
-> axis 2 — and since the same day, a MODEL-DRIVEN user: `engagement.user` accepts a persona a simulator
-> plays, bounded by a required `maxTurns`. What tau-bench still needs is its own DOMAIN DATABASE and tool
-> APIs — the world its reward compares the final state of — which a workspace now expresses as an
-> environment that PROVIDES a world (`world-and-engagement-model.md`), not as anything this platform can
-> ship on the benchmark's behalf.)*
+> unqualified or local-only refs is registered without a word.
+
+> **Landed 2026-09-03 — tau-bench, the last adapter on this list.** It was open because its case is not a task
+> with a trace but a DIALOGUE, and its verdict is not an answer but a DOMAIN'S STATE; both are execution
+> shapes rather than mappings, and both now exist (`docs/architecture/world-and-engagement-model.md`). The
+> adapter maps the row's user instruction to a model-driven user bounded by `maxTurns`, and the row's expected
+> end state to the `world-state` grader, which reads what the WORLD published onto the platform's observation
+> channel rather than what the agent said about it. `scoring: proxy` names what it approximates: the official
+> reward is computed by tau-bench's own harness with its own simulator against its own database, and this runs
+> the same task against the service the WORKSPACE hosts. That service — the domain database and the tool APIs
+> — is what a workspace registers as an environment that provides a world; Everdict does not ship it, because
+> a database invented here would be a different benchmark wearing tau-bench's name.
 
 **The gap.** Terminal-Bench slices 2–5 are unbuilt — the ingestion edge, the benchmark-source kind for
 `POST /datasets`, the image-provenance helper, the web wizard (`docs/architecture/standard-task-formats.md`).

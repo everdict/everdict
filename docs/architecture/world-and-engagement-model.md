@@ -182,9 +182,12 @@ case declares and refuses when it cannot — a provided world is the same decora
      sweep and the request path cannot disagree about what "gone" means. `released` is first-write-wins: a
      late sweep may not reopen a proven ending.
 
-   **Nomad first, refused by name elsewhere** — the same call the browser-session lane made, for the same
-   reason: a world that came up on a runtime this control plane cannot then tear down is exactly the leak
-   above. A refusal is a case that does not run; a silent fallback would be a world nobody reclaims.
+   **Any runtime that can PROVE a teardown may create a world** — Nomad, K8s and the local Docker daemon all
+   implement ensure/teardown/describe, which is all a world needs (a browser SESSION needs more: a
+   provisioner and a CDP this control plane can reach, which is why that lane is Nomad-only and why copying
+   its constraint here was the wrong inheritance). What is genuinely required is `describeTopology`: a
+   runtime that cannot say whether a topology still stands could never prove a world gone, so a case placed
+   there is refused rather than run into a leak.
 3.5 ✅ **Building the world** (landed 2026-09-03) — the recipe moved to one owner (`execution/build-recipe.ts`,
    re-exported under its historical harness names), an environment declares `source`+`build` beside its
    `image`, and `CampaignBuildService` grew the second subject: same session, same captured layer, and a mint

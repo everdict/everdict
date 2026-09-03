@@ -286,6 +286,51 @@ export const BENCHMARK_CATALOG = {
       extraGraders: [{ id: "steps" }, { id: "judge", config: { rubric: WEBVOYAGER_RUBRIC } }],
     },
   },
+  // ── A BENCHMARK WHOSE CASE IS A CONVERSATION AND WHOSE VERDICT IS THE WORLD'S STATE ─────────────────
+  //
+  // tau-bench (sierra-research/tau-bench): an agent serves a USER over several turns while calling a domain's
+  // tools, and the case is decided by what the domain looks like afterwards plus whatever the user had to be
+  // told. It needed two things this platform did not have, and both now exist:
+  //   · a case that is a DIALOGUE with a model-driven user (world-and-engagement-model.md, axis 2) — the
+  //     row's user instruction becomes the persona, bounded by maxTurns;
+  //   · a world the agent ACTS ON that publishes its own final state, compared by the `world-state` grader
+  //     against what the row declares (axis 1, `EnvironmentSpec.observe`).
+  //
+  // What the workspace supplies is the benchmark's own service — its domain database and tool APIs, run as an
+  // environment that PROVIDES a world. Everdict does not ship it: the data and the tools are tau-bench's, and
+  // a database invented here would be a different benchmark wearing its name.
+  "tau-bench": {
+    id: "tau-bench",
+    description:
+      "tau-bench — a multi-turn agent serving a simulated user against a domain's tools (sierra-research/tau-bench). Source jsonl: paste the domain's tasks. Each case becomes a DIALOGUE whose user is model-driven from the row's user instruction, acting on the tau-bench service the WORKSPACE hosts (register it as an environment that provides a world and publishes its final state); the verdict compares that state against the row's expected outcome",
+    category: "tool",
+    // The official reward is computed by tau-bench's own harness against its own database, with its own user
+    // simulator and model. This runs the same TASK — same domain, same tools, same expected end state — with
+    // everdict's user simulator and a state comparison over what the workspace's own deployment publishes. The
+    // number is a regression signal for that deployment, never a leaderboard row.
+    scoring: {
+      kind: "proxy",
+      approximates:
+        "the official reward: the domain database's final state plus the required outputs, decided by tau-bench's own harness and user simulator",
+      officialEvaluator: "sierra-research/tau-bench (tau_bench.envs · run.py)",
+      license: "code MIT",
+    },
+    defaultVersion: "1.0.0",
+    source: { kind: "jsonl" },
+    mapping: {
+      idField: "id",
+      // The opening message is the user's first ask; the persona carries who they are and what they want, so
+      // the simulator can answer follow-up questions the agent asks (which is the whole point of the format).
+      taskField: "instruction",
+      personaField: "user_instruction",
+      maxTurns: 30,
+      promptEnv: true,
+      // The world's final state, as the row declares it — read by the `world-state` grader off the platform's
+      // observation channel, never off the agent's own report.
+      answerField: "expected_state",
+      extraGraders: [{ id: "world-state" }, { id: "steps" }],
+    },
+  },
   // ── BROWSING BENCHMARKS, SHIPPED AS PROXIES BECAUSE THEIR EVALUATORS ARE NOT REPRODUCED HERE ─────────
   //
   // Both of these are on benchmark-evidence-spec.md §1's adapter list, and both arrive as `proxy` on purpose.

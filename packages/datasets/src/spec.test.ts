@@ -29,6 +29,8 @@ describe("CaseMappingSchema ⟷ CaseMapping", () => {
       imageField: true,
       image: true,
       placement: true,
+      personaField: true,
+      maxTurns: true,
       testCmdField: true,
       tagFields: true,
       extraGraders: true,

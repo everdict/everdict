@@ -161,8 +161,13 @@ same treatment two image digests already get.
 > templates (with instances), each a `command` harness with a `conversation` contract, a `source` + `build` recipe
 > and a `source.maintainer`; the seed test asserts the contract survives resolution. The CLI resume forms and
 > session-id patterns are the shapes those CLIs document today and are the part a workspace adjusts when a CLI
-> changes them. **Hermes has no recipe yet**: its CLI's resume form is not confirmed, and a recipe that guesses it
-> would register a "conversational" harness that cannot resume — the exact defect the contract exists to refuse.
+> changes them. **Hermes ships no first-party recipe, and that is the finished answer rather than a gap**: the
+> one thing such a recipe needs that this repository cannot supply is a fact about a third-party CLI — its
+> resume flag and session-id pattern — and a template that guessed them would register a "conversational"
+> harness that cannot resume, the exact defect the contract exists to refuse. Everything else is in place: the
+> contract is declarative (`docs/command-harness.md`), the refusal fires at registration when a `conversation`
+> block has no `{{conversation}}` slot or no `{{resume}}`, and the two shipped templates are worked examples to
+> copy. A workspace that runs that CLI writes ten lines; nobody here can write them on their behalf.
 
 **The gap.** Codex ships as a one-shot `command` recipe (`examples/bundles/codex-pinch/bundle.json`: `codex
 exec … < /dev/null`, no `conversation`). Hermes appears only as an example name in an environment comment.
