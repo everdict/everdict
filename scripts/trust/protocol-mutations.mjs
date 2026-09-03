@@ -16,6 +16,64 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
+  // ── THE EVOLUTION LOOP, DRIVEN FOR REAL (docs/architecture/evolution-lineage.md) ─────────────────
+  //
+  // Three defects found by standing a campaign up end to end against a real harness. Each is silent: the
+  // version registers, the round is comparable, the number comes back looking like an ordinary result.
+  {
+    // An override key the template's KIND cannot apply is ignored by `resolveHarnessInstance` and stripped by
+    // the instance schema, so a plausible-but-wrong nesting registers the template's own bytes under a new
+    // version label — and a campaign then compares its baseline with itself.
+    name: "evolution — an override the template cannot apply is registered instead of refused",
+    file: "packages/registry/src/harness/harness-instance-registry.ts",
+    from: "  const defects = instanceOverrideDefects(template.kind, instance.overrides);",
+    to: "  const defects = (void instanceOverrideDefects, [] as string[]);",
+    build: "@everdict/registry",
+    suite: ["--root", "packages/registry", "src/harness/harness-instance-registry.test.ts"],
+  },
+  {
+    // …and the ADOPTION lane, which validated with nothing at all in the in-memory twin while the Pg twin has
+    // resolved and asserted since arch-review 77 — so every unit test of the lane where a dropped variation
+    // costs a campaign its evidence was green against a store more permissive than production.
+    name: "evolution — the in-memory adoption lane stops validating what it registers",
+    file: "packages/registry/src/harness/harness-instance-registry.ts",
+    from: "    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);\n    assertRegistrableInstance(template, instance);\n    return this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);",
+    to: "    void this.templates;\n    return this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);",
+    build: "@everdict/registry",
+    suite: ["--root", "packages/registry", "src/harness/harness-instance-registry.test.ts"],
+  },
+  {
+    // A round whose two sides ran the same harness bytes reads 0 improvements and 0 regressions — which the
+    // driver is told to treat as NEUTRAL and build on — while it spends a slot of the pre-registered held-out
+    // family and moves the consecutive-rejection counter. The direction was never tried.
+    name: "evolution — a round compares the baseline with itself and calls the result neutral",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: '    frame.subject.type === "harness" &&\n    baselineSpecDigest !== undefined &&\n    baselineSpecDigest === candidateSpecDigest',
+    to: "    false",
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/api/campaign/campaign.routes.test.ts"],
+  },
+  {
+    // …and the other half: an ENVIRONMENT campaign REQUIRES the harness to be identical on both sides, so an
+    // unscoped version of that guard refuses exactly the campaigns it is not about.
+    name: "evolution — the identical-bytes guard is unscoped and breaks environment campaigns",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: '    frame.subject.type === "harness" &&\n    baselineSpecDigest !== undefined',
+    to: "    baselineSpecDigest !== undefined",
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/api/campaign/campaign.routes.test.ts"],
+  },
+  {
+    // A setup step used to exec with no env at all while the command got the whole of it, so a step naming a
+    // spec variable expanded it to the empty string, exited 0, and the harness ran in a sandbox nobody had
+    // prepared — a case that comes back looking like an agent that did nothing.
+    name: "evolution — a harness setup step runs without the spec's env",
+    file: "packages/harnesses/src/command.ts",
+    from: "      const res = await compute.exec(cmd, { cwd, env });",
+    to: "      const res = await compute.exec(cmd, (void env, { cwd }));",
+    build: "@everdict/harnesses",
+    suite: ["--root", "packages/harnesses", "src/command.test.ts"],
+  },
   // ── THE WORLD A CASE ACTS ON (docs/architecture/world-and-engagement-model.md) ────────────────────
   //
   // Slices 3.9 and 3.95 landed a created-world ledger and a world a batch's cases share. Every fence below is

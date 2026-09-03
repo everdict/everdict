@@ -202,6 +202,118 @@ describe("campaign routes — the settlement over HTTP", () => {
     await app.close();
   });
 
+  // ── [COUNTEREXAMPLE] A ROUND THAT COMPARED THE SUBJECT WITH ITSELF IS NOT A ROUND ────────────────
+  //
+  // Found by driving a real campaign end to end. A candidate authored with a plausible-but-wrong override key
+  // registers the TEMPLATE'S OWN BYTES under a new version label (the registry refuses that spelling now, and
+  // cannot see a candidate that is identical for any other reason). Left comparable, such a round is the
+  // worst-shaped evidence this record can hold: 0 improvements, 0 regressions — which the driver is told to
+  // read as a NEUTRAL result and build on — while a slot of the pre-registered held-out family is spent and
+  // the consecutive-rejection counter moves. The direction was never tried.
+  //
+  // Observed RED before the guard: `expected 'both sides ran the same harness bytes…' to be undefined`, i.e.
+  // the round came back comparable with a neutral verdict.
+  it("REFUSES a harness round whose two sides ran the same bytes — a relabelled baseline is not a candidate", async () => {
+    const sameBytes = {
+      ...winning,
+      baseline: {
+        record: {
+          harness: { id: "patchbot", version: "1.0.0" },
+          manifest: { harness: { specDigest: "sha256:identical" } },
+        },
+      },
+      candidate: {
+        record: {
+          harness: { id: "patchbot", version: "1.0.1" },
+          manifest: { harness: { specDigest: "sha256:identical" } },
+        },
+      },
+    };
+    const { app } = build(sameBytes as typeof winning);
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: {
+        issueId: "iss_1",
+        frame: { ...frame, subject: { type: "harness", id: "patchbot", baselineVersion: "1.0.0" } },
+      },
+    });
+    const { id } = opened.json() as { id: string };
+    const logged = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "the override never reached the spec, so this 'candidate' is the baseline",
+        learned: "a round with no treatment must not be recorded as a neutral finding about a direction",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    expect(logged.statusCode).toBe(201);
+    const verdict = (logged.json() as { round: { verdict: { comparable: boolean; detail?: string } } }).round.verdict;
+    expect(verdict.comparable).toBe(false);
+    expect(verdict.detail).toContain("the same harness bytes");
+    await app.close();
+  });
+
+  // …and the mirror: an ENVIRONMENT campaign REQUIRES the harness to be identical on both sides — that is what
+  // isolates the world as the treatment — so the same equality must not be refused there.
+  it("allows an ENVIRONMENT round with identical harness bytes — there the equality is the precondition", async () => {
+    // The world moved and the actor did not: same harness id, same version, same BYTES, and each side's
+    // manifest seals a different version of the environment under test.
+    const worldMoved = {
+      ...winning,
+      baseline: {
+        record: {
+          harness: { id: "patchbot", version: "1.0.0" },
+          manifest: {
+            harness: { specDigest: "sha256:identical" },
+            environments: { c1: { ref: "shop@1.0.0" }, c2: { ref: "shop@1.0.0" } },
+          },
+        },
+      },
+      candidate: {
+        record: {
+          harness: { id: "patchbot", version: "1.0.0" },
+          manifest: {
+            harness: { specDigest: "sha256:identical" },
+            environments: { c1: { ref: "shop@1.1.0" }, c2: { ref: "shop@1.1.0" } },
+          },
+        },
+      },
+    };
+    const { app } = build(worldMoved as typeof winning);
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: {
+        issueId: "iss_1",
+        frame: { ...frame, subject: { type: "environment", id: "shop", baselineVersion: "1.0.0" } },
+      },
+    });
+    const { id } = opened.json() as { id: string };
+    const logged = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "the world moved; the agent did not",
+        learned: "an environment campaign holds the harness still on purpose, so identical bytes are expected",
+        candidateVersion: "1.1.0",
+        baselineScorecardId: "sc-b",
+        candidateScorecardId: "sc-c",
+      },
+    });
+    expect(logged.statusCode).toBe(201);
+    const verdict = (logged.json() as { round: { verdict: { comparable: boolean } } }).round.verdict;
+    expect(verdict.comparable, "the harness being equal is what makes the world the treatment").toBe(true);
+    await app.close();
+  });
+
   // ── THE AUTHORIZATION IS REACHABLE FROM A TRANSPORT (arch-review 73) ──────────────────────────────
   //
   // arch-review 71 wrote the durable operation and called `decided` "visible, addressable, re-drivable".

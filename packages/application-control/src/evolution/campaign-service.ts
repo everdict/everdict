@@ -1421,6 +1421,31 @@ function verdictOf(
         `the judges are not the frame's (frame: ${want || "none"}; baseline: ${judgesOf(snapshot.baseline) || "none"}; candidate: ${judgesOf(snapshot.candidate) || "none"})`,
       );
   }
+  // ── A ROUND THAT COMPARED THE SUBJECT WITH ITSELF IS NOT A ROUND ─────────────────────────────────
+  //
+  // The verdict already records the candidate's exact bytes (`candidateSpecDigest`) because "a version label
+  // cannot tell an evaluated C1 from a saved C2". The same sentence says a label cannot tell a real candidate
+  // from a relabelled baseline — and a dropped override does exactly that (`instanceOverrideDefects` refuses
+  // the commonest way to author one, and cannot see a candidate that is identical for any other reason).
+  //
+  // Left comparable, such a round is the worst-shaped evidence this record can hold: it reads 0 improvements
+  // and 0 regressions, which the driver is told to treat as a NEUTRAL result and build on. It spends a slot of
+  // the pre-registered `heldOutFamilySize`, counts toward `stopAfterRejectedRounds`, and its `learned` says
+  // the direction is neutral. The direction was never tried.
+  //
+  // ⚠️ Scoped to a HARNESS subject on purpose. An ENVIRONMENT campaign REQUIRES the harness to be identical on
+  // both sides — that is what isolates the world as the treatment — so the same equality is the precondition
+  // there rather than the defect.
+  const baselineSpecDigest = snapshot.baseline.record.manifest?.harness?.specDigest;
+  const candidateSpecDigest = snapshot.candidate.record.manifest?.harness?.specDigest;
+  if (
+    frame.subject.type === "harness" &&
+    baselineSpecDigest !== undefined &&
+    baselineSpecDigest === candidateSpecDigest
+  )
+    return rejected(
+      `both sides ran the same harness bytes (${baselineSpecDigest}) — the candidate is the baseline under another label, so this round has no treatment to measure`,
+    );
   const significant = comparison.trials.cases.filter((c) => c.significant);
   // ── …AND THE HELD-OUT POPULATION, COUNTED APART (arch-review 71 P1-high) ──────────────────────────
   //
@@ -1452,9 +1477,7 @@ function verdictOf(
     ...(targets !== undefined ? { targets } : {}),
     // …and the exact bytes evaluated, so an adopted label can be checked against what a registry holds
     // under it (arch-review 71 P0-evolution).
-    ...(snapshot.candidate.record.manifest?.harness?.specDigest !== undefined
-      ? { candidateSpecDigest: snapshot.candidate.record.manifest.harness.specDigest }
-      : {}),
+    ...(candidateSpecDigest !== undefined ? { candidateSpecDigest } : {}),
     // …and where those bytes were built from (docs/architecture/code-evolution-loop.md, D4).
     ...(candidateSource !== undefined ? { candidateSource } : {}),
     // …and the candidate's own judges on whether its account holds up (arch-review 71 P1-evolution).

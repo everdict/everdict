@@ -99,12 +99,30 @@ spans the chain and the frames must say so.
 result available, and its p-value is fixed by N alone:
 
     N=3   0/3 → 3/3   p = 0.10      never significant, at any family size
-    N=5   0/5 → 5/5   p = 0.0079    clears a family up to 6
-    N=6   0/6 → 6/6   p = 0.0022    clears a family up to 23
-    N=7   0/7 → 7/7   p = 0.00058   clears a family up to 86
+    N=5   0/5 → 5/5   p = 0.0079    clears a bare alpha of 0.05/6
+    N=6   0/6 → 6/6   p = 0.0022    clears 0.05/23
+    N=7   0/7 → 7/7   p = 0.00058   clears 0.05/86
 
-Pick N and the family together. A twenty-round campaign at N=5 is a campaign that cannot adopt anything, and
-it will spend its whole budget finding that out.
+⚠️ **That column is the bare `fdrAlpha / heldOutFamilySize`, and it is NOT the bar a case has to clear.**
+`fdrAlpha` is corrected TWICE, over two different families, and only the first is the one you pre-register:
+the round's alpha is `fdrAlpha / heldOutFamilySize`, and Benjamini–Hochberg then runs over the round's own
+CASES at that level — rank k of m is compared against `(k/m) · alpha`. So the bar depends on how many cases
+move:
+
+    one case improves, m = 8      bar = (1/8)·alpha       N=5 fails (0.0079 > 0.00104); N=7 clears
+    six improve, m = 8            bar = (6/8)·alpha       N=6 clears (0.0022 < 0.00625); N=5 still fails
+
+A frame written straight off the old table — eight scenarios, `trialsPerCase: 5`, family 6 — was driven for
+real and could not adopt a candidate that flipped EVERY held-out case 0/5 → 5/5. The arithmetic was right and
+the frame was underpowered; the campaign spent its budget finding out, which is exactly the outcome the
+paragraph below warns about and the table above invited.
+
+So: pick N from the bar you will actually face, which is `(k/m)·fdrAlpha/heldOutFamilySize` for the k cases
+you expect to move out of m scenarios. When in doubt assume k = 1 — it is the case where a narrow, correct fix
+has to carry the round alone.
+
+A twenty-round campaign at N=5 is a campaign that cannot adopt anything, and it will spend its whole budget
+finding that out.
 
 ## What makes a round WIN
 

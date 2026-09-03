@@ -74,6 +74,24 @@ describe("CommandHarness", () => {
     expect(header?.split("-")[1]).toBe(traceIdForRun("run-abc"));
   });
 
+  // ── [COUNTEREXAMPLE] A SETUP STEP SEES THE SPEC'S OWN ENV ──────────────────────────────────────
+  //
+  // `install` used to exec with `{ cwd }` alone while `run` passed the whole env, so a setup step naming a
+  // spec variable expanded it to the EMPTY STRING, exited 0, and the harness ran in a sandbox nobody had
+  // prepared. Found by driving a real evolution campaign: the setup wrote the agent's source from
+  // `$PATCHBOT_SRC`, produced a zero-byte file, and every case came back looking like an agent that did
+  // nothing. The failure has no error to read, which is what makes it worth a test.
+  it("hands each setup step the spec's env — an install that cannot see it prepares nothing", async () => {
+    const { compute, execs } = fakeCompute();
+    await new CommandHarness(
+      spec({ setup: ["printf '%s' \"$AGENT_SRC\" > agent.js"], env: { AGENT_SRC: "console.log(1)", TOKEN: "t" } }),
+    ).install(compute);
+    expect(execs[0]?.env, "a setup step that cannot read the spec's env installs an empty file, and exits 0").toEqual({
+      AGENT_SRC: "console.log(1)",
+      TOKEN: "t",
+    });
+  });
+
   it("install runs the setup commands in order", async () => {
     const { compute, execs } = fakeCompute();
     await new CommandHarness(spec({ setup: ["a", "b"] })).install(compute);

@@ -247,6 +247,44 @@ function dropEnvKeys(env: Record<string, EnvValue>, unset: string[] | undefined)
   return Object.fromEntries(Object.entries(env).filter(([k]) => !drop.has(k)));
 }
 
+// ── AN OVERRIDE THIS TEMPLATE CANNOT APPLY IS A VARIATION THAT NEVER HAPPENED ───────────────────────
+//
+// `resolveHarnessInstance` reads a DIFFERENT set of override keys per kind: a command template consumes
+// `env`/`unsetEnv`/`params`/`resources`, a service template `services`/`frontDoor`/`target`/`resources`, a
+// process template only `resources`. Every other key is ignored in silence — and the instance schema drops
+// unknown keys before anyone sees them, so `overrides: { command: { env: … } }` (a plausible nesting, and not
+// the real one) registers a version whose "variation" is the template's own bytes, with a 201 and no warning.
+//
+// That is the same accident the pin check above already refuses by name — "silently ignoring a typo causes the
+// accident where the eval passes without the PR image being swapped in" — one field over. It costs most in an
+// evolution campaign: the round is comparable, scores 0 improvements and 0 regressions, spends a slot of the
+// pre-registered held-out family, counts toward the consecutive-rejection halt, and the driver writes down
+// that the direction was neutral. The direction was never tried.
+//
+// A CREATION rule, consumed where a version is registered — never at resolve, which every READ runs (a rule
+// applied at decode time is a data outage for rows written before it).
+const APPLICABLE_OVERRIDES: Record<HarnessTemplateSpec["kind"], readonly string[]> = {
+  command: ["env", "unsetEnv", "params", "resources"],
+  service: ["services", "frontDoor", "target", "resources"],
+  process: ["resources"],
+};
+
+export function instanceOverrideDefects(
+  kind: HarnessTemplateSpec["kind"],
+  overrides: InstanceOverrides | undefined,
+): string[] {
+  if (overrides === undefined) return [];
+  const applicable = APPLICABLE_OVERRIDES[kind];
+  const stray = Object.entries(overrides)
+    .filter(([key, value]) => value !== undefined && !applicable.includes(key))
+    .map(([key]) => key);
+  return stray.length === 0
+    ? []
+    : [
+        `overrides ${stray.map((k) => `'${k}'`).join(", ")} cannot be applied to a '${kind}' template (it applies ${applicable.join(", ")}) — an override nothing reads is a variation that never happened, so the version would be the template's own bytes under a new label`,
+      ];
+}
+
 // Template (structure) + Instance (pins) → resolved HarnessSpec. Missing/mismatched slots throw BadRequestError.
 export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: HarnessInstanceSpec): HarnessSpec {
   if (template.id !== instance.template.id || template.version !== instance.template.version) {

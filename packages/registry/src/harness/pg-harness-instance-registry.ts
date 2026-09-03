@@ -7,12 +7,12 @@ import {
   resolveHarnessInstance,
 } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
-import { assertPortable } from "@everdict/domain";
 import { PgVersionedStore } from "../pg-versioned-store.js";
 import { asService } from "../registry.js";
 import {
   type HarnessInstanceRegistry,
   type HarnessListEntry,
+  assertRegistrableInstance,
   enrichHarnessList,
   resolveInstanceWithPins,
 } from "./harness-instance-registry.js";
@@ -48,9 +48,7 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     origin?: CapabilityOrigin,
   ): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    // Resolve validates pins; assertPortable then hard-blocks a non-portable service spec (structural errors only —
-    // host-literal warnings are surfaced by the caller). docs/architecture/topology-portability.md.
-    assertPortable(resolveHarnessInstance(template, instance));
+    assertRegistrableInstance(template, instance);
     await this.store.register(tenant, instance, createdBy, teamId, origin);
   }
   // Same validation, and the owner resolved inside the write rather than by the caller (arch-review 77).
@@ -62,7 +60,7 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
   ): Promise<"registered" | "owner_moved"> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    assertPortable(resolveHarnessInstance(template, instance));
+    assertRegistrableInstance(template, instance);
     return await this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {

@@ -207,3 +207,73 @@ describe("resolveWithPins — submit-time transient pins (registry unchanged)", 
     await expect(instances.resolveWithPins("acme", "bu", "v1", { nope: "x" })).rejects.toBeInstanceOf(BadRequestError);
   });
 });
+
+// ── [COUNTEREXAMPLE] AN OVERRIDE THIS TEMPLATE CANNOT APPLY IS REFUSED, NOT DROPPED ─────────────────
+//
+// Found by driving a real evolution campaign. `overrides: { command: { env: … } }` is a plausible nesting and
+// not the real one (`overrides.env`), the instance schema strips unknown keys, and the door answered 201 — so
+// the "candidate" was the template's own bytes under a new version label. The campaign then compared the
+// baseline with itself, scored 0 improvements and 0 regressions, spent a slot of its pre-registered held-out
+// family, and the driver wrote down that the direction was neutral. It was never tried.
+//
+// The same accident the pin check has refused by name for years, one field over.
+const cmdTemplate: HarnessTemplateSpec = {
+  kind: "command",
+  category: "coding",
+  id: "patchbot",
+  version: "1",
+  setup: [],
+  command: "node agent.js {{task}}",
+  env: { STRATEGY: "add" },
+  params: {},
+  trace: { kind: "none" },
+};
+
+describe("an override the template's kind cannot apply", () => {
+  let templates: InMemoryHarnessTemplateRegistry;
+  let instances: InMemoryHarnessInstanceRegistry;
+  beforeEach(async () => {
+    templates = new InMemoryHarnessTemplateRegistry();
+    instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", cmdTemplate);
+    await templates.register("acme", buTemplate);
+  });
+
+  const cmdInstance = (version: string, overrides: Record<string, unknown>) =>
+    ({ template: { id: "patchbot", version: "1" }, id: "patchbot", version, pins: {}, overrides }) as never;
+
+  it("REFUSES a command instance whose override belongs to a service template", async () => {
+    await expect(
+      instances.register("acme", cmdInstance("1.1.0", { services: { planner: { env: { A: "1" } } } })),
+    ).rejects.toThrow(/cannot be applied to a 'command' template/);
+    // …and nothing was written: a refusal after the write is not a refusal.
+    await expect(instances.get("acme", "patchbot", "1.1.0")).rejects.toThrow();
+  });
+
+  it("REFUSES a service instance whose override is a command template's", async () => {
+    await expect(
+      instances.register("acme", {
+        template: { id: "bu", version: "1" },
+        id: "bu",
+        version: "2.0.0",
+        pins: { planner: "p:1", browser: "b:1" },
+        overrides: { env: { A: "1" } },
+      } as never),
+    ).rejects.toThrow(/cannot be applied to a 'service' template/);
+  });
+
+  it("accepts the override the template DOES apply, and applies it", async () => {
+    await instances.register("acme", cmdInstance("1.2.0", { env: { STRATEGY: "search" } }));
+    const resolved = await instances.get("acme", "patchbot", "1.2.0");
+    if (resolved.kind !== "command") throw new Error("expected command");
+    expect(resolved.env.STRATEGY, "the variation reached the bytes that run").toBe("search");
+  });
+
+  // The adoption lane is where a dropped variation costs a campaign its evidence, and it is the lane the
+  // in-memory twin validated with NOTHING while the Pg twin has resolved and asserted since arch-review 77.
+  it("…and the ADOPTION lane refuses it too — the twin no longer differs from production", async () => {
+    await expect(
+      instances.registerPreservingOwner("acme", cmdInstance("1.3.0", { frontDoor: { completion: { timeoutMs: 5 } } })),
+    ).rejects.toThrow(/cannot be applied to a 'command' template/);
+  });
+});

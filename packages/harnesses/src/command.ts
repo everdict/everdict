@@ -74,8 +74,19 @@ export class CommandHarness implements EvaluableHarness {
 
   async install(compute: ComputeHandle): Promise<void> {
     const cwd = this.cwd;
+    // ── A SETUP STEP SEES THE SPEC'S OWN ENV ────────────────────────────────────────────────────────
+    //
+    // This loop used to exec with `{ cwd }` alone while `run()` passed the whole env, so a setup step naming
+    // a spec variable — `pip install --index-url $PRIVATE_INDEX`, `git clone https://$TOKEN@…`, or anything
+    // that writes a file from one — expanded it to the EMPTY STRING, exited 0, and the harness then ran in a
+    // sandbox nobody had prepared. The failure has no error to read: the install "succeeded" and the case
+    // comes back looking like an agent that did nothing.
+    //
+    // `flattenEnv` drops unresolved `{secretRef}` entries, so a setup step sees exactly what the run will —
+    // which is the point: an install and the command it installs for must not disagree about the world.
+    const env = flattenEnv(this.spec.env);
     for (const cmd of this.spec.setup) {
-      const res = await compute.exec(cmd, { cwd });
+      const res = await compute.exec(cmd, { cwd, env });
       if (res.exitCode !== 0)
         // AppError with the harness's own code — the failure taxonomy reads it as stage=install, class=harness
         // (raw Error would classify as retryable run-stage infra and burn retries on a deterministic setup break).

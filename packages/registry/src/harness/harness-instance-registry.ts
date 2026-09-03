@@ -5,6 +5,7 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
   type ServiceHarnessSpec,
+  instanceOverrideDefects,
   resolveHarnessInstance,
 } from "@everdict/contracts";
 import { assertPortable, modelBindingLabel, referencesUserSecret, summarizeInstanceVariation } from "@everdict/domain";
@@ -96,6 +97,24 @@ export function resolveInstanceWithPins(
   return resolveHarnessInstance(template, { ...instance, pins: { ...instance.pins, ...pins } });
 }
 
+// What a register lane owes before it writes a version, in ONE place because there are four of them (two
+// twins x register/registerPreservingOwner) and a lesson learned in one lane is not learned in the others.
+//   · the pins resolve (unknown slots, missing images) — `resolveHarnessInstance` throws;
+//   · the resolved spec is portable — `assertPortable`;
+//   · and every override the instance declares is one this template's kind can actually apply, because an
+//     override nothing reads registers the template's own bytes under a new label.
+export function assertRegistrableInstance(template: HarnessTemplateSpec, instance: HarnessInstanceSpec): void {
+  const defects = instanceOverrideDefects(template.kind, instance.overrides);
+  const first = defects[0];
+  if (first !== undefined)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { instance: `${instance.id}@${instance.version}`, template: `${template.id}@${template.version}` },
+      first,
+    );
+  assertPortable(resolveHarnessInstance(template, instance));
+}
+
 export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry {
   private readonly store = new VersionedStore<HarnessInstanceSpec>("harness instance");
   constructor(private readonly templates: HarnessTemplateRegistry) {}
@@ -109,12 +128,14 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
     origin?: CapabilityOrigin,
   ): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    // Resolve validates pins; assertPortable then hard-blocks a service spec that would resolve to different addresses
-    // per runtime (structural errors only — host-literal warnings are surfaced by the caller). docs/architecture/topology-portability.md.
-    assertPortable(resolveHarnessInstance(template, instance));
+    assertRegistrableInstance(template, instance);
     this.store.register(tenant, instance, createdBy, teamId, origin);
   }
 
+  // The SAME validation `register` runs. It was missing here while the Pg twin has done it since
+  // arch-review 77, so the adoption lane — the one lane where a dropped variation costs a campaign's evidence
+  // — was checked by nothing, and every unit test of it passed against a store more permissive than
+  // production (rule `testing`, the twin-divergence law).
   async registerPreservingOwner(
     tenant: string,
     instance: HarnessInstanceSpec,
@@ -122,6 +143,8 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
     origin?: CapabilityOrigin,
     authority?: { expectedOwnerTeamId?: string; initialTeamId?: string },
   ): Promise<"registered" | "owner_moved"> {
+    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
+    assertRegistrableInstance(template, instance);
     return this.store.registerPreservingOwner(tenant, instance, createdBy, origin, authority);
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
