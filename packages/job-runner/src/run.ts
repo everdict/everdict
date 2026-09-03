@@ -11,6 +11,7 @@ import {
   type Grader,
   type LiveScreenCapture,
   type TraceEvent,
+  UpstreamError,
   judgeAuthEnv,
   judgeEnv,
 } from "@everdict/contracts";
@@ -203,6 +204,15 @@ export async function runCaseJob(
     // Built from the same grant the judge is — this job's own judge model and key — because it is the same
     // kind of call: made on the platform's behalf, never on the agent's. Absent config leaves it undefined,
     // and `runCase` then REFUSES a model-user case by name rather than running it as a one-shot.
+    // A PROVIDED world's own account, read once after the drive (world-and-engagement-model.md). The job's
+    // own fetch: the world is reachable from here because the agent just acted on it, and the control plane
+    // only sees this case after the graders have already run.
+    fetchWorldRecording: async (url: string) => {
+      const res = await fetch(url, { headers: { accept: "text/plain, application/json" } });
+      if (!res.ok)
+        throw new UpstreamError("UPSTREAM_ERROR", { url, status: res.status }, `world recording ${res.status}`);
+      return res.text();
+    },
     ...((): { simulateUser?: SimulatedUser } => {
       const simulateUser = userSimulatorFromEnv({ ...env, ...jobEnv });
       return simulateUser ? { simulateUser } : {};

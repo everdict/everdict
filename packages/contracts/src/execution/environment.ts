@@ -184,6 +184,17 @@ export const EnvironmentSpecSchema = z
         }),
       ])
       .optional(),
+    // ── WHERE THIS WORLD PUBLISHES ITS OWN ACCOUNT (world-and-engagement-model.md, axis 1) ────────────
+    //
+    // Observation is the PROVIDER's obligation: only whatever stands between the actor and the world can say
+    // what passed between them. A workspace that puts a recording proxy in front of its app declares here which
+    // wiring key holds the recording's URL, and the platform fetches it once after the drive — onto the
+    // observation channel, which is the platform's own account and never the agent's.
+    //
+    // It sits beside `provides` rather than inside it because all three arms can carry one: a static world may
+    // publish a recording, a session may hand one back per session, and a created topology may include the
+    // proxy as one of its services.
+    observe: z.object({ from: z.string().min(1) }).optional(),
     // ── HOW THE WORLD'S BYTES ARE PRODUCED (world-and-engagement-model.md, landing order 3) ────────────
     //
     // The same recipe a harness slot's image is built from — one shape, two subjects, one owner

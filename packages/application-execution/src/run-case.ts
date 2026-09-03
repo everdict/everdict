@@ -69,6 +69,14 @@ export interface RunCaseDeps {
   // sandbox was given. Optional because most cases are one-shot — and a case that DECLARES a model user
   // while this is absent is refused by name, never quietly run as a one-shot, which would measure a first
   // turn and report it as a conversation.
+  // ── READING A PROVIDED WORLD'S OWN ACCOUNT (world-and-engagement-model.md, axis 1) ────────────
+  //
+  // A world that publishes what passed between it and the agent — a recording proxy in front of an API — is
+  // fetched ONCE after the drive and before grading, so a judge weighs the agent's story against the world's.
+  // Injected rather than a global fetch because this runs inside a job whose egress is the deployment's
+  // business, and because a test must be able to drive the failure: a fetch that failed reads as
+  // `sampling_failed`, never as "watched and saw nothing".
+  fetchWorldRecording?: (url: string) => Promise<string>;
   simulateUser?: (input: {
     persona: string;
     task: string;
@@ -341,8 +349,16 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
   // The observation channel the graders receive (evolution-lineage Track C): the environment's own account,
   // frozen per grading call. `unobserved{unsupported}` when this environment cannot sample — never an empty
   // series, which would claim "watched and nothing changed" about a world nobody watched (L2).
+  // Did the world's own account fail to arrive? A recording that was PROMISED and could not be read makes
+  // the whole observation `sampling_failed`: an empty account of a world nobody could read is the L2 collapse
+  // this channel exists to refuse.
+  let recordingFailed = false;
   const observationsOf = (): CaseObservations => {
-    if (envRecorder === undefined) return { kind: "unobserved", reason: "unsupported" };
+    if (recordingFailed) return { kind: "unobserved", reason: "sampling_failed" };
+    if (envRecorder === undefined)
+      return envDeltas.length > 0
+        ? { kind: "sampled", deltas: [...envDeltas] }
+        : { kind: "unobserved", reason: "unsupported" };
     // Every attempt failed and none answered: fewer deltas must never read as a calmer world (L2).
     if (envRecorder.outcomes.succeeded === 0 && envRecorder.outcomes.failed > 0)
       return { kind: "unobserved", reason: "sampling_failed" };
@@ -497,6 +513,23 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     // produced a normal, sealed result for a case the user had just stopped. One more cooperative check at the
     // window's edge — later aborts (mid-grade) still settle, and the batch's first-terminal-write discards them.
     if (signal?.aborted) throw cancelledRun(runId);
+    // ── THE WORLD'S OWN ACCOUNT, BEFORE GRADING ──────────────────────────────────────────────────
+    //
+    // Fetched here rather than by the control plane, because the graders that would weigh it run in a
+    // moment and the control plane only sees the result afterwards. A world that declares a recording and
+    // cannot produce one is `sampling_failed`, not an empty account (L2).
+    const recordFrom = evalCase.world?.observe?.from;
+    if (recordFrom !== undefined) {
+      const url = evalCase.world?.wiring[recordFrom];
+      const fetchRecording = deps.fetchWorldRecording;
+      if (url === undefined || fetchRecording === undefined) recordingFailed = true;
+      else
+        try {
+          envDeltas.push({ t: Date.now(), kind: "world-recording", text: await fetchRecording(url) });
+        } catch {
+          recordingFailed = true;
+        }
+    }
     let snapshot = await deps.environment.snapshot(compute);
     const source = deps.harness.traceSource?.();
     // The mode that defers collection out of the job — observation scoring that needs the trace is deferred with it (completed by the control plane).

@@ -82,6 +82,22 @@ This single distinction is what the three deferred items were each missing:
 - An api target's `observe` is an obligation of whoever **provides** the world, because only the provider
   stands between the actor and the world.
 
+### Observation belongs to whoever provides the world
+
+An `observe` list on a harness TARGET is the actor's own view of what should be watched, and nothing on the
+acting side can watch an exchange — only what stands BETWEEN the actor and the world can. So the declaration
+lives on the environment (`EnvironmentSpec.observe: { from }`, naming the wiring key whose URL holds the
+recording), the platform fetches it once after the drive and before grading, and it lands on the PLATFORM's
+observation channel (`EnvDelta{kind:"world-recording"}`) rather than in the agent's trace — the agent's story
+and the world's account stay two accounts, which is the only arrangement in which a judge can compare them.
+
+A recording that was promised and could not be read makes the observation `sampling_failed`. Never `sampled`
+with nothing in it: an empty account of a world nobody could read is the L2 collapse this channel exists to
+refuse, and it is the reading that would let a judge conclude the world was quiet.
+
+The workspace supplies the proxy — as a service of a created world, as part of a session's response, or in
+front of a static one. Everdict references images and does not ship a recorder.
+
 ### Axis 2 — engagement: how the actor meets the question
 
     one-shot   the actor is given the task and produces a trace                (every row but G)
@@ -99,7 +115,7 @@ provide a declared world refuses the case.
 | `service` environment | a **provided** world | ✅ static + session-opened landed; a world Everdict CREATES still needs a durable worklist and a verified zero |
 | environment build recipe | an **in-compute** world's bytes | ✅ landed 2026-09-03 — the environment carries an image and a `source`+`build` recipe, and an environment campaign builds it |
 | tau-bench | **dialogue** engagement + a state-comparing grader | ✅ the turn loop (scripted user); still needs a model-driven user simulator and the benchmark's domain database |
-| api observation | the **provider's** obligation | a recording provider (a proxy) that yields coordinates AND events |
+| api observation | the **provider's** obligation | ✅ landed 2026-09-03 — the environment declares `observe: { from }`, a wiring key whose URL the platform fetches after the drive and before grading, onto the observation channel |
 | os target | a **provided** world | ✅ expressible now: a desktop handed out by a session API is `provides: { kind: "session" }` |
 
 The shape of the port is not invented here: `SeedingDispatcher`

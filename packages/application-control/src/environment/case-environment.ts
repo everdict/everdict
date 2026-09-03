@@ -90,38 +90,41 @@ export async function resolveCaseEnvironments(input: {
     if (imageDefect !== undefined)
       throw new ConflictError("CONFLICT", { case: c.id, environment: `${spec.id}@${spec.version}` }, imageDefect);
     seals[c.id] = { ref: `${spec.id}@${spec.version}`, digest };
+    // WHERE the world is, when it is one the actor reaches by coordinates rather than by being inside it
+    // (world-and-engagement-model.md). Platform-authored from the version this batch sealed, so the
+    // coordinates and the identity axis are the same fact — and built ONCE here rather than per arm, so a
+    // world's own account (`observe`) reaches a static, a session and a created world alike.
+    const provides = spec.provides;
+    const world =
+      provides === undefined
+        ? undefined
+        : {
+            ...(provides.kind === "static"
+              ? { wiring: provides.wiring }
+              : provides.kind === "session"
+                ? {
+                    // Opened per case at DISPATCH: this resolution runs once per batch, and a session
+                    // acquired at submit would be held for every case after it and expire under most of them.
+                    wiring: {},
+                    session: { endpoint: provides.endpoint, acquire: provides.acquire },
+                  }
+                : {
+                    // Created per case at dispatch for the same reason — and torn down after it, which is the
+                    // half this arm owes and the other two do not.
+                    wiring: {},
+                    create: {
+                      environment: `${spec.id}@${spec.version}`,
+                      services: provides.services,
+                      wiring: provides.wiring,
+                    },
+                  }),
+            ...(spec.observe !== undefined ? { observe: spec.observe } : {}),
+          };
     cases.push({
       ...c,
       env: spec.env,
       ...(spec.image !== undefined ? { image: spec.image } : {}),
-      // …and WHERE the world is, when it is one the actor reaches by coordinates rather than by being inside
-      // it (world-and-engagement-model.md). Platform-authored from the version this batch sealed, so the
-      // coordinates and the identity axis are the same fact.
-      ...(spec.provides === undefined
-        ? {}
-        : spec.provides.kind === "static"
-          ? { world: { wiring: spec.provides.wiring } }
-          : spec.provides.kind === "session"
-            ? {
-                // Opened per case at dispatch, not here: this resolution runs once per BATCH, and a session
-                // acquired at submit would be held for every case that follows and expire under most of them.
-                world: {
-                  wiring: {},
-                  session: { endpoint: spec.provides.endpoint, acquire: spec.provides.acquire },
-                },
-              }
-            : {
-                // Created per case at dispatch, for the same reason — and torn down after it, which is the
-                // half this arm owes and the other two do not.
-                world: {
-                  wiring: {},
-                  create: {
-                    environment: `${spec.id}@${spec.version}`,
-                    services: spec.provides.services,
-                    wiring: spec.provides.wiring,
-                  },
-                },
-              }),
+      ...(world !== undefined ? { world } : {}),
     });
   }
   return { cases, seals };

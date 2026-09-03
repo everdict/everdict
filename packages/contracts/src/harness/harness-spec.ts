@@ -451,11 +451,15 @@ export const ApiTargetSchema = z.object({
   acquire: TargetAcquireSchema.optional(),
   openapi: z.object({ ref: z.string().min(1) }).optional(), // where the API's contract is published
   auth: z.object({ secretRef: z.string().min(1) }).optional(), // the credential the client presents, by secret name
-  // WHAT WOULD BE WATCHED, and today nothing watches it. There is no recording provider between an api client
-  // and its world (world-and-engagement-model.md: observation is the PROVIDER's obligation), so a non-empty
-  // list here is a promise nobody keeps — and a declaration nothing honours is the annotation failure rule
-  // `protocol` is about. It therefore defaults to EMPTY and a non-empty one is refused by name until a
-  // recording provider exists to lift the refusal.
+  // WHAT WOULD BE WATCHED — and this is not where watching is declared. Observation is the PROVIDER's
+  // obligation (world-and-engagement-model.md): only what stands between the actor and the world can say what
+  // passed between them, and a HARNESS target is the actor's own view. A workspace that puts a recording
+  // proxy in front of its API declares it on the ENVIRONMENT (`EnvironmentSpec.observe`), whose recording the
+  // platform fetches onto the observation channel.
+  //
+  // So this stays empty by default and a non-empty list is still refused: a declaration on the acting side
+  // that nothing on the providing side honours is the annotation failure rule `protocol` is about, and the
+  // refusal names where the declaration belongs instead.
   observe: z.array(z.enum(["request", "response"])).default([]),
 });
 export type ApiTarget = z.infer<typeof ApiTargetSchema>;
@@ -486,7 +490,7 @@ export function targetDefects(target: TopologyTarget | undefined, context: "serv
   // — the L2 collapse, in a field that decides what evidence a judge is given.
   if (target.kind === "api" && target.observe.length > 0)
     defects.push(
-      "an api target cannot declare `observe` yet — nothing records a client's exchanges, and a declaration nothing honours would read as an empty observation rather than as no observation (docs/architecture/world-and-engagement-model.md)",
+      "an api target does not declare `observe` — observation belongs to whoever PROVIDES the world, so declare it on the environment (`EnvironmentSpec.observe`, whose recording the platform fetches onto the observation channel) rather than on the agent's own view of it (docs/architecture/world-and-engagement-model.md)",
     );
   if (target.kind === "os" && target.acquire?.mode !== "service")
     defects.push(

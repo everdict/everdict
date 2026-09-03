@@ -174,6 +174,10 @@ export const EvalCaseSchema = z.object({
       // …and a world still to be CREATED for this case: the services to bring up and how their endpoints
       // become wiring. Carried the same way and for the same reason as `session`, and removed before the job
       // is dispatched — the runner receives coordinates, never the recipe for making more worlds.
+      // WHERE THIS WORLD PUBLISHES ITS OWN ACCOUNT — a wiring key whose URL the platform fetches once, after
+      // the drive and before grading, onto the observation channel. Platform-authored from the sealed
+      // environment, like every other part of `world`.
+      observe: z.object({ from: z.string().min(1) }).optional(),
       create: z
         .object({
           environment: z.string().min(1), // "id@version" — what the ledger records as the world's identity
@@ -335,7 +339,11 @@ export type TraceRef = z.infer<typeof TraceRefSchema>;
 // large diff to a stateDeltas ref. Rides the CaseResult, so it works self-hosted AND managed. docs/architecture/replay.md.
 export const EnvDeltaSchema = z.object({
   t: z.number(), // wall-clock ms — shares the recording/trace t0 clock
-  kind: z.enum(["repo-diff"]),
+  // `repo-diff` is the environment sampling ITSELF over the run. `world-recording` is a PROVIDED world's own
+  // account of what the agent did to it — the exchanges a proxy in front of an API recorded, fetched once
+  // after the drive (world-and-engagement-model.md: observation is the provider's obligation). Both are the
+  // platform's observation, never the agent's report.
+  kind: z.enum(["repo-diff", "world-recording"]),
   text: z.string(),
 });
 export type EnvDelta = z.infer<typeof EnvDeltaSchema>;
