@@ -1,0 +1,31 @@
+# Image that runs SpreadsheetBench with Claude Code = spreadsheetbench:v1 (toolchain + grader) + node + claude.
+# The agent and the scoring toolchain (libreoffice + openpyxl + sbench_grade + recalc) must be in ONE container,
+# so they are combined — the same shape as Dockerfile.codex, and for the same reason.
+#
+# THIS IS THE ENVIRONMENT, NOT A HOST SETUP. What SpreadsheetBench needs to be measurable — a spreadsheet
+# engine that can recalculate, and a scorer that reads cached values — is a property of the WORLD a case acts
+# in, so it is an image with a version rather than something installed on whoever happens to run the batch.
+# Registered as an Everdict environment (`EnvironmentSpec.image`), it gets its own identity axis: moving the
+# toolchain is then a change the diff can attribute, instead of an unrecorded difference between two machines.
+#
+# claude auth: the runner bind-mounts ~/.claude at /claude (machine subscription login = own-pays, no API key)
+# → CLAUDE_CONFIG_DIR=/claude, exactly as codex uses CODEX_HOME=/codex.
+# claude refuses --dangerously-skip-permissions as root unless it is told it runs inside a sandbox, which is
+# precisely this container's contract → IS_SANDBOX=1 (the same forcing ClaudeCodeHarness does).
+# For reference: docker build -t spreadsheetbench-claude:v1 -f Dockerfile.claude examples/bundles/spreadsheetbench
+FROM spreadsheetbench:v1
+
+# node 22 + the Claude Code CLI, pinned: an agent whose version moves under a campaign is a treatment nobody
+# declared, and the whole point of the environment axis is that such a move is visible.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends curl ca-certificates \
+  && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+  && apt-get install -y --no-install-recommends nodejs \
+  && npm i -g @anthropic-ai/claude-code@2.1.259 \
+  && npm cache clean --force \
+  && apt-get purge -y curl && apt-get autoremove -y \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV CLAUDE_CONFIG_DIR=/claude
+ENV IS_SANDBOX=1
+WORKDIR /everdict

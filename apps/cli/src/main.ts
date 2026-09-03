@@ -62,6 +62,7 @@ function usage(): void {
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
       "  --max-concurrent N: run N lease workers at once (case-level parallelism; default 1)",
       "  --mount-codex-login: bind ~/.codex into containerized (case.image) jobs → codex runs in-image with your login",
+      "  --mount-claude-login: bind ~/.claude into containerized (case.image) jobs → claude runs in-image with your login",
       "  service harness readiness: [--ready-timeout-ms N] [--ready-interval-ms N] (topology endpoint polling)",
     ].join("\n"),
   );

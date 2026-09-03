@@ -62,6 +62,22 @@ export async function runnerCommand(flags: Map<string, string>): Promise<void> {
       console.error(`⚠ --mount-codex-login: ${dockerOk ? `${codexHome} not found` : "no docker"} → skipping mount.`);
     }
   }
+  // …and the same opt-in for Claude Code, which authenticates the same way (a machine login, own-pays) and
+  // reads its config from CLAUDE_CONFIG_DIR exactly as codex reads CODEX_HOME. The lesson was paid for on the
+  // codex lane and not learned on this one, which is the sibling-lane shape rule `protocol` names: a harness
+  // that could run in an image had no way to be authenticated there, so every containerized Claude Code case
+  // would have started unauthenticated and failed as if the agent could not do the task.
+  if (flags.has("mount-claude-login")) {
+    const claudeHome = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+    if (dockerOk && existsSync(claudeHome)) {
+      mounts.push({ source: claudeHome, target: "/claude" }); // rw — claude writes token refresh + session state
+      console.error(
+        `▶ claude login mount: ${claudeHome} → /claude (containerized jobs). Reference it via CLAUDE_CONFIG_DIR=/claude in the harness.`,
+      );
+    } else {
+      console.error(`⚠ --mount-claude-login: ${dockerOk ? `${claudeHome} not found` : "no docker"} → skipping mount.`);
+    }
+  }
 
   // wedge prevention: a resilient MCP session (@everdict/self-hosted-runner) that auto-reinitializes on API restart/disconnect. Lazy connect.
   const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));
