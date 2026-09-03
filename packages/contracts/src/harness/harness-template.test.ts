@@ -976,7 +976,14 @@ describe("targets — browser | api | os, each obtainable or refused where it en
         }),
       ).success,
     ).toBe(true);
-    expect(targetDefects({ kind: "api", observe: ["request", "response"] }, "service")).toHaveLength(1);
+    // Two defects, and both are the point: nothing provides this world, and nothing watches it either.
+    expect(targetDefects({ kind: "api", observe: ["request", "response"] }, "service")).toHaveLength(2);
+    // An api target that names its world and asks to watch nothing is clean — the `observe` refusal is about
+    // a promise nobody keeps, not about api targets.
+    expect(targetDefects({ kind: "api", baseUrl: "https://shop.internal", observe: [] }, "service")).toEqual([]);
+    expect(
+      targetDefects({ kind: "api", baseUrl: "https://shop.internal", observe: ["request"] }, "service"),
+    ).toHaveLength(1);
     expect(targetDefects({ kind: "os", os: "linux", observe: ["screenshot", "window"] }, "service")).toHaveLength(1);
     expect(
       targetDefects(

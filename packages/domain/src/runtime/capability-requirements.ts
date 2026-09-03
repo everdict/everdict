@@ -7,7 +7,7 @@ import type {
   RuntimeSpec,
   ServiceHarnessSpec,
 } from "@everdict/contracts";
-import { resolvePlacementOs } from "@everdict/contracts";
+import { BadRequestError, resolvePlacementOs } from "@everdict/contracts";
 import { isHardenedRuntime } from "./trust-zone-hardening.js";
 
 // Derive the capabilities a case requires to run — decided from case fields (image/env.kind/source/placement.isolation).
@@ -18,6 +18,10 @@ export function requiredCapabilities(evalCase: EvalCase): CapabilityName[] {
   const req = new Set<CapabilityName>();
   if (evalCase.image) req.add("docker"); // container image execution (case.image)
   const env = evalCase.env;
+  // A REFERENCE is resolved by the control plane before anything is placed (world-and-engagement-model.md).
+  // One reaching here means the resolution was skipped, and the else-branch below would derive the DEFAULT
+  // box for a case whose world nobody read — an under-provisioned run that reads as an agent that failed.
+  if (env.kind === "ref") throw unresolvedEnvironment(evalCase.id, env.id);
   if (env.kind === "repo") {
     if ("git" in env.source) req.add("git"); // only a remote git source needs git (files/path sources don't)
   } else if (env.kind === "browser") {
@@ -42,6 +46,9 @@ export function requiredCapabilities(evalCase: EvalCase): CapabilityName[] {
 // to the driver (a container IMAGE can provide headless chromium — the driver cannot know, so it must not
 // refuse); "desktop" is a world no process/container driver can conjure and is refused pre-flight there.
 export function computeNeedsFor(evalCase: Pick<EvalCase, "env">): Array<"shell" | "browser" | "desktop"> {
+  // Same refusal as `requiredCapabilities`, and for the same reason: `["shell"]` for an unresolved reference
+  // provisions a box with no browser and no desktop for a case whose world was never read.
+  if (evalCase.env.kind === "ref") throw unresolvedEnvironment("", evalCase.env.id);
   if (evalCase.env.kind === "browser") return ["shell", "browser"];
   if (evalCase.env.kind === "os-use") return ["shell", "desktop"];
   return ["shell"];
@@ -171,4 +178,14 @@ export function runtimeSpecWithCapabilities(spec: RuntimeSpec): RuntimeSpec {
 export function jobFlavour(job: CaseJob): "service" | "process" | undefined {
   if (!job.harnessSpec) return undefined;
   return job.harnessSpec.kind === "service" ? "service" : "process";
+}
+
+// The one wording for "this case's world was never resolved", so the two derivations above and anything that
+// joins them say the same thing.
+function unresolvedEnvironment(caseId: string, environmentId: string): BadRequestError {
+  return new BadRequestError(
+    "BAD_REQUEST",
+    { case: caseId, environment: environmentId },
+    `this case names environment '${environmentId}' by reference and it was never resolved — the world it needs cannot be derived from a reference, so placing it would provision the default box for a world nobody read`,
+  );
 }

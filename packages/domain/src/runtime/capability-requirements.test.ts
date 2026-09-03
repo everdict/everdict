@@ -246,3 +246,18 @@ describe("runtimeSpecWithCapabilities — the register-time SSOT (declared ∪ d
     expect(twice.capabilities).toEqual(once.capabilities);
   });
 });
+
+// An unresolved environment REFERENCE is not a case with a modest world (world-and-engagement-model.md). The
+// control plane resolves it before anything is placed; one arriving here means the resolution was skipped,
+// and the fall-through would derive the DEFAULT box — an under-provisioned run that reads as an agent failing
+// a task it was never given the world for.
+describe("a world nobody resolved is refused, not defaulted", () => {
+  const referencing = { id: "c1", env: { kind: "ref", id: "shop" }, graders: [], timeoutSec: 60, tags: [] };
+  it("refuses to derive capabilities or compute needs from a reference", () => {
+    expect(() => requiredCapabilities(referencing as never)).toThrow(/never resolved/);
+    expect(() => computeNeedsFor(referencing as never)).toThrow(/never resolved/);
+  });
+  it("still answers for a resolved world", () => {
+    expect(computeNeedsFor({ env: { kind: "browser" } } as never)).toEqual(["shell", "browser"]);
+  });
+});

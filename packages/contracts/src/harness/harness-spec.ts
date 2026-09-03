@@ -451,7 +451,12 @@ export const ApiTargetSchema = z.object({
   acquire: TargetAcquireSchema.optional(),
   openapi: z.object({ ref: z.string().min(1) }).optional(), // where the API's contract is published
   auth: z.object({ secretRef: z.string().min(1) }).optional(), // the credential the client presents, by secret name
-  observe: z.array(z.enum(["request", "response"])).default(["request", "response"]),
+  // WHAT WOULD BE WATCHED, and today nothing watches it. There is no recording provider between an api client
+  // and its world (world-and-engagement-model.md: observation is the PROVIDER's obligation), so a non-empty
+  // list here is a promise nobody keeps — and a declaration nothing honours is the annotation failure rule
+  // `protocol` is about. It therefore defaults to EMPTY and a non-empty one is refused by name until a
+  // recording provider exists to lift the refusal.
+  observe: z.array(z.enum(["request", "response"])).default([]),
 });
 export type ApiTarget = z.infer<typeof ApiTargetSchema>;
 // A desktop the agent drives — the `os-use` world declared as a topology's target, so a deployed agent (not a CLI
@@ -477,6 +482,12 @@ export function targetDefects(target: TopologyTarget | undefined, context: "serv
   const defects: string[] = [];
   if (target.kind === "api" && target.baseUrl === undefined && target.acquire?.mode !== "service")
     defects.push("an api target names a baseUrl, or acquires one through a session API (acquire.mode = service)");
+  // An `observe` nobody produces would read downstream as "watched and saw nothing" rather than "not watched"
+  // — the L2 collapse, in a field that decides what evidence a judge is given.
+  if (target.kind === "api" && target.observe.length > 0)
+    defects.push(
+      "an api target cannot declare `observe` yet — nothing records a client's exchanges, and a declaration nothing honours would read as an empty observation rather than as no observation (docs/architecture/world-and-engagement-model.md)",
+    );
   if (target.kind === "os" && target.acquire?.mode !== "service")
     defects.push(
       "an os target is acquired through a session API (acquire.mode = service) — nothing provisions a desktop here",
