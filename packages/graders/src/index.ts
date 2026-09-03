@@ -32,3 +32,9 @@ export {
 export { type EvidenceAssessment, assessEvidence } from "./assess-evidence.js";
 export { makeGraders } from "./make-graders.js";
 export { judgeFromEnv, makeGradersFromEnv, skipGrader } from "./judge-env.js";
+export {
+  modelUser,
+  userSimulatorFromEnv,
+  userSimulatorPrompt,
+  type SimulatedUser,
+} from "./user-simulator.js";

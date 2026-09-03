@@ -200,11 +200,29 @@ export const EvalCaseSchema = z.object({
   engagement: z
     .object({
       kind: z.literal("dialogue"),
-      user: z.object({ kind: z.literal("scripted"), turns: z.array(z.string().min(1)).min(1) }),
+      user: z.discriminatedUnion("kind", [
+        // The case carries the user's turns: the exchange is fixed data like every other part of the
+        // question, and two runs of the case ask the same thing.
+        z.object({ kind: z.literal("scripted"), turns: z.array(z.string().min(1)).min(1) }),
+        // A MODEL plays the user, from a persona the case declares. What tau-bench and its relatives need,
+        // and the reason `maxTurns` is required for this kind: a scripted user runs out of lines, a model
+        // never does, and an unbounded conversation is a runaway with a bill.
+        z.object({
+          kind: z.literal("model"),
+          persona: z.string().min(1), // who the user is and what they want — the simulator's whole brief
+          // What ends the conversation besides the bound. The simulator is told to answer with exactly this
+          // when the exchange is over, and that turn is not sent to the agent.
+          done: z.string().min(1).default("###STOP###"),
+        }),
+      ]),
       // The bound on the whole exchange, counting the opening task as turn 1. Absent = as many turns as the
       // user has lines; a smaller value truncates them, which is what makes a shared dataset runnable under
       // a tighter budget without editing the cases.
       maxTurns: z.number().int().positive().max(50).optional(),
+    })
+    .refine((e) => e.user.kind !== "model" || e.maxTurns !== undefined, {
+      message: "a model-driven user needs maxTurns — a scripted user runs out of lines and a model does not",
+      path: ["maxTurns"],
     })
     .optional(),
 });
@@ -513,8 +531,20 @@ export type Scorecard = z.infer<typeof ScorecardSchema>;
 // one-shot case, which is every case that declares no engagement.
 export function dialogueTurns(evalCase: Pick<EvalCase, "engagement">): string[] {
   const engagement = evalCase.engagement;
-  if (engagement === undefined) return [];
+  if (engagement === undefined || engagement.user.kind !== "scripted") return [];
   // The opening task is turn 1, so `maxTurns` leaves `maxTurns - 1` for the user.
   const budget = engagement.maxTurns === undefined ? engagement.user.turns.length : engagement.maxTurns - 1;
   return engagement.user.turns.slice(0, Math.max(0, budget));
+}
+
+// How many turns the USER may still take after the opening task — the one reader of the bound, so the loop
+// and anything that previews a dialogue count the same exchange. A scripted user is also bounded by how many
+// lines it has; a model user has only this.
+export function dialogueUserBudget(evalCase: Pick<EvalCase, "engagement">): number {
+  const engagement = evalCase.engagement;
+  if (engagement === undefined) return 0;
+  if (engagement.user.kind === "scripted") return dialogueTurns(evalCase).length;
+  // `maxTurns` is required for a model user (the schema refuses one without it); the fallback keeps this
+  // total rather than making every caller handle a case the parse already excluded.
+  return Math.max(0, (engagement.maxTurns ?? 1) - 1);
 }

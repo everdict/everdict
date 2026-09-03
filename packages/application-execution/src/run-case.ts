@@ -28,6 +28,7 @@ import {
   CURRENT_EXECUTION_MANIFEST_ERA,
   UpstreamError,
   dialogueTurns,
+  dialogueUserBudget,
   resolvePlacementOs,
   stamp,
 } from "@everdict/contracts";
@@ -62,6 +63,17 @@ export interface RunCaseDeps {
   // Applied to the compute the GRADERS are handed, and to any compute they provision for themselves. The
   // harness's compute is untouched, so the key is not in the environment of the process being evaluated.
   graderEnv?: Record<string, string>;
+  // ── WHO PLAYS THE USER, WHEN A CASE'S USER IS A MODEL (world-and-engagement-model.md, axis 2) ──
+  //
+  // A scripted user is data the case carries; a model user is a call, and a call needs a transport this
+  // sandbox was given. Optional because most cases are one-shot — and a case that DECLARES a model user
+  // while this is absent is refused by name, never quietly run as a one-shot, which would measure a first
+  // turn and report it as a conversation.
+  simulateUser?: (input: {
+    persona: string;
+    task: string;
+    transcript: ReadonlyArray<{ role: string; text: string }>;
+  }) => Promise<string | undefined>;
   // The harness version's seeds, materialized by the control plane and written at the mount BEFORE the harness
   // installs (harness-identity-and-seeds-spec.md §2). Written through the same compute the harness runs in.
   seedFiles?: ReadonlyArray<{ path: string; content: string }>;
@@ -382,8 +394,16 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     // the agent resumes its session rather than starting a new one each time. A harness that cannot hold a
     // conversation is refused HERE rather than driven turn by turn: each "turn" would be an independent run,
     // the conversation would be a fiction, and the score would measure something nobody asked for.
+    const engagement = evalCase.engagement;
     const userTurns = dialogueTurns(evalCase);
-    if (userTurns.length > 0 && deps.harness.conversational !== true)
+    const userBudget = dialogueUserBudget(evalCase);
+    if (engagement?.user.kind === "model" && deps.simulateUser === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { case: evalCase.id },
+        `case '${evalCase.id}' has a MODEL-driven user and this execution site was given no simulator — running it as a one-shot would measure a first turn and report it as a conversation`,
+      );
+    if (userBudget > 0 && deps.harness.conversational !== true)
       throw new BadRequestError(
         "BAD_REQUEST",
         { case: evalCase.id, harness: deps.harness.id },
@@ -397,10 +417,32 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     // trace and let the finally dispose the compute — which frees the runtime mid-case (the container/process dies).
     const signal = deps.runCtx.signal;
     if (signal?.aborted) throw cancelledRun(runId);
-    // One turn's drive. A one-shot case runs this once with the task; a dialogue runs it again per user line.
+    // The user's next turn, or undefined when the conversation is over. One function for both user kinds so
+    // the loop counts one exchange rather than branching on who is speaking.
+    const nextUserTurn = async (index: number): Promise<string | undefined> => {
+      if (engagement === undefined) return undefined;
+      if (engagement.user.kind === "scripted") return userTurns[index];
+      const simulate = deps.simulateUser;
+      if (simulate === undefined) return undefined; // refused above; this is the exhaustiveness arm
+      const said = await simulate({
+        persona: engagement.user.persona,
+        task: evalCase.task,
+        transcript: trace
+          .filter((e): e is TraceEvent & { kind: "message"; role: string; text: string } => e.kind === "message")
+          .map((e) => ({ role: e.role, text: e.text })),
+      });
+      if (said === undefined) return undefined;
+      const trimmed = said.trim();
+      // The stop sentence ends the exchange and is NOT sent: a user who says "we are done" to the agent has
+      // added a turn nobody asked for, and the transcript a judge reads would carry an instruction from the
+      // platform rather than from the person it is simulating.
+      return trimmed.length === 0 || trimmed.includes(engagement.user.done) ? undefined : said;
+    };
+
+    // One turn's drive. A one-shot case runs this once with the task; a dialogue runs it again per user turn.
     const driveTurn = async (text: string): Promise<void> => {
       const turnCtx: RunContext =
-        userTurns.length === 0
+        userBudget === 0
           ? runCtx
           : {
               ...runCtx,
@@ -424,10 +466,14 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     };
     const drain = (async () => {
       await driveTurn(evalCase.task);
-      // The user's lines, in order, each resuming the session the previous turn reported. An abort between
-      // turns stops the exchange where it is — the trace so far is what happened, and the finally disposes.
-      for (const turn of userTurns) {
+      // The user's turns, each resuming the session the previous one reported. A scripted user's lines are
+      // read in order; a model user is ASKED, with the exchange so far, and ends the conversation by
+      // answering with the `done` sentence — which is never sent to the agent. An abort between turns stops
+      // the exchange where it is: the trace so far is what happened, and the finally disposes.
+      for (let i = 0; i < userBudget; i++) {
         if (signal?.aborted) return;
+        const turn = await nextUserTurn(i);
+        if (turn === undefined) return;
         await driveTurn(turn);
       }
     })();

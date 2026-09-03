@@ -182,7 +182,16 @@ case declares and refuses when it cannot — a provided world is the same decora
    the agent RESUMES its session instead of meeting each line cold. `dialogueTurns` is the one reader of the
    bound. A harness that does not declare `conversational` is refused before the first turn: driving it would
    make every turn an independent run, and the conversation the score is computed over would be a fiction.
-   A model-driven user is a different user KIND and plugs in at `engagement.user`, not into the loop.
+   ✅ **And the model-driven user landed the same day**: `engagement.user` is a union, and a `model` user
+   declares a PERSONA the simulator plays. It is asked for each turn with the exchange so far, and it ends
+   the conversation by saying its stop sentence — which is dropped rather than delivered, so the transcript a
+   judge reads carries no instruction the platform wrote. `maxTurns` is REQUIRED for a model user: a scripted
+   user runs out of lines and a model does not. The simulator is built from the same grant the judge is (this
+   job's own model and key), because it is the same kind of call — made on the platform's behalf, never on
+   the agent's — and it is never handed the case's expected answer or its grading material, because a user
+   who knows the answer stops being a user and becomes a hint. A case that declares a model user where no
+   simulator was given is REFUSED: running it as a one-shot would measure a first turn and report it as a
+   conversation.
 
 Each slice lands with a counterexample that drives the production composition, and slices 3 and 4 land with
 their refusals: a world that cannot be provided, and a harness that cannot hold a conversation.

@@ -17,6 +17,7 @@ import {
 import { classifyFailure, registryAuthsOf, stageForError } from "@everdict/domain";
 import { DockerDriver, type DriverMount, LocalDriver } from "@everdict/drivers";
 import { OsUseEnvironment, PromptEnvironment, RepoEnvironment } from "@everdict/environments";
+import { type SimulatedUser, userSimulatorFromEnv } from "@everdict/graders";
 import { runContextFromEnv } from "./env.js";
 import { makeGradersFromEnv, makeHarness } from "./registry.js";
 
@@ -198,6 +199,14 @@ export async function runCaseJob(
     // `runCase` hands it to the graders' view of the compute instead. Same consumer, same value; the harness's
     // environment no longer contains a credential it never needed.
     ...(Object.keys(jobEnv).length > 0 ? { graderEnv: jobEnv } : {}),
+    // WHO PLAYS THE USER for a dialogue case whose user is a MODEL (world-and-engagement-model.md, axis 2).
+    // Built from the same grant the judge is — this job's own judge model and key — because it is the same
+    // kind of call: made on the platform's behalf, never on the agent's. Absent config leaves it undefined,
+    // and `runCase` then REFUSES a model-user case by name rather than running it as a one-shot.
+    ...((): { simulateUser?: SimulatedUser } => {
+      const simulateUser = userSimulatorFromEnv({ ...env, ...jobEnv });
+      return simulateUser ? { simulateUser } : {};
+    })(),
     // The harness version's seeds, materialized by the control plane (harness-identity-and-seeds-spec.md §2).
     ...(job.seedFiles !== undefined ? { seedFiles: job.seedFiles } : {}),
     // The lane's attestation, onto the manifest `runCase` writes — the same value the driver above checks the

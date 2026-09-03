@@ -117,3 +117,60 @@ describe("[COUNTEREXAMPLE] a dialogue case is one exchange, not N first turns", 
     expect(turns).toEqual([{ text: "book me a flight" }]);
   });
 });
+
+// ── A MODEL PLAYS THE USER (world-and-engagement-model.md, axis 2 — the tau-bench shape) ──────────────
+//
+// A scripted user runs out of lines; a model never does, which is why `maxTurns` is required for one and why
+// the stop sentence is the other ending. Two things this pins that nothing else can:
+//   ① the simulator's stop sentence ENDS the exchange and is not delivered — a "we're done" turn sent to the
+//      agent would put a platform instruction in the transcript a judge then reads as the user's words;
+//   ② a case whose user is a model, at an execution site with no simulator, is REFUSED — running it as a
+//      one-shot would measure a first turn and report it as a conversation.
+describe("[COUNTEREXAMPLE] a model-driven user is asked per turn, and its ending is not a turn", () => {
+  const modelCase = (over: Record<string, unknown> = {}): EvalCase =>
+    dialogueCase({
+      engagement: {
+        kind: "dialogue",
+        user: { kind: "model", persona: "you want a window seat", done: "###STOP###" },
+        maxTurns: 4,
+        ...over,
+      },
+    } as Partial<EvalCase>);
+
+  it("asks the simulator for each turn, showing it the exchange so far, and stops on the stop sentence", async () => {
+    const { harness, turns } = conversationalHarness();
+    const asked: Array<{ persona: string; transcript: number }> = [];
+    const said = ["make it a window seat", "###STOP###"];
+    await runCase(modelCase(), {
+      ...deps(harness),
+      simulateUser: async ({ persona, transcript }) => {
+        asked.push({ persona, transcript: transcript.length });
+        return said[asked.length - 1];
+      },
+    });
+    expect(turns.map((t) => t.text)).toEqual(["book me a flight", "make it a window seat"]);
+    // The simulator sees what the agent has said so far — one message after the opening, two after the reply.
+    expect(asked).toEqual([
+      { persona: "you want a window seat", transcript: 1 },
+      { persona: "you want a window seat", transcript: 2 },
+    ]);
+  });
+
+  it("honours maxTurns even when the simulator would keep talking", async () => {
+    const { harness, turns } = conversationalHarness();
+    await runCase(modelCase({ maxTurns: 2 }), { ...deps(harness), simulateUser: async () => "and another thing" });
+    expect(turns).toHaveLength(2);
+  });
+
+  it("② refuses a model-user case where no simulator was given — before the first turn", async () => {
+    const { harness, turns } = conversationalHarness();
+    await expect(runCase(modelCase(), deps(harness))).rejects.toThrow(/no simulator/);
+    expect(turns).toEqual([]);
+  });
+
+  it("an empty answer ends the exchange like the stop sentence — a user with nothing to say has stopped", async () => {
+    const { harness, turns } = conversationalHarness();
+    await runCase(modelCase(), { ...deps(harness), simulateUser: async () => "   " });
+    expect(turns.map((t) => t.text)).toEqual(["book me a flight"]);
+  });
+});

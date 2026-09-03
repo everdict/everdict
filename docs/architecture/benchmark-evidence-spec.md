@@ -59,8 +59,11 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 > path rather than in a grader, and its reward compares the domain database's final state against the
 > benchmark's own. *(Since 2026-09-03 the first of those exists: a case declares its engagement and `runCase`
 > drives the exchange over the harness's continuity contract — `docs/architecture/world-and-engagement-model.md`
-> axis 2. What tau-bench still needs is a MODEL-DRIVEN user, which plugs in at `engagement.user` beside the
-> scripted one, and its domain database.)*
+> axis 2 — and since the same day, a MODEL-DRIVEN user: `engagement.user` accepts a persona a simulator
+> plays, bounded by a required `maxTurns`. What tau-bench still needs is its own DOMAIN DATABASE and tool
+> APIs — the world its reward compares the final state of — which a workspace now expresses as an
+> environment that PROVIDES a world (`world-and-engagement-model.md`), not as anything this platform can
+> ship on the benchmark's behalf.)*
 
 **The gap.** Terminal-Bench slices 2–5 are unbuilt — the ingestion edge, the benchmark-source kind for
 `POST /datasets`, the image-provenance helper, the web wizard (`docs/architecture/standard-task-formats.md`).
