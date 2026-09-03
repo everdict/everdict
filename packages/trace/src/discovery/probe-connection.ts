@@ -1,3 +1,4 @@
+import { deadlineFetch } from "@everdict/contracts";
 import type { TraceProbeConfig, TraceProbeResult, TraceScopeKind, TraceScopeOption } from "@everdict/contracts";
 
 // Connection test + scope discovery for a trace source/sink, run BEFORE registration. One lightweight authed
@@ -132,7 +133,7 @@ const SPECS: Record<TraceProbeConfig["kind"], KindSpec> = {
 // Probe a trace source/sink connection and discover its selectable scopes. Never throws for reachability — the
 // outcome (reachable/reason/scopes) is the return value. Injected fetchImpl for tests; 10s Promise.race timeout.
 export async function probeTraceConnection(cfg: TraceProbeConfig): Promise<TraceProbeResult> {
-  const f = cfg.fetchImpl ?? fetch;
+  const f = deadlineFetch(cfg.fetchImpl);
   const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const spec = SPECS[cfg.kind];
   const { url, init } = spec.request(trimSlash(cfg.endpoint), cfg.auth);

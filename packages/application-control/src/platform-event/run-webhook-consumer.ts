@@ -1,4 +1,9 @@
-import { type PlatformEventRecord, assertPublicOutboundTarget, refuseUnsafeOutboundUrl } from "@everdict/contracts";
+import {
+  type PlatformEventRecord,
+  assertPublicOutboundTarget,
+  deadlineFetch,
+  refuseUnsafeOutboundUrl,
+} from "@everdict/contracts";
 import type { RunStore } from "../ports/run-store.js";
 import type { PlatformEventConsumer } from "./event-consumer-runner.js";
 
@@ -57,7 +62,7 @@ const LANE = "run webhook";
 const TERMINAL_RUN_KINDS = ["run.completed", "run.failed"];
 
 export function runWebhookConsumer(deps: RunWebhookDeps): PlatformEventConsumer {
-  const fetchImpl = deps.fetchImpl ?? fetch;
+  const fetchImpl = deadlineFetch(deps.fetchImpl);
   const timeoutMs = deps.requestTimeoutMs ?? 10_000;
   return {
     name: "runs:completion-webhook",

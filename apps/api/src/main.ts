@@ -80,6 +80,7 @@ import { InMemoryWorkspaceFs } from "@everdict/storage";
 import { CdpEnvironmentRecorder } from "@everdict/topology";
 import { buildTraceSource } from "@everdict/trace";
 import type { AgentTryRelay } from "./api/mcp-context.js";
+import { agentFetch } from "./common/agent-fetch.js";
 import type { BrowserSessionProvisioner } from "./common/browser-session-provisioner.js";
 import { CaseFsRequestHub } from "./common/case-fs-request-hub.js";
 import { CaseRecorder } from "./common/case-recorder.js";
@@ -764,7 +765,7 @@ async function main(): Promise<void> {
     ...(approvalAgentUrl && approvalAgentToken
       ? {
           deliver: async (approval, decision) => {
-            const res = await fetch(new URL("/internal/deliver-approval", approvalAgentUrl), {
+            const res = await agentFetch(new URL("/internal/deliver-approval", approvalAgentUrl), {
               method: "POST",
               headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
               body: JSON.stringify({
@@ -778,7 +779,7 @@ async function main(): Promise<void> {
             return json.delivered === true;
           },
           resume: async (approval, decision, decidedBy) => {
-            const res = await fetch(new URL("/internal/resume-approval", approvalAgentUrl), {
+            const res = await agentFetch(new URL("/internal/resume-approval", approvalAgentUrl), {
               method: "POST",
               headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
               body: JSON.stringify({
@@ -2102,7 +2103,7 @@ async function main(): Promise<void> {
               subject?: { type: string; id: string };
               instruction?: string;
             }) => {
-              const res = await fetch(new URL("/internal/activations", approvalAgentUrl), {
+              const res = await agentFetch(new URL("/internal/activations", approvalAgentUrl), {
                 method: "POST",
                 headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
                 body: JSON.stringify(input),
@@ -2112,7 +2113,7 @@ async function main(): Promise<void> {
             status: async (workspace: string, sessionId: string) => {
               const url = new URL(`/internal/activations/${encodeURIComponent(sessionId)}/status`, approvalAgentUrl);
               url.searchParams.set("workspace", workspace);
-              const res = await fetch(url, { headers: { "x-internal-token": approvalAgentToken } });
+              const res = await agentFetch(url, { headers: { "x-internal-token": approvalAgentToken } });
               return { status: res.status, body: await res.json().catch(() => ({})) };
             },
           },
@@ -2154,7 +2155,7 @@ async function main(): Promise<void> {
     ...(approvalAgentUrl && approvalAgentToken
       ? {
           agentTry: (async (input) => {
-            const res = await fetch(new URL("/internal/try", approvalAgentUrl), {
+            const res = await agentFetch(new URL("/internal/try", approvalAgentUrl), {
               method: "POST",
               headers: { "content-type": "application/json", "x-internal-token": approvalAgentToken },
               body: JSON.stringify(input),

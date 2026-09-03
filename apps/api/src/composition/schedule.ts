@@ -10,6 +10,7 @@ import type {
 } from "@everdict/application-control";
 import { BadRequestError, EVERDICT_TRACE_SOURCE, UpstreamError } from "@everdict/contracts";
 import type { ScheduleStore } from "@everdict/db";
+import { agentFetch } from "../common/agent-fetch.js";
 import { TemporalScheduleDriver } from "../core/schedule/temporal-schedule-driver.js";
 
 // The one place the schedule↔membership↔scorecard construction cycle is expressed.
@@ -77,7 +78,7 @@ export function wireScheduleService(
             try {
               // The agent's internal surface says `workspace` (the /agent/events precedent); the port input says
               // `tenant` (control-plane vocabulary) — map explicitly, never spread (a live 400 caught the drift).
-              res = await fetch(new URL("/internal/report", agentUrl), {
+              res = await agentFetch(new URL("/internal/report", agentUrl), {
                 method: "POST",
                 headers: { "content-type": "application/json", "x-internal-token": agentInternalToken },
                 body: JSON.stringify({

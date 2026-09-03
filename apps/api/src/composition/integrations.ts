@@ -15,6 +15,7 @@ import { UpstreamError } from "@everdict/contracts";
 import type { PlatformEventStore } from "@everdict/db";
 import type { CommentStore, NotificationStore, OAuthStateStore, WorkspaceSettingsStore } from "@everdict/db";
 import { buildTraceSink, buildTraceSource, probeTraceConnection } from "@everdict/trace";
+import { agentFetch } from "../common/agent-fetch.js";
 import { httpAgentEventSink } from "../infrastructure/agent/agent-event-sink.js";
 import { githubAppGateway } from "../infrastructure/github/app-gateway.js";
 import { githubRepoTreeReaderFactory, githubRepoWriterFactory } from "../infrastructure/github/repo-writer.js";
@@ -104,7 +105,7 @@ export function buildIntegrations(deps: {
             try {
               // The agent's internal surface says `workspace` (the /agent/events precedent); the port says `tenant`
               // (control-plane vocabulary) — map explicitly, never spread.
-              res = await fetch(new URL("/internal/discussion-turn", agentUrl), {
+              res = await agentFetch(new URL("/internal/discussion-turn", agentUrl), {
                 method: "POST",
                 headers: { "content-type": "application/json", "x-internal-token": agentInternalToken },
                 body: JSON.stringify({

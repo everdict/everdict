@@ -9,6 +9,7 @@ import {
   type TraceRunStatus,
   type TraceSummary,
   UpstreamError,
+  deadlineFetch,
 } from "@everdict/contracts";
 import { extractEvidence } from "./evidence-resolve.js";
 import {
@@ -273,7 +274,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
 
   // One traces/search call with the given filter clause → the first trace_id (or undefined on no match).
   private async searchTraceId(experiments: string[], filter: string): Promise<string | undefined> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
       method: "POST",
@@ -324,7 +325,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
 
   // GET the trace by its (server-minted) trace_id and parse to Span[]. Absent/unparseable → 0 spans (flush lag).
   private async getSpansById(traceId: string): Promise<Span[]> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const res = await f(`${base}/api/3.0/mlflow/traces/get?trace_id=${encodeURIComponent(traceId)}`, {
       ...(this.opts.headers ? { headers: this.opts.headers } : {}),
@@ -362,7 +363,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
       if (!found) return "absent";
       traceId = found;
     }
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const res = await f(`${base}/api/3.0/mlflow/traces/get?trace_id=${encodeURIComponent(traceId)}`, {
       ...(this.opts.headers ? { headers: this.opts.headers } : {}),
@@ -404,7 +405,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
     const evidence = await extractEvidence(
       spans,
       m,
-      this.opts.fetchImpl ?? fetch,
+      deadlineFetch(this.opts.fetchImpl),
       this.opts.headers,
       this.opts.endpoint,
       this.opts.artifactBaseUrl,
@@ -424,7 +425,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
     const evidence = await extractEvidence(
       spans,
       m,
-      this.opts.fetchImpl ?? fetch,
+      deadlineFetch(this.opts.fetchImpl),
       this.opts.headers,
       this.opts.endpoint,
       this.opts.artifactBaseUrl,
@@ -440,7 +441,7 @@ export class MlflowTraceSource implements BrowsableTraceSource {
   }
 
   async listTraces(opts?: ListTracesOptions): Promise<TraceListPage> {
-    const f = this.opts.fetchImpl ?? fetch;
+    const f = deadlineFetch(this.opts.fetchImpl);
     const base = this.opts.endpoint.replace(/\/$/, "");
     const experiments = opts?.scope ? [opts.scope] : (this.opts.experimentIds ?? []);
     if (experiments.length === 0) {

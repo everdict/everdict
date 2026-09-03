@@ -1,4 +1,5 @@
 import type { AgentEventSink } from "@everdict/application-control";
+import { agentFetch } from "../../common/agent-fetch.js";
 
 // Push a platform event to the agent service's internal /agent/events endpoint (S4 — the monitoring→proactive-team
 // bridge, docs/architecture/agent-teams.md). Authenticated with the shared internal token; the agent fans the event to
@@ -8,7 +9,7 @@ export function httpAgentEventSink(agentUrl: string, internalToken: string): Age
   const url = `${agentUrl.replace(/\/$/, "")}/agent/events`;
   return {
     async emit(input) {
-      await fetch(url, {
+      await agentFetch(url, {
         method: "POST",
         headers: { "content-type": "application/json", "x-internal-token": internalToken },
         body: JSON.stringify(input),
