@@ -157,19 +157,22 @@ landed honestly — an environment carries its world's BYTES and its build RECIP
 now), declares a world PROVIDED statically or opened per case through a session API, and a case declares its
 ENGAGEMENT so a dialogue is one exchange rather than N first turns.
 
-Open, and each with its reason written where somebody will meet it:
-- **tau-bench** (`benchmark-evidence-spec.md` §1) — the execution model it needed now exists (a case declares
-  its engagement and the exchange is one conversation); what remains is a model-driven user and the
-  benchmark's own domain database, which its reward compares against.
-- **A world Everdict CREATES** (`world-and-engagement-model.md`, landing order 3.9) — bringing infrastructure
-  up per case and tearing it down. Static and session-opened worlds landed because neither creates anything;
-  this one needs a durable worklist of what was created and a verified zero (rule `protocol` L5), because a
-  world we made and cannot prove is gone is a leak that bills.
-- **An api client's observation** — nothing records a client's exchanges, so `observe` on an api target is
-  now REFUSED rather than declared and unhonoured. A recording provider lifts the refusal.
-- **A model-driven user** for a dialogue case (`engagement.user`, beside the scripted one) — the last thing
-  tau-bench needs besides its domain database.
+Every structural blocker this program named is now landed — the four axes of
+`docs/architecture/world-and-engagement-model.md` in full: an environment carries its world's bytes and its
+build recipe, provides a world statically · per session · by CREATING one (with a durable worklist and a
+teardown that reads back zero), publishes that world's own account onto the observation channel, and a case
+declares whether it is one-shot or a dialogue with a scripted or model-driven user.
+
+Open, and neither is a gap in this platform:
+- **A tau-bench adapter** needs the benchmark's own DOMAIN DATABASE and tool APIs — the world whose final
+  state its reward compares. A workspace expresses that as an environment that provides a world; it is not
+  something Everdict can ship on the benchmark's behalf, and inventing one would be the fabrication every
+  `proxy` declaration in the catalogue exists to prevent.
 - A Hermes recipe waits on its CLI's resume form.
+
+What a next pass would extend rather than unblock: a created world on K8s or a self-hosted runner (Nomad
+ships first, and the others are refused by name rather than degraded), and a world SHARED across a batch's
+cases, which needs a slice key rather than a new axis.
 
 ## What would reopen this page
 
