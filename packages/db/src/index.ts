@@ -123,7 +123,20 @@ export {
   InMemoryAgentMemberPreferenceStore,
   PgAgentMemberPreferenceStore,
 } from "./workspace/agent-member-preference-store.js";
-export { type SqlClient, type PgPool, makePool, sqlClient, withTransaction } from "./client.js";
+export {
+  type SqlClient,
+  type PgPool,
+  type PoolTuning,
+  makePool,
+  poolConfig,
+  sqlClient,
+  withTransaction,
+  DEFAULT_POOL_MAX,
+  DEFAULT_CONNECTION_TIMEOUT_MS,
+  DEFAULT_STATEMENT_TIMEOUT_MS,
+  DEFAULT_IDLE_IN_TRANSACTION_TIMEOUT_MS,
+  DEFAULT_IDLE_TIMEOUT_MS,
+} from "./client.js";
 export {
   type UsageRow,
   type UsageCost,
