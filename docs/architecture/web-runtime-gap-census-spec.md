@@ -272,7 +272,40 @@ record of.
 | `/benchmarks/:id/judge` | beside the import, because the halves travel together: cases from the import, criterion from the benchmark's own scorer. NO official scorer is the more important answer — it says the criterion is yours, and that "we ran benchmark X" will not mean the same thing elsewhere unless you say how you scored it |
 | `/fs` (DELETE) | governance, not content. It empties EVERY member's files, so the confirm asks for the workspace NAME rather than a yes — a yes/no dialog is the wrong shape for an act whose blast radius is other people's work |
 
-**12 remain OWED — all of them `campaigns`.**
+| `/campaigns` (11 of 12) | the evolution domain, which had no page at all. What the surface deliberately does NOT have is the field a driver would most expect: **there is no verdict input**, because the platform derives the verdict from the production scorecard diff and a form offering one would ask a loop to grade its own work. `learned` is required for the mirrored reason — the budget is spent either way, and what the round TAUGHT is the only half the next round can use. Settle is hidden while the gate says `continue` (the arithmetic is the frame's, not the page's), and adopt/merge appear only while the authorization is unspent, because **settling is not adopting**: a campaign reading `adopted` whose registry write nobody has made is work not yet done, not a bug to hide. The twelfth route — the adoption's SPEND — is DECIDED rather than built, and the reason is the finding below |
+
+**0 remain OWED.** Every browser-facing route is reachable; the 18 entries that survive on `DECIDED` each
+name a caller that is not a browser.
+
+### What the self-review found, and why it is the census's own lesson
+
+The first campaigns surface was written from skill `evolve` rather than from the contract, and it shipped
+green: typecheck, lint, tests, the reach gate. Six readings were dead, and every one of them was a field that
+**does not exist on the wire**:
+
+| written | the wire | what it did |
+|---|---|---|
+| `campaign.subject.kind` | `campaign.frame.subject.type` | a permanently blank page header |
+| `close.answer === 'adopt'` | `close.outcome.kind === 'adopted'` | the adopt/merge panel NEVER rendered |
+| `round.verdict.outcome` | `{comparable, significantImprovements, heldOut…}` | every round badged "not comparable" |
+| `settle().close.answer` | `close.outcome.kind` | the settle result never said what it decided |
+| `adoption.operation !== 'decided'` | `operation` is an OBJECT | every campaign read as already spent |
+| `learned: z.string()` | `.optional()` on the row | **one legacy round takes down the campaign list** |
+
+The last one is the one to keep. It is the outage
+`packages/contracts/src/records/legacy-campaign-decode.counterexample.test.ts` was written for — a creation
+rule applied at decode time — reproduced one layer out in the browser, in a repository that already had the
+counterexample on file. A creation floor belongs to the FORM; the decode gets whatever was legitimately
+stored.
+
+None of it was catchable by reading, because reading is what produced it. What catches it is a
+**compile-time drift guard**, and it is now in `apps/web/src/entities/campaign/model/schema.ts` in two
+directions, because they find different mistakes: comparing KEY SETS finds an invented field (structural
+assignability ignores an extra optional), and asserting the wire type is assignable to the decoded type finds
+a field the web requires and the row may omit. Both were seen RED against the shipped code.
+
+This is the fifth-extraction-error lesson in a different costume: the numbers were wrong five times and the
+FIELDS were wrong six, and in both cases the fix was a mechanical check rather than a more careful reading.
 
 ### ⚠️ The scanner's fifth extraction error, found by using it
 
@@ -290,14 +323,10 @@ That is the fifth spelling of this class (backticked-only matching · a characte
 trailing `${qs}` read as a segment · a literal-prefix "reachable" check · this). The pattern is worth naming:
 **every one was a false report about the SAME kind of value**, and each was found only by driving the tool
 against the tree rather than by reading it. A census's extraction is the part that needs the counterexample,
-not its conclusions. They are not one more afternoon: `campaigns` (11 routes) is the evolution domain with no
-page at all, `knowledge` authoring (8) is a write surface over a graph the web only reads, and the
-`sandboxes`/`groups`/`checkpoints`/`environments` clusters are each a product surface somebody has to
-design. Calling those
-resolved by adding a client method nobody calls would be the unwired-capability defect this repository has a
-gate against — so they stay named, and the gate refuses to let a new one join them silently.
+not its conclusions — the numbers in this document were wrong five times, and never once in a way reading it
+would have shown.
 
-What the gate DOES guarantee, and what this page is now the record of: no route can go unreachable without a
+What the gate guarantees, and what this page is the record of: no route can go unreachable without a
 decision, no decision can outlive its subject, and the debt has a count that only moves one way.
 
 ## Slice 4 — the check that keeps it closed — **Landed**
@@ -309,7 +338,15 @@ for it — and a route that BECOMES reachable must lose its line, because a reas
 reads as permission.
 
 It was listed last because it would have been red, and a gate that lands before its fix teaches people to
-bypass gates. It is green now: **364 routes, 72 decided, 55 of them OWED.**
+bypass gates. It was green at **364 routes, 72 decided, 55 of them OWED**, and it is green now at
+**365 routes, 18 decided, none OWED** — the debt is paid, and the 18 that remain are the routes whose caller
+is a runner, a CI job, another service, or (in one case) a door whose body a browser cannot honestly fill.
+
+⚠️ **An empty OWED list is not the end of the convention, and reading it that way is how the next gap becomes
+invisible.** The next unreachable route needs somewhere honest to sit while its surface is built; what the
+line must never become is a parking space. The two entry kinds look alike and mean opposite things — `OWED —`
+says *a person needs this and it does not exist yet*, and a plain reason says *the caller is not a browser*.
+Only the first one is a debt, and only the first one is supposed to disappear.
 
 ⚠️ **IT FOUND THE HAND CENSUS WRONG, IN BOTH DIRECTIONS.** Its extraction is stricter, and re-running the
 count mechanically moved the answer from 36 to 39 with different membership: `/harnesses/:id/pins`,

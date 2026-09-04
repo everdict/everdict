@@ -1245,6 +1245,69 @@ export const controlPlane = {
   // A checkpoint is the state transfer between agents: confirmed facts with their evidence references,
   // hypotheses, open decisions, what remains. It is EVIDENCE about how a task stopped, and evidence only a
   // person can act on had no reader. Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+  // ── EVOLUTION CAMPAIGNS — THE RECORD, AND THE DECISIONS A PERSON OWES IT ────────────────────────
+  //
+  // A campaign is a SETTLEMENT, not an engine: a frozen frame, an append-only round trace and a pure gate.
+  // It does not propose candidates, does not run scorecards and does not wake itself — that is the driver's
+  // job (skill `evolve`). So the web is a READER plus the acts a person is supposed to perform: ask the
+  // gate, settle on its answer, spend the authorization, merge the code it owes.
+  //
+  // Twelve routes, none of them reachable from the web until now: five design documents, one control-plane
+  // surface, and an experiment nobody outside an agent loop could audit. Census slice 5.
+  // docs/architecture/web-runtime-gap-census-spec.md
+  listCampaigns: <T>(auth: AuthContext) => call<T>(auth, '/campaigns'),
+  getCampaign: <T>(auth: AuthContext, id: string) => call<T>(auth, `/campaigns/${encodeURIComponent(id)}`),
+  // The gate, asked without touching anything: `continue` | `adopt` | `halt`. The arithmetic is the FRAME's
+  // — a reader who counted rounds themselves would be answering a different question.
+  // Log a round. The driver is "a human or an outside agent" (skill `evolve`), so this door is a person's
+  // too — and what it does NOT take is a verdict: the platform derives that from the production scorecard
+  // diff, which is the whole reason a loop cannot write its own report card.
+  logCampaignRound: <T>(
+    auth: AuthContext,
+    id: string,
+    body: {
+      hypothesis?: string
+      learned: string
+      candidateVersion: string
+      baselineScorecardId: string
+      candidateScorecardId: string
+    }
+  ) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/rounds`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  campaignDecision: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/decision`),
+  // The durable authorization a close left behind. `decided` with nothing spent is not a bug — it is work
+  // not yet done, which is the distinction the detail page exists to make visible.
+  campaignAdoption: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/adoption`),
+  // One round's sealed evidence, by sequence.
+  campaignRoundEvidence: <T>(auth: AuthContext, id: string, seq: number) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/rounds/${seq}/evidence`),
+  // The next round's handoff, rendered from the frozen frame and the last round's sealed evidence. The
+  // RENDERER is also the guard that keeps held-out ids, pass rates and judge rationale out of a delegate's
+  // hands — which is why a hand-written brief is not a substitute.
+  campaignBrief: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/brief`),
+  // The code-evolution builds behind a candidate, and the sets they were grouped into.
+  campaignBuilds: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/builds`),
+  campaignBuildSets: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/build-sets`),
+  // Write the gate's answer. REFUSES while the answer is `continue` — a campaign settles on an adoptable
+  // candidate or on its own ending, never because somebody decided it had gone on long enough.
+  settleCampaign: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/settle`, { method: 'POST' }),
+  // Spend the authorization: register the version and read it back. The proof comes from the adoption read
+  // — it is not something a caller composes.
+  mergeCampaignCandidate: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}/merge`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   listCheckpoints: <T>(auth: AuthContext, envelopeId?: string) =>
     call<T>(auth, `/checkpoints${envelopeId ? `?envelopeId=${encodeURIComponent(envelopeId)}` : ''}`),
   getCheckpoint: <T>(auth: AuthContext, id: string) =>

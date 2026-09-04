@@ -41,6 +41,14 @@ const NOT_A_BROWSER_SURFACE = [
 const DECIDED = new Map([
   // ── NOT A BROWSER'S DOOR ──────────────────────────────────────────────────────────────────────────
   ["/workspace/github-app/callback", "GitHub redirects the browser here and the server handles it"],
+  // The adoption's SPEND. Its body carries the candidate's own document bytes (`{proof, spec}`), and the
+  // browser does not hold them: it would have to guess a document from a registry READ, which returns what
+  // that door renders rather than what `register` takes. A guess that lands writes an IMMUTABLE version, and
+  // rule `protocol` — "a refusal after an irreversible write is not a refusal" — says the honest retry after
+  // that is refused forever. So the page shows the owed authorization and names where the spend happens; the
+  // act belongs to the door that already holds the bytes (the agent loop, the CLI, the registry itself).
+  // The merge half HAS no bytes — its body is the proof alone — and it is on the page.
+  ["/campaigns/:p/adopt", "the body carries the candidate's document bytes, which a browser does not hold"],
   ["/workspace/mattermost/messages", "outbound notification send; the platform calls it"],
   ["/bundles/apply", "one-shot register for the CLI/GitOps"],
   ["/scorecards/backfill-models", "an operator maintenance sweep over historical records"],
@@ -60,20 +68,11 @@ const DECIDED = new Map([
 
   // ── OWED — a real gap with a person behind it ─────────────────────────────────────────────────────
   //
-  // Named rather than merely absent, so the debt is visible and this check can be green today without
-  // pretending it is decided. Removing a line is the definition of done for that surface.
-  ["/campaigns", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/adopt", "OWED — an adoption gate a person should decide"],
-  ["/campaigns/:p/builds", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/merge", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/settle", "OWED — a settle a person should decide"],
-  ["/campaigns/:p/adoption", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/brief", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/build-sets", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/decision", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/rounds", "OWED — the evolution domain has no web surface"],
-  ["/campaigns/:p/rounds/:p/evidence", "OWED — the evolution domain has no web surface"],
+  // EMPTY, as of the census's slice 5: every route a person needs is reachable. The convention stays,
+  // because the next unreachable route will need somewhere honest to sit while its surface is built —
+  // `OWED — <why a person needs it>` keeps this check green AND keeps the debt visible, and removing the
+  // line is the definition of done. What it must never become is a parking space: an entry that is not
+  // OWED claims the caller is not a browser, and that is a decision, not a delay.
 ]);
 
 const walk = (dir, out = []) => {
@@ -215,7 +214,10 @@ if (failures.length) {
   process.exit(1);
 }
 const owed = [...DECIDED.values()].filter((r) => r.startsWith("OWED")).length;
+const tally =
+  owed === 0
+    ? `${DECIDED.size} decided, none owed — every remaining entry names a caller that is not a browser`
+    : `${DECIDED.size} decided, of which ${owed} are OWED surfaces with a named debt`;
 console.log(
-  `web reach OK — ${routes.size} routes, every browser-facing one reachable from the web or decided ` +
-    `(${DECIDED.size} decided, of which ${owed} are OWED surfaces with a named debt).`,
+  `web reach OK — ${routes.size} routes, every browser-facing one reachable from the web or decided (${tally}).`,
 );

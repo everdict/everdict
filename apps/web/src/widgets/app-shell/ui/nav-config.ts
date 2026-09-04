@@ -22,6 +22,7 @@ import {
   type LucideIcon,
   FlaskConical,
   Handshake,
+  TrendingUp,
 } from 'lucide-react'
 
 import { singularSegment } from '@/shared/lib/resource-routes'
@@ -279,6 +280,16 @@ const EXPERIMENTS_ITEM: NavItem = {
   keywords: 'experiment group ungraded phase two judge later',
 }
 
+// Evolution campaigns keep the palette-only posture. A campaign is driven by a loop, not by somebody
+// clicking through it — what the web owes is a place to AUDIT one and to make the two decisions the record
+// asks a person for (settle, and spend the authorization).
+const CAMPAIGNS_ITEM: NavItem = {
+  href: '/campaigns',
+  labelKey: 'campaigns',
+  icon: TrendingUp,
+  keywords: 'campaign evolution candidate baseline round gate adopt settle',
+}
+
 export const ALL_NAV_ITEMS: NavItem[] = [
   // children 까지 평탄화 — 펼치지 않아도 Cmd+K 로는 닿아야 한다.
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
@@ -287,6 +298,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   APPROVALS_ITEM,
   CHECKPOINTS_ITEM,
   EXPERIMENTS_ITEM,
+  CAMPAIGNS_ITEM,
 ]
 
 // Every row rendered in the app nav, flattened — the sidebar's `More` children included. The active-state
