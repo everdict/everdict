@@ -29,6 +29,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/collaboration.md](architecture/collaboration.md) — module collaboration diagrams (Mermaid): bird's-eye dependency/eval-loop/control-plane + one detailed diagram per package & app
 - [architecture/execution-scoring-orchestration.md](architecture/execution-scoring-orchestration.md) — the three concerns, and why they stay apart
 - [architecture/evolution-program-gap-map.md](architecture/evolution-program-gap-map.md) — the four-pillar program (define any harness · one identity + seeds on the version · honest benchmarks + exact evidence · routed evolution), what holds, and the spec that closes each gap
+- [architecture/harness-observability.md](architecture/harness-observability.md) — what the harness can see about ITSELF: the three ledgers in `.git/`, the eval history, and the session facts only telemetry can answer
 - [dev.md](dev.md) — local development: persistent Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
 
 ## Surfaces

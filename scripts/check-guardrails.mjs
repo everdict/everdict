@@ -19,7 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_PATHS, decideGate } from "./hooks/gate-decision.mjs";
+import { ARMS, CONFIG_PATHS, decideGate } from "./hooks/gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const violations = [];
@@ -59,8 +59,16 @@ if (!existsSync(settingsPath)) {
 }
 if (!existsSync(path.join(root, HOOK))) {
   fail(`${HOOK} does not exist.`);
-} else if (!readFileSync(path.join(root, HOOK), "utf8").includes("decideGate")) {
-  fail(`${HOOK} no longer consumes decideGate — the decision this check drives is not the one the hook makes.`);
+} else {
+  const hook = readFileSync(path.join(root, HOOK), "utf8");
+  if (!hook.includes("decideGate")) {
+    fail(`${HOOK} no longer consumes decideGate — the decision this check drives is not the one the hook makes.`);
+  }
+  // A recording added and then guarded by nothing is the same class of thing as the gate wiring that nothing
+  // read until it was checked: it regresses silently, and the first sign is an empty ledger nobody queried.
+  if (!hook.includes("everdict-gate-log.jsonl")) {
+    fail(`${HOOK} no longer writes the decision ledger — the gate would decide constantly and remember nothing.`);
+  }
 }
 
 // ── half two: the decision ───────────────────────────────────────────────────────────────────────
@@ -68,63 +76,68 @@ const HEAD = "a".repeat(40);
 const OTHER = "b".repeat(40);
 const full = new Map([[HEAD, "full"]]);
 
-/** [name, facts, expected, reasonMustMention] */
+/** [name, facts, expected, arm] */
 const TABLE = [
   [
     "an unreadable CI ledger is a DENY, not an empty one",
     { head: HEAD, pushed: [HEAD], ciLedger: null, evalLedger: [], configChanged: false },
     "deny",
-    "everdict-ci-ok",
+    ARMS.CI_LEDGER_UNREADABLE,
   ],
   [
     "a tip with no FULL stamp is refused",
     { head: HEAD, pushed: [HEAD], ciLedger: new Map([[HEAD, "fast"]]), evalLedger: null, configChanged: false },
     "deny",
-    "ci:local",
+    ARMS.TIP_UNSTAMPED,
   ],
   [
     "an ungated intermediate commit is refused even when the tip is full",
     { head: HEAD, pushed: [HEAD, OTHER], ciLedger: full, evalLedger: null, configChanged: false },
     "deny",
-    "ci:commits",
+    ARMS.COMMITS_UNSTAMPED,
   ],
   [
     "a configuration change with no eval ledger is refused",
     { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: null, configChanged: true },
     "deny",
-    "agent-evals",
+    ARMS.EVAL_LEDGER_UNREADABLE,
   ],
   [
     "a configuration change stamped for another commit is refused",
     { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: [OTHER], configChanged: true },
     "deny",
-    "agent-evals",
+    ARMS.EVAL_STAMP_MISMATCH,
   ],
   [
     "a configuration change stamped for HEAD is allowed",
     { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: [`${HEAD} `], configChanged: true },
     "allow",
-    undefined,
+    ARMS.ALLOW,
   ],
   [
     "a push that changes no configuration never meets the eval arm",
     { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: null, configChanged: false },
     "allow",
-    undefined,
+    ARMS.ALLOW,
   ],
 ];
 
-for (const [name, facts, expected, mention] of TABLE) {
+for (const [name, facts, expected, arm] of TABLE) {
   const decision = decideGate(facts);
   const actual = decision.allow ? "allow" : "deny";
   if (actual !== expected) {
     fail(`decision: ${name} — expected ${expected}, got ${actual}${decision.allow ? "" : ` (${decision.reason})`}`);
     continue;
   }
-  if (mention !== undefined && !decision.reason.includes(mention)) {
+  // The ARM, not the prose: it is what the decision ledger records and what a query over a thousand denials
+  // counts, so a reworded reason must not be able to change what this check certified.
+  if (decision.arm !== arm) {
     fail(
-      `decision: ${name} — denied, but the reason never names \`${mention}\`, so it points at the wrong remedy: ${decision.reason}`,
+      `decision: ${name} — expected arm \`${arm}\`, got \`${decision.arm}\`. The ledger would file this denial under the wrong control.`,
     );
+  }
+  if (!decision.allow && decision.reason.length < 20) {
+    fail(`decision: ${name} — denied with no usable reason, so the person it stops learns nothing.`);
   }
 }
 

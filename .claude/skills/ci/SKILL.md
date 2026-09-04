@@ -91,4 +91,8 @@ its decision still denies the seven cases it is supposed to. ⚠️ Its segmente
 whose content contains a compound-command example of a push through a shell heredoc is denied by the gate,
 because the heredoc body is part of the command string. Use an editor for those files.
 
+Every push decision is recorded in `.git/everdict-gate-log.jsonl` with the ARM that fired, so "what has
+this gate refused" is a query. `pnpm telemetry` collects the session facts no file can answer —
+`docs/architecture/harness-observability.md` is the inventory of what the harness knows about itself.
+
 See rule `ci.md` for the pushed critical rules.

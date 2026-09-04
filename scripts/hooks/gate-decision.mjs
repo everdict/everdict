@@ -23,6 +23,22 @@ export const CONFIG_PATHS = ["CLAUDE.md", ".claude", "evals"];
  */
 export const CONFIG_PATHSPEC = [...CONFIG_PATHS, ":(exclude)evals/history.jsonl"];
 
+/**
+ * Which refusal fired, as a stable identifier.
+ *
+ * The decision ledger records this rather than the prose, because "denied" with no arm is the same shape of
+ * record the ledger exists to replace — countable only as a total, never as "which control is costing what".
+ * Reasons are written for a person reading one denial; arms are written for a query over a thousand.
+ */
+export const ARMS = /** @type {const} */ ({
+  ALLOW: "allow",
+  CI_LEDGER_UNREADABLE: "ci-ledger-unreadable",
+  EVAL_LEDGER_UNREADABLE: "eval-ledger-unreadable",
+  EVAL_STAMP_MISMATCH: "eval-stamp-mismatch",
+  TIP_UNSTAMPED: "tip-unstamped",
+  COMMITS_UNSTAMPED: "commits-unstamped",
+});
+
 const short = (sha) => sha.slice(0, 9);
 
 /**
@@ -32,12 +48,13 @@ const short = (sha) => sha.slice(0, 9);
  * @param {Map<string,string>|null} facts.ciLedger  sha -> "full"|"fast"; null = unreadable
  * @param {string[]|null} facts.evalLedger          stamp lines; null = unreadable
  * @param {boolean} facts.configChanged             the push touches CONFIG_PATHS
- * @returns {{allow: true} | {allow: false, reason: string}}
+ * @returns {{allow: true, arm: string} | {allow: false, arm: string, reason: string}}
  */
 export function decideGate({ head, pushed, ciLedger, evalLedger, configChanged }) {
   if (ciLedger === null) {
     return {
       allow: false,
+      arm: ARMS.CI_LEDGER_UNREADABLE,
       reason:
         "push blocked: no CI-parity ledger (.git/everdict-ci-ok) — nothing in this checkout has ever been gated. Run `pnpm ci:local`.",
     };
@@ -53,12 +70,14 @@ export function decideGate({ head, pushed, ciLedger, evalLedger, configChanged }
     if (evalLedger === null) {
       return {
         allow: false,
+        arm: ARMS.EVAL_LEDGER_UNREADABLE,
         reason: `push blocked: this push changes the configuration that steers the agent (${CONFIG_PATHS.join(", ")}) and there is no agent-eval stamp. Run \`pnpm agent-evals\`.`,
       };
     }
     if (!evalLedger.some((line) => line.split(" ")[0] === head)) {
       return {
         allow: false,
+        arm: ARMS.EVAL_STAMP_MISMATCH,
         reason: `push blocked: this push changes ${CONFIG_PATHS.join(", ")}, and .git/everdict-evals-ok does not stamp HEAD ${short(head)}. The structural checks cannot ask whether the agent still does the work to the same standard — run \`pnpm agent-evals\`.`,
       };
     }
@@ -67,16 +86,18 @@ export function decideGate({ head, pushed, ciLedger, evalLedger, configChanged }
   // ── every commit in the push, not only its tip ─────────────────────────────────────────────────
   const unstamped = pushed.filter((sha) => !ciLedger.has(sha));
   const tipLevel = ciLedger.get(head);
-  if (head !== "" && unstamped.length === 0 && tipLevel === "full") return { allow: true };
+  if (head !== "" && unstamped.length === 0 && tipLevel === "full") return { allow: true, arm: ARMS.ALLOW };
 
   if (tipLevel !== "full") {
     return {
       allow: false,
+      arm: ARMS.TIP_UNSTAMPED,
       reason: `push blocked: HEAD ${short(head)} has no FULL gate stamp. Run \`pnpm ci:local\` (mirrors .github/workflows/ci.yml), then push.`,
     };
   }
   return {
     allow: false,
+    arm: ARMS.COMMITS_UNSTAMPED,
     reason: `push blocked: ${unstamped.length} of the ${pushed.length} commit(s) this push carries were never gated — ${unstamped
       .slice(0, 3)
       .map(short)

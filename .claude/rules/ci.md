@@ -50,6 +50,17 @@ See skill `ci`.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
   and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
   gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
+- **The gate RECORDS what it decided** (`.git/everdict-gate-log.jsonl`, one JSON line per push decision).
+  `pnpm guardrails` proves the decision is CORRECT over constructed facts; nothing recorded what it actually
+  decided, so the gate's own leading indicator (wait per gate) had no data and its lagging one (violations
+  reaching the far side) had no denominator — and the refusals, the half that shows a control was load-bearing,
+  were discarded at process exit. Each line carries an **arm** (`tip-unstamped`, `eval-stamp-mismatch`, …)
+  declared in `gate-decision.mjs`, not just the prose: a reason is for one person reading one denial, an arm is
+  for a query over a thousand. The write sits AFTER the early exits — the hook is on the `Bash` matcher, so
+  recording sooner would produce a shell transcript — and is wrapped, because a hook that throws while
+  recording is worse than one that records nothing. `pnpm guardrails` refuses a hook that stopped writing it.
+  The session-level facts no file can answer (concurrent sessions, steering vs waiting, tool decisions) need
+  `pnpm telemetry` + the recipe in `scripts/telemetry/README.md`; see `docs/architecture/harness-observability.md`.
 - **`pnpm guardrails` checks the gate that every other gate is enforced BY.** `pre-push-gate.mjs` holds both
   ledgers, it is wired in `.claude/settings.json` — an editable file in the tree — and NOTHING READ THAT
   WIRING: `grep -l settings.json scripts/check-*.mjs` returned nothing. What stood in for a check was this

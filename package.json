@@ -25,6 +25,7 @@
     "docs-check": "node scripts/check-docs.mjs",
     "intent-chain": "node scripts/check-intent-chain.mjs",
     "guardrails": "node scripts/check-guardrails.mjs",
+    "telemetry": "node scripts/telemetry/otlp-sink.mjs",
     "agent-evals": "node evals/run.mjs",
     "constructed-casts": "node scripts/check-constructed-casts.mjs",
     "guarded-doubles": "node scripts/check-guarded-doubles.mjs",

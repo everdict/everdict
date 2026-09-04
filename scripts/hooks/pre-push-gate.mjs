@@ -7,7 +7,7 @@
 // This file GATHERS FACTS; `scripts/hooks/gate-decision.mjs` decides, so `pnpm guardrails` can drive the
 // decision over a truth table without an env var that would make the ledgers forgeable.
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_PATHSPEC, decideGate } from "./gate-decision.mjs";
@@ -89,6 +89,34 @@ const decision = decideGate({
   evalLedger: readLedger("everdict-evals-ok"),
   configChanged,
 });
+// ── the gate records what it decided ─────────────────────────────────────────────────────────────
+//
+// `pnpm guardrails` proves this decision is CORRECT over constructed facts; nothing recorded what it actually
+// decided, so "how long did this gate cost" had no data and "what has it refused" had no denominator. The
+// refusals are the half that proves a control was load-bearing rather than decorative, and they were being
+// discarded at process exit.
+//
+// Written AFTER the early exits on purpose: the hook is wired on the Bash matcher, so recording any earlier
+// would produce a shell transcript rather than an audit trail. Wrapped, because a hook that throws while
+// recording is worse than one that records nothing — the decision must survive a failed write. Local to
+// `.git/`, because it describes this checkout's operations rather than the project's history.
+try {
+  appendFileSync(
+    path.join(root, ".git", "everdict-gate-log.jsonl"),
+    `${JSON.stringify({
+      at: new Date().toISOString(),
+      verdict: decision.allow ? "allow" : "deny",
+      arm: decision.arm,
+      head,
+      pushed: pushed.length,
+      configChanged,
+      reason: decision.allow ? undefined : decision.reason,
+    })}\n`,
+  );
+} catch {
+  // a decision that cannot be recorded is still a decision
+}
+
 if (decision.allow) process.exit(0);
 
 process.stdout.write(
