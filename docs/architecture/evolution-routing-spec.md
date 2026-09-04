@@ -1,5 +1,5 @@
 ---
-kind: decision
+kind: spec
 title: "Evolution routing — WHO from the template, WHAT from the evidence, the issue binds the cases, the gate verifies the targets"
 status: accepted
 updated: 2026-09-02

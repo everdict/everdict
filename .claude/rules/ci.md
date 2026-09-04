@@ -38,6 +38,13 @@ See skill `ci`.
   moment of editing and nobody is reading it deliberately enough to notice: widening the existing check found
   29 dead paths across 7 skills on its first run. `docs/architecture/rearchitecture/**` is exempt on purpose
   (historical review records), and a path that is absent BY DESIGN goes in `KNOWN_ABSENT` with its reason.
+  **Check 5 is the DOCUMENT-KIND contract** (`docs/architecture/document-kinds.md`): frontmatter declares a
+  `kind` from a closed set (`wiki` · `decision` · `spec` · `runbook`) with a `status` that kind allows, a
+  spec is named `*-spec.md` and declares `anchors:`, and a `superseded` decision links a successor that
+  exists. `kind:` had been in all 176 documents and nothing read it — so it drifted into four `*-spec.md`
+  files filed as decisions, one invented word and one file with no frontmatter, which left the layer that
+  records WHY with zero live members. A decision is superseded, never edited once accepted; a wiki page is
+  edited in place. Skill `documenting` says which kind a page is.
   It also checks the SYMBOLS `.claude/**` names, because the rot that actually happens here is a file that
   stayed while the interface inside it was deleted — a backtick is a claim that this repo declares the name.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,

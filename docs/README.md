@@ -29,6 +29,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/execution-scoring-orchestration.md](architecture/execution-scoring-orchestration.md) — the three concerns, and why they stay apart
 - [architecture/evolution-program-gap-map.md](architecture/evolution-program-gap-map.md) — the four-pillar program (define any harness · one identity + seeds on the version · honest benchmarks + exact evidence · routed evolution), what holds, and the spec that closes each gap
 - [dev.md](dev.md) — local development: persistent Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
+- [architecture/document-kinds.md](architecture/document-kinds.md) — the four kinds a document can be (wiki · decision · spec · runbook), what each owes, and how each is allowed to change
 
 ## Surfaces
 - [api.md](api.md) — the control-plane HTTP API (`apps/api`): runs, scorecards, datasets, judges, runtimes, schedules, bundles, workspace integrations, runners — async `POST /runs` + poll/webhook

@@ -43,6 +43,22 @@ const conventions = [...walk(".claude/rules"), ...walk(".claude/skills")].sort()
 const citing = [...docs, ...conventions];
 const failures = [];
 
+// Frontmatter is a flat `key: value` block between the first two `---` lines. ONE parser, because two
+// readers of one format have already diverged (rule `protocol` L3): check 4b reads `anchors:` out of it and
+// check 5 reads the taxonomy, and a doc whose block they disagree about is the one nobody would look at.
+const frontmatterOf = (doc) => {
+  const lines = readFileSync(join(ROOT, doc), "utf8").split("\n");
+  if (lines[0] !== "---") return undefined;
+  const end = lines.indexOf("---", 1);
+  if (end < 0) return undefined;
+  const fields = new Map();
+  for (const line of lines.slice(1, end)) {
+    const m = /^([a-z_-]+):\s*(.*)$/.exec(line);
+    if (m) fields.set(m[1], m[2].trim());
+  }
+  return fields;
+};
+
 // ── 1. index completeness ───────────────────────────────────────────────────────────────────────
 {
   const index = readFileSync(join(ROOT, INDEX), "utf8");
@@ -148,14 +164,9 @@ for (const doc of docs) {
   // Scanned separately from the backtick pass because frontmatter is not prose: these paths are bare, and
   // the reader of a doc never sees them. Nothing else would ever notice them going dead.
   for (const doc of docs) {
-    const head = readFileSync(join(ROOT, doc), "utf8").split("\n---", 2);
-    if (!head[0].startsWith("---")) continue;
-    const line = head[0].split("\n").find((l) => l.startsWith("anchors:"));
+    const line = frontmatterOf(doc)?.get("anchors");
     if (line === undefined) continue;
-    for (const raw of line
-      .slice("anchors:".length)
-      .replace(/^\s*\[|\]\s*$/g, "")
-      .split(",")) {
+    for (const raw of line.replace(/^\s*\[|\]\s*$/g, "").split(",")) {
       const anchorPath = raw.trim();
       if (anchorPath === "") continue;
       if (!tracked.has(anchorPath))
@@ -252,6 +263,104 @@ for (const doc of docs) {
       if (live.has(symbol) || KNOWN_ABSENT_SYMBOLS.has(symbol)) continue;
       if (aboutTests(doc) && testOnly.has(symbol)) continue;
       failures.push(`${doc} names \`${symbol}\`, which no source file declares or uses`);
+    }
+  }
+}
+
+// ── 5. THE KIND IS A CONTRACT, NOT A LABEL ──────────────────────────────────────────────────────
+//
+// `kind:` sat in all 176 documents' frontmatter and nothing consumed it — a declaration with no reader,
+// which is this repository's most-repeated defect wearing a documentation costume, and the same sentence
+// check 4b is written under. Counting it said so out loud: 142 `wiki`, 8 `runbook`, one `design` nobody
+// else spells, one file with no frontmatter at all, and 24 `decision` of which EVERY live one is a spec.
+// So the layer skill `documenting` calls the whole point of `docs/` — "only a document says why, and what
+// we chose against" — had zero members outside the frozen re-architecture folder, because the only label
+// for it was occupied by something else.
+//
+// `status` was not a vocabulary either. Every `wiki` was `current` and every `decision` was `accepted`,
+// one to one, so the field carried nothing `kind` had not already said.
+//
+// Each kind now owes something a reader can check, and the two that DECIDE owe the most:
+//
+//     wiki      describes what IS              → edited in place when the world moves
+//     decision  a choice and what it rejected  → never edited once accepted; SUPERSEDED, successor named
+//     spec      the buildable shape of one     → anchored to the source it specifies, so drift is loud
+//               architecture or implementation
+//     runbook   an operational procedure       → current, or it is a trap
+//
+// The kind is frontmatter rather than a directory on purpose: `docs/architecture/docs-site.md` counted the
+// in-code references a relocation would break and rejected the tidy move. A taxonomy that costs nothing to
+// apply is one that gets applied.
+{
+  const KINDS = new Map([
+    ["wiki", ["current"]],
+    ["decision", ["proposed", "accepted", "superseded"]],
+    ["spec", ["proposed", "accepted", "landed"]],
+    ["runbook", ["current"]],
+  ]);
+  const known = new Set(docs);
+
+  // The index is not exempt: it carries the same block and passes it, and an exemption whose reason is
+  // "it is the index" is the shape this repository reads as permission.
+  for (const doc of docs) {
+    const fm = frontmatterOf(doc);
+    if (fm === undefined) {
+      failures.push(`${doc} has no frontmatter — every document declares kind/title/status/updated`);
+      continue;
+    }
+    for (const key of ["kind", "title", "status", "updated"]) {
+      if (!fm.has(key))
+        failures.push(`${doc} declares no \`${key}\` — every document declares kind/title/status/updated`);
+    }
+
+    const kind = fm.get("kind");
+    const statuses = kind === undefined ? undefined : KINDS.get(kind);
+    if (kind !== undefined && statuses === undefined) {
+      failures.push(`${doc} is kind \`${kind}\`, which is not one of ${[...KINDS.keys()].join(" | ")}`);
+      continue;
+    }
+
+    const status = fm.get("status");
+    if (statuses !== undefined && status !== undefined && !statuses.includes(status))
+      failures.push(`${doc} is a ${kind} with status \`${status}\` — a ${kind} is ${statuses.join(" | ")}`);
+
+    const updated = fm.get("updated");
+    if (updated !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(updated))
+      failures.push(`${doc} has updated \`${updated}\`, which is not an ISO date`);
+
+    // The name and the kind are two spellings of one fact, so they agree or one of them is wrong. This is
+    // the drift that was actually there: four `*-spec.md` files filed as decisions, which is how the
+    // decision layer came to look populated while holding nothing that records a choice.
+    const namedSpec = doc.endsWith("-spec.md");
+    if (namedSpec && kind !== "spec")
+      failures.push(`${doc} is named as a spec and declares kind \`${kind}\` — the name and the kind are one fact`);
+    if (kind === "spec" && !namedSpec)
+      failures.push(`${doc} is kind \`spec\` but is not named \`*-spec.md\` — the name and the kind are one fact`);
+
+    // A spec says what to BUILD, so it names the source it is about. Unanchored, nothing can go stale
+    // loudly: check 4b already refuses an anchor that stopped existing, and this is what makes a spec
+    // have one to refuse.
+    if (kind === "spec" && !fm.has("anchors"))
+      failures.push(
+        `${doc} is a spec with no \`anchors:\` — a spec that names no source cannot be shown to have drifted`,
+      );
+
+    // Superseding is the ONLY way a decision changes, so the successor is a link and not a sentence: a
+    // reader who arrives at the old page has to be able to leave it. An accepted decision that was simply
+    // edited leaves no trace that the earlier answer was ever given, which is the memory this layer exists
+    // to hold.
+    if (status === "superseded") {
+      const by = fm.get("superseded-by");
+      if (by === undefined)
+        failures.push(
+          `${doc} is superseded and does not name \`superseded-by:\` — a superseded decision links its successor`,
+        );
+      else if (!known.has(by.startsWith("docs/") ? by : join("docs", by)))
+        failures.push(`${doc} is superseded by ${by}, which is not a document in this repository`);
+    } else if (fm.has("superseded-by")) {
+      failures.push(
+        `${doc} names \`superseded-by:\` while its status is \`${status}\` — only a superseded document has a successor`,
+      );
     }
   }
 }

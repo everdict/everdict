@@ -1,5 +1,5 @@
 ---
-kind: decision
+kind: spec
 title: "Harness definability — a client is a target, an environment is an entity, the case reaches the harness"
 status: accepted
 updated: 2026-09-02

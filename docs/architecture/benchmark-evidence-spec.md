@@ -1,5 +1,5 @@
 ---
-kind: decision
+kind: spec
 title: "Benchmarks and evidence — finish the on-ramps, diagnose the agent, derive the round's evidence, export what is citable"
 status: accepted
 updated: 2026-09-02

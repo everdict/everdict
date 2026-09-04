@@ -1,3 +1,9 @@
+---
+kind: decision
+title: "Parallel evolution — the walk branches, and what may cross between branches"
+status: proposed
+updated: 2026-09-04
+---
 # Parallel evolution — the walk branches, and what may cross between branches
 
 > Status: **design**. Nothing here is landed. The one code change it proposes is named in "What is missing"

@@ -9,8 +9,13 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 right. It just stops at two layers. `docs/` appears there only as something `pnpm docs-check` also scans, so
 the question a writer actually has — *where does this go?* — has never had an answer.
 
-It shows: this repository has 166 documents, 28 rules and 19 skills, and nothing states the choice between
+It shows: this repository has 177 documents, 28 rules and 19 skills, and nothing states the choice between
 them. Everyone picks by instinct, and instinct puts the same knowledge in three places at once or in none.
+
+There is a SECOND question underneath it, and it went unanswered for longer. Once the answer is "a document",
+`docs/` holds four different things — a description, a decision, a spec, a procedure — and for 176 files it
+had names for two of them. `docs/architecture/document-kinds.md` records that count and the repair; the
+choice itself is below.
 
 ## The three layers, by the failure each one prevents
 
@@ -40,10 +45,48 @@ months is a document.
 4. **Is it none of them?** Then it is a code comment, and this repository's comments carry that weight — the
    case law in rule `protocol` lives beside the code it constrains, not in a document.
 
-## What a design record owes
+## Inside `docs/`: which KIND
+
+The layer choice above gets you to `docs/`. The kind is the second choice, it is declared in frontmatter, and
+`pnpm docs-check` check 5 refuses a document that does not make it. Four kinds, and the question that
+separates them is **what makes this page wrong**:
+
+    wiki      describes what IS                 wrong when the code moved       status: current
+    decision  a choice, and what it rejected    wrong only if it was a lie      status: proposed|accepted|superseded
+    spec      the buildable shape of one        wrong when the source drifted   status: proposed|accepted|landed
+              architecture or implementation    → so it declares `anchors:`
+    runbook   an operational procedure          wrong when the steps changed    status: current
+
+A decision is the odd one and it is the reason the split matters: it cannot go stale, because it was never a
+claim about the present. "We chose X over Y in September, for these reasons, and here is what would reopen it"
+stays true after X is replaced. That is why the kinds evolve differently.
+
+**How each one changes — this is the part to get right.**
+
+    wiki · runbook   EDITED in place. The old sentence was a description and it is now wrong.
+    spec             sections gain **Landed**; what a landed section taught moves to a wiki page.
+    decision         SUPERSEDED, never edited once `accepted`.
+
+Editing an accepted decision destroys the only copy of the answer we used to give, which is the whole reason
+the layer exists. So the successor is a resolved link (`superseded-by:`), not a sentence in the body — a
+reader who lands on a reversed decision has to be able to leave it. Before `accepted`, a decision is
+`proposed` and may be rewritten freely; a proposal is not yet a memory of anything.
+
+**Two spellings of one fact.** A spec is named `*-spec.md` AND declares `kind: spec`, in both directions,
+because the drift that check 5 was written for is exactly what happens when a name and a label are allowed to
+disagree: four `*-spec.md` files sat filed as decisions, so the decision layer looked populated while holding
+nothing that recorded a choice.
+
+**The kind is frontmatter, not a directory.** `docs/architecture/docs-site.md` counted the in-code references
+a relocation would break and rejected the tidy move; naming the kinds does not require it. Placement stays
+where that page put it.
+
+## What a decision owes
+
+(`kind: decision`. A spec owes this too, for every section it proposes.)
 
 A document that records only the current shape is a description, and a description is what the code already
-is. The record is the part the code cannot hold:
+is — a `wiki` page, and a fine one. The record is the part the code cannot hold:
 
 - **The alternative that was rejected, and why.** `docs/architecture/docs-site.md` is the exemplar in this
   tree: it proposes the obvious tidy — move the root docs under a reference directory, the architecture ones
@@ -62,18 +105,25 @@ else is for maintainers, indexed by topic in `docs/README.md` rather than by dir
 root and `architecture/` is historical and deliberately frozen, because in-code references make relocation
 expensive.
 
-So: add the document where its neighbours are, link it from `docs/README.md` — `pnpm docs-check` refuses an
-orphan — and do not reorganise the tree as a side effect of writing one page.
+So: add the document where its neighbours are, declare its kind in frontmatter, link it from
+`docs/README.md` — `pnpm docs-check` refuses an orphan — and do not reorganise the tree as a side effect of
+writing one page. The kind travels in the file, so a page is never in the wrong directory for its kind.
 
 ## What the gates cannot see
 
 `pnpm docs-check` proves every document is reachable from the index, that its relative links resolve, that
-every backticked repository path exists, and that every symbol a rule or skill names is one the source
-declares. `pnpm convention-harness` proves every rule reaches live paths and every workspace is governed.
+every backticked repository path exists, that every symbol a rule or skill names is one the source declares,
+and — check 5 — that the frontmatter declares a kind from the closed set with a status that kind allows, that
+a spec is anchored, and that a superseded decision links a successor that exists.
+`pnpm convention-harness` proves every rule reaches live paths and every workspace is governed.
 
 None of them can see:
 
-- **a document that records state instead of a decision** — it passes every check and answers nothing;
+- **a document that records state instead of a decision** — it declares `kind: decision`, passes every arm of
+  check 5, and answers nothing. The gate checks the SHAPE of the declaration; only a reader can tell a choice
+  from a description;
+- **an accepted decision that was quietly EDITED instead of superseded** — the frontmatter is untouched, so
+  the check is silent. Git history is not: a diff against a `kind: decision` body is the thing to ask about;
 - **a decision the code has since reversed** — the paths still exist, the symbols still exist, and the
   sentence is now false. Rule `protocol` names this: a claim about another component is the part that needs
   checking, and the present tense is the half that slips through;

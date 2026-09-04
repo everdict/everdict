@@ -57,6 +57,11 @@ and the site's section split already deliver.
 So the structure grows a layer instead of shuffling one: `docs/guide/` is new and holds the
 user-facing tree; everything that was there stays where the code expects to find it.
 
+The same count is why the document TAXONOMY is frontmatter rather than a directory per kind. See
+[document-kinds.md](document-kinds.md): four kinds (`wiki` · `decision` · `spec` · `runbook`), each
+with what it owes and how it is allowed to change, checked by `pnpm docs-check` — and applied without
+moving a single file, so the 988 references above stay valid.
+
 Four separate `@docusaurus/plugin-content-docs` instances, each with its own `sidebars.ts` — the
 mastra arrangement. `/internals` carries a banner ("design records, not product documentation;
 they describe intent at the time of writing") and `noindex`, so it never competes with `/docs` in

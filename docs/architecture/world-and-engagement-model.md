@@ -1,7 +1,7 @@
 ---
-kind: design
+kind: decision
 title: "The world a case acts on — delivery, lifecycle, engagement"
-status: current
+status: accepted
 updated: 2026-09-03
 ---
 # The world a case acts on — delivery, lifecycle, engagement

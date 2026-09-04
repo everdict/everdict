@@ -1,5 +1,5 @@
 ---
-kind: decision
+kind: spec
 title: "Harness identity and seeds — forks are recorded, seeds hang off the version, lineage is one read, a seeded finding is a leak"
 status: accepted
 updated: 2026-09-02
