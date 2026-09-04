@@ -266,6 +266,71 @@ export const scorecardRecordSchema = z.object({
   casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
   // Transient scoring failures a targeted re-score can recover (detail only) — the rescore button shows iff set.
   retryableUnmeasured: z.number().int().optional(),
+  // ── PRODUCT FACTS THE CONTROL PLANE SERVES (census slice 1) ───────────────────────────────────────
+  //
+  // Every one of these was already on the wire and thrown away here, which is why nothing showed them:
+  // omission is invisible to an assignability check that only looks at what is present. The shapes are
+  // NARROWER than the contract's on purpose — the web renders a summary of each, not the whole document —
+  // and that is safe because a richer wire object stays assignable to a narrower declaration.
+  // docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // scorecard | experiment. An experiment is the ungraded phase-1 group; a reader must not be told it is a
+  // scorecard.
+  kind: z.enum(['scorecard', 'experiment']).optional(),
+  // How long a running batch has left. Absent when nothing can estimate it, which is not zero.
+  etaSeconds: z.number().optional(),
+  // The child runs this batch fanned out — the drill-down list, beside `caseRuns` which says which of them
+  // each case's answer is.
+  runIds: z.array(z.string()).optional(),
+  // The stamped-policy verdict aggregate. `casePass` is the pair a header shows; this is the one release
+  // surfaces stand on, and it carries WHICH policy judged it.
+  verdictSummary: z.object({}).passthrough().optional(),
+  // The execution world cohort — os · drivers · runtimes · images, and whether they were MIXED. A batch whose
+  // cases ran in different worlds is not one experiment, and `mixed` is the only field that says so.
+  world: z
+    .object({
+      os: z.string().optional(),
+      drivers: z.array(z.string()).optional(),
+      runtimes: z.array(z.string()).optional(),
+      images: z.array(z.string()).optional(),
+      mixed: z.boolean(),
+      observed: z.number().int(),
+      total: z.number().int().optional(),
+    })
+    .optional(),
+  // The CI gate decisions recorded on this batch — pass | block | blocked_missing | not_comparable, and the
+  // reason. A blocked release whose reason lives only in the record is a decision nobody can act on.
+  gates: z.array(z.object({}).passthrough()).optional(),
+  // The JUDGMENT revision ledger: which judges at which versions, and the plane digest each pass left. What
+  // answers "the numbers changed and nobody touched the harness".
+  scoring: z
+    .array(
+      z
+        .object({
+          revision: z.number().int(),
+          kind: z.string(),
+          createdAt: z.string(),
+          createdBy: z.string().optional(),
+        })
+        .passthrough(),
+    )
+    .optional(),
+  // …and the EXECUTION revision ledger beside it: which retry replaced which attempt, when, by whom, why.
+  executions: z
+    .array(
+      z
+        .object({
+          revision: z.number().int(),
+          kind: z.string(),
+          reason: z.string().optional(),
+          createdAt: z.string(),
+          createdBy: z.string().optional(),
+        })
+        .passthrough(),
+    )
+    .optional(),
+  // The decision context a release read off this batch.
+  decision: z.object({}).passthrough().optional(),
   // ── THE EXECUTION AXIS (docs/architecture/in-place-case-retry-spec.md) ─────────────────────────────
   //
   // Attempts a retry DISPLACED, detail only — the whole result of each is kept on the record, and the page
@@ -631,6 +696,57 @@ type _recordFieldsOnWire = AssertAssignable<
   Pick<ScorecardResponse, keyof WebScorecardFlat>,
   WebScorecardFlat
 >
+// ── EVERY FIELD THE WIRE SERVES IS CLASSIFIED, SO A DROPPED ONE CANNOT BE SILENT ────────────────────
+//
+// `_recordFieldsOnWire` above checks the fields the web DECLARES against the wire — which is the wrong
+// half of the question, because the drift that actually happens here is a field the web never declared at
+// all. A census of the two found six product facts the control plane computes, serves on every detail read,
+// and the web throws away at this schema: `gates` (why a release blocked), `scoring` (which judges, at
+// which versions), `executions` (which retry replaced which attempt), `world` (the execution cohort),
+// `decision` and `etaSeconds`. Nothing failed, because omission is invisible to an assignability check that
+// only looks at what is present. docs/architecture/web-runtime-gap-census-spec.md
+//
+// So the classification is exhaustive and the compiler holds it: `satisfies Record<keyof …>` refuses a wire
+// field nobody has placed, exactly the way `ACTIVITY_AXIS_BY_KIND` refuses an event kind nobody has given
+// an axis. Adding a field to the record now breaks THIS build until someone says which it is — and
+// `product` is the answer that costs work, which is the point.
+//
+//   product   a reader of a scorecard is entitled to it; the web schema must decode it
+//   internal  control-plane lifecycle state (ownership fences, live pass markers, projection versions).
+//             Serving it is fine; rendering it would be leaking the machine into the product.
+export const SCORECARD_WIRE_FIELD_KIND = {
+  // Identity and the batch's own answer.
+  id: 'product', tenant: 'product', kind: 'product', dataset: 'product', harness: 'product',
+  status: 'product', summary: 'product', verdictSummary: 'product', trialSummary: 'product',
+  headlinePassRate: 'product', casePass: 'product', scorecard: 'product', caseRuns: 'product',
+  models: 'product', judgeModels: 'product', origin: 'product', createdBy: 'product',
+  runtime: 'product', subset: 'product', orchestration: 'product', requested: 'product',
+  createdAt: 'product', updatedAt: 'product', error: 'product', steps: 'product', runIds: 'product',
+  export: 'product', analysisRef: 'product', manifest: 'product', verdictPolicy: 'product',
+  retryableUnmeasured: 'product', outcomes: 'product', policyResolution: 'product',
+  // The six the census found, plus the two ledgers the in-place retry added.
+  gates: 'product', scoring: 'product', executions: 'product', world: 'product',
+  decision: 'product', etaSeconds: 'product', caseAttempts: 'product', retrySummary: 'product',
+  // Control-plane machinery. `ownerReplica`/`ownerEpoch` fence a driver, the two pass markers say a plane is
+  // mid-repair, `publication` is the settlement's owed outward effects, and `traceProjectionVersion` says
+  // which era judged it. A reader of a scorecard is not reading any of those.
+  ownerReplica: 'internal', ownerEpoch: 'internal', scoringPass: 'internal', executionPass: 'internal',
+  publication: 'internal', traceProjectionVersion: 'internal',
+} as const satisfies Record<keyof ScorecardResponse, 'product' | 'internal'>
+
+type ProductScorecardField = {
+  [K in keyof typeof SCORECARD_WIRE_FIELD_KIND]: (typeof SCORECARD_WIRE_FIELD_KIND)[K] extends 'product'
+    ? K
+    : never
+}[keyof typeof SCORECARD_WIRE_FIELD_KIND]
+
+// The check itself: `Pick` over a key the web schema does not declare is a compile error, so a product fact
+// the web drops fails the build with the field's own name in the message. This is the guard the six missing
+// fields walked past for as long as they were missing.
+// Picked from the FULL web record, not the flat one: `WebScorecardFlat` omits the heavy members on
+// purpose, and picking from it would report them as gaps they are not.
+type _webDecodesEveryProductFact = Pick<WebScorecardRecord, ProductScorecardField>
+
 // Suite DTOs — identical to their wire response types (bidirectional).
 type _diffFwd = AssertAssignable<WebScorecardDiff, ScorecardDiffResponse>
 type _diffBack = AssertAssignable<ScorecardDiffResponse, WebScorecardDiff>
@@ -679,6 +795,7 @@ export type __scorecardDriftGuard = [
   _scoreDetailAccepts,
   _originFieldsOnWire,
   _recordFieldsOnWire,
+  _webDecodesEveryProductFact,
   _diffFwd,
   _diffBack,
   _trendFwd,

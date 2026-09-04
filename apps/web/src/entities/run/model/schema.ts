@@ -203,6 +203,46 @@ export const runSchema = z.object({
   liveTrace: z.object({ kind: z.string(), endpoint: z.string(), runId: z.string() }).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  // ── PRODUCT FACTS THE CONTROL PLANE SERVES (census slice 1) ────────────────────────────────────────
+  //
+  // All eight were on the wire and thrown away here. They are spelled OUT rather than as a passthrough
+  // blob, because `_flatGuard` (web ⊆ wire) refuses an index signature — correctly: a loose shape would
+  // let the wire's own shape change under the page without the build noticing, which is the drift these
+  // guards exist for. docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // What this run retried, re-scored or forked from. Without it a re-run is an unrelated row on the list.
+  lineage: z
+    .object({
+      retryOf: z.string().optional(),
+      rescoreOf: z.string().optional(),
+      forkedFrom: z.string().optional(),
+    })
+    .optional(),
+  // Whose compute ran it and how isolated — the world question at the single-run scale.
+  placement: z
+    .object({
+      where: z.enum(['inline', 'driver', 'runtime']),
+      target: z.string().optional(),
+      isolation: z.string().optional(),
+    })
+    .optional(),
+  // What it left behind.
+  outputs: z
+    .object({
+      artifacts: z.array(z.string()).optional(),
+      files: z.array(z.string()).optional(),
+      summary: z.string().optional(),
+      exitCode: z.number().int().optional(),
+    })
+    .optional(),
+  // Who may see this run — a page that cannot read it cannot explain why a row is missing for a teammate.
+  visibility: z.enum(['workspace', 'member']).optional(),
+  // Scheduling class — why a run waited.
+  class: z.enum(['interactive', 'background', 'batch']).optional(),
+  // The correlation id its trace is keyed by; the deep link needs it.
+  executionId: z.string().optional(),
+  // The callback the submitter asked for — shown so a stuck integration is diagnosable from the run.
+  webhookUrl: z.string().optional(),
 })
 
 export const runsSchema = z.array(runSchema)
@@ -254,6 +294,47 @@ type WebRunFlat = Omit<WebRun, 'result' | 'usage'>
 type _flatGuard = AssertAssignable<WebRunFlat, WireRunFlat>
 type _webFieldsOnWire = AssertAssignable<Pick<WireRunFlat, keyof WebRunFlat>, WebRunFlat>
 type _statusGuard = AssertAssignable<WebRun['status'], WireRunStatus>
+
+// ── EVERY WIRE FIELD IS CLASSIFIED, SO A DROPPED PRODUCT FACT CANNOT BE SILENT ──────────────────────
+//
+// The two guards above check the fields the web DECLARES. Neither can see one it never declared, which is
+// the drift that actually happens: a census of the wire against this file found seven product facts served
+// on every run detail read and thrown away here — `lineage` (what this run retried or forked from),
+// `placement` (whose compute, how isolated), `outputs` (what it left behind), `visibility`, `class`,
+// `caseSpec` and `executionId`. The comment above records three of them as deliberate omissions; the other
+// four were not recorded anywhere, which is the difference this removes.
+// docs/architecture/web-runtime-gap-census-spec.md
+//
+// `satisfies Record<keyof …>` makes the classification exhaustive, so a field added to the record breaks
+// THIS build until someone says which it is — and `product` is the answer that costs work.
+export const RUN_WIRE_FIELD_KIND = {
+  // Identity, outcome and what a reader of a run is looking at.
+  id: 'product', tenant: 'product', status: 'product', kind: 'product', harness: 'product',
+  caseId: 'product', group: 'product', result: 'product', usage: 'product',
+  error: 'product', verdict: 'product', origin: 'product', trigger: 'product', session: 'product',
+  parentScorecardId: 'product', envelope: 'product', attach: 'product', lifetime: 'product',
+  createdAt: 'product', updatedAt: 'product', createdBy: 'product', runtime: 'product',
+  liveTrace: 'product',
+  // The seven the census found.
+  lineage: 'product', placement: 'product', outputs: 'product', visibility: 'product',
+  class: 'product', executionId: 'product', webhookUrl: 'product',
+  // Control-plane machinery: which replica drives this row, and which takeover that is. A reader of a run
+  // is not reading a fencing token.
+  ownerReplica: 'internal', ownerEpoch: 'internal',
+  // A product fact decoded by ANOTHER schema, named here so the classification stays exhaustive. The
+  // census first read this as a gap; it is not. `runCaseSpecSchema` parses it beside `runSchema` in the run
+  // page, deliberately, because the wire's `caseSpec` is the whole `EvalCase` and mirroring that contract
+  // into this file would both duplicate it and break `_flatGuard`. Recording WHERE is the point: an
+  // omission with a named owner is a decision, an omission with none is the drift this map exists for.
+  caseSpec: 'elsewhere',
+} as const satisfies Record<keyof RunDetailResponse, 'product' | 'internal' | 'elsewhere'>
+
+type ProductRunField = {
+  [K in keyof typeof RUN_WIRE_FIELD_KIND]: (typeof RUN_WIRE_FIELD_KIND)[K] extends 'product' ? K : never
+}[keyof typeof RUN_WIRE_FIELD_KIND]
+
+// `Pick` over a key the web schema does not declare is a compile error naming the field.
+type _webDecodesEveryProductRunFact = Pick<WebRun, ProductRunField>
 // The web Usage stays local (numbers instead of the wire's nonnegative-int brand), but its shape can't drift from the
 // wire summary: the web keys must be exactly the wire keys (record-typed both ways).
 type _usageKeysMatch = AssertAssignable<keyof z.infer<typeof usageSchema>, keyof RunUsageSummary> &
@@ -277,6 +358,7 @@ type _canonicalGuard = AssertAssignable<
 export type __runDriftGuard = [
   _flatGuard,
   _webFieldsOnWire,
+  _webDecodesEveryProductRunFact,
   _canonicalGuard,
   _statusGuard,
   _usageKeysMatch,

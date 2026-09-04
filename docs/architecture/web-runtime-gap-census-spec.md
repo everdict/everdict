@@ -105,20 +105,83 @@ Not an argument that every route needs a page. Several of these are legitimately
 operator-only, and saying so IS the work — an unbuilt page and a deliberate omission look identical in a
 count, and only a decision tells them apart. Slice 0 exists for that reason.
 
-## Slice 0 — decide, before building anything
+## Slice 0 — decide, before building anything — **Landed**
 
-Walk the 36 and mark each: **build** · **agent-only** (and why a person does not need it) · **operator-only**
-(a runbook, not a page). The output is a table in this page, and no slice below starts until it exists.
-A gap closed by deciding it is not a gap is closed.
+Each of the 36 read against what its route actually declares. **Seven are not gaps at all**: their caller was
+never a browser, and counting them as missing pages was the census being conservative in the safe direction.
 
-## Slice 1 — the six served facts
+### Not a gap — the caller is not a browser (7)
+
+| route | who calls it |
+|---|---|
+| `/workspace/github-app/callback` | GitHub redirects the browser here and the server handles it. A page would be the bug |
+| `/workspace/metrics` | *"Workspace-scoped Prometheus metrics"* — a scrape endpoint |
+| `/workspace/images/push-grant` | *"Docker Registry v2 token endpoint (the managed registry's auth realm)"* — the docker client's |
+| `/workspace/mattermost/messages` | outbound notification send; the platform calls it, nobody clicks it |
+| `/bundles/apply` | *"Apply a bundle (one-shot register)"* — the CLI/GitOps door |
+| `/scorecards/backfill-models` | an operator maintenance sweep over historical records — a runbook, not a page |
+| `/agents/validate` | *"Dry-run validate an agent spec"* — reachable, but through the craft form's own submit path rather than as a door of its own |
+
+### Build — a person needs it and has no way (29)
+
+| what | routes | why it is a person's job |
+|---|---:|---|
+| **approvals** | 2 | *"Decide a parked agent mutation."* The queue exists so a HUMAN approves what an agent proposes, and the human has no door. The sharpest case in the census |
+| **knowledge authoring** | 8 | `extract` mines a thread for entry candidates (*"a real billable model call"*), and `annotate`/`relate`/`node`/`subgraph`/`context`/`annotations`/`related` are the rest of the write side. The web reads the graph and can author nothing |
+| **campaigns** | 6 | open · list · get · log a round · ask the adoption gate · settle. An evolution walk a person cannot see is an experiment nobody can audit, and `adopt`/`settle` are gates — the two acts that most need a human |
+| **groups (experiments)** | 3 | *"Run an experiment (ungraded phase-1 group)"* and *"Score a group's runs (phase 2, detached)"*. The two-phase experiment has no surface at all |
+| **checkpoints** | 2 | handoff checkpoints and *"an independent verification"* — evidence about agent handoffs, read by people |
+| **fs** | 2 | *"Search the workspace filesystem"* and *"Filesystem storage usage"*. There is a `/files` page; it cannot search, and cannot say what it costs |
+| **trace config** | 2 | `trace-thresholds` (*"evaluated over every trajectory at seal time"*) and `trace-ingestion` (*"the OTLP door's events/hour quota + retention … overridable per workspace"*) — settings with no settings page |
+| **environments** | 1 | the environment REGISTRY. Settings has an *adopted-environments* page, which is image adoption — a different noun. The registry is what makes the world an identity axis |
+| **images/mirror** | 1 | *"Copy an external image into this workspace's managed namespace"* — a real user action on the managed store |
+| **scorecards/gate** | 1 | the CI gate decision. See slice 1: the RECORD already carries `gates` and the web drops it, so this is the same gap from two directions |
+| **scorecards/query** | 1 | slice 2 — it has a twin, which is its own finding |
+
+**29 build + 7 not-a-gap = 36.** No slice below adds to this list; a route that appears later is a new
+census, dated separately.
+
+## Slice 1 — the served facts — **Landed**
 
 The cheapest real value in the census: the runtime already computes them, the record already carries them,
-and the web throws them away at the schema. Gates and the two revision ledgers are the ones a user asks for
-by name — *why did this block?*, *when did the judges change?*, *how many times did this case run?*
+and the web threw them away at the schema.
 
-**Counterexample owed**: a scorecard whose record carries a `gates` entry renders it, and the web schema's
-drift guard fails when a contract field it claims to mirror is dropped.
+**The repair is a classification, not a list of fields.** The existing guards
+(`_recordFieldsOnWire`, `_webFieldsOnWire`) check the fields the web DECLARES against the wire — the wrong
+half of the question, because the drift that happens is a field the web never declared at all, and omission
+is invisible to an assignability check that only looks at what is present. So every wire field is now
+classified, exhaustively, and the compiler holds it:
+
+    SCORECARD_WIRE_FIELD_KIND   satisfies Record<keyof ScorecardResponse, 'product' | 'internal'>
+    RUN_WIRE_FIELD_KIND         satisfies Record<keyof RunDetailResponse,  'product' | 'internal' | 'elsewhere'>
+
+`product` means a reader is entitled to it and the web schema must decode it; `internal` is control-plane
+machinery (ownership fences, live pass markers, the publication outbox) that a reader of a scorecard is not
+reading. A `Pick<WebRecord, ProductField>` beside each map is a compile error naming any product field the
+web drops, and `satisfies` refuses a field nobody has classified — so a field added to the record breaks the
+web build until someone decides, and `product` is the answer that costs work.
+
+Sixteen fields were then added to the two web schemas: nine on the scorecard (`gates` · `scoring` ·
+`executions` · `world` · `decision` · `etaSeconds` · `kind` · `runIds` · `verdictSummary`) and seven on the
+run (`lineage` · `placement` · `outputs` · `visibility` · `class` · `executionId` · `webhookUrl`).
+
+**Counterexamples, both driven red.** Dropping a product field fails the build with the field's own name;
+adding a wire field with no classification fails with `TS1360`. And a runtime test reads each field back
+through the real schema, because zod's default `.strip()` makes an undeclared field vanish SILENTLY — a
+schema that declares a field and rejects its real shape is worse than one that omits it, and only a parse
+proves the difference.
+
+### Census correction — `caseSpec` was never a gap
+
+The run's `caseSpec` read as missing and is not: `runCaseSpecSchema` decodes it beside `runSchema` in the run
+page, deliberately, because the wire's is the whole `EvalCase` and mirroring that contract into the web would
+both duplicate it and break `_flatGuard` (which correctly refuses a loose index-signature shape). That is why
+the run map has a third value, `elsewhere`: an omission with a named owner is a decision, an omission with
+none is the drift the map exists for.
+
+The first attempt did use `z.object({}).passthrough()` for the run's new fields, and `_flatGuard` refused
+every one of them — correctly, since a loose shape would let the wire change under the page without the
+build noticing. They are spelled out.
 
 ## Slice 2 — the analysis twin
 
@@ -139,6 +202,25 @@ A scanner that fails when a route has no client caller and no declared reason �
 `unwired-capabilities` and `gated-doors` already have. It is listed last on purpose: it would be RED on `main`
 today, and a gate that lands before its fix teaches people to bypass gates (skill `code-review` says this
 about a check it also deferred). It lands with the last slice that makes it green.
+
+## The legacy tests this cleared
+
+The goal that opened this work asked for the counterexamples AND for the tests that had stopped earning
+their place. One class showed up while slice 1 was landing, in `packages/db/src/db.test.ts`:
+
+    expect(calls[0]?.params?.[13]).toBe("eval");
+    // Column order (mig 0092 tail, re-shifted by 0212 dropping team_id): …
+
+Sixteen assertions pinned a POSITION in the params array — the one thing that is not the fact under test —
+and their own comment tracked which migration had last shifted the list. That shape does not fail when a
+column moves; it goes quietly WRONG, because the index still exists and now names a different column. It is
+the same defect family as the placeholder/param drift that took three stores' INSERTs down, seen from the
+test side.
+
+They read by column NAME now, parsed out of the statement the store actually built rather than from an
+exported constant — importing the store's private column list would only pin the two copies to each other.
+Demonstrated by inserting a column at the front: the name-based assertions follow it, the positional one
+that had not been converted fails.
 
 ## What would reopen this
 

@@ -3,6 +3,7 @@ import type { RunRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { PgCallbackStore } from "./activity/callback-store.js";
 import type { SqlClient } from "./client.js";
+import { columnNames } from "./insert-columns.js";
 import { migrate, preflight } from "./migrate.js";
 import { PgRunStore } from "./results/pg-run-store.js";
 import { InMemoryRunStore } from "./results/run-store.js";
@@ -44,6 +45,27 @@ const ROW = {
   updated_at: new Date("2026-06-18T00:00:01.000Z"),
 };
 
+// ── ASSERT BY COLUMN NAME, NEVER BY POSITION ────────────────────────────────────────────────────────
+//
+// These used to read `params[13]`, with a comment tracking which migration had last shifted the list —
+// including "re-shifted by 0212 dropping team_id". A positional assertion pins the one thing that is not
+// the fact under test, and it goes quietly WRONG rather than red when a column is added in the middle: the
+// index still exists, it just names a different column now.
+//
+// `columnNames` is the same parse the store's own INSERT is built from (`insertPlaceholders`), so this
+// reads the value the way the statement does. It is also how the column/param arity defect of
+// `insert-arity.test.ts` became impossible to reintroduce here.
+// Read from the STATEMENT the store built, not from an exported constant: the column list is private to
+// the store, and importing it for a test would only pin the two copies to each other. The captured SQL is
+// what Postgres would see.
+const paramFor = (call: { text?: string; params?: readonly unknown[] } | undefined, column: string): unknown => {
+  const columns = /INSERT INTO \w+ \(([^)]+)\)/.exec(call?.text ?? "")?.[1];
+  if (columns === undefined) throw new Error(`no INSERT in: ${(call?.text ?? "").slice(0, 120)}`);
+  const at = columnNames(columns).indexOf(column);
+  if (at < 0) throw new Error(`no column '${column}' in the INSERT — the store stopped writing it`);
+  return (call?.params ?? [])[at];
+};
+
 describe("PgRunStore", () => {
   it("create → parameterized INSERT (jsonb is stringified)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
@@ -59,8 +81,8 @@ describe("PgRunStore", () => {
     };
     await store.create(rec);
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_runs/);
-    expect(calls[0]?.params?.[0]).toBe("r1");
-    expect(calls[0]?.params?.[6]).toBeNull(); // no result
+    expect(paramFor(calls[0], "id")).toBe("r1");
+    expect(paramFor(calls[0], "result")).toBeNull();
   });
 
   it("round-trips caseSpec (mig 0051, single-run durability): INSERT stringifies it, get maps it back", async () => {
@@ -84,7 +106,7 @@ describe("PgRunStore", () => {
       createdAt: "2026-06-18T00:00:00.000Z",
       updatedAt: "2026-06-18T00:00:00.000Z",
     });
-    expect(calls[0]?.params?.[12]).toBe(JSON.stringify(caseSpec)); // case_spec column, jsonb
+    expect(paramFor(calls[0], "case_spec")).toBe(JSON.stringify(caseSpec));
 
     const { client: reader } = fakeClient(() => ({ rows: [{ ...ROW, case_spec: caseSpec }] }));
     const rec = await new PgRunStore(reader).get("r2");
@@ -108,14 +130,13 @@ describe("PgRunStore", () => {
       createdAt: "2026-07-29T00:00:00.000Z",
       updatedAt: "2026-07-29T00:00:00.000Z",
     });
-    // Column order (mig 0092 tail, re-shifted by 0212 dropping team_id): …case_spec($13), kind, class, lifetime,
-    // origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at
-    expect(calls[0]?.params?.[13]).toBe("eval");
-    expect(calls[0]?.params?.[14]).toBe("batch");
-    expect(calls[0]?.params?.[15]).toBe("task");
-    expect(calls[0]?.params?.[16]).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
-    expect(calls[0]?.params?.[18]).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
-    expect(calls[0]?.params?.[20]).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
+    const wrote = (column: string) => paramFor(calls[0], column);
+    expect(wrote("kind")).toBe("eval");
+    expect(wrote("class")).toBe("batch");
+    expect(wrote("lifetime")).toBe("task");
+    expect(wrote("origin")).toBe(JSON.stringify({ cause: "schedule", scheduleId: "sch-1" }));
+    expect(wrote("placement")).toBe(JSON.stringify({ where: "runtime", target: "nomad-x" }));
+    expect(wrote("group_ref")).toBe(JSON.stringify({ id: "sc-9", role: "case" }));
 
     const { client: reader } = fakeClient(() => ({
       rows: [
@@ -397,8 +418,7 @@ describe("PgRunStore — which replica drives the row (multi-replica boot recove
 
     await new PgRunStore(client, "cp-abc").create(queued);
 
-    expect(calls[0]?.text).toMatch(/session, owner_replica, visibility, webhook_url, execution_id, created_at/);
-    expect(calls[0]?.params?.[24]).toBe("cp-abc");
+    expect(paramFor(calls[0], "owner_replica")).toBe("cp-abc");
   });
 
   it("leaves the owner NULL when the store has no replica identity (the single-process shape)", async () => {
@@ -406,7 +426,7 @@ describe("PgRunStore — which replica drives the row (multi-replica boot recove
 
     await new PgRunStore(client).create(queued);
 
-    expect(calls[0]?.params?.[24]).toBeNull();
+    expect(paramFor(calls[0], "owner_replica")).toBeNull();
   });
 
   it("transfers ownership on update — the replica that resumes an orphan becomes its driver", async () => {
