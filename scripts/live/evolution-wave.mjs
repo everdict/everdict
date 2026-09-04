@@ -255,6 +255,30 @@ try {
     tags: ["spreadsheetbench"],
   });
 
+  // ── CONCURRENT CAMPAIGNS MAY NOT SHARE A HELD-OUT ROW ────────────────────────────────────────────
+  //
+  // `heldOutFamilySize` corrects for how many times one held-out set is ASKED, and the platform verifies that
+  // along a CHAIN (`continues`): a successor must fit inside its predecessor's pre-registration. It cannot see
+  // SIBLINGS, and siblings are what this script creates — so two campaigns opened here with the same held-out
+  // case each declare a family covering only themselves, and that row is asked twice as often as either one
+  // corrects for. The first wave run with this file did exactly that: case 15380 was held-out in two of three
+  // campaigns at family 3, so it answered six rounds under a correction that assumed three.
+  //
+  // The platform's policy for siblings is an open question (`docs/architecture/evolution-program-gap-map.md`
+  // G4.11). The DRIVER's answer is not: a wave lays out its own exams, so it lays them out disjoint.
+  {
+    const owner = new Map();
+    for (const c of PLAN.campaigns)
+      for (const id of c.heldOut) {
+        const first = owner.get(id);
+        if (first !== undefined)
+          throw new Error(
+            `campaigns '${first}' and '${c.id}' are both held out on case ${id}. Concurrent campaigns spend one held-out row against two families that each count only themselves, so the correction is wrong for both — give each campaign its own held-out cases, or run them as a chain with one family.`,
+          );
+        owner.set(id, c.id);
+      }
+  }
+
   // One dataset per campaign: its own exam, so a campaign's frame names exactly the cases it runs.
   for (const c of PLAN.campaigns) {
     const cases = [...c.targets, ...c.heldOut].map((id) => {
