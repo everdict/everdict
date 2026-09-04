@@ -10,7 +10,7 @@ import { contentDigest } from "../provenance/content-digest.js";
 //
 // `identity_unverified` is deliberately a per-decision refusal rather than a terminal state: the campaign
 // stays open, because the fix (pin the image, run on a lane that reports provenance) is another round —
-// whereas no_improvement and budget_exhausted are the campaign's own endings.
+// whereas no_improvement, budget_exhausted and exam_inert are the campaign's own endings.
 
 export type CampaignGateAnswer =
   | {
@@ -28,9 +28,18 @@ export type CampaignGateAnswer =
       // held-out counts and the identity axes, and this rides to the close and the proof so a merge can name
       // the pull request it is about.
       candidateSource?: CandidateSource;
+      // Carried on EVERY arm, adoption included: a candidate adopted over an exam whose other scenarios
+      // nothing has ever passed is a narrower result than it reads as, and the reader should see that where
+      // the decision is, not in a separate query.
+      neverSolved?: string[];
     }
-  | { kind: "continue"; roundsLeft: number; consecutiveRejected: number }
-  | { kind: "halt"; reason: "no_improvement" | "budget_exhausted" | "identity_unverified"; detail: string };
+  | { kind: "continue"; roundsLeft: number; consecutiveRejected: number; neverSolved?: string[] }
+  | {
+      kind: "halt";
+      reason: "no_improvement" | "budget_exhausted" | "identity_unverified" | "exam_inert";
+      detail: string;
+      neverSolved?: string[];
+    };
 
 // A round is a WIN only when its comparison actually held: a non-comparable pair produced no significance
 // signal, and counts riding on it are not evidence.
@@ -159,6 +168,81 @@ export interface CampaignStop {
   atRound: number; // 1-based position of the round at which the frame's rule fired
 }
 
+// ── WHICH ENDING IT WAS: THE HYPOTHESES, OR THE INSTRUMENT ──────────────────────────────────────────
+//
+// `campaignStoppedAt` decides WHEN a campaign ends and this decides what to CALL that ending. The split is
+// deliberate and it is what makes the diagnosis safe to add: a campaign is never ended by this function, so
+// a wrong answer here costs a word in a record and can never cost a round.
+//
+// A frozen frame that has never once been solved, across every round logged against it, is not a well of
+// dry hypotheses — it is an exam that does not respond, and the next round meets the same one. The mirror
+// case is an exam every arm passes completely: no headroom, so no candidate can ever show an improvement.
+// Both are `exam_inert`; the detail says which.
+//
+// SILENCE IS NOT INERTNESS. A round logged before `verdict.response` existed cannot say what it scored in
+// absolute terms — the level is not recoverable from deltas — so ONE such round withholds the diagnosis for
+// the whole campaign. That is L2's third value placed on the fail-safe side: an unproven accusation about
+// somebody's exam is worse than an imprecise ending, and the ending is already correct.
+// ── WHICH SCENARIOS NOTHING HAS EVER PASSED ─────────────────────────────────────────────────────────
+//
+// `examInertness` is all-or-nothing and the failure it was written for was a SUBSET: a wave whose best round
+// read `31202:5/5 34033:4/5 38537:1/5` over eleven cases at 0/5 has a responsive exam by every whole-campaign
+// predicate, and eleven of its fourteen scenarios had never been passed by anything. Several of those were
+// structurally unwinnable — a grader that could not read their answer range, and one whose published answer
+// key was permuted — and that is the loudest thing the trace contains.
+//
+// It is NOT an ending. An exam that responds on three cases is not inert and the campaign may legitimately
+// keep improving those three; this is the sentence that points at the dataset, carried on `continue` as well
+// as on the halt, because the driver asks `decision` every round and round 2 is when it was worth knowing.
+//
+// Silence withholds it, like every other reading of `response`: one round that cannot say what it solved
+// makes "never solved" unprovable for the whole walk.
+export function neverSolvedAcross(frame: CampaignFrame, rounds: readonly CampaignRound[]): string[] | undefined {
+  if (rounds.length === 0) return undefined;
+  const solved = new Set<string>();
+  for (const r of rounds) {
+    const level = r.verdict.response;
+    if (level === undefined) return undefined;
+    for (const id of level.solved) solved.add(id);
+  }
+  const never = frame.scenarios.map((sc) => sc.id).filter((id) => !solved.has(id));
+  return never.length > 0 ? never : undefined;
+}
+
+export type ExamInertness = "never_solved" | "no_headroom" | "never_measured";
+
+export function examInertness(rounds: readonly CampaignRound[]): ExamInertness | undefined {
+  if (rounds.length === 0) return undefined;
+  const spoke = rounds.map((r) => ({ level: r.verdict.response, unmeasured: r.verdict.unmeasured }));
+  // A round that can say neither what it scored nor that it could not be scored withholds the diagnosis for
+  // the whole campaign — one is enough (see the block above).
+  if (spoke.some((it) => it.level === undefined && it.unmeasured === undefined)) return undefined;
+  // The grader never answered, in every round. Checked first: such a round has no level to read, so asking
+  // the level questions of a mixed trace would compare a population against a smaller one.
+  if (spoke.every((it) => it.unmeasured !== undefined && it.unmeasured.cases > 0)) return "never_measured";
+  const levels = spoke.map((it) => it.level);
+  // A MIX of measured-and-dead with could-not-measure is not a conclusion. The two have different repairs —
+  // one is a dataset whose cases nobody can pass, the other a grader that cannot read them — and a campaign
+  // that saw both has not told us which dominates.
+  if (levels.some((it) => it === undefined)) return undefined;
+  const said = levels.filter((it): it is NonNullable<typeof it> => it !== undefined);
+  if (said.every((it) => it.solved.length === 0)) return "never_solved";
+  if (said.every((it) => it.failed.length === 0)) return "no_headroom";
+  return undefined;
+}
+
+// The ending's own words, once `examInertness` has said the instrument is what ended it.
+export function inertDetail(kind: ExamInertness, rounds: number): string {
+  switch (kind) {
+    case "never_solved":
+      return `no scenario of this frozen exam has ever been passed by either arm, across all ${rounds} logged round(s) — the exam never responded, so no candidate could have shown an improvement and none can`;
+    case "no_headroom":
+      return `every scenario passes on both arms in all ${rounds} logged round(s) — the exam has no headroom left to measure an improvement in`;
+    case "never_measured":
+      return `every one of the ${rounds} logged round(s) had scenarios the graders could not be measured on at all — the campaign ended on a grader that cannot answer, not on hypotheses that were tried and lost`;
+  }
+}
+
 export function campaignStoppedAt(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignStop | undefined {
   let consecutiveRejected = 0;
   for (let i = 0; i < rounds.length; i += 1) {
@@ -201,11 +285,26 @@ export function campaignRoundRefusal(
 }
 
 export function campaignAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {
+  // Attached ONCE, to whatever the decision turns out to be, rather than at each of the nine return sites —
+  // a field spelled nine times is eight chances for the next ending to forget it (rule `protocol`, the
+  // one-lane-only law counted at return statements instead of call sites).
+  const answer = decideAdoption(frame, rounds);
+  const neverSolved = neverSolvedAcross(frame, rounds);
+  return neverSolved === undefined ? answer : { ...answer, neverSolved };
+}
+
+function decideAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {
   // The ending first: a round logged after the frame's own rule fired is not evidence, whatever it scored.
   const ended = campaignStoppedAt(frame, rounds);
   if (ended !== undefined) {
     const after = rounds.length - ended.atRound;
     const tail = after > 0 ? ` — the ${after} round(s) logged after it are not adoption evidence` : "";
+    // WHICH ending it was. The rule that fired is settled above and is not revisited here; this only asks
+    // whether the thing that ran out was the hypotheses or the exam. It reads every logged round, including
+    // any past the ending: a round logged late is not adoption evidence, and it is still a measurement of
+    // whether this frozen exam responds at all.
+    const inert = examInertness(rounds);
+    if (inert !== undefined) return { kind: "halt", reason: "exam_inert", detail: inertDetail(inert, rounds.length) };
     return ended.reason === "no_improvement"
       ? {
           kind: "halt",

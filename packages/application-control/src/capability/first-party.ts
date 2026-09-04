@@ -823,7 +823,8 @@ Everdict's tools load on demand. Before anything else:
   round trace. Ask it; do not re-implement it. The arithmetic is the frame's, and it reads the HELD-OUT
   counts — improving where you have been pushing is evidence about your search, not about the agent.
 - \`continue\` → back to step 2. \`halt\` → \`settle_campaign\` and report the reason (\`no_improvement\` after
-  the rejected streak · \`budget_exhausted\` · \`identity_unverified\`, which is asking which bytes you
+  the rejected streak · \`budget_exhausted\` · \`exam_inert\`, which says the frozen exam never responded (or
+  had no headroom) and is a finding about the DATASET, not the hypotheses · \`identity_unverified\`, which is asking which bytes you
   measured rather than ending the walk).
 - \`adopt\` → adoption is not a save you perform, it is an authorization you spend. \`settle_campaign\` writes
   it, \`campaign_adoption\` reads it back, and \`adopt_campaign_candidate\` presents it with the spec being

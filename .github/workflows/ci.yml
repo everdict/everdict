@@ -70,8 +70,25 @@ jobs:
       - run: pnpm source-bytes
       - run: pnpm untrusted-ingress
       - run: pnpm mutation-leak
+      # A grader may not publish a zero on the arm that means "I could not run" — see the scanner's header.
+      - run: pnpm grader-collapse
       # Self-host minimal-profile contract — the control plane must boot with zero optional env.
       - run: node scripts/live/empty-env-boot.mjs
+
+      # ── THE SCORERS THAT DECIDE EVERY REWARD, WHICH NO GATE HAD EVER READ ────────────────────────
+      #
+      # `examples/bundles/**` is outside the layer spine, outside every scanner, and its scripts are Python,
+      # so this workflow had nothing that could execute them. What lived there was not an example: a
+      # SpreadsheetBench wave's entire score came from `sbench_digest.py`, whose `answer_position` reader
+      # raised on 420 of the 912 published positions and had that raise recorded as the agent's wrong answer.
+      # Two files owned that parser and both were wrong, which is the divergence rule `protocol` L3 names —
+      # in the one place no gate could see it. Their self-tests run here now.
+      - name: bundle scorer self-tests
+        run: |
+          python3 -m pip install --quiet --break-system-packages openpyxl
+          for t in examples/bundles/*/scripts/sbench_position.py; do
+            echo "▶ $t"; python3 "$t"
+          done
 
   web:
     name: web (self-contained lint · build)

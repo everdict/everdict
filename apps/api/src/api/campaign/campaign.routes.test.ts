@@ -65,6 +65,9 @@ const frame: CampaignFrame = {
 function build(snapshot: CampaignSnapshot) {
   const store = new InMemoryEvolutionCampaignStore();
   const campaignService = new CampaignService({
+    // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+    // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+    scorecards: { get: async () => undefined },
     store,
     operations: store,
     changes: noChanges,
@@ -635,6 +638,9 @@ describe("POST /campaigns with frame.fromIssue — the issue's case links become
     const store = new InMemoryEvolutionCampaignStore();
     const issues = issueWith(links);
     const campaignService = new CampaignService({
+      // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+      // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+      scorecards: { get: async () => undefined },
       store,
       operations: store,
       changes: noChanges,
@@ -992,6 +998,9 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
   ) {
     const store = new InMemoryEvolutionCampaignStore();
     const campaignService = new CampaignService({
+      // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+      // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+      scorecards: { get: async () => undefined },
       store,
       operations: store,
       changes: noChanges,

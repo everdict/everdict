@@ -265,6 +265,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
   // — a fixture that carries only the campaign half cannot see an adoption at all.
   const service = (store: EvolutionCampaignStore & AdoptionOperationStore) =>
     new CampaignService({
+      // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+      // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+      scorecards: { get: async () => undefined },
       store,
       operations: store,
       changes: noChanges,
@@ -839,6 +842,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       deferCompletion: store.deferCompletion.bind(store),
     };
     const svc2 = new CampaignService({
+      // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+      // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+      scorecards: { get: async () => undefined },
       store: raced,
       operations: raced,
       changes: noChanges,
@@ -1129,6 +1135,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         ],
       };
       const svc = new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes: noChanges,
@@ -1208,6 +1217,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       changes: ReturnType<typeof prReader>,
     ) =>
       new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes,
@@ -1347,6 +1359,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       const store = new InMemoryEvolutionCampaignStore();
       const evidence = new InMemoryCampaignEvidenceStore();
       const svc = new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes: noChanges,
@@ -1437,6 +1452,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     it("[§3] a store that cannot take the evidence refuses the round — nothing is appended without its bytes", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const svc = new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes: noChanges,
@@ -1483,6 +1501,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       });
       const build = (seedProvenance: SeedProvenanceReader) =>
         new CampaignService({
+          // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+          // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+          scorecards: { get: async () => undefined },
           store,
           operations: store,
           changes: noChanges,
@@ -1544,6 +1565,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         subject: { type: "harness", id: "shop", baselineVersion: "1.0.0" },
       };
       const svc = new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes: noChanges,
@@ -1670,6 +1694,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     });
     const withReader = (store: InMemoryEvolutionCampaignStore, changes: ReturnType<typeof reader>) =>
       new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes,
@@ -1774,6 +1801,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const ledger = (runs: Record<string, Run>) => ({ get: async (id: string) => runs[id] });
     const withRuns = (store: InMemoryEvolutionCampaignStore, runs: Record<string, Run>) =>
       new CampaignService({
+        // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+        // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+        scorecards: { get: async () => undefined },
         store,
         operations: store,
         changes: noChanges,

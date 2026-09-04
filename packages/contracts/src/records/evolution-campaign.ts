@@ -56,6 +56,24 @@ const CampaignFrameShape = z.object({
   // population by any meaning of the word); the gate requires every one of them to flip, and the held-out
   // block to regress nowhere. Default empty = the aggregate rule, which every campaign written before had.
   targets: z.array(z.string().min(1).max(300)).max(500).default([]),
+  // ── DOES THIS EXAM RESPOND TO A CORRECT ANSWER? (the positive control) ───────────────────────────
+  //
+  // Everything else the frame freezes is about the COMPARISON — which cases, which judges, how many trials,
+  // what counts as significant. None of it asks whether the measurement can produce a pass at all, and a
+  // campaign whose scorer cannot say yes derives correct verdicts about nothing. A SpreadsheetBench wave ran
+  // round after round at 14.3% against a grader whose `answer_position` reader raised on 420 of the 912
+  // published positions and had every raise recorded as the agent's wrong answer; the benchmark's OWN answer
+  // workbooks scored `FAIL 3/3` on eight of eight sampled cases.
+  //
+  // So a frame may name ONE scorecard as its positive control. The platform reads it and derives what it
+  // proves (`examProofOf`) — the driver names the evidence, never what the evidence shows (L3). A scorecard
+  // that proves nothing about this frame is refused at open, because a control that controls nothing is
+  // worse than none: it reads like the check was done.
+  //
+  // OPTIONAL, and deliberately not a per-scenario requirement. "Prove every case is passable" would refuse
+  // every hard benchmark, which is what campaigns exist for. The coverage is recorded and visible instead,
+  // so an unproven exam is a fact an operator can see rather than one nobody asked about.
+  examProvenBy: z.string().min(1).max(200).optional(),
   judges: z.array(z.string().min(1).max(200)).default([]),
   trialsPerCase: z.number().int().min(1).max(100),
   // The budget is ROUNDS: one round = one hypothesis = one baseline↔candidate comparison. Trials/scenarios
@@ -484,6 +502,60 @@ export const CampaignRoundSchema = z.object({
         regressions: z.number().int().min(0),
       })
       .optional(),
+    // ── …AND THE ABSOLUTE LEVEL, BECAUSE A DIFFERENTIAL CANNOT SEE A DEAD INSTRUMENT ────────────────
+    //
+    // Everything above is a DELTA, so these two rounds are the same record:
+    //
+    //     every scenario 0.0 on both arms  →  comparable: true · 0/0 · heldOut 0/0
+    //     every scenario 1.0 on both arms  →  comparable: true · 0/0 · heldOut 0/0
+    //
+    // …and a campaign of either kind ends `no_improvement`, which says the hypotheses failed. In the first
+    // one they were never tested. A SpreadsheetBench wave ran round after round at 14.3% against a grader
+    // that scored 420 of the 912 published tasks zero WITHOUT OPENING the agent's workbook (its
+    // `answer_position` reader raised on every sheet-qualified range and the raise was caught as an ordinary
+    // wrong answer), over a dataset with a permuted answer key that failed a candidate which had solved all
+    // three test workbooks. Every refusal the gate made was right; the ending it named was not.
+    //
+    // So the platform records what it already computed and used to discard — `TrialCaseDelta` carries
+    // `baselineRate` and `candidateRate` per case. `solved` NAMES the scenarios some arm passed at least
+    // once and `failed` those some arm failed at least once; a campaign whose every round solved nothing is
+    // an exam that never responded, and one whose every round failed nothing is an exam with no headroom.
+    //
+    // THE IDS, NOT A COUNT — because the failure this exists for was a SUBSET. The wave that motivated it
+    // read `31202:5/5 34033:4/5 38537:1/5` over eleven cases at 0/5, so a count of solved scenarios was 3
+    // and every all-or-nothing predicate stayed silent while eleven scenarios had never been passed by
+    // anything. The gate unions these across the walk (`neverSolvedAcross`) and says which.
+    //
+    // OPTIONAL, and the gate treats its absence as "this round cannot say" rather than as inertness (rule
+    // `protocol` L2, and the schema-split law: a creation rule applied at decode time is a data outage).
+    // Past rounds cannot be repaired — an absolute level is not derivable from deltas — so the honest shape
+    // is absent, never a manufactured zero, which is exactly the value that would accuse a healthy exam.
+    response: z
+      .object({
+        solved: z.array(z.string().min(1).max(300)).max(500),
+        failed: z.array(z.string().min(1).max(300)).max(500),
+        scenarios: z.number().int().min(0),
+      })
+      .optional(),
+    // ── …AND WHY A ROUND HAS NO LEVEL AT ALL, WHEN THE REASON IS THE INSTRUMENT ───────────────────
+    //
+    // A case the graders could not score contributes no trials, falls under the frame's trial floor, and the
+    // round is rejected as thin — `comparable: false`, no `response`, and a rejection that counts toward
+    // `stopAfterRejectedRounds` exactly like a candidate that was tried and lost. Three of those end the
+    // campaign as `no_improvement`, which again blames hypotheses for an instrument.
+    //
+    // Recorded rather than parsed back out of `detail`: a predicate read from rendered text is the
+    // re-derivation rule `protocol` L3 forbids, and this one would be read by the gate.
+    //
+    // `cases` is how many of the round's `of` compared scenarios ran trials that produced NO verdict — the
+    // grader was invoked and could not answer. A round the driver simply under-ran is not this: that is a
+    // driver error, it is still `thin`, and it must not be dressed as a broken exam.
+    unmeasured: z
+      .object({
+        cases: z.number().int().min(0),
+        of: z.number().int().min(0),
+      })
+      .optional(),
     // ── THE CANDIDATE WAS SEEDED WITH THE EXAM (harness-identity-and-seeds-spec.md §4) ─────────────
     //
     // The seeds (skill ids / knowledge entry ids) whose evidence names a scorecard over the frame's held-out
@@ -604,7 +676,19 @@ export const CampaignRoundInputSchema = CampaignRoundSchema.pick({
 });
 export type CampaignRoundInput = z.infer<typeof CampaignRoundInputSchema>;
 
-export const CAMPAIGN_STATES = ["open", "adopted", "no_improvement", "budget_exhausted"] as const;
+// What the frame's positive control actually proved, DERIVED by the platform at open (`examProofOf`) and
+// frozen with the frame. `proven` are the scenarios that scorecard measured and passed; the rest are cases
+// no scorer here has ever said yes about — which is not a refusal (a hard benchmark is the normal case) but
+// is the first thing to read when a campaign ends `exam_inert`.
+export const ExamProofRecordSchema = z.object({
+  scorecardId: z.string().min(1).max(200),
+  proven: z.array(z.string().min(1).max(300)).max(500),
+  unproven: z.array(z.string().min(1).max(300)).max(500),
+  of: z.number().int().min(0),
+});
+export type ExamProofRecord = z.infer<typeof ExamProofRecordSchema>;
+
+export const CAMPAIGN_STATES = ["open", "adopted", "no_improvement", "budget_exhausted", "exam_inert"] as const;
 export const CampaignStateSchema = z.enum(CAMPAIGN_STATES);
 export type CampaignState = z.infer<typeof CampaignStateSchema>;
 
@@ -626,7 +710,11 @@ export const CampaignCloseSchema = z.object({
     }),
     z.object({
       kind: z.literal("halted"),
-      reason: z.enum(["no_improvement", "budget_exhausted"]),
+      // `exam_inert` is an ending about the INSTRUMENT: across every round the frozen exam never responded
+      // (nothing was ever solved) or never had headroom (nothing was ever failed). Recording that as
+      // `no_improvement` blames hypotheses that were never measured, which is the conflation the state
+      // exists to end.
+      reason: z.enum(["no_improvement", "budget_exhausted", "exam_inert"]),
       detail: z.string().max(1000),
     }),
   ]),
@@ -763,6 +851,9 @@ export const EvolutionCampaignRecordSchema = z.object({
   // contentDigest of the frame at open — what an adoption references, and what makes a frame edit
   // representable only as a NEW campaign.
   frameDigest: z.string().min(1),
+  // What the frame's positive control proved, derived by the platform at open. Absent when the frame named
+  // none — an unproven exam, which is legal and is the thing to read first when a campaign ends `exam_inert`.
+  examProof: ExamProofRecordSchema.optional(),
   rounds: z.array(CampaignRoundSchema).default([]),
   state: CampaignStateSchema,
   close: CampaignCloseSchema.optional(),

@@ -24,6 +24,7 @@
     "plugin-manifests": "node scripts/check-plugin-manifests.mjs",
     "docs-check": "node scripts/check-docs.mjs",
     "constructed-casts": "node scripts/check-constructed-casts.mjs",
+    "grader-collapse": "node scripts/check-grader-collapse.mjs",
     "guarded-doubles": "node scripts/check-guarded-doubles.mjs",
     "unwired-capabilities": "node scripts/check-unwired-capabilities.mjs",
     "gated-doors": "node scripts/check-gated-doors.mjs",

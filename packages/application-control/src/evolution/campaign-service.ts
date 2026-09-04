@@ -46,6 +46,7 @@ import type {
   HarnessShapeReader,
   SeedProvenanceReader,
 } from "../ports/evolution-campaign-store.js";
+import { examProofOf } from "./exam-proof.js";
 
 // ── THE CAMPAIGN SERVICE (docs/architecture/evolution-lineage.md, Track D) ───────────────────────────
 //
@@ -234,6 +235,21 @@ export interface CampaignServiceDeps {
   // The dataset version a derived frame's scenarios come from. REQUIRED: an optional one would let "no registry
   // wired" read as "no such dataset" at the one door that turns an issue into an exam (rule `protocol`).
   datasets: { get(tenant: string, id: string, ref?: string): Promise<{ cases: ReadonlyArray<{ id: string }> }> };
+  // ── THE FRAME'S POSITIVE CONTROL, READ AT OPEN (`exam-proof.ts`) ─────────────────────────────────
+  //
+  // REQUIRED, not optional. A frame that names a control the service cannot read would open with the check
+  // silently skipped, and "the check was configured away" is indistinguishable from "the check passed" at
+  // every later reader — the optional-dependency law (rule `protocol`).
+  scorecards: {
+    // The port's own shape: `get(id)` returns the record, and the per-case rows are the heavy `scorecard`
+    // detail that only `get` carries (`list` omits them). Tenant scoping is the caller's, as everywhere else
+    // on this store — `verifyExamControl` checks it before reading anything out.
+    get(
+      id: string,
+    ): Promise<
+      { tenant: string; scorecard?: { results: ReadonlyArray<{ caseId?: string; scores: Score[] }> } } | undefined
+    >;
+  };
   // THE diff predicate (the ScorecardService facade's diffSnapshot) — policy-resolved transitions, trial
   // statistics, experiment identity, AND the two sides' records, so the round's declared coordinates are
   // verified against what actually ran. One owner; this service only summarizes its answer.
@@ -398,12 +414,17 @@ export class CampaignService {
     // Open is the only moment the answer can change anything: after it the frame is frozen and its rounds are
     // judged at a level nobody may revise.
     await this.assertChainIsHonest(tenant, frame);
+    // …and if it names a POSITIVE CONTROL, the platform reads what that scorecard actually proves. Open is
+    // the only moment this can be established: the frame freezes here and every later round is judged
+    // against it (`exam-proof.ts` for why the question is "does the scorer respond", not "can an agent win").
+    const examProof = await this.verifyExamControl(tenant, frame);
     const record: EvolutionCampaignRecord = {
       id: this.newId(),
       tenant,
       issueId: issue.id,
       frame,
       frameDigest: contentDigest(frame),
+      ...(examProof !== undefined ? { examProof } : {}),
       rounds: [],
       state: "open",
       createdBy: by,
@@ -699,6 +720,46 @@ export class CampaignService {
   // So reads stay permissive and every DECISION and MUTATION re-checks the frame against the rule in force.
   // The refusal names the remedy, because "open a new campaign" is the only thing a caller can do: the frame
   // is frozen by construction, so an ineligible one cannot be repaired in place.
+  // ── THE POSITIVE CONTROL, READ RATHER THAN BELIEVED ─────────────────────────────────────────────
+  //
+  // The frame names one scorecard. What it PROVES is derived here from the rows the platform wrote (L3), and
+  // a control that proves nothing about this frame is refused — a check that reads as done and establishes
+  // nothing is worse than no check, which is this repository's whole protocol rule in one sentence.
+  //
+  // A scorecard that cannot be READ is not a refusal and not a pass: `unknown` is the third value, and here
+  // it means the campaign opens with no proof recorded rather than with a proof nobody verified.
+  private async verifyExamControl(tenant: string, frame: CampaignFrame): Promise<EvolutionCampaignRecord["examProof"]> {
+    const id = frame.examProvenBy;
+    if (id === undefined) return undefined;
+    const card = await this.deps.scorecards.get(id);
+    // Another workspace's scorecard reads as nonexistent, the way every cross-tenant read here does.
+    if (card === undefined || card.tenant !== tenant)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { examProvenBy: id },
+        `the frame's positive control names scorecard ${id}, which this workspace does not have`,
+      );
+    // A record whose per-case rows were not carried proves nothing, and saying so is not the same as saying
+    // the exam is broken — the caller is told to name a scorecard whose detail is readable.
+    if (card.scorecard === undefined)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { examProvenBy: id },
+        `scorecard ${id} carries no per-case results, so what it proves about this frame cannot be read`,
+      );
+    const proof = examProofOf(
+      frame.scenarios.map((sc) => sc.id),
+      card.scorecard,
+    );
+    if (proof.proven.length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { examProvenBy: id, scenarios: proof.of },
+        `scorecard ${id} passes none of this frame's ${proof.of} scenario(s), so it proves nothing about whether this exam can be scored at all — name a scorecard in which at least one of them was measured and passed, or open the campaign without a positive control and read the coverage as unproven`,
+      );
+    return { scorecardId: id, proven: proof.proven, unproven: proof.unproven, of: proof.of };
+  }
+
   private requireEligibleFrame(record: EvolutionCampaignRecord): void {
     const defects = campaignFrameDefects(record.frame);
     if (defects.length === 0) return;
@@ -1179,7 +1240,10 @@ export class CampaignService {
         { answer },
         "the gate answers continue — the campaign settles only on an adoptable candidate or its own ending",
       );
-    let state: "adopted" | "no_improvement" | "budget_exhausted";
+    // `exam_inert` settles like the other two endings: the gate decided the campaign is over and named the
+    // instrument rather than the hypotheses. `identity_unverified` is the one halt reason that is NOT a
+    // state — it keeps the campaign open, and it is refused below.
+    let state: "adopted" | "no_improvement" | "budget_exhausted" | "exam_inert";
     let close: NonNullable<EvolutionCampaignRecord["close"]>;
     // ── THE AUTHORIZATION THE CLOSE OWES (arch-review 71 P0-evolution) ───────────────────────────────
     //
@@ -1419,13 +1483,43 @@ function verdictOf(
   const thin = comparison.trials.cases.filter(
     (c) => c.baselineTrials < frame.trialsPerCase || c.candidateTrials < frame.trialsPerCase,
   );
-  if (thin.length > 0)
-    return rejected(
-      `${thin.length} case(s) ran fewer than the frame's ${frame.trialsPerCase} trials (${thin
-        .slice(0, 5)
-        .map((c) => c.caseId)
-        .join(", ")})`,
-    );
+  if (thin.length > 0) {
+    // ── WHY IT IS THIN: THE DRIVER UNDER-RAN, OR THE GRADER COULD NOT ANSWER ────────────────────────
+    //
+    // `caseTrialStats` counts SCORED trials, so a case whose graders published no verdict contributes zero
+    // and lands here beside a case the driver simply ran too few times. They are the same rejection and they
+    // are not the same finding: one is a driver error, the other is a broken instrument — and three of the
+    // latter end the campaign as `no_improvement`, blaming hypotheses that were never measured.
+    //
+    // The raw rows say which. A side that RAN at least the frame's trials and SCORED fewer was invoked and
+    // could not answer. Where a side's rows were not fetched we say nothing rather than guess: `undefined`
+    // withholds the gate's inertness diagnosis, which is the fail-safe direction (`examInertness`).
+    const ran = (side: CampaignComparisonSide, caseId: string): number | undefined =>
+      side.record.scorecard === undefined
+        ? undefined
+        : side.record.scorecard.results.filter((r) => r.caseId === caseId).length;
+    const couldNotAnswer = thin.filter((c) => {
+      const b = ran(snapshot.baseline, c.caseId);
+      const d = ran(snapshot.candidate, c.caseId);
+      if (b === undefined || d === undefined) return false;
+      const baselineSilent = b >= frame.trialsPerCase && c.baselineTrials < frame.trialsPerCase;
+      const candidateSilent = d >= frame.trialsPerCase && c.candidateTrials < frame.trialsPerCase;
+      return baselineSilent || candidateSilent;
+    });
+    const readable =
+      snapshot.baseline.record.scorecard !== undefined && snapshot.candidate.record.scorecard !== undefined;
+    return {
+      ...rejected(
+        `${thin.length} case(s) ran fewer than the frame's ${frame.trialsPerCase} trials (${thin
+          .slice(0, 5)
+          .map((c) => c.caseId)
+          .join(", ")})`,
+      ),
+      ...(readable && couldNotAnswer.length > 0
+        ? { unmeasured: { cases: couldNotAnswer.length, of: comparison.trials.cases.length } }
+        : {}),
+    };
+  }
   if (frame.judges.length > 0) {
     const want = [...frame.judges].sort().join(",");
     // Who SCORED the plane, read from the scoring ledger's current revision — the pass that applied the judges
@@ -1487,8 +1581,22 @@ function verdictOf(
           unflipped: frame.targets.filter((id) => !improved.has(id)),
         }
       : undefined;
+  // ── THE ABSOLUTE LEVEL, BORN WHERE IT IS MEASURED (rule `protocol` L3) ────────────────────────────
+  //
+  // Everything else on this verdict is a delta, and a delta cannot tell an exam nothing responds to from a
+  // pair of arms that tied. `TrialCaseDelta` already carries both arms' pass rates and this function used to
+  // drop them; the gate reads the counts back only to NAME an ending it was going to declare anyway
+  // (`examInertness`). Counted over the whole compared set, not the held-out block: a dead instrument is a
+  // property of the exam, not of the population the gate adopts on.
+  const cases = comparison.trials.cases;
+  const response = {
+    solved: cases.filter((c) => c.baselineRate > 0 || c.candidateRate > 0).map((c) => c.caseId),
+    failed: cases.filter((c) => c.baselineRate < 1 || c.candidateRate < 1).map((c) => c.caseId),
+    scenarios: cases.length,
+  };
   return {
     comparable: true,
+    response,
     significantImprovements: significant.filter((c) => c.delta > 0).length,
     significantRegressions: significant.filter((c) => c.delta < 0).length,
     heldOut: {

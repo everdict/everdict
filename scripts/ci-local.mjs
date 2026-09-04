@@ -6,7 +6,7 @@
 // (CI validates the pushed commit, so a dirty-tree pass proves nothing about HEAD).
 // Plain Node, no external deps. Usage: `pnpm ci:local` (or `node scripts/ci-local.mjs`).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,7 +88,11 @@ run("pnpm source-bytes", "pnpm", ["source-bytes"]);
 // written AFTER the lesson was the one that never learned it.
 run("pnpm untrusted-ingress", "pnpm", ["untrusted-ingress"]);
 run("pnpm mutation-leak", "pnpm", ["mutation-leak"]);
+run("pnpm grader-collapse", "pnpm", ["grader-collapse"]);
 run("empty-env boot contract", "node", ["scripts/live/empty-env-boot.mjs"]);
+// The bundle scorers' own self-tests. Skipped rather than failed when the machine has no openpyxl: CI
+// installs it, and a local gate that refuses on a missing optional interpreter teaches people to bypass it.
+runBundleSelfTests();
 
 // Job 2 — web (self-contained; contracts d.ts already exists via the root build above).
 run("web lint", "pnpm", ["-F", "@everdict/web", "lint"]);
@@ -170,3 +174,30 @@ for (const dir of new Set([gitDir, commonDir])) {
   writeFileSync(file, `${[...kept, `${head} full`].slice(-LEDGER_LINES).join("\n")}\n`);
 }
 console.log(`\n✓ CI-PARITY GREEN — stamped ${head.slice(0, 9)} full — safe to push.`);
+
+// ── THE SCORERS NO GATE HAD READ ────────────────────────────────────────────────────────────────────
+//
+// `examples/bundles/**` is outside the layer spine and its scorers are Python, so nothing in this file could
+// execute them — and a SpreadsheetBench wave's entire score came from one of them. See the ci.yml block of
+// the same name.
+function runBundleSelfTests() {
+  const tests = globSelfTests();
+  if (tests.length === 0) return;
+  const probe = spawnSync("python3", ["-c", "import openpyxl"], { stdio: "ignore" });
+  if (probe.status !== 0) {
+    console.log("○ bundle scorer self-tests — skipped (no python3 + openpyxl here; CI installs it)");
+    return;
+  }
+  for (const t of tests) run(`bundle self-test ${t}`, "python3", [t]);
+}
+
+function globSelfTests() {
+  const base = path.join(root, "examples", "bundles");
+  if (!existsSync(base)) return [];
+  const out = [];
+  for (const bundle of readdirSync(base)) {
+    const f = path.join(base, bundle, "scripts", "sbench_position.py");
+    if (existsSync(f)) out.push(path.relative(root, f));
+  }
+  return out;
+}

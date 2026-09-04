@@ -18,7 +18,8 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       annotations: { readOnlyHint: false },
       description:
         "Open an evolution campaign: freeze the frame (subject, scenarios with held-out marked, judges, " +
-        "trials per case, round budget, significance, the identity waiver) and record its digest. The frame " +
+        "trials per case, round budget, significance, the identity waiver, and optionally examProvenBy — a " +
+        "scorecard the platform reads to establish this exam can be scored at all) and record its digest. The frame " +
         "is immutable — weakening judges/scenarios mid-campaign is impossible by construction; a different " +
         "frame is a new campaign. issue_id is the campaign's journal (the issue links scorecards and carries " +
         "the resolution).",
@@ -71,7 +72,10 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
     "get_campaign",
     {
       annotations: { readOnlyHint: true },
-      description: "Read one campaign — frame, round trace, state, and close",
+      description:
+        "Read one campaign — frame, round trace, state, close, and examProof (what the frame's positive " +
+        "control proved: which scenarios a named scorecard has ever measured AND passed). An exam with no " +
+        "proven scenario is the first thing to read when a campaign ends exam_inert.",
       inputSchema: { id: z.string() },
     },
     ({ id }) =>
@@ -153,7 +157,7 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
       annotations: { readOnlyHint: true },
       description:
         "Ask the pure adoption gate: adopt (latest candidate significantly better, zero regressions, world " +
-        "identity verified or waived at open) | continue | halt (no_improvement / budget_exhausted / " +
+        "identity verified or waived at open) | continue | halt (no_improvement / budget_exhausted / exam_inert / " +
         "identity_unverified — the last refuses adoption but keeps the campaign open).",
       inputSchema: { id: z.string() },
     },

@@ -30,6 +30,12 @@ const ALLOWED = new Set([
   // (arch-review 71 P1-evolution). It reads no `.value` and no `.pass` — an unmeasured row is a grader
   // failure, carries no assessment, and counting one would be reading a verdict out of an absence.
   "evolution/campaign-service.ts",
+  // GATED via `isMeasured`: the frame's positive control asks whether a named scorecard ever PASSED each of
+  // the frame's scenarios, which is the one question where an unmeasured row must be neither a zero nor a
+  // yes. Counting it as a failure would accuse a case nobody scored; counting it as a proof would certify
+  // the very instrument that could not run — and certifying that instrument is the defect this file exists
+  // to prevent, so the gate is the whole point of the read rather than a formality on the way to one.
+  "evolution/exam-proof.ts",
   // producer — a case whose verdict is reached in a SECOND unit (arch-review 56, Wave K): it appends the
   // verifier's scores to the agent half's, and when that unit could not run it appends an explicit
   // `unmeasured` verdict instead. Never a zero and never nothing: a case whose verdict never happened must
