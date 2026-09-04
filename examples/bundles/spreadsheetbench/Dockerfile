@@ -23,7 +23,12 @@ RUN mkdir -p /root/.config/libreoffice/4/user \
   '</oor:items>' \
   > /root/.config/libreoffice/4/user/registrymodifications.xcu
 
-COPY scripts/sbench_grade.py scripts/recalc.sh /opt/
+# Every script the scoring lane calls, not just the one the sample flow uses: `scripts/live/*.mjs` invoke
+# /opt/sbench_digest.py (the salted-digest checker), /opt/sbcheck.py and /opt/sbexamples.py (the agent's own
+# self-inspection tools), and none of them was here — so the published image could not run the campaign at
+# all, and only a hand-built one ever did. sbench_position.py is imported by the two graders.
+COPY scripts/sbench_grade.py scripts/sbench_digest.py scripts/sbench_position.py \
+     scripts/sbcheck.py scripts/sbexamples.py scripts/recalc.sh /opt/
 RUN chmod +x /opt/recalc.sh
 
 WORKDIR /everdict

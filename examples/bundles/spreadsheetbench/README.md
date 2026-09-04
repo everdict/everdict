@@ -115,9 +115,43 @@ a formula output is recalculated by the in-image LibreOffice before scoring, so 
 | `build-bundle.py` | regenerates `bundle.json`, embedding `scripts/*.py` into the sample datasets |
 | `Dockerfile` | builds `spreadsheetbench:v1` (python + libreoffice-calc + openpyxl + grader + recalc) — the portable runtime image |
 | `Dockerfile.codex` | builds `spreadsheetbench-codex:v1` (= `:v1` + node + codex) — runs codex *in* the image with the runner's mounted machine login (`sbench-codex` harness) |
+| `scripts/sbench_position.py` | the ONE reader of `answer_position` — every scorer here imports it |
 | `scripts/sbench_grade.py` | faithful V1/V2 scorer (golden-based) — for real data |
+| `scripts/sbench_digest.py` | the salted-digest checker that ships in the image, so the answer workbook does not have to |
+| `scripts/sbench_stage.py` | mints a task set from `all_data_912`, refusing the cases no correct agent could pass |
+| `scripts/sbcheck.py` · `sbexamples.py` | the agent's own self-inspection of its output (shape, not correctness) |
 | `scripts/recalc.sh` | LibreOffice-headless recalc of a formula xlsx → cached values (run in the grader, pre-scoring) |
 | `scripts/gen_v1.py` · `grade_v1.py` | v1 sample input generator + recompute grader |
 | `scripts/gen_v2.py` · `grade_v2.py` | v2 sample input generator + regression/modification grader |
 
 Edit a script → rerun `python3 build-bundle.py` → re-apply.
+
+## What the published data does not guarantee, and what we refuse because of it
+
+Two defects were found by running the benchmark and then checking the MEASUREMENT rather than the score.
+Both had the same signature — a correct answer recorded as a wrong one — and neither is visible anywhere
+downstream, because a reward file reads `0.0` either way.
+
+**`answer_position` is not a plain range.** 492 of the 912 published positions are (`C2:C66`); the other 420
+are sheet-qualified or multi-range, and the sheet name's quoting is not consistent even within the file
+(`Sheet1'!A1:M237`, `'MINUS'!B2:E11,'PLUS'!B2:E5200`, `'Vendor!'A1:D101`, `'Calculation!'C11:I490'`). Both
+scorers here read it themselves and both got it wrong: `sbench_grade.py`'s regex returned the whole string as
+a range, and `sbench_digest.py` handed it to `range_boundaries`, whose raise was caught by a per-file
+`except` and recorded as "output could not be read" — a scored zero over a workbook nobody opened. One
+reader now owns the field (`sbench_position.py`), 909 of 912 positions parse, and the three that do not are
+REFUSED rather than failed: an open-ended range whose extent would come from whichever workbook is being
+read, a malformed reference (`BD2:308`), and a full-width colon. `sbench_digest.py` exits **2** for those,
+the harness publishes no reward, and the case is `unmeasured` instead of lost.
+
+**Some answer keys do not pair with their own input.** Case 15380's answer workbooks 2 and 3 are swapped:
+input 2 asks for month `09` and answer 2 says `FEB`, which is input 3's answer. An agent that solves all
+three workbooks correctly scores 1/3 and fails — measured, with a real agent's real output. `sbench_stage.py`
+refuses a case whose `n_<id>_answer.xlsx` matches some OTHER test case's input outside the answer range,
+because a permutation is provable. It does NOT refuse the weaker signal — an answer workbook that matches no
+input — since a task that sorts a table legitimately changes cells outside `answer_position`; those are
+printed with the differing cells for a human to read. Cases 17047 and 30930 are in that bucket and look like
+data slips (`A31` is `-3039` in the input and `-30` in the answer, in a column the instruction never writes),
+but "looks like" is not grounds for a refusal.
+
+⚠️ **No CI gate covers any of this.** The workflow installs no Python and never enters `examples/`, so
+`python3 scripts/sbench_position.py` (its self-test) is the author's check, not the tree's.
