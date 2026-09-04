@@ -1,0 +1,207 @@
+{
+  "why": "The scorecard-analysis pivot is implemented TWICE — packages/domain/src/scorecard/analysis.ts (the server engine behind POST /scorecards/query) and apps/web/src/features/analyze-scorecards/model/analysis.ts (the client engine the studio actually runs). The duplication is load-bearing: the studio pivots an already-loaded list, and a round trip per filter toggle would make it unusable. What was NOT load-bearing was the lockstep — a comment in each file claiming the other is kept in step, which is a claim about another component and had no check. This file is that check: both engines answer the SAME question here, and each side's test asserts its own engine reproduces it. See docs/architecture/web-runtime-gap-census-spec.md.",
+  "cards": [
+    {
+      "id": "sc-1",
+      "tenant": "acme",
+      "status": "succeeded",
+      "dataset": {
+        "id": "swe",
+        "version": "1.0.0"
+      },
+      "harness": {
+        "id": "claude",
+        "version": "1.0.0"
+      },
+      "createdAt": "2026-09-01T00:00:00.000Z",
+      "updatedAt": "2026-09-01T00:00:00.000Z",
+      "summary": [
+        {
+          "metric": "tests_pass",
+          "count": 500,
+          "passRate": 0.8
+        }
+      ]
+    },
+    {
+      "id": "sc-2",
+      "tenant": "acme",
+      "status": "succeeded",
+      "dataset": {
+        "id": "swe",
+        "version": "1.0.0"
+      },
+      "harness": {
+        "id": "claude",
+        "version": "1.0.0"
+      },
+      "createdAt": "2026-09-02T00:00:00.000Z",
+      "updatedAt": "2026-09-02T00:00:00.000Z",
+      "summary": [
+        {
+          "metric": "tests_pass",
+          "count": 5,
+          "passRate": 0.2
+        }
+      ]
+    },
+    {
+      "id": "sc-3",
+      "tenant": "acme",
+      "status": "succeeded",
+      "dataset": {
+        "id": "swe",
+        "version": "1.0.0"
+      },
+      "harness": {
+        "id": "codex",
+        "version": "2.0.0"
+      },
+      "createdAt": "2026-09-03T00:00:00.000Z",
+      "updatedAt": "2026-09-03T00:00:00.000Z",
+      "summary": [
+        {
+          "metric": "tests_pass",
+          "count": 100,
+          "passRate": 0.5
+        }
+      ]
+    },
+    {
+      "id": "sc-4",
+      "tenant": "acme",
+      "status": "succeeded",
+      "dataset": {
+        "id": "swe",
+        "version": "1.0.0"
+      },
+      "harness": {
+        "id": "codex",
+        "version": "2.0.0"
+      },
+      "createdAt": "2026-09-04T00:00:00.000Z",
+      "updatedAt": "2026-09-04T00:00:00.000Z",
+      "summary": [
+        {
+          "metric": "cost_usd",
+          "count": 10,
+          "mean": 1.5
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "name": "a rate is weighted by CASE COUNT, so a 5-case smoke run cannot outweigh a 500-case suite",
+      "config": {
+        "viz": "grid",
+        "groupBy": ["harness"],
+        "metric": "tests_pass",
+        "measure": "passRate",
+        "filters": {},
+        "sort": {
+          "by": "label",
+          "dir": "asc"
+        }
+      },
+      "expect": {
+        "kind": "grid",
+        "rows": [
+          {
+            "key": "claude",
+            "value": 0.7940594059405941
+          },
+          {
+            "key": "codex",
+            "value": 0.5
+          }
+        ],
+        "total": 4
+      }
+    },
+    {
+      "name": "a card with no row for the metric contributes NOTHING — never a zero nobody measured",
+      "config": {
+        "viz": "grid",
+        "groupBy": ["harness"],
+        "metric": "cost_usd",
+        "measure": "mean",
+        "filters": {},
+        "sort": {
+          "by": "label",
+          "dir": "asc"
+        }
+      },
+      "expect": {
+        "kind": "grid",
+        "rows": [
+          {
+            "key": "claude",
+            "value": null
+          },
+          {
+            "key": "codex",
+            "value": 1.5
+          }
+        ],
+        "total": 4
+      }
+    },
+    {
+      "name": "latest reads the NEWEST card's own row and does not fall back to an older card that has one",
+      "config": {
+        "viz": "grid",
+        "groupBy": ["harness"],
+        "metric": "tests_pass",
+        "measure": "latest",
+        "filters": {},
+        "sort": {
+          "by": "label",
+          "dir": "asc"
+        }
+      },
+      "expect": {
+        "kind": "grid",
+        "rows": [
+          {
+            "key": "claude",
+            "value": 0.2
+          },
+          {
+            "key": "codex",
+            "value": null
+          }
+        ],
+        "total": 4
+      }
+    },
+    {
+      "name": "count is the number of scorecards in the bucket, metric-independent",
+      "config": {
+        "viz": "grid",
+        "groupBy": ["harness"],
+        "metric": "tests_pass",
+        "measure": "count",
+        "filters": {},
+        "sort": {
+          "by": "label",
+          "dir": "asc"
+        }
+      },
+      "expect": {
+        "kind": "grid",
+        "rows": [
+          {
+            "key": "claude",
+            "value": 2
+          },
+          {
+            "key": "codex",
+            "value": 2
+          }
+        ],
+        "total": 4
+      }
+    }
+  ]
+}

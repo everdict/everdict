@@ -1,4 +1,21 @@
 {
+  "approvalsPage": {
+    "approve": "승인",
+    "askedBy": "{agent} 요청",
+    "decideError": "결정이 거부되었습니다.",
+    "deny": "거부",
+    "description": "멤버의 결정을 기다리며 멈춘 에이전트 변경. 결정하지 않는 것도 결정입니다 \u2014 만료된 승인은 거부됩니다.",
+    "empty": "결정을 기다리는 에이전트가 없습니다.",
+    "expires": "{at} 만료",
+    "loadError": "승인 큐를 읽지 못했습니다: {error}",
+    "status": {
+      "approved": "승인됨",
+      "denied": "거부됨",
+      "expired": "만료됨",
+      "pending": "대기"
+    },
+    "title": "승인"
+  },
   "acceptInvite": {
     "acceptFailed": "수락하지 못했어요",
     "joined": "워크스페이스 <ws>{workspace}</ws> 에 {role} 로 참여했어요.",
@@ -1603,6 +1620,7 @@
     "usedBy": "사용처"
   },
   "nav": {
+    "approvals": "승인",
     "overview": "개요",
     "harnesses": "하니스",
     "datasets": "데이터셋",

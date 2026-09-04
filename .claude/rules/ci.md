@@ -210,6 +210,21 @@ See skill `ci`.
   schema anywhere outside its declaration; every allowlist entry states why that site is not a door, and the
   honest reasons are "it decodes bytes WE wrote" and "it IS the declaration". An entry whose site stopped
   naming the schema FAILS — a reason that outlived its subject reads as permission for a door nobody opened.
+- **`pnpm web-reach` refuses a control-plane route the web can neither open nor explain.** `apps/web` is a
+  pure HTTP client of the control plane, so every capability the runtime grows is one the web has to be
+  taught separately — and nothing asked. A door nobody opens looks exactly like a door nobody needed, so the
+  drift was invisible and only ever ran one way: a census found 39 browser-facing routes unreachable, and,
+  worse, that a deliberate agent-only surface and an unbuilt page are indistinguishable in a count. The check
+  therefore demands an ANSWER, not a caller: reachable from `apps/web/src/shared/lib/control-plane.ts`, or a
+  line in `DECIDED` saying why a person does not need it. An `OWED —` reason is a named debt that keeps the
+  gate green while the surface is missing; removing that line is the definition of done for it. A route that
+  BECOMES reachable must lose its line — a reason that outlived its subject reads as permission.
+  ⚠️ Its extraction is the whole risk, and the first three passes of the census it comes from were each wrong
+  in a different way (matching only backticked literals; a character class without parentheses that missed
+  every `${encodeURIComponent(id)}`; a trailing `${qs}` read as a path segment). This one tracks `${}` depth
+  so a NESTED template — `` `/runs/${id}/trajectory${suffix ? `?${suffix}` : ""}` `` — does not truncate the
+  path, and refuses to run at all over an empty route corpus. See
+  `docs/architecture/web-runtime-gap-census-spec.md`.
 - **`pnpm gated-doors` refuses a transport that locks itself on a dependency the composition root never
   passes.** A route saying `if (!deps.x) … 404` means "this deployment may not have x"; it says nothing about
   whether ANY deployment does. Two doors shipped dead for exactly that reason: every `/environments` door

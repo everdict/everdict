@@ -54,6 +54,9 @@ jobs:
       # It is now the ONLY gate over docs/ — the separate site workflow was removed with the site itself
       # (docs/architecture/docs-site-removal.md).
       - run: pnpm docs-check
+      # Every browser-facing route is reachable from the web, or carries the reason it is not. A door
+      # nobody opens looks exactly like a door nobody needed, and nothing else asks.
+      - run: pnpm web-reach
       - run: pnpm constructed-casts
       - run: pnpm guarded-doubles
       - run: pnpm unwired-capabilities

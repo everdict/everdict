@@ -52,6 +52,9 @@ run("pnpm test", "pnpm", ["test"]);
 run("pnpm build", "pnpm", ["build"]);
 run("pnpm cone", "pnpm", ["cone"]);
 run("pnpm web-imports", "pnpm", ["web-imports"]);
+// Every browser-facing route is reachable from the web, or carries the reason it is not — a door nobody
+// opens looks exactly like a door nobody needed, and nothing else asks.
+run("pnpm web-reach", "pnpm", ["web-reach"]);
 run("pnpm migrations", "pnpm", ["migrations"]);
 run("pnpm artifact-frame", "pnpm", ["artifact-frame"]);
 // ── CAN THE CONVENTIONS STILL FIRE? ───────────────────────────────────────────────────────────────

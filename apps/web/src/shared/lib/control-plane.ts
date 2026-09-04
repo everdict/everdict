@@ -243,6 +243,17 @@ function runListPath(opts?: {
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
   // Notification feed (personally owned; bell inbox) — qs is a raw query string like '?unread=1&limit=30'.
+  // ── AGENT APPROVALS — THE HUMAN'S HALF OF A HUMAN-IN-THE-LOOP QUEUE ──────────────────────────────
+  //
+  // A parked agent mutation waits for a MEMBER to approve or deny it, and until now only the agent surface
+  // (MCP) could reach the decision — the person the queue exists for had no door at all. Census slice 3.
+  // docs/architecture/web-runtime-gap-census-spec.md
+  listApprovals: <T>(auth: AuthContext, qs = '') => call<T>(auth, `/approvals${qs}`),
+  decideApproval: <T>(auth: AuthContext, id: string, decision: 'approve' | 'deny') =>
+    call<T>(auth, `/approvals/${encodeURIComponent(id)}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    }),
   listNotifications: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/notifications${qs}`),
   readNotifications: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/notifications/read', { method: 'POST', body: JSON.stringify(body) }),

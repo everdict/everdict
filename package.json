@@ -14,6 +14,7 @@
     "build": "turbo run build",
     "cone": "node scripts/check-job-runner-cone.mjs",
     "web-imports": "node scripts/check-web-imports.mjs",
+    "web-reach": "node scripts/check-web-reach.mjs",
     "migrations": "node scripts/check-migrations.mjs",
     "artifact-frame": "node scripts/check-artifact-frame.mjs",
     "convention-harness": "node scripts/check-convention-harness.mjs",

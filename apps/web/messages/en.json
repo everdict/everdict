@@ -1,4 +1,21 @@
 {
+  "approvalsPage": {
+    "approve": "Approve",
+    "askedBy": "asked by {agent}",
+    "decideError": "The decision was refused.",
+    "deny": "Deny",
+    "description": "Agent mutations parked for a member's decision. Not deciding is a decision \u2014 an approval that expires is denied.",
+    "empty": "No agent is waiting on a decision.",
+    "expires": "expires {at}",
+    "loadError": "Could not read the approval queue: {error}",
+    "status": {
+      "approved": "Approved",
+      "denied": "Denied",
+      "expired": "Expired",
+      "pending": "Waiting"
+    },
+    "title": "Approvals"
+  },
   "acceptInvite": {
     "acceptFailed": "Couldn't accept",
     "joined": "Joined workspace <ws>{workspace}</ws> as {role}.",
@@ -1603,6 +1620,7 @@
     "usedBy": "Used by"
   },
   "nav": {
+    "approvals": "Approvals",
     "overview": "Overview",
     "harnesses": "Harnesses",
     "datasets": "Datasets",

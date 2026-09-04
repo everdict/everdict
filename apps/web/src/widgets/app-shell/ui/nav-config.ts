@@ -247,11 +247,24 @@ const AGENTS_ITEM: NavItem = {
   keywords: 'agent fleet run trigger automation 에이전트 자동화 플릿',
 }
 
+// Agent approvals keep the same posture as the fleet row above — palette-reachable, no permanent sidebar
+// row — for the opposite reason: the queue is usually EMPTY, and a row that is empty most days trains people
+// to stop looking at it. What it must not be is unreachable, which is what it was: the decision existed only
+// on the agent surface, so the member the queue exists for had no door.
+// docs/architecture/web-runtime-gap-census-spec.md
+const APPROVALS_ITEM: NavItem = {
+  href: '/approvals',
+  labelKey: 'approvals',
+  icon: ShieldCheck,
+  keywords: 'approval approve deny parked agent mutation hitl human in the loop',
+}
+
 export const ALL_NAV_ITEMS: NavItem[] = [
   // children 까지 평탄화 — 펼치지 않아도 Cmd+K 로는 닿아야 한다.
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
   WORKSPACE_ISSUES_ITEM,
   AGENTS_ITEM,
+  APPROVALS_ITEM,
 ]
 
 // Every row rendered in the app nav, flattened — the sidebar's `More` children included. The active-state

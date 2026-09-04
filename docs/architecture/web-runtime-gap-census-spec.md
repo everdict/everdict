@@ -183,25 +183,79 @@ The first attempt did use `z.object({}).passthrough()` for the run's new fields,
 every one of them — correctly, since a loose shape would let the wire change under the page without the
 build noticing. They are spelled out.
 
-## Slice 2 — the analysis twin
+## Slice 2 — the analysis twin — **Landed**
 
-Delete the client engine and call `/scorecards/query`, or state why the duplicate is load-bearing (an offline
-pivot over an already-loaded list is a real answer). Either way it stops being an accident.
+**The duplicate is load-bearing and stays.** The studio pivots an already-loaded list, and a round trip per
+filter toggle would make it unusable — that is a real answer, not an excuse. What was NOT load-bearing was
+the lockstep: each engine carried a comment saying the other is kept in step with it, which is a claim about
+another component with nothing checking it, and only one of the two is ever called — so a divergence would
+have been invisible for as long as nobody used the route.
 
-**Counterexample owed**: one query shape produces the same table from both engines — which is exactly the
-test that does not exist today, and the reason nobody noticed only one runs.
+`fixtures/analysis-parity.json` is the one question both engines answer. Each side has its own test over it,
+neither imports the other (the web may not import `@everdict/domain` at all), and the file is read rather
+than imported for that reason. Four cases: the case-count weighting that stops a 5-case smoke run
+outweighing a 500-case suite, a metric absent from a card contributing NOTHING rather than a zero, `latest`
+reading the newest card's own row without falling back, and `count` being metric-independent.
 
-## Slice 3 — approvals, and the rest of the decided list
+Driven red on each side independently — dropping the weighting in the web engine reddens the web's test
+only, and dropping it in the domain reddens the domain's only.
 
-`/approvals` + `/approvals/:id/decide` first, because a HITL queue with no human door is the sharpest case in
-the census. Then whatever slice 0 marked **build**.
+⚠️ **The fixture corrected me before it corrected any engine.** Its `latest` expectation assumed a fallback
+to an older card that has the metric. There is none: `latest` takes the newest card and reads ITS row, which
+for that group is absent. The expectation was the bug, and the property is now pinned by name.
 
-## Slice 4 — the check that keeps it closed
+## Slice 3 — approvals — **Landed**
 
-A scanner that fails when a route has no client caller and no declared reason — the shape
-`unwired-capabilities` and `gated-doors` already have. It is listed last on purpose: it would be RED on `main`
-today, and a gate that lands before its fix teaches people to bypass gates (skill `code-review` says this
-about a check it also deferred). It lands with the last slice that makes it green.
+`/approvals` + `/approvals/:id/decide`, because a human-in-the-loop queue with no human door is the sharpest
+case in the census: the control plane parked agent mutations that only the AGENT surface could answer.
+
+`/approvals` is a page, reachable from the palette but with no permanent sidebar row — the same posture the
+agent fleet keeps, for the opposite reason: the queue is usually empty, and a row that is empty most days
+trains people to stop looking at it. What it must not be is unreachable.
+
+Three decisions the page makes, each with a test:
+
+- **A read that failed is not an empty queue.** Showing "nothing to approve" over an unreadable store tells a
+  member no agent is waiting when one is.
+- **`requestId` is dropped at the schema.** The control plane's own comment calls it live-delivery
+  correlation, never identity; a page that rendered it would be showing plumbing.
+- **A decided or expired row keeps its place and loses its buttons.** The queue is a record of what was asked
+  and answered, not a worklist that empties. And `expiresAt` is on the row, because not deciding IS a
+  decision — an expired approval is denied.
+
+The palette keywords are English-only: it matches on the TRANSLATED label plus keywords, so the `ko` nav
+label already finds the row and Korean keywords here would be debt against the language ratchet for nothing.
+
+The rest of the **build** list is now carried by slice 4 as named debt rather than by this page as prose.
+
+## Slice 4 — the check that keeps it closed — **Landed**
+
+`pnpm web-reach`. It does not demand a caller; it demands an ANSWER: every browser-facing route is reachable
+from the web's one client, or carries a line saying why a person does not need it. An `OWED —` reason keeps
+the gate green while a surface is missing and names the debt, so removing that line is the definition of done
+for it — and a route that BECOMES reachable must lose its line, because a reason that outlived its subject
+reads as permission.
+
+It was listed last because it would have been red, and a gate that lands before its fix teaches people to
+bypass gates. It is green now: **364 routes, 72 decided, 55 of them OWED.**
+
+⚠️ **IT FOUND THE HAND CENSUS WRONG, IN BOTH DIRECTIONS.** Its extraction is stricter, and re-running the
+count mechanically moved the answer from 36 to 39 with different membership: `/harnesses/:id/pins`,
+`/harnesses/:id/lineage`, `/runs/:id/cancel` and `/skills/:id/verify` had been marked REACHABLE by a
+literal-prefix check that `/harnesses/${id}` satisfied — a fourth spelling of the same extraction error the
+first three passes made. Nine routes the hand sweep never saw (`/scorecards/estimate`, `/trajectories`,
+`/sandboxes/:id/*`, the `/ops/driver/*` trio, …) were also found.
+
+Two extraction lessons are in the script, because they are the reason a census like this lies:
+
+- **A nested template truncates the path.** `` `/runs/${id}/trajectory${suffix ? `?${suffix}` : ""}` `` — the
+  inner backtick ends a naive match, so a route the web calls on every run page reads as unreachable. The
+  scan tracks `${}` depth instead.
+- **A trailing `${…}` that builds a query string is not a segment**, and it cannot be matched with a regex
+  because the group nests. The tail is found by balancing braces.
+
+It also refuses to run over an empty route corpus, which would otherwise pass over a repository it never
+read — the vacuous-green shape this repository's gates keep having to refuse.
 
 ## The legacy tests this cleared
 
