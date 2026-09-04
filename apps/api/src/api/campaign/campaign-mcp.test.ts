@@ -204,6 +204,27 @@ describe("campaign MCP tools — the loop's settlement surface", () => {
     expect(JSON.parse(textOf(settled)).record.state).toBe("adopted");
   });
 
+  it("get_campaign_round_brief hands an agent the handoff, with no held-out coordinate in it", async () => {
+    // The MCP half of the brief door. An agent's whole delegation flow is these two calls back to back —
+    // read the brief, pass it to create_sandbox — so a tool that exists on one transport only is a flow that
+    // works from a terminal and not from an agent (rule `api-layer`: parity is structural).
+    const client = await connect(makeDeps(), ["member"]);
+    const { id } = JSON.parse(
+      textOf(await client.callTool({ name: "open_campaign", arguments: { issue_id: "iss_1", frame } })),
+    ) as { id: string };
+
+    const brief = await client.callTool({ name: "get_campaign_round_brief", arguments: { id } });
+    expect(brief.isError).toBeFalsy();
+    const body = JSON.parse(textOf(brief)) as { goal: string; doneWhen: string[]; constraints: string[] };
+    expect(body.goal).toMatch(/do not change the evaluation/);
+    expect(body.doneWhen.length).toBeGreaterThan(0);
+    // This frame declares no oracle scope, and the brief says so rather than staying quiet about it.
+    expect(body.constraints.join("\n")).toMatch(/declared no oracle scope/);
+    // Every scenario of this frame is held-out, so a brief that names any of them has aimed the delegate at
+    // the generalization population — the one failure that keeps the round green and the evidence worthless.
+    expect(textOf(brief)).not.toMatch(/"c1"|"c2"/);
+  });
+
   it("campaign_adoption reads the authorization and adopt_campaign_candidate SPENDS it", async () => {
     // The MCP half of the same protocol. arch-review 72 shipped the consumer with no caller on EITHER
     // transport; parity here means both reach the one service, never two implementations of it.

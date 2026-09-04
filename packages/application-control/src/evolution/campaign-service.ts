@@ -3,6 +3,7 @@ import type {
   CampaignFrameFromIssue,
   CampaignRound,
   CandidateSource,
+  DelegationBrief,
   DomainFact,
   EvolutionCampaignRecord,
   ReadResult,
@@ -21,7 +22,7 @@ import {
   isMeasured,
 } from "@everdict/contracts";
 import { campaignFrameDefects } from "@everdict/contracts";
-import type { ExperimentIdentity, RoundEvidenceSide, TrialDiff } from "@everdict/domain";
+import { type ExperimentIdentity, type RoundEvidenceSide, type TrialDiff, campaignRoundBrief } from "@everdict/domain";
 import {
   type CampaignGateAnswer,
   adoptionProofOf,
@@ -504,6 +505,45 @@ export class CampaignService {
         `the evidence stored at ${ref.key} does not digest to what round ${seq} sealed — refusing to serve bytes the round did not seal`,
       );
     return RoundEvidenceSchema.parse(document);
+  }
+
+  // ── THE NEXT ROUND'S HANDOFF, RENDERED BY THE PLATFORM ─────────────────────────────────────────
+  //
+  // `roundEvidence` above is what the platform MEASURED; this is what it ASKS FOR. Two things that had to meet
+  // and never did: a round names a `delegationRunId` whose TTL and spend are checked, and nothing anywhere
+  // asked what that delegate was told. The brief is derived from the frozen frame and the last round's
+  // evidence, so the handoff is a contract an agent can pass straight to `create_sandbox` — and so the oracle
+  // boundary is enforced by the producer instead of by whoever was typing (`campaignRoundBrief`).
+  //
+  // Readable while the campaign is OPEN or closed: a settled campaign's brief is how a member reads what the
+  // last delegate was asked, which is half of "was this delegation any good".
+  async roundBrief(tenant: string, id: string): Promise<DelegationBrief> {
+    const record = await this.get(tenant, id);
+    const rounds = [...record.rounds].sort((a, b) => a.seq - b.seq);
+    const last = rounds.at(-1);
+    // The evidence read is the one thing here that can fail for a reason the caller must not mistake for
+    // absence, so it is carried as a REASON rather than swallowed into an empty brief (L2).
+    let evidence: RoundEvidence | undefined;
+    let evidenceUnavailable: string | undefined;
+    if (last !== undefined) {
+      if (last.verdict.evidence === undefined) evidenceUnavailable = `round ${last.seq} sealed no evidence record`;
+      else
+        try {
+          evidence = await this.roundEvidence(tenant, id, last.seq);
+        } catch (error) {
+          evidenceUnavailable = error instanceof Error ? error.message : `round ${last.seq}'s evidence is unreadable`;
+        }
+    }
+    return campaignRoundBrief({
+      campaignId: record.id,
+      seq: rounds.length + 1,
+      frame: record.frame,
+      issueId: record.issueId,
+      ...(evidence !== undefined ? { evidence } : {}),
+      ...(evidenceUnavailable !== undefined ? { evidenceUnavailable } : {}),
+      // A round written before `learned` was required carries none; the renderer is handed findings, not holes.
+      learned: rounds.map((r) => r.learned).filter((l): l is string => l !== undefined),
+    });
   }
 
   // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────

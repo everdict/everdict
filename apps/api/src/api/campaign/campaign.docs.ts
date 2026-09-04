@@ -1,4 +1,4 @@
-import { EvolutionCampaignRecordSchema, RoundEvidenceSchema } from "@everdict/contracts";
+import { DelegationBriefSchema, EvolutionCampaignRecordSchema, RoundEvidenceSchema } from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -26,7 +26,8 @@ export const campaignDocs: Record<
   | "build"
   | "builds"
   | "buildSets"
-  | "roundEvidence",
+  | "roundEvidence"
+  | "roundBrief",
   FastifySchema
 > = {
   open: {
@@ -157,6 +158,23 @@ export const campaignDocs: Record<
     response: {
       200: { description: "The round's evidence record", ...toJsonSchema(RoundEvidenceSchema) },
       ...errorResponses(401, 403, 404, 409),
+    },
+  },
+  roundBrief: {
+    summary: "The next round's delegation brief, authored by the platform",
+    description:
+      "The handoff for the round about to be authored, derived from the frozen frame and the last round's sealed " +
+      "evidence: `goal` (the cases to flip, as a condition on the subject), `context` (which round, what earlier " +
+      "rounds established), `references` (the issue, the baseline, the last candidate batch, and one candidate-side " +
+      "trace per target still failing), `constraints` (the oracle's paths, one lever, bytes must differ) and " +
+      "`doneWhen` (checks the delegate can run itself — never the scorecard). Pass it straight to create_sandbox. " +
+      "Held-out scenario ids, pass rates and judge rationale are excluded BY CONSTRUCTION: a delegate shown the " +
+      "generalization population has been aimed at it. Requires scorecards:read.",
+    tags: ["campaign"],
+    params: toJsonSchema(z.object({ id: z.string() })),
+    response: {
+      200: { description: "The delegation brief", ...toJsonSchema(DelegationBriefSchema) },
+      ...errorResponses(401, 403, 404),
     },
   },
   buildSets: {

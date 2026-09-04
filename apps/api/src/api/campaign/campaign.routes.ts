@@ -299,6 +299,32 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     }
   });
 
+  // ── THE NEXT ROUND'S HANDOFF, SO A DELEGATION IS A CONTRACT AND NOT A PARAGRAPH ───────────────────
+  //
+  // The read an agent makes before it opens a sandbox: `GET /campaigns/:id/brief` → `create_sandbox({profile,
+  // brief})`. Same action as every other campaign read (`scorecards:read`) — a brief names what the platform
+  // already served through the evidence and campaign doors, arranged for a delegate, so it grants nothing new.
+  app.get<{ Params: { id: string } }>(
+    "/campaigns/:id/brief",
+    { schema: campaignDocs.roundBrief },
+    async (req, reply) => {
+      if (!deps.campaignService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:read");
+      } catch (err) {
+        return sendError(reply, err);
+      }
+      try {
+        return reply.send(await deps.campaignService.roundBrief(principal.workspace, req.params.id));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   // ── THE EVIDENCE A ROUND SEALED (docs/architecture/benchmark-evidence-spec.md §3) ──────────────────
   app.get<{ Params: { id: string; seq: string } }>(
     "/campaigns/:id/rounds/:seq/evidence",

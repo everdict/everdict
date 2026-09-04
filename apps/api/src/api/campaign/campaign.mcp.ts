@@ -336,6 +336,27 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
   );
 
   server.registerTool(
+    "get_campaign_round_brief",
+    {
+      annotations: { readOnlyHint: true },
+      description:
+        "The next round's DELEGATION BRIEF, authored by the platform from the frozen frame and the last round's " +
+        "sealed evidence: goal (the cases to flip, as a condition on the subject), context (which round, what " +
+        "earlier rounds established about the mechanism), references (the issue, the baseline, the last candidate " +
+        "batch, one candidate-side trace per target still failing), constraints (the oracle's paths, one lever, " +
+        "the candidate must differ in bytes) and doneWhen (checks the delegate can run in its own sandbox — the " +
+        "repository's build and tests, never the scorecard). Pass it straight to create_sandbox as `brief`. " +
+        "Held-out ids, pass rates and judge rationale are excluded by construction: a delegate shown the " +
+        "generalization population has been aimed at it, which is what makes the round's evidence worthless.",
+      inputSchema: { id: z.string() },
+    },
+    ({ id }) =>
+      run(principal, "scorecards:read", async () => {
+        return ok(await campaigns.roundBrief(ws, id));
+      }),
+  );
+
+  server.registerTool(
     "get_campaign_build_sets",
     {
       annotations: { readOnlyHint: true },

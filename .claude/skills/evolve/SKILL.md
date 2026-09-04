@@ -42,6 +42,13 @@ So the split to hold in mind, because every mistake below is a confusion of the 
    Then open the failing cases' traces — they read a page at a time, so a long run costs a window rather than
    the whole thing, and a hypothesis formed from scores alone is a guess about a mechanism nobody looked at.
 
+   **When somebody else authors it, ask the platform for the handoff.** `GET /campaigns/:id/brief` (MCP:
+   `get_campaign_round_brief`) renders the next round's `DelegationBrief` from the frozen frame and the last
+   round's sealed evidence — goal, context, the traces of targets still failing, the oracle's paths as
+   constraints, and a `doneWhen` the delegate can check inside its own sandbox. Pass it to `create_sandbox`
+   as `brief` rather than writing one: the renderer is also what keeps held-out ids, pass rates and judge
+   rationale out of the delegate's hands, and a hand-written brief has no such guard.
+
    ⚠️ **The candidate never receives the findings.** They shape your proposal; they do not go into the thing
    being measured. A subject told what its evaluators concluded stops producing traces that show how it
    actually behaves, and the next round loses its evidence. This is measured: WikiSkill (arXiv 2608.27454)

@@ -767,6 +767,54 @@ describe("GET /campaigns/:id/rounds/:seq/evidence", () => {
   });
 });
 
+// ── THE NEXT ROUND'S HANDOFF, OVER HTTP ────────────────────────────────────────────────────────────────
+//
+// The read that makes a delegation a contract: an agent fetches this and passes it to `create_sandbox` as
+// `brief`. What the transport case is here to pin is the ORACLE BOUNDARY reaching the wire — `frame` above is
+// all held-out (c1, c2) with no targets, which is the strongest version of the question: a brief for it may
+// name no scenario at all, because every scenario in it is the generalization population.
+describe("GET /campaigns/:id/brief", () => {
+  it("serves a brief the delegate can act on, and names no held-out scenario", async () => {
+    const { app } = build(winning);
+    const open = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const id = open.json().id as string;
+
+    const before = await app.inject({ method: "GET", url: `/campaigns/${id}/brief`, headers: H });
+    expect(before.statusCode, before.body).toBe(200);
+    expect(before.json().goal).toMatch(/do not change the evaluation/);
+    expect(before.json().doneWhen.join("\n")).toMatch(/build and tests pass/);
+    expect(before.json().context).toMatch(/Round 1 of campaign/);
+    expect(JSON.stringify(before.json()), "a held-out id on the wire is the whole defect").not.toMatch(/"c1"|"c2"/);
+
+    await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "shorter instructions",
+        learned: "the tool budget was the binding constraint, not the prompt",
+        candidateVersion: "1.0.1",
+        baselineScorecardId: "sc-base",
+        candidateScorecardId: "sc-win",
+      },
+    });
+    const after = await app.inject({ method: "GET", url: `/campaigns/${id}/brief`, headers: H });
+    expect(after.statusCode, after.body).toBe(200);
+    // Round 2 now, and the finding travels — that is what the next proposal is supposed to be shaped by.
+    expect(after.json().context).toMatch(/Round 2 of campaign/);
+    expect(after.json().context).toMatch(/tool budget was the binding constraint/);
+    // …and the evidence the round sealed still buys the delegate no held-out coordinate.
+    expect(JSON.stringify(after.json())).not.toMatch(/"c1"|"c2"/);
+    expect((await app.inject({ method: "GET", url: "/campaigns/evc_missing/brief", headers: H })).statusCode).toBe(404);
+    await app.close();
+  });
+});
+
 // ── ONE CAPABILITY'S EVOLUTION MEMORY (docs/architecture/evolution-routing-spec.md §5) ────────────────
 describe("GET /campaigns?subjectType=&subjectId=", () => {
   it("narrows to the subject's campaigns, and refuses a half-named subject", async () => {

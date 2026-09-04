@@ -528,6 +528,7 @@ export {
   roundEvidenceKey,
   roundEvidenceOf,
 } from "./evolution/round-evidence.js";
+export { type CampaignRoundBriefInput, campaignRoundBrief } from "./evolution/round-brief.js";
 export {
   type CaseLinksAnswer,
   type FrameFromCasesAnswer,
