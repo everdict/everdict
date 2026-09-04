@@ -1,6 +1,8 @@
 # Intent: nobody looks at the code nobody touched
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 20e6ad53db9b5dac5b909d528f3f8b2659515259
 
 ## Problem
 
