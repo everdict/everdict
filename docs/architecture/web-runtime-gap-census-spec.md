@@ -226,7 +226,26 @@ Three decisions the page makes, each with a test:
 The palette keywords are English-only: it matches on the TRANSLATED label plus keywords, so the `ko` nav
 label already finds the row and Korean keywords here would be debt against the language ratchet for nothing.
 
-The rest of the **build** list is now carried by slice 4 as named debt rather than by this page as prose.
+## Slice 5 — paying the named debt, surface by surface
+
+Slice 4 turned the remaining gaps into debt the gate carries by name. This is the ledger of what has been
+paid, and it is the only honest place to read how far the census got: the gate going green does not mean the
+surfaces exist, it means each missing one has a line saying so.
+
+| paid | what it closes |
+|---|---|
+| `/runs/:id/cancel` | a run that will not finish could be WATCHED and not stopped. The control is bound to `queued`/`running`/`suspended` — a settled run's button answers 409 and nothing else, which teaches people the page lies. Tested in both directions, and driven red by unbinding it |
+| `/fs/search` | a workspace tree you can browse and cannot search is a tree you have to already know. TWO inputs, not one, because the control plane searches two different things: `glob` matches PATHS and `pattern` greps CONTENT, and collapsing them makes the box lie about what it does. A truncated result says it is a FLOOR |
+| `/fs/usage` | …and a tree with no usage read cannot say what it costs. Best-effort on the page: a usage read that fails must not take the browser down, and absent reads as "not measured", never 0 |
+
+**53 remain OWED.** They are not one more afternoon: `campaigns` (10 routes) is the evolution domain with no
+page at all, `knowledge` authoring (8) is a write surface over a graph the web only reads, and the
+`sandboxes`/`groups`/`checkpoints` clusters are each a product surface somebody has to design. Calling those
+resolved by adding a client method nobody calls would be the unwired-capability defect this repository has a
+gate against — so they stay named, and the gate refuses to let a new one join them silently.
+
+What the gate DOES guarantee, and what this page is now the record of: no route can go unreachable without a
+decision, no decision can outlive its subject, and the debt has a count that only moves one way.
 
 ## Slice 4 — the check that keeps it closed — **Landed**
 

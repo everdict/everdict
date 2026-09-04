@@ -2428,6 +2428,10 @@
     "paginationPage": "Page {page} / {total}"
   },
   "runsPage": {
+    "cancel": "Stop",
+    "cancelConfirm": "Stop this run? A cancelled run is terminal — its evidence has to be produced again.",
+    "cancelError": "The run could not be stopped.",
+    "cancelTitle": "Stop this run — queued work never starts, running work is force-freed.",
     "scoreUnmeasured": "unmeasured",
     "title": "Runs",
     "subtitle": "Every run and scorecard batch in this workspace.",
@@ -3151,6 +3155,13 @@
     "askInChat": "Ask in chat"
   },
   "files": {
+    "search": "Search",
+    "searchError": "The search failed.",
+    "searchGlobPlaceholder": "path glob — src/**/*.md",
+    "searchNoMatches": "No file matched.",
+    "searchPatternPlaceholder": "content regex (case-insensitive)",
+    "searchTruncated": "A cap fired — this is a floor, not the whole answer. Narrow with a glob or a subtree.",
+    "usage": "{mb} MB · {files} files",
     "title": "Files",
     "description": "The workspace's shared filesystem — agents persist task outputs and artifacts here; browse it like a shell.",
     "treeTitle": "Files",

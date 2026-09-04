@@ -32,6 +32,7 @@ import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { RuntimeChip } from '@/shared/ui/chip'
 import { Link } from '@/shared/ui/link'
+import { CancelRunButton } from '@/features/cancel-run'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
@@ -343,6 +344,9 @@ export default async function RunDetailPage({
                 </Badge>
               )}
               <StatusPill status={run.status} />
+              {/* Only while it can still be stopped — a settled run's button is a control that answers
+                  409 and nothing else, which teaches people the page lies. */}
+              <CancelRunButton id={run.id} status={run.status} />
             </div>
           }
         />

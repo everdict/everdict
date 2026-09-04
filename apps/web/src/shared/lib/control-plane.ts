@@ -1058,6 +1058,30 @@ export const controlPlane = {
   // Stop a running/queued batch — marks it cancelled and force-frees the runtime of the in-flight cases.
   cancelScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  // Stop ONE run — the single-run twin of the batch cancel above. A queued run never starts; a running one
+  // is force-freed, and a session run is closed. Reachable from the run's own page, which is where somebody
+  // watching a run that will not finish actually is.
+  cancelRun: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+
+  // ── THE FILES PAGE'S TWO MISSING ANSWERS ─────────────────────────────────────────────────────────
+  //
+  // A workspace filesystem you can browse and cannot SEARCH is a tree you have to already know. And a tree
+  // with no usage read cannot say what it costs, which is the question that arrives right after somebody
+  // notices it is large. Both doors existed and had no web caller. Census slice 5.
+  // docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // `glob` matches paths (* within a segment, ** across); `pattern` greps content case-insensitively. At
+  // least one is required — the control plane refuses a search that asks for everything.
+  searchFiles: <T>(
+    auth: AuthContext,
+    q: { glob?: string; pattern?: string; path?: string; limit?: number }
+  ) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== '') qs.set(k, String(v))
+    return call<T>(auth, `/fs/search?${qs.toString()}`)
+  },
+  fsUsage: <T>(auth: AuthContext) => call<T>(auth, '/fs/usage'),
   // Re-score ONLY the retryable-unmeasured judge scores in place (transient judge blips) — no case re-run.
   rescoreScorecardUnmeasured: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/rescore-unmeasured`, { method: 'POST' }),
