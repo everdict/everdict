@@ -19,11 +19,16 @@ WHAT IT REFUSES, and why each one is PROVABLE rather than suspected:
     be answered (rule `protocol`, L2).
   · fewer than four answer cells. `sbench_digest.py`'s docstring already states this bound — a digest over
     one small number is guessable — and until now nothing enforced it.
-  · a MISPAIRED answer key: a BIJECTION, other than the identity, from the three answer workbooks to the
-    three inputs, comparing the cells OUTSIDE the answer range. Every answer matched to exactly one input
-    and every input claimed once is a permutation; no task effect produces that. Case 15380 is one —
-    answers 2 and 3 are swapped — so an agent that solves all three workbooks correctly is scored 1/3 and
-    fails. Measured, on the real data, with a real agent's real output.
+  · a MISPAIRED answer key: comparing the cells OUTSIDE the answer range, no answer workbook pairs with its
+    OWN input, and a bijection onto the other inputs does. Every answer matched to exactly one input and
+    every input claimed once is a permutation; no task effect produces one. Case 15380 is one — answers 2
+    and 3 are swapped — so an agent that solves all three workbooks correctly is scored 1/3 and fails.
+    Measured, on the real data, with a real agent's real output.
+
+    THE IDENTITY IS ASKED FIRST, and that ordering is the whole check. Two test cases commonly differ only
+    INSIDE the answer range, which makes their contexts equal — and then the identity and a swap of those
+    two are both bijections. Looking for a non-identity permutation and taking the first hit reported 70
+    correct keys as mispaired, all naming the same swap, which is what gave it away.
 
 WHAT IT CANNOT CHECK, and says so. Not every answer workbook is "the input with the answer written into
 it": for an extraction task it is a result-only sheet with nothing outside `answer_position` at all. There
@@ -110,8 +115,19 @@ def examine(root, task, salt):
     if not all(answers[n] for n in (1, 2, 3)):
         return "no_evidence", "the answer workbooks hold nothing outside the answer range", digests_for()
 
-    # …and it needs a BIJECTION, which is what makes it a permutation rather than a coincidence: every
-    # answer matched to exactly one input, every input claimed once, and the mapping not the identity.
+    matches = {n: [m for m in (1, 2, 3) if answers[n] == inputs[m]] for n in (1, 2, 3)}
+
+    # THE IDENTITY IS ASKED FIRST, AND IT ANSWERS THE QUESTION. Two test cases often differ only inside the
+    # answer range, which makes their contexts equal — and then the identity AND a swap of those two are
+    # both bijections. Searching for a non-identity permutation and taking the first hit reported 70 cases
+    # as "answer 2 is input 3's, answer 3 is input 2's" whose keys were perfectly correct; the giveaway was
+    # that all 70 named the same permutation. A key that pairs with its own input is paired, however many
+    # other readings the data also admits.
+    if all(n in matches[n] for n in (1, 2, 3)):
+        return "admitted", "", digests_for()
+
+    # Only now is a bijection evidence: every answer matched to exactly one input, every input claimed
+    # once, and no self-pairing available. That is a permutation, and no task effect produces one.
     permutation = next(
         (p for p in itertools.permutations((1, 2, 3))
          if p != (1, 2, 3) and all(answers[n] == inputs[p[n - 1]] for n in (1, 2, 3))),
@@ -121,7 +137,6 @@ def examine(root, task, salt):
         pairs = ", ".join(f"answer {n} is input {permutation[n - 1]}'s" for n in (1, 2, 3)
                           if permutation[n - 1] != n)
         return "refused", f"the answer key is mispaired ({pairs})", None
-    matches = {n: [m for m in (1, 2, 3) if answers[n] == inputs[m]] for n in (1, 2, 3)}
 
     digests = digests_for()
     drifted = [n for n in (1, 2, 3) if n not in matches[n]]

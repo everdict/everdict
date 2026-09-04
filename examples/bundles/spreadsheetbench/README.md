@@ -146,9 +146,12 @@ the harness publishes no reward, and the case is `unmeasured` instead of lost.
 **Some answer keys do not pair with their own input.** Case 15380's answer workbooks 2 and 3 are swapped:
 input 2 asks for month `09` and answer 2 says `FEB`, which is input 3's answer. An agent that solves all
 three workbooks correctly scores 1/3 and fails — measured, with a real agent's real output. `sbench_stage.py`
-refuses a case only when the three answer workbooks form a BIJECTION onto the three inputs that is not the
-identity: every answer matched to exactly one input, every input claimed once. That is a permutation, and no
-task effect makes one. It does NOT refuse the weaker signal — an answer workbook that matches no input —
+refuses a case only when NO answer workbook pairs with its own input and a bijection onto the others does:
+every answer matched to exactly one input, every input claimed once. That is a permutation, and no task
+effect makes one. The identity is asked first and is what settles it — two test cases often differ only
+inside the answer range, so their contexts are equal and both the identity and a swap of the two are
+bijections; searching for a non-identity permutation instead reported 70 correct keys as mispaired, all
+naming the same swap. It does NOT refuse the weaker signal — an answer workbook that matches no input —
 since a task that sorts a table legitimately changes cells outside `answer_position`; those are printed with
 the differing cells for a human to read. Cases 17047 and 30930 are in that bucket and look like data slips
 (`A31` is `-3039` in the input and `-30` in the answer, in a column the instruction never writes), but "looks
