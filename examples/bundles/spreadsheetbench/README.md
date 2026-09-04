@@ -152,10 +152,19 @@ effect makes one. The identity is asked first and is what settles it — two tes
 inside the answer range, so their contexts are equal and both the identity and a swap of the two are
 bijections; searching for a non-identity permutation instead reported 70 correct keys as mispaired, all
 naming the same swap. It does NOT refuse the weaker signal — an answer workbook that matches no input —
-since a task that sorts a table legitimately changes cells outside `answer_position`; those are printed with
-the differing cells for a human to read. Cases 17047 and 30930 are in that bucket and look like data slips
-(`A31` is `-3039` in the input and `-30` in the answer, in a column the instruction never writes), but "looks
-like" is not grounds for a refusal.
+since a task that sorts a table legitimately changes cells outside `answer_position`. Those are reported, and
+**classified**, because "a human should read these" over 220 cases is 220 findings nobody reads. The
+difference splits three ways and only one is worth anyone's time:
+
+| | | |
+|---|---|---|
+| `added` | the answer has a value where the input had none | a helper cell the solution wrote — ordinary |
+| `removed` | the input had a value the answer does not | the solution cleared it, or the answer sheet is a trimmed result — ordinary |
+| `changed` | **both present and different** | the answer's source data is not the input's, and no task does that to a cell outside `answer_position` |
+
+Cases 17047 and 30930 are `changed` — `A31` is `-3039` in the input and `-30` in the answer, in a column the
+instruction never writes — and they head the report as `[SOURCE DATA DIFFERS]`. Still not a refusal: "looks
+like" is not proof, and a false refusal silently drops a good case from the exam.
 
 And where the answer workbook is result-only — an extraction task whose answer file holds nothing outside
 `answer_position` — there is no pairing evidence at all, which is a third value rather than a verdict. The
