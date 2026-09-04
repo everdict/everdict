@@ -1,6 +1,8 @@
 # Intent: the conventions do not know about the harness that now enforces them
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 9bdd9ed57434d5c8a03b68fd1e9c5cb902e07cf0
 
 ## Problem
 
