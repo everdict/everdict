@@ -13,6 +13,7 @@
 // sees two unrelated string arrays, and tests on either side pass alone.
 //
 // Reads SOURCE only (no build, no deps), prints every violation, exits 1.
+// watches: nothing — compares token and stylesheet SHAPES across three trees, never a name.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

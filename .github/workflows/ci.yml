@@ -66,6 +66,9 @@ jobs:
       # deleting the PreToolUse block from .claude/settings.json is a two-line edit every other gate stays
       # green through. Checks the wiring AND drives the decision over a truth table.
       - run: pnpm guardrails
+      # Every scanner states the vocabulary it watches, and every watched name is live. A scanner whose
+      # names died still runs, still passes and still prints a file count — it reads exactly like coverage.
+      - run: pnpm scanner-watches
       - run: pnpm intent-chain
       - run: pnpm docs-check
       # Every browser-facing route is reachable from the web, or carries the reason it is not. A door

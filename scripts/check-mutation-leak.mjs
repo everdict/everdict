@@ -18,6 +18,7 @@
 // It compares each commit's ADDED lines against every rung's `to:` replacement. The rung definition file is
 // excluded by construction — it is where those strings legitimately live — and short replacements (`false`,
 // `undefined`) are skipped because they are ordinary code, not a fingerprint.
+// watches: nothing — compares commit diffs to the mutation text the rungs already declare.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 

@@ -76,6 +76,8 @@ run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 // The push gate guards every other gate, and its own wiring lives in an editable settings file that
 // nothing read until this check.
 run("pnpm guardrails", "pnpm", ["guardrails"]);
+// A scanner whose watch list died keeps passing over a file count. Found by accident once; checked now.
+run("pnpm scanner-watches", "pnpm", ["scanner-watches"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);

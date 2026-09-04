@@ -35,6 +35,7 @@
 // predicate). This guard is about code that ships.
 //
 // Reads SOURCE only (no build, no deps), prints every violation, exits 1.
+// watches: nothing — matches the shape of a cast, not any identifier.
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";

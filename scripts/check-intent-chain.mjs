@@ -19,6 +19,7 @@
 // report green over questions it never asked (ci.yml gives the core job `fetch-depth: 0` for this reason).
 //
 // Reads SOURCE + git history only (no build, no deps), prints every violation, exits 1.
+// watches: nothing — reads intent artifacts and the commit graph.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";

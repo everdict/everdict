@@ -13,6 +13,7 @@
 // to whoever next runs the count by hand. docs/architecture/web-runtime-gap-census-spec.md
 //
 // Run: node scripts/check-web-reach.mjs
+// watches: nothing — extracts route paths from the client and the server, so both sides are derived.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 

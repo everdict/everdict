@@ -16,6 +16,7 @@
 // root CONSTRUCTS an implementation of the port, and in both cases one does. "A producer exists ≠ the
 // producer reaches this consumer" (rule `protocol`) — and here the consumer is a TRANSPORT, so what has to be
 // checked is the argument list of the one call that builds it.
+// watches: nothing — matches a 404-shaped refusal in route files.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

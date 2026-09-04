@@ -16,6 +16,7 @@
 // a tree where nothing calls it.
 //
 // Reads SOURCE only (no build, no deps, no git), prints every violation, exits 1.
+// watches: nothing — drives the gate decision; the identifiers it uses are its own, not live source's.
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

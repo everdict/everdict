@@ -13,6 +13,7 @@
 //
 // Run: node scripts/check-docs.mjs
 
+// watches: nothing — reads documents and resolves what they cite; the names it checks come FROM the documents.
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";

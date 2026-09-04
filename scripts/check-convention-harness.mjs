@@ -16,6 +16,7 @@
 //   (3) every rule referenced from CLAUDE.md / .claude/skills/README.md exists
 //   (4) every skill directory has a SKILL.md with `name:` + `description:` frontmatter (the PULL layer is
 //       matched on the description, so a missing one is a skill the model can never select)
+// watches: nothing — reads rule and skill frontmatter, and whether their globs still match.
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

@@ -7,6 +7,7 @@
 //       the orchestration layer have no business running inside the sandbox.
 //   (3) @everdict/contracts (L0) depends on exactly {"zod"} — the contract root stays light forever.
 // On violation it prints the offending edge and exits 1. Plain Node, no external deps.
+// watches: nothing — walks package dependency edges.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

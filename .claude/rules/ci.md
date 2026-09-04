@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -50,6 +50,18 @@ See skill `ci`.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
   and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
   gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
+- **`pnpm scanner-watches` refuses a scanner whose vocabulary died.** `check-authz-optional.mjs` watched four
+  names and two of them — `assertTeamVisible`, `assertEntityVisible` — had ZERO live call sites after
+  `0212_drop_team_axis.sql` removed the axis they belonged to. It reported `PASS … 1998 files` throughout,
+  which is worse than a dead check: it runs, it passes, it prints a count, and its header goes on teaching a
+  call the codebase can no longer compile. Nothing here could see it — `docs-check` verifies the symbols
+  `.claude/**` BACKTICKS, and a name inside a scanner's own array is source code. It was found by accident,
+  when an eval case written from that header tested a shape this codebase does not have and the agent under
+  test refused the premise. Every scanner now declares an exported WATCHES array (backtick-free here on purpose: it lives in
+  `scripts/`, which `docs-check` deliberately excludes from live source) or the one-line marker
+  `// watches: nothing — <why>`, so the answer is COMPLETE rather than opt-in; "the ones somebody remembered
+  to annotate" is the coverage this check exists to stop believing in. ⚠️ It PARSES the scanners and never
+  imports them — importing a script runs it, which this file already records for `protocol-mutations`.
 - **The gate RECORDS what it decided** (`.git/everdict-gate-log.jsonl`, one JSON line per push decision).
   `pnpm guardrails` proves the decision is CORRECT over constructed facts; nothing recorded what it actually
   decided, so the gate's own leading indicator (wait per gate) had no data and its lagging one (violations
@@ -127,6 +139,11 @@ See skill `ci`.
   shortest path from that compile error is `?.` rather than a refusal — the optional type makes the unsafe
   spelling the one that builds. Two fixes are allowed at a flagged site and no third: refuse when the
   capability is absent, or narrow the value first and pass it plainly.
+  ⚠️ **THOSE THREE INCIDENTS ARE HISTORY, NOT INSTRUCTION.** All of them were about a TEAM axis that no longer
+  exists: `0212_drop_team_axis.sql` removed it, `gate` takes `(principal, action)` and no resource-derived
+  argument, and the two `assert*Visible` names are gone. The scanner watched them for months anyway, passing
+  the whole time. The LAW did not narrow when the axis went — only its worked example did — and re-adding a
+  resource-scoped authorization argument means re-adding its name to that scanner's WATCHES in the same change.
 - **`pnpm import-cycles` is a RATCHET over circular imports** (arch-review 84). ESM tolerates a cycle only
   while every use is deferred to call time; one module-scope use — a `const` derived at import, a decorator,
   a registry populated on load — and one side sees a half-initialized namespace, which surfaces as a runtime

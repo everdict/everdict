@@ -23,6 +23,7 @@
 // What this checks: every field of `DispatchOptions` reaches every forwarder. A forwarder that passes the
 // whole options object through is safe BY CONSTRUCTION and is not asked to name anything; one that rebuilds
 // the object must mention each field, or say in `TERMINATES_HERE` why the field stops there.
+// watches: nothing — derives the field names from the interface itself, so it cannot go stale.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

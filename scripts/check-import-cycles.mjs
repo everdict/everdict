@@ -14,6 +14,7 @@
 // The fix is almost always the same shape: the value both sides need belongs to neither of them. Give it its
 // own module that imports from neither, and the cycle disappears along with the question of which writer
 // "owns" the shared thing.
+// watches: nothing — walks the module graph.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 

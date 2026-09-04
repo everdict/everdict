@@ -16,6 +16,7 @@
 // `\u0000` compiles to the same byte. There is no reason to write the other one, so this refuses it.
 //
 // Reads SOURCE only (no build, no deps), prints every violation, exits 1.
+// watches: nothing — matches control codes in bytes.
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";

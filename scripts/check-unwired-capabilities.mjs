@@ -16,6 +16,7 @@
 // root, or be listed here with the reason it is not. "Constructed" means a `new Impl(` in apps/*/src — the
 // place a deployment is assembled — because that is the thing whose absence nobody can see from the
 // consumer.
+// watches: nothing — derives port names from the interfaces themselves.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
