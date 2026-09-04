@@ -19,6 +19,7 @@ import { Markdown } from '@/shared/ui/markdown'
 
 import { useInfraPanel } from '../model/infra-panel-context'
 import { MentionInChatButton } from './mention-in-chat-button'
+import { NodeContributions } from '@/features/annotate-knowledge'
 
 // The panel's knowledge tab — what the node picked on the map IS, and what sits around it. Identity, harvested
 // attributes and relationships come from the published map (the same data the canvas draws); a claim additionally
@@ -39,6 +40,12 @@ export function KnowledgeTab() {
     [knowledgeGraph]
   )
   const node = knowledgeNodeId === null ? undefined : nodeById.get(knowledgeNodeId)
+  // The vocabulary the graph actually uses. Taken from the loaded edges rather than hard-coded: a list
+  // written here would be a second copy of a closed set the control plane owns, and the two would drift.
+  const knownPredicates = useMemo(
+    () => [...new Set((knowledgeGraph?.edges ?? []).map((e) => e.predicate))].sort(),
+    [knowledgeGraph]
+  )
 
   const groups = useMemo(() => {
     if (!node || !knowledgeGraph) return []
@@ -145,6 +152,13 @@ export function KnowledgeTab() {
           ))}
         </div>
       )}
+      {/* WHAT PEOPLE ADDED, AND HOW THEY ADD. The graph above is derived from records; these are the notes
+          and the typed edges somebody asserted, which is the half the web could only ever draw. Predicates
+          come from the edges the graph already carries — a free-text box would let somebody assert an edge
+          kind the control plane has no rule for, and it would look saved. */}
+      <div className="border-t pt-3">
+        <NodeContributions nodeId={node.nodeId} predicates={knownPredicates} />
+      </div>
     </div>
   )
 }

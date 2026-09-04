@@ -265,7 +265,9 @@ record of.
 | `/groups` (+ get, score) | the two-phase experiment. Phase 1 runs ungraded and phase 2 judges the runs that already exist without re-executing them — the split is what makes a second question cost only the judge, and only an agent could ask it. The list links each group to `/scorecard/:id` rather than growing a second detail view of one record |
 | `/fs/revisions` · `/sandboxes/:id/tasks/:id/trace` | **not gaps — the scanner was wrong.** See below |
 
-**26 remain OWED.**
+| `/knowledge/*` (all 8) | the web could DRAW the graph and author nothing in it. A graph a person can only look at is a report; the notes and the typed edges are what make it a place work accumulates. The note action sends NO author — a note whose author the client could choose is not attribution — and the predicate list is derived from the edges the graph already carries rather than hard-coded, because a second copy of a closed vocabulary drifts. `extract` is an explicit act, never something the page does on open: it is a real billable model call whose result is PROPOSED entries awaiting review |
+
+**18 remain OWED.**
 
 ### ⚠️ The scanner's fifth extraction error, found by using it
 

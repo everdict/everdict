@@ -271,6 +271,44 @@ export const controlPlane = {
   // graph = the whole-workspace projection (read = scorecards:read); reindex = rebuild from records (settings:write).
   knowledgeGraph: <T>(auth: AuthContext, depth?: number) =>
     call<T>(auth, `/knowledge/graph${depth !== undefined ? `?depth=${depth}` : ''}`),
+
+  // ── THE KNOWLEDGE GRAPH'S WRITE SIDE, AND THE READS THAT MAKE IT USEFUL ─────────────────────────
+  //
+  // The web could DRAW the graph and author nothing in it: eight routes, all unreachable. A graph a person
+  // can only look at is a report; the notes, the relationships and the mined candidates are what make it a
+  // place work accumulates. Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // One node by its content-addressed id (e.g. "harness:acme:web-agent@1.0.0").
+  knowledgeNode: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/knowledge/node?id=${encodeURIComponent(id)}`),
+  // A node's 1-hop facts, ranked for display; and the multi-hop walk behind it.
+  knowledgeRelated: <T>(auth: AuthContext, id: string, limit?: number) =>
+    call<T>(
+      auth,
+      `/knowledge/related?id=${encodeURIComponent(id)}${limit !== undefined ? `&limit=${limit}` : ''}`
+    ),
+  knowledgeSubgraph: <T>(auth: AuthContext, id: string, depth?: number) =>
+    call<T>(
+      auth,
+      `/knowledge/subgraph?id=${encodeURIComponent(id)}${depth !== undefined ? `&depth=${depth}` : ''}`
+    ),
+  // The authored notes on a node — the READ side of annotate, which is why they travel together.
+  knowledgeAnnotations: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/knowledge/annotations?id=${encodeURIComponent(id)}`),
+  annotateKnowledge: <T>(auth: AuthContext, body: { node: unknown; note: string }) =>
+    call<T>(auth, '/knowledge/annotate', { method: 'POST', body: JSON.stringify(body) }),
+  // A TYPED relationship — the predicate vocabulary is closed at the control plane, so this cannot invent
+  // an edge kind the graph has no rule for.
+  relateKnowledge: <T>(auth: AuthContext, body: { from: unknown; to: unknown; predicate: string }) =>
+    call<T>(auth, '/knowledge/relate', { method: 'POST', body: JSON.stringify(body) }),
+  // Mine a discussion thread for entry CANDIDATES — proposed entries awaiting review, never published
+  // knowledge. A real billable model call, like skill-generate.
+  extractKnowledge: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/knowledge/extract', { method: 'POST', body: JSON.stringify(body) }),
+  // Task-time context assembly. POST because anchors are structured NodeRefs whose keys may contain '/' or
+  // ':' — a query string would have to escape them and would still read badly in a log.
+  knowledgeContext: <T>(auth: AuthContext, body: { anchors: unknown[] }) =>
+    call<T>(auth, '/knowledge/context', { method: 'POST', body: JSON.stringify(body) }),
   reindexKnowledge: <T>(auth: AuthContext) =>
     call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
   // Knowledge entries — reified claims (the knowledge layer). List is freshness-decorated; read=scorecards:read,

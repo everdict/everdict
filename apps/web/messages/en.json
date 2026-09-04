@@ -1,4 +1,17 @@
 {
+  "knowledgePage": {
+    "contextEmpty": "An agent would be handed nothing for this anchor.",
+    "expand": "Expand",
+    "noHops": "Nothing within two hops.",
+    "previewContext": "Agent context",
+    "addNote": "Add note",
+    "factsUnread": "What is known about this node could not be read ({error}) — this is not the same as nothing being known.",
+    "noteError": "The note could not be added.",
+    "notePlaceholder": "what you know about this node",
+    "relate": "Relate",
+    "relateError": "The relationship was refused — the predicate may not exist.",
+    "targetPlaceholder": "target node id"
+  },
   "experimentsPage": {
     "description": "Ungraded phase-1 groups. Phase 2 applies judges over the runs that already exist and never re-executes them — the compute is spent, so asking a second question costs only the judge.",
     "empty": "No experiment has been run.",
@@ -3131,6 +3144,11 @@
     "labelsDesc": "The vocabulary your team classifies issues with. Renaming or recolouring a label reaches every issue that wears it."
   },
   "knowledge": {
+    "extract": "Mine a thread",
+    "extractError": "The extraction failed.",
+    "extractPrompt": "Paste the discussion to mine. The result is PROPOSED entries awaiting review, not published knowledge.",
+    "extractTitle": "Mine a discussion for knowledge-entry candidates. A real model call; the result awaits review.",
+    "extracted": "{n} candidate(s) proposed — they await review.",
     "title": "Knowledge",
     "description": "Durable claims about this workspace's entities — findings, decisions, conventions, and context — version-pinned to what they concern.",
     "newEntry": "New entry",

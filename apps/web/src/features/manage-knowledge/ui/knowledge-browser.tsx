@@ -28,6 +28,7 @@ import {
   verifyKnowledgeEntryAction,
 } from '../api/manage-knowledge'
 import { EntryFormDialog } from './entry-form-dialog'
+import { ExtractKnowledgeButton } from '@/features/extract-knowledge'
 
 // kind 별 톤 — 목록/상세에서 한눈에 구분되는 얇은 칩 색.
 const KIND_TONE: Record<KnowledgeEntry['kind'], string> = {
@@ -314,6 +315,9 @@ export function KnowledgeBrowser({
             </Button>
           ))}
         </div>
+        {/* Mine a thread for CANDIDATES — proposed entries awaiting review, never published knowledge. It
+            sits beside "new entry" because both end at the same review queue, from opposite directions. */}
+        {canWrite && <ExtractKnowledgeButton />}
         {canWrite && (
           <Button
             size="sm"

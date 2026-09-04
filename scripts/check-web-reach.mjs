@@ -62,14 +62,6 @@ const DECIDED = new Map([
   //
   // Named rather than merely absent, so the debt is visible and this check can be green today without
   // pretending it is decided. Removing a line is the definition of done for that surface.
-  ["/knowledge/annotate", "OWED — knowledge authoring"],
-  ["/knowledge/annotations", "OWED — knowledge authoring"],
-  ["/knowledge/context", "OWED — knowledge authoring"],
-  ["/knowledge/extract", "OWED — knowledge authoring"],
-  ["/knowledge/node", "OWED — knowledge authoring"],
-  ["/knowledge/relate", "OWED — knowledge authoring"],
-  ["/knowledge/related", "OWED — knowledge authoring"],
-  ["/knowledge/subgraph", "OWED — knowledge authoring"],
   ["/campaigns", "OWED — the evolution domain has no web surface"],
   ["/campaigns/:p", "OWED — the evolution domain has no web surface"],
   ["/campaigns/:p/adopt", "OWED — an adoption gate a person should decide"],

@@ -1,4 +1,17 @@
 {
+  "knowledgePage": {
+    "contextEmpty": "이 앵커로는 에이전트가 받을 것이 없습니다.",
+    "expand": "확장",
+    "noHops": "두 홉 안에 아무것도 없습니다.",
+    "previewContext": "에이전트 컨텍스트",
+    "addNote": "메모 추가",
+    "factsUnread": "이 노드에 대해 알려진 것을 읽지 못했습니다 ({error}) — 아는 것이 없다는 뜻이 아닙니다.",
+    "noteError": "메모를 추가하지 못했습니다.",
+    "notePlaceholder": "이 노드에 대해 아는 것",
+    "relate": "관계 추가",
+    "relateError": "관계가 거부되었습니다 — 술어가 없을 수 있습니다.",
+    "targetPlaceholder": "대상 노드 id"
+  },
   "experimentsPage": {
     "description": "채점 전(phase 1) 그룹. phase 2 는 이미 있는 run 위에 judge 를 적용하고 phase 1 을 다시 실행하지 않습니다 — 컴퓨트는 이미 썼으니 두 번째 질문은 judge 값만 듭니다.",
     "empty": "실행된 실험이 없습니다.",
@@ -3131,6 +3144,11 @@
     "labelsDesc": "팀이 이슈를 분류하는 어휘입니다. 이름이나 색을 바꾸면 그 라벨을 단 모든 이슈에 한 번에 반영됩니다."
   },
   "knowledge": {
+    "extract": "스레드 채굴",
+    "extractError": "추출에 실패했습니다.",
+    "extractPrompt": "채굴할 논의를 붙여넣으세요. 결과는 검토 대기 중인 \"제안\" 항목이며 발행된 지식이 아닙니다.",
+    "extractTitle": "논의에서 지식 항목 후보를 채굴합니다. 실제 모델 호출이며 결과는 검토를 기다립니다.",
+    "extracted": "후보 {n}건이 제안되었습니다 — 검토를 기다립니다.",
     "title": "지식",
     "description": "워크스페이스 엔티티에 대한 지속 가능한 주장 — 발견·결정·관례·컨텍스트를 대상 버전에 핀해 기록합니다.",
     "newEntry": "새 엔트리",
