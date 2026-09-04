@@ -119,6 +119,40 @@ child rows" is not "the container exited".
 - **Cancellation is also a REVOCATION** (see L1): after it, the subject may no longer authorize new external
   work. A stop that races a dispatch and loses is a teardown that will never converge.
 
+## A MEASUREMENT IS NOT EVIDENCE UNTIL SOMETHING HAS PASSED IT
+Every law above guards the seam between a DECISION and an EFFECT. None of them guards the seam between a
+MEASUREMENT and the EVIDENCE a decision rests on — and the product sells a defensible verdict, so the
+verdict's premise is worth as much as its plumbing.
+
+A SpreadsheetBench wave ran round after round at 14.3%, derived correct verdicts under a frozen frame, and
+refused every candidate. All of it was right and none of it meant anything: the grader handed the published
+`answer_position` string to `range_boundaries`, which raises on every sheet-qualified or multi-range form,
+and the raise was caught by a per-file `except Exception` and recorded as *the agent's wrong answer*. 420 of
+the 912 tasks were unwinnable by construction, their workbooks never opened. One case's published answer key
+was permuted, so a candidate that solved all three test workbooks scored 1/3 and failed. Feeding the
+benchmark's OWN answer files to that grader returned `FAIL 3/3` on eight of eight sampled cases.
+
+    the two arms were measured the same way   ≠   the measurement can produce a pass
+
+- **A scorer is certified by a POSITIVE CONTROL, not by agreement between arms.** The question is not "can
+  the subject pass this" — that would refuse every hard benchmark, which is what evaluation exists for. It
+  is *has this scorer ever said yes about this case*: a property of the (case, grader) pair, answerable from
+  one artifact the platform itself scored. `examProofOf` is that read, and the coverage is DERIVED from the
+  named evidence rather than declared by whoever names it (L3).
+- **A refusal to measure is not a zero.** `|| echo 0.0` on a grader's failure arm cannot tell a wrong answer
+  from a grader that could not run, and every layer above consumes the second as the first. An absent reward
+  is the third value (L2), and the platform already knows how to read it — `pnpm grader-collapse` refuses the
+  shell fragment that destroys it.
+- **A differential cannot see a dead instrument.** Every-scenario-0.0 and every-scenario-1.0 produce the same
+  deltas. Carry the absolute level with the comparison, or an ending will name the hypotheses for a fault in
+  the apparatus.
+- **AND THE ALL-OR-NOTHING PREDICATE IS THE WRONG SHAPE.** The wave above solved three of fourteen scenarios,
+  so every whole-campaign check stayed silent while eleven had never been passed by anything. Ask WHICH
+  scenarios have never been passed, across the whole walk, and say so while it is still running.
+- **The scorers live where no gate looks.** Both readers of `answer_position` were wrong, in `examples/`,
+  outside the layer spine, outside every scanner, in a language CI did not install. A predicate that decides
+  every reward is not an example.
+
 ## A COMMENT THAT PROMISES ANOTHER COMPONENT'S BEHAVIOUR IS A CLAIM, AND THE CLAIM NEEDS THE TEST
 Three reviews in a row have found the same thing: a guard was written correctly, and the sentence justifying
 it described what some OTHER function would do next — and that function did not do it.

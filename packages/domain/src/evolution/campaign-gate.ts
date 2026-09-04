@@ -290,7 +290,18 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
   // one-lane-only law counted at return statements instead of call sites).
   const answer = decideAdoption(frame, rounds);
   const neverSolved = neverSolvedAcross(frame, rounds);
-  return neverSolved === undefined ? answer : { ...answer, neverSolved };
+  if (neverSolved === undefined) return answer;
+  // …and if this ending has scenarios nothing ever passed AND the frame never named a positive control, say
+  // so HERE, which is the moment somebody reads why the campaign stopped. The control is opt-in and the
+  // campaigns that most need it are the ones that will not set it; a frame every scenario has been solved on
+  // has nothing to answer for, and a warning that fires everywhere is read nowhere.
+  if (answer.kind === "halt" && frame.examProvenBy === undefined)
+    return {
+      ...answer,
+      neverSolved,
+      detail: `${answer.detail}. ${neverSolved.length} of the frame's ${frame.scenarios.length} scenario(s) were never passed by either arm in any round (${neverSolved.slice(0, 8).join(", ")}${neverSolved.length > 8 ? ", …" : ""}), and this frame declared no positive control (examProvenBy), so nothing has established that its exam can be scored at all`,
+    };
+  return { ...answer, neverSolved };
 }
 
 function decideAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {

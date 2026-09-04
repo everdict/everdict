@@ -396,6 +396,11 @@ function heldOutKey(frame: Pick<CampaignFrame, "scenarios">): string {
   return [...new Set(frame.scenarios.filter((s) => s.heldOut === true).map((s) => s.id))].sort().join("\u0000");
 }
 
+// A brief that grows without limit stops being a brief; these bound what an ancestor chain and a round's
+// `informedBy` list (up to 50 ids) can put into one handoff.
+const MAX_INHERITED_SOURCES = 5;
+const MAX_INHERITED_FINDINGS = 20;
+
 export class CampaignService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -564,7 +569,50 @@ export class CampaignService {
       ...(evidenceUnavailable !== undefined ? { evidenceUnavailable } : {}),
       // A round written before `learned` was required carries none; the renderer is handed findings, not holes.
       learned: rounds.map((r) => r.learned).filter((l): l is string => l !== undefined),
+      ...(await this.inheritedFindings(tenant, record, last)),
     });
+  }
+
+  // ── WHAT EARLIER WALKS ESTABLISHED ──────────────────────────────────────────────────────────────
+  //
+  // Two driver-declared pointers, both of which had no reader: `frame.continues` (this walk carries on from
+  // that one) and the latest round's `informedBy` (these other walks shaped this proposal). The findings
+  // themselves are read from those campaigns' rounds by the platform — the loop says which walks matter, it
+  // does not get to say what they found (rule `protocol` L3).
+  //
+  // BOUNDED on purpose. A chain can be long and `informedBy` takes up to 50 ids; a brief that grows without
+  // limit stops being a brief. Nearest ancestors first, because the walk closest to this one is the one whose
+  // mechanism still applies.
+  private async inheritedFindings(
+    tenant: string,
+    record: EvolutionCampaignRecord,
+    last: CampaignRound | undefined,
+  ): Promise<{ inherited?: Array<{ campaignId: string; findings: string[] }> }> {
+    const wanted: string[] = [];
+    if (record.frame.continues !== undefined) wanted.push(record.frame.continues);
+    for (const id of last?.informedBy ?? []) if (!wanted.includes(id)) wanted.push(id);
+    if (wanted.length === 0) return {};
+
+    const inherited: Array<{ campaignId: string; findings: string[] }> = [];
+    let budget = MAX_INHERITED_FINDINGS;
+    for (const id of wanted.slice(0, MAX_INHERITED_SOURCES)) {
+      if (budget <= 0) break;
+      // A pointer to a campaign this workspace cannot read is not an error here: the brief is advice, and a
+      // handoff that fails because one ancestor is gone is worse than one that carries less. The chain's
+      // HONESTY is enforced at open (`assertChainIsHonest`), which is where a refusal belongs.
+      const source = await this.deps.store.get(tenant, id).catch(() => undefined);
+      if (source === undefined) continue;
+      const findings = source.rounds
+        .slice()
+        .sort((a, b) => a.seq - b.seq)
+        .map((r) => r.learned)
+        .filter((l): l is string => l !== undefined && l.trim() !== "")
+        .slice(0, budget);
+      if (findings.length === 0) continue;
+      budget -= findings.length;
+      inherited.push({ campaignId: id, findings });
+    }
+    return inherited.length > 0 ? { inherited } : {};
   }
 
   // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────

@@ -45,7 +45,7 @@ refusal. They are printed with the differing cells so a human can decide, and th
 """
 import argparse, hashlib, json, pathlib, sys, itertools
 from openpyxl import load_workbook
-from openpyxl.utils import range_boundaries
+from openpyxl.utils import get_column_letter, range_boundaries
 
 from sbench_digest import canon, digest_of
 from sbench_position import cell_count, parse_answer_position
@@ -60,7 +60,9 @@ def context(path, positions, fallback_sheet):
     that, `0.0009995002498750624` and `0.000999500249875062` read as a difference and every case with a
     computed column looks mispaired.
     """
-    wb = load_workbook(path, data_only=True)
+    # `read_only=True` streams rows instead of building the whole object graph. A full 912-instruction stage
+    # opens 5,472 workbooks, some with sheets of 5,000+ rows, and took ~50 minutes without it.
+    wb = load_workbook(path, data_only=True, read_only=True)
     covered = set()
     for part_sheet, rng in positions:
         name = part_sheet or fallback_sheet
@@ -69,13 +71,16 @@ def context(path, positions, fallback_sheet):
         covered |= {(ws.title, r, c) for r in range(r1, r2 + 1) for c in range(c1, c2 + 1)}
     out = {}
     for ws in wb.worksheets:
-        for row in ws.iter_rows():
-            for cell in row:
-                if (ws.title, cell.row, cell.column) in covered or cell.value is None:
+        # A read-only sheet yields `EmptyCell` for gaps, which carries no coordinate at all — so the row and
+        # column are tracked here rather than read off the cell. Enumerating gives the same answer for a
+        # normal cell and is the only answer available for an empty one.
+        for r, row in enumerate(ws.iter_rows(), start=1):
+            for c, cell in enumerate(row, start=1):
+                if cell.value is None or (ws.title, r, c) in covered:
                     continue
                 key = canon(cell)
                 if key != "S":  # an empty string is an absent value, not a difference
-                    out[(ws.title, cell.coordinate)] = key
+                    out[(ws.title, f"{get_column_letter(c)}{r}")] = key
     return out
 
 
@@ -94,7 +99,18 @@ def examine(root, task, salt):
         return "refused", f"answer_position {task['answer_position']!r} is unreadable ({exc})", None
     cells = cell_count(positions)
     if cells < MIN_ANSWER_CELLS:
-        return "refused", f"{cells} answer cell(s): a digest over so few values is guessable", None
+        # NOT "this case is broken" — it is fine, and this CHECKER cannot hold its answer safely. The
+        # distinction is the whole point of an actionable refusal: 164 of the published 912 land here, and
+        # telling an operator "guessable" without telling them what would work reads as "18% of this
+        # benchmark is unusable" when it means "18% of it needs the other lane".
+        return (
+            "refused",
+            f"{cells} answer cell(s): a salted digest over so few values is guessable by the agent, which "
+            f"shares this container with the checker. The case is fine — score it on a lane with a private "
+            f"verifier (the Nomad and K8s backends implement dispatchVerifier), where the answer never enters "
+            f"the agent's world at all",
+            None,
+        )
 
     sheet = task.get("answer_sheet") or ""
     try:

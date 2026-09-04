@@ -119,6 +119,32 @@ describe("neverSolved — the scenarios nothing has ever passed", () => {
     expect(answer).toEqual({ kind: "continue", roundsLeft: 10, consecutiveRejected: 0 });
   });
 
+  it("AN ENDING OVER UNPASSED SCENARIOS SAYS THAT NOBODY ESTABLISHED THE EXAM CAN BE SCORED", () => {
+    // The positive control is opt-in, and the campaigns that most need it are the ones that will not set it.
+    // This is where that costs something and therefore where it is said: an ending, with scenarios nothing
+    // ever passed, and no control named. Not on a healthy campaign — a frame every scenario has been solved
+    // on has nothing to answer for, and a warning that fires everywhere is read nowhere.
+    seq = 0;
+    const answer = campaignAdoption(frame(), [
+      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+    ]);
+    if (answer.kind !== "halt") throw new Error("expected a halt");
+    expect(answer.detail).toMatch(/no positive control|examProvenBy/);
+  });
+
+  it("…and a frame that DID name one is not nagged about it", () => {
+    seq = 0;
+    const answer = campaignAdoption(frame({ examProvenBy: "sc-oracle" }), [
+      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+    ]);
+    if (answer.kind !== "halt") throw new Error("expected a halt");
+    expect(answer.detail).not.toMatch(/no positive control/);
+  });
+
   it("a fully inert exam is still `exam_inert`, and names every scenario", () => {
     seq = 0;
     const dead = () => round({ solved: [], failed: ["s1", "s2", "s3", "s4"], scenarios: 4 });

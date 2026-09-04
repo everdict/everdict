@@ -81,6 +81,32 @@ you kept are the ones nobody reviewed: the `artifact://` P0 was closed by a sche
 `https://foreign-host/<our-bucket>/<key>` — the same field, the same producer, the same consumer — had no
 test at all. Write the boundary case for what SURVIVES the predicate, not only for what it removes.
 
+**AND A REFUSAL NEEDS THE COUNTEREXAMPLE FROM BOTH SIDES.** The rule above is written for a GUARD — a strip,
+a filter — where the danger is what SURVIVES. A REFUSAL is the same predicate pointed the other way, and its
+danger is what it WRONGLY REJECTS, which no amount of testing the rejected class can find. A validator with
+only refusal cases is a validator whose false-positive rate is unmeasured, and a false refusal is silent:
+it removes a case from an exam, a file from a build, a candidate from a batch, and nothing downstream says
+anything was lost.
+
+Measured, twice in one session, in one 90-line file:
+
+    refused 10 cases   comparing an answer workbook's context to an input's, `{} == {}` matched
+                       (an extraction task's answer sheet holds nothing outside the answer range)
+    refused 70 cases   searching for a non-identity permutation and taking the first hit — when two test
+                       cases differ only inside the answer range, the identity AND a swap both hold
+
+Both shipped with a counterexample for the case that MUST be refused (a genuinely swapped answer key) and
+none for the cases that must be ADMITTED. Both were found by reading the check's OUTPUT — seventy refusals
+all naming the same permutation — rather than by reading the check.
+
+- **Name the admitted classes before writing the predicate**, the way pass 5 names the kept classes, and
+  write one boundary case for each: the empty one, the ambiguous one, the one that coincides by accident.
+- **A refusal's error message is evidence.** If a hundred refusals give the same reason, that is a
+  distribution, and a real defect distribution is not uniform. Read the output, not the rule.
+- The shared root of both, and of every finding in this session: **an existence check standing where a
+  discriminating one was meant.** "Something matched" is not "the right thing matched"; "a permutation
+  exists" is not "the identity does not hold"; "the arms agree" is not "the measurement works".
+
 ### 6 — The adapter is not its twin, and one statement is not one commit.
 A decision that lives in SQL, a constraint, a conditional `UPDATE`'s `WHERE`, a jsonpath — is certified by a
 real engine or by nothing. In-memory twins run different code, and a fake client that asserts on SQL TEXT
