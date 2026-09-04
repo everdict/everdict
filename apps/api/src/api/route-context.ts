@@ -451,12 +451,6 @@ export function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyR
     .send({ code: "UNAUTHENTICATED", message: "MCP requires OAuth authentication (see resource_metadata)." });
 }
 
-// Team OWNERSHIP resolution + the read guard live in `common/team-scope.ts` (both transports need them, and
-// an MCP tool file cannot import this module without closing a cycle): teamOfVersion / teamOfEntity /
-
-// Re-exported so a ROUTE keeps one import surface (this module, beside gate/sendError) while an MCP tool file
-// imports the same functions straight from `common/team-scope.js` — it cannot import this one without a cycle.
-
 // authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403. The WORKSPACE is the only
 // boundary, so an action the role grants reaches every asset the workspace holds; there is no per-resource arm.
 export function gate(principal: Principal, action: Action): void {
@@ -549,7 +543,7 @@ export async function publishDataset(
   principal: Principal,
   dataset: Dataset,
   metrics: string[],
-  provenance: { teamId?: string; origin?: unknown } = {},
+  provenance: { origin?: unknown } = {},
 ): Promise<void> {
   const registry = deps.datasetRegistry;
   if (!registry) throw new NotFoundError("NOT_FOUND", {}, "dataset registry not configured");
@@ -597,8 +591,6 @@ export function runVisible(
 ): boolean {
   return record.tenant === principal.workspace && canReadRun(record, principal.subject);
 }
-
-// The READ half of the team axis lives in `common/team-scope.ts` (both transports need it, and the MCP tool files
 
 // AppError → flat error response; anything else → 500. Every route funnels failures through this.
 export function sendError(reply: FastifyReply, err: unknown): FastifyReply {

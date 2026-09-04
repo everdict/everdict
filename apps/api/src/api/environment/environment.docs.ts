@@ -45,7 +45,7 @@ const docs = {
   },
   get: {
     summary: "Get an environment version",
-    description: "A full EnvironmentSpec. version accepts \"latest\". Another workspace's or another team's reads 404.",
+    description: 'A full EnvironmentSpec. version accepts "latest". Another workspace\'s reads 404.',
     tags: ["environment"],
     params: idVersionParams,
     response: {
@@ -66,6 +66,6 @@ const docs = {
   },
 } satisfies Record<string, FastifySchema>;
 
-// Widened re-export (team convention): the descriptors' literal response keys would otherwise make Fastify
+// Widened re-export (repo convention): the descriptors' literal response keys would otherwise make Fastify
 // narrow reply.code() in the handlers — the FastifySchema value type keeps the doc attachment behavior-free.
 export const environmentDocs: Record<keyof typeof docs, FastifySchema> = docs;

@@ -53,13 +53,11 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     {
       annotations: { readOnlyHint: true },
       description:
-        "The workspace's projects. Filter by status (planned | in_progress | completed | cancelled), by the " +
-        "initiative they sit under, or by the TEAM working them (a project names its teams, so this answers " +
-        "what the team is on even before its first issue). Rows carry no issue counts — call get_project.",
+        "The workspace's projects. Filter by status (planned | in_progress | completed | cancelled) or by the " +
+        "initiative they sit under. Rows carry no issue counts — call get_project.",
       inputSchema: {
         status: ProjectStatusSchema.optional(),
         initiative: z.string().optional().describe("only projects under this initiative id"),
-        team: z.string().optional().describe("only projects this team contributes to"),
         limit: z.number().int().positive().max(200).optional(),
       },
     },
@@ -87,9 +85,7 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     },
     (a) =>
       run(principal, "issues:read", async () => {
-        const project = await projects.detail(ws, a.id);
-        // A private team's project is ABSENT, not forbidden — the same answer the HTTP read gives.
-        return ok(project);
+        return ok(await projects.detail(ws, a.id));
       }),
   );
 
@@ -98,10 +94,9 @@ export function registerProjectTools(server: McpServer, ctx: McpToolContext): vo
     {
       annotations: { readOnlyHint: false },
       description:
-        "Edit a project's content (name, description, teams, initiatives, target date). Status moves use " +
+        "Edit a project's content (name, description, initiatives, target date). Status moves use " +
         "set_project_status instead. Pass null to clear description/targetDate; a LIST replaces what is there, " +
-        "so pass [] to detach every initiative. Not the teams, though: a project is worked by at least one, " +
-        "and removing a team whose issues are still in the project is refused (move them out first).",
+        "so pass [] to detach every initiative.",
       inputSchema: {
         id: z.string(),
         name: z.string().min(1).max(300).optional(),

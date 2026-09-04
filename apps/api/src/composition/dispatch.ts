@@ -312,7 +312,7 @@ export function buildDispatch(deps: {
     reader: dockerRegistryReader(), // Docker Registry v2 read adapter — the agent's list_image_tags / inspect_image tools
   });
   // Workspace trace-source resolution for the topology pull — a service harness's selected source (name → config with the
-  // auth value + correlate + scope) so a dev-cluster-deployed harness's trace is pulled from its team's platform after a case.
+  // auth value + correlate + scope) so a dev-cluster-deployed harness's trace is pulled from the workspace's platform after a case.
   // Image pull credentials — managed grants + BYO registries, defined ONCE so run, scorecard and the runtime
   // dispatcher all authorize a job's images the same way.
   const registryAuthsFor = buildImagePullAuths({

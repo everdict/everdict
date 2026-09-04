@@ -35,22 +35,12 @@ export interface CreateProjectInput {
   targetDate?: string;
 }
 
-// "Which team does work land on when the caller names none" — the same question filing an issue asks, and it
-// has to have the same answer: the workspace's default team, minted or repaired on the spot. A workspace comes
-// into existence through several paths, so the team it falls back to is a lazily repaired invariant rather than
-// a row somebody remembered to create. Composed like `IssueTeamAllocator` — `TeamService` satisfies it
-// structurally, so the two stay peers; absent = a creation naming no team is told to name one.
-export interface ProjectDefaultTeamResolver {
-  ensureDefault(tenant: string, by: string): Promise<{ id: string }>;
-}
-
 export interface ProjectServiceDeps {
   store: ProjectStore;
   issues: IssueStore;
   // Read-only, and stores rather than the peer services: the project's own edges have to point at things that
   // exist in THIS workspace, and that check is a store read, not a service call (see the api-layer skill —
   // peer services never call each other).
-  defaultTeam?: ProjectDefaultTeamResolver;
   initiatives: InitiativeStore;
   // The posted-update timeline. Absent = this deployment does not carry project updates, and the health routes
   // answer 404 — the rest of the project works unchanged.

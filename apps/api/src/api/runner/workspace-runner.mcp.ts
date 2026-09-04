@@ -24,14 +24,14 @@ export function registerWorkspaceRunnerTools(server: McpServer, ctx: McpToolCont
       },
       () => run(principal, "members:read", async () => ok({ runners: await runners.listForWorkspace(ws) })),
     );
-    // Workspace-shared runners (team resource, owner=ws:<workspace>) — once an admin registers one, any member can target self:ws:<id>.
+    // Workspace-shared runners (owner=ws:<workspace>) — once an admin registers one, any member can target self:ws:<id>.
     // Unlike personal runners (pair_runner, self-scoped), gated by settings:write (admin).
     server.registerTool(
       "pair_workspace_runner",
       {
         annotations: { readOnlyHint: false },
         description:
-          "Pair a workspace-shared runner (team build server/CI). Any member targets it as self:ws:<id>. The plaintext token (rnr_…) is shown once in the response. Admin only.",
+          "Pair a workspace-shared runner (a shared build server or CI host). Any member targets it as self:ws:<id>. The plaintext token (rnr_…) is shown once in the response. Admin only.",
         inputSchema: {
           label: z.string().min(1).max(80).describe("display runner name (e.g. acme-ci-runner)"),
           os: z.string().min(1).max(40).optional().describe("linux | darwin | win32, etc."),

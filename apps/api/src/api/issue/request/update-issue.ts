@@ -14,12 +14,7 @@ export const UpdateIssueBodySchema = z
     assignee: z.string().min(1).max(200).nullable().optional(),
     projectId: z.string().min(1).max(200).nullable().optional(),
     priority: IssuePrioritySchema.optional(),
-    // Pulling an issue into an iteration — or out of one (`null`) — is a plan change rather than a workflow
-    // transition, so it rides the ordinary edit (docs/tracker.md). The body simply never offered it, so every
-    // surface that puts work in a cycle sent a key this schema stripped: a cycle-only edit came back 400
-    // "Nothing to update.", and one bundled with another field answered 200 having changed nothing. The service
-    // checks the cycle is the issue's OWN team's, which is why the value has to reach it verbatim.
-    // The project checkpoint, and the same omission one level up: the project screen has counted the issues on
+    // The project checkpoint: the project screen has counted the issues on
     // each milestone since it existed, and no transport ever accepted the field that would make one of those
     // counts non-zero. Only the EDIT path offers it, because only the edit path validates it — the service
     // checks the milestone is on whichever project the issue ends up in, which is also why a project change in

@@ -273,14 +273,10 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
 // `created: false` about a version being born. The harness lane already used `ownVersions` (tenant-local,
 // "no fallback — for conflict checks"): one fact, two lanes, two meanings.
 //
-// The same asymmetry decided OWNERSHIP. The owner lookup is tenant-local, so a `_shared`-only candidate had
-// no owner to preserve and its first local version was born UNOWNED — a private team's campaign minting a
-// capability every other team can see and write.
-//
-// Seen RED on the previous closure: `existed` was true (created: false) and `teamOfVersion` was undefined.
+// Seen RED on the previous closure: `existed` was true, so the fact said `created: false`.
 describe("[R115 COUNTEREXAMPLE] adopting a candidate that lives only in _shared", () => {
-  it("reports the workspace version as CREATED and files it under the campaign's team", async () => {
-    const proof = { ...proofFor(await measuredDigest()), teamId: "team-a" };
+  it("reports the workspace version as CREATED — a first local version is a birth, not a proof", async () => {
+    const proof = proofFor(await measuredDigest());
     const { store, registeredFacts } = operations(proof);
     const agents = new InMemoryAgentRegistry();
     // The candidate exists in `_shared` only — `has()` answers true for it, `ownVersions` does not.

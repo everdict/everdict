@@ -4,8 +4,8 @@ import { PgVersionedStore } from "../pg-versioned-store.js";
 import type { EnvironmentListEntry, EnvironmentRegistry } from "./environment-registry.js";
 
 // Postgres-backed tenant-owned Environment SSOT. Key (tenant, id, version). Tenant-owned first, else _shared
-// fallback. Schema: @everdict/db/migrations/0207_create_environments (environment column + tags + team_id +
-// origin + created_by, all of them from the start). Design: docs/architecture/harness-definability-spec.md §2.
+// fallback. Schema: @everdict/db/migrations/0207_create_environments (environment column + tags + origin +
+// created_by, all of them from the start). Design: docs/architecture/harness-definability-spec.md §2.
 export class PgEnvironmentRegistry implements EnvironmentRegistry {
   private readonly store: PgVersionedStore<EnvironmentSpec>;
   constructor(client: SqlClient) {

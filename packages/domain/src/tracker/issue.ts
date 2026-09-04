@@ -58,7 +58,6 @@ export interface NewIssueInput {
   estimate?: number;
   dueDate?: string;
   parentId?: string;
-  cycleId?: string;
   milestoneId?: string;
   stateId?: string;
   projectId?: string;
@@ -85,9 +84,6 @@ export interface IssueEditInput {
   estimate?: number | null;
   dueDate?: string | null;
   parentId?: string | null;
-  // Pulling an issue into an iteration (or out of one) is a plan change, not a workflow transition — it rides
-  // the ordinary edit and leaves one `updated` history entry.
-  cycleId?: string | null;
   // The project checkpoint. `null` detaches it.
   milestoneId?: string | null;
 }
@@ -341,7 +337,6 @@ export class Issue {
       ...(input.estimate !== undefined ? { estimate: input.estimate } : {}),
       ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
       ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-      ...(input.cycleId !== undefined ? { cycleId: input.cycleId } : {}),
       ...(input.milestoneId !== undefined ? { milestoneId: input.milestoneId } : {}),
       ...(input.stateId !== undefined ? { stateId: input.stateId } : {}),
       ...(input.projectId !== undefined ? { projectId: input.projectId } : {}),

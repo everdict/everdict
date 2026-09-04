@@ -68,7 +68,6 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
       run(principal, "runs:read", async () => {
         const runs = await deps.service.list(ws, {
           // The viewer keeps another member's agent turns and shell sessions off this page (BFF parity), and
-          // the team ceiling keeps a private team's runs off it (same parity).
           viewer: principal.subject,
           // The same page size the BFF applies, from the same owner — parity is structural here, and so was
           // the defect: both transports resolved an absent `limit` to "every run this workspace ever ran".

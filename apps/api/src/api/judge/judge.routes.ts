@@ -125,7 +125,7 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
     }
   });
 
-  app.get<{ Querystring: { team?: string } }>("/judges", { schema: judgeDocs.list }, async (req, reply) => {
+  app.get("/judges", { schema: judgeDocs.list }, async (req, reply) => {
     if (!deps.judgeRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -133,8 +133,6 @@ export function registerJudgeRoutes(app: FastifyInstance, deps: ServerDeps): voi
     try {
       gate(principal, "judges:read");
       const entries = await deps.judgeRegistry.list(principal.workspace);
-      // Ceiling first (another team's judge is not the caller's to see; an unowned `_shared` one is everyone's),
-      // then the `?team=` narrow on top — named by id or by key (`?team=ENG`), the ref the team URL carries.
       const visible = entries;
       return reply.send(visible);
     } catch (err) {

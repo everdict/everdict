@@ -337,7 +337,6 @@ export {
 export {
   type CreateProjectInput,
   type ProjectActor,
-  type ProjectDefaultTeamResolver,
   ProjectService,
   type ProjectServiceDeps,
 } from "./project/project-service.js";

@@ -606,7 +606,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       // getForDisplay, not get: the case snapshots on this answer are rendered, so their artifact refs must be
       // browser-openable (the stored ones point at the in-network object store and have expired). Same in the MCP twin.
       const record = await deps.scorecardService.getForDisplay(req.params.id);
-      // Another team's batch is answered exactly like another workspace's, and like one that never existed.
+      // Another workspace's batch is answered exactly like one that never existed.
       if (!record || record.tenant !== principal.workspace)
         return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       // Which child run is each (case, trial)'s answer — served, never re-derived by the client (the web used

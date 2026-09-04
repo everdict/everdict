@@ -46,9 +46,9 @@ export const issueDocs: Record<
       "history are on GET /issues/:id, because a list row draws none of them. `order` picks the sequence " +
       "(updated [default] | created | priority | due); the cursor is minted UNDER that ordering, so reusing a " +
       "token with a different `order` is a 400 rather than a meaningless window. status, priority, project, " +
-      "assignee, cycle and label are SETS — repeat the key to name several (`?status=todo&status=in_progress`), " +
+      "assignee and label are SETS — repeat the key to name several (`?status=todo&status=in_progress`), " +
       "and they AND across facets; an empty value reaches the unset bucket (`?assignee=` = unassigned). Also " +
-      "filter by team (or mine=true for every team you belong to), syncPull (the GitHub bulk sync's working " +
+      "syncPull (the GitHub bulk sync's working " +
       "set), parent (an issue id for its sub-issues, `none` for the top-level ones), or by the capability an " +
       "issue links (linkType + linkId — 'which issues watch this harness'), or search by name (`q` — a " +
       "case-insensitive substring of the identifier or title, what every issue picker asks). Requires issues:read.",
@@ -56,15 +56,11 @@ export const issueDocs: Record<
     querystring: toJsonSchema(
       z.object({
         status: z.union([IssueStatusSchema, z.array(IssueStatusSchema)]).optional(),
-        team: z.string().optional(),
-        mine: z.enum(["true", "false"]).optional(),
         project: z.union([z.string(), z.array(z.string())]).optional(),
         assignee: z.union([z.string(), z.array(z.string())]).optional(),
         priority: z.union([IssuePrioritySchema, z.array(IssuePrioritySchema)]).optional(),
-        cycle: z.union([z.string(), z.array(z.string())]).optional(),
         label: z.union([z.string(), z.array(z.string())]).optional(),
         parent: z.string().optional(),
-        triage: z.enum(["true", "false"]).optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
         q: z.string().min(1).max(200).optional(),
@@ -83,9 +79,9 @@ export const issueDocs: Record<
     summary: "Count the workspace's issues per group",
     description:
       "How many issues fall in each group under the SAME filter GET /issues takes — the headers of a grouped " +
-      "board. `groupBy` is status | assignee | priority | project | cycle, all scalar columns, so every issue " +
+      "board. `groupBy` is status | assignee | priority | project, all scalar columns, so every issue " +
       "counts exactly once. Groups come back largest-first with the UNSET bucket last and `key: null` " +
-      "(unassigned, no project, no cycle). A grouped screen holds one PAGE per group, so it cannot get these " +
+      "(unassigned, no project). A grouped screen holds one PAGE per group, so it cannot get these " +
       "numbers from its own rows — counting what it received would only report the page size. Requires " +
       "issues:read.",
     tags: ["issue"],
@@ -93,15 +89,11 @@ export const issueDocs: Record<
       z.object({
         groupBy: IssueGroupBySchema,
         status: z.union([IssueStatusSchema, z.array(IssueStatusSchema)]).optional(),
-        team: z.string().optional(),
-        mine: z.enum(["true", "false"]).optional(),
         project: z.union([z.string(), z.array(z.string())]).optional(),
         assignee: z.union([z.string(), z.array(z.string())]).optional(),
         priority: z.union([IssuePrioritySchema, z.array(IssuePrioritySchema)]).optional(),
-        cycle: z.union([z.string(), z.array(z.string())]).optional(),
         label: z.union([z.string(), z.array(z.string())]).optional(),
         parent: z.string().optional(),
-        triage: z.enum(["true", "false"]).optional(),
         linkType: IssueLinkTypeSchema.optional(),
         linkId: z.string().optional(),
         q: z.string().min(1).max(200).optional(),
@@ -116,7 +108,7 @@ export const issueDocs: Record<
     summary: "Get an issue",
     description:
       "One issue with its links, resolution, GitHub copy and durable history. `:id` is the issue id OR the " +
-      "identifier its team minted (`ENG-12`, case-insensitive) — the same name the web URL uses, so a pasted " +
+      "identifier the workspace minted (`EVD-12`, case-insensitive) — the same name the web URL uses, so a pasted " +
       "link resolves. Another workspace's id returns 404 (no existence leak). Requires issues:read.",
     tags: ["issue"],
     response: {
@@ -127,11 +119,10 @@ export const issueDocs: Record<
   update: {
     summary: "Edit an issue's content",
     description:
-      "Title, description, labels, assignee, project, milestone, cycle, priority, estimate, due date, parent. " +
-      "Status moves go through POST /issues/:id/status and team moves through POST /issues/:id/team, so " +
-      "neither is ever a side effect of a rename — but joining an iteration is a plan change, so cycleId rides " +
-      "this edit (the issue's own team's cycles only), as does milestoneId (its own project's checkpoints " +
-      "only). null clears an optional field; re-parenting an issue under one of its own sub-issues is a 409. " +
+      "Title, description, labels, assignee, project, milestone, priority, estimate, due date, parent. " +
+      "A status move goes through POST /issues/:id/status, so it is never a side effect of a rename. " +
+      "milestoneId is validated against the issue's own project's checkpoints. null clears an optional " +
+      "field; re-parenting an issue under one of its own sub-issues is a 409. " +
       "Requires issues:write.",
     tags: ["issue"],
     body: toJsonSchema(UpdateIssueBodySchema),

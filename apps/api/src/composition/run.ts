@@ -267,7 +267,7 @@ export function buildRun(deps: {
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
     // Workspace default judge model (a per-request override wins): injected into the job so an inline judge grader scores with this model.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
-    // Private-repo seed (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (team-shared).
+    // Private-repo seed (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (workspace-shared).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
     // Image pull credentials (managed grants + BYO registries) — the ones covering this job's images ride along.
     registryAuthsFor,

@@ -24,7 +24,6 @@ export interface JudgeAuthDispatcherDeps {
 // same way as a harness model, then job.judge is rewritten to the resolved form. On top of that it fixes two live gaps:
 //  - tier asymmetry: the backend-level secretEnv carries only the WORKSPACE tier, so a submitter whose
 //    provider key is a personal secret got a working harness but a silently skipped judge on managed runtimes.
-//    Resolution order: workspace (the team's judge key) first, the submitter's personal key as fallback.
 //  - silent skip: a judge model with NO resolvable key used to surface only as a "skipped" score after the
 //    run. On managed targets that is now a fail-fast config error at dispatch (before any compute is spent).
 // Self-hosted lanes (self / self:*) get the SAME resolved credential as managed ones — the harness path already
@@ -93,7 +92,7 @@ export class JudgeAuthDispatcher implements Dispatcher {
     const baseName = provider === "anthropic" ? "ANTHROPIC_BASE_URL" : "OPENAI_BASE_URL";
     // A secret-store failure propagates as-is (infra) — only a MISSING key is a config error.
     const scoped = await this.deps.scopedSecretsFor(tenant, job.submittedBy);
-    const apiKey = scoped.workspace[keyName] ?? scoped.user[keyName]; // workspace (the team's key) first, personal fallback
+    const apiKey = scoped.workspace[keyName] ?? scoped.user[keyName]; // the workspace's key first, personal fallback
     const baseUrl = modelBaseUrl ?? scoped.workspace[baseName] ?? scoped.user[baseName]; // the model's baseUrl wins
     if (apiKey === undefined) {
       // Self-hosted lanes soften the fail-fast: no resolvable key means the runner judges with its own machine

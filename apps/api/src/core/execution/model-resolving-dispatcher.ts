@@ -66,8 +66,8 @@ async function resolveBinding(
     const secretName = modelApiKeySecretName(model);
     const scoped = await secretsFor(tenant, submittedBy);
     const fromWorkspace = scoped.workspace[secretName];
-    apiKey = fromWorkspace ?? scoped.user[secretName]; // workspace (the team's key) first, personal fallback
-    workspacePaid = fromWorkspace !== undefined; // the workspace secret supplied the key → the team pays for these tokens
+    apiKey = fromWorkspace ?? scoped.user[secretName]; // the workspace's key first, personal fallback
+    workspacePaid = fromWorkspace !== undefined; // the workspace secret supplied the key → the workspace pays for these tokens
     if (apiKey === undefined && model.apiKeySecret !== undefined)
       throw new BadRequestError(
         "BAD_REQUEST",

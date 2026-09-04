@@ -11,7 +11,7 @@ import type { FsFile, FsWriteOptions, WorkspaceFs } from "../ports/workspace-fs.
 // site, and `search_files` grepping another member's memory would be exactly that hole.
 //
 // Absence is spelled NOT FOUND, never FORBIDDEN: "you may not read this" still confirms the file exists, and what
-// a member wrote privately includes the fact that they wrote it. Same rule the private-team reads follow.
+// a member wrote privately includes the fact that they wrote it. Same rule every private read follows.
 export class MemberScopedWorkspaceFs implements WorkspaceFs {
   // `viewer` undefined = a caller who is nobody in particular (a scheduled agent, an internal job): it sees the
   // shared tree and NO member area. Fail-safe by construction — forgetting to pass an identity hides memory

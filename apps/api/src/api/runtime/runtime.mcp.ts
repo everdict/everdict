@@ -92,15 +92,9 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
           "Register a RuntimeSpec (JSON string) as owned by this workspace (immutable; CONFLICT on collision). Credentials live in the SecretStore",
         inputSchema: {
           runtime: z.string().describe("RuntimeSpec JSON"),
-          team: z
-            .string()
-            .optional()
-            .describe(
-              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
-            ),
         },
       },
-      ({ runtime, team }) =>
+      ({ runtime }) =>
         run(ctx.principal, "runtimes:write", async () => {
           let parsed: unknown;
           try {
@@ -157,7 +151,6 @@ export function registerRuntimeTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, version }) =>
         run(principal, "runtimes:read", async () => {
-          // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
           // already carries, on the door that returns the same bytes (arch-review 119).
           // get() resolves the registered spec (NOT_FOUND on non-owned/missing) before any live I/O.
           const spec = await runtimes.get(ws, id, version ?? "latest");

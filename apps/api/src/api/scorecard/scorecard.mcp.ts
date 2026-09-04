@@ -18,7 +18,6 @@ import { serveScorecard, serveScorecardListItem } from "./serve.js";
 //
 // The HTTP twin's `scorecardIsOurs`, spelled here because the two transport files may not import each other.
 // Every OPERATIONAL tool gated a bare `scorecards:run` while `get_scorecard` was tenant-scoped, so an agent
-// acting for a member of another team — answered NOT_FOUND for the same id on read — could stop a running
 // batch, RE-DRIVE it (real compute on somebody else's evidence), rescore it, or override its gate decision.
 // Reading was narrower than writing, which is the inversion the axis exists to prevent; docs/auth.md names
 // results by name.
@@ -137,12 +136,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             .optional()
             .describe(
               "in-batch OOM auto-boost (opt-in — every boost re-runs the case): an OOM_KILLED case re-dispatches with doubled job-only memory up to the cap",
-            ),
-          team_id: z
-            .string()
-            .optional()
-            .describe(
-              'the team this batch belongs to — id or key ("ENG"). A team you are not on is refused. Absent: the harness\'s owning team, else your own',
             ),
           origin: z
             .object({
@@ -336,7 +329,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       schedule?: string;
       dataset?: string;
       harness?: string;
-      team?: string;
       status?: ScorecardStatus;
       runtime?: string;
       creator?: string;
@@ -374,7 +366,6 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           schedule: z.string().optional().describe("narrow to the runs a schedule fired (its run history)"),
           dataset: z.string().optional().describe("narrow to batches run on this dataset (any version)"),
           harness: z.string().optional().describe("narrow to batches run with this harness (any version)"),
-          team: z.string().optional().describe('narrow to one team\'s batches — id or key ("ENG")'),
           status: ScorecardStatusSchema.optional().describe("narrow to one batch status"),
           runtime: z.string().optional().describe("narrow to the runtime the batch ran on"),
           creator: z.string().optional().describe("narrow to the submitter (subject)"),
@@ -401,17 +392,16 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         annotations: { readOnlyHint: true },
         description:
           "How many batches fall in each bucket under the SAME narrows list_scorecards takes — 'how much has " +
-          "run, and where' without reading the rows. `groupBy` is day | status | harness | dataset | team | " +
+          "run, and where' without reading the rows. `groupBy` is day | status | harness | dataset | " +
           "creator; `day` is the stored instant's UTC calendar day. Buckets with no rows are absent and " +
-          "`key: null` is the unset bucket (no team, no creator). Counting a PAGE's rows would only report the " +
+          "`key: null` is the unset bucket (no creator). Counting a PAGE's rows would only report the " +
           "page size back, which is why this exists. HTTP parity (GET /scorecards/counts).",
         inputSchema: {
-          groupBy: ScorecardGroupBySchema.describe("day | status | harness | dataset | team | creator"),
+          groupBy: ScorecardGroupBySchema.describe("day | status | harness | dataset | creator"),
           judge: z.string().optional(),
           schedule: z.string().optional(),
           dataset: z.string().optional(),
           harness: z.string().optional(),
-          team: z.string().optional().describe('narrow to one team\'s batches — id or key ("ENG")'),
           status: ScorecardStatusSchema.optional(),
           runtime: z.string().optional(),
           creator: z.string().optional(),

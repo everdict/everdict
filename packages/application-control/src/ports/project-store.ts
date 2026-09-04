@@ -4,7 +4,7 @@ import type { OutboxEvent } from "./run-store.js";
 export interface ProjectListFilter {
   status?: ProjectStatus;
   // Membership tests against the project's own `initiativeIds` — many-to-many, so
-  // "this initiative's projects" and "this team's projects" are containment questions the store answers, not
+  // "this initiative's projects" is a containment question the store answers, not
   // joins the service has to assemble.
   initiativeId?: string;
   // "Any of these initiatives" — one query for an initiative AND its descendants, so a nested readiness roll-up

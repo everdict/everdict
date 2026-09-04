@@ -15,7 +15,7 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme')).toEqual(['overview'])
     expect(activeRows('/acme/projects')).toEqual(['projects'])
     expect(activeRows('/acme/projects/p1')).toEqual(['projects'])
-    expect(activeRows('/acme/teams')).toEqual(['teams'])
+    expect(activeRows('/acme/members')).toEqual(['members'])
   })
 
   it('does not light the overview on every page — it owns the workspace root alone', () => {

@@ -19,14 +19,11 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       "list_judges",
       {
         annotations: { readOnlyHint: true },
-        description:
-          "Agent Judges visible to this workspace (owned + _shared default judges). `team` narrows to one " +
-          "team's own judges (id or key, ENG).",
-        inputSchema: { team: z.string().optional().describe('only this team\'s judges — id or key ("ENG")') },
+        description: "Agent Judges visible to this workspace (owned + _shared default judges).",
+        inputSchema: {},
       },
-      ({ team }) =>
+      () =>
         run(principal, "judges:read", async () => {
-          // The visible-team ceiling first; `team` is the narrow on top of it, never a way past it.
           const visible = await judges.list(ws);
           return ok(visible);
         }),
@@ -59,7 +56,6 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
       },
       ({ id, base, candidate }) =>
         run(principal, "judges:read", async () => {
-          // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
           // already carries, on the door that returns the same bytes (arch-review 119).
           const [baseSpec, candidateSpec] = await Promise.all([
             judges.get(ws, id, base),
@@ -139,17 +135,11 @@ export function registerJudgeTools(server: McpServer, ctx: McpToolContext): void
           "Register a JudgeSpec (JSON string) as owned by this workspace (model/harness; immutable; CONFLICT on collision)",
         inputSchema: {
           judge: z.string().describe("JudgeSpec JSON"),
-          team: z
-            .string()
-            .optional()
-            .describe(
-              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
-            ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ judge, team, fromIssue, originNote }) =>
+      ({ judge, fromIssue, originNote }) =>
         run(ctx.principal, "judges:write", async () => {
           let parsed: unknown;
           try {

@@ -12,17 +12,9 @@ import type { RuntimeListEntry, RuntimeRegistry } from "@everdict/application-co
 export class InMemoryRuntimeRegistry implements RuntimeRegistry {
   private readonly store = new VersionedStore<RuntimeSpec>("runtime");
 
-  // ── THE OWNER IS THREADED, BECAUSE THE PG TWIN THREADS IT (arch-review 119) ─────────────────────
-  //
-  // This said "everdict_runtimes carries neither column", and migration 0106 gave the table `team_id`. The Pg
-  // twin was corrected — its comment records that dropping the owner "left a column that was always NULL and a
-  // gate that could never refuse" — and this sibling kept the old body under the old justification.
-  //
-  // A twin that ignores an argument the real store honours is a guard no unit test can see (rule `testing`):
-  // every unit assertion about a runtime's owning team was green against a store that could not hold one, and
-  // the `_` prefix was the tell. `createdBy` genuinely stays unthreaded — that column does not exist, so
-  // carrying it here would make the in-memory store MORE capable than production, which is the same divergence
-  // pointing the other way.
+  // ⚠️ `createdBy` is deliberately NOT threaded: `everdict_runtimes` carries no such column, so storing it here
+  // would make the in-memory twin MORE capable than production — the divergence rule `testing` warns about,
+  // pointing the other way. The parameter is kept so `origin` lands in the slot every other registry uses.
   async register(tenant: string, spec: RuntimeSpec, _createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
     this.store.register(tenant, spec, undefined, origin);
   }

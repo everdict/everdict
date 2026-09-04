@@ -45,8 +45,8 @@ export class PgAgentRegistry implements AgentRegistry {
       versionOrigins?: Record<string, CapabilityOrigin>;
     }>
   > {
-    // Forward what the meta carries — this twin was dropping teamId AND versionOrigins while the in-memory
-    // one dropped only origins: two lists of one port disagreeing about the same read (rule protocol L3).
+    // Forward what the meta carries — this twin was dropping `versionOrigins` while the in-memory one kept
+    // them: two lists of one port disagreeing about the same read (rule protocol L3).
     return (await this.store.listMeta(tenant)).map((m) => ({
       id: m.id,
       versions: m.versions,

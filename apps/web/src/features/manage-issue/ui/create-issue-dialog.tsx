@@ -30,7 +30,6 @@ export interface CreateIssueDialogProps {
   projects: { id: string; name: string }[]
   // 이 팀의 열린 이터레이션. 팀 스코프 화면에서만 채워진다 — 여러 팀이 섞인 목록에서는 "어느 팀의 3번인가"에
   // 답할 수 없고, 이슈는 자기 팀의 사이클에만 들어간다.
-  cycles?: { id: string; name: string }[]
   // 팀이 하나뿐이면 고를 게 없다 — 필드를 숨기고 서버가 기본팀으로 보낸다.
   teams?: { id: string; key: string; name: string }[]
   // 하위 이슈로 접수할 부모. 있으면 제목이 "하위 이슈 추가"로 읽히고, 만든 뒤에도 부모 화면에 남는다 —
@@ -44,7 +43,6 @@ export interface CreateIssueDialogProps {
 export function CreateIssueDialog({
   workspace,
   projects,
-  cycles = [],
   parentId,
   open,
   onClose,
@@ -57,7 +55,6 @@ export function CreateIssueDialog({
   const [description, setDescription] = useState('')
   const [status, setStatus] = useState<IssueStatus>('backlog')
   const [projectId, setProjectId] = useState('')
-  const [cycleId, setCycleId] = useState('')
   const [priority, setPriority] = useState<IssuePriority>('none')
   const [estimate, setEstimate] = useState('')
   const [dueDate, setDueDate] = useState('')
@@ -87,7 +84,6 @@ export function CreateIssueDialog({
         setTitle('')
         setDescription('')
         setProjectId('')
-        setCycleId('')
         setPriority('none')
         setEstimate('')
         setDueDate('')
@@ -190,23 +186,6 @@ export function CreateIssueDialog({
               ]}
             />
           </div>
-          {/* 사이클을 쓰는 팀에서만. 접수하면서 바로 이번 주기에 넣는 것은 리니어의 기본 동선이고,
-              없으면 만들고 나서 상세를 다시 열어야 한다. */}
-          {cycles.length > 0 && (
-            <div className="space-y-1.5">
-              <Label htmlFor="issue-cycle">{t('fieldCycle')}</Label>
-              <Combobox
-                id="issue-cycle"
-                value={cycleId}
-                onChange={setCycleId}
-                placeholder={t('fieldCycleNone')}
-                options={[
-                  { value: '', label: t('fieldCycleNone') },
-                  ...cycles.map((c) => ({ value: c.id, label: c.name })),
-                ]}
-              />
-            </div>
-          )}
         </div>
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="secondary" size="sm" onClick={onClose}>

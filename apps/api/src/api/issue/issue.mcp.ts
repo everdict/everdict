@@ -10,7 +10,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
 
-// MCP twin of the issue routes (BFF↔MCP parity). This is the surface an agent uses to triage its own
+// MCP twin of the issue routes (BFF↔MCP parity). This is the surface an agent uses to work its own
 // regressions: find the issue that watches a harness, read how it was closed last time, and move it.
 // ctx.agent rides into the service so an agent's transitions stamp causedBy — the trigger loop guard.
 export function registerIssueTools(server: McpServer, ctx: McpToolContext): void {
@@ -35,24 +35,21 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "when you find a defect worth tracking across runs, not for one-off notes.",
       inputSchema: {
         title: z.string().min(1).max(300),
-        team: z
-          .string()
-          .optional()
-          .describe(
-            'the team whose list it lands on — id or key ("ENG"); the identifier is minted from that team\'s counter. Absent: the workspace default team',
-          ),
         description: z.string().max(50_000).optional(),
         status: IssueStatusSchema.exclude(["done", "regressed"]).optional(),
         priority: IssuePrioritySchema.optional().describe(
           "urgent | high | medium | low | none (default) — urgency, independent of the workflow status",
         ),
-        estimate: z.number().int().nonnegative().max(1000).optional().describe("points on the team's scale"),
+        estimate: z
+          .number()
+          .int()
+          .nonnegative()
+          .max(1000)
+          .optional()
+          .describe("story points, on whatever scale the workspace reads them in"),
         dueDate: z.string().optional().describe("YYYY-MM-DD — when this issue is due"),
         parentId: z.string().optional().describe("file it as a sub-issue of this issue (id or identifier)"),
-        projectId: z
-          .string()
-          .optional()
-          .describe("the project this issue belongs to — one of the issue team's projects (list_projects?team=)"),
+        projectId: z.string().optional().describe("the project this issue belongs to (list_projects)"),
         assignee: z.string().optional(),
         labelIds: z.array(z.string()).max(50).optional(),
         links: z
@@ -67,9 +64,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           .max(50)
           .optional()
           .describe("capabilities that verify this issue (harness/dataset/judge/scorecard/run/view)"),
-        // `Issue.create`'s comment names an agent as one of the two surfaces that files INTO triage; until
-        // arch-review 106 neither surface had a door, so nothing in the repository ever set this and the whole
-        // triage lifecycle was unreachable. An agent filing work for a human to admit is the point of the queue.
       },
     },
     (a) =>
@@ -78,8 +72,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
           await issues.create({
             tenant: ws,
             createdBy: principal.subject,
-            // Resolved here (id or key) so an unknown team is a 404 rather than an issue quietly filed under
-            // the default one.
             title: a.title,
             ...(a.description !== undefined ? { description: a.description } : {}),
             ...(a.status !== undefined ? { status: a.status } : {}),
@@ -107,18 +99,16 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "assignee); the description, the full links and the move history live on get_issue. `order` picks the " +
         "sequence (updated [default] | created | priority | due) and the cursor belongs to it — reusing a token " +
         "under a different order is refused rather than served as a meaningless window. status, priority, " +
-        "project, assignee, cycle and label take an ARRAY to mean 'any of these', and AND across facets; the " +
+        "project, assignee and label take an ARRAY to mean 'any of these', and AND across facets; the " +
         'empty string reaches the unset bucket (assignee: [""] = unassigned). `linkType` + `linkId` answers ' +
         "'which issues watch this harness/dataset', the lookup to run before investigating a failing batch, and " +
         "`q` searches the identifier + title when you know what the issue is CALLED but not its id. " +
         "`parent` takes an issue id for its sub-issues, or the literal `none` for the top-level issues only.",
       inputSchema: {
         status: z.array(IssueStatusSchema).optional(),
-        team: z.string().optional().describe('only this team\'s issues — id or key ("ENG")'),
         project: z.array(z.string()).optional(),
         assignee: z.array(z.string()).optional().describe('issue assignees; "" selects the unassigned ones'),
         priority: z.array(IssuePrioritySchema).optional(),
-        cycle: z.array(z.string()).optional(),
         label: z.array(z.string()).optional().describe("label ids; an issue matches when it carries ANY of them"),
         parent: z.string().optional().describe("an issue id for its sub-issues, or `none` for top-level only"),
         linkType: IssueLinkTypeSchema.optional(),
@@ -134,10 +124,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         ok(
           await issues.listSummaries(ws, {
             ...issueFilterOfArgs(a),
-            // A private team's issues are not the workspace's — the same narrowing the HTTP list applies. An
-            // agent reading through this tool must not see what the person it acts for cannot.
-            // `team` is the NARROW on top of that ceiling (the HTTP list's `?team=`): naming a team you cannot
-            // see returns nothing rather than that team's issues.
             ...(a.order !== undefined ? { order: a.order } : {}),
             ...(a.limit !== undefined ? { limit: a.limit } : {}),
             ...(a.cursor !== undefined ? { cursor: a.cursor } : {}),
@@ -153,7 +139,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
       description:
         "How many issues fall in each group under the same filter list_issues takes — 'how much unstarted work " +
         "does each member hold', 'how big is each status column'. `groupBy` is status | assignee | priority | " +
-        "project | cycle. Groups come back largest-first with the unset bucket last (`key: null`). Use this " +
+        "project. Groups come back largest-first with the unset bucket last (`key: null`). Use this " +
         "instead of paging the whole list to count it: the answer is one aggregate, and it stays correct past " +
         "the page limit.",
       inputSchema: {
@@ -162,7 +148,6 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         project: z.array(z.string()).optional(),
         assignee: z.array(z.string()).optional(),
         priority: z.array(IssuePrioritySchema).optional(),
-        cycle: z.array(z.string()).optional(),
         label: z.array(z.string()).optional(),
         parent: z.string().optional(),
         linkType: IssueLinkTypeSchema.optional(),
@@ -186,7 +171,7 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
       description:
         "One issue in full — its links, how it was resolved (including the scorecard that proved it), its " +
         "GitHub copy, and the durable history of every move. Read this before re-investigating something the " +
-        "team already closed.",
+        "the workspace already closed.",
       inputSchema: { id: z.string().describe("issue id, or the identifier a member would name it by (ENG-12)") },
     },
     (a) =>
@@ -202,13 +187,11 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     {
       annotations: { readOnlyHint: false },
       description:
-        "Edit an issue's content (title, description, labels, assignee, project, milestone, cycle, priority, " +
-        "estimate, due date, parent). Status moves use set_issue_status instead, and team moves use " +
-        "move_issue. Pass null to clear assignee/projectId/milestoneId/cycleId/description/estimate/dueDate/" +
-        "parentId. Pulling an issue into an iteration is a plan change, not a transition, so it rides this " +
-        "edit — and only into one of the issue's OWN team's cycles; a milestone likewise has to be one of the " +
-        "issue's own project's checkpoints. Re-parenting an issue under one of its own sub-issues is refused " +
-        "— that would close the loop.",
+        "Edit an issue's content (title, description, labels, assignee, project, milestone, priority, " +
+        "estimate, due date, parent). Status moves use set_issue_status instead. " +
+        "Pass null to clear assignee/projectId/milestoneId/description/estimate/dueDate/" +
+        "parentId. A milestone has to be one of the issue's own project's checkpoints. Re-parenting an issue " +
+        "under one of its own sub-issues is refused — that would close the loop.",
       inputSchema: {
         id: z.string(),
         title: z.string().min(1).max(300).optional(),
@@ -350,7 +333,6 @@ function issueFilterOfArgs(a: {
   project?: string[];
   assignee?: string[];
   priority?: IssueListFilter["priorities"];
-  cycle?: string[];
   label?: string[];
   parent?: string;
   linkType?: IssueListFilter["link"] extends infer L ? (L extends { type: infer T } ? T : never) : never;

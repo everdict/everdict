@@ -17,7 +17,7 @@ interface RegisterableSpec {
 // wider `register` against a narrower constraint (the extra parameters are optional), so a decorator that
 // forwards only what it uses typechecks perfectly and silently drops the rest — which is what happened here:
 // every dataset/judge/harness registered through the composed app arrived UNOWNED and unstamped, because
-// `teamId` and `origin` stopped at this Proxy. Forward the whole call; read what you need from it.
+// `origin` stopped at this Proxy. Forward the whole call; read what you need from it.
 export function withRegisteredFact<
   S extends RegisterableSpec,
   R extends {

@@ -4,7 +4,7 @@ import { z } from "zod";
 // One endpoint for every workflow move. The service picks the domain transition that fits the current state
 // (move / resolve / reopen), so a caller says where the issue should end up, not which verb to use.
 export const SetIssueStatusBodySchema = z.object({
-  // Which of the team's board columns the move landed in, when the caller moved by column rather than by
+  // Which of the board's columns the move landed in, when the caller moved by column rather than by
   // canonical status. The status is still what everything programmatic reads; this records the column.
   stateId: z.string().min(1).max(200).optional(),
   status: IssueStatusSchema,

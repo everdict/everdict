@@ -121,7 +121,6 @@ export function RunScorecardForm({
       ...(tags.length > 0 ? { tags } : {}),
       ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
     }
-    // rest.teamId = '' means "follow the harness's team" — the action omits a falsy teamId from the body.
     const res = await runScorecardAction({
       ...rest,
       ...(judgeRefs.length > 0 ? { judges: judgeRefs } : {}),

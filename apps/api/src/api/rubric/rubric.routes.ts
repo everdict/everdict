@@ -62,7 +62,6 @@ export function registerRubricRoutes(app: FastifyInstance, deps: ServerDeps): vo
     if (!principal) return reply;
     try {
       gate(principal, "judges:read");
-      // A rubric is owned like every other eval asset — another team's does not appear, an unowned one does.
       const entries = await deps.rubricRegistry.list(principal.workspace);
       return reply.send(entries);
     } catch (err) {

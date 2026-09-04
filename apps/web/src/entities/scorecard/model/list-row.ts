@@ -28,7 +28,6 @@ export interface ScorecardRow {
   // Exactly what OriginChip draws — never `ref`, `runUrl` or `pinOverrides` (a pinned digest is 71 chars).
   origin?: { source: string; repo?: string; sha?: string; prNumber?: number }
   createdBy?: string
-  teamId?: string
   runtime?: string
   // The "{selected}/{total}" chip. `ids` and `tags` are the reason a subset row was twice the size of any other.
   subset?: { total: number; selected: number }

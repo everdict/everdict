@@ -12,7 +12,7 @@ export interface AgentRegistry {
   versions(tenant: string, id: string): Promise<string[]>; // sorted (semver first) — owner-first / _shared fallback, deleted versions excluded
   ownVersions(tenant: string, id: string): Promise<string[]>; // only versions this tenant registered directly (no fallback — for conflict checks), deleted excluded
   // createdBy = creator of the first-registered version (for who-may-delete gating; undefined for seed/_shared).
-  // before the axis), which is the workspace's. Surfaced because the read applies the visible-team ceiling.
+  // before the axis), which is the workspace's.
   // `versionOrigins` = version → birth stamp (only stamped versions; omitted when none) — the same
   // per-version answer every other registry list carries, and what the succeeds/born_from harvest reads.
   list(tenant: string): Promise<

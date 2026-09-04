@@ -115,7 +115,7 @@ export function registerTrajectoryTools(server: McpServer, ctx: McpToolContext):
       annotations: { readOnlyHint: true },
       description:
         "The tenant-configured trace thresholds — evaluated over EVERY trajectory at seal time; a crossing " +
-        "lands trace.threshold_crossed on the event log (the wake signal a triage agent subscribes to).",
+        "lands trace.threshold_crossed on the event log (the wake signal an agent subscribes to).",
       inputSchema: {},
     },
     () => run(principal, "runs:read", async () => ok({ thresholds: (await settings.get(ws))?.traceThresholds ?? [] })),

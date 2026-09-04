@@ -10,7 +10,7 @@ import { baseUrl } from "../route-context.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { workspaceRunnerDocs } from "./workspace-runner.docs.js";
 
-// workspace-shared runners (team tier self:ws) — roster, pairing, owned list, revoke + GitHub Actions runner self-install.
+// workspace-shared runners (self:ws tier) — roster, pairing, owned list, revoke + GitHub Actions runner self-install.
 export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: ServerDeps): void {
   app.get("/workspace/runners", { schema: workspaceRunnerDocs.roster }, async (req, reply) => {
     if (!deps.runnerService)
@@ -25,8 +25,8 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
     }
   });
 
-  // Register a workspace-shared runner (team resource) — an admin pairs it with owner="ws:<workspace>". Unlike a personal runner (POST /runners,
-  // self-scoped), any member of this workspace can target it via self:ws:<id> (a team build server/CI runner). Plaintext token only once.
+  // Register a workspace-shared runner (a workspace resource) — an admin pairs it with owner="ws:<workspace>". Unlike a personal runner (POST /runners,
+  // self-scoped), any member of this workspace can target it via self:ws:<id> (a shared build server or CI runner). Plaintext token only once.
   app.post("/workspace/runners", { schema: workspaceRunnerDocs.pair }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
@@ -35,7 +35,7 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
     const body = PairRunnerBodySchema.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
-      gate(principal, "settings:write"); // registering a team resource = admin
+      gate(principal, "settings:write"); // registering a workspace resource = admin
       const paired = await deps.runnerService.pairWorkspace({
         workspace: principal.workspace,
         label: body.data.label,
@@ -54,7 +54,7 @@ export function registerWorkspaceRunnerRoutes(app: FastifyInstance, deps: Server
     }
   });
 
-  // List workspace-shared runners (owner=ws:<workspace> only — the roster [GET /workspace/runners] includes personal runners, this is team-owned only).
+  // List workspace-shared runners (owner=ws:<workspace> only — the roster [GET /workspace/runners] includes personal runners, this is workspace-owned only).
   app.get("/workspace/runners/owned", { schema: workspaceRunnerDocs.owned }, async (req, reply) => {
     if (!deps.runnerService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });

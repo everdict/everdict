@@ -19,11 +19,8 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
     });
   }
 
-  // The store is configured with `teamId: true` (migration 0106 gave the table the column) and `teamOfVersion`
-  // below reads it, so DROPPING the owner here left a column that was always NULL and a gate that could never
-  // refuse: a runtime registered by one team looked unowned to everyone. `createdBy` stays unthreaded — the
-  // table carries no such column — and the parameter is kept so `origin` lands in the 5th slot every other
-  // registry uses.
+  // `createdBy` stays unthreaded — the table carries no such column — and the parameter is kept so `origin`
+  // lands in the same slot every other registry uses.
   register(tenant: string, spec: RuntimeSpec, _createdBy?: string, origin?: CapabilityOrigin): Promise<void> {
     return this.store.register(tenant, spec, undefined, origin);
   }

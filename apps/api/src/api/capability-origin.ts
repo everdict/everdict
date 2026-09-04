@@ -17,7 +17,7 @@ import type { ServerDeps } from "./route-context.js";
 //   · `from`     — DECLARED by the caller, because only the caller knows what it was working on.
 //
 // A declared issue reference is resolved to the issue's RECORD ID before it is stored, and its identifier+title
-// snapshotted as the label: `ENG-12` is re-minted when an issue moves team, so a stamp that kept the identifier
+// snapshotted as the label: an identifier is a name a record can be re-issued under, so a stamp that kept it
 // would rot exactly when the issue changed hands. If the lookup fails the declaration is kept verbatim — a
 // provenance note about an issue the caller cannot read (or that was deleted) is still better than none, and it
 // renders as plain text rather than a link.

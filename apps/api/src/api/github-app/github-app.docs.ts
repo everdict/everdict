@@ -26,7 +26,7 @@ const docs = {
     summary: "List repos the workspace App installations can access",
     description:
       "Repo picker for the CI repo-link UX — merges every installation's repository list. Only the repos chosen " +
-      "at install time appear (= what the team explicitly allowed). Requires settings:read.",
+      "at install time appear (= what an admin explicitly allowed). Requires settings:read.",
     tags: ["github-app"],
     response: {
       200: {

@@ -195,7 +195,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerMcpRoutes(routes, deps);
   });
 
-  // token via the workspace GitHub App. settings:write (admin, since it touches a team resource + repo trust). The tokens in the response are not stored.
+  // token via the workspace GitHub App. settings:write (admin, since it touches a workspace resource + repo trust). The tokens in the response are not stored.
 
   // Interactive terminal WebSocket (observability ⑥) — attach a noServer WS to Fastify's http.Server and handle
   // upgrades for /runs/:id/terminal?ticket=… . The ticket (minted by the authenticated POST above) is the auth;

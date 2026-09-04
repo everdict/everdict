@@ -6,7 +6,7 @@ import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 
-// Doc-only OpenAPI descriptors for workspace-shared runners (team tier, owner="ws:<workspace>") —
+// Doc-only OpenAPI descriptors for workspace-shared runners (owner="ws:<workspace>") —
 // rule api-layer: schemas document, never validate/serialize (the compilers are no-ops).
 // Values are widened to FastifySchema so Fastify does NOT narrow reply.code() to the documented status keys.
 const docs = {
@@ -14,7 +14,7 @@ const docs = {
     summary: "Workspace runner roster",
     description:
       "Every runner paired into this workspace — personal runners included (workspace-visibility roster, " +
-      "metadata only, never tokens). For the team-owned subset see GET /workspace/runners/owned. " +
+      "metadata only, never tokens). For the workspace-owned subset see GET /workspace/runners/owned. " +
       "Requires members:read.",
     tags: ["runner"],
     response: {
@@ -25,10 +25,10 @@ const docs = {
   pair: {
     summary: "Pair a workspace-shared runner",
     description:
-      'Registers a team resource (owner="ws:<workspace>", e.g. a shared build server): unlike a personal ' +
+      'Registers a workspace resource (owner="ws:<workspace>", e.g. a shared build server): unlike a personal ' +
       'runner (POST /runners, self-scoped), any member can target it via "self:ws:<id>" or the "self:ws" pool, ' +
       "and runs bill the workspace (workspace-pays). The plaintext rnr_ token appears exactly once (stored as " +
-      "a hash). Requires settings:write (admin — registering a team resource).",
+      "a hash). Requires settings:write (admin — registering a workspace resource).",
     tags: ["runner"],
     body: toJsonSchema(PairRunnerBodySchema),
     response: {
@@ -39,7 +39,7 @@ const docs = {
   owned: {
     summary: "List workspace-owned runners",
     description:
-      'Only the team-owned runners (owner="ws:<workspace>") — the roster route also includes personal runners ' +
+      'Only the workspace-owned runners (owner="ws:<workspace>") — the roster route also includes personal runners ' +
       "paired here. Requires settings:write (admin).",
     tags: ["runner"],
     response: {
@@ -50,7 +50,7 @@ const docs = {
   revoke: {
     summary: "Revoke a workspace-shared runner",
     description:
-      "Removes a team-owned runner (owner-scoped to ws:<workspace> — cannot touch personal runners). " +
+      "Removes a workspace-owned runner (owner-scoped to ws:<workspace> — cannot touch personal runners). " +
       "Requires settings:write (admin).",
     tags: ["runner"],
     params: toJsonSchema(z.object({ id: z.string().describe("Runner id") })),

@@ -25,31 +25,19 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
     try {
-      // ── OPENING A CAMPAIGN IS A WRITE INTO THE ISSUE'S TEAM (arch-review 78 P1-security) ────────────
-      //
-      // The campaign inherits the issue's team, so opening one against another team's private issue
-      // CREATES a row in that team's space — a write authorized by nothing but a workspace-level action.
-      // `IssueService.get` takes a tenant and a ref; team visibility is not one of its inputs, so knowing
-      // the id was enough. The team is resolved here and both questions are asked of it: may this caller
-      // SEE it (privacy), and may they WRITE to it (membership).
-      // ⚠️ NOT `deps.issueService?.get(...)` — and this file had that spelling for the length of one fix
-      // (arch-review 79). The optional call makes the whole team check evaporate when the tracker is absent:
-      // `undefined` reads as UNOWNED, which is allowed. A campaign whose authority cannot be established
-      // must not be opened.
+      // A campaign journals into an issue, so the issue is READ before the campaign opens — a campaign
+      // against an issue that is not there is a campaign about nothing, and the service would fail the same
+      // way, later and with a worse message.
+      // ⚠️ NOT `deps.issueService?.get(...)`: a `?.` here would make the read evaporate when the tracker is
+      // absent and open the campaign anyway, against nothing. If the service is not wired, refuse.
       if (!deps.issueService)
         return reply.code(404).send({
           code: "NOT_FOUND",
-          message: "issue service not configured — a campaign's team cannot be established",
+          message: "issue service not configured — a campaign's issue cannot be resolved",
         });
       const issue = await deps.issueService.get(principal.workspace, body.issueId);
       if (issue === undefined) return reply.code(404).send({ code: "NOT_FOUND", message: "issue not found" });
-      // …and now the gate's input is unambiguous. An `issue?.teamId` here would hand authorization an
-      // `undefined` that means "the issue is missing" while authz reads it as "no team constraint" — the
-      // permissive arm, reached for a reason that has nothing to do with the resource (arch-review 79).
       gate(principal, "scorecards:run");
-      // …and the SERVICE re-reads this issue to stamp the campaign's team, so the team it stamps must be the
-      // one this gate cleared. `POST /issues/:id/team` between the two reads would otherwise file a Team B
-      // campaign for a caller authorized only for Team A (arch-review 115).
       return reply.code(201).send(await deps.campaignService.open(principal.workspace, { ...body }, principal.subject));
     } catch (err) {
       return sendError(reply, err); // unknown issue → 404
@@ -88,15 +76,10 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
       return sendError(reply, err);
     }
     try {
-      const record = await deps.campaignService.get(principal.workspace, req.params.id);
-      // A private team's campaign reads as nonexistent to everybody else — the same 404 an absent one gets,
-      // so the surface does not leak which ids exist (arch-review 76 P1-security).
-      // ⚠️ THE ROW CHECKED IS THE ROW RETURNED (arch-review 83). This read the campaign twice — once to
-      // authorize, once to answer — so the value the check passed on was not the value the caller received.
-      // A campaign's team happens to be immutable after open, which makes this harmless TODAY and not a
-      // property to build on: rule `protocol` L1 asks the decision and the effect to rest on one read, and a
-      // second `get` is a second moment.
-      return reply.send(record);
+      // ONE read, and it is the row returned (arch-review 83): a door that reads once to check and once to
+      // answer has passed its check on a value the caller never receives. `get` is tenant-scoped, so another
+      // workspace's id is the same 404 an absent one gets and the surface leaks no existence.
+      return reply.send(await deps.campaignService.get(principal.workspace, req.params.id));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -198,23 +181,11 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
     } catch (err) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
-    // ── …AND AGAINST THE TEAM THAT OWNS THE THING BEING WRITTEN (arch-review 76 P1-security) ────────
-    //
-    // Preserving the owner team and being ALLOWED to write to it are different questions, and the first
-    // version answered only the first: the composition read the entity's team and registered the successor
-    // under it, while the route gated a workspace-level action with no resource scope. So a member of Team B
-    // holding `agents:write` could adopt a candidate owned by Team A and mint a Team-A-owned successor.
-    //
-    // The team model is explicit that READ is decided by team privacy and WRITE by team membership; a write
-    // gated without `{ teamId }` has asked neither question about the resource it is about to change.
-    //
-    // Declared out here so the EFFECT below can assert the same owner this block authorized against.
     try {
-      // ⚠️ NOT `deps.campaignService?.get(...)` (arch-review 78). The optional call made the campaign's team
-      // check vanish whenever the settlement service was absent — `undefined` reads as UNOWNED, which is
-      // allowed. That is the law this very wave wrote, broken by the security fix that carries it: a
-      // capability a protocol depends on is REQUIRED at the deciding seam, or its absence is a NAMED
-      // outcome. An adoption cannot be gated against a campaign nobody can read.
+      // ⚠️ NOT `deps.campaignService?.get(...)` (arch-review 78). A capability a protocol depends on is
+      // REQUIRED at the deciding seam, or its absence is a NAMED outcome — an optional call turns "we cannot
+      // read the campaign" into "there was nothing to check". An adoption cannot be spent against a campaign
+      // nobody can read.
       if (!deps.campaignService)
         return reply
           .code(404)
@@ -269,8 +240,8 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
   //
   // A build session boots the harness slot's base image, checks out the commit, runs the template's frozen
   // build steps, and publishes the result as one layer in the managed registry — Everdict builds it, no outside
-  // CI. Gated like a re-pin: the campaign's own team, and the harness family's write action, because the build
-  // mints a new harness instance version. The heavy work runs in the BACKGROUND after the record is created;
+  // CI. Gated like a re-pin — the harness family's write action — because the build mints a new harness
+  // instance version. The heavy work runs in the BACKGROUND after the record is created;
   // the caller gets the `building` record and waits on `campaign.candidate_built`.
   app.post<{ Params: { id: string } }>("/campaigns/:id/builds", { schema: campaignDocs.build }, async (req, reply) => {
     if (!deps.campaignBuild || !deps.campaignService)
@@ -403,8 +374,8 @@ export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): 
   // ── PAY THE CODE DEBT (docs/architecture/code-evolution-loop.md, D5) ─────────────────────────────
   //
   // The other half of `adopt`: the pull request the adopted bytes were built from lands on the default branch.
-  // Gated exactly like adopt — the campaign's own team, and the candidate family's write action against the
-  // entity's owner — because it is the same authorization being spent on its second effect. The repository and
+  // Gated exactly like adopt — the candidate family's write action — because it is the same authorization
+  // being spent on its second effect. The repository and
   // pull request are read off the STORED operation by the service; the body carries only the proof.
   app.post<{ Params: { id: string } }>("/campaigns/:id/merge", { schema: campaignDocs.merge }, async (req, reply) => {
     if (!deps.campaignAdoption)

@@ -8,7 +8,6 @@ import { workflowStateDocs } from "./workflow-state.docs.js";
 // without any of it reaching the release gate, the rollups or the regression watch, which all read the
 // canonical status.
 //
-// One board per workspace. It used to be a team's, and the addresses were `/teams/:id/states`; the workspace is
 // the only boundary now, so the board is workspace administration — read is `issues:read` (viewer+, the same
 // gate the tracker's content has, because knowing the column names is as benign as knowing the issues), and
 // every write is `settings:write` (admin), which is where shaping a workspace has always lived.

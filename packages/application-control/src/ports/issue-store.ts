@@ -51,7 +51,6 @@ export interface IssueListFilter {
   priorities?: IssuePriority[];
   assignees?: string[];
   projectIds?: string[];
-  cycleIds?: string[];
   // Labels are the one MANY-valued column: an issue carries a set, so a row matches when the two sets
   // intersect. That is the only reading a label filter can have — "has any of these labels".
   labelIds?: string[];
@@ -76,7 +75,7 @@ export interface IssueStore {
   get(tenant: string, id: string): Promise<IssueRecord | undefined>;
   // The addressable identity (`ENG-12`) — unique per workspace, so a link people paste resolves to exactly one
   // issue. Reads and mutations both arrive by it, because it is what the URL and the MCP tools carry.
-  // Implementations match the CURRENT identifier first and then the record's `formerIdentifiers`: a team move
+  // Implementations match the CURRENT identifier first and then the record's `formerIdentifiers`: a re-issue
   // re-mints the name, and a link that was correct when it was pasted has to keep working afterwards.
   getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined>;
   // The imported-copy identity — import dedup (re-importing the same GitHub issue is a no-op) and pull matching.
@@ -88,7 +87,6 @@ export interface IssueStore {
   // `list_issues` tool serve: implementations read only the projected columns, so an issue's description and
   // audit trail are never fetched — let alone parsed — to draw a row that shows neither.
   listSummaries(tenant: string, filter?: IssuePageFilter): Promise<IssuePage>;
-  // Issue counts per team in one aggregate. Absent teams simply have no entry (a team with no issues).
   // How many issues fall in each group under `filter` — what a GROUPED list's headers show. One aggregate, not
   // a count per group: a screen grouped by assignee would otherwise fire a query per member to learn how many
   // rows it is not showing. Groups come back largest-first; the unset bucket carries `key: null`.

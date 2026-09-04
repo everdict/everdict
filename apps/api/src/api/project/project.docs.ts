@@ -29,9 +29,8 @@ export const projectDocs: Record<
   create: {
     summary: "Create a project on the eval tracker",
     description:
-      "Group issues under one target date, optionally beneath an initiative. Names the team(s) working it — at " +
-      "least one, and naming none lands it on the workspace's default team; only those teams' issues may join " +
-      "it. The project starts `planned`; moves go through POST /projects/:id/status. Emits project.created. " +
+      "Group issues under one target date, optionally beneath an initiative. " +
+      "The project starts `planned`; moves go through POST /projects/:id/status. Emits project.created. " +
       "Requires issues:write.",
     tags: ["project"],
     body: toJsonSchema(CreateProjectBodySchema),
@@ -43,16 +42,14 @@ export const projectDocs: Record<
   list: {
     summary: "List the workspace's projects",
     description:
-      "The workspace's projects. Filter by status, by the initiative they sit under, or by the TEAM working " +
-      "them — a project NAMES its teams, so `team` is a containment test on that list and answers before the " +
-      "project has a single issue. Rows carry no rollup — read one project for its issue counts. Requires " +
+      "The workspace's projects. Filter by status or by the initiative they sit under. " +
+      "Rows carry no rollup — read one project for its issue counts. Requires " +
       "issues:read.",
     tags: ["project"],
     querystring: toJsonSchema(
       z.object({
         status: ProjectStatusSchema.optional(),
         initiative: z.string().optional(),
-        team: z.string().optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
       }),
     ),
@@ -76,10 +73,9 @@ export const projectDocs: Record<
   update: {
     summary: "Edit a project's content",
     description:
-      "Name, description, teams, umbrellas, target date. Status moves go through POST /projects/:id/status so " +
+      "Name, description, umbrellas, target date. Status moves go through POST /projects/:id/status so " +
       "a completion is never a side effect of a rename. null clears an optional field; a list replaces what is " +
-      "there. The team list may not be emptied, and removing a team whose issues are still in the project is a " +
-      "409 naming the count (move them out first). Requires issues:write.",
+      "there, so [] detaches every initiative. Requires issues:write.",
     tags: ["project"],
     body: toJsonSchema(UpdateProjectBodySchema),
     response: {

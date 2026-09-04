@@ -22,13 +22,12 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       {
         annotations: { readOnlyHint: true },
         description:
-          "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists. `team` narrows to one team's datasets (id or key, ENG) — what the team owns, not everything it can see.",
-        inputSchema: { team: z.string().optional().describe('only this team\'s datasets — id or key ("ENG")') },
+          "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists.",
+        inputSchema: {},
       },
-      ({ team }) =>
+      () =>
         run(principal, "datasets:read", async () => {
           // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-          // person's teams and no more. `team` is the NARROW on top of that ceiling, never a way past it.
           const visible = await datasets.list(ws);
           return ok(visible);
         }),
@@ -65,7 +64,6 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       },
       ({ id, base, candidate }) =>
         run(principal, "datasets:read", async () => {
-          // A private team's asset reads as one that does not exist — the guard its own `get_` sibling
           // already carries, on the door that returns the same bytes (arch-review 119).
           const [baseDs, candidateDs] = await Promise.all([
             datasets.get(ws, id, base),
@@ -117,18 +115,11 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
           "Register a Dataset (JSON string) as owned by the active workspace (versions immutable; re-registering the same id@version with different content is CONFLICT). Before registering, always confirm in order: (1) workspace — confirm with the user which workspace (fixed by credential, not changeable via a parameter). (2) id — one id groups multiple versions. If you are adding/editing cases in the same dataset, reuse the existing id and bump to a new 'version' (e.g. 1.0.0 → 1.1.0). Do not flatten into a new id each time. (3) version — a new semver that doesn't collide with an existing one. First check existing ids/versions via list_datasets/validate_dataset.",
         inputSchema: {
           dataset: z.string().describe("Dataset JSON (id·version·cases)"),
-          team: z
-            .string()
-            .optional()
-            .describe(
-              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
-            ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
         },
       },
-      ({ dataset, team, fromIssue, originNote }) =>
-        // must not be able to file a dataset under a team the person it acts for is not on.
+      ({ dataset, fromIssue, originNote }) =>
         run(ctx.principal, "datasets:write", async () => {
           let parsed: unknown;
           try {

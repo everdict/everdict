@@ -89,15 +89,9 @@ export function registerRubricTools(server: McpServer, ctx: McpToolContext): voi
           "Register a RubricSpec (JSON string) as owned by this workspace (referenced by judges as rubric:{id,version}; immutable; CONFLICT on collision)",
         inputSchema: {
           rubric: z.string().describe("RubricSpec JSON"),
-          team: z
-            .string()
-            .optional()
-            .describe(
-              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
-            ),
         },
       },
-      ({ rubric, team }) =>
+      ({ rubric }) =>
         run(ctx.principal, "judges:write", async () => {
           let parsed: unknown;
           try {

@@ -190,7 +190,6 @@ export class RuntimeDispatcher implements Dispatcher {
     // self:<runnerId> — a personally-owned self-hosted runner. Verify the submitter (submittedBy) owns that runner, then
     // route to the (tenant,owner,runnerId) backend. Targeting someone else's runner / an unknown owner is 404 (no existence leak + D3 isolation).
     if (target?.startsWith("self:") && this.deps.resolveSelfRunner && this.deps.buildSelfHostedBackend) {
-      // self:ws:<runnerId> = a workspace-shared runner (owner=ws:<tenant> — any member of this workspace can target it; team build server/CI).
       // self:<runnerId> = a personally-owned runner (owner=submitter — my runners only, D3). owner is derived from tenant, so membership is access.
       const rest = target.slice("self:".length);
       const workspaceShared = rest.startsWith("ws:");

@@ -8,7 +8,6 @@ import { trajectoryDocs } from "./trajectory.docs.js";
 // ── A FLAG THAT SILENTLY MEANS "NO" IS THE WRONG DIRECTION FOR THIS ONE (design review) ─────────────
 //
 // `resolve` was parsed as `=== "true" || === "1"`, copied from the notification route. This repo has two
-// spellings for a boolean query param and the other one — `z.enum(["true","false"])`, used by cycle, team
 // and fs — is what rule `api-layer` prescribes: validate, then 400. The difference matters more here than
 // for a list filter: a caller asking `?resolve=yes` because they are AUDITING the evidence a verdict was
 // reached on would silently receive the excerpt, which is the one answer this flag exists to let them

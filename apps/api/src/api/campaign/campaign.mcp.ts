@@ -393,7 +393,6 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         }
         const checked = CampaignAdoptionProofSchema.safeParse(parsedProof);
         if (!checked.success) return fail(`BAD_REQUEST: ${checked.error.message}`);
-        // The same two gates adopt carries — the campaign's own team and the entity's owner — because this is the
         // same authorization spent on its second effect (parity with the route).
         gate(principal, "scorecards:run");
         const candidate = checked.data.candidate;

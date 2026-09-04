@@ -188,7 +188,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
       {
         annotations: { readOnlyHint: false },
         description:
-          "Create an issue in a repository the workspace's GitHub App is installed on — returns the new issue number and URL. Use to file a bug or task on the team's behalf. member+ (github:write).",
+          "Create an issue in a repository the workspace's GitHub App is installed on — returns the new issue number and URL. Use to file a bug or task on the workspace's behalf. member+ (github:write).",
         inputSchema: {
           repository: z.string().min(1).describe('"owner/name"'),
           title: z.string().min(1).describe("issue title"),

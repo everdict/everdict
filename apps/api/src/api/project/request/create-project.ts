@@ -9,10 +9,8 @@ const CalendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected a Y
 export const CreateProjectBodySchema = z.object({
   name: z.string().min(1).max(300),
   description: z.string().max(50_000).optional(),
-  // The contributing teams and the umbrellas this project rolls up into — both lists, and both validated
   // against the workspace (unlike an issue LINK, which stays an unvalidated pointer): these edges decide which
   // sidebar the project appears in and which release gate counts it, so a dangling id would hide real work.
-  // Naming no team lands the project on the workspace's default team.
   initiativeIds: z.array(z.string().min(1).max(200)).max(20).optional(),
   // Who is answerable for it, and who is on it.
   lead: z.string().min(1).max(200).optional(),

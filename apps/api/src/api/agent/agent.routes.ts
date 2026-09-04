@@ -78,7 +78,6 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     // ── SAVING AN AGENT IS A WRITE TO SOMEBODY'S AGENT (arch-review 118) ──────────────────────────
     //
     // This gated a bare `agents:write` with no resource scope while the service PRESERVES the owner — so a
-    // member of another team saving over Team A's agent minted a new immutable Team-A-owned version they
     // were never authorized to write. Preserving an owner and being allowed to write to it are different
     // questions, which is the sentence the campaign adopt route already carries; arch-review 76 closed it at
     // the ADOPT door and did not look at the ordinary save door, where the same action mints the same kind
@@ -144,7 +143,6 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!principal) return reply;
     try {
       gate(principal, "agents:read");
-      // A private team's authored entry is that team's — the ceiling every other team-owned read stays under.
       const entries = await deps.agentRegistry.list(principal.workspace);
       return reply.send(entries);
     } catch (err) {

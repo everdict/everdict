@@ -11,8 +11,7 @@ export const pulseDocs: Record<"read", FastifySchema> = {
       "How the workspace is doing, in one read: the state right now (open issues, active cycles, goals at risk, " +
       "unfinished agent tasks, pending approvals) plus the trend over the last `days` days (recorded activity by " +
       "axis, issue flow in/out, evaluated pass rate). The trend is derived from the platform-event log, so it " +
-      "says what the log holds and stops at the deployment's retention edge. Counts are scoped to the teams the " +
-      "caller may read — a private team's work is not in them. Requires issues:read.",
+      "says what the log holds and stops at the deployment's retention edge. Requires issues:read.",
     tags: ["workspace"],
     querystring: toJsonSchema(
       z.object({

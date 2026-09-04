@@ -6,7 +6,7 @@ import { z } from "zod";
 // in. Without it a judge that an agent authored from an issue arrives in the workspace anonymous — the detail
 // view can name its creator and its content, and nothing else.
 //
-// It is METADATA BESIDE the spec, never a field inside it — the same rule `created_by`, `team_id` and version
+// It is METADATA BESIDE the spec, never a field inside it — the same rule `created_by` and version
 // tags already follow. Versions are immutable, so putting provenance in the spec would mean re-stating where
 // something came from mints a new version of content that did not change, and two versions born from the same
 // issue would stop being comparable.

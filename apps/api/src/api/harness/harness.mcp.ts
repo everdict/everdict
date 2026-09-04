@@ -28,12 +28,10 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
       "list_harnesses",
       {
         annotations: { readOnlyHint: true },
-        description:
-          "Harness instances this workspace sees (grouped by template; owned + _shared). `team` narrows to one " +
-          "team's own harnesses (id or key, ENG).",
-        inputSchema: { team: z.string().optional().describe('only this team\'s harnesses — id or key ("ENG")') },
+        description: "Harness instances this workspace sees (grouped by template; owned + _shared).",
+        inputSchema: {},
       },
-      ({ team }) =>
+      () =>
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
@@ -185,12 +183,6 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             .describe(
               "HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins, description? } (description = this version's changelog, optional)",
             ),
-          team: z
-            .string()
-            .optional()
-            .describe(
-              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
-            ),
           fromIssue: z.string().optional().describe(FROM_ISSUE_TOOL_DESCRIPTION),
           originNote: z.string().max(500).optional().describe(ORIGIN_NOTE_TOOL_DESCRIPTION),
           forkedFrom: z
@@ -201,7 +193,7 @@ export function registerHarnessTools(server: McpServer, ctx: McpToolContext): vo
             ),
         },
       },
-      ({ spec, team, fromIssue, originNote, forkedFrom }) =>
+      ({ spec, fromIssue, originNote, forkedFrom }) =>
         run(ctx.principal, "harnesses:register", async () => {
           let parsed: unknown;
           try {

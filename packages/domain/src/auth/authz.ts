@@ -75,18 +75,6 @@ export type Action =
   // creator-or-admin in the service, like skills and comments.
   | "issues:read"
   | "issues:write"
-  // Teams (records/team.ts) shape the workspace rather than fill it: creating one mints an identifier prefix
-  // every future issue inherits, and the roster decides whose list an issue lands in. That is administration,
-  // so it does not ride issues:write (member+) the way tracker CONTENT does — read stays viewer+ because
-  // knowing the teams is as benign as knowing the members.
-  | "teams:read"
-  | "teams:write"
-  // Joining/leaving a team YOURSELF (Linear's "Join teams"). Deliberately split from teams:write: managing
-  // someone else's roster is workspace administration, but putting yourself on a public team is how a member
-  // subscribes to a stream of work — honestly named as its own action (like images:push) rather than widening
-  // teams:write to member. The route only ever passes the caller's own subject, so the action cannot reach
-  // anyone else's membership. Viewer stays out: a read-only role does not mutate rosters.
-  | "teams:join"
   // Minting workspace image-registry push credentials — the only member action where a credential 'value' leaves to the caller,
   // so it's honestly named as a separate action instead of reusing harnesses:register (viewer+) (register/unregister = settings:write, read = harnesses:read).
   | "images:push"
@@ -131,7 +119,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "members:read", // reading the team (workspace members) is benign → viewer+
     "comments:read", // reading comments = benign (viewing collaborative discussion) → viewer+
     "issues:read", // reading the tracker (what the team is evaluating and why) is benign → viewer+
-    "teams:read", // knowing which teams exist is as benign as knowing the members → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -165,8 +152,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:write", // writing comments = collaborative content (discussing which model was run) → member+ (deletion = author-or-admin, service layer)
     "issues:read",
     "issues:write", // filing/resolving/linking tracker work = collaborative content → member+ (deletion = creator-or-admin, service layer)
-    "teams:read", // a member files into a team, so it must be able to list them (creating one stays admin)
-    "teams:join", // putting YOURSELF on (or off) a public team's roster — self-service, never someone else's membership
     "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
     "mattermost:post", // posting to the workspace Mattermost channel (using the integration) — a member's job, unlike admin-only registration (settings:write)
     "github:read", // reading repos/files/issues via the workspace App (using the integration) — the read half of github:write, same level: a role that may open a PR must be able to read what it is changing
@@ -222,9 +207,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "comments:write",
     "issues:read",
     "issues:write",
-    "teams:read",
-    "teams:write", // creating a team mints an identifier prefix + decides whose list issues land in → workspace administration
-    "teams:join",
     "images:push",
     "mattermost:post",
     "github:read",
@@ -277,7 +259,6 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "runtimes:write",
   "comments:write",
   "issues:write", // filing/resolving tracker work = content mutation (an agent triaging its own regressions needs it)
-  "teams:join", // joining/leaving a team oneself = subscribing to a stream of work, not roster governance
   "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)
   "mattermost:post", // posting to the workspace Mattermost channel = content mutation (using a configured integration)
   "github:write", // creating a GitHub issue/comment via the workspace App = content mutation (using a configured integration)

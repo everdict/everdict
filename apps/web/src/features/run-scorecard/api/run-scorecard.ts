@@ -9,7 +9,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 export interface RunScorecardInput {
   // The team this batch belongs to — the form's explicit pick. Absent = the control plane files the batch
   // under the team that owns the harness (the "follow the harness" default).
-  teamId?: string
   datasetId: string
   datasetVersion: string
   harnessId: string

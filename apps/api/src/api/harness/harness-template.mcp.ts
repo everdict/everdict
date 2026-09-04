@@ -12,12 +12,10 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
       "list_harness_templates",
       {
         annotations: { readOnlyHint: true },
-        description:
-          "Harness templates this workspace sees (categories; owned + _shared). `team` narrows to one team's " +
-          "own templates (id or key, ENG).",
-        inputSchema: { team: z.string().optional().describe('only this team\'s templates — id or key ("ENG")') },
+        description: "own templates (id or key, ENG).",
+        inputSchema: {},
       },
-      ({ team }) =>
+      () =>
         run(principal, "harnesses:read", async () => {
           const visible = await templates.list(ws);
           return ok(visible);
@@ -46,15 +44,9 @@ export function registerHarnessTemplateTools(server: McpServer, ctx: McpToolCont
           "Register a harness template (category structure, JSON string) (immutable; CONFLICT on clash). No gate (viewer+)",
         inputSchema: {
           spec: z.string().describe("HarnessTemplateSpec JSON"),
-          team: z
-            .string()
-            .optional()
-            .describe(
-              'the owning team — id or key ("ENG"). A team you are not on is refused. Absent: your own team, else the workspace default',
-            ),
         },
       },
-      ({ spec, team }) =>
+      ({ spec }) =>
         run(ctx.principal, "templates:write", async () => {
           let parsed: unknown;
           try {

@@ -96,13 +96,6 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!deps.modelService) return reply.code(404).send({ code: "NOT_FOUND", message: "model service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // ── SAVING A MODEL IS A WRITE TO SOMEBODY'S MODEL (arch-review 119) ──────────────────────────
-    //
-    // A bare `models:write` with no resource scope, while the service PRESERVES the owner — so a member of
-    // another team saving over Team A's model mints a new immutable Team-A-owned version they were never
-    // authorized to write. arch-review 118 wrote that sentence about the AGENT save door and closed only
-    // that one; there are three upsert doors and the capability one is covered by its service
-    // (creator-or-admin), which left this the last unguarded.
     try {
       gate(principal, "models:write");
     } catch (err) {
@@ -126,7 +119,6 @@ export function registerModelRoutes(app: FastifyInstance, deps: ServerDeps): voi
     if (!principal) return reply;
     try {
       gate(principal, "models:read");
-      // A private team's authored entry is that team's — the ceiling every other team-owned read stays under.
       const entries = await deps.modelRegistry.list(principal.workspace);
       return reply.send(entries);
     } catch (err) {

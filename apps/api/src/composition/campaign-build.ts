@@ -85,8 +85,7 @@ export function buildCampaignBuild(deps: CampaignBuildWiring): CampaignBuildServ
     campaigns: campaignDep,
     harness: harnessDep,
     // The candidate version is minted through the SAME re-pin door a headless CI re-pin uses (D2), so a build
-    // and a merge produce the same shape. The origin is the campaign; the owner is the harness\'s own team,
-    // which `repinHarnessImages` preserves.
+    // and a merge produce the same shape. The origin is the campaign.
     repin: async ({ tenant, by, id, pins, version, note }) => {
       const result = await repinHarnessImages(
         deps.instances,

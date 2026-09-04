@@ -663,8 +663,7 @@ describe("issue list — the grouped screen's query", () => {
 
 // A project's checkpoints, on the issues that are supposed to reach them. The project screen has counted the
 // issues on each milestone since it existed and every count was zero — not because nobody used them, but
-// because `milestoneId` was missing from the edit body, so zod stripped it before the service could store it
-// (the same omission `cycleId` had, one level up).
+// because `milestoneId` was missing from the edit body, so zod stripped it before the service could store it.
 describe("PATCH /issues/:id — the project checkpoint", () => {
   async function projectWithMilestone(app: ReturnType<typeof build>["app"], name = "conversation quality") {
     const project = (await app.inject({ method: "POST", url: "/projects", headers: H, payload: { name } })).json();

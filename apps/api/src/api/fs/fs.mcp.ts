@@ -73,7 +73,7 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
     {
       annotations: { readOnlyHint: false },
       description:
-        "Create or replace a file on the workspace filesystem (parents become directories implicitly), publishing it as a new revision attributed to you. Use this to persist task outputs — reports, extracted datasets, generated configs — as real files the team can browse. Text by default; pass encoding 'base64' for binary. Files cap at 5 MiB. " +
+        "Create or replace a file on the workspace filesystem (parents become directories implicitly), publishing it as a new revision attributed to you. Use this to persist task outputs — reports, extracted datasets, generated configs — as real files the workspace can browse. Text by default; pass encoding 'base64' for binary. Files cap at 5 MiB. " +
         "MODIFYING AN EXISTING FILE: pass `base_revision` — the `revision` you got from get_file. Members and other agents edit these files too, and without it your write silently overwrites whatever they published meanwhile. On CONFLICT the error carries the live content plus an attempted three-way merge: re-apply your change on top of it and write again (use the merged text when it has no conflict markers). Requires files:write.",
       inputSchema: {
         path: z.string().min(1).max(600),

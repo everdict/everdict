@@ -6,11 +6,9 @@ import { CreateTaskBodySchema } from "./request/create-task.js";
 import { UpdateTaskBodySchema } from "./request/update-task.js";
 
 // OpenAPI descriptors for the workspace task ledger (doc-only — never validates/serializes; see api/openapi.ts).
-// Tasks are the cross-turn, cross-agent coordination substrate (docs/architecture/agent-teams.md): workspace-
 // shared, any member/agent creates/claims/completes (shared mutation IS the coordination), delete = creator or
 // admin (decided in the service). Authz reuses the agent actions (no new action): read = agents:read, write =
 // agents:write. Lifecycle facts task.created/claimed/completed/cancelled feed the event log; created/completed
-// are trigger-matchable (the team wake-up pair).
 export const taskDocs: Record<"create" | "list" | "get" | "update" | "delete", FastifySchema> = {
   create: {
     summary: "Create a task on the workspace ledger",

@@ -172,5 +172,5 @@ const docs = {
   },
 } satisfies Record<string, FastifySchema>;
 
-// Widened re-export (team convention): keeps the doc attachment behavior-free (no reply.code() narrowing).
+// Widened re-export (repo convention): keeps the doc attachment behavior-free (no reply.code() narrowing).
 export const agentToolDocs: Record<keyof typeof docs, FastifySchema> = docs;

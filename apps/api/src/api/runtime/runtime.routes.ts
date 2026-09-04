@@ -95,7 +95,6 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
     if (!principal) return reply;
     try {
       gate(principal, "runtimes:read");
-      // A private team's registered infra is that team's — the ceiling every other team-owned read stays under.
       const entries = await deps.runtimeRegistry.list(principal.workspace);
       return reply.send(entries);
     } catch (err) {
@@ -134,7 +133,6 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
       if (!principal) return reply;
       try {
         gate(principal, "runtimes:read");
-        // A private team's runtime reads as one that does not exist — the guard `GET /runtimes/:id/versions`
         // already carries, on the door that resolves the same spec (arch-review 119).
         // get() 404s a non-owned / missing runtime (no existence leak) before any live I/O.
         const spec = await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version);

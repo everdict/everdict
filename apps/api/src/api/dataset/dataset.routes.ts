@@ -130,7 +130,7 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     });
   });
 
-  app.get<{ Querystring: { team?: string } }>("/datasets", { schema: datasetDocs.list }, async (req, reply) => {
+  app.get("/datasets", { schema: datasetDocs.list }, async (req, reply) => {
     if (!deps.datasetRegistry)
       return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -138,10 +138,6 @@ export function registerDatasetRoutes(app: FastifyInstance, deps: ServerDeps): v
     try {
       gate(principal, "datasets:read");
       const entries = await deps.datasetRegistry.list(principal.workspace);
-      // Two different narrows, in order. The CEILING is ownership: another team's dataset is not the caller's to
-      // see, so it never appears (an unowned `_shared` entry is the workspace's and always does). `?team=` is the
-      // NARROW on top of it — "of the ones I can see, this team's" — named by id or by key (`?team=ENG`), the
-      // same ref the team-scoped URL carries.
       const visible = entries;
       return reply.send(visible);
     } catch (err) {

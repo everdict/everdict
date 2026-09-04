@@ -18,8 +18,6 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
     if (!deps.environmentRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: missing });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // Resolve the owning team FIRST and gate against it — registering "as a team you are not on" is refused
-    // for the same reason writing another team's asset is (the sibling doors all do this).
     try {
       gate(principal, "datasets:write");
     } catch (err) {
@@ -52,7 +50,6 @@ export function registerEnvironmentRoutes(app: FastifyInstance, deps: ServerDeps
     if (!principal) return reply;
     try {
       gate(principal, "datasets:read");
-      // A private team's environment is that team's — the ceiling every other team-owned read stays under.
       const entries = await deps.environmentRegistry.list(principal.workspace);
       return reply.send(entries);
     } catch (err) {

@@ -140,7 +140,7 @@ export type AgentDefault = z.infer<typeof agentDefaultSchema>
 export const agentDefaultsSchema = z.object({ defaults: z.array(agentDefaultSchema) })
 
 // GET /agents 200 — 에이전트 id 당 한 항목(워크스페이스 소유 + _shared 폴백).
-// teamId/versionOrigins 는 다른 레지스트리 목록과 같은 팀·리니지 한 줄 — 파서가 벗겨내면 목록이 팀 축과
+// versionOrigins 는 다른 레지스트리 목록과 같은 리니지 한 줄 — 파서가 벗겨내면 목록이
 // "이 버전이 왜 존재하나"를 그릴 수 없다(review wave C).
 export const agentSummarySchema = z.object({
   id: z.string(),

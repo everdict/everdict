@@ -140,7 +140,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     }
   });
 
-  app.get<{ Querystring: { team?: string } }>("/harnesses", { schema: harnessDocs.list }, async (req, reply) => {
+  app.get("/harnesses", { schema: harnessDocs.list }, async (req, reply) => {
     if (!deps.harnessInstances)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);

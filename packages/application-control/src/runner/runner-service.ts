@@ -106,7 +106,7 @@ export class RunnerService {
     return (await this.store.listByWorkspace(workspace)).map(this.overlay);
   }
 
-  // Workspace-shared runner (team resource) — owner="ws:<workspace>". Unlike a personal runner (owner=subject), an admin registers it and
+  // Workspace-shared runner — owner="ws:<workspace>". Unlike a personal runner (owner=subject), an admin registers it and
   // any member of this workspace targets it (self:ws:<id>). Billing is the workspace's (not personal own-pays — later). Design:
   // docs/architecture/self-hosted-runtime-and-runners.md.
   private static wsOwner(workspace: string): string {

@@ -36,7 +36,6 @@ export async function createIssueAction(input: {
   // 하위 이슈로 접수 — 부모는 이 워크스페이스에 있어야 한다(제어 평면이 404 로 거절).
   parentId?: string
   // 바로 이터레이션에 넣기. 자기 팀의 사이클이어야 한다(제어 평면이 거절).
-  cycleId?: string
   projectId?: string
   assignee?: string
   labelIds?: string[]
@@ -64,7 +63,6 @@ export async function updateIssueAction(
     priority?: IssuePriority
     // 이터레이션에 넣고 빼기. 일을 주기로 끌어오는 것은 워크플로 전이가 아니라 계획 변경이라 평범한 편집이다
     // (제어 평면도 그렇게 본다). 자기 팀의 사이클만 받는다 — 다른 팀 것은 거절된다.
-    cycleId?: string | null
     // 프로젝트 체크포인트. 사이클과 같은 규칙이 한 단계 위에 있다 — 자기 프로젝트의 마일스톤만 받는다
     // (프로젝트가 없는 이슈에 걸면 "먼저 프로젝트에 넣으라"고 거절된다).
     milestoneId?: string | null

@@ -136,7 +136,6 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         if (measured !== undefined && would !== measured) refuseDigest(would);
         // ── THE ADOPTED VERSION STAYS WITH ITS TEAM, WITHOUT A WINDOW (wave C · 74 · 77) ─────────────
         //
-        // Ownership is read off the entity, so a successor registered with no team re-files the whole agent
         // ── LOCAL EXISTENCE, NOT RESOLVE-EXISTENCE (arch-review 115) ──────────────────────────────
         //
         // `has()` falls back to `_shared`, so a candidate that exists only there answered TRUE while this

@@ -13,7 +13,7 @@ import { type CollectTraceDeps, collectDeferredTrace } from "./collect-trace.js"
 export interface ExecuteCaseDeps extends CollectTraceDeps {
   dispatcher: Dispatcher;
   // Resolve a token for seeding a private repo (preferred) — workspace-owned GitHub App. If the case git URL's owner matches the workspace
-  // installation account, issue a repo-scoped installation token via that App (independent of the submitter's personal login, team-shared).
+  // installation account, issue a repo-scoped installation token via that App (independent of the submitter's personal login, workspace-shared).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // (legacy) personal connection — evalCase.env.source.connectionId → external-account connection token (personally owned, resolved by owner). Removed in S6.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;

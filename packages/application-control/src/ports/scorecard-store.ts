@@ -29,11 +29,10 @@ export interface ScorecardListFilter {
   // history on every navigation. Each one mirrors a facet the list offers.
   runtime?: string; // placement target (registered runtime id | self:* runner)
   createdBy?: string; // the submitter subject
-  // …and the SET forms, which are what a facet is. The singular fields above (and `dataset`/`harness`/
-  // `status`/`teamId`) are SCOPES: one value, decided by the address or by the detail-history read that asks
-  // ("this judge's evaluations", "this schedule's runs", "this team's page"). A facet is a question the
-  // reader asks of a list — "any of these" — so it is a set, and the two AND together exactly as the issue
-  // store's `teamId` and `statuses` do. Empty array = chosen and nothing matches, never "no filter".
+  // …and the SET forms, which are what a facet is. The singular fields above (`dataset`/`harness`/`status`)
+  // are SCOPES: one value, decided by the address or by the detail-history read that asks ("this judge's
+  // evaluations", "this schedule's runs"). A facet is a question the reader asks of a list — "any of these" —
+  // so it is a set, and the two AND together. Empty array = chosen and nothing matches, never "no filter".
   statuses?: ScorecardStatus[];
   datasets?: string[];
   harnesses?: string[];

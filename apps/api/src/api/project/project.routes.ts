@@ -63,9 +63,6 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
         status: ProjectStatusSchema.optional(),
         // "Which projects sit under this initiative" — the readiness page's drill-down.
         initiative: z.string().min(1).optional(),
-        // "Which projects is this team working on" — the sidebar's per-team Projects entry. A project NAMES
-        // its teams, so this is containment on the project itself, not a detour through its issues.
-        team: z.string().min(1).optional(),
         limit: z.coerce.number().int().positive().max(200).optional(),
       })
       .safeParse(req.query);
@@ -77,9 +74,6 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
         ...(initiative !== undefined ? { initiativeId: initiative } : {}),
         ...(limit !== undefined ? { limit } : {}),
       });
-      // A PRIVATE team's work is not the workspace's. A project names several teams and is visible when any one
-      // of them is — being on one of the teams doing the work is reason enough to see it. Public teams are
-      // unaffected, which is the point: this narrows what somebody opted to hide, nothing else.
       return reply.send(rows);
     } catch (err) {
       return sendError(reply, err);
@@ -99,9 +93,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ServerDeps): v
       return sendError(reply, err);
     }
     try {
-      const detail = await deps.projectService.detail(principal.workspace, req.params.id);
-      // Same answer a private team's issue gets: absent, not forbidden.
-      return reply.send(detail);
+      return reply.send(await deps.projectService.detail(principal.workspace, req.params.id));
     } catch (err) {
       return sendError(reply, err); // another workspace's id → 404 (tenant-scoped store, no existence leak)
     }

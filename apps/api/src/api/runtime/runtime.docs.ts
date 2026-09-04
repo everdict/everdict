@@ -154,6 +154,6 @@ const docs = {
   },
 } satisfies Record<string, FastifySchema>;
 
-// Widened re-export (team convention): the descriptors' literal response keys would otherwise make Fastify
+// Widened re-export (repo convention): the descriptors' literal response keys would otherwise make Fastify
 // narrow reply.code() in the handlers — the FastifySchema value type keeps the doc attachment behavior-free.
 export const runtimeDocs: Record<keyof typeof docs, FastifySchema> = docs;

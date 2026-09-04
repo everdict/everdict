@@ -1324,7 +1324,6 @@ async function main(): Promise<void> {
     workspaceFs,
     events: platformEventService,
   });
-  // Workspace task ledger (agent-teams): lifecycle facts (task.created/claimed/completed/cancelled) are
   // emitted here — the single choke point both transports call; created/completed are trigger-matchable.
   const taskService = new TaskService({ store: taskStore, events: platformEventService });
   // The eval tracker (docs/tracker.md). IssueService is the single choke point for tracker facts: every

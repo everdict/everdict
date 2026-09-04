@@ -32,7 +32,8 @@ export const CAPABILITY_HARVESTER = "capability_harvester_v1";
 // The registry metadata a spec does not carry itself. `tags` is here (not on the spec) for harnesses — a HarnessSpec has
 // no tags field; dataset/judge/runtime carry their own on the spec and ignore this. `origin` is the version's birth
 // stamp (CapabilityOrigin, stored beside the spec in the registry) — its `from` ref becomes the `born_from` lineage
-// edge; `teamId` is the owning team (also registry metadata) → `belongs_to`.
+// edge.
+
 export interface SpecHarvestMeta {
   tenant: string;
   createdAt: string;

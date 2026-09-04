@@ -7,7 +7,6 @@ import { CreateTaskBodySchema } from "./request/create-task.js";
 import { UpdateTaskBodySchema } from "./request/update-task.js";
 import { taskDocs } from "./task.docs.js";
 
-// The workspace task ledger (docs/architecture/agent-teams.md) — cross-turn, cross-agent coordination tasks.
 // Authz reuses the agent actions (no new action): read = agents:read, write = agents:write; delete additionally
 // requires creator-or-admin (decided in the service). Agent attribution (the forwarded conversation headers)
 // rides into the service so agent-created/claimed tasks stamp causedBy — the trigger loop guard.

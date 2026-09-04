@@ -33,7 +33,7 @@ export interface RunListOptions {
   // unlimited — so both read the entire ledger, including finished runs' snapshots, to find the few rows
   // that were still moving.
   //
-  // Applied in the QUERY, beside `viewer`/`visibleTeams` and for the same reason those are: a page narrowed
+  // Applied in the QUERY, beside `viewer` and for the same reason it is: a page narrowed
   // afterwards is the wrong size. Empty array = chosen and nothing matches, never "no filter".
   statuses?: readonly RunStatus[];
 }

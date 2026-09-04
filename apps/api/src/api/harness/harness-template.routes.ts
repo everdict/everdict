@@ -15,9 +15,6 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     const parsed = HarnessTemplateSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      // Decide the owning team first, then gate against it — registering is "make this the team's", so filing it
-      // under a team you are not on is refused for the same reason editing that team's work is. A template that
-      // named no team used to land UNOWNED, which made it the one capability the axis could not describe.
       gate(principal, "templates:write");
       await deps.harnessTemplates.register(principal.workspace, parsed.data, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
@@ -63,7 +60,6 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      // A private team's authored entry is that team's — the ceiling every other team-owned read stays under.
       const entries = await deps.harnessTemplates.list(principal.workspace);
       return reply.send(entries);
     } catch (err) {
@@ -83,7 +79,6 @@ export function registerHarnessTemplateRoutes(app: FastifyInstance, deps: Server
         gate(principal, "harnesses:read");
         const versions = await deps.harnessTemplates.versions(principal.workspace, req.params.id);
         if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "template not found." });
-        // A private team's template reads as one that does not exist — the guard the per-VERSION door beside
         // this one already carries, and the instance twin (`GET /harnesses/:id`) carries too (arch-review 119).
         return reply.send({ id: req.params.id, versions });
       } catch (err) {

@@ -250,7 +250,7 @@
 17	apps/web/src/features/manage-issue/api/issues.ts
 5	apps/web/src/features/manage-issue/lib/label-selection.ts
 1	apps/web/src/features/manage-issue/ui/create-issue-button.tsx
-11	apps/web/src/features/manage-issue/ui/create-issue-dialog.tsx
+9	apps/web/src/features/manage-issue/ui/create-issue-dialog.tsx
 7	apps/web/src/features/manage-issue/ui/edit-issue-dialog.tsx
 7	apps/web/src/features/manage-issue/ui/issue-actions.tsx
 5	apps/web/src/features/manage-issue/ui/issue-assignee-control.test.tsx
@@ -350,11 +350,10 @@
 3	apps/web/src/features/view-report-schedule/api/report-schedule-actions.ts
 3	apps/web/src/features/workspace-settings/api/workspace-meta.ts
 4	apps/web/src/instrumentation.ts
-4	apps/web/src/shared/auth/can.ts
 2	apps/web/src/shared/auth/principal.ts
 1	apps/web/src/shared/lib/agent-plane.ts
 29	apps/web/src/shared/lib/ansi.ts
-76	apps/web/src/shared/lib/control-plane.ts
+74	apps/web/src/shared/lib/control-plane.ts
 3	apps/web/src/shared/lib/http-bytes.test.ts
 15	apps/web/src/shared/lib/http-bytes.ts
 2	apps/web/src/shared/lib/image-resize.ts
@@ -397,7 +396,7 @@
 2	apps/web/src/widgets/app-shell/ui/app-shell.tsx
 1	apps/web/src/widgets/app-shell/ui/command-palette.tsx
 6	apps/web/src/widgets/app-shell/ui/nav-config.test.ts
-28	apps/web/src/widgets/app-shell/ui/nav-config.ts
+26	apps/web/src/widgets/app-shell/ui/nav-config.ts
 1	apps/web/src/widgets/app-shell/ui/nav-group-open.test.ts
 8	apps/web/src/widgets/app-shell/ui/nav-group-open.ts
 3	apps/web/src/widgets/app-shell/ui/settings-nav-config.ts

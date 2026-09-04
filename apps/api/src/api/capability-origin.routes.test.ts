@@ -419,9 +419,9 @@ describe("agent save origin — the upsert records why the version exists, and w
     });
   });
 
-  it("a BUMP stays with the team that owns the agent (review wave C)", async () => {
-    // Ownership is read off the newest version — a bump registered with no team moved the whole agent out
-    // of its team's list the moment the new version became latest. Seen RED: the entry's teamId vanished.
+  it("a BUMP over an existing agent mints the next PATCH version, not a new entry", async () => {
+    // A save over an id that already has versions is a bump, and it lands on the same entry — the registry
+    // resolves the newest own version and succeeds it. A second entry would split the agent's history in two.
     const { app, agents } = await buildWithAgents();
     await agents.register(
       "acme",
@@ -444,5 +444,9 @@ describe("agent save origin — the upsert records why the version exists, and w
     });
     expect(bumped.statusCode).toBe(200);
     expect((bumped.json() as { version: string }).version).toBe("1.0.1");
+    expect(await agents.ownVersions("acme", "helper"), "the bump split the agent into two entries").toEqual([
+      "1.0.0",
+      "1.0.1",
+    ]);
   });
 });

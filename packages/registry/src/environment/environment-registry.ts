@@ -7,9 +7,7 @@ import { VersionedStore } from "../versioned-store.js";
 export type { EnvironmentListEntry, EnvironmentRegistry } from "@everdict/application-control";
 import type { EnvironmentListEntry, EnvironmentRegistry } from "@everdict/application-control";
 
-// Delegates to the shared VersionedStore. The owner IS threaded (migration 0207 gives the table `team_id`, and
-// the Pg twin reads it): a twin that ignored the argument would make every unit assertion about an
-// environment's owning team green against a store that cannot hold one.
+// Delegates to the shared VersionedStore — the same machinery every other versioned registry uses.
 export class InMemoryEnvironmentRegistry implements EnvironmentRegistry {
   private readonly store = new VersionedStore<EnvironmentSpec>("environment");
 

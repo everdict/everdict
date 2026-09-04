@@ -339,8 +339,6 @@ export class ScorecardAnalyticsService {
   // Computed from the list (lightweight summary/models/origin) alone — ScorecardRecord structurally satisfies
   // AnalysisCard. Narrows dataset/harness at the SQL level when the filter pins exactly one (domain re-filters
   // defensively). docs/architecture/analysis-studio.md (V1).
-  // `visibleTeams` is a separate parameter rather than a field on the config on purpose: the config is parsed from
-  // the request body, and an ownership ceiling that a caller could type is not a ceiling.
   async analysis(tenant: string, config: AnalysisConfig): Promise<AnalysisResult> {
     const f = config.filters;
     const dataset = f.dataset?.length === 1 ? f.dataset[0] : undefined;

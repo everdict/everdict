@@ -55,8 +55,8 @@ export interface HarnessInstanceRegistry {
   getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
   versions(tenant: string, id: string): Promise<string[]>;
   // Only the versions this tenant registered DIRECTLY (no `_shared` fallback) — the question "is this the
-  // workspace's own harness, and whose is it here" that the private-team read ceiling and the ownership
-  // transfer both stand on.
+  // workspace's own harness, or one it merely resolves through the first-party fallback", which is what a
+  // conflict check and an adoption's "was a version BORN here" both stand on.
   ownVersions(tenant: string, id: string): Promise<string[]>;
   list(tenant: string): Promise<HarnessListEntry[]>;
   // The first-registrant subject of this harness id (no seed/shared) — for verifying the owner of a private (references a personal secret) harness.

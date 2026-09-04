@@ -22,8 +22,6 @@ export interface PgVersionedStoreConfig<T> {
   parse: (v: unknown) => T;
   softDelete?: boolean; // table has a deleted_at column → reads filter it out, register revives, softDelete exposed
   createdBy?: boolean; // table has a created_by column → INSERT stamps it, creatorOfVersion + list createdBy derive from it
-  // table has a team_id column (migration 0106) → INSERT stamps it and teamOfVersion reads it. Ownership is
-  // metadata beside created_by, never inside the versioned spec: transferring it must not mint a new version.
   tags?: boolean; // table has a tags jsonb column (migration 0047/0054) → setVersionTags/versionTags + list versionTags
   // table has an origin jsonb column (migration 0111) → INSERT stamps it and listMeta/versionOrigins read it.
   // Provenance beside created_by, never inside the spec (see records/capability-origin.ts).

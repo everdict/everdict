@@ -129,7 +129,7 @@ export interface McpDeps {
   campaignBuild?: CampaignBuildService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/list/get
   taskService?: TaskService; // workspace task ledger — cross-agent coordination
-  // The eval tracker (docs/tracker.md) — an agent triages its own regressions through these.
+  // The eval tracker (docs/tracker.md) — an agent works its own regressions through these.
   issueService?: IssueService;
   issueLabelService?: IssueLabelService;
   projectService?: ProjectService;

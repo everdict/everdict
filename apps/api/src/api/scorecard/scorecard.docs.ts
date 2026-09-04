@@ -159,21 +159,20 @@ const docs = {
     summary: "Count the workspace's scorecards per group",
     description:
       "How many batches fall in each bucket under the SAME filter GET /scorecards takes — the headers of a " +
-      "grouped list, and its total. `groupBy` is day | status | harness | dataset | team | creator; `day` is " +
+      "grouped list, and its total. `groupBy` is day | status | harness | dataset | creator; `day` is " +
       "the stored instant's UTC calendar day, which is the key the day grouping buckets a row under (a " +
       "header counted in one timezone over rows bucketed in another disagrees with itself twice a day). " +
-      "Buckets with no rows are absent, and `key: null` is the unset bucket (no team, no creator). A paged " +
+      "Buckets with no rows are absent, and `key: null` is the unset bucket (no creator). A paged " +
       "screen cannot get these numbers from its own rows — counting what it received only reports the page " +
       "size back. Requires scorecards:read.",
     tags: ["scorecard"],
     querystring: toJsonSchema(
       z.object({
-        groupBy: z.enum(["day", "status", "harness", "dataset", "team", "creator"]),
+        groupBy: z.enum(["day", "status", "harness", "dataset", "creator"]),
         judge: z.string().optional(),
         schedule: z.string().optional(),
         dataset: z.string().optional(),
         harness: z.string().optional(),
-        team: z.string().optional(),
         status: ScorecardStatusSchema.optional(),
         runtime: z.string().optional(),
         creator: z.string().optional(),
@@ -186,7 +185,7 @@ const docs = {
         description: "Per-group counts and their total",
         ...toJsonSchema(
           z.object({
-            groupBy: z.enum(["day", "status", "harness", "dataset", "team", "creator"]),
+            groupBy: z.enum(["day", "status", "harness", "dataset", "creator"]),
             groups: z.array(z.object({ key: z.string().nullable(), count: z.number().int() })),
             total: z.number().int(),
           }),
@@ -214,7 +213,6 @@ const docs = {
         schedule: z.string().optional().describe("Narrow to the runs a schedule fired (its run history)"),
         dataset: z.string().optional().describe("Narrow to batches run on this dataset (any version)"),
         harness: z.string().optional().describe("Narrow to batches run with this harness (any version)"),
-        team: z.string().optional().describe('Narrow to one owning team (id or key, e.g. "ENG")'),
         status: ScorecardStatusSchema.optional().describe("Narrow to one batch status"),
         runtime: z.string().optional().describe("Narrow to the runtime the batch ran on"),
         creator: z.string().optional().describe("Narrow to the submitter (subject)"),

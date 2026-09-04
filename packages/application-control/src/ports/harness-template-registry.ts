@@ -20,6 +20,6 @@ export interface HarnessTemplateRegistry {
   get(tenant: string, id: string, ref?: string): Promise<HarnessTemplateSpec>;
   versions(tenant: string, id: string): Promise<string[]>;
   ownVersions(tenant: string, id: string): Promise<string[]>;
-  // before the axis), which is the workspace's. Surfaced because the read applies the visible-team ceiling.
+  // before the axis), which is the workspace's.
   list(tenant: string): Promise<HarnessTemplateListEntry[]>;
 }

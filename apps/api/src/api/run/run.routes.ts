@@ -128,7 +128,6 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
       const runs = await deps.service.list(principal.workspace, {
         ...opts,
         viewer: principal.subject,
-        // Second ceiling, orthogonal to the audience one above: a private team's runs are that team's work.
       });
       // A batch's children include superseded attempts; the receipt ledger says which row each case's answer
       // is. ONE ledger read per request (never per row), over the children this viewer may actually see.

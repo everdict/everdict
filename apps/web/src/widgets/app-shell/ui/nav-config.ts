@@ -6,7 +6,6 @@ import {
   CircleDot,
   ClipboardCheck,
   Database,
-  Ellipsis,
   FolderKanban,
   Gavel,
   LayoutDashboard,
@@ -19,7 +18,6 @@ import {
   Target,
   Terminal,
   Users,
-  UsersRound,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
@@ -50,11 +48,9 @@ export interface NavSection {
 // 뒤로 미루는 것과, 축 하나를 통째로 감추는 것은 다른 일이다. 에이전트는 매일 쓰는 축이라 접힌 채로 시작하던
 // 것을 되돌렸다 — 접힌 그룹은 "이 제품에 그런 게 있다"는 사실 자체를 화면에서 지운다.
 
-// Issues are NOT a top-level entry: every issue carries a required `teamId` and its identifier is minted by the
-// team (`ENG-123`), so the team is where issues live, not a filter over a global list. Each team in the sidebar's
-// "Your teams" group owns its Issues (and a team-scoped Projects view) — see TeamsNav in sidebar.tsx. The
-// `/issues` route still exists (workspace-wide, reachable by URL and from the command palette); it just is not
-// the way you navigate to work, which is what made the team axis invisible before.
+// Issues ARE a top-level entry. They were not, while a team minted the identifier and owned the list, and the
+// sidebar's "Your teams" group was where you found them; the workspace is the only boundary now, so there is
+// ONE list and it belongs at the top with the rest of the tracker.
 // The sidebar leads with the TRACKER (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue. That is the deliberate
 // order of the product's questions: "why are we evaluating this, and can we ship" comes first, and the eval
 // The second group is the AGENT — what it can use and what it knows. Tools · skills · knowledge were
@@ -118,29 +114,14 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Bookmark,
         keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
       },
-      // These are APP routes, not /settings ones: looking up a team or a person is reading, and reading should
-      // not hand the sidebar over to configuration. The settings pages still exist and own the other half —
-      // /teams and /members browse (teams:read · members:read, viewer+), Settings creates·renames·invites·
-      // changes roles (teams:write · members:write, admin). Each links to the other for whoever may do both.
+      // An APP route, not a /settings one: looking up a person is reading, and reading should not hand the
+      // sidebar over to configuration. The settings page owns the other half — this browses
+      // (`members:read`, viewer+), Settings invites and changes roles (`members:write`, admin).
       {
         href: '/members',
-        labelKey: 'more',
-        icon: Ellipsis,
-        keywords: 'more member team roster 더보기 멤버 팀',
-        children: [
-          {
-            href: '/members',
-            labelKey: 'members',
-            icon: Users,
-            keywords: 'member people directory who 멤버 사람 디렉토리',
-          },
-          {
-            href: '/teams',
-            labelKey: 'teams',
-            icon: UsersRound,
-            keywords: 'team directory browse key 팀 목록',
-          },
-        ],
+        labelKey: 'members',
+        icon: Users,
+        keywords: 'member people directory who 멤버 사람 디렉토리',
       },
     ],
   },

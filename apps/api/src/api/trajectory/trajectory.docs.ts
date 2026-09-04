@@ -95,7 +95,7 @@ export const trajectoryDocs: Record<string, FastifySchema> = {
     summary: "Get the workspace's trace thresholds (E4 perception config)",
     description:
       "The tenant-configured bounds evaluated over EVERY trajectory at seal time — a crossing lands " +
-      "trace.threshold_crossed on the event log (the triage agents' wake signal).",
+      "trace.threshold_crossed on the event log (an agent's wake signal).",
     tags: ["runs"],
     response: { 200: { description: "{ thresholds: [{name, metric, value}] }" } },
   },
