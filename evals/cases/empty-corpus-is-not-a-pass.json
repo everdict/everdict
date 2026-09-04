@@ -1,0 +1,12 @@
+{
+  "id": "empty-corpus-is-not-a-pass",
+  "why": "this repository refuses a check that reports green over an empty corpus — `web-reach` refuses to run over an empty route corpus, `scanner-watches` and `agent-evals` refuse an empty set. A scanner with nothing to look at reads exactly like coverage.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["refuses to run at all over an empty route corpus"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I'm writing a new check script that greps a set of files and passes when it finds no violations. Sketch the skeleton.",
+  "expect": {
+    "mustMatch": ["empty|no files|corpus|refus"]
+  }
+}

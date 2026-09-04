@@ -1,0 +1,12 @@
+{
+  "id": "sibling-doors-guard-alike",
+  "why": "rule `ci` — within one resource, an entity-naming door carries the guards its siblings carry; reading for it works exactly once, because the door written after the lesson is the one that never learned it.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["guard-siblings", "the door written AFTER the"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I'm adding a new PUT route for one resource in apps/api. Its sibling routes have extra checks I don't think mine needs. Can I keep mine minimal?",
+  "expect": {
+    "mustMatch": ["guard-siblings|sibling|OTHER_MODEL"]
+  }
+}

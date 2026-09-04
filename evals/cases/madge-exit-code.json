@@ -1,0 +1,12 @@
+{
+  "id": "madge-exit-code",
+  "why": "rule `ci` — madge EXITS 1 when it finds cycles, so the first draft's plain `execFileSync` threw on the only interesting case and the check would have passed exactly when there was something to report.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["madge EXITS 1 when it finds cycles"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I'm writing a circular-import check that shells out to madge and fails when it finds cycles. Sketch the exec call.",
+  "expect": {
+    "mustMatch": ["exit|status|nonzero|non-zero"]
+  }
+}

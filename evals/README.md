@@ -115,6 +115,19 @@ commit to trigger on. **There is no unattended answer to it here**, because that
 repository chose not to hold them. `pnpm agent-evals --model <alias>` asks it by hand. Removing this section
 is the definition of done for that debt.
 
+## Growing the suite
+
+The article's baseline is 20–50 real tasks. This one went 1 → 6 → 13, and every case after the first six came
+from a ⚠️ block in `.claude/rules/ci.md` — that file is a list of incidents with their repairs, which is
+exactly the raw material a case is made of. Writing eight took one pass; two were refused at load because
+their `neutralize` strings did not match a live line, which is the check doing its job before a run was paid
+for; one was retired after the run (`RETIRED.md`).
+
+The pattern that keeps working: take an incident, ask what a person would actually say at the moment it
+happened, and assert on the artifact a correct answer must name. The pattern that keeps failing is asserting
+on a word — three cases have now gone red against correct answers for that reason, the last one against an
+answer that named `--no-verify` only to say it does not help.
+
 ## What the runs cost, and what they bought
 
 Calibration is not overhead; it is the work. Every one of these was found by running the suite, not by reading

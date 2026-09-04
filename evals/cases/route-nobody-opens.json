@@ -1,0 +1,12 @@
+{
+  "id": "route-nobody-opens",
+  "why": "rule `ci` — a door nobody opens looks exactly like a door nobody needed; a census found 39 browser-facing routes the web could not reach, and a deliberate agent-only surface was indistinguishable from an unbuilt page.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["web-reach", "door nobody opens looks exactly like"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I just added a new browser-facing route to apps/api and the web app does not call it yet. Is that fine to push?",
+  "expect": {
+    "mustMatch": ["web-reach|DECIDED|OWED|reachable"]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "allowlist-rebuild-eats-fields",
+  "why": "rule `ci` — `DispatchOptions` is taken apart into a QueueEntry and rebuilt at `runOne`; that rebuild is an allowlist and has silently eaten two fields, the second while the block carried two comments warning about the first.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["option-forwarding", "rebuild is an allowlist"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I'm adding a new field to DispatchOptions in this repo. Anything I should watch out for beyond updating the interface?",
+  "expect": {
+    "mustMatch": ["rebuild|allowlist|QueueEntry|runOne|forward"]
+  }
+}

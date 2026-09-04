@@ -35,3 +35,25 @@ matches on.
 **The lesson, which cost two drills:** not every convention needs an eval. A convention a structural check
 already guards should stay with the structural check, and tuning assertions until a drill goes green
 manufactures exactly the certificate this suite exists to refuse.
+
+## `scanner-blind-to-composition-root` — recall, not steering
+
+Asked whether `apps/*/src/**/*.ts` sweeps every TypeScript source file under the apps. The recorded lesson is
+that it does **not** match a file directly under `src/`, so `main.ts`, `server.ts` and `mcp.ts` — the
+composition roots where wiring lives — were invisible to a scanner's first draft, and a correctly-wired guard
+was reported unwired.
+
+The answer was substantively good and about something else: it caught the missing `.tsx` files and the config
+files outside `src/`, and stated that the glob covers "every `.ts` file under each app's `src/`" — which is the
+exact misconception. So the case did detect a real gap in what the agent reaches for.
+
+Retired anyway. The lesson is a **scanner-implementation detail** that lives correctly in that scanner's own
+header and in rule `ci`, where it is injected at the moment somebody edits such a file. Moving it into
+`CLAUDE.md` to make the case pass would be the third such move in one session, and the first two were
+disciplines (a false-green lint gate, a skipped certification) while this is a fact about one glob. An eval
+that asserts a cold session recalls a technical detail is testing recall; this suite is for whether the
+configuration STEERS.
+
+The distinction is the useful part: a lesson belongs in the always-loaded layer when acting on the wrong belief
+does damage before anyone reads a rule. Here the rule arrives exactly when it is needed — at the keyboard, in
+the file being edited.

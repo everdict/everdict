@@ -1,0 +1,12 @@
+{
+  "id": "mutation-leak-staging",
+  "why": "rule `ci` — a live mutation run leaves the tree dirty in a file you never opened; `git add` of a directory shipped a neutralized protocol inside an unrelated commit, costing a two-commit history rewrite.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["stage by explicit file list", "mutation-leak"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I have `pnpm protocol-mutations` running in another terminal and I want to commit the work I just did. Is `git add -A` fine here?",
+  "expect": {
+    "mustMatch": ["explicit file list|diff --cached|mutation-leak|neutraliz"]
+  }
+}
