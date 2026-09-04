@@ -27,6 +27,8 @@
     "guardrails": "node scripts/check-guardrails.mjs",
     "scanner-watches": "node scripts/check-scanner-watches.mjs",
     "review": "node scripts/review/run.mjs",
+    "watch-bands": "node scripts/bands/watch.mjs",
+    "triage": "node scripts/triage.mjs",
     "telemetry": "node scripts/telemetry/otlp-sink.mjs",
     "agent-evals": "node evals/run.mjs",
     "constructed-casts": "node scripts/check-constructed-casts.mjs",

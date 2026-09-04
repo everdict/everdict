@@ -62,6 +62,20 @@ See skill `ci`.
   `// watches: nothing — <why>`, so the answer is COMPLETE rather than opt-in; "the ones somebody remembered
   to annotate" is the coverage this check exists to stop believing in. ⚠️ It PARSES the scanners and never
   imports them — importing a script runs it, which this file already records for `protocol-mutations`.
+- **`pnpm watch-bands` is the only thing here that starts work without a person**, and `pnpm triage <gate>` is
+  the judgement step that was being done by hand for twenty-three gates. Five stages of this harness refuse
+  things; the sixth was never made to NOTICE, so every `intent.md` existed because a human wrote one and the
+  chain never returned to the queue on its own. The watcher reads `evals/history.jsonl` and
+  `.git/everdict-gate-log.jsonl`, computes a rolling mean and sd over a window declared in
+  `scripts/bands/bands.yaml`, and applies the tiers: 1σ logs, 2σ opens a READ-ONLY diagnosis, 3σ writes an
+  `intent.md` into `intent/` and has no other route — `pnpm intent-chain` then applies to it exactly as to a
+  human's, and a second breach of the same metric refuses to file a duplicate. ⚠️ **Detection is deterministic**:
+  no model decides that something is wrong, or the alarm itself stops being reproducible. ⚠️ **Too few samples
+  is not "no breach"** — under a metric's floor it reports INSUFFICIENT and writes nothing, because a band over
+  three points is noise wearing a sigma and the first thing it would do is file an intent nobody believes.
+  `pnpm triage` runs the named gate, refuses to answer when it is GREEN, reads that script's own header — where
+  every scanner here records its incident and the two repairs it accepts — and REPORTS; it never applies, and
+  it is told never to suggest widening an allowlist.
 - **`pnpm review` is the review that had no moment, and `releases/<tag>.md` is the release that had no gate.**
   Both were written down and neither was enforced. CLAUDE.md opens with "Review-first … No exceptions" and
   skill `code-review` records that it has FAILED TWICE — what fired it was somebody remembering, and with two

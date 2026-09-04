@@ -79,5 +79,16 @@ prompt or response text.
   started before anything reads it.
 - **The ledgers do not travel.** A second checkout starts with no history of what its gates decided. For one
   maintainer this costs nothing; it is the first thing to revisit if that changes.
-- **Nothing watches these files.** Detection that turns a drift into an `intent.md` — the closing-the-loop
-  play — has no subject until the baseline exists.
+- **The watcher exists and has nothing to band yet.** `pnpm watch-bands` reads these ledgers, computes rolling
+  bands from `scripts/bands/bands.yaml`, and at 3σ files an `intent.md` into the queue with no person in the
+  path — proven against a synthetic series at 3.32σ. Against the real ones it reports INSUFFICIENT, because
+  the baseline started on 2026-09-05: 0/8 eval runs, 11/20 gate decisions, 1/6 reviews. That is the correct
+  answer and the reason recording started before anything read it.
+
+## Reading them
+
+| Question | Command |
+|---|---|
+| has anything drifted? | `pnpm watch-bands` (`--dry-run` to see what it would file) |
+| why is this gate red? | `pnpm triage <gate>` — runs it, reads its header, reports, never applies |
+| what has the gate refused? | `.git/everdict-gate-log.jsonl`, grouped by `arm` |

@@ -1,0 +1,57 @@
+# Control bands over the indicators this harness produces about itself.
+#
+# Versioned on purpose: a band changed in a terminal is an alarm nobody can reproduce, and the first question
+# about any breach is what the threshold was at the time. Detection is entirely deterministic — no model
+# decides whether something is wrong. The model is invoked once a band is breached, and the tier decides what
+# it may do.
+#
+# The window is in SAMPLES rather than days because these indicators are produced by acts, not by clocks: a
+# quiet week has no runs, and dividing by elapsed time would read that as a collapse.
+#
+# `floor` is the number of samples below which no band is computed at all. Under it the watcher reports
+# INSUFFICIENT and writes nothing — a band over three points is noise wearing a sigma, and the first thing it
+# would do is file an intent nobody believes.
+
+version: 1
+
+tiers:
+  1sigma:
+    action: log
+  2sigma:
+    action: diagnose # a read-only session; it may look, it may not act
+    tools: "Read,Grep,Glob"
+  3sigma:
+    action: propose # writes intent/<date>-<slug>/intent.md and nothing else
+    routes: [intent]
+
+metrics:
+  - id: eval-pass-rate
+    source: evals-history
+    field: passRate
+    window: 20
+    floor: 8
+    direction: down # only a FALL is a breach; a suite that suddenly passes more is not an incident
+    why: >
+      The configuration that steers the agent stopped carrying a lesson it used to carry. This is the one
+      indicator here that is about behaviour rather than about the tree.
+
+  - id: gate-denial-rate
+    source: gate-log
+    field: denyRate
+    window: 40
+    floor: 20
+    direction: up
+    why: >
+      A rising share of pushes refused means either the gates got stricter or the work got sloppier, and the
+      arm breakdown in the same record says which. A fall is not a breach: it is what a working harness looks
+      like.
+
+  - id: review-important-rate
+    source: review-reports
+    field: importantPerReview
+    window: 12
+    floor: 6
+    direction: up
+    why: >
+      Important findings per review, rising. Either the code is getting worse or the reviewer is getting
+      louder; the reports name files, so the difference is checkable.
