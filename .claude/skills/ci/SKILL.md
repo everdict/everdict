@@ -81,4 +81,9 @@ you work. One of them does: **`pnpm intent-chain`** enforces the Plan→Build ha
 `plan.md` must be committed in a LATER commit than the `intent.md` it cites. Writing both in one commit fails
 the gate — by design, because that is the shape a plan written after the diff takes. See `intent/README.md`.
 
+**`pnpm agent-evals`** is the second stamp the push gate asks for. It is not part of `ci:local` and not in
+CI; a push that CHANGES `CLAUDE.md`, `.claude/**` or `evals/**` is denied unless a green run has stamped HEAD
+in `.git/everdict-evals-ok`. Editing a skill therefore costs one ~90s run before you can push it. Ordinary
+pushes never meet the arm. See `evals/README.md`.
+
 See rule `ci.md` for the pushed critical rules.

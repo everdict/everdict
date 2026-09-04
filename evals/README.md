@@ -72,20 +72,37 @@ A killed drill leaves neutralized files behind (a `finally` does not run when th
 records what it touched in `.git/everdict-eval-drill-stale` and refuses to start again until they are
 restored — `git checkout -- <the files it names>`.
 
-## Why this is not in `pnpm ci:local`
+## Where it is enforced — the push gate, not CI
 
-For the reason `protocol-mutations` left it: a gate that makes every iteration wait gets removed, and then
-nothing runs at all. The suite is triggered by what it tests — any change to `CLAUDE.md`, `.claude/**` or
-`evals/**` — plus a nightly run, because a model change moves the answer with no commit at all.
+Not in `pnpm ci:local`, for the reason `protocol-mutations` left CI: a gate that makes every iteration wait
+gets switched off, and then nothing runs. Not in GitHub Actions either, and that one is worth stating plainly
+— **the suite never needed an API key.** Five local runs used the machine's existing login, which is the same
+principle this repository already states for the execution layer: *"for LocalDriver the harness uses the
+machine's existing login (no API key)."* A GitHub runner is a bare machine with no login, so running it there
+would require an `ANTHROPIC_API_KEY` secret — a cost of the delivery choice, not of the thing delivered.
 
-## The first CI run will fail
+So it is enforced where enforcement already lives. `scripts/hooks/pre-push-gate.mjs` denies a push whose
+commits are not in the CI-parity ledger; it now also denies a push that **changes** `CLAUDE.md`, `.claude/**`
+or `evals/**` unless `.git/everdict-evals-ok` stamps the current HEAD. A green `pnpm agent-evals` writes that
+stamp. A push that leaves the configuration alone never meets the arm.
 
-`.github/workflows/agent-evals.yml` needs `ANTHROPIC_API_KEY` in the repository secrets. Until it is there,
-the job fails and says so. That is the intended behaviour: a suite that reports green because it never
-executed is strictly worse than none, which is the rule this repository already applies to a trust scenario
-that skips.
+The stamp attests a COMMIT, so a run over dirty configuration declines to write one and says so: the suite
+overlays the working tree's `CLAUDE.md`/`.claude` into its worktree precisely so an edit can be tested before
+it is committed, and that is the same reason such a run cannot then vouch for HEAD. `--only` never stamps —
+it answers about one case, and the gate asks about the configuration.
 
-## What the first five runs cost, and what they bought
+Unlike the CI ledger, the eval stamp is **tip-only**. That one is per-commit because a bisect lands on an
+intermediate commit; nobody bisects a skill's wording.
+
+## Owed: the model-swap question
+
+*"When a new model is swapped in, does the agent still do the work to the same standard?"* — the article's
+other question, and the reason a scheduled run exists at all, since a model change moves the answer with no
+commit to trigger on. **There is no unattended answer to it here**, because that needs CI credentials and this
+repository chose not to hold them. `pnpm agent-evals --model <alias>` asks it by hand. Removing this section
+is the definition of done for that debt.
+
+## What the runs cost, and what they bought
 
 Calibration is not overhead; it is the work. Every one of these was found by running the suite, not by reading
 it — and four of the six were defects in the suite itself, which is the ordinary case.

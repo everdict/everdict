@@ -44,10 +44,39 @@ const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf
 // TIP must be `full`: the expensive checks — gitleaks over all history, the web build, the mutation suite —
 // answer questions about the tree being published, while lint/typecheck/test are what bisect actually lands
 // on. `pnpm ci:commits` fills the intermediate ones.
+// ⚠️ A LEDGER THAT CANNOT BE READ IS A DENY, NEVER A CRASH. This read had no guard, so on a checkout that
+// had never been gated `readFileSync` threw — and a PreToolUse hook that exits non-zero without writing a
+// decision lets the tool call through. The gate failed OPEN on precisely the state that means "nothing here
+// has ever been gated". `deny()` is used for it, because "cannot find out" is an escalation, not a pass.
+const deny = (reason) => {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: `${reason} See .claude/rules/ci.md.`,
+      },
+    }),
+  );
+  process.exit(0);
+};
+
+const readLedger = (name, missing) => {
+  try {
+    return readFileSync(path.join(root, ".git", name), "utf8")
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    deny(missing);
+    return []; // unreachable; deny() exits
+  }
+};
+
 const ledger = new Map();
-for (const line of readFileSync(path.join(root, ".git", "everdict-ci-ok"), "utf8")
-  .split("\n")
-  .filter(Boolean)) {
+for (const line of readLedger(
+  "everdict-ci-ok",
+  "git push blocked: no CI-parity ledger (.git/everdict-ci-ok) — nothing in this checkout has ever been gated. Run `pnpm ci:local`.",
+)) {
   const [sha, level] = line.split(" ");
   // A bare sha predates the ledger and attested the full gate.
   if (sha !== undefined) ledger.set(sha, level ?? "full");
@@ -66,8 +95,40 @@ const pushed = haveBase
       .filter(Boolean)
   : [head];
 
+// ── THE CONFIGURATION THAT STEERS THE AGENT IS TESTED TOO ────────────────────────────────────────
+//
+// `pnpm agent-evals` is not in `ci:local` and not in CI: it needs a model, a GitHub runner has no login, and
+// the secret that would give it one is a cost of the delivery choice rather than of the suite (five local
+// runs used the machine's existing login). `protocol-mutations` left CI for the same shape of reason. What
+// keeps it from sliding back to advisory is this arm — a push that CHANGES the configuration under test must
+// carry a green run of it.
+//
+// Tip-only, unlike the CI ledger. That one is per-commit because a bisect lands on an intermediate commit;
+// nobody bisects a skill's wording, and what the suite answers is a question about the tree being published.
+const CONFIG_PATHS = ["CLAUDE.md", ".claude", "evals"];
+const touchedConfig = haveBase
+  ? spawnSync("git", ["diff", "--name-only", `${base}..HEAD`, "--", ...CONFIG_PATHS], { cwd: root, encoding: "utf8" })
+  : spawnSync("git", ["show", "--name-only", "--format=", "HEAD", "--", ...CONFIG_PATHS], {
+      cwd: root,
+      encoding: "utf8",
+    });
+const configChanged = touchedConfig.status === 0 && touchedConfig.stdout.trim() !== "";
+
 const unstamped = pushed.filter((sha) => !ledger.has(sha));
 const tipLevel = ledger.get(head);
+
+if (configChanged) {
+  const evals = readLedger(
+    "everdict-evals-ok",
+    `git push blocked: this push changes the configuration that steers the agent (${CONFIG_PATHS.join(", ")}) and there is no agent-eval stamp. Run \`pnpm agent-evals\`.`,
+  );
+  if (!evals.some((line) => line.split(" ")[0] === head)) {
+    deny(
+      `git push blocked: this push changes ${CONFIG_PATHS.join(", ")}, and .git/everdict-evals-ok does not stamp HEAD ${head.slice(0, 9)}. The structural checks cannot ask whether the agent still does the work to the same standard — run \`pnpm agent-evals\`.`,
+    );
+  }
+}
+
 if (head !== "" && unstamped.length === 0 && tipLevel === "full") process.exit(0);
 
 const reason =
@@ -80,12 +141,4 @@ const reason =
           ", ",
         )}${unstamped.length > 3 ? ", …" : ""}. GitHub only checks the tip too, so these would be holes nothing contradicts. Run \`pnpm ci:commits\`.`;
 
-process.stdout.write(
-  JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: `${reason} See .claude/rules/ci.md.`,
-    },
-  }),
-);
+deny(reason);

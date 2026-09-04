@@ -193,6 +193,11 @@ See skill `ci`.
   ⚠️ **NEVER `import()` THIS SCRIPT TO SEE IF IT PARSES.** It is a script, not a module: importing it RUNS it,
   in whatever tree you are standing in. `node -e "import('./scripts/trust/protocol-mutations.mjs')"` started a
   full mutation run in a shared worktree. `node --check <file>` is the syntax check — it never executes.
+- ⚠️ **The push gate itself used to fail OPEN.** `pre-push-gate.mjs` read `.git/everdict-ci-ok` with no
+  guard, so on a checkout that had never been gated `readFileSync` threw — and a PreToolUse hook that exits
+  non-zero without writing a decision lets the tool call through. The gate that exists to deny unstamped
+  pushes was open on exactly the state meaning "nothing here has ever been gated". Every ledger read is a
+  `deny` on failure now: cannot-find-out is an escalation, never a pass.
 - **`pnpm agent-evals` is the configuration's own regression suite, and it is NOT in this gate.** `docs-check`
   and `convention-harness` guard the SHAPE of `CLAUDE.md`/rules/skills — paths resolve, symbols exist, globs
   match live code, descriptions survive. Neither can ask whether the agent still does the work to the same
@@ -202,9 +207,13 @@ See skill `ci`.
   lesson and the `neutralize` sentences that carry it, and **`--drill <id>` removes those sentences and
   requires the case to go RED**. A `neutralize` string that matches no line FAILS AT LOAD, for the same reason
   a `protocol-mutations` rung whose target line is gone fails: a declaration whose target was reworded still
-  reads as a claim about what the case measures. It runs on `.github/workflows/agent-evals.yml` (path-filtered
-  on `CLAUDE.md`/`.claude/**`/`evals/**`, plus nightly), never on every push — the cost lesson
-  `protocol-mutations` already taught. ⚠️ Its first assertion was the literal `ci:local` and it went red
+  reads as a claim about what the case measures. It is enforced at the PUSH GATE, not in CI: the suite never needed an API key (local runs use the
+  machine's existing login, the same principle this repo states for LocalDriver), a GitHub runner has none,
+  and the secret that would give it one is a cost of the delivery choice. So `pre-push-gate.mjs` denies a push
+  that CHANGES `CLAUDE.md`/`.claude/**`/`evals/**` unless `.git/everdict-evals-ok` stamps HEAD — tip-only,
+  because nobody bisects a skill's wording. A push that leaves the configuration alone never meets the arm.
+  ⚠️ The model-swap question has NO unattended answer here (`--model <alias>` by hand); that debt is named in
+  `evals/README.md`. ⚠️ Its first assertion was the literal `ci:local` and it went red
   against an answer that had RUN the gate and written "CI-local": assertions name artifacts the agent must
   reach for, never phrasing. See `evals/README.md`.
 - **`pnpm guard-siblings` refuses a door whose neighbours guard something it does not** (arch-review 119).

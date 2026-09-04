@@ -36,7 +36,10 @@ const resultDir = path.join(root, "evals", ".results");
 
 // The configuration under test. Copied from the working tree into the worktree so a maintainer can run the
 // suite against a skill edit BEFORE committing it — which is when the answer is still cheap to change.
-const CONFIG = ["CLAUDE.md", ".claude"];
+// Copied into the worktree so a skill edit can be tested BEFORE it is committed. `evals` is not overlaid —
+// the runner reads its cases from the working tree directly — but it is part of what the push gate asks
+// about, so it is part of what must be clean before a stamp is written.
+const CONFIG = ["CLAUDE.md", ".claude", "evals"];
 // Everything that can change the tree or leave the machine. Deny wins over the repo's own allow list.
 const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 
@@ -142,7 +145,8 @@ const setup = () => {
     console.error(`✖ agent-evals: could not create the throwaway worktree.\n${add.stderr}`);
     process.exit(1);
   }
-  for (const item of CONFIG) cpSync(path.join(root, item), path.join(wt, item), { recursive: true, force: true });
+  for (const item of CONFIG.filter((i) => i !== "evals"))
+    cpSync(path.join(root, item), path.join(wt, item), { recursive: true, force: true });
 };
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -307,4 +311,33 @@ console.log(`\n${selected.length - failed}/${selected.length} passed · $${spend
 if (failed > 0) {
   console.error("\n✖ agent-evals RED — the configuration stopped carrying a lesson it is supposed to carry.");
   process.exit(1);
+}
+
+// ── the push stamp ───────────────────────────────────────────────────────────────────────────────
+//
+// This suite is not in `ci:local` and not in CI (a GitHub runner has no login, and the secret that would give
+// it one is a cost of the delivery choice, not of the suite). What keeps it from being advisory is
+// `scripts/hooks/pre-push-gate.mjs`: a push that CHANGES the configuration under test must carry a green run.
+//
+// A partial run cannot stamp — `--only` answers about one case and the gate asks about the configuration.
+// And a run over DIRTY configuration says nothing about HEAD: the suite reads its cases from the working tree
+// and overlays the working tree's CLAUDE.md/.claude into the worktree, exactly so an edit can be tested before
+// it is committed, which is the same reason the stamp cannot then attest the commit.
+if (!opts.only) {
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
+  const dirty = spawnSync("git", ["status", "--porcelain", "--", ...CONFIG], { cwd: root, encoding: "utf8" })
+    .stdout.split("\n")
+    .map((l) => l.slice(3).trim())
+    .filter(Boolean);
+  if (dirty.length > 0) {
+    console.log(
+      `\n· no push stamp: ${CONFIG.join(", ")} differ from HEAD (${dirty.slice(0, 4).join(", ")}${dirty.length > 4 ? ", …" : ""}).`,
+    );
+    console.log("  This run tested the working tree; the stamp attests a COMMIT. Commit, then re-run.");
+  } else if (head !== "") {
+    writeFileSync(path.join(root, ".git", "everdict-evals-ok"), `${head}\n`);
+    console.log(
+      `\n· push stamp written for ${head.slice(0, 9)} — the gate will accept a configuration change on this HEAD.`,
+    );
+  }
 }
