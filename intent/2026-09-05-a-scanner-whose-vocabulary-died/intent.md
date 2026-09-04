@@ -1,6 +1,8 @@
 # Intent: a scanner whose vocabulary died keeps passing
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 47db660a80c138b7f1bb7a3d409c4895985bfb68
 
 ## Problem
 
