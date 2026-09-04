@@ -62,6 +62,20 @@ See skill `ci`.
   `// watches: nothing — <why>`, so the answer is COMPLETE rather than opt-in; "the ones somebody remembered
   to annotate" is the coverage this check exists to stop believing in. ⚠️ It PARSES the scanners and never
   imports them — importing a script runs it, which this file already records for `protocol-mutations`.
+- **`pnpm review` is the review that had no moment, and `releases/<tag>.md` is the release that had no gate.**
+  Both were written down and neither was enforced. CLAUDE.md opens with "Review-first … No exceptions" and
+  skill `code-review` records that it has FAILED TWICE — what fired it was somebody remembering, and with two
+  merge commits in 2,710 there was no pull request for a review to attach to. A tag push publishes binaries
+  and images to the public and required nothing first. So: a push carrying `packages/**` or `apps/**` is
+  denied unless a review has run for HEAD (`.git/everdict-review-ok`), and a push whose HEAD carries a release
+  tag is denied unless `releases/<tag>.md` is COMMITTED — committed, because an authorization living in a
+  working tree did not travel with the tag. ⚠️ **The stamp is written on COMPLETION, never on cleanliness.**
+  Findings rank and inform; the person decides. A reviewer that blocks on its own findings is not the control
+  the article describes and would be routed around in a week. The release arm is checked FIRST so a refused
+  release says release, not whichever cheaper gate was also unsatisfied. ⚠️ The reviewer chunks: one truncated
+  blob over a 1.8 MB range would have stamped for about a fifth of what it claimed, so the diff is grouped per
+  file, every group is reviewed, and a range needing more than eight groups is REFUSED — a 541-file push is
+  the problem, not the reviewer. `--range` never stamps, for the reason `--only` never stamps an eval run.
 - **The gate RECORDS what it decided** (`.git/everdict-gate-log.jsonl`, one JSON line per push decision).
   `pnpm guardrails` proves the decision is CORRECT over constructed facts; nothing recorded what it actually
   decided, so the gate's own leading indicator (wait per gate) had no data and its lagging one (violations

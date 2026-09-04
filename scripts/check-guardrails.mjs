@@ -76,51 +76,81 @@ if (!existsSync(path.join(root, HOOK))) {
 const HEAD = "a".repeat(40);
 const OTHER = "b".repeat(40);
 const full = new Map([[HEAD, "full"]]);
+// Defaults keep each row about ONE fact. A row that has to restate six unrelated facts stops being readable,
+// and an unreadable table is one nobody notices a hole in.
+const facts = (over) => ({
+  head: HEAD,
+  pushed: [HEAD],
+  ciLedger: full,
+  evalLedger: [`${HEAD} `],
+  reviewLedger: [`${HEAD} `],
+  configChanged: false,
+  productChanged: false,
+  releaseTags: [],
+  ...over,
+});
 
 /** [name, facts, expected, arm] */
 const TABLE = [
-  [
-    "an unreadable CI ledger is a DENY, not an empty one",
-    { head: HEAD, pushed: [HEAD], ciLedger: null, evalLedger: [], configChanged: false },
-    "deny",
-    ARMS.CI_LEDGER_UNREADABLE,
-  ],
-  [
-    "a tip with no FULL stamp is refused",
-    { head: HEAD, pushed: [HEAD], ciLedger: new Map([[HEAD, "fast"]]), evalLedger: null, configChanged: false },
-    "deny",
-    ARMS.TIP_UNSTAMPED,
-  ],
+  ["an unreadable CI ledger is a DENY, not an empty one", facts({ ciLedger: null }), "deny", ARMS.CI_LEDGER_UNREADABLE],
+  ["a tip with no FULL stamp is refused", facts({ ciLedger: new Map([[HEAD, "fast"]]) }), "deny", ARMS.TIP_UNSTAMPED],
   [
     "an ungated intermediate commit is refused even when the tip is full",
-    { head: HEAD, pushed: [HEAD, OTHER], ciLedger: full, evalLedger: null, configChanged: false },
+    facts({ pushed: [HEAD, OTHER] }),
     "deny",
     ARMS.COMMITS_UNSTAMPED,
   ],
   [
     "a configuration change with no eval ledger is refused",
-    { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: null, configChanged: true },
+    facts({ configChanged: true, evalLedger: null }),
     "deny",
     ARMS.EVAL_LEDGER_UNREADABLE,
   ],
   [
     "a configuration change stamped for another commit is refused",
-    { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: [OTHER], configChanged: true },
+    facts({ configChanged: true, evalLedger: [OTHER] }),
     "deny",
     ARMS.EVAL_STAMP_MISMATCH,
   ],
+  ["a configuration change stamped for HEAD is allowed", facts({ configChanged: true }), "allow", ARMS.ALLOW],
   [
-    "a configuration change stamped for HEAD is allowed",
-    { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: [`${HEAD} `], configChanged: true },
+    "product code with no review ledger at all is refused",
+    facts({ productChanged: true, reviewLedger: null }),
+    "deny",
+    ARMS.REVIEW_LEDGER_UNREADABLE,
+  ],
+  [
+    "product code reviewed at another commit is refused",
+    facts({ productChanged: true, reviewLedger: [OTHER] }),
+    "deny",
+    ARMS.REVIEW_MISSING,
+  ],
+  ["product code reviewed at HEAD is allowed", facts({ productChanged: true }), "allow", ARMS.ALLOW],
+  [
+    "a docs-only push never meets the review arm",
+    facts({ productChanged: false, reviewLedger: null }),
     "allow",
     ARMS.ALLOW,
   ],
   [
-    "a push that changes no configuration never meets the eval arm",
-    { head: HEAD, pushed: [HEAD], ciLedger: full, evalLedger: null, configChanged: false },
+    "a release tag with no authorization is refused",
+    facts({ releaseTags: [{ tag: "api-v1.4.0", authorized: false }] }),
+    "deny",
+    ARMS.RELEASE_UNAUTHORIZED,
+  ],
+  [
+    "an authorized release tag is allowed",
+    facts({ releaseTags: [{ tag: "api-v1.4.0", authorized: true }] }),
     "allow",
     ARMS.ALLOW,
   ],
+  [
+    "the release arm outranks the cheaper gates, so a refused release says RELEASE",
+    facts({ releaseTags: [{ tag: "v2.0.0", authorized: false }], ciLedger: new Map([[HEAD, "fast"]]) }),
+    "deny",
+    ARMS.RELEASE_UNAUTHORIZED,
+  ],
+  ["a push that changes no configuration never meets the eval arm", facts({ evalLedger: null }), "allow", ARMS.ALLOW],
 ];
 
 for (const [name, facts, expected, arm] of TABLE) {

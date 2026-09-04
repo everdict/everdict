@@ -95,4 +95,8 @@ Every push decision is recorded in `.git/everdict-gate-log.jsonl` with the ARM t
 this gate refused" is a query. `pnpm telemetry` collects the session facts no file can answer —
 `docs/architecture/harness-observability.md` is the inventory of what the harness knows about itself.
 
+**`pnpm review`** is the third stamp. A push carrying `packages/**` or `apps/**` is denied until a review
+has run for HEAD; it stamps on completion, not on cleanliness, so findings are yours to judge. A push whose
+HEAD carries a release tag needs `releases/<tag>.md` committed first — see `releases/README.md`.
+
 See rule `ci.md` for the pushed critical rules.

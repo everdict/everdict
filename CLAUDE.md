@@ -31,9 +31,10 @@ reviewing what you now rest on.
   test descriptions, commit messages, PR titles/bodies.
 - The ONLY Korean in the repo is **ko-locale product data**: `apps/web/messages/ko.json` and inline
   ko-locale dictionaries/fallbacks (e.g. `shared/lib/{format,clipboard,cron}`), plus test assertions
-  on that ko output, plus an agent-eval STIMULUS in `evals/cases/` where the language is the fixture (a
-  Korean request that must still produce English source). The Korean is always an input under test,
-  never the repository's own prose.
+  on that ko output, plus the ONE named agent-eval stimulus whose language IS the fixture
+  (`evals/cases/english-only-source.json` — a Korean request that must still produce English source).
+  Each further one is argued and listed individually, never by directory. The Korean is always an input
+  under test, never the repository's own prose.
 - Web UI strings → **message catalogs** (`ko`/`en`), never hardcoded in components (see `docs/web.md`).
 - Conversation with the maintainer stays Korean (preference); repo artifacts do not.
 

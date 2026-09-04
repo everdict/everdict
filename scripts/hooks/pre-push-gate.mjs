@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_PATHSPEC, decideGate } from "./gate-decision.mjs";
+import { CONFIG_PATHSPEC, PRODUCT_PATHS, RELEASE_TAG, decideGate } from "./gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -82,12 +82,35 @@ const touched = haveBase
   : git("show", "--name-only", "--format=", "HEAD", "--", ...CONFIG_PATHSPEC);
 const configChanged = touched.status === 0 && touched.stdout.trim() !== "";
 
+// Product code — a docs-only or intent-only push carries nothing a review would find, and pays nothing.
+const product = haveBase
+  ? git("diff", "--name-only", `${base}..HEAD`, "--", ...PRODUCT_PATHS)
+  : git("show", "--name-only", "--format=", "HEAD", "--", ...PRODUCT_PATHS);
+const productChanged = product.status === 0 && product.stdout.trim() !== "";
+
+// Release tags pointing at HEAD. Read from the TAG rather than from the push command: a tag created in
+// another checkout and pushed from this one is still a release leaving this machine, and parsing which refs a
+// shell string would push is a guess where `--points-at` is an answer.
+const releaseTags = git("tag", "--points-at", "HEAD")
+  .stdout.split("\n")
+  .map((t) => t.trim())
+  .filter((t) => t !== "" && RELEASE_TAG.test(t))
+  .map((tag) => ({
+    tag,
+    // Committed, not merely present: an authorization that lives only in the working tree did not travel with
+    // the tag it authorizes.
+    authorized: git("cat-file", "-e", `HEAD:releases/${tag}.md`).status === 0,
+  }));
+
 const decision = decideGate({
   head,
   pushed,
   ciLedger,
   evalLedger: readLedger("everdict-evals-ok"),
+  reviewLedger: readLedger("everdict-review-ok"),
   configChanged,
+  productChanged,
+  releaseTags,
 });
 // ── the gate records what it decided ─────────────────────────────────────────────────────────────
 //
@@ -110,6 +133,8 @@ try {
       head,
       pushed: pushed.length,
       configChanged,
+      productChanged,
+      releaseTags: releaseTags.map((t) => t.tag),
       reason: decision.allow ? undefined : decision.reason,
     })}\n`,
   );

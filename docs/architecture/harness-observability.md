@@ -13,25 +13,34 @@ The distinction that organises it: a fact about a **tree** is answerable by read
 under `scripts/` does exactly that. A fact about an **act** — a decision that was made, a session that ran —
 exists only if something recorded it while it happened.
 
-## The three ledgers
+## The ledgers
 
-All three live in `.git/`, and that is deliberate: they describe *this checkout's operations*, not the
-project's history. None of them travels with a clone.
+They live in `.git/`, and that is deliberate: they describe *this checkout's operations*, not the project's
+history. None of them travels with a clone. The one exception is below the table, and it is an exception for
+a reason.
 
 | File | Written by | Holds |
 |---|---|---|
 | `everdict-ci-ok` | `pnpm ci:local`, `pnpm ci:commits` | `<sha> full\|fast` per gated commit |
 | `everdict-evals-ok` | `pnpm agent-evals` (full, clean-configuration runs) | the HEAD a green eval run attests |
-| `everdict-gate-log.jsonl` | `scripts/hooks/pre-push-gate.mjs`, on every push decision | `{at, verdict, arm, head, pushed, configChanged, reason}` |
+| `everdict-review-ok` | `pnpm review` (full-range runs) | the HEAD a completed review attests |
+| `everdict-review-<head>.json` | `pnpm review` | the findings, ranked, with the range and part count |
+| `everdict-gate-log.jsonl` | `scripts/hooks/pre-push-gate.mjs`, on every push decision | `{at, verdict, arm, head, pushed, configChanged, productChanged, releaseTags, reason}` |
 
-The first two are **stamps**: they answer "may this proceed". The third is a **record**: it answers "what has
-this control been doing". A harness with only the first kind can prove what it permitted and nothing about
-what it refused, and the refusals are the half that shows a control was load-bearing rather than decorative.
+The release authorization is the odd one out: it is the only record here that is COMMITTED rather than kept
+in `.git/`. `releases/<tag>.md` has to travel with the tag it authorizes — an authorization that lives
+only in a working tree did not authorize anything anyone else can see.
+
+Three of them are **stamps** — `ci-ok`, `evals-ok`, `review-ok` — and they answer "may this proceed". The
+gate log is a **record**: it answers "what has this control been doing". A harness with only the first kind can
+prove what it permitted and nothing about what it refused, and the refusals are the half that shows a control
+was load-bearing rather than decorative.
 
 ### Arms, not prose
 
-Each logged decision carries an `arm` — `ci-ledger-unreadable`, `eval-stamp-mismatch`, `tip-unstamped`,
-`commits-unstamped`, `eval-ledger-unreadable`, or `allow` — declared in `scripts/hooks/gate-decision.mjs` and
+Each logged decision carries an `arm` — `ci-ledger-unreadable`, `eval-ledger-unreadable`,
+`eval-stamp-mismatch`, `review-ledger-unreadable`, `review-missing`, `release-unauthorized`, `tip-unstamped`,
+`commits-unstamped`, or `allow` — declared in `scripts/hooks/gate-decision.mjs` and
 asserted by `pnpm guardrails`. A reason is written for one person reading one denial; an arm is written for a
 query over a thousand. Counting denials without arms tells you a gate is expensive and never which control is
 costing it.
