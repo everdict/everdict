@@ -44,6 +44,26 @@ const arg = (n, d) => {
 const TASKS = arg("data", "");
 const TRIALS = Number(arg("trials", "3"));
 const IMAGE = arg("image", "sbench-env:1.1.0");
+// ── A SMALL, TARGETED EXAM (frame-design.md, `targets`) ─────────────────────────────────────────────
+// A round over fourteen cases at five trials is 140 containers and the better part of two hours, which is a
+// loop nobody iterates on. Two things make it minutes instead, and neither weakens the verdict:
+//   · `--cases` narrows the exam. A SMALLER exam is a WEAKER multiple-comparison correction, not a stronger
+//     one — Benjamini-Hochberg ranks within the round's own cases, so rank 1 of 4 clears at (1/4)·alpha
+//     where rank 1 of 14 needs (1/14)·alpha. The frozen family (`heldOutFamilySize`) is unchanged.
+//   · `--targets` names the cases the campaign EXISTS to flip. The gate then requires every one of them to
+//     improve significantly and the held-out block not to REGRESS — the "at least one held-out improvement"
+//     rule is replaced, because a narrow, correct fix improves what it was asked to and nothing else.
+// A target may not be held-out, and the schema refuses a frame that says otherwise: a case the loop is
+// briefed on and optimizes against is not a generalization population.
+const ONLY = (arg("cases", "") || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const TARGETS = (arg("targets", "") || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const WORKERS = arg("workers", "4");
 if (!TASKS) {
   console.error("--data <dir> is required: the staged tasks.json this image was built from.");
   process.exit(2);
@@ -80,7 +100,29 @@ THE SHEET USUALLY CONTAINS ITS OWN TEST: the person who asked this question fill
 
 Then, for each workbook: apply the rule to EVERY row the data covers, save, run \`/opt/recalc.sh <file>\`, and run \`python3 /opt/sbcheck.py <file>\`. If it reports EMPTY rows or a formula that produced NO value, you are not done. Finish only when sbcheck reports no shape problems for all three outputs.`;
 
-const tasks = JSON.parse(readFileSync(`${TASKS}/tasks.json`, "utf8"));
+// ROUND 2. Round 1 told the agent that the sheet contains its own test; on the two targets it did not use it.
+// Telling an agent to verify is not giving it something that verifies, so the environment gained the check
+// (`/opt/sbexamples.py`, image 1.2.0) and this scaffold makes running it the finishing condition.
+const EXAMPLE_CHECKED = `${VERIFYING}
+
+THE SHEET'S OWN TEST IS A COMMAND YOU RUN, NOT A THING YOU REMEMBER. For every workbook:
+
+    python3 /opt/sbexamples.py --input <the input> --output <your output> --range <the target range>
+
+It compares your output against the rows the asker had ALREADY filled in — cells you can see, no answer
+involved. If it says a worked example disagrees, your rule is wrong and the sheet can already prove it: fix
+the rule and run it again. Do not finish until it reports that every worked example agrees for all three
+workbooks, AND sbcheck reports no shape problems.
+
+Passing it is necessary, not sufficient — the graded rows are the ones the asker left empty — so a rule that
+merely reproduces the examples by special-casing them is worthless. Derive the rule, then check it.`;
+
+const all = JSON.parse(readFileSync(`${TASKS}/tasks.json`, "utf8"));
+const tasks = ONLY.length > 0 ? all.filter((t) => ONLY.includes(String(t.id))) : all;
+if (ONLY.length > 0 && tasks.length !== ONLY.length) {
+  console.error(`--cases named ${ONLY.length} ids and ${tasks.length} are in the data — refusing a partial exam.`);
+  process.exit(2);
+}
 const caseFor = (t) => ({
   id: String(t.id),
   task:
@@ -151,6 +193,10 @@ try {
       BASE,
       "--poll-interval-ms",
       "1000",
+      // One runner, several cases at once. The default is 1 — serial — which is what made a round take two
+      // hours; the scorecard's own `concurrency` parks the jobs and this is what decides how many actually run.
+      "--max-concurrent",
+      WORKERS,
       "--mount-claude-login",
     ],
     { cwd: ROOT, env: { ...process.env }, stdio: ["ignore", "pipe", "pipe"] },
@@ -201,6 +247,7 @@ try {
   for (const [version, scaffold, description] of [
     ["1.0.0", PLAIN, "baseline: told what to do, nothing about how to check it"],
     ["1.1.0", VERIFYING, "candidate: the worked examples are the test, and sbcheck says what the reader sees"],
+    ["1.2.0", EXAMPLE_CHECKED, "round 2: the sheet's own test is a command the agent must run, not remember"],
   ]) {
     const r = await call("POST", "/harnesses", {
       template: { id: "sbench-claude", version: "1.0.0" },
@@ -236,15 +283,31 @@ try {
     "issue",
   );
   // Held-out is the last third BY ID ORDER — a rule fixed here, before either side has run, rather than a
-  // split chosen once the numbers are in.
+  // split chosen once the numbers are in. Named TARGETS are excluded from it by construction, because the
+  // schema refuses a frame whose target is also held-out and it is right to: a case the loop is briefed on
+  // and optimizes against cannot also be the population that says whether it generalized.
   const ids = cases.map((c) => c.id).sort();
-  const held = new Set(ids.slice(Math.ceil((ids.length * 2) / 3)));
+  const eligible = ids.filter((id) => !TARGETS.includes(id));
+  const held = new Set(eligible.slice(Math.ceil((eligible.length * 2) / 3) - (TARGETS.length > 0 ? 0 : 0)));
+  if (TARGETS.length > 0) {
+    // With targets declared the held-out block is what must not REGRESS, so it takes every case that is
+    // neither a target nor training — here, everything the targets leave.
+    held.clear();
+    for (const id of eligible.slice(Math.max(0, eligible.length - Math.max(2, Math.ceil(eligible.length / 2)))))
+      held.add(id);
+  }
+  const missingTarget = TARGETS.filter((t) => !ids.includes(t));
+  if (missingTarget.length > 0) {
+    console.error(`--targets names ${missingTarget.join(", ")}, which the exam does not contain.`);
+    process.exit(2);
+  }
   const camp = ok(
     await call("POST", "/campaigns", {
       issueId: issue.id,
       frame: {
         subject: { type: "harness", id: "sbench-claude", baselineVersion: "1.0.0" },
         scenarios: ids.map((id) => ({ id, ...(held.has(id) ? { heldOut: true } : {}) })),
+        ...(TARGETS.length > 0 ? { targets: TARGETS } : {}),
         trialsPerCase: TRIALS,
         budget: { maxRounds: 3 },
         significance: { fdrAlpha: 0.05, heldOutFamilySize: 3 },
@@ -257,6 +320,7 @@ try {
   );
   show("campaign", `${camp.id}  frame ${String(camp.frameDigest).slice(0, 24)}…`);
   show("held-out", [...held].join(", "));
+  if (TARGETS.length > 0) show("targets", TARGETS.join(", "));
 
   const scorecard = async (version) => {
     const s = ok(
@@ -294,8 +358,9 @@ try {
   const base = await scorecard("1.0.0");
   show("profile", profile(base.rec));
 
-  line("⑧ round 1 — candidate 1.1.0");
-  const cand = await scorecard("1.1.0");
+  const CANDIDATE_VERSION = arg("candidate", "1.1.0");
+  line(`⑧ round — candidate ${CANDIDATE_VERSION}`);
+  const cand = await scorecard(CANDIDATE_VERSION);
   show("profile", profile(cand.rec));
 
   const logged = await call("POST", `/campaigns/${camp.id}/rounds`, {
@@ -304,7 +369,7 @@ try {
       "The sheet carries the asker's own worked examples, so an agent can test its rule without an oracle; " +
       "and the reader sees cached values, so a formula that does not evaluate is an empty cell whatever the " +
       "agent believes it wrote.",
-    candidateVersion: "1.1.0",
+    candidateVersion: CANDIDATE_VERSION,
     baselineScorecardId: base.id,
     candidateScorecardId: cand.id,
   });
@@ -317,6 +382,7 @@ try {
     if (v.comparable === false) show("why not", v.detail);
     show("significant +/-", `${v.significantImprovements} / ${v.significantRegressions}`);
     show("heldOut", v.heldOut);
+    if (v.targets) show("targets", v.targets);
     show("unverified axes", v.unverifiedAxes);
   }
 
