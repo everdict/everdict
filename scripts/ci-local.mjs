@@ -78,6 +78,8 @@ run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 run("pnpm guardrails", "pnpm", ["guardrails"]);
 // A scanner whose watch list died keeps passing over a file count. Found by accident once; checked now.
 run("pnpm scanner-watches", "pnpm", ["scanner-watches"]);
+// A round that repairs every instance and ships no way to detect the next one bought a repair, not a rule.
+run("pnpm controls-documented", "pnpm", ["controls-documented"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);

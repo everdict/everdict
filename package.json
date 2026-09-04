@@ -30,6 +30,7 @@
     "watch-bands": "node scripts/bands/watch.mjs",
     "triage": "node scripts/triage.mjs",
     "scan": "node scripts/scan/run.mjs",
+    "controls-documented": "node scripts/check-controls-documented.mjs",
     "telemetry": "node scripts/telemetry/otlp-sink.mjs",
     "agent-evals": "node evals/run.mjs",
     "constructed-casts": "node scripts/check-constructed-casts.mjs",

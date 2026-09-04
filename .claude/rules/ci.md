@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -62,6 +62,25 @@ See skill `ci`.
   `// watches: nothing — <why>`, so the answer is COMPLETE rather than opt-in; "the ones somebody remembered
   to annotate" is the coverage this check exists to stop believing in. ⚠️ It PARSES the scanners and never
   imports them — importing a script runs it, which this file already records for `protocol-mutations`.
+- **`pnpm controls-documented` asks the question no other gate asks: does every control that exists get NAMED
+  by anything?** `convention-harness` asks whether a rule still reaches live paths; `docs-check` asks whether
+  the paths and symbols a rule names exist. Neither runs the arrow the other way. It cost a commit to notice:
+  the round that fixed "the conventions do not know about the harness" shipped, and the very next control —
+  `pnpm scan` — went out with this file, `CLAUDE.md` and the docs index untouched, by the same author, in the
+  same session, because an edit script asserted `'pnpm scan' not in s` and `pnpm scanner-watches` contains that
+  substring. That round repaired every instance by hand and shipped no way to detect the next one, which is the
+  exact criticism it made of prose laws. On its FIRST run this check found two more that had been undocumented
+  for far longer: `pnpm migrations` and `pnpm plugin-manifests`. See
+  `lessons/2026-09-05-a-control-shipped-and-the-conventions-did-not-know.md`.
+- **`pnpm migrations` is the migration NUMBERING guard.** `migrate()` tracks applied migrations by filename and
+  applies them in filename order, so two files sharing a number both run — in an order decided by whatever
+  follows the digits. That is fine until the two touch the same table, and then which one wins is alphabetical
+  accident rather than intent. It happens when two branches each take "the next number" without seeing the
+  other, which is what a shared repository does. Pairs that already shipped are grandfathered by name.
+- **`pnpm plugin-manifests`** keeps this repository usable as a marketplace for two clients: only Claude Code
+  expands `${VAR}` inside a plugin's `.mcp.json`, so Codex must be pointed at a manifest of its own or every
+  session dies on a literal `${EVERDICT_MCP_URL}` — invisible until it reaches a user's machine, and readable
+  by no compiler or test because these are data files.
 - **`pnpm scan` is the only control here that is NOT change-scoped**, and `lessons/` is where an incident's
   reasoning goes. Everything else reads a diff — review reads the range, the gates read what a commit touched,
   the evals fire on configuration that changed — so all of them are blind to code nobody has touched. A file
