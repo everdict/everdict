@@ -62,6 +62,21 @@ See skill `ci`.
   `// watches: nothing — <why>`, so the answer is COMPLETE rather than opt-in; "the ones somebody remembered
   to annotate" is the coverage this check exists to stop believing in. ⚠️ It PARSES the scanners and never
   imports them — importing a script runs it, which this file already records for `protocol-mutations`.
+- **`pnpm scan` is the only control here that is NOT change-scoped**, and `lessons/` is where an incident's
+  reasoning goes. Everything else reads a diff — review reads the range, the gates read what a commit touched,
+  the evals fire on configuration that changed — so all of them are blind to code nobody has touched. A file
+  written eleven months ago is never looked at again, and both halves go stale: the code around it changed and
+  the reader got better. `gitleaks` covers secrets deterministically over all history; the context-dependent
+  classes (a bound composed with an unbounded neighbour, a platform field on a producer document, a guard
+  nothing calls) are what this scan is pointed at, with the classes taken from rule `protocol` and this file.
+  Scopes are cut by dependency cone (`scripts/scan/SCOPES.md`), `--next` takes the least-recently-read one so
+  running it needs no decision about where, and `--status` answers "when did anyone last read this" per scope
+  — **an unscanned scope says NEVER, because unscanned is not clean and the two must stop looking alike.**
+  ⚠️ A scan is a statement about a scope AT A TIME UNDER A MODEL; all three are in the record or a clean scope
+  is indistinguishable from an unread one. ⚠️ The confidence on a finding is the scanner's rating of ITSELF,
+  not a calibration anybody measured. Nothing is auto-applied: findings enter the tree through the gates, and
+  a bounded one becomes a change while a wider one becomes an `intent.md`. The first run over `contracts`
+  found two real ones in 291 untouched files — see `intent/2026-09-05-scan-contracts-outbound-credentials/`.
 - **`pnpm watch-bands` is the only thing here that starts work without a person**, and `pnpm triage <gate>` is
   the judgement step that was being done by hand for twenty-three gates. Five stages of this harness refuse
   things; the sixth was never made to NOTICE, so every `intent.md` existed because a human wrote one and the

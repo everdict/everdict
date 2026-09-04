@@ -25,6 +25,7 @@ a reason.
 | `everdict-evals-ok` | `pnpm agent-evals` (full, clean-configuration runs) | the HEAD a green eval run attests |
 | `everdict-review-ok` | `pnpm review` (full-range runs) | the HEAD a completed review attests |
 | `everdict-review-<head>.json` | `pnpm review` | the findings, ranked, with the range and part count |
+| `everdict-scan-log.jsonl` | `pnpm scan` | one line per scan: scope, head, model, file count, findings |
 | `everdict-gate-log.jsonl` | `scripts/hooks/pre-push-gate.mjs`, on every push decision | `{at, verdict, arm, head, pushed, configChanged, productChanged, releaseTags, reason}` |
 
 The release authorization is the odd one out: it is the only record here that is COMMITTED rather than kept
@@ -92,3 +93,4 @@ prompt or response text.
 | has anything drifted? | `pnpm watch-bands` (`--dry-run` to see what it would file) |
 | why is this gate red? | `pnpm triage <gate>` — runs it, reads its header, reports, never applies |
 | what has the gate refused? | `.git/everdict-gate-log.jsonl`, grouped by `arm` |
+| when did anyone last read this code? | `pnpm scan --status` — NEVER is an answer, and it is not "clean" |

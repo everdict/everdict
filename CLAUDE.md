@@ -63,7 +63,8 @@ red; after pushing, confirm the run went green (`gh run watch … --exit-status`
 - `evals/`    — the regression suite over the configuration that steers the AGENT (not the product's scoring domain). `pnpm agent-evals`.
 - `releases/` — the authorization a release tag needs before it may leave. `releases/<tag>.md`, committed.
 - `REVIEW.md` — the review policy `pnpm review` applies to every push carrying product code.
-- `scripts/bands/`, `scripts/telemetry/` — what watches the harness and what collects what files cannot answer.
+- `lessons/`  — what an incident taught: what was believed, what made it invisible, what would have caught it.
+- `scripts/bands/`, `scripts/scan/`, `scripts/telemetry/` — what watches the harness, what reads code nobody touched, and what collects what files cannot answer.
 See rule `.claude/rules/ci.md` for what each refuses and why; `docs/architecture/harness-observability.md` for what it can see about itself.
 
 ## The change chain — `intent/` before code

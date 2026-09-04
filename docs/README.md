@@ -31,6 +31,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/evolution-program-gap-map.md](architecture/evolution-program-gap-map.md) — the four-pillar program (define any harness · one identity + seeds on the version · honest benchmarks + exact evidence · routed evolution), what holds, and the spec that closes each gap
 - [intent/README.md](https://github.com/everdict/everdict/blob/main/intent/README.md) — where a change starts: the `intent.md` → `plan.md` chain, and the commit ordering `pnpm intent-chain` enforces
 - [releases/README.md](https://github.com/everdict/everdict/blob/main/releases/README.md) — the authorization a release tag needs before it may leave, and why it is committed rather than kept locally
+- [lessons/README.md](https://github.com/everdict/everdict/blob/main/lessons/README.md) — what an incident taught, in the four sentences no diff records
 - [evals/README.md](https://github.com/everdict/everdict/blob/main/evals/README.md) — the regression suite over the configuration that steers the agent, its removal drill, and what five runs of calibration found
 - [architecture/harness-observability.md](architecture/harness-observability.md) — what the harness can see about ITSELF: the three ledgers in `.git/`, the eval history, and the session facts only telemetry can answer
 - [dev.md](dev.md) — local development: persistent Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
