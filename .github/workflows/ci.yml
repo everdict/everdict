@@ -48,9 +48,11 @@ jobs:
       # ${VAR} in a plugin's .mcp.json; Codex must be pointed away from it or it registers the literal string.
       - run: pnpm plugin-manifests
 
-      # Documentation integrity — the index covers every doc, links resolve, and cited code paths
-      # still exist. It lives HERE, not only in docs.yml, because doc rot is caused by CODE moves and
-      # docs.yml is path-filtered to docs/**.
+      # Documentation integrity — the index covers every doc, links resolve, cited code paths still exist,
+      # and every document declares a kind from the closed set. It lives HERE, in the code gate, because doc
+      # rot is caused by CODE moves: a path-filtered docs job would never run for the commit that broke it.
+      # It is now the ONLY gate over docs/ — the separate site workflow was removed with the site itself
+      # (docs/architecture/docs-site-removal.md).
       - run: pnpm docs-check
       - run: pnpm constructed-casts
       - run: pnpm guarded-doubles

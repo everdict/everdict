@@ -107,10 +107,10 @@ this change, because the answer was four spec files.
 ## What was rejected
 
 **A directory per kind** (`docs/decisions/`, `docs/specs/`, `docs/wiki/`). This is the obvious tidy and
-`docs/architecture/docs-site.md` already rejected it once, against a counted sweep of the in-code references a
+[docs-site-removal.md](docs-site-removal.md) rejects it against a counted sweep of the in-code references a
 relocation would break — every rule's `paths:` glob, every `anchors:` entry, every backticked citation check 3
 validates. Nothing about naming the kinds requires moving the files, and a taxonomy that costs a rename to
-apply is one that stops being applied. The kind is frontmatter; placement stays where `docs-site.md` put it.
+apply is one that stops being applied. The kind is frontmatter; placement does not move.
 
 **Leaving `kind` unchecked and writing the convention down instead.** The convention WAS written down, in the
 frontmatter of 176 files, and it drifted into four wrong labels, one invented word and one omission — with a

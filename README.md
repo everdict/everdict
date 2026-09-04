@@ -16,7 +16,7 @@ Fully self-hosted: your code and data never leave your infrastructure.
 </div>
 
 <p align="center">
-  <img src="site/static/img/scorecards.webp" alt="Everdict scorecards — dataset × harness runs with judge scores, models, and pass rates" width="880">
+  <img src="docs/assets/img/scorecards.webp" alt="Everdict scorecards — dataset × harness runs with judge scores, models, and pass rates" width="880">
 </p>
 
 ## Why Everdict
@@ -72,7 +72,7 @@ A run separates four in-sandbox concerns plus placement:
 **Harness** (the agent under test) · **Environment** (the world it acts on — repo / browser / OS) · **Driver** (in-sandbox compute) · **Grader / Judge** (how it's scored — tests · cost · latency · steps, plus LLM / VLM / agent judges) · **Backend** (where it runs — Local / Nomad / K8s / your own runner).
 
 <p align="center">
-  <img src="site/static/img/run-detail.webp" alt="One run — replay player, the judge's verdict with written reasoning, per-metric scores, and the full trace" width="880">
+  <img src="docs/assets/img/run-detail.webp" alt="One run — replay player, the judge's verdict with written reasoning, per-metric scores, and the full trace" width="880">
   <br><em>One run: replay, the judge's verdict with its written reasoning, and the full trace behind every number.</em>
 </p>
 
@@ -86,7 +86,6 @@ The full architecture, module boundaries, and package map live in **[CLAUDE.md](
 - [`docs/`](docs/) — the full index of all 136 documents · [`docs/architecture/overview.md`](docs/architecture/overview.md) — the map
 - Eval entities: [datasets](docs/datasets.md) · [judges](docs/judges.md) · [runtimes](docs/runtimes.md) · [scorecards](docs/scorecards.md)
 - Surfaces: [HTTP API + MCP](docs/api.md) · [SaaS web](docs/web.md) · [service topologies](docs/service-harness.md) · [Backend vs Driver](docs/execution-backends.md)
-- [`site/`](site/README.md) — the Docusaurus app that publishes `docs/` (plus the homepage) to GitHub Pages
 
 ## Status
 

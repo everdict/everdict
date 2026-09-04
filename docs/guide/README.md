@@ -6,10 +6,10 @@ updated: 2026-08-11
 ---
 # Guide — the product documentation
 
-Written for someone using Everdict, not maintaining it. This is the tree the public docs site
-publishes as `/docs`; the design records under [`../architecture/`](../architecture/overview.md) are a separate,
-maintainer-facing section. See [`../architecture/docs-site.md`](../architecture/docs-site.md) for how
-the two map onto the site.
+Written for someone using Everdict, not maintaining it. The design records under
+[`../architecture/`](../architecture/overview.md) are a separate, maintainer-facing section. Nothing here is
+published outside this repository — see
+[`../architecture/docs-site-removal.md`](../architecture/docs-site-removal.md).
 
 ## Get started
 - [Section index](start/README.md)

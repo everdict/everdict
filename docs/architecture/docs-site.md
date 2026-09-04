@@ -1,10 +1,16 @@
 ---
-kind: wiki
+kind: decision
 title: "The documentation site — information architecture (plan)"
-status: current
-updated: 2026-08-11
+status: superseded
+superseded-by: docs/architecture/docs-site-removal.md
+updated: 2026-09-04
 ---
 # The documentation site — information architecture (plan)
+
+> ⚠️ **SUPERSEDED on 2026-09-04 by [docs-site-removal.md](docs-site-removal.md).** The site was
+> built, then removed as a duplicate surface; nothing is published to GitHub Pages and the Docusaurus
+> app is deleted. This page is kept unedited as the record of what was planned and why — including
+> §2.0, whose measured rejection of relocating files is still live and is restated in the successor.
 
 > The repo has 121 markdown files and 288,654 words. Almost none of it is documentation a
 > newcomer can read. This plan says what the public docs site is made of, what has to be

@@ -77,9 +77,9 @@ because the drift that check 5 was written for is exactly what happens when a na
 disagree: four `*-spec.md` files sat filed as decisions, so the decision layer looked populated while holding
 nothing that recorded a choice.
 
-**The kind is frontmatter, not a directory.** `docs/architecture/docs-site.md` counted the in-code references
-a relocation would break and rejected the tidy move; naming the kinds does not require it. Placement stays
-where that page put it.
+**The kind is frontmatter, not a directory.** `docs/architecture/docs-site-removal.md` carries the counted
+sweep — 988 in-code references to `docs/architecture/**`, 461 to the root docs — that makes relocation
+expensive. Naming the kinds does not require it, so placement stays where it is.
 
 ## What a decision owes
 
@@ -88,22 +88,23 @@ where that page put it.
 A document that records only the current shape is a description, and a description is what the code already
 is — a `wiki` page, and a fine one. The record is the part the code cannot hold:
 
-- **The alternative that was rejected, and why.** `docs/architecture/docs-site.md` is the exemplar in this
-  tree: it proposes the obvious tidy — move the root docs under a reference directory, the architecture ones
-  under a design directory — and then rejects it against a measured count of in-code references that the move
-  would break. A reader who arrives with the same idea is answered in one paragraph instead of re-running the
-  sweep.
+- **The alternative that was rejected, and why.** `docs/architecture/docs-site-removal.md` is the exemplar in
+  this tree: it rejects the obvious tidy — move the root docs under a reference directory, the architecture
+  ones under a design directory — against a measured count of in-code references that the move would break,
+  and it says plainly what removing the published site LOSES. A reader who arrives with either idea is
+  answered in a paragraph instead of re-running the sweep.
 - **The number, not the adjective.** "Many references" ages into nothing; a counted sweep stays checkable and
   its expiry is visible when the count moves.
 - **What would reopen it.** A decision with no stated trigger is a decision nobody can revisit honestly.
 
 ## Where a document goes
 
-The tree's own layout is a recorded decision, not an accident — read `docs/architecture/docs-site.md` before
-moving anything. In short: `guide/` is product documentation written for someone using Everdict; everything
-else is for maintainers, indexed by topic in `docs/README.md` rather than by directory. Placement between the
-root and `architecture/` is historical and deliberately frozen, because in-code references make relocation
-expensive.
+The tree's own layout is a recorded decision, not an accident — read `docs/architecture/docs-site-removal.md`
+before moving anything. In short: `guide/` is product documentation written for someone using Everdict;
+everything else is for maintainers, indexed by topic in `docs/README.md` rather than by directory. Placement
+between the root and `architecture/` is historical and deliberately frozen, because in-code references make
+relocation expensive. Nothing is published outside the repository, so `docs/README.md` is the only navigation
+there is — an unindexed page is an unreachable one.
 
 So: add the document where its neighbours are, declare its kind in frontmatter, link it from
 `docs/README.md` — `pnpm docs-check` refuses an orphan — and do not reorganise the tree as a side effect of

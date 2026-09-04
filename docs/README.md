@@ -10,9 +10,10 @@ Every document in this tree is listed here. Conventions (single source of truth)
 [`CLAUDE.md`](https://github.com/everdict/everdict/blob/main/CLAUDE.md) + `../.claude/` (rules + skills).
 
 > **Two audiences, one tree.** [`guide/`](guide/README.md) is the product documentation — written for
-> someone *using* Everdict, and the tree the public docs site publishes. Everything else here is
-> maintainer-facing: reference pages, design records, runbooks. See
-> [architecture/docs-site.md](architecture/docs-site.md) for how the two map onto the site.
+> someone *using* Everdict. Everything else here is maintainer-facing: reference pages, design records,
+> runbooks. Every document declares which of four kinds it is — see
+> [architecture/document-kinds.md](architecture/document-kinds.md). Nothing is published outside this
+> repository: [architecture/docs-site-removal.md](architecture/docs-site-removal.md).
 
 ## Guide — product documentation
 - [guide/README.md](guide/README.md) — the section index
@@ -29,7 +30,6 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/execution-scoring-orchestration.md](architecture/execution-scoring-orchestration.md) — the three concerns, and why they stay apart
 - [architecture/evolution-program-gap-map.md](architecture/evolution-program-gap-map.md) — the four-pillar program (define any harness · one identity + seeds on the version · honest benchmarks + exact evidence · routed evolution), what holds, and the spec that closes each gap
 - [dev.md](dev.md) — local development: persistent Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
-- [architecture/document-kinds.md](architecture/document-kinds.md) — the four kinds a document can be (wiki · decision · spec · runbook), what each owes, and how each is allowed to change
 
 ## Surfaces
 - [api.md](api.md) — the control-plane HTTP API (`apps/api`): runs, scorecards, datasets, judges, runtimes, schedules, bundles, workspace integrations, runners — async `POST /runs` + poll/webhook
@@ -156,9 +156,11 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [migration/README.md](migration/README.md) — migration discipline (expand → deploy → contract, preflight checks)
 - Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0023_connections_owner](migration/preflight/0023_connections_owner.md) *(superseded)* · [0200_trajectory_events](migration/preflight/0200_trajectory_events.md) · [0212-drop-team-axis](migration/preflight/0212-drop-team-axis.md)
 
-## The public docs site
-- [architecture/docs-site.md](architecture/docs-site.md) — information architecture for the Docusaurus site published from this tree
+## The documentation itself
+- [architecture/document-kinds.md](architecture/document-kinds.md) — the four kinds a document can be (wiki · decision · spec · runbook), what each owes, and how each is allowed to change
+- [architecture/docs-site-removal.md](architecture/docs-site-removal.md) — documentation ships in this repository; the published site was removed as a duplicate surface
 - [architecture/docs-quality-rubric.md](architecture/docs-quality-rubric.md) — the scoring instrument used to close the gap to Mastra
+- [architecture/docs-site.md](architecture/docs-site.md) — *(superseded)* the plan for the Docusaurus site, kept for §2.0's measured rejection of relocating files
 
 ## Internals — historical design records
 > Written during the re-architecture review and **not maintained since**. The umbrella migration

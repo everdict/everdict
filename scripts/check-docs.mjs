@@ -132,8 +132,13 @@ for (const doc of docs) {
   // `.env` and friends are gitignored by design — the docs tell you to create them.
   const candidates = new Set();
   const sites = [];
+  // A SUPERSEDED decision earns the historical folder's exemption, for the folder's own stated reason: the
+  // addresses it cites are the record of what we decided against, not a mistake. Without this, superseding a
+  // page would force an edit to the page being frozen — and the whole point of `superseded-by:` is that the
+  // earlier answer survives unedited (`docs/architecture/document-kinds.md`).
+  const superseded = (doc) => frontmatterOf(doc)?.get("status") === "superseded";
   for (const doc of citing) {
-    if (doc.startsWith(HISTORICAL)) continue;
+    if (doc.startsWith(HISTORICAL) || superseded(doc)) continue;
     const text = readFileSync(join(ROOT, doc), "utf8");
     for (const m of text.matchAll(/`([^`\n]+)`/g)) {
       let token = m[1].trim().replace(/[).,;:]+$/, "");
@@ -288,9 +293,9 @@ for (const doc of docs) {
 //               architecture or implementation
 //     runbook   an operational procedure       → current, or it is a trap
 //
-// The kind is frontmatter rather than a directory on purpose: `docs/architecture/docs-site.md` counted the
-// in-code references a relocation would break and rejected the tidy move. A taxonomy that costs nothing to
-// apply is one that gets applied.
+// The kind is frontmatter rather than a directory on purpose: `docs/architecture/docs-site-removal.md`
+// carries the counted sweep — 988 in-code references to the architecture docs, 461 to the root ones — that
+// makes relocation expensive. A taxonomy that costs nothing to apply is one that gets applied.
 {
   const KINDS = new Map([
     ["wiki", ["current"]],
@@ -368,7 +373,7 @@ for (const doc of docs) {
 if (failures.length) {
   console.error(`docs check FAILED — ${failures.length} problem(s):\n`);
   for (const f of failures) console.error(`  ✗ ${f}`);
-  console.error("\nSee docs/architecture/docs-site.md for what this gate is protecting.");
+  console.error("\nSee docs/architecture/document-kinds.md for what this gate is protecting.");
   process.exit(1);
 }
 console.log(

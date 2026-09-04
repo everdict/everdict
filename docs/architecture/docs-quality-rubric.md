@@ -6,9 +6,15 @@ updated: 2026-08-11
 ---
 # Documentation quality rubric — scoring against Mastra
 
-> The docs site shipped. It is not good. This page is the instrument that says *how* not-good, in
-> numbers that move, so improvement is a measured activity rather than a feeling. The benchmark is
+> This page is the instrument that says *how* not-good the documentation is, in numbers that move, so
+> improvement is a measured activity rather than a feeling. The benchmark is
 > [mastra.ai/docs](https://mastra.ai/docs), chosen by the maintainer.
+>
+> ⚠️ **The instrument is out of date and the gap number is not comparable until it is re-weighted.** It
+> was written against a published Docusaurus site, which [docs-site-removal.md](docs-site-removal.md)
+> removed. **D6 Findability** (10) and **D7 Visual design** (10) score a surface that no longer exists,
+> and rounds **R4** (Algolia search) and **R5** (homepage and theme) cannot be built. The content
+> dimensions — D1 · D2 · D3 · D5, and most of D4 — are unaffected and still say what to do first.
 >
 > **Target: close the gap to ≤ 5 points.** Re-score after every round; a round that does not move a
 > number did not happen.
