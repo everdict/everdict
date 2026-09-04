@@ -1,6 +1,8 @@
 # Intent: the loop has nothing watching it
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 526d3a133e7fb36b978621f95ccc3a4107363a31
 
 ## Problem
 
