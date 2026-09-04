@@ -73,6 +73,9 @@ run("pnpm convention-harness", "pnpm", ["convention-harness"]);
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
 // The Plan→Build handoff. A plan reads exactly the same whether it was written before the work or after it;
 // the commit order is the only witness, so this one asks git rather than the files.
+// The push gate guards every other gate, and its own wiring lives in an editable settings file that
+// nothing read until this check.
+run("pnpm guardrails", "pnpm", ["guardrails"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);

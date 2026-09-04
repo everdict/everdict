@@ -94,6 +94,19 @@ it answers about one case, and the gate asks about the configuration.
 Unlike the CI ledger, the eval stamp is **tip-only**. That one is per-commit because a bisect lands on an
 intermediate commit; nobody bisects a skill's wording.
 
+## The history
+
+Every run appends one line to `evals/history.jsonl` — timestamp, model, per-case outcome, cost. `.results/`
+is overwritten each run, so before this the eval pass rate had no history at all, and that closes a door: a
+control band needs a rolling baseline, and a baseline cannot be collected retroactively. Every unrecorded run
+was a run that could never be part of one.
+
+A `--only` run is recorded with `partial: true` rather than dropped, so a band can filter it out instead of
+averaging one case into a suite-wide rate. The file is excluded from the stamp's cleanliness check and from
+the push gate's configuration set (`CONFIG_PATHSPEC`, one definition read by both): it is what a run WRITES,
+and treating it as configuration closes a loop with no exit — appending dirties `evals/`, a dirty `evals/`
+refuses the stamp, and earning the stamp appends again.
+
 ## Owed: the model-swap question
 
 *"When a new model is swapped in, does the agent still do the work to the same standard?"* — the article's

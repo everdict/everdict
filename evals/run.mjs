@@ -25,10 +25,20 @@
 //   node evals/run.mjs --drill <id>
 //   node evals/run.mjs --list
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { CONFIG_PATHS, CONFIG_PATHSPEC } from "../scripts/hooks/gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const caseDir = path.join(root, "evals", "cases");
@@ -39,7 +49,9 @@ const resultDir = path.join(root, "evals", ".results");
 // Copied into the worktree so a skill edit can be tested BEFORE it is committed. `evals` is not overlaid —
 // the runner reads its cases from the working tree directly — but it is part of what the push gate asks
 // about, so it is part of what must be clean before a stamp is written.
-const CONFIG = ["CLAUDE.md", ".claude", "evals"];
+const CONFIG = CONFIG_PATHS;
+// The history is what a run WRITES, so it cannot be part of what a run attests — see CONFIG_PATHSPEC.
+const CLEAN_PATHSPEC = CONFIG_PATHSPEC;
 // Everything that can change the tree or leave the machine. Deny wins over the repo's own allow list.
 const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 
@@ -289,11 +301,13 @@ if (selected.length === 0) {
 setup();
 let failed = 0;
 let spend = 0;
+const outcomes = [];
 try {
   console.log(`▶ agent-evals · ${selected.length} case(s) · model ${opts.model} · worktree ${path.basename(wt)}\n`);
   for (const c of selected) {
     const out = runCase(c);
     spend += out.cost;
+    outcomes.push({ id: c.id, pass: out.pass, seconds: Number(out.seconds) });
     if (out.pass) {
       console.log(`✓ ${c.id.padEnd(32)} ${out.seconds}s`);
       continue;
@@ -313,6 +327,26 @@ if (failed > 0) {
   process.exit(1);
 }
 
+// ── the history ──────────────────────────────────────────────────────────────────────────────────
+//
+// `.results/` is overwritten every run, so the eval pass rate — the one leading indicator this harness
+// produces — had no history at all. That closes a door: a control band needs a rolling baseline, and a
+// baseline cannot be collected retroactively. Every unrecorded run is a run that can never be part of one.
+// A `--only` run is recorded as `partial` rather than dropped, so a future band can filter it out instead of
+// averaging one case into a suite-wide rate.
+appendFileSync(
+  path.join(root, "evals", "history.jsonl"),
+  `${JSON.stringify({
+    at: new Date().toISOString(),
+    model: opts.model,
+    partial: Boolean(opts.only),
+    passed: selected.length - failed,
+    of: selected.length,
+    cost: Number(spend.toFixed(4)),
+    cases: outcomes,
+  })}\n`,
+);
+
 // ── the push stamp ───────────────────────────────────────────────────────────────────────────────
 //
 // This suite is not in `ci:local` and not in CI (a GitHub runner has no login, and the secret that would give
@@ -325,7 +359,7 @@ if (failed > 0) {
 // it is committed, which is the same reason the stamp cannot then attest the commit.
 if (!opts.only) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
-  const dirty = spawnSync("git", ["status", "--porcelain", "--", ...CONFIG], { cwd: root, encoding: "utf8" })
+  const dirty = spawnSync("git", ["status", "--porcelain", "--", ...CLEAN_PATHSPEC], { cwd: root, encoding: "utf8" })
     .stdout.split("\n")
     .map((l) => l.slice(3).trim())
     .filter(Boolean);

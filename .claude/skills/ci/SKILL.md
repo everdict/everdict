@@ -86,4 +86,9 @@ CI; a push that CHANGES `CLAUDE.md`, `.claude/**` or `evals/**` is denied unless
 in `.git/everdict-evals-ok`. Editing a skill therefore costs one ~90s run before you can push it. Ordinary
 pushes never meet the arm. See `evals/README.md`.
 
+**`pnpm guardrails`** checks the push gate itself — that `.claude/settings.json` still wires it, and that
+its decision still denies the seven cases it is supposed to. ⚠️ Its segmenter matches TEXT: writing a file
+whose content contains a compound-command example of a push through a shell heredoc is denied by the gate,
+because the heredoc body is part of the command string. Use an editor for those files.
+
 See rule `ci.md` for the pushed critical rules.

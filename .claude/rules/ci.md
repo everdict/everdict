@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -50,6 +50,22 @@ See skill `ci`.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
   and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
   gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
+- **`pnpm guardrails` checks the gate that every other gate is enforced BY.** `pre-push-gate.mjs` holds both
+  ledgers, it is wired in `.claude/settings.json` — an editable file in the tree — and NOTHING READ THAT
+  WIRING: `grep -l settings.json scripts/check-*.mjs` returned nothing. What stood in for a check was this
+  rule's own sentence about never working around the hook, which is prose, in the file that records a dozen
+  times what happens to a law kept as prose. Deleting the PreToolUse block is a two-line edit every other gate
+  stays green through. The check has two halves and needs both: the WIRING still exists (textual — the only
+  thing that catches a deletion) and the DECISION still decides (behavioural — `decideGate` driven over seven
+  facts, including that an unreadable ledger denies rather than reads as empty). The decision was split into
+  `scripts/hooks/gate-decision.mjs` to make that drivable; the alternative, an env var pointing the ledgers
+  somewhere a test can write, would have made the check easy and the GATE FORGEABLE.
+  ⚠️ **THE PUSH SEGMENTER MATCHES TEXT, NOT COMMANDS.** It splits on `&&`/`||`/`;`/`|`/newline and looks for a
+  segment beginning with the two words. A file whose CONTENT contains such a segment is therefore refused when
+  written through a shell heredoc — which is how this very hook's own comment (an example of the compound form
+  it catches) denied the command that was writing it. Anything quoting a push after a separator — a doc, a
+  commit message, a grep — is refused the same way. Left as is on purpose: the failure mode of this gate is a
+  false ALLOW, so it errs toward denying. Write such a file with an editor, not a heredoc.
 - **`pnpm intent-chain` is the Plan→Build handoff, enforced instead of stated.** A plan written after the
   diff is a description that agrees with itself, and no reader can tell the two apart: both are markdown that
   matches the code. The witness is the commit graph, so the check asks it — a `plan.md` cites the commit that

@@ -62,6 +62,10 @@ jobs:
       # The Plan→Build handoff: every change directory carries the request it came from, a plan descends
       # from its intent, and a shipped intent names the commit that landed it. Commit order is the only
       # witness that a plan was not written after the diff.
+      # The push gate is what every other gate is enforced BY, and until this check nothing read its wiring:
+      # deleting the PreToolUse block from .claude/settings.json is a two-line edit every other gate stays
+      # green through. Checks the wiring AND drives the decision over a truth table.
+      - run: pnpm guardrails
       - run: pnpm intent-chain
       - run: pnpm docs-check
       # Every browser-facing route is reachable from the web, or carries the reason it is not. A door
