@@ -113,6 +113,11 @@ const SERIES = {
     // allow. Mean over the window is the rate, which is what the band is about.
     return rows.map((r) => (r.verdict === "deny" ? 1 : 0));
   },
+  "scan-log": () => {
+    const rows = readJsonl(path.join(gitDir, "everdict-scan-log.jsonl"));
+    if (rows === null) return null;
+    return rows.map((r) => Number(r.findings ?? 0));
+  },
   "review-reports": () => {
     let files;
     try {

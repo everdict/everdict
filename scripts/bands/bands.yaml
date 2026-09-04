@@ -55,3 +55,13 @@ metrics:
     why: >
       Important findings per review, rising. Either the code is getting worse or the reviewer is getting
       louder; the reports name files, so the difference is checkable.
+
+  - id: scan-findings
+    source: scan-log
+    field: findings
+    window: 16
+    floor: 8
+    direction: up
+    why: >
+      Findings per scan, rising. The article expects this to FALL as fixes and evals accumulate, so a rise is
+      either a scope that was never read before or a class the codebase started producing again.
