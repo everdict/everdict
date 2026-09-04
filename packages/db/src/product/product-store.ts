@@ -2,6 +2,7 @@ import type { OutboxEvent, ProductListFilter, ProductStore } from "@everdict/app
 import { type ProductRecord, ProductRecordSchema } from "@everdict/contracts";
 import { productEvaluationDefinitionDigest, productReleasePolicyDigest } from "@everdict/domain";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory } from "../tracker/row.js";
 
@@ -122,8 +123,7 @@ interface ProductRow extends TrackerRow {
 
 const PRODUCT_COLUMNS =
   "(id, tenant, slug, name, description, icon, services, series, auto_eval, history, created_by, created_at, updated_at, release_policy_digest, evaluation_definition_digest)";
-const PRODUCT_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11,$12::timestamptz,$13::timestamptz,$14,$15)";
+const PRODUCT_VALUES = insertPlaceholders(PRODUCT_COLUMNS);
 
 function insertParams(record: ProductRecord): unknown[] {
   return [
@@ -173,6 +173,7 @@ export class PgProductStore implements ProductStore {
 
   async create(record: ProductRecord, events?: OutboxEvent[]): Promise<void> {
     const base = insertParams(record);
+    assertInsertArity("product-store.create", PRODUCT_COLUMNS, base);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, base.length + 1);
       await this.client.query(

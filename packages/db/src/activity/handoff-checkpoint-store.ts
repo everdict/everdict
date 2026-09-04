@@ -1,6 +1,7 @@
 import type { HandoffCheckpointStore, OutboxEvent } from "@everdict/application-control";
 import { type HandoffCheckpointRecord, HandoffCheckpointRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 // Handoff checkpoints (ownership protocol O6) — same contract in-memory and on Postgres. Append-only by
@@ -61,7 +62,7 @@ function rowToRecord(row: CheckpointRow): HandoffCheckpointRecord {
 }
 
 const CHECKPOINT_COLUMNS = "(id, tenant, envelope_id, role, goal, created_by, created_at, body)";
-const CHECKPOINT_VALUES = "($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::jsonb)";
+const CHECKPOINT_VALUES = insertPlaceholders(CHECKPOINT_COLUMNS);
 
 export class PgHandoffCheckpointStore implements HandoffCheckpointStore {
   constructor(private readonly client: SqlClient) {}
@@ -77,6 +78,7 @@ export class PgHandoffCheckpointStore implements HandoffCheckpointStore {
       record.createdAt,
       JSON.stringify(record),
     ];
+    assertInsertArity("handoff-checkpoint-store.create", CHECKPOINT_COLUMNS, params);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);
       await this.client.query(

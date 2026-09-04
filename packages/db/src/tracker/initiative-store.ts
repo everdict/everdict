@@ -11,6 +11,7 @@ import {
   InitiativeUpdateRecordSchema,
 } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory } from "./row.js";
 
@@ -81,8 +82,7 @@ interface InitiativeRow extends TrackerRow {
 
 const INITIATIVE_COLUMNS =
   "(id, tenant, name, description, icon, status, parent_id, lead, member_ids, resources, health, target_date, completed_at, history, created_by, created_at, updated_at)";
-const INITIATIVE_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::timestamptz,$14::jsonb,$15,$16::timestamptz,$17::timestamptz)";
+const INITIATIVE_VALUES = insertPlaceholders(INITIATIVE_COLUMNS);
 
 function insertParams(record: InitiativeRecord): unknown[] {
   return [
@@ -133,6 +133,7 @@ export class PgInitiativeStore implements InitiativeStore {
 
   async create(record: InitiativeRecord, events?: OutboxEvent[]): Promise<void> {
     const base = insertParams(record);
+    assertInsertArity("initiative-store.create", INITIATIVE_COLUMNS, base);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, base.length + 1);
       await this.client.query(

@@ -23,6 +23,7 @@ import {
 } from "@everdict/domain";
 
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory, trackerIds } from "./row.js";
 
@@ -329,8 +330,7 @@ function rowToSummary(row: IssueSummaryRow): IssueSummary {
 
 const ISSUE_COLUMNS =
   "(id, tenant, number, identifier, former_identifiers, title, description, status, priority, estimate, due_date, parent_id, milestone_id, state_id, project_id, assignee, label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)";
-const ISSUE_VALUES =
-  "($1,$2,$3,$4,$5,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21::jsonb,$22::jsonb,$23::jsonb,$24::jsonb,$25,$26::jsonb,$27::timestamptz,$28::timestamptz)";
+const ISSUE_VALUES = insertPlaceholders(ISSUE_COLUMNS);
 
 function insertParams(record: IssueRecord): unknown[] {
   return [
@@ -397,6 +397,7 @@ export class PgIssueStore implements IssueStore {
 
   async create(record: IssueRecord, events?: OutboxEvent[]): Promise<void> {
     const base = insertParams(record);
+    assertInsertArity("issue-store.create", ISSUE_COLUMNS, base);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, base.length + 1);
       await this.client.query(

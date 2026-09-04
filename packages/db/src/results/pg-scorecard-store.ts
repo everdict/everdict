@@ -8,6 +8,7 @@ import type {
 } from "@everdict/application-control";
 import { type ScorecardRecord, ScorecardRecordSchema, TERMINAL_SCORECARD_STATUSES } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "./outbox.js";
 
 interface ScorecardRow {
@@ -119,8 +120,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
   "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world, publication)";
-const SCORECARD_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)";
+const SCORECARD_VALUES = insertPlaceholders(SCORECARD_COLUMNS);
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
   return [
@@ -179,6 +179,7 @@ export class PgScorecardStore implements ScorecardStore {
 
   async create(r: ScorecardRecord, events?: OutboxEvent[]): Promise<void> {
     const base = scorecardInsertParams(r, this.replicaId);
+    assertInsertArity("pg-scorecard-store.create", SCORECARD_COLUMNS, base);
     if (events && events.length > 0) {
       // One statement, two writes (E0): the scorecard insert and its facts commit or roll back together
       // (same data-modifying-CTE outbox as PgRunStore).

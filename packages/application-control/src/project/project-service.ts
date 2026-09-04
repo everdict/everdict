@@ -82,10 +82,10 @@ export class ProjectService {
     return record;
   }
 
-  // Both narrowings are the store's now (`team_ids`/`initiative_ids` containment). "This team's projects" used
-  // to be derived from the team's ISSUES, which answered "none" for exactly as long as a project was still
-  // being planned — the window where the question gets asked. A project names its teams, so it can say so
-  // before a single issue exists.
+  // The narrowing is the store's (`initiative_ids` containment). It used to be derived from the ISSUES
+  // underneath, which answered "none" for exactly as long as a project was still being planned — the window
+  // where the question gets asked. A project names what it belongs to, so it can say so before a single
+  // issue exists.
   list(tenant: string, filter?: ProjectListFilter): Promise<ProjectRecord[]> {
     return this.deps.store.list(tenant, filter);
   }

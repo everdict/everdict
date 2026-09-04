@@ -1,6 +1,7 @@
 import type { OutboxEvent, VerificationDecisionStore } from "@everdict/application-control";
 import { type VerificationDecision, VerificationDecisionSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 // The verification ledger (mig 0151) — same contract in-memory and on Postgres. Append-only like the
@@ -65,7 +66,7 @@ function rowToRecord(row: DecisionRow): VerificationDecision {
 }
 
 const DECISION_COLUMNS = "(id, tenant, subject_type, subject_id, verdict, created_at, body)";
-const DECISION_VALUES = "($1,$2,$3,$4,$5,$6::timestamptz,$7::jsonb)";
+const DECISION_VALUES = insertPlaceholders(DECISION_COLUMNS);
 
 export class PgVerificationDecisionStore implements VerificationDecisionStore {
   constructor(private readonly client: SqlClient) {}
@@ -80,6 +81,7 @@ export class PgVerificationDecisionStore implements VerificationDecisionStore {
       record.createdAt,
       JSON.stringify(record),
     ];
+    assertInsertArity("verification-decision-store.create", DECISION_COLUMNS, params);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, params.length + 1);
       await this.client.query(

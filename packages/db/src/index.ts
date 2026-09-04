@@ -103,6 +103,7 @@ export type {
 export { generateKey, hashKey, generateInviteToken } from "@everdict/application-control";
 
 // Store impls (InMemory*/Pg*) + local persistence helpers stay here — the db package owns them.
+export { assertInsertArity, columnNames, insertPlaceholders } from "./insert-columns.js";
 export { PgLeaderElector, type PgLeaderElectorOptions } from "./ops/leader-elector.js";
 export { PgReplicaRegistry, type PgReplicaRegistryOptions } from "./ops/replica-registry.js";
 export { InMemoryWorldCreationStore, PgWorldCreationStore } from "./environment/world-creation-store.js";

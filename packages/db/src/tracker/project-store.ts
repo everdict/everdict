@@ -6,6 +6,7 @@ import {
   ProjectUpdateRecordSchema,
 } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory, trackerIds } from "./row.js";
 
@@ -78,8 +79,7 @@ interface ProjectRow extends TrackerRow {
 
 const PROJECT_COLUMNS =
   "(id, tenant, name, description, status, initiative_ids, lead, member_ids, health, milestones, target_date, completed_at, history, created_by, created_at, updated_at)";
-const PROJECT_VALUES =
-  "($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8,$9::jsonb,$10,$11::jsonb,$12,$13::timestamptz,$14::jsonb,$15,$16::timestamptz,$17::timestamptz)";
+const PROJECT_VALUES = insertPlaceholders(PROJECT_COLUMNS);
 
 function insertParams(record: ProjectRecord): unknown[] {
   return [
@@ -128,6 +128,7 @@ export class PgProjectStore implements ProjectStore {
 
   async create(record: ProjectRecord, events?: OutboxEvent[]): Promise<void> {
     const base = insertParams(record);
+    assertInsertArity("project-store.create", PROJECT_COLUMNS, base);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, base.length + 1);
       await this.client.query(

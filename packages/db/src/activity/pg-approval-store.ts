@@ -1,6 +1,7 @@
 import type { ApprovalListFilter, ApprovalStore, OutboxEvent } from "@everdict/application-control";
 import { type ApprovalRecord, ApprovalRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 interface ApprovalRow {
@@ -39,7 +40,7 @@ function rowToRecord(row: ApprovalRow): ApprovalRecord {
 
 const APPROVAL_COLUMNS =
   "(id, tenant, session_id, agent_id, request_id, request, status, decided_by, decided_at, expires_at, created_at, updated_at)";
-const APPROVAL_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)";
+const APPROVAL_VALUES = insertPlaceholders(APPROVAL_COLUMNS);
 
 function approvalInsertParams(r: ApprovalRecord): unknown[] {
   return [
@@ -64,6 +65,7 @@ export class PgApprovalStore implements ApprovalStore {
 
   async create(r: ApprovalRecord, events?: OutboxEvent[]): Promise<void> {
     const base = approvalInsertParams(r);
+    assertInsertArity("pg-approval-store.create", APPROVAL_COLUMNS, base);
     if (events && events.length > 0) {
       // One statement, two writes (E0) — the same data-modifying-CTE outbox as the run/scorecard stores.
       const ev = eventValuesClause(events, base.length + 1);

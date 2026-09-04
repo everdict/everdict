@@ -1,6 +1,7 @@
 import type { IssueLabelStore, IssueStore, OutboxEvent } from "@everdict/application-control";
 import { ConflictError, type IssueLabelRecord, IssueLabelRecordSchema, type IssueRecord } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { iso } from "./row.js";
 
@@ -22,7 +23,7 @@ interface IssueLabelRow {
 }
 
 const LABEL_COLUMNS = "(id, tenant, name, color, description, created_by, created_at, updated_at)";
-const LABEL_VALUES = "($1,$2,$3,$4,$5,$6,$7::timestamptz,$8::timestamptz)";
+const LABEL_VALUES = insertPlaceholders(LABEL_COLUMNS);
 
 function insertParams(record: IssueLabelRecord): unknown[] {
   return [
@@ -139,6 +140,7 @@ export class PgIssueLabelStore implements IssueLabelStore {
 
   async create(record: IssueLabelRecord, events?: OutboxEvent[]): Promise<void> {
     const base = insertParams(record);
+    assertInsertArity("issue-label-store.create", LABEL_COLUMNS, base);
     // ON CONFLICT DO NOTHING + RETURNING lets one round trip both insert and detect the duplicate, instead of a
     // read-then-write that two concurrent definitions could both pass.
     if (events && events.length > 0) {

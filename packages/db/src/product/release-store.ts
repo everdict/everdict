@@ -7,6 +7,7 @@ import type {
 } from "@everdict/application-control";
 import { OPEN_ISSUE_STATUSES, type ReleaseRecord, ReleaseRecordSchema, type ReleaseStatus } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { type TrackerRow, iso, trackerHistory, trackerIds } from "../tracker/row.js";
 
@@ -181,8 +182,7 @@ interface ReleaseRow extends TrackerRow {
 
 const RELEASE_COLUMNS =
   "(id, tenant, product_id, name, description, status, target_date, released_at, series_keys, planned_series_keys, series_selection, history, created_by, created_at, updated_at, components)";
-const RELEASE_VALUES =
-  "($1,$2,$3,$4,$5,$6,$7,$8::timestamptz,$9::jsonb,$10::jsonb,$11,$12::jsonb,$13,$14::timestamptz,$15::timestamptz,$16::jsonb)";
+const RELEASE_VALUES = insertPlaceholders(RELEASE_COLUMNS);
 
 function insertParams(record: ReleaseRecord): unknown[] {
   return [
@@ -243,6 +243,7 @@ export class PgReleaseStore implements ReleaseStore {
 
   async create(record: ReleaseRecord, events?: OutboxEvent[]): Promise<void> {
     const base = insertParams(record);
+    assertInsertArity("release-store.create", RELEASE_COLUMNS, base);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, base.length + 1);
       await this.client.query(

@@ -1,6 +1,7 @@
 import type { OutboxEvent, ProductVersionListFilter, ProductVersionStore } from "@everdict/application-control";
 import { type ProductServiceVersionRecord, ProductServiceVersionRecordSchema } from "@everdict/contracts";
 import type { SqlClient } from "../client.js";
+import { assertInsertArity, insertPlaceholders } from "../insert-columns.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { iso } from "../tracker/row.js";
 
@@ -98,7 +99,7 @@ interface ProductVersionRow {
 
 const VERSION_COLUMNS =
   "(id, tenant, product_id, service, version, stream_key, kind, prerelease, sha, url, notes, published_at, imported_at)";
-const VERSION_VALUES = "($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::timestamptz,$13::timestamptz)";
+const VERSION_VALUES = insertPlaceholders(VERSION_COLUMNS);
 // Insert-once WITHOUT naming a target (arch-review 14 P0). Naming the stream-scoped index made the writer
 // depend on a uniqueness that is not yet the only one in force: mig 0138's original
 // UNIQUE (tenant, product_id, service, version) is still present for rollback safety, so a second stream's
@@ -169,6 +170,7 @@ export class PgProductVersionStore implements ProductVersionStore {
       if (adopted.rows.length > 0) return false;
     }
     const base = insertParams(record);
+    assertInsertArity("product-version-store.create", VERSION_COLUMNS, base);
     if (events && events.length > 0) {
       const ev = eventValuesClause(events, base.length + 1);
       const { rows } = await this.client.query<{ id: string }>(
