@@ -86,6 +86,31 @@ describe("the prompt is a first-class axis of a command harness", () => {
     expect(resolved.prompt).toBe("the default scaffold");
   });
 
+  // ── THE ONE A SINGLE RESOLVE CANNOT SEE ──────────────────────────────────────────────────────────
+  //
+  // Every case above builds a fresh template literal and resolves it once, which is exactly why none of them
+  // caught this: the first implementation wrote the channel key into the env object it was handed, and
+  // `dropEnvKeys` returns its INPUT when there is nothing to drop — so with no env override that object IS
+  // `template.env`, the one the registry holds. One instance's prompt then leaked into every later resolve of
+  // that template, including a campaign's BASELINE, which equalizes the two sides and makes a real treatment
+  // read as no change. `scripts/live/axis-matrix.mjs` found it against a live registry.
+  //
+  // Observed RED before the fix:
+  //   AssertionError: expected { MODEL: 'sonnet', CC_SCAFFOLD: 'mine' } to deeply equal { MODEL: 'sonnet' }
+  it("does not mutate the template — a second instance resolves as if the first had never existed", () => {
+    const shared = template();
+    const withPrompt = resolveHarnessInstance(shared, instance({ overrides: { prompt: "mine" } }));
+    if (withPrompt.kind !== "command") throw new Error("expected a command spec");
+    expect(withPrompt.env.CC_SCAFFOLD).toBe("mine");
+    // The template the registry holds is untouched…
+    expect(shared.kind === "command" ? shared.env : undefined).toEqual({ MODEL: "sonnet" });
+    // …so a sibling instance that overrides nothing is the baseline, not the first instance's prompt.
+    const sibling = resolveHarnessInstance(shared, instance({ version: "1.0.2" }));
+    if (sibling.kind !== "command") throw new Error("expected a command spec");
+    expect(sibling.prompt).toBeUndefined();
+    expect(sibling.env).toEqual({ MODEL: "sonnet" });
+  });
+
   it("a template with no channel and no prompt override is exactly what it was — nothing invented", () => {
     const plain = template({ promptChannel: undefined } as Partial<HarnessTemplateSpec>);
     const resolved = resolveHarnessInstance(plain, instance());

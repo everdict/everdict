@@ -466,7 +466,14 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       const channelValue = channel !== undefined ? env[channel.name] : undefined;
       const prompt =
         overrides?.prompt ?? (typeof channelValue === "string" && channel !== undefined ? channelValue : undefined);
-      if (channel !== undefined && overrides?.prompt !== undefined) env[channel.name] = overrides.prompt;
+      // ⚠️ A NEW OBJECT, ALWAYS. `dropEnvKeys` returns its INPUT when there is nothing to drop, and the input is
+      // `template.env` itself whenever the instance overrode no env — so writing the channel key in place
+      // mutated the template the REGISTRY holds. Every later resolve of that template then saw one instance's
+      // prompt, including the campaign BASELINE, which made two sides identical and a real treatment read as
+      // no change at all. Found by `scripts/live/axis-matrix.mjs` driving five candidates through one live
+      // registry; no unit test could see it, because each one resolves once from a fresh literal.
+      const resolvedEnv =
+        channel !== undefined && overrides?.prompt !== undefined ? { ...env, [channel.name]: overrides.prompt } : env;
       return CommandHarnessSpecSchema.parse({
         ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
         ...(template.target !== undefined ? { target: template.target } : {}),
@@ -475,7 +482,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         version: instance.version,
         setup: template.setup,
         command: template.command,
-        env,
+        env: resolvedEnv,
         params,
         ...(prompt !== undefined ? { prompt } : {}),
         trace: template.trace,
