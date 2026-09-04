@@ -19,10 +19,18 @@ WHAT IT REFUSES, and why each one is PROVABLE rather than suspected:
     be answered (rule `protocol`, L2).
   · fewer than four answer cells. `sbench_digest.py`'s docstring already states this bound — a digest over
     one small number is guessable — and until now nothing enforced it.
-  · a MISPAIRED answer key: `n_<id>_answer.xlsx` whose cells OUTSIDE the answer range are not its own
-    input's but are exactly some OTHER test case's input. That is a permutation, not a task effect, and it
-    is what case 15380 is: answers 2 and 3 are swapped, so an agent that solves all three workbooks
-    correctly is scored 1/3 and fails. Measured, on the real data, with a real agent's real output.
+  · a MISPAIRED answer key: a BIJECTION, other than the identity, from the three answer workbooks to the
+    three inputs, comparing the cells OUTSIDE the answer range. Every answer matched to exactly one input
+    and every input claimed once is a permutation; no task effect produces that. Case 15380 is one —
+    answers 2 and 3 are swapped — so an agent that solves all three workbooks correctly is scored 1/3 and
+    fails. Measured, on the real data, with a real agent's real output.
+
+WHAT IT CANNOT CHECK, and says so. Not every answer workbook is "the input with the answer written into
+it": for an extraction task it is a result-only sheet with nothing outside `answer_position` at all. There
+is then no evidence either way, and the honest answer is a third value rather than a verdict. The first
+version of this file did not have it, compared `{}` to `{}`, and refused 10 cases on an empty match — case
+97-36 has all 22 of its values inside `A1:A22`, so every answer file matched whichever input also happened
+to have nothing outside. Those cases are staged and counted separately.
 
 WHAT IT ONLY REPORTS. An answer workbook whose non-answer cells match NO input is not proof of anything: a
 task that sorts a table or fills a column legitimately changes cells outside `answer_position`. Cases 17047
@@ -67,7 +75,12 @@ def context(path, positions, fallback_sheet):
 
 
 def examine(root, task, salt):
-    """-> (kind, detail, digests). kind is 'admitted' | 'refused' | 'admitted_with_report'."""
+    """-> (kind, detail, digests).
+
+    kind is 'admitted' (the key pairs with its input), 'refused' (provably unwinnable), 'no_evidence' (the
+    answer workbooks carry nothing the pairing could be checked against) or 'admitted_with_report' (they
+    differ, which a task legitimately can cause). The last two are staged; only 'refused' is dropped.
+    """
     cid = str(task["id"])
     directory = root / cid
     try:
@@ -85,15 +98,32 @@ def examine(root, task, salt):
     except Exception as exc:
         return "refused", f"a workbook could not be read ({type(exc).__name__}: {exc})", None
 
-    matches = {n: [m for m in (1, 2, 3) if answers[n] == inputs[m]] for n in (1, 2, 3)}
-    mispaired = [(n, matches[n][0]) for n in (1, 2, 3) if n not in matches[n] and len(matches[n]) == 1]
-    if mispaired:
-        pairs = ", ".join(f"answer {n} is input {m}'s" for n, m in mispaired)
-        return "refused", f"the answer key is mispaired ({pairs})", None
+    def digests_for():
+        return [digest_of(directory / f"{n}_{cid}_answer.xlsx", sheet, positions, salt) for n in (1, 2, 3)]
 
-    digests = [
-        digest_of(directory / f"{n}_{cid}_answer.xlsx", sheet, positions, salt) for n in (1, 2, 3)
-    ]
+    # AN EMPTY CONTEXT MATCHES AN EMPTY CONTEXT, AND THAT IS NOT EVIDENCE OF ANYTHING. Not every answer
+    # workbook is "the input with the answer filled in": for an extraction task it is a result-only sheet,
+    # so everything outside `answer_position` is absent from it. Case 97-36 is that shape — all 22 of its
+    # values live inside `A1:A22`, every answer file has nothing outside it, and `{} == {}` reported the
+    # key as mispaired against whichever input also happened to have nothing outside. The first version of
+    # this check refused 11 cases and 10 of them were this. So a pairing claim needs discriminating bytes.
+    if not all(answers[n] for n in (1, 2, 3)):
+        return "no_evidence", "the answer workbooks hold nothing outside the answer range", digests_for()
+
+    # …and it needs a BIJECTION, which is what makes it a permutation rather than a coincidence: every
+    # answer matched to exactly one input, every input claimed once, and the mapping not the identity.
+    permutation = next(
+        (p for p in itertools.permutations((1, 2, 3))
+         if p != (1, 2, 3) and all(answers[n] == inputs[p[n - 1]] for n in (1, 2, 3))),
+        None,
+    )
+    if permutation is not None:
+        pairs = ", ".join(f"answer {n} is input {permutation[n - 1]}'s" for n in (1, 2, 3)
+                          if permutation[n - 1] != n)
+        return "refused", f"the answer key is mispaired ({pairs})", None
+    matches = {n: [m for m in (1, 2, 3) if answers[n] == inputs[m]] for n in (1, 2, 3)}
+
+    digests = digests_for()
     drifted = [n for n in (1, 2, 3) if n not in matches[n]]
     if drifted:
         detail = []
@@ -123,7 +153,7 @@ def main():
             print(f"no such instruction: {', '.join(sorted(missing))}", file=sys.stderr)
             return 2
 
-    staged, refused, reported = [], [], []
+    staged, refused, reported, unchecked = [], [], [], []
     for task in dataset:
         cid = str(task["id"])
         salt = hashlib.sha256(f"{cid}|everdict-spreadsheetbench".encode()).hexdigest()[:16]
@@ -133,6 +163,8 @@ def main():
             continue
         if kind == "admitted_with_report":
             reported.append((cid, detail))
+        if kind == "no_evidence":
+            unchecked.append(cid)
         staged.append({
             "id": task["id"],
             "instruction": task["instruction"],
@@ -144,6 +176,9 @@ def main():
 
     pathlib.Path(args.out).write_text(json.dumps(staged, indent=2))
     print(f"staged {len(staged)} of {len(dataset)} instructions -> {args.out}")
+    if unchecked:
+        print(f"{len(unchecked)} of them could not have their answer key checked at all — the answer "
+              f"workbooks hold nothing outside the answer range, so there is no pairing evidence either way")
     if reported:
         print(f"\n{len(reported)} admitted with a pairing report (a human should read these):", file=sys.stderr)
         for cid, detail in reported:

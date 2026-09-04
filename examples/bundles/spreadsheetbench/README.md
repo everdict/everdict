@@ -146,12 +146,19 @@ the harness publishes no reward, and the case is `unmeasured` instead of lost.
 **Some answer keys do not pair with their own input.** Case 15380's answer workbooks 2 and 3 are swapped:
 input 2 asks for month `09` and answer 2 says `FEB`, which is input 3's answer. An agent that solves all
 three workbooks correctly scores 1/3 and fails — measured, with a real agent's real output. `sbench_stage.py`
-refuses a case whose `n_<id>_answer.xlsx` matches some OTHER test case's input outside the answer range,
-because a permutation is provable. It does NOT refuse the weaker signal — an answer workbook that matches no
-input — since a task that sorts a table legitimately changes cells outside `answer_position`; those are
-printed with the differing cells for a human to read. Cases 17047 and 30930 are in that bucket and look like
-data slips (`A31` is `-3039` in the input and `-30` in the answer, in a column the instruction never writes),
-but "looks like" is not grounds for a refusal.
+refuses a case only when the three answer workbooks form a BIJECTION onto the three inputs that is not the
+identity: every answer matched to exactly one input, every input claimed once. That is a permutation, and no
+task effect makes one. It does NOT refuse the weaker signal — an answer workbook that matches no input —
+since a task that sorts a table legitimately changes cells outside `answer_position`; those are printed with
+the differing cells for a human to read. Cases 17047 and 30930 are in that bucket and look like data slips
+(`A31` is `-3039` in the input and `-30` in the answer, in a column the instruction never writes), but "looks
+like" is not grounds for a refusal.
+
+And where the answer workbook is result-only — an extraction task whose answer file holds nothing outside
+`answer_position` — there is no pairing evidence at all, which is a third value rather than a verdict. The
+first version of this check compared `{}` to `{}` and refused 10 cases on an empty match; case 97-36 has all
+22 of its values inside `A1:A22`, so every answer file matched whichever input also had nothing outside.
+Those cases are staged and counted separately.
 
 ⚠️ **No CI gate covers any of this.** The workflow installs no Python and never enters `examples/`, so
 `python3 scripts/sbench_position.py` (its self-test) is the author's check, not the tree's.
