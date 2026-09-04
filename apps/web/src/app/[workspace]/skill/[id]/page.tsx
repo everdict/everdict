@@ -12,6 +12,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { fmtSubject } from '@/shared/lib/format'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { VerifySkillButton } from '@/features/verify-skill'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
@@ -85,7 +86,11 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
   const reference = { type: 'skill' as const, id: skill.id, label: skill.name }
   return (
     <div className="space-y-6">
-      <PageHeader title={skill.name} description={skill.description} />
+      <PageHeader
+        title={skill.name}
+        description={skill.description}
+        actions={<VerifySkillButton id={id} />}
+      />
       <SkillDetail
         skill={skill}
         author={author}

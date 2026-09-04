@@ -323,6 +323,10 @@
     "lastRunAt": "최근 실행 {at}"
   },
   "datasetsPage": {
+    "attest": "ground truth 승인",
+    "attestError": "승인이 거부되었습니다.",
+    "attestPrompt": "무엇을 어떤 근거로 승인합니까? (이 바이트에 대해 기록됩니다)",
+    "attestTitle": "이 버전의 ground_truth 선언을 승인합니다. ground truth 지표는 모든 judge 를 앞서므로, 승인은 정확한 내용에 대해 기록됩니다 — 바이트가 바뀌면 그 승인은 더 이상 그것을 가리키지 않습니다.",
     "title": "데이터셋",
     "description": "어떤 하니스든 같은 문제로 공정하게 비교해요.",
     "importFromSource": "소스에서 가져오기",
@@ -486,6 +490,22 @@
     "errorDownloadFailed": "다운로드 실패 (GitHub {status})"
   },
   "harnessesPage": {
+    "delegate": "슬롯 담당",
+    "delegateUnread": "위임 프로필을 읽지 못했습니다.",
+    "noMaintainer": "선언된 담당 없음",
+    "spanMapping": "트레이스 span 매핑",
+    "spanMappingDefault": "선언된 매핑이 없어 기본값이 적용됩니다.",
+    "spanMappingUnread": "span 매핑을 읽지 못했습니다.",
+    "repin": "이미지 재고정",
+    "repinConfirm": "이 하네스의 이미지 바인딩을 다시 고정할까요? 새 불변 버전을 등록합니다 — 지금 보고 있는 버전을 수정하지 않습니다.",
+    "repinError": "재고정에 실패했습니다.",
+    "repinTitle": "움직이는 이미지 바인딩을 해석해 새 버전으로 등록합니다.",
+    "repinned": "{version} 을 등록했습니다.",
+    "repinnedNoChange": "움직인 것이 없어 새 버전이 필요하지 않았습니다.",
+    "after": "{version} 다음",
+    "forkedFrom": "{from} 에서 분기",
+    "lineage": "계보",
+    "lineageUnread": "계보를 읽지 못했습니다 — 계보가 없다는 뜻은 아닙니다.",
     "title": "하니스",
     "description": "평가할 에이전트예요. 어떤 벤치마크로든 돌려봐요.",
     "register": "하니스 등록",
@@ -2760,6 +2780,25 @@
     "loadingMore": "불러오는 중…"
   },
   "scorecardsPage": {
+    "estimate": "예상",
+    "estimateError": "예상치를 읽지 못했습니다.",
+    "estimateNoHistory": "이 조합의 이력이 없습니다 — 근거가 없는 것이지 저렴한 것이 아닙니다.",
+    "estimateValue": "~${usd} · ~{minutes}분 (과거 배치 {samples}건 기준)",
+    "reportError": "리포트를 만들지 못했습니다.",
+    "overrideGate": "차단 무시",
+    "overrideGateError": "무시가 거부되었습니다.",
+    "overrideGatePrompt": "이 차단을 무시하는 이유는? (결정에 기록됩니다)",
+    "overrideGateTitle": "차단 게이트 결정을 무시합니다. 이유가 기록됩니다 — 아무 흔적도 남기지 않는 무시는 무시가 아닙니다.",
+    "reportOpen": "인용 가능 리포트",
+    "reportTitle": "남에게 인용시킬 수 있는 형태의 배치 리포트입니다.",
+    "verifyManifest": {
+      "action": "매니페스트 검증",
+      "mismatch": "불일치 — 이 배치는 매니페스트가 주장하는 것이 아닙니다.",
+      "unverifiable": "검사할 수 없었습니다 — 실패도 통과도 아닙니다.",
+      "verified": "검증됨 — 주장하는 그대로입니다."
+    },
+    "verifyManifestError": "매니페스트 검사를 실행하지 못했습니다.",
+    "verifyManifestTitle": "이 배치가 봉인된 다이제스트를 다시 확인합니다.",
     "rescoreButton": "미측정 {count}건 재채점",
     "rescoring": "재채점 중…",
     "rescoreError": "재채점에 실패했습니다.",
@@ -3729,6 +3768,9 @@
     "capabilityFrom": "{source} 출처"
   },
   "skillsManager": {
+    "verify": "확인",
+    "verifyError": "확인에 실패했습니다.",
+    "verifyTitle": "이 스킬이 여전히 유효한지 확인합니다 — 지침은 계속 움직이는 코드베이스 위에 쓰입니다.",
     "newSkill": "새 스킬",
     "editSkill": "스킬 편집",
     "emptyTitle": "아직 스킬이 없어요",
@@ -5866,6 +5908,9 @@
     "servicePathPlaceholder": "apps/api (선택)"
   },
   "productPage": {
+    "versionsEmpty": "아직 가져온 서비스 버전이 없습니다.",
+    "versionsHeading": "가져온 버전",
+    "versionsUnread": "버전 원장을 읽지 못했습니다 — 버전이 없다는 뜻은 아닙니다.",
     "servicesHeading": "추적 서비스",
     "syncFailed": "싱크 실패: {message}",
     "lastSynced": "{at} 싱크됨",

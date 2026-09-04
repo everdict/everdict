@@ -27,6 +27,7 @@ import { DeleteDatasetButton } from '@/features/delete-dataset'
 import { CommentsSection } from '@/features/discuss'
 import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
+import { AttestDatasetButton } from '@/features/attest-dataset'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { pickOrigin } from '@/entities/capability-origin'
 import {
@@ -371,6 +372,13 @@ export default async function DatasetDetailPage({
               version={dataset.version}
               tags={versionTags}
               canEdit={canPublish}
+            />
+            {/* The constitutional approval a ground_truth declaration needs before a submit may rest on it.
+                Admin-only at the control plane; the button only appears where it can succeed. */}
+            <AttestDatasetButton
+              id={dataset.id}
+              version={dataset.version}
+              canAttest={can(principal?.roles, 'datasets:delete')}
             />
           </div>
         )}

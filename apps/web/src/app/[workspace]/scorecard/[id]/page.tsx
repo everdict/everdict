@@ -13,6 +13,7 @@ import { DeleteScorecardButton } from '@/features/delete-scorecard'
 import { CommentsSection } from '@/features/discuss'
 import { RerunScorecardButton } from '@/features/rerun-scorecard'
 import { RescoreScorecardButton } from '@/features/rescore-scorecard'
+import { ScorecardEvidenceActions } from '@/features/scorecard-evidence'
 import { StopScorecardButton } from '@/features/stop-scorecard'
 import { datasetSchema, type DatasetCase } from '@/entities/dataset'
 import { judgesSchema, type JudgePickerChoice } from '@/entities/judge'
@@ -630,6 +631,15 @@ export default async function ScorecardDetailPage({
                 record.retryableUnmeasured !== undefined &&
                 record.retryableUnmeasured > 0 && (
                   <RescoreScorecardButton id={record.id} count={record.retryableUnmeasured} />
+              )}
+              {/* Two acts a settled batch owes a reader: prove it is still what it claims, and let somebody
+                  override a block ON THE RECORD rather than in a conversation. `gates` reaches the web now
+                  (census slice 1), so the override appears only when there IS a block. */}
+              {(record.status === 'succeeded' || record.status === 'failed') && (
+                <ScorecardEvidenceActions
+                  id={record.id}
+                  blocked={(record.gates ?? []).some((g) => (g as { outcome?: string }).outcome === 'block')}
+                />
                 )}
               {canRun && (
                 <RerunScorecardButton

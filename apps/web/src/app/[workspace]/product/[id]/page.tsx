@@ -29,6 +29,7 @@ import { Card } from '@/shared/ui/card'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
+import { loadProductVersions } from '@/features/product-versions'
 
 export const dynamic = 'force-dynamic'
 
@@ -57,6 +58,8 @@ export default async function ProductPage({
   const locale = await getLocale()
   const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
+  // Best-effort: a version read that fails must not take the product page down with it.
+  const versions = await loadProductVersions(ctx, id)
 
   // 알 수 없는 range 는 기본 폭으로 — 잘못 친 파라미터가 빈 화면이 되는 것보다 낫다.
   const activeRange: TimelineRangeKey =
@@ -130,6 +133,30 @@ export default async function ProductPage({
           ) : null
         }
       />
+
+        {/* The imported service versions underneath the releases — the insert-once ledger the watch series
+          uses as its x-axis. Without it the page shows releases and cannot answer "what shipped between
+          these two", which is what a timeline is for. */}
+      <section className="space-y-2.5">
+        <SectionHeader title={t('versionsHeading')} />
+        {versions === undefined ? (
+          <p className="text-[12px] text-faint">{t('versionsUnread')}</p>
+        ) : versions.versions.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">{t('versionsEmpty')}</p>
+        ) : (
+          <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+            {versions.versions.slice(0, 20).map((v, i) => (
+              <li key={`${v.service ?? ''}@${v.version}-${i}`} className="flex items-center gap-2 px-2.5 py-1.5">
+                {v.service !== undefined && (
+                  <span className="shrink-0 text-[12px] text-muted-foreground">{v.service}</span>
+                )}
+                <span className="shrink-0 font-mono text-[12.5px] font-[510]">{v.version}</span>
+                <span className="min-w-0 flex-1 truncate text-right text-[11px] text-faint">{v.at ?? ''}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       {/* 추적 서비스 — 이 제품을 구성하는 실제 레포들과 각자의 싱크 상태. 비어 있으면 섹션째 숨긴다. */}
       {product.services.length > 0 && (

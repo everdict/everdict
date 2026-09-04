@@ -1,6 +1,19 @@
 import type { ReactNode } from 'react'
-import { ChevronLeft, FileText, GitBranchPlus, GitCompare, Lock, Shapes } from 'lucide-react'
+import { ChevronLeft, FileText, GitBranch, GitBranchPlus, GitCompare, Lock, Shapes } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
+
+import {
+  HarnessDelegatePanel,
+  HarnessLineagePanel,
+  HarnessSpanMappingPanel,
+  loadHarnessDelegate,
+  loadHarnessLineage,
+  loadSpanAttrMapping,
+  type HarnessDelegate,
+  type HarnessLineage,
+  type SpanAttrMapping,
+} from '@/features/harness-provenance'
+import { RepinHarnessButton } from '@/features/repin-harness'
 
 import {
   MentionInChatButton,
@@ -104,11 +117,19 @@ export default async function HarnessDetailPage({
 
   let versions: string[] = []
   let versionTags: Record<string, string[]> = {}
+  let lineage: HarnessLineage | undefined
+  let spanMapping: SpanAttrMapping | undefined
+  let delegate: HarnessDelegate | undefined
   let spec: HarnessSpec | undefined
   let error: string | undefined
   let active: string | undefined
   try {
     const detail = harnessVersionsSchema.parse(await controlPlane.getHarness(ctx, id))
+    // Where each version came from — one read the page never made, so a harness could say what it IS
+    // and nothing about what produced it. Best-effort: a failed read must not take the page down.
+    lineage = await loadHarnessLineage(ctx, id)
+    spanMapping = await loadSpanAttrMapping(ctx, id)
+    delegate = await loadHarnessDelegate(ctx, id)
     versions = detail.versions
     versionTags = detail.versionTags ?? {}
     const requested = typeof v === 'string' && versions.includes(v) ? v : undefined
@@ -307,6 +328,9 @@ export default async function HarnessDetailPage({
                   {t('newVariant')}
                 </Link>
               )}
+              {/* Re-pin is a WRITE that mints a version, so it sits with the other version-authoring actions
+                  and is gated the same way. */}
+              {canTagVersions && <RepinHarnessButton id={id} />}
               {canDeleteHarness && (
                 <DeleteHarnessButton
                   id={id}
@@ -320,6 +344,24 @@ export default async function HarnessDetailPage({
           }
         />
       </div>
+
+      {/* Where each version came from. The control plane has answered this in one read all along and the
+          page never asked, so a harness could say what a version IS and nothing about what produced it. */}
+      <Card className="p-5">
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+          <GitBranch className="size-3.5" />
+          {t('lineage')}
+        </div>
+        <HarnessLineagePanel lineage={lineage} />
+        <div className="mt-4 mb-2 flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('spanMapping')}
+        </div>
+        <HarnessSpanMappingPanel mapping={spanMapping} />
+        <div className="mt-4 mb-2 flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('delegate')}
+        </div>
+        <HarnessDelegatePanel delegate={delegate} />
+      </Card>
 
       {/* This version's changelog (description) — a free-form note entered at deploy time. Hide the section itself if absent (don't render empty sections). */}
       {versionNote && (

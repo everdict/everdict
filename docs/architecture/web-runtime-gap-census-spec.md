@@ -238,9 +238,29 @@ surfaces exist, it means each missing one has a line saying so.
 | `/fs/search` | a workspace tree you can browse and cannot search is a tree you have to already know. TWO inputs, not one, because the control plane searches two different things: `glob` matches PATHS and `pattern` greps CONTENT, and collapsing them makes the box lie about what it does. A truncated result says it is a FLOOR |
 | `/fs/usage` | …and a tree with no usage read cannot say what it costs. Best-effort on the page: a usage read that fails must not take the browser down, and absent reads as "not measured", never 0 |
 
-**53 remain OWED.** They are not one more afternoon: `campaigns` (10 routes) is the evolution domain with no
+| `/harnesses/:id/lineage` · `span-attr-mapping` · `delegate` | a harness page could say what a version IS and nothing about what produced it, what a pulled trace is read AS, or who maintains each slot. Three panels on one card, each distinguishing **unread from empty** — the shared mistake of a best-effort side read is drawing nothing when the read failed, which tells a reader the thing does not exist |
+| `/harnesses/:id/pins` | the headless re-pin. Its confirm says what it MAKES rather than asking "are you sure": a re-pin registers a NEW immutable version, and a reader who thinks it edits the current one will use it very differently |
+| `/scorecards/:id/verify-manifest` | THREE answers, not two. `unverifiable` is not a failure — it says the check could not run, and collapsing it into "mismatch" accuses a batch nobody read |
+| `/scorecards/:id/gate/override` | an override on the RECORD instead of in a conversation. The reason is required; an override that leaves no artifact overrides nothing (rule `suite`). Shown only when there IS a block, which the record's `gates` field (slice 1) is what makes possible |
+| `/scorecards/:id/report` | the batch as something a reader takes AWAY. Returned as text rather than re-rendered in our components, which would produce a second document saying almost the same thing |
+| `/scorecards/estimate` | what a batch will cost before spending it. Asked on demand, not per keystroke. **No history is a real answer** and says so — printing $0 for a pair nobody has run would be inventing a number the route goes out of its way not to invent |
+| `/skills/:id/verify` | the act that turns "true when written" into "checked on a date" |
+| `/datasets/:id/versions/:v/attest` | the constitutional approval a `ground_truth` declaration needs. Deliberately not one-click: an approval that costs one click is one nobody read, and the note is recorded against the exact bytes |
+| `/judges/:id/versions/:v/tags` | every other versioned entity could be labelled from the web and a judge could not — so a judge version could be tagged by an agent and not by a person |
+| `/products/:id/versions` | the imported version ledger under the releases. Without it a product page cannot answer "what shipped between these two", which is what a timeline is for |
+
+**Two were deliberately NOT closed, and the client methods for them were removed again.**
+`/scorecards/gate` (release-gate a candidate against a baseline) and `/benchmarks/:id/judge` (a benchmark's
+official scorer as a registerable code judge) both needed a surface I would have been guessing at. A control
+placed by guess is worse than a named debt: it looks like a decision. They went back on the OWED list, and
+the client methods came back out — a client method with no caller is the unwired-capability defect this
+repository has a gate against, and adding one to make a counter move is the exact mistake this page is a
+record of.
+
+**41 remain OWED.** They are not one more afternoon: `campaigns` (11 routes) is the evolution domain with no
 page at all, `knowledge` authoring (8) is a write surface over a graph the web only reads, and the
-`sandboxes`/`groups`/`checkpoints` clusters are each a product surface somebody has to design. Calling those
+`sandboxes`/`groups`/`checkpoints`/`environments` clusters are each a product surface somebody has to
+design. Calling those
 resolved by adding a client method nobody calls would be the unwired-capability defect this repository has a
 gate against — so they stay named, and the gate refuses to let a new one join them silently.
 

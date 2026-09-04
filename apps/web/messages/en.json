@@ -323,6 +323,10 @@
     "lastRunAt": "Last run {at}"
   },
   "datasetsPage": {
+    "attest": "Approve ground truth",
+    "attestError": "The approval was refused.",
+    "attestPrompt": "What is being approved, and on what basis? (recorded against these exact bytes)",
+    "attestTitle": "Approve this version's ground_truth declarations. A ground-truth metric outranks every judge, so the approval is recorded against the exact content — if the bytes move, it no longer names them.",
     "title": "Datasets",
     "description": "Compare any harness fairly on the same problems.",
     "importFromSource": "Import from source",
@@ -486,6 +490,22 @@
     "errorDownloadFailed": "Download failed (GitHub {status})"
   },
   "harnessesPage": {
+    "delegate": "Slot maintainers",
+    "delegateUnread": "The delegation profile could not be read.",
+    "noMaintainer": "no maintainer declared",
+    "spanMapping": "Trace span mapping",
+    "spanMappingDefault": "No mapping declared — the defaults apply.",
+    "spanMappingUnread": "The span mapping could not be read.",
+    "repin": "Re-pin images",
+    "repinConfirm": "Re-pin this harness's image bindings? This REGISTERS A NEW immutable version — it does not edit the one you are looking at.",
+    "repinError": "The re-pin failed.",
+    "repinTitle": "Resolve the moving image bindings and register the result as a new version.",
+    "repinned": "Registered {version}.",
+    "repinnedNoChange": "Nothing moved — no new version was needed.",
+    "after": "after {version}",
+    "forkedFrom": "forked from {from}",
+    "lineage": "Lineage",
+    "lineageUnread": "The lineage could not be read — this says nothing about whether there is one.",
     "title": "Harnesses",
     "description": "The agents you evaluate. Run them against any benchmark.",
     "register": "Register harness",
@@ -2760,6 +2780,25 @@
     "loadingMore": "Loading…"
   },
   "scorecardsPage": {
+    "estimate": "Estimate",
+    "estimateError": "The estimate could not be read.",
+    "estimateNoHistory": "No history for this pair — nothing to estimate from, which is not the same as cheap.",
+    "estimateValue": "~${usd} · ~{minutes} min (from {samples} past batch(es))",
+    "reportError": "The report could not be built.",
+    "overrideGate": "Override block",
+    "overrideGateError": "The override was refused.",
+    "overrideGatePrompt": "Why is this block being overridden? (recorded on the decision)",
+    "overrideGateTitle": "Override a blocking gate decision. The reason is recorded — an override that leaves no artifact overrides nothing.",
+    "reportOpen": "Citable report",
+    "reportTitle": "The batch as a report somebody else can cite.",
+    "verifyManifest": {
+      "action": "Verify manifest",
+      "mismatch": "MISMATCH — this batch is not what its manifest claims.",
+      "unverifiable": "Could not be checked — this is not a failure, and not a pass.",
+      "verified": "Verified — still what it claims."
+    },
+    "verifyManifestError": "The manifest check failed to run.",
+    "verifyManifestTitle": "Re-check the digests this batch was sealed under.",
     "rescoreButton": "Re-score {count} unmeasured",
     "rescoring": "Re-scoring…",
     "rescoreError": "Re-score failed.",
@@ -3729,6 +3768,9 @@
     "capabilityFrom": "from {source}"
   },
   "skillsManager": {
+    "verify": "Attest",
+    "verifyError": "The attestation failed.",
+    "verifyTitle": "Attest that this skill still holds — guidance is written against a codebase that keeps moving.",
     "newSkill": "New skill",
     "editSkill": "Edit skill",
     "emptyTitle": "No skills yet",
@@ -5866,6 +5908,9 @@
     "servicePathPlaceholder": "apps/api (optional)"
   },
   "productPage": {
+    "versionsEmpty": "No service version has been imported yet.",
+    "versionsHeading": "Imported versions",
+    "versionsUnread": "The version ledger could not be read — this says nothing about whether there are versions.",
     "servicesHeading": "Tracked services",
     "syncFailed": "Sync failed: {message}",
     "lastSynced": "Synced {at}",

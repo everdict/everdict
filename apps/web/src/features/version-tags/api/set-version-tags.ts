@@ -9,7 +9,10 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
 // (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
 // 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
-export type VersionTagEntity = 'harness' | 'dataset' | 'runtime' | 'rubric' | 'capability'
+// `judge` was the one registry whose tags the web could not set — every other versioned entity had a
+// branch here and judges did not, so a judge version could be labelled by an agent and not by a person.
+// Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+export type VersionTagEntity = 'harness' | 'dataset' | 'runtime' | 'rubric' | 'capability' | 'judge'
 
 export async function setVersionTagsAction(input: {
   entity: VersionTagEntity
@@ -27,6 +30,8 @@ export async function setVersionTagsAction(input: {
       await controlPlane.setRubricVersionTags(ctx, input.id, input.version, input.tags)
     else if (input.entity === 'capability')
       await controlPlane.setCapabilityVersionTags(ctx, input.id, input.version, input.tags)
+    else if (input.entity === 'judge')
+      await controlPlane.setJudgeVersionTags(ctx, input.id, input.version, input.tags)
     else await controlPlane.setRuntimeVersionTags(ctx, input.id, input.version, input.tags)
     return { ok: true }
   } catch (e) {

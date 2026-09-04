@@ -15,6 +15,7 @@ import { FieldError, Input, Label } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { runScorecardAction } from '../api/run-scorecard'
+import { EstimateLine } from '@/features/estimate-scorecard'
 
 interface Values {
   datasetId: string
@@ -369,6 +370,11 @@ export function RunScorecardForm({
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <p className="text-[12px] text-muted-foreground">{t('help')}</p>
+
+      {/* What this batch is likely to cost, before spending it. History-based for THIS dataset×harness pair,
+          asked on demand: re-reading it per keystroke would spend the control plane's time on a form nobody
+          has finished. No history is a real answer and says so rather than printing a zero. */}
+      <EstimateLine dataset={datasetId} harness={harnessId} />
 
       <Button type="submit" disabled={isSubmitting}>
         {isSubmitting ? t('submitting') : t('submit')}

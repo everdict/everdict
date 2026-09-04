@@ -1082,6 +1082,64 @@ export const controlPlane = {
     return call<T>(auth, `/fs/search?${qs.toString()}`)
   },
   fsUsage: <T>(auth: AuthContext) => call<T>(auth, '/fs/usage'),
+
+  // ── HARNESS: THE FOUR READS AND ONE ACTION THE DETAIL PAGE COULD NOT MAKE ────────────────────────
+  //
+  // Census slice 5. Each existed on the control plane and had no web caller, so a harness page could show
+  // what a version IS and nothing about where it came from, what it points at, or how to move it forward.
+  // docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // Where a version came from — the instance chain behind it.
+  harnessLineage: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/lineage`),
+  // How this harness's trace spans map onto our semantic conventions — what a pulled trace is read AS.
+  harnessSpanAttrMapping: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/span-attr-mapping`),
+  // The agent a delegating (judge) harness dispatches to.
+  harnessDelegate: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/delegate`),
+  // Headless re-pin — resolves the harness's moving image bindings and registers the result as a NEW
+  // immutable instance version. Never edits the version in front of you; that is why it is a POST that
+  // returns a new one.
+  repinHarness: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/pins`, { method: 'POST' }),
+  // Per-version labels — mutable metadata, deliberately OUTSIDE the spec so a label can be added to a
+  // version that already exists (immutability is content-only).
+  setJudgeVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    }),
+
+  // ── SCORECARD: THE FIVE THE DETAIL PAGE COULD NOT REACH ──────────────────────────────────────────
+  //
+  // The citable report a person hands to somebody else; the manifest check that says the batch is still
+  // what it claims; the release gate and its override; and the submit-time estimate.
+  scorecardReport: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/report`),
+  verifyScorecardManifest: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/verify-manifest`, { method: 'POST' }),
+  overrideScorecardGate: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/gate/override`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  estimateScorecard: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/scorecards/estimate${qs}`),
+
+  // ── THE REST OF THE BATCH ────────────────────────────────────────────────────────────────────────
+  //
+  // Attest a dataset version's ground_truth declarations — the approval a constitutional metric needs
+  // before a submit may rest on it (rule `suite`: an authorization that leaves no artifact authorizes
+  // nothing). Skill verification, the product's imported version ledger, and a benchmark's official scorer.
+  attestDatasetVersion: <T>(auth: AuthContext, id: string, version: string, body: unknown) =>
+    call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/attest`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  verifySkill: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/skills/${encodeURIComponent(id)}/verify`, { method: 'POST' }),
+  listProductVersions: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/products/${encodeURIComponent(id)}/versions`),
   // Re-score ONLY the retryable-unmeasured judge scores in place (transient judge blips) — no case re-run.
   rescoreScorecardUnmeasured: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/rescore-unmeasured`, { method: 'POST' }),

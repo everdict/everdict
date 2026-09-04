@@ -29,6 +29,7 @@ import { CodeEditor } from '@/shared/ui/code-editor'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
+import { VersionTagsEditor } from '@/features/version-tags'
 
 export const dynamic = 'force-dynamic'
 
@@ -202,6 +203,16 @@ export default async function JudgeDetailPage({
           <span className="font-mono text-[12px] text-faint">
             {t('latestVersion', { version: judge.version })}
           </span>
+          {/* Every other versioned entity could be labelled from the web and a judge could not — so a judge
+              version could be tagged by an agent and not by a person. Tags are mutable metadata OUTSIDE the
+              spec, which is the point: a label can be added to a version that already exists. */}
+          <VersionTagsEditor
+            entity="judge"
+            id={judge.id}
+            version={judge.version}
+            tags={summary.versionTags?.[judge.version] ?? []}
+            canEdit={can(principal?.roles, 'judges:write')}
+          />
           {judge.kind === 'model' && judge.model && (
             <ModelChip>{judgeModelLabel(judge.model)}</ModelChip>
           )}
