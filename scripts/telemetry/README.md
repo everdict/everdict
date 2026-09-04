@@ -55,9 +55,12 @@ it rather than in a stream that only exists while a sink happens to be listening
 - It is local (`.git/`), not shared. It describes this checkout's sessions.
 - `http/protobuf` and gRPC are not accepted. Both would need a dependency.
 
-## Owed
+## No longer owed
 
-Nothing forces the recipe on. A session run without it is invisible to the three indicators above, and the
-gap looks identical to a quiet week. Closing that would mean putting the variables in `.claude/settings.json`'s
-`env` block, which turns the export on for everyone in the repository and makes a session noisy when no sink
-is listening — a trade worth making once a sink is expected to be up, and not before.
+The debt this section used to name — *nothing forces the recipe on, and a session run without it is invisible*
+— is paid. `.claude/settings.json` sets the block above for every session in this repository.
+
+The decision rested on a measurement rather than a hope: a session with the full recipe and **nothing** on the
+port produced 157 bytes of stderr, all of it an unrelated stdin warning. Exports are dropped silently when the
+sink is down, which is the property that made turning it on safe. Start `pnpm telemetry` when you want them
+kept; the recipe above is still what to export by hand for a CLI run outside this repository's settings.

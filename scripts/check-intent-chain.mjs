@@ -104,11 +104,49 @@ for (const name of changes) {
       fail(`${label}/intent.md: missing section "## ${section}" (intent/TEMPLATE.md).`);
   }
 
+  // Reported, never failed. Not every change needs a design pass, and a gate that insists otherwise gets
+  // routed around — but an accepted intent nobody has designed against is invisible without this line, which
+  // is how this repository reached ten change directories and zero specs.
+  if (status === "accepted" && !existsSync(path.join(dir, "spec.md"))) {
+    notes.push(`${label}: accepted, and no spec.md. \`pnpm design --next\` takes the oldest of these.`);
+  }
+
   const intentSha = introducedBy(intentFile);
   if (!intentSha) {
     notes.push(
       `${label}: intent.md is not committed yet — its ordering rules are deferred to the commit that adds it.`,
     );
+  }
+
+  // ── spec.md: the same ordering law as plan.md ──────────────────────────────────────────────────
+  //
+  // Added because the design pass that WRITES these specs was reviewed by one, and it pointed out that
+  // `spec.md` had no ordering rule at all — so a spec could be back-dated exactly the way a plan could before
+  // this check existed. Descent from the intent only: this change is the counterexample to spec-before-plan
+  // (the design pass necessarily came after its own plan), and a rule with a permanent exception is worse than
+  // a narrower rule that holds.
+  const specFile = path.join(dir, "spec.md");
+  if (existsSync(specFile)) {
+    const spec = readFileSync(specFile, "utf8");
+    const citedSpec = /^From:\s*intent\.md\s*@\s*([0-9a-f]{7,40})\s*$/m.exec(spec)?.[1];
+    if (!citedSpec) {
+      fail(
+        `${label}/spec.md: no \`From: intent.md @ <sha>\` line. A spec that does not name its request cannot be checked against it.`,
+      );
+    } else if (!resolves(citedSpec)) {
+      fail(`${label}/spec.md: \`From:\` names ${citedSpec}, which is not a commit in this history.`);
+    } else if (intentSha && gitOut("rev-parse", citedSpec) !== intentSha) {
+      fail(
+        `${label}/spec.md: \`From:\` names ${short(citedSpec)}, but intent.md was introduced by ${short(intentSha)}.`,
+      );
+    }
+    const specSha = introducedBy(specFile);
+    if (specSha && intentSha && !isAncestor(intentSha, specSha)) {
+      fail(
+        `${label}: spec.md (${short(specSha)}) does not descend from intent.md (${short(intentSha)}). A spec committed before or beside its intent was written to fit work already done.`,
+      );
+    }
+    if (!specSha) notes.push(`${label}: spec.md is not committed yet — its ordering rules are deferred.`);
   }
 
   // ── plan.md: rule 2 ────────────────────────────────────────────────────────────────────────────

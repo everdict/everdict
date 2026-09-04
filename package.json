@@ -26,6 +26,7 @@
     "intent-chain": "node scripts/check-intent-chain.mjs",
     "guardrails": "node scripts/check-guardrails.mjs",
     "scanner-watches": "node scripts/check-scanner-watches.mjs",
+    "design": "node scripts/design/run.mjs",
     "review": "node scripts/review/run.mjs",
     "watch-bands": "node scripts/bands/watch.mjs",
     "triage": "node scripts/triage.mjs",

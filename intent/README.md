@@ -12,6 +12,13 @@ intent/<YYYY-MM-DD>-<slug>/
 
 `intent/TEMPLATE.md` and `intent/PLAN-TEMPLATE.md` are the shapes. `pnpm intent-chain` enforces them.
 
+`spec.md` is written by `pnpm design --next`, which takes the oldest **accepted** intent without one, applies
+this repository's rules and skills as constraints, and leaves the result in the working tree **uncommitted** —
+a machine proposes, and the spec meets a person before a plan is written against it. It is optional: not every
+change needs a design pass, and `intent-chain` reports a specless accepted intent as a note rather than a
+failure. When it exists it carries the same `From: intent.md @ <sha>` line a plan does, and the same descent
+rule.
+
 ## Why this exists
 
 Before this directory, an idea reached the code as a commit message. The commit messages in this repository

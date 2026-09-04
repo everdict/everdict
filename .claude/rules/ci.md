@@ -81,6 +81,27 @@ See skill `ci`.
   expands `${VAR}` inside a plugin's `.mcp.json`, so Codex must be pointed at a manifest of its own or every
   session dies on a literal `${EVERDICT_MCP_URL}` — invisible until it reaches a user's machine, and readable
   by no compiler or test because these are data files.
+- **`pnpm design` is the stage that had never run**, and the four triggers around it. Ten change directories,
+  nine plans, ZERO specs — the requirements-and-design pass was not skipped on purpose, nothing asked for it.
+  `--next` takes the oldest accepted intent without a spec (the rotation `pnpm scan --next` uses, applied to a
+  stage), runs one read-only session with this repository's rules and skills as constraints, and **writes
+  `spec.md` into the working tree committing nothing** — a machine may propose, and the spec meets a person
+  before a plan is written against it. `pnpm intent-chain` reports an accepted intent with no spec as a NOTE,
+  never a violation: not every change needs a design pass, and a gate insisting otherwise gets routed around.
+  ⚠️ `spec.md` is held to the SAME ordering law as `plan.md` — a `From: intent.md @ <sha>` naming the commit
+  that introduced the intent, and descent from it. That rule exists because the design pass was reviewed by
+  one of its own specs, which pointed out that a spec could be back-dated exactly the way a plan could before
+  `intent-chain` existed. Descent only, not spec-before-plan: this very change is the counterexample, and a
+  rule with a permanent exception is worse than a narrower one that holds.
+  Three more triggers came with it. **Session telemetry is on by default** in `.claude/settings.json` —
+  measured first, not assumed: a session with the full recipe and nothing on the port produced 157 bytes of
+  unrelated stderr, so it costs nothing when no sink listens. Conversation content stays off. **`ci:local`
+  reads the bands every run** (`watch-bands --dry-run` — file reads and arithmetic, no model, no cost on green),
+  so the one thing that notices drift is read at the cadence a push already has instead of waiting to be typed.
+  And **a red bespoke gate triages itself**: the first failing `scripts/check-*.mjs` per run is handed to
+  `pnpm triage`, which reads that scanner's own header. Lint, typecheck, test and build are excluded — they
+  explain themselves, and a model call restating a compiler error is the shape that teaches people to ignore
+  the tool.
 - **`pnpm scan` is the only control here that is NOT change-scoped**, and `lessons/` is where an incident's
   reasoning goes. Everything else reads a diff — review reads the range, the gates read what a commit touched,
   the evals fire on configuration that changed — so all of them are blind to code nobody has touched. A file

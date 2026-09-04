@@ -16,6 +16,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GITLEAKS_VERSION = "8.24.3"; // keep in sync with ci.yml
 const gitleaksCache = path.join(homedir(), ".cache", "everdict", `gitleaks-${GITLEAKS_VERSION}`, "gitleaks");
 
+// The judgement step on a red gate used to be manual, and the person who could most use it is the one who has
+// to remember it exists at the moment something just went red. Bounded to the FIRST bespoke failure per run:
+// lint and typecheck explain themselves, and a model call restating a compiler error is the shape that teaches
+// people to ignore the tool.
+let triaged = false;
+const SELF_EXPLANATORY = new Set(["pnpm lint", "pnpm typecheck", "pnpm test", "pnpm build", "web lint", "web build"]);
+
 function run(label, command, args, opts = {}) {
   const startedAt = Date.now();
   process.stdout.write(`\n▶ ${label}\n`);
@@ -23,6 +30,17 @@ function run(label, command, args, opts = {}) {
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   if (res.status !== 0) {
     console.error(`\n✖ CI-PARITY RED — "${label}" failed after ${seconds}s. Fix it, then re-run pnpm ci:local.`);
+    const gate = /^pnpm ([a-z-]+)$/.exec(label)?.[1];
+    if (
+      !triaged &&
+      gate !== undefined &&
+      !SELF_EXPLANATORY.has(label) &&
+      existsSync(path.join(root, "scripts", `check-${gate}.mjs`))
+    ) {
+      triaged = true;
+      process.stdout.write("\n▶ triaging it — the failing scanner's own header records the repairs it accepts\n");
+      spawnSync("node", [path.join(root, "scripts", "triage.mjs"), gate], { cwd: root, stdio: "inherit" });
+    }
     process.exit(1);
   }
   process.stdout.write(`✓ ${label} (${seconds}s)\n`);
@@ -113,6 +131,10 @@ run("gitleaks (full history)", resolveGitleaks(), [
   "--log-opts=--all",
   "--no-banner",
 ]);
+
+// The bands, every full run. File reads and arithmetic — no model, no cost on a green run — so the one thing
+// here that notices drift is read at the cadence a push already has, rather than waiting to be typed.
+run("bands (dry run)", "pnpm", ["watch-bands", "--dry-run"]);
 
 // Stamp — only a clean tree proves HEAD is what we just validated.
 //
