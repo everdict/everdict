@@ -1,6 +1,8 @@
 # Intent: the two Deploy controls this repository states and does not enforce
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 6abe522563c223a164267b3bb9f4c3e525533be8
 
 ## Problem
 
