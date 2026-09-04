@@ -84,23 +84,33 @@ const tasks = JSON.parse(readFileSync(`${TASKS}/tasks.json`, "utf8"));
 const caseFor = (t) => ({
   id: String(t.id),
   task:
-    `You are given three Excel workbooks in /data/${t.id}: 1_${t.id}_input.xlsx, 2_${t.id}_input.xlsx and ` +
-    `3_${t.id}_input.xlsx. Copy them into the working directory, apply the instruction below to EACH, and ` +
-    `save the results as 1_${t.id}_output.xlsx, 2_${t.id}_output.xlsx and 3_${t.id}_output.xlsx.\n\n` +
+    `Three Excel workbooks are in this directory: 1_${t.id}_input.xlsx, 2_${t.id}_input.xlsx and ` +
+    `3_${t.id}_input.xlsx. Apply the instruction below to EACH of them and save the results here as ` +
+    `1_${t.id}_output.xlsx, 2_${t.id}_output.xlsx and 3_${t.id}_output.xlsx.\n\n` +
     `INSTRUCTION: ${t.instruction}`,
   env: { kind: "repo", source: { files: {} } },
   image: IMAGE,
-  // The grader runs the task's own verifier and reads the reward it PUBLISHES — never an exit code. Its
-  // `files` make it a PRIVATE plan (`PRIVATE_GRADER_CONFIG_KEYS`), so on a lane with a verifier the checker
-  // never enters the agent's container at all; on this lane the digest is what keeps the oracle out of it.
+  // The grader runs the task's own verifier and reads the reward it PUBLISHES — never an exit code.
+  //
+  // ⚠️ IT GRADES IN PLACE, ON PURPOSE. A `files` or `env` key would make this a PRIVATE plan
+  // (`PRIVATE_GRADER_CONFIG_KEYS`), and a self-hosted runner has no lane to run a verifier away from the
+  // agent's container — so every case comes back `unmeasured: runtime 'self:…' cannot run a verifier away
+  // from the agent's container`. Measured the expensive way: a first run of this script declared one and
+  // produced 70 unmeasured results before the profile made it visible.
+  //
+  // The digest is what keeps the oracle out of the container, and it needs no private lane to do it: the
+  // checker holds a salted hash, not an answer, so there is nothing to read even standing next to it.
   graders: [
     {
       id: "reward-file",
       config: {
-        cmd: `bash -lc 'for f in *_output.xlsx; do [ -f "$f" ] && /opt/recalc.sh "$f" >/dev/null 2>&1; done; python3 /opt/sbench_digest.py --id ${t.id} --range ${JSON.stringify(t.answer_position)} --sheet ${JSON.stringify(t.answer_sheet ?? "")} --salt ${t.salt} --digests ${t.digests.join(",")} && echo 1.0 > /tmp/everdict-reward/reward.txt || echo 0.0 > /tmp/everdict-reward/reward.txt'`,
+        cmd: `bash -lc 'mkdir -p /tmp/everdict-reward; for f in *_output.xlsx; do [ -f "$f" ] && /opt/recalc.sh "$f" >/dev/null 2>&1; done; python3 /opt/sbench_digest.py --id ${t.id} --range ${JSON.stringify(t.answer_position)} --sheet ${JSON.stringify(t.answer_sheet ?? "")} --salt ${t.salt} --digests ${t.digests.join(",")} && echo 1.0 > /tmp/everdict-reward/reward.txt || echo 0.0 > /tmp/everdict-reward/reward.txt'`,
         rewardDir: "/tmp/everdict-reward",
-        files: { "noop.txt": "the plan is private because this key is here — see verifierPlanOf" },
-        testsDir: "tests",
+        // WHERE THE HARNESS WORKED. `CommandHarness` runs in "work" (the repo env seeds there) and this
+        // grader defaults to the image's own WORKDIR — so without this the checker looks in an empty
+        // directory and reports every output "was not produced", which is indistinguishable from an agent
+        // that produced nothing. Measured the expensive way, twice.
+        cwd: "work",
       },
     },
   ],
@@ -175,7 +185,11 @@ try {
       version: "1.0.0",
       description: "Claude Code over a spreadsheet task; the scaffold is what a campaign evolves",
       setup: [],
+      // The inputs are staged by the COMMAND rather than requested in the prompt: a task that asks the agent
+      // to copy its own fixtures measures whether it read that sentence, which is not what this benchmark is
+      // about. `{{case.id}}` is the allowed token that makes it per-case.
       command:
+        "cp /data/{{case.id}}/*_input.xlsx . && " +
         'claude -p {{task}} --model "$CC_MODEL" --allowedTools "Read,Edit,Write,Bash" --max-turns "$CC_TURNS" ' +
         '--append-system-prompt "$CC_SCAFFOLD" --output-format json --dangerously-skip-permissions < /dev/null',
       env: { CC_MODEL: process.env.EVERDICT_CC_MODEL ?? "haiku", CC_TURNS: "40", CC_SCAFFOLD: PLAIN, IS_SANDBOX: "1" },
