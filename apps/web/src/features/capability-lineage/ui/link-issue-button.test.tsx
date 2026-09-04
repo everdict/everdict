@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest'
 
 import en from '../../../../messages/en.json'
 
-// 이 파일이 잠그는 것: 하네스·데이터셋·저지 화면에서도 이슈를 걸 수 있고, 그 자리는 이슈를 고칠 수 있는
-// 사람에게만 보인다(링크는 이슈 레코드에 쓰이므로 능력의 권한이 아니라 issues:write 가 판정한다).
+// What this file locks down: an issue can be attached from the harness, dataset and judge screens too, and that place is visible only to
+// someone who can EDIT AN ISSUE (the link is written on the issue record, so issues:write decides it — not a permission on the capability).
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 vi.mock('@/features/issue-links', () => ({ addIssueLinkAction: async () => ({ ok: true }) }))
 
@@ -28,7 +28,7 @@ describe('link issue button', () => {
     const out = render(true)
 
     expect(out).toContain('Link an issue')
-    expect(out).toContain('aria-expanded="false"') // 검색 목록은 열어야 그려진다
+    expect(out).toContain('aria-expanded="false"') // the search list is only drawn once opened
   })
 
   it('shows a reader nothing — linking is a write on the issue', () => {

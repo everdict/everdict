@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { agentPlane } from '@/shared/lib/agent-plane'
 
-// 에이전트 try-drive BFF(agent-automation B3) — 크래프팅 캔버스의 "try"가 draft 를 섀도 실행한다.
+// The agent try-drive BFF (agent-automation B3) — the crafting canvas' "try" shadow-runs the draft.
 export async function POST(request: Request): Promise<Response> {
   const ctx = await authContext()
   try {

@@ -20,16 +20,16 @@ export function CreateInitiativeButton({
   initiatives,
 }: {
   workspace: string
-  // 상위로 걸 수 있는 이니셔티브들. 하나만 고르는 자리이므로 Combobox — 프로젝트의 팀/이니셔티브와 달리
-  // 부모는 하나다.
+  // The initiatives it can hang from. It is a place that picks ONE, so a Combobox — unlike a project's teams and initiatives, a parent
+  // is singular.
   initiatives: { id: string; name: string }[]
-  // 목표일이 이미 지났는지 판정할 기준. 목록의 "기한 초과" 배지와 같은 시간대를 써야 방금 만든 것이
-  // 왜 초과로 보이는지가 어긋나지 않는다.
+  // The basis for judging whether the target date has already passed. It has to use the same timezone as the list's "overdue" badge, or why
+  // something just created shows as overdue does not add up.
   timeZone: string
 }) {
   const t = useTranslations('initiativesPage')
   const router = useRouter()
-  // 이 버튼은 헤더와 빈 상태 두 곳에 놓인다 — 필드 id 를 인스턴스마다 갈라 두 개가 같은 id 를 쓰는 일이 없게 한다.
+  // This button sits in two places, the header and the empty state — the field ids are split per instance so two of them never share an id.
   const formId = useId()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -39,8 +39,8 @@ export function CreateInitiativeButton({
   const [targetDate, setTargetDate] = useState('')
   const [pending, setPending] = useState(false)
 
-  // 지난 날짜도 받는다 — 이미 넘긴 마감을 그대로 기록하는 건 정당하다. 다만 만들자마자 "기한 초과"로
-  // 보일 거라는 사실은 저장 전에 알려준다.
+  // A past date IS accepted — recording a deadline already missed is legitimate. It simply says, before saving, that it will show as
+  // "overdue" the moment it is created.
   const targetIsPast = isPastDue(targetDate === '' ? undefined : targetDate, timeZone)
 
   function submit() {
@@ -155,8 +155,8 @@ export function CreateInitiativeButton({
             <Button type="button" variant="secondary" size="sm" onClick={() => setOpen(false)}>
               {t('cancel')}
             </Button>
-            {/* 제출 라벨은 트리거("새 이니셔티브")와 달라야 한다 — 같은 글자면 무엇을 누르는지가 아니라
-                어디를 누르는지로만 구분된다. 진행 중에도 라벨을 유지해 버튼 폭이 튀지 않게 한다. */}
+            {/* The submit label has to differ from the trigger ("new initiative") — identical text distinguishes what you are pressing only by
+                WHERE you press. The label is kept during submission too, so the button width does not jump. */}
             <Button type="submit" size="sm" disabled={pending || name.trim().length === 0}>
               {pending && <Loader2 className="size-3.5 animate-spin" />}
               {t('createSubmit')}

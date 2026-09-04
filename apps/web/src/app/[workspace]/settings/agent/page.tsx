@@ -18,11 +18,11 @@ import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 export const dynamic = 'force-dynamic'
 
-// 기본 대화 에이전트가 등록되는 안정 id — agent 서버의 AGENT_CONFIG_ID 미러.
+// The stable id the default conversational agent is registered under — a mirror of the agent server's AGENT_CONFIG_ID.
 const AGENT_CONFIG_ID = 'default'
 
-// Settings › Agent — 워크스페이스의 에이전트 목록: 기본 대화 에이전트(default) 최상단 + 추가 등록 에이전트 +
-// first-party 템플릿(_shared). 행 클릭 → 상세(/settings/agent/[id]). 새 에이전트 제작은 크래프팅 스튜디오로.
+// Settings › Agent — the workspace's agent list: the default conversational agent (default) at the top, plus additionally registered agents and
+// first-party templates (_shared). A row click → the detail (/settings/agent/[id]). Making a new agent goes to the crafting studio.
 export default async function AgentListSettingsPage({
   params,
 }: {
@@ -54,7 +54,7 @@ export default async function AgentListSettingsPage({
     )
   }
 
-  // 목록 + 각 에이전트의 latest 스펙(enabled/설명/트리거 배지용). 항목 수가 적어 병렬 개별 조회로 충분.
+  // The list plus each agent's latest spec (for the enabled/description/trigger badges). The entries are few, so parallel individual reads are enough.
   let entries: AgentSummary[] = []
   try {
     entries = agentsSchema.parse(await controlPlane.listAgents(ctx))
@@ -70,12 +70,12 @@ export default async function AgentListSettingsPage({
           agentSpecSchema.parse(await controlPlane.getAgent(ctx, entry.id, 'latest'))
         )
       } catch {
-        // 조회 실패 행은 요약만 보여준다
+        // A row whose read failed shows the summary alone
       }
     })
   )
 
-  // 정렬: 기본(default) → 워크스페이스 소유 → _shared 템플릿. default 는 미등록이어도 가상 행으로 노출.
+  // Order: default → workspace-owned → _shared templates. `default` is surfaced as a virtual row even when unregistered.
   const hasDefault = entries.some((e) => e.id === AGENT_CONFIG_ID)
   const rows = [
     ...(hasDefault

@@ -14,8 +14,8 @@ describe('chat entry — which entries start their own conversation', () => {
   })
 
   it('starts fresh when an analyze entry declares itself the subject of the conversation', () => {
-    // 이슈 상세와 빈 분석 캔버스가 이 예외를 쓴다. 임무 프레이밍은 빈 화면에서만 뜨므로, 이게 false 로
-    // 돌아오면 진입해도 패널은 열려 있던 대화 그대로 — 그 작업에 맞는 화면을 아예 못 보게 된다.
+    // The issue detail and the blank analysis canvas use this exception. Mission framing appears only on an empty screen, so with this returning
+    // false the panel stays on whatever conversation was open even after entering — and the screen framed for that work is never seen at all.
     expect(startsFreshConversation({ mission: 'issueAnalyze', fresh: true })).toBe(true)
     expect(startsFreshConversation({ mission: 'viewAnalyze', fresh: true })).toBe(true)
   })

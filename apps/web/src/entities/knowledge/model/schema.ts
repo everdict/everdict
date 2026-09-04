@@ -90,7 +90,7 @@ export const knowledgeEntrySchema = z.object({
   evidence: z.array(nodeRefSchema).default([]),
   status: z.enum(KNOWLEDGE_ENTRY_STATUSES).default('active'),
   supersedes: z.string().optional(),
-  // 추출 출처 — proposed(제안) 엔트리의 감사 락. 승인 후에도 출처 표시용으로 유지.
+  // The extraction provenance — the audit lock of a `proposed` entry. Kept as an attribution even after approval.
   extraction: z
     .object({
       sourceKind: z.string(),

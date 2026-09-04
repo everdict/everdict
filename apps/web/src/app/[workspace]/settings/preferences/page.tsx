@@ -12,15 +12,15 @@ import { PreferencesPanel } from './preferences-panel'
 
 export const dynamic = 'force-dynamic'
 
-// Account › Preferences — 기기별 표시 설정(테마·언어·시간대) + 계정에 저장되는 내 기본 에이전트 모델.
-// 모델만 서버 상태라 카드를 나눈다: 한 카드 안에서 "이 기기" 와 "내 계정" 이 섞이면 어느 행이 어디까지 따라오는지
-// 말할 수 없다.
+// Account › Preferences — the per-device display settings (theme, language, timezone) plus my default agent model, which is stored on the account.
+// Only the model is server state, so the cards are split: with "this device" and "my account" mixed into one card there is no way to say how far
+// each row follows you.
 export default async function PreferencesPage() {
   const t = await getTranslations('settingsNav')
   const a = await getTranslations('agentModelPreference')
   const ctx = await authContext()
 
-  // 둘 다 best-effort — 모델 레지스트리가 없는 배포/권한 없는 멤버에게도 나머지 설정은 계속 보여야 한다.
+  // Both are best-effort — the remaining settings must still show on a deployment with no model registry, and to a member without permission.
   let preference: AgentModelPreference | undefined
   let models: string[] = []
   try {

@@ -5,14 +5,14 @@ import { fmtPct } from '@/shared/lib/format'
 import { Link } from '@/shared/ui/link'
 import { StatCard } from '@/shared/ui/stat-card'
 
-// 현황 — 지금 이 워크스페이스가 어떤 상태인가. 여덟 개의 숫자는 제품의 축을 하나씩 대표한다: 일(이슈·회귀),
-// 이터레이션, 목표, 에이전트, 실행, 품질, 그리고 기록된 활동의 총량.
+// State — what condition this workspace is in right now. The eight numbers each stand for one axis of the product: work (issues, regressions),
+// iterations, goals, agents, executions, quality, and the total volume of recorded activity.
 //
-// 타일은 전부 링크다. 대시보드에서 숫자를 본 다음에 하는 일은 언제나 "그래서 그게 뭔데"이고, 그 답이 있는
-// 화면으로 가는 길이 없으면 숫자는 읽고 끝나는 장식이 된다.
+// Every tile is a LINK. What you do after seeing a number on a dashboard is always "so what IS that", and with no route to the screen holding
+// the answer, a number becomes decoration you read and forget.
 
-// 통과율의 변화는 퍼센트 포인트로 읽는다 — 74%에서 78%로 간 것은 +4pt 이지 +5.4% 가 아니다. 두 값이 화면에
-// 같이 있을 때 독자가 직접 검산할 수 있는 쪽이 포인트다(analysis-artifact 의 metricDelta 와 같은 판단).
+// A change in pass rate is read in PERCENTAGE POINTS — going from 74% to 78% is +4pt, not +5.4%. With both values on screen together, points
+// are the side the reader can check for themselves (the same judgement as analysis-artifact's metricDelta).
 function passRatePoints(now: number, before: number): number {
   return Math.round((now - before) * 1000) / 10
 }
@@ -24,8 +24,8 @@ function Tile({
   hint,
   tone,
 }: {
-  // 없을 수도 있다 — 이 화면 자체가 답인 숫자(기록된 활동)는 아래 피드가 그 답이라, 링크를 달면 어디로도
-  // 데려가지 못하는 링크가 된다.
+  // It can be absent — a number whose answer IS this screen (recorded activity) has the feed below as that answer, so attaching a link would
+  // make a link that takes you nowhere.
   href?: string
   label: string
   value: string | number
@@ -59,8 +59,8 @@ export async function PulseTiles({
   const base = `/${workspace}`
   const { work, goals, agents, evaluation, trend } = pulse
 
-  // 사이클의 진행률은 활성 사이클들이 커밋한 일 전체에 대한 완료 비율이다. 커밋한 것이 없으면 비율도 없다 —
-  // 0% 로 그리면 "아무것도 못 했다"로 읽히는데, 사실은 "아직 아무것도 담지 않았다"이다.
+  // A cycle's progress is the completion ratio over ALL the work the active cycles committed. With nothing committed there is no ratio —
+  // drawn as 0% it reads as "nothing got done", when what it means is "nothing has been put in yet".
   const activityTotal = trend.activity.reduce((sum, point) => sum + point.total, 0)
   const perDay = trend.activity.length > 0 ? Math.round(activityTotal / trend.activity.length) : 0
   const delta =
@@ -100,8 +100,8 @@ export async function PulseTiles({
         href={`${base}/runs`}
         label={t('tileRuns')}
         value={evaluation.runs}
-        // 실패가 있어도 실행 '수'는 빨갛게 칠하지 않는다 — 경보인 것은 실패지 실행량이 아니고, 큰 숫자가
-        // 빨개지면 많이 돌린 날이 나쁜 날처럼 읽힌다. 실패는 힌트가 말한다.
+        // The run COUNT is not painted red even when there are failures — what is alarming is the failures, not the volume, and a big number
+        // turning red makes a day of heavy running read as a bad day. The failures are stated by the hint.
         hint={t('tileRunsHint', { failed: evaluation.failed })}
       />
       <Tile

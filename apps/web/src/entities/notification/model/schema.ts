@@ -17,11 +17,11 @@ export const notificationKinds = [
   'schedule_failed',
   'report_completed',
   'comment_mention',
-  // 닫아둔 이슈의 평가가 무너졌다 — 아무도 안 보고 있는 이슈라서, 이슈 쪽이 사람을 찾아와야 한다.
+  // The evaluation of a CLOSED issue broke — nobody is watching that issue, so the issue side has to come find a person.
   'issue_regressed',
-  // 프로젝트/목표에 판정이 올라왔다 — 그 일에 답할 사람에게 간다(docs/tracker.md).
+  // A verdict was posted on a project or a goal — it goes to whoever has to answer for that work (docs/tracker.md).
   'tracker_update_posted',
-  // 에이전트가 승인(HITL)에 파킹됐다 — 파킹된 대화/디스커션은 아무도 안 보고 있을 수 있어, 요청이 사람을 찾아온다(N8).
+  // An agent parked on an approval (HITL) — a parked conversation or discussion may have nobody watching, so the request comes to find a person (N8).
   'agent_approval_requested',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)

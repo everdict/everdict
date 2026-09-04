@@ -54,7 +54,7 @@ describe('list filters — a facet is "any of these", and an empty one is no fac
     expect(listFilterCount({ team: ['eng', 'des'], tags: ['smoke'] })).toBe(3)
   })
 
-  // 주소창에는 무엇이든 칠 수 있다 — 모르는 축은 400 을 만드는 대신 버린다.
+  // Anything can be typed into an address bar — an unknown axis is DROPPED rather than made into a 400.
   it('reads only the facets this list knows about', () => {
     expect(listFiltersOf({ team: 'eng', nonsense: 'x' }, ['team', 'tags'])).toEqual({
       team: ['eng'],
@@ -77,7 +77,7 @@ describe('applyListView — filtering, searching, ordering and grouping in one p
     expect(groups[0]?.items.map((r) => r.id)).toEqual(['bravo', 'alpha'])
   })
 
-  // 값이 하나도 없는 항목은 「미지정」으로 걸러질 수 있어야 한다 — 사람들이 실제로 찾는 버킷이다.
+  // An item with no value at all has to be filterable as "unspecified" — it is a bucket people genuinely look for.
   it('lets an item with no value on a facet be filtered as unset', () => {
     const { groups } = applyListView(rows, view({ filters: { team: [''] } }), spec)
     expect(groups[0]?.items.map((r) => r.id)).toEqual(['delta'])
@@ -106,7 +106,7 @@ describe('applyListView — filtering, searching, ordering and grouping in one p
     expect(groups[0]?.items.map((r) => r.id)).toEqual(['alpha', 'bravo', 'charlie', 'delta'])
   })
 
-  // 이름 없는 그룹이 이름 있는 것들 사이에 끼면 목록이 아니라 잔해로 읽힌다.
+  // A nameless group wedged in among named ones makes the list read as debris rather than as a list.
   it('puts the biggest group first and the unset bucket last', () => {
     const { groups } = applyListView(
       rows,
@@ -148,7 +148,7 @@ describe('the display cookie — per reader, per view, and never trusted', () =>
     expect(listDisplayFor(cookie, 'judges', vocabulary)).toEqual(vocabulary.fallback)
   })
 
-  // 쿠키 아래에서 어휘가 바뀔 수 있다 — 낡은 단어 하나는 그 단어만큼만 잃어야지, 취향 전체를 버리면 안 된다.
+  // The vocabulary can change underneath a cookie — one stale word should cost only that word, never the whole preference.
   it('falls back field by field when a stored word is no longer a word', () => {
     const cookie = withListDisplay(undefined, 'harnesses', { grouping: 'retired', order: 'name' })
     expect(listDisplayFor(cookie, 'harnesses', vocabulary)).toEqual({

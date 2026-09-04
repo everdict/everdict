@@ -12,8 +12,8 @@ import { Textarea } from '@/shared/ui/input'
 
 import { postInitiativeUpdateAction } from '../api/initiatives'
 
-// 목표가 지금 어디쯤인지 사람이 말하는 자리. 산수(진척)는 서버가 세지만, "그래서 괜찮은가"는 판단이라
-// 판정과 그 문장이 한 폼에 있다 — 본문 없는 판정은 서버도 거절한다.
+// The place where a PERSON says where the goal is now. The arithmetic (progress) is counted by the server, but "so is it all right" is a
+// JUDGEMENT, so the verdict and its sentence live in one form — the server refuses a verdict with no body too.
 export function InitiativeUpdatePanel({ id }: { id: string }) {
   const t = useTranslations('initiativesPage')
   const refresh = useRefresh()

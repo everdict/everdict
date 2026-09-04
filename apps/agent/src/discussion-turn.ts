@@ -28,7 +28,7 @@ export interface DiscussionTurnInput {
 // tenant's budget on one thread question.
 const DISCUSSION_MAX_TURNS = 32;
 // A parked write-tool approval waits longer than an interactive chat's (nobody may be watching yet — the thread
-// shows 승인 대기 and a member opens the panel to answer). Deny on expiry (the registry's safe default).
+// shows "awaiting approval" and a member opens the panel to answer). Deny on expiry (the registry's safe default).
 const DISCUSSION_APPROVAL_TIMEOUT_MS = 600_000;
 
 export function buildDiscussionPrompt(input: DiscussionTurnInput): string {
@@ -101,7 +101,7 @@ export async function runDiscussionTurn(
     const references: AgentReference[] | undefined = refType
       ? [{ type: refType, id: input.resourceId, label: input.resourceId }]
       : undefined;
-    // A write-tool ask parks in the shared registry: the comment flips to 승인 대기 and a panel opened on the
+    // A write-tool ask parks in the shared registry: the comment flips to "awaiting approval" and a panel opened on the
     // session discovers the ask via GET /pending, answering through the normal POST /permission route.
     let lastActivity = "thinking";
     const permit: PermissionHook = async (request) => {

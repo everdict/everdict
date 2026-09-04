@@ -51,7 +51,7 @@ export function AgentFleet({
       if (!res.ok) return
       setRuns(agentRunListSchema.parse(await res.json()).runs)
     } catch {
-      // 폴링 실패는 다음 틱에 재시도 — 화면은 마지막 상태 유지
+      // A polling failure retries on the next tick — the screen keeps its last state
     }
   }, [])
 
@@ -126,8 +126,8 @@ export function AgentFleet({
   )
 }
 
-// 파킹된 mutation 승인 프롬프트(agent-automation A6) — 대기 중인 요청을 GET /pending으로 발견해
-// 도구 이름과 함께 허용/거부를 인라인으로 묻는다. 결정은 기존 POST /permission 채널을 그대로 쓴다.
+// The parked mutation approval prompt (agent-automation A6) — it discovers waiting requests through GET /pending and asks inline for allow or
+// deny, with the tool name. The decision uses the existing POST /permission channel unchanged.
 const pendingSchema = z.object({
   pending: z.array(z.object({ requestId: z.string(), name: z.string(), input: z.unknown() })),
 })
@@ -145,7 +145,7 @@ function ApprovalPrompt({ sessionId, onDecided }: { sessionId: string; onDecided
         const first = pendingSchema.parse(await res.json()).pending[0]
         if (first) setAsk({ requestId: first.requestId, name: first.name })
       } catch {
-        // 대기 요청 조회 실패 — 배지만 남는다(다음 폴링에서 재시도)
+        // The pending-request read failed — only the badge remains (retried on the next poll)
       }
     })()
     return () => {
@@ -178,7 +178,7 @@ function ApprovalPrompt({ sessionId, onDecided }: { sessionId: string; onDecided
   )
 }
 
-// 런 트랜스크립트 드릴인 — 워크스페이스-가시 세션의 메시지를 그대로 보여준다(관측 표면, 편집 없음).
+// The run transcript drill-in — it shows the messages of a workspace-visible session verbatim (an observation surface, no editing).
 function RunTranscriptDialog({ run, onClose }: { run: AgentSession | null; onClose: () => void }) {
   const t = useTranslations('agentFleet')
   const [messages, setMessages] = useState<AgentMessage[] | null>(null)

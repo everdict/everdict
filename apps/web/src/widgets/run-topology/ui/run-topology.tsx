@@ -14,10 +14,10 @@ import { SectionHeader } from '@/shared/ui/section-header'
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 const POLL_MS = 5000
 
-// 토폴로지 헬스 패널(런타임 디버깅, 서비스 하네스) — 웜 토폴로지의 서비스별 상세를 5초마다 폴링한다:
-// 선언 정체성(role·이미지·포트)과 라이브 상태(상태·readiness·재시작·OOM·노드·리소스·age·엔드포인트)를
-// 서비스별 행으로, 펼치면 오케스트레이터 이벤트 피드+로그 테일(온디맨드 1회 fetch)까지.
-// 서비스 하네스가 아닌 run(found=false)은 첫 발견 전까지 통째로 숨긴다(빈 섹션 금지).
+// The topology health panel (runtime debugging, service harnesses) — it polls a warm topology's per-service detail every 5s:
+// the declared identity (role, image, port) and the live state (status, readiness, restarts, OOM, node, resources, age, endpoints) as one row
+// per service, expanding to the orchestrator event feed plus a log tail (fetched on demand, once).
+// A run that is not a service harness (found=false) hides entirely until the first discovery (no empty sections).
 export function RunTopology({ runId, initialStatus }: { runId: string; initialStatus: string }) {
   const t = useTranslations('runTopology')
   const [topology, setTopology] = useState<TopologyStatus | null>(null)
@@ -39,10 +39,10 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
           }
           if (stopped) return
           if (body.found && body.topology) setTopology(body.topology)
-          if (TERMINAL.has(body.status)) return // run 종료 — 마지막 로스터를 남기고 폴링 중단
+          if (TERMINAL.has(body.status)) return // the run ended — keep the last roster and stop polling
         }
       } catch {
-        // 일시 오류 — 폴링 지속
+        // a transient error — keep polling
       }
       if (!stopped) timer = setTimeout(tick, POLL_MS)
     }
@@ -53,7 +53,7 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
     }
   }, [runId, initialStatus])
 
-  // 행 펼침 — 이벤트 피드는 로스터에 이미 실려 있고, 로그만 온디맨드 1회 fetch.
+  // Row expansion — the event feed already rides on the roster, so only the logs are fetched on demand, once.
   const toggle = async (service: string) => {
     const next = !open[service]
     setOpen((prev) => ({ ...prev, [service]: next }))
@@ -66,11 +66,11 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
       const body = (await res.json()) as { found: boolean; text: string }
       setLogs((prev) => ({ ...prev, [service]: body.found ? body.text : t('noLogs') }))
     } catch {
-      // best-effort — 로그 없음으로 둔다
+      // best-effort — left as no logs
     }
   }
 
-  // 서비스 하네스가 아니거나 아직 첫 로스터 전 — 통째로 숨긴다.
+  // Not a service harness, or before the first roster — hidden entirely.
   if (!topology) return null
 
   return (
@@ -80,8 +80,8 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
         {!topology.deployed && (
           <p className="px-4 py-3 text-[12.5px] text-muted-foreground">{t('notDeployed')}</p>
         )}
-        {/* 세션 풀 — 서비스 컨테이너 "안"의 자원이라 오케스트레이터 로스터에는 안 보인다. 배치가 풀보다 넓으면
-            서비스는 정상인데 케이스만 계속 거절되므로, 이 줄이 그 원인을 눈에 보이게 한다. */}
+        {/* The session pool — a resource INSIDE the service container, so it is invisible to the orchestrator roster. When a batch is wider than
+            the pool the service is healthy and only the cases keep being refused, so this line makes that cause visible. */}
         {topology.pool && (
           <div className="flex items-center gap-2 px-4 py-2.5">
             <span className="text-[11.5px] text-faint">{t('poolLabel')}</span>
@@ -98,7 +98,7 @@ export function RunTopology({ runId, initialStatus }: { runId: string; initialSt
           </div>
         )}
         {topology.services.map((svc) => {
-          // 라이브 상세 요약 줄 — 값이 있는 항목만 · 구분자로 잇는다(빈 섹션 숨김 관례).
+          // The live detail summary line — only entries with a value, joined by · (the empty-section convention).
           const rest = [
             svc.port !== undefined ? `:${svc.port}` : undefined,
             svc.node,

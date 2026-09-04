@@ -14,11 +14,11 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // plane's: read issues:read · write issues:write · delete creator-or-admin). Transition facts
 // (issue.status_changed etc.) are emitted server-side; nothing here decides legality.
 //
-// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다.
-// 이 앱에는 그것이 무효화할 캐시가 없고(페이지는 전부 `force-dynamic`, 제어 평면 호출은 전부 `no-store`,
-// `staleTimes.dynamic` 은 0), Next 16 은 액션이 무효화를 선언했다는 사실만으로 클라이언트 prefetch 캐시를
-// 통째로 버리고 300ms 쿨다운을 건다. 그러면 화면에 걸린 모든 `<Link>` 가 한꺼번에 다시 prefetch 되고
-// (이슈 상세 기준 23개), 변이의 트랜지션이 그 큐에 묶여 스피너가 몇 초씩 돈다. 자세한 내용은 `docs/web.md`.
+// ⚠️ Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here.
+// This app has no cache for it to invalidate (every page is `force-dynamic`, every control-plane call is `no-store` and
+// `staleTimes.dynamic` is 0), and Next 16 throws away the whole client prefetch cache and imposes a 300ms cooldown on the mere FACT that an
+// action declared an invalidation. Every `<Link>` on screen then re-prefetches at once (23 of them on an issue detail) and the mutation's
+// transition is queued behind them, so the spinner turns for seconds. The details are in `docs/web.md`.
 
 export interface IssueActionResult {
   ok: boolean
@@ -33,9 +33,9 @@ export async function createIssueAction(input: {
   priority?: IssuePriority
   estimate?: number
   dueDate?: string
-  // 하위 이슈로 접수 — 부모는 이 워크스페이스에 있어야 한다(제어 평면이 404 로 거절).
+  // Filed as a sub-issue — the parent must be in this workspace (the control plane refuses with a 404).
   parentId?: string
-  // 바로 이터레이션에 넣기. 자기 팀의 사이클이어야 한다(제어 평면이 거절).
+  // Put straight into an iteration. It must be the issue's own team's cycle (the control plane refuses otherwise).
   projectId?: string
   assignee?: string
   labelIds?: string[]
@@ -61,12 +61,12 @@ export async function updateIssueAction(
     assignee?: string | null
     projectId?: string | null
     priority?: IssuePriority
-    // 이터레이션에 넣고 빼기. 일을 주기로 끌어오는 것은 워크플로 전이가 아니라 계획 변경이라 평범한 편집이다
-    // (제어 평면도 그렇게 본다). 자기 팀의 사이클만 받는다 — 다른 팀 것은 거절된다.
-    // 프로젝트 체크포인트. 사이클과 같은 규칙이 한 단계 위에 있다 — 자기 프로젝트의 마일스톤만 받는다
-    // (프로젝트가 없는 이슈에 걸면 "먼저 프로젝트에 넣으라"고 거절된다).
+    // Adding to and removing from an iteration. Pulling work into a cycle is a change of PLAN rather than a workflow transition, so it is an
+    // ordinary edit (and the control plane sees it the same way). Only the issue's own team's cycles are accepted — another team's are refused.
+    // The project checkpoint. The same rule one level up from cycles — only a milestone of the issue's own project is accepted
+    // (attaching one on an issue with no project is refused with "put it in a project first").
     milestoneId?: string | null
-    // null 은 비운다: 추정치 없음·기한 없음·부모에서 떼기.
+    // null CLEARS: no estimate, no due date, detach from the parent.
     estimate?: number | null
     dueDate?: string | null
     parentId?: string | null
@@ -81,11 +81,11 @@ export async function updateIssueAction(
   }
 }
 
-// 여러 이슈를 한 이터레이션으로 옮기기 — 리니어의 일괄 편집. `null` 은 사이클에서 뺀다.
+// Move several issues into one iteration — Linear's bulk edit. `null` removes them from the cycle.
 //
-// 제어 평면에 일괄 엔드포인트를 새로 내지 않고 건별 편집을 펼친다: 이슈마다 "자기 팀의 사이클인가"를 서버가
-// 그대로 판정해야 하고(일괄 경로를 따로 두면 그 판정이 두 벌이 된다), 부분 실패가 정상적인 결과이기 때문이다.
-// 그래서 결과도 부분 실패를 그대로 말한다 — 열아홉 건이 옮겨졌는데 "실패"라고만 하면 다시 누르게 된다.
+// It fans out per-issue edits rather than adding a new bulk endpoint to the control plane: the server has to judge "is this the issue's own
+// team's cycle" for EACH issue (a separate bulk path would make that judgement exist twice), and partial failure is a normal outcome.
+// So the result states partial failure as it is — reporting "failed" when nineteen moved makes people press it again.
 export async function moveIssuesToCycleAction(
   ids: string[],
 ): Promise<{ moved: number; failed: number; error?: string }> {
@@ -118,7 +118,7 @@ export async function setIssueStatusAction(
   id: string,
   status: IssueStatus,
   resolution?: { scorecardId?: string; note?: string },
-  // 보드 컬럼으로 옮긴 경우 — 컬럼이 곧 정규 상태라, 서버는 컬럼 쪽을 따른다.
+  // Moved to a board column — the column IS the canonical status, so the server follows the column side.
   stateId?: string
 ): Promise<IssueActionResult> {
   const ctx = await authContext()

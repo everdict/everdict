@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// Re-run body — a full re-run (전체 재실행) of a finished batch. Scoring (grading plan / inline judge model / trace
+// Re-run body — a FULL re-run of a finished batch. Scoring (grading plan / inline judge model / trace
 // sink / trials) is reproduced verbatim from the SOURCE record. The inputs here are the run-config choices a re-run may
 // adjust: WHO runs it (judges/runtime) and HOW it is dispatched (concurrency/retries/subset). Each unset field inherits
 // the original batch's own value. (Scoring is never overridden — a re-run reproduces the source verdict semantics.)

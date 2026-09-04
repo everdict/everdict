@@ -12,13 +12,13 @@ import { BarChart, LineChart, seriesColorAt } from '@/shared/ui/charts'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-// 추이 — 워크스페이스가 어느 쪽으로 움직이고 있나. 세 질문을 세 그림으로 나눈다:
-//   ① 무엇이 벌어지고 있나(축별 활동량)  ② 일이 들어오는 속도와 나가는 속도  ③ 평가가 매기는 점수
-// 팀별 비교를 그리지 않는 것은 의도다(사용자 결정): 대시보드가 팀을 나란히 세우는 순간 현황판이 아니라
-// 성과표가 되고, 정작 "지금 어떤가/어디로 가는가"라는 질문은 화면에서 사라진다.
+// Trends — which way the workspace is moving. Three questions as three pictures:
+//   ① what is happening (activity per axis)  ② the rate work arrives and the rate it leaves  ③ the score evaluation gives
+// Not drawing a per-team comparison is deliberate (a user decision): the moment a dashboard stands teams side by side it stops being a status
+// board and becomes a scoreboard, and the actual question — how are we now, where are we going — disappears from the screen.
 
-// 날짜 축은 M/D 로만 — 30개의 눈금에 연도를 붙이면 축이 글자로 덮인다. UTC 로 읽는 이유는 서버가 UTC 로
-// 하루를 자르기 때문이다(로컬로 다시 해석하면 어떤 독자에게는 막대가 하루씩 밀린다).
+// The date axis is M/D only — putting a year on thirty ticks buries the axis in text. It is read in UTC because the server cuts a day in UTC
+// (re-interpreted locally, some readers would see every bar shifted by a day).
 function useDayLabel(): (date: string) => string {
   const format = useFormatter()
   return (date: string) =>
@@ -43,12 +43,12 @@ export function PulseTrends({
   const days = activity.map((point) => point.date)
   const count = (n: number) => String(Math.round(n))
 
-  // 밴드의 이름은 그 밴드가 세는 것을 말해야 한다 — "작업"처럼 제품 어디에도 없는 낱말이면 독자는 무엇이
-  // 거기 쌓였는지 알 길이 없다. 이름은 가장 큰 구성요소를 부르고(이슈·프로젝트), 정확한 내역은 hint 가
-  // 진다: 축 하나가 스무 종류가 넘는 사실을 묶으므로 두 낱말로는 다 담기지 않는다(가이드 문구는 인라인이
-  // 아니라 InfoTip 으로 — `.claude` 규약).
-  // 이름·색·값이 한 자리에 있는 이유: 범례와 값이 따로 나열되면 한쪽만 순서가 바뀌어도 라벨이 남의 막대를
-  // 가리키고, 그건 화면에 아무 티도 나지 않는다.
+  // A band's name has to say what that band COUNTS — a word that appears nowhere in the product leaves the reader no way to know what
+  // accumulated there. The name calls the largest component (issues, projects) and the exact breakdown is carried by the hint: one axis
+  // groups more than twenty kinds of fact, which two words cannot hold (guidance goes in an InfoTip rather than inline — the `.claude` convention).
+  // rather than inline — the `.claude` convention).
+  // Name, colour and value sit in one place because with the legend and the values listed separately, one of them changing order makes a label
+  // at somebody else's bar, and that leaves no visible trace on screen.
   const bands = [
     {
       key: 'work',
@@ -124,8 +124,8 @@ export function PulseTrends({
         </div>
       </section>
 
-      {/* 한 행에 선 두 차트는 높이를 맞춘다 — 한쪽이 빈 상태(그 기간에 채점된 것이 없음)일 때 내용 높이에
-          맡기면 그 칸만 짧아져 행이 어긋난다. 섹션을 flex 열로 두고 카드가 남은 높이를 먹는다. */}
+      {/* Two charts on one row are height-matched — left to their content height, the one that is EMPTY (nothing was scored in that period)
+          becomes shorter and the row misaligns. The section is a flex column and the cards take the remaining height. */}
       <div className="grid grid-cols-1 items-stretch gap-5 @4xl:grid-cols-2">
         <section className="flex flex-col gap-2.5">
           <SectionHeader title={t('trendFlow')} />
@@ -148,8 +148,8 @@ export function PulseTrends({
         <section className="flex flex-col gap-2.5">
           <SectionHeader title={t('trendQuality')} />
           <div className="flex-1 rounded-lg border bg-card p-3.5 shadow-raise">
-            {/* 측정이 없던 날은 null 이다 — 선이 끊긴다. 0 으로 이으면 아무도 평가를 돌리지 않은 주말이
-                품질이 무너진 것처럼 보인다. 축은 0~100% 로 고정한다(비율의 프레임은 언제나 전체다). */}
+            {/* A day with no measurement is null — the line BREAKS. Joined through 0, a weekend when nobody ran an evaluation looks like
+                quality collapsing. The axis is pinned to 0–100% (a ratio's frame is always the whole). */}
             <LineChart
               x={quality.map((point) => point.date)}
               series={[{ key: 'passRate', label: t('qualityPassRate'), color: seriesColorAt(1) }]}

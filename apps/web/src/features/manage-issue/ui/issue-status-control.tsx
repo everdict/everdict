@@ -38,12 +38,12 @@ export function IssueStatusControl({
   status: IssueStatus
   canWrite: boolean
   scorecards: ResolvableScorecard[]
-  // `icon` 은 목록 행의 밀도 — 아이콘만, 이름은 툴팁으로. 같은 컨트롤을 두 밀도로 쓰는 것이지 행 전용
-  // 사본을 만드는 게 아니다: 상태 어휘·닿을 수 있는 전이·완료 시 해결 다이얼로그가 한 곳에만 있어야 한다.
+  // `icon` is the list row's density — the icon alone, with the name in a tooltip. The SAME control used at two densities rather than a
+  // row-specific copy: the status vocabulary, the reachable transitions and the resolution dialog on done must live in one place.
   variant?: 'default' | 'icon'
-  // 이 이슈가 속한 팀의 보드 컬럼들. 있으면 팀이 붙인 이름으로 고르고(리니어와 같은 동선), 없으면 정규
-  // 어휘로 떨어진다 — 어느 쪽이든 서버가 받는 것은 같은 전이다. `position` 은 보드의 순서를 다시 세우는 데
-  // 쓴다(orderWorkflowStates) — 자리 안의 순서는 팀이 정한 것이라 화면이 지어내면 안 된다.
+  // The board columns of this issue's team. Present, the choice is by the names the TEAM attached (the same path as Linear); absent, it falls
+  // back to the canonical vocabulary — either way what the server receives is the same transition. `position` is used to re-establish the
+  // board's order (orderWorkflowStates) — the order within a slot is the team's decision and must not be invented by the screen.
   states?: { id: string; name: string; status: IssueStatus; position: number }[]
 }) {
   const t = useTranslations('issuesPage')
@@ -121,9 +121,9 @@ export function IssueStatusControl({
         )}
       >
         <DropdownLabel>{t('statusMoveTo')}</DropdownLabel>
-        {/* 팀 보드가 있으면 그 이름들로 — 닿을 수 있는 정규 상태에 매핑된 컬럼만 낸다.
-            순서는 보드의 순서(정규 상태 → 그 안의 자리)로 다시 세운다: 서버는 `position` 만으로 정렬해 주고
-            새 컬럼은 보드 끝에 붙으므로, 팀이 「검토 중」에 컬럼을 하나 더하면 그것이 「취소됨」 아래에 나타난다. */}
+        {/* With a team board, by ITS names — only columns mapped to a reachable canonical status are offered.
+            The order is re-established as the BOARD's (canonical status → the position within it): the server sorts by `position` alone and a new
+            column is appended at the board's end, so a team adding another column to "in review" would otherwise see it appear below "cancelled". */}
         {(states.length > 0
           ? orderWorkflowStates(states)
               .filter((state) => reachableFrom(status).includes(state.status))

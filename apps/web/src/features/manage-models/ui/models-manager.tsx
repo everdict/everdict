@@ -28,8 +28,8 @@ import { InfoTip, Tooltip } from '@/shared/ui/tooltip'
 
 import { deleteModelAction, saveModelAction, testModelConnectionAction } from '../api/manage-models'
 
-// 한 모델 id 의 최신 스펙 + 소유/버전 (설정 카드 표시용). spec 은 상세 페치 실패 시 없을 수 있다.
-// createdBy = 최초 등록 버전의 등록자(seed/_shared 는 없음) — 삭제 버튼 노출(등록자-or-admin) 판단용.
+// The newest spec of one model id plus its ownership and version (for the settings card). `spec` may be absent when the detail fetch failed.
+// createdBy = whoever registered the FIRST version (absent for seed/_shared) — used to decide whether the delete button shows (registrant-or-admin).
 export interface ModelEntry {
   id: string
   owner: string
@@ -38,9 +38,9 @@ export interface ModelEntry {
   spec?: ModelSpec
 }
 
-// 워크스페이스 모델 관리 카드 — 지원 LLM 모델을 raw env 조합이 아니라 일급 엔티티로 등록/편집/조회.
-// 버전은 UI 에서 감춘다(내부 불변 버전은 유지) — 등록/편집은 연결 테스트 통과 후에만 저장된다.
-// canDelete = 이 워크스페이스의 admin(models:delete). currentSubject = 로그인 subject — admin 이 아니어도 자기가 등록한 모델은 삭제 가능.
+// The workspace model management card — registering, editing and reading the supported LLM models as first-class entities rather than as a raw env combination.
+// Versions are hidden in the UI (the internal immutable versions remain) — a registration or edit saves only after the connection test passes.
+// canDelete = an admin of this workspace (models:delete). currentSubject = the signed-in subject — even a non-admin can delete a model they registered.
 export function ModelsManager({
   models,
   secretNames,
@@ -121,9 +121,9 @@ export function ModelsManager({
                 hint={<ModelHint entry={m} secretNames={secretNames} />}
               >
                 <span className="flex items-center gap-1">
-                  {/* 실제 커넥션 확인 — 더미콜을 날려 응답이 오면 ✓, 아니면 ✗ (스펙을 아는 행만). */}
+                  {/* A real connection check — a dummy call, ✓ when it answers and ✗ when it does not (only on a row whose spec is known). */}
                   {m.spec && <RowConnectionCheck id={m.id} spec={m.spec} />}
-                  {/* 편집(새 불변 버전으로 저장) — 워크스페이스 소유 + 쓰기 권한 + 스펙을 아는 행만. */}
+                  {/* Edit (saved as a new immutable version) — only on a workspace-owned row with write permission and a known spec. */}
                   {owned && canWrite && m.spec && (
                     <button
                       type="button"
@@ -137,7 +137,7 @@ export function ModelsManager({
                       <Pencil className="size-3.5" />
                     </button>
                   )}
-                  {/* 삭제는 워크스페이스 소유 모델만(_shared 는 불가) + admin 또는 등록자 본인일 때만 노출. 최종 강제는 컨트롤플레인. */}
+                  {/* Delete shows only for a workspace-owned model (never _shared) and only for an admin or the registrant. The control plane enforces it finally. */}
                   {owned &&
                     (canDelete ||
                       (currentSubject !== undefined && m.createdBy === currentSubject)) && (
@@ -153,7 +153,7 @@ export function ModelsManager({
   )
 }
 
-// 행별 커넥션 체크 버튼 — idle(플러그) → 진행(스피너) → ✓/✗. 결과(응답/에러)는 툴팁으로. 다시 눌러 재확인.
+// The per-row connection check button — idle (a plug) → in progress (a spinner) → ✓/✗. The result (response or error) goes in the tooltip. Press again to re-check.
 function RowConnectionCheck({ id, spec }: { id: string; spec: ModelSpec }) {
   const t = useTranslations('manageModels')
   const [result, setResult] = useState<{ ok: boolean; message?: string }>()
@@ -199,7 +199,7 @@ function RowConnectionCheck({ id, spec }: { id: string; spec: ModelSpec }) {
   )
 }
 
-// 행별 삭제 트리거(휴지통 아이콘) + 확인 다이얼로그. 모델 전체(모든 소유 버전)를 소프트-딜리트한다.
+// The per-row delete trigger (a bin icon) plus its confirmation dialog. It soft-deletes the whole model (every owned version).
 function DeleteModelControl({ id }: { id: string }) {
   const t = useTranslations('manageModels')
   const [open, setOpen] = useState(false)
@@ -218,7 +218,7 @@ function DeleteModelControl({ id }: { id: string }) {
   )
 }
 
-// 모델 삭제 확인 다이얼로그 — 툼스톤(과거 스코어카드는 재현 보존, 이후 참조 실행은 해석 실패). 컨트롤플레인이 등록자-or-admin 을 강제.
+// The model delete confirmation dialog — a tombstone (past scorecards keep their reproduction, and later referencing runs fail to resolve). The control plane enforces registrant-or-admin.
 function DeleteModelDialog({ id, onClose }: { id: string; onClose: () => void }) {
   const t = useTranslations('manageModels')
   const refresh = useRefresh()
@@ -293,7 +293,7 @@ function DeleteModelDialog({ id, onClose }: { id: string; onClose: () => void })
   )
 }
 
-// provider · 모델식별자 · baseUrl + API 키 연결 상태(연결한 시크릿 이름 / provider 기본 / 미설정 경고).
+// provider · model identifier · baseUrl plus the API key connection state (the linked secret's name / the provider default / an unset warning).
 function ModelHint({ entry, secretNames }: { entry: ModelEntry; secretNames: string[] }) {
   const t = useTranslations('manageModels')
   const spec = entry.spec
@@ -314,7 +314,7 @@ function ModelHint({ entry, secretNames }: { entry: ModelEntry; secretNames: str
       ) : (
         <span className="text-faint">{t('keyDefault')}</span>
       )}
-      {/* 컴패니언 티어 요약 — 설정된 슬롯만(hide-empty). */}
+      {/* The companion tier summary — only the configured slots (hide-empty). */}
       {spec.companions &&
         (['small', 'fallback', 'subagent'] as const)
           .filter((slot) => spec.companions?.[slot])
@@ -327,7 +327,7 @@ function ModelHint({ entry, secretNames }: { entry: ModelEntry; secretNames: str
   )
 }
 
-// spec → 커넥션 서브셋(테스트/저장에 필요한 provider·model·baseUrl·apiKeySecret 만).
+// spec → the connection subset (only the provider, model, baseUrl and apiKeySecret a test or save needs).
 function connectionOf(spec: {
   provider: string
   model: string
@@ -342,9 +342,9 @@ function connectionOf(spec: {
   }
 }
 
-// 등록/편집 통합 폼 — provider · id(편집 시 고정) · 모델식별자 · baseUrl · apiKeySecret(SecretPicker) · 설명 +
-// 컴패니언 티어(small/fallback/subagent — 같은 카탈로그의 다른 등록 모델을 고르는 콤보). 버전 입력 없음(내부 자동 배정).
-// 저장은 반드시 "연결 테스트"가 성공한 뒤에만 활성화되고, 커넥션 필드를 바꾸면 테스트가 무효화된다(컴패니언은 커넥션이 아니라 무효화 없음).
+// The combined register/edit form — provider · id (fixed while editing) · model identifier · baseUrl · apiKeySecret (SecretPicker) · description +
+// the companion tiers (small/fallback/subagent — a combo picking another registered model from the same catalog). No version input (assigned internally).
+// Save is enabled only AFTER a successful "connection test", and changing a connection field invalidates that test (a companion is not part of the connection, so it does not invalidate).
 function ModelForm({
   mode,
   secretNames,
@@ -379,7 +379,7 @@ function ModelForm({
   const [saving, startSave] = useTransition()
   const [error, setError] = useState<string>()
 
-  // 커넥션에 영향을 주는 필드가 바뀌면 직전 테스트 결과를 무효화 — 저장되는 커넥션은 항상 테스트한 커넥션과 같아야 한다.
+  // Changing a field that affects the connection invalidates the previous test result — the connection that gets SAVED must always be the connection that was TESTED.
   function invalidateTest() {
     setTest(undefined)
   }
@@ -405,7 +405,7 @@ function ModelForm({
     })
   }
 
-  // 선택된 컴패니언만 모아 스펙 필드로 — 셋 다 비면 필드 자체를 보내지 않는다(스펙에 빈 객체를 남기지 않기).
+  // Collect only the selected companions into the spec field — with all three empty the field is not sent at all (no empty object left in the spec).
   function companions(): Record<string, string> | undefined {
     const picked = {
       ...(companionSmall ? { small: companionSmall } : {}),
@@ -504,8 +504,8 @@ function ModelForm({
         </Field>
       </div>
 
-      {/* 컴패니언 티어 — 이 모델이 에이전트를 구동할 때 함께 뛰는 등록 모델(스펙이 배포 env 기본값을 이긴다).
-          커넥션과 무관하므로 테스트를 무효화하지 않고, 고를 수 있는 후보는 이 워크스페이스의 다른 등록 모델뿐. */}
+      {/* Companion tiers — the registered models that run alongside this one when it drives an agent (the spec beats the deployment env defaults).
+          They have nothing to do with the connection, so they do not invalidate the test, and the only candidates are other models registered in this workspace. */}
       <div className="space-y-2 border-t border-border pt-3">
         <div className="flex items-center gap-1.5">
           <h4 className="text-[12.5px] font-[560] text-foreground">{t('companionsTitle')}</h4>
@@ -539,7 +539,7 @@ function ModelForm({
         </div>
       </div>
 
-      {/* 연결 테스트 결과 — 성공 시 응답 프리뷰, 실패 시 사유. */}
+      {/* The connection test result — a response preview on success, the reason on failure. */}
       {test?.ok === true && (
         <Callout tone="info" className="py-2">
           {t('testOk')}
@@ -558,7 +558,7 @@ function ModelForm({
       )}
 
       <div className="flex flex-wrap items-center gap-2">
-        {/* 저장은 연결 테스트 통과 후에만 활성화(강제 — 버튼 비활성은 UX, 최종 강제는 컨트롤플레인). */}
+        {/* Save is enabled only after the connection test passes (a disabled button is UX; the control plane enforces it finally). */}
         <Button
           type="button"
           size="sm"
@@ -597,7 +597,7 @@ function ModelForm({
   )
 }
 
-// 컴패니언 한 슬롯의 콤보 — 후보는 워크스페이스의 다른 등록 모델 + "없음"(빈 값 = 슬롯 미지정 → 배포 기본값으로 폴백).
+// The combo for one companion slot — the candidates are the workspace's other registered models plus "none" (an empty value = the slot is unset → falls back to the deployment default).
 function CompanionPicker({
   value,
   onChange,

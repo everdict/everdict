@@ -1,16 +1,16 @@
 import { cn } from '@/shared/lib/utils'
 
-// 로딩 자리표시자 — 화면이 도착하기 전에 "무엇이 올 자리인지"만 그린다. 색은 표면 토큰(`muted`)에서 오고,
-// 크기는 항상 호출부가 정한다: 스켈레톤이 자기 크기를 들고 있으면 진짜 내용과 어긋나 도착 순간에 화면이 튄다.
+// The loading placeholder — before a screen arrives it draws only "what is going to be here". The colour comes from the surface token (`muted`)
+// and the SIZE is always the caller's: a skeleton carrying its own size disagrees with the real content and the screen jumps on arrival.
 //
-// 스크린 리더에는 존재하지 않는다(`aria-hidden`) — 읽어 줄 내용이 없는 장식이고, 로딩 사실은 라우트 경계가
-// 알린다. 문자열이 없으므로 메시지 카탈로그에 들어갈 것도 없다.
+// It does not exist for a screen reader (`aria-hidden`) — it is decoration with nothing to read out, and the loading fact is announced by the
+// route boundary. Having no strings, it has nothing to put in a message catalog.
 export function Skeleton({ className }: { className?: string }) {
   return <div aria-hidden className={cn('animate-pulse rounded-md bg-muted', className)} />
 }
 
-// 텍스트 한 줄 자리. 마지막 줄만 짧게 끝나는 건 실제 문단이 그렇기 때문이다 — 모든 줄이 같은 길이면
-// 자리표시자로 읽히지 않고 표처럼 보인다.
+// The slot for one line of text. Only the LAST line ends short because that is what a real paragraph does — with every line the same length it
+// does not read as a placeholder and looks like a table.
 export function SkeletonLines({ lines = 3, className }: { lines?: number; className?: string }) {
   return (
     <div className={cn('space-y-2', className)}>
@@ -21,11 +21,11 @@ export function SkeletonLines({ lines = 3, className }: { lines?: number; classN
   )
 }
 
-// 목록 화면의 기본 로딩 경계 — 제목 + 설명 + 행. 이 앱의 화면 대부분이 이 모양이라, 자기 세그먼트에
-// `loading.tsx` 를 두지 않은 라우트는 전부 이것을 물려받는다(더 특징적인 화면은 자기 것으로 덮는다).
+// The default loading boundary for a list screen — a title, a description and rows. Most of this app's screens are this shape, so every route
+// that does not put a `loading.tsx` in its own segment inherits this one (a more distinctive screen overrides it with its own).
 //
-// `scoped` 는 팀 아래 화면의 스코프 바 자리다. 미리 잡아 두지 않으면 그 줄이 도착하는 순간 아래의 모든
-// 것이 한 번 밀려 내려간다 — 자리표시자가 만들면 안 되는 유일한 것이 그 점프다.
+// `scoped` is the slot for the scope bar on screens under a team. Not reserved, everything below shifts down once that line arrives —
+// and that jump is the one thing a placeholder must never cause.
 export function ListPageSkeleton({
   scoped = false,
   rows = 6,

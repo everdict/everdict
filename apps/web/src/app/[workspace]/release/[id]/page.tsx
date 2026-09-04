@@ -27,7 +27,7 @@ import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 
-// 시리즈 판정 → 카탈로그 키 (릴리즈 게이트 어휘 그대로)
+// A series verdict → a catalog key (the release gate vocabulary verbatim)
 const VERDICT_LABEL_KEY = {
   pass: 'verdictPass',
   no_baseline: 'verdictNoBaseline',
@@ -43,8 +43,8 @@ const VERDICT_LABEL_KEY = {
 
 export const dynamic = 'force-dynamic'
 
-// 릴리즈 상세 — "나가도 되는가"에 답하는 화면. 준비도(열린 링크 이슈 + 워치 시리즈의 최신 vs 직전 출하
-// 기준선)는 서버가 파생해 내려 주고, 게이트 컨트롤이 그 답 위에서 동작한다. 측정 없음은 회귀가 아니다.
+// The release detail — the screen that answers "may this ship". Readiness (open linked issues plus each watch series' newest against the
+// previous ship's baseline) is derived and sent down by the server, and the gate control acts on top of that answer. No measurement is not a regression.
 export default async function ReleasePage({
   params,
 }: {
@@ -60,8 +60,8 @@ export default async function ReleasePage({
   } catch {
     notFound()
   }
-  // 편집 다이얼로그의 시리즈 선택지 + 구성 편집기의 서비스/버전 선택지 — 프로덕트가 선언한 것만(없는 키는
-  // 400 이고, 원장에 없는 버전은 어느 행과도 이어지지 않는다). 실패해도 화면은 뜬다.
+  // The edit dialog's series choices plus the composition editor's service/version choices — only what the product DECLARED (a key that does
+  // not exist is a 400, and a version not in the ledger joins to no row). The screen renders even on failure.
   let product: ProductDetail | undefined
   try {
     product = productDetailSchema.parse(await controlPlane.getProduct(ctx, release.productId))
@@ -69,7 +69,7 @@ export default async function ReleasePage({
     product = undefined
   }
 
-  // 이 릴리즈에 링크된 이슈들 — 역방향 질의 하나. 게이트의 openIssues 와 같은 근거다.
+  // The issues linked to this release — one reverse query. The same grounds as the gate's openIssues.
   const linkedIssues = await controlPlane
     .listIssues(ctx, { linkType: 'release', linkId: id, limit: 50 })
     .then((raw) => issuePageSchema.parse(raw).items)
@@ -118,7 +118,7 @@ export default async function ReleasePage({
         </Link>
       </p>
 
-      {/* 준비도 카드 — 게이트가 보는 그대로: 열린 이슈 수와 시리즈별 최신/기준선. */}
+      {/* The readiness card — exactly what the gate sees: the open issue count and each series' newest against its baseline. */}
       <Card className="space-y-3 p-4">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold">{t('readinessHeading')}</h2>
@@ -187,7 +187,7 @@ export default async function ReleasePage({
                       )}
                     </td>
                     <td className="px-2 py-1.5">
-                      {/* 시리즈별 릴리즈 판정 — 스코어카드 게이트의 어휘. 차단하면 danger, 통과면 success. */}
+                      {/* The per-series release verdict — the scorecard gate's vocabulary. Blocking is danger, passing is success. */}
                       <Badge
                         tone={
                           series.regressed

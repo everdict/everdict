@@ -117,7 +117,7 @@ export function RerunScorecardButton({
         </div>
 
         <div className="space-y-4 px-5 py-4">
-          {/* Scope — full re-run vs failed-only recovery. "실패만" is offered only when the source has failed cases. */}
+          {/* Scope — a full re-run vs failed-only recovery. "Failed only" is offered only when the source has failing cases. */}
           <fieldset className="space-y-2" aria-label={t('scopeLegend')}>
             <ScopeOption
               selected={scope === 'all'}

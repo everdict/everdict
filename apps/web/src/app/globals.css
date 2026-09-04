@@ -147,10 +147,11 @@ samp {
   --chart-4: #eda100;
   --chart-5: #e87ba4;
   --chart-other: #9197a0;
-  /* ANSI 16색 (로그·터미널 출력 전용, shared/lib/ansi.ts) — 차트 팔레트와 별개다: 여기서 색을 고르는 건
-     우리가 아니라 로그를 뱉는 프로세스이고, 우리는 그 이름을 "이 표면에서 읽히는 값"으로만 옮긴다.
-     밝은 배경이라 원색을 그대로 쓰면 노랑/시안이 사라지므로 어둡게 밟아 둔다. ANSI white 는 회색으로
-     내리는데(흰 배경에 흰 글자는 안 보인다), 이는 터미널 에뮬레이터의 라이트 테마 관례와 같다. */
+  /* The 16 ANSI colours (log and terminal output only, shared/lib/ansi.ts) — separate from the chart palette:
+     what picks a colour here is the process EMITTING the log rather than us, and all we do is map its name to
+     "the value that reads on this surface". On a light ground the raw primaries lose yellow and cyan, so they are
+     stepped darker. ANSI white is stepped down to a grey (white text on a white ground is invisible), which is
+     the same convention a terminal emulator's light theme follows. */
   --ansi-black: #27272a;
   --ansi-red: #c72e35;
   --ansi-green: #1a7f4b;
@@ -208,8 +209,9 @@ samp {
   --chart-4: #c98500;
   --chart-5: #d55181;
   --chart-other: #62666d;
-  /* ANSI 16색 — 근검정 표면에 맞춰 다시 밟은 같은 색 이름. ANSI black 은 순검정이 아니라 보이는 회색으로
-     올린다(검은 배경의 검은 글자는 사라진다) — 라이트의 white 처리와 대칭이다. */
+  /* The 16 ANSI colours — the same colour names stepped again for a near-black ground. ANSI black is raised to a
+     VISIBLE grey rather than pure black (black text on a black ground disappears) — the mirror of the light
+     theme's treatment of white. */
   --ansi-black: #4b5058;
   --ansi-red: #eb5757;
   --ansi-green: #4cb782;

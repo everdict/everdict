@@ -6,8 +6,8 @@ import type { IssueOption } from '@/entities/issue'
 
 import en from '../../../../messages/en.json'
 
-// 이 파일이 잠그는 것: 한 이슈가 다른 이슈를 언급하면 ① 그 이슈로 건너갈 수 있고 ② 같은 자리에서 뗄 수 있다.
-// 링크가 들고 있는 것은 UUID 라, 칩이 식별자·제목으로 그려지는지가 곧 "사람이 읽을 수 있는가"다.
+// What this file locks down: when one issue mentions another, ① you can cross to that issue and ② you can detach it from the same place.
+// The link holds a UUID, so whether the chip is drawn with the identifier and title IS "can a person read this".
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 vi.mock('../api/links', () => ({
   addIssueLinkAction: async () => ({ ok: true }),
@@ -42,7 +42,7 @@ describe('issue mention control', () => {
 
     expect(out).toContain('href="/acme/issue/ENG-12/judge-reads-a-stale-rubric"')
     expect(out).toContain('ENG-12')
-    // UUID 는 사람이 부르는 이름이 아니다 — 칩에 새어 나오면 안 된다.
+    // A UUID is not a name a person calls something by — it must not leak into the chip.
     expect(out).not.toContain(MENTIONED.id)
   })
 
@@ -55,7 +55,7 @@ describe('issue mention control', () => {
 
     expect(out).toContain('Add')
     expect(out).toContain('aria-label="Issues this one mentions"')
-    expect(out).toContain('aria-expanded="false"') // 목록은 열어야 그려진다
+    expect(out).toContain('aria-expanded="false"') // the list is only drawn once opened
   })
 
   it('gives a reader chips only — no unlink, no add', () => {

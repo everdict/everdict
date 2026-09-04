@@ -20,9 +20,9 @@ import { EditIssueDialog } from './edit-issue-dialog'
 // control plane (403), so the affordance is shown to any writer and the refusal is surfaced verbatim rather
 // than pre-guessed here.
 //
-// 하위 이슈 추가가 여기 있는 이유: 상세 화면의 「하위 이슈」 섹션은 자식이 있을 때만 선다(빈 섹션 숨김).
-// 그러면 첫 자식을 만들 길이 화면에서 사라진다 — 하위 이슈가 하나도 없는 이슈가 바로 쪼갤 것이 남은 이슈인데도
-// 그렇다. 리니어도 이 진입을 ⋯ 메뉴에 두므로, 자식이 있든 없든 항상 닿는 자리는 여기다.
+// Why "add sub-issue" is here: the detail screen's "sub-issues" section stands only when there ARE children (empty-section hiding).
+// So the route to creating the first child disappears from the screen — and an issue with no sub-issues is exactly the one still left to split.
+// Linear puts this entry in the ⋯ menu too, so this is the place reachable whether or not there are children.
 export function IssueActions({
   workspace,
   issue,
@@ -34,10 +34,10 @@ export function IssueActions({
   workspace: string
   issue: Issue
   projects: { id: string; name: string }[]
-  // 편집 다이얼로그의 라벨 선택기가 고를 워크스페이스 레지스트리.
+  // The workspace registry the edit dialog's label picker chooses from.
   labels: IssueLabel[]
   canWrite: boolean
-  // 설명에 파일을 붙일 수 있는지(files:write) — 이슈 쓰기와 같은 등급이지만 다른 판정이라 따로 받는다.
+  // Whether a file can be attached to the description (files:write) — the same grade as writing the issue but a DIFFERENT judgement, so it is received separately.
   canAttach?: boolean
 }) {
   const t = useTranslations('issuesPage')
@@ -99,8 +99,8 @@ export function IssueActions({
         </DropdownItem>
       </DropdownMenu>
 
-      {/* 하위 이슈는 부모의 팀에서 태어난다 — 팀이 식별자를 찍으므로, 팀을 물려주지 않으면 `ENG-12` 의 자식이
-          워크스페이스 기본 팀에서 `PLAT-3` 으로 찍혀 나온다. */}
+      {/* A sub-issue is born in its PARENT's team — the team stamps the identifier, so without inheriting it a child of `ENG-12` would be
+          stamped `PLAT-3` in the workspace default team. */}
       <CreateIssueDialog
         workspace={workspace}
         projects={projects}

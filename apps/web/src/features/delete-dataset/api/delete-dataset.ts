@@ -8,9 +8,9 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // versions). Backed by the control plane's bulk endpoint: it checks each target creator-or-admin and is atomic
 // (fail-fast — nothing is deleted if any target is forbidden/absent), so this is one call, not a per-version fan-out.
 
-// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
-// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
-// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
+// Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here
+// (there is no cache to invalidate, and Next 16 throws away the whole client prefetch cache and imposes a 300ms cooldown on the
+// DECLARATION alone). The grounds are in `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export async function deleteDatasetVersionsAction(input: {
   id: string
   versions?: string[]

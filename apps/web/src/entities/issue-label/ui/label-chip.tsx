@@ -2,12 +2,12 @@ import { cn } from '@/shared/lib/utils'
 
 import type { IssueLabel, IssueLabelColor } from '../model/schema'
 
-// Linear st. 라벨 칩 — 색 점 + 이름. 색은 닫힌 어휘(contracts ISSUE_LABEL_COLORS)이고 여기서 테마 토큰으로
-// 매핑한다: hex 를 저장했다면 다크에서 안 보이는 라벨을 누구나 만들 수 있었을 것이다. 차트와 같은 규칙 —
-// 지어낸 색은 없다.
+// A Linear-style label chip — a colour dot plus the name. The colour is a CLOSED vocabulary (contracts' ISSUE_LABEL_COLORS) mapped to theme
+// tokens here: had a hex been stored, anyone could have made a label invisible in dark mode. The same rule as the charts —
+// no invented colours.
 //
-// `bg-<token>/x` 는 우리 @theme inline 색에서는 유틸리티를 만들지 않는다(shadcn 의 destructive 와 다름) —
-// 그래서 점은 CSS 변수를 직접 읽는다(shared/ui/badge 와 같은 회피법).
+// `bg-<token>/x` does not generate a utility for our @theme inline colours (unlike shadcn's destructive) —
+// so the dot reads the CSS variable directly (the same workaround as shared/ui/badge).
 const DOT: Record<IssueLabelColor, string> = {
   gray: 'var(--color-muted-foreground)',
   purple: 'var(--chart-4)',
@@ -45,8 +45,8 @@ export function LabelChip({ label, className }: { label: IssueLabel; className?:
   )
 }
 
-// 이슈가 든 id 를 레지스트리에 붙여 칩으로 그린다. 정의가 사라진 id 는 렌더하지 않는다 — 삭제가 이슈에서
-// id 를 같이 떼어내므로 정상 경로에서는 생기지 않고, 생겼다면 그건 표시할 것이 없는 포인터다.
+// It joins the ids an issue holds to the registry and draws them as chips. An id whose definition is gone is not rendered — deleting a label
+// detaches its id from the issues too, so it does not arise on the normal path, and if it did it is a pointer with nothing to show.
 export function IssueLabelChips({
   labelIds,
   directory,

@@ -10,22 +10,22 @@ import type { AnalysisArtifact } from '@/entities/analysis-artifact'
 // sub-agent activity card (parallel/background delegation made visible, Claude Code style). Plain tool calls/results
 // are deliberately NOT rendered — the conversation shows what the agent says and delegates, not its plumbing.
 
-// 작업목록은 전체 덮어쓰기 시맨틱(write_todos)이므로, 같은 목록의 새 스냅샷이 오면 처음 등장한 그 자리에서
-// 내용만 교체한다(위치·id 모두 안정 — 갱신마다 목록이 바닥으로 이동하면 위 내용이 통째로 당겨지며 스크롤이
-// 튀고, id 가 바뀌면 React 가 리마운트해 스피너·문구가 깜빡인다). 내용이 하나도 겹치지 않으면 "새 목록"으로
-// 보고 이전 것을 이력으로 보존한다.
+// A todo list has whole-overwrite semantics (write_todos), so when a new snapshot of the SAME list arrives only its content is replaced,
+// in the place it first appeared (both position and id stay stable — a list that moves to the bottom on every update drags everything above
+// it and the scroll jumps, and a changed id makes React remount so spinners and text flicker). With no item in common at all it is treated
+// as a NEW list and the previous one is preserved as history.
 const WRITE_TODOS_TOOL = 'write_todos'
 const SPAWN_AGENT_TOOL = 'spawn_agent'
 const CREATE_SANDBOX_TOOL = 'create_sandbox'
 const SPAWN_TEAMMATE_TOOL = 'spawn_teammate'
 
-// 커널(@everdict/agent-runtime loop.ts / spawn-tool.ts)의 고정 문구와 짝을 이루는 파서들 — 백그라운드 서브에이전트의
-// 진행 상태는 별도 이벤트가 아니라 이 레코드 문구로 흘러오므로, 커널 쪽 문구가 바뀌면 여기도 함께 바뀌어야 한다.
+// The parsers paired with the kernel's fixed wording (@everdict/agent-runtime loop.ts / spawn-tool.ts) — a background sub-agent's progress
+// arrives as this record TEXT rather than as its own event, so wording changed on the kernel side has to change here too.
 const BG_RESULT_PREFIX = '[Background sub-agent '
 const BG_RESULT_HEAD = /^\[Background sub-agent (\S+) (finished|failed)\]\n?/
 const BG_LAUNCH_ACK = /Sub-agent (\S+) launched in the background/
-// 메일박스가 주입한 컨텍스트 턴의 attribution 접두사 (apps/agent agent-mailbox.ts renderEnvelope와 짝) — 팀메이트
-// 메시지·플랫폼 이벤트는 유저가 쓴 말이 아니므로 말풍선이 아니라 접힌 컨텍스트 블록으로 렌더한다.
+// The attribution prefix of a context turn injected by the mailbox (paired with apps/agent agent-mailbox.ts renderEnvelope) — a teammate
+// message or a platform event is not something the USER said, so it renders as a folded context block rather than a speech bubble.
 const TEAMMATE_MSG_HEAD = /^\[Message from teammate ([^\]]*)\]\n?/
 const EVENT_MSG_HEAD = /^\[Everdict event(?: — ([^\]]*))?\]\n?/
 
@@ -48,8 +48,8 @@ export interface SubagentView {
   summary?: string // the sub-agent's returned findings / the spawn acknowledgement
 }
 
-// 한 번의 위임. sessionRunId 가 있어야 카드가 그 대화를 붙어서 볼 수 있다 — 도구 결과(RunRecord)에서 온다.
-// 결과가 없으면(아직 실행 중) running, 결과가 RunRecord 로 안 읽히면(권한 거부·오류) failed.
+// One delegation. A sessionRunId is what lets the card attach to and watch that conversation — it comes from the tool result (RunRecord).
+// No result (still running) is `running`; a result that does not read as a RunRecord (permission denied, an error) is `failed`.
 export interface DelegationView {
   id: string
   profileId: string
@@ -68,7 +68,7 @@ export type TranscriptItem =
   | { kind: 'context'; id: string; source: 'teammate' | 'event'; sender?: string; text: string }
   // an analysis artifact (chart/table/report) the agent emitted this conversation — rendered as a card in place
   | { kind: 'artifact'; id: string; artifact: AnalysisArtifact }
-  // 에이전트가 일을 맡긴 위임 — 그 세션의 대화를 카드 안에서 그대로 펼쳐 본다(위임의 위임 가시성)
+  // The delegation the agent handed work to — its session's conversation is expanded inside the card (visibility into a delegation's delegation)
   | { kind: 'delegation'; id: string; delegation: DelegationView }
 
 // Parse a write_todos tool-call argument string into checklist items. Best-effort: a malformed payload yields [].
@@ -81,9 +81,9 @@ export function parseTodosArg(raw: string): TodoItemView[] {
   }
 }
 
-// create_sandbox 호출 한 건을 위임 뷰로. 인자에서 프로필/목표를, 도구 결과(RunRecord JSON)에서 세션 run id 를
-// 읽는다. 둘 다 best-effort — 손상되거나 거부 문자열이면 실패로 표시하고 카드가 그 사실을 말한다(조용히 사라지지
-// 않는다). 권한 모드가 default/plan 이면 결과는 RunRecord 가 아니라 거부 문구라서 이 분기가 실제로 쓰인다.
+// One create_sandbox call as a delegation view. The profile and goal come from the arguments and the session run id from the tool result
+// (RunRecord JSON). Both are best-effort — a corrupted or refusal string is marked failed and the card SAYS so (it does not disappear
+// quietly). In default/plan permission mode the result is a refusal message rather than a RunRecord, so this branch is genuinely used.
 export function parseDelegationEntry(
   tc: { id: string; name: string; arguments: string },
   result: string | undefined
@@ -93,7 +93,7 @@ export function parseDelegationEntry(
   try {
     const args = JSON.parse(tc.arguments) as Record<string, unknown>
     const profile = args.profile
-    if (profile === null || typeof profile !== 'object') return undefined // 위임이 아닌 일반 샌드박스 부팅
+    if (profile === null || typeof profile !== 'object') return undefined // an ordinary sandbox boot, not a delegation
     profileId =
       typeof (profile as Record<string, unknown>).id === 'string'
         ? String((profile as Record<string, unknown>).id)
@@ -106,7 +106,7 @@ export function parseDelegationEntry(
     )
       goal = String((brief as Record<string, unknown>).goal)
   } catch {
-    return undefined // 인자를 못 읽으면 위임인지조차 알 수 없다
+    return undefined // unreadable arguments mean we cannot even tell whether it was a delegation
   }
   if (result === undefined) return { id: tc.id, profileId, goal, status: 'running' }
   try {
@@ -138,7 +138,7 @@ function parseSpawnEntry(
       background = args.run_in_background === true
     }
   } catch {
-    // 손상된 인자 — 빈 태스크로 표시
+    // Corrupted arguments — shown as an empty task
   }
 
   if (tc.name === SPAWN_TEAMMATE_TOOL) {
@@ -164,7 +164,7 @@ function parseSpawnEntry(
     ...(type !== undefined ? { type } : {}),
   }
   if (background) {
-    // 런치 ack에서 커널의 bg id를 얻는다; 완료는 나중에 주입되는 [Background sub-agent …] user 턴이 알려준다.
+    // The kernel's bg id comes from the launch ack; completion is announced by the [Background sub-agent …] user turn injected later.
     const ack = result !== undefined ? BG_LAUNCH_ACK.exec(result) : null
     if (ack) return { entry: { ...base, background: true, status: 'running' }, bgId: ack[1] }
     return {
@@ -208,12 +208,12 @@ export function buildTranscript(
   messages: AgentMessage[],
   artifacts: AnalysisArtifact[] = []
 ): TranscriptItem[] {
-  // spawn 계열 도구의 결과만 call id로 되짚는다 — 일반 도구 결과는 렌더에 쓰지 않는다.
+  // Only the results of the spawn-family tools are traced back by call id — ordinary tool results are not used in the render.
   const spawnCallIds = new Set<string>()
   for (const m of messages)
     for (const tc of m.toolCalls ?? [])
       if (tc.name === SPAWN_AGENT_TOOL || tc.name === SPAWN_TEAMMATE_TOOL) spawnCallIds.add(tc.id)
-      else if (tc.name === CREATE_SANDBOX_TOOL) spawnCallIds.add(tc.id) // 위임 세션 id 는 결과에만 있다
+      else if (tc.name === CREATE_SANDBOX_TOOL) spawnCallIds.add(tc.id) // a delegation session id exists only on the result
   const resultByCallId = new Map<string, string>()
   for (const m of messages)
     if (m.role === 'tool' && m.toolCallId !== undefined && spawnCallIds.has(m.toolCallId))
@@ -222,16 +222,16 @@ export function buildTranscript(
   const items: TranscriptItem[] = []
   let lastTodos: TodoItemView[] = []
   let lastTodosAt = -1
-  // 열려있는 활동 카드의 entries 참조 — user 턴/assistant 텍스트가 나오면 닫힌다(reasoning·todos는 카드를 쪼개지 않음).
+  // A reference to the entries of the OPEN activity card — it closes on a user turn or assistant text (reasoning and todos do not split a card).
   let agentBuf: SubagentView[] | null = null
-  // 아직 완료 안 된 백그라운드 서브에이전트: 커널 bg id → 카드 엔트리. bg id는 런마다 재사용되므로(bg-1…)
-  // 완료 턴을 만나는 시점의 미해결 런치와 순서대로 짝지어야 한다.
+  // Background sub-agents not finished yet: kernel bg id → card entry. A bg id is REUSED across runs (bg-1…), so a completion turn is paired
+  // in order with the outstanding launches at the moment it arrives.
   const pendingBg = new Map<string, SubagentView>()
 
   const processMessage = (m: AgentMessage): void => {
     if (m.role === 'tool') return // tool results are folded into the activity card / not rendered
     if (m.role === 'user') {
-      // 커널이 주입한 백그라운드 결과 턴 — 카드의 상태·요약으로 접고, 말풍선으로는 렌더하지 않는다.
+      // A background result turn injected by the kernel — folded into the card's state and summary, never rendered as a bubble.
       if (m.content.startsWith(BG_RESULT_PREFIX)) {
         for (const block of m.content.split(/(?=\[Background sub-agent )/)) {
           const head = BG_RESULT_HEAD.exec(block)
@@ -245,8 +245,8 @@ export function buildTranscript(
         }
         return
       }
-      // 메일박스 주입 컨텍스트(팀메이트 메시지·플랫폼 이벤트) — 유저 발화가 아니므로 접힌 컨텍스트 블록으로.
-      // 열린 활동 카드는 쪼개지 않는다(reasoning과 같은 취급 — 대화 흐름을 끊는 건 진짜 유저/어시스턴트 발화뿐).
+      // Mailbox-injected context (a teammate message, a platform event) — not the user speaking, so a folded context block.
+      // It does not split an open activity card (treated like reasoning — only a real user or assistant utterance breaks the conversation flow).
       const teammate = TEAMMATE_MSG_HEAD.exec(m.content)
       if (teammate) {
         const sender = (teammate[1] ?? '').trim()
@@ -286,8 +286,8 @@ export function buildTranscript(
       if (tc.name === WRITE_TODOS_TOOL) {
         const todos = parseTodosArg(tc.arguments)
         if (todos.length === 0) continue
-        // 항목 내용이 하나라도 겹치면 같은 목록의 갱신 — 처음 자리의 스냅샷을 제자리에서 교체한다.
-        // id 는 첫 스냅샷의 것을 유지해 React key 가 안정되게 한다(리마운트·스크롤 점프 방지).
+        // Any item in common means this is an UPDATE of the same list — the first snapshot's position is replaced in place.
+        // The id is kept from the first snapshot so the React key stays stable (no remount, no scroll jump).
         const sameList = todos.some((td) => lastTodos.some((prev) => prev.content === td.content))
         const anchor = sameList && lastTodosAt >= 0 ? items[lastTodosAt] : undefined
         if (anchor !== undefined && anchor.kind === 'todos') {
@@ -299,8 +299,8 @@ export function buildTranscript(
         lastTodos = todos
       } else if (tc.name === CREATE_SANDBOX_TOOL) {
         const delegation = parseDelegationEntry(tc, resultByCallId.get(tc.id))
-        if (delegation === undefined) continue // 프로필 없는 샌드박스 부팅은 위임이 아니다 — 카드도 없다
-        agentBuf = null // 위임은 결과물 쪽 — 열려 있던 활동 카드를 닫는다(아티팩트와 같은 규칙)
+        if (delegation === undefined) continue // a sandbox boot with no profile is not a delegation — and gets no card
+        agentBuf = null // a delegation is on the OUTPUT side — it closes an open activity card (the same rule as an artifact)
         items.push({ kind: 'delegation', id: tc.id, delegation })
       } else if (tc.name === SPAWN_AGENT_TOOL || tc.name === SPAWN_TEAMMATE_TOOL) {
         const { entry, bgId } = parseSpawnEntry(tc, resultByCallId.get(tc.id))

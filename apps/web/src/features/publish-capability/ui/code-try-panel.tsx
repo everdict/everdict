@@ -11,8 +11,8 @@ import { Label, Textarea } from '@/shared/ui/input'
 
 import { tryCodeToolAction } from '../api/wizard-tools'
 
-// code 도구 검증 패널 — 코드만 보고 채택/발행하지 않는다: check(구문, 파스만) + run(예제 입력으로 실제 1회 실행,
-// 에이전트와 동일 실행계약·샌드박스 게이트). 위저드(draft spec 빌더)와 스토어 상세(발행본 ref) 양쪽이 재사용한다.
+// The code tool verification panel — nothing is adopted or published on a reading of the code alone: check (syntax, a parse) plus run (one real
+// execution against an example input, on the same execution contract and sandbox gate as the agent). Reused by both the wizard (a draft spec builder) and the store detail (a published ref).
 export type CodeTryTargetBuilder = () =>
   | { name?: string; spec: CapabilitySpec }
   | { ref: { source: string; id: string; version: string } }
@@ -24,8 +24,8 @@ export function CodeTryPanel({
   showCheck,
 }: {
   buildTarget: CodeTryTargetBuilder
-  initialInput?: string // 예제 입력 JSON 프리필(보통 첫 예제)
-  showCheck: boolean // 위저드=true(발행 전 구문검사), 스토어 상세=false(실행만)
+  initialInput?: string // the example input JSON to prefill (usually the first example)
+  showCheck: boolean // the wizard = true (a syntax check before publishing), the store detail = false (run only)
 }) {
   const t = useTranslations('capabilityStore')
   const [input, setInput] = useState(initialInput ?? '{}')

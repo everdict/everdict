@@ -12,11 +12,11 @@ import {
   DropdownSeparator,
 } from '@/shared/ui/dropdown-menu'
 
-// 「표시」 — 리니어의 같은 이름 메뉴: 레이아웃 · 묶기 · 정렬, 그리고 목록에 따라 몇 개의 켜고 끄기.
-// 전부 "이걸 어떻게 보고 싶은가"에 답하지 "이 중 어느 것"에는 답하지 않으며, 그래서 아무것도 URL 에 가지
-// 않는다 — 보낸 링크가 받는 사람의 화면 배치를 바꾸면 안 된다.
+// "Display" — Linear's menu of the same name: layout · grouping · ordering, plus a few toggles depending on the list.
+// All of it answers "how do I want to SEE this" rather than "which of these", which is why none of it goes into the URL —
+// a link you send must not rearrange the recipient's screen.
 //
-// 선택은 그 자리에서 적용된다(서버 왕복 없이). 이슈 목록도 평가 자원 목록들도 이 컴포넌트를 쓴다.
+// A choice applies on the spot (with no server round trip). Both the issue list and the evaluation resource lists use this component.
 
 export interface DisplayOption {
   value: string
@@ -52,7 +52,7 @@ export function ListDisplayMenu({
   orders: readonly DisplayOption[]
   order: string
   onOrder: (value: string) => void
-  // 목록이 실제로 두 가지 모양을 가질 때만 — 보드가 없는 목록에 레이아웃 줄을 세우지 않는다.
+  // Only when the list genuinely has two shapes — no layout row is stood up on a list with no board.
   layouts?: readonly LayoutOption[]
   layout?: string
   onLayout?: (value: string) => void
@@ -76,8 +76,7 @@ export function ListDisplayMenu({
         </button>
       )}
     >
-      {/* 레이아웃만 세그먼티드 컨트롤이다: 둘 중 하나를 고르는 일이고, 어느 쪽인지가 한눈에 읽혀야 하는
-          유일한 축이다. */}
+      {/* Only the layout is a segmented control: it picks one of two, and it is the only axis where WHICH one has to be readable at a glance. */}
       {layouts !== undefined && layouts.length > 0 && (
         <>
           <div className="flex gap-1 p-1">

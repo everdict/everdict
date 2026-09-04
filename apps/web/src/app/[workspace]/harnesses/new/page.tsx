@@ -31,8 +31,8 @@ export default async function NewHarnessPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string }>
-  // ?template=&tplVersion= — 어떤 형상 위에 하네스를 얹는지. 서버가 그 템플릿의 유효값(상속)을 만들어
-  // 폼에 내려주므로, 브라우저가 제어 평면을 직접 부를 일이 없다.
+  // ?template=&tplVersion= — which shape the harness sits on. The server builds that template's effective (inherited) values and passes them
+  // down to the form, so the browser never calls the control plane directly.
   searchParams: Promise<{ tab?: string; template?: string; tplVersion?: string }>
 }) {
   const { workspace } = await params
@@ -62,7 +62,7 @@ export default async function NewHarnessPage({
     }
   }
 
-  // 고를 수 있는 형상 + (고른 게 있으면) 그 형상의 유효값. 실패해도 폼은 자유 입력으로 그대로 뜬다.
+  // The selectable shapes plus (when one is chosen) that shape's effective values. The form still renders as free input on failure.
   let templates: { id: string; versions: string[] }[] = []
   if (allowed) {
     try {
@@ -109,7 +109,7 @@ export default async function NewHarnessPage({
             secrets={secrets}
             modelIds={modelIds}
             templates={templates}
-            // 형상이 하나도 없으면 인스턴스 탭은 고를 게 없는 화면이다 — 그때만 형상부터.
+            // With no shapes at all, the instance tab is a screen with nothing to pick — only then does it start from the shape.
             startTab={tab === 'template' || templates.length === 0 ? 'template' : 'instance'}
             {...(instanceInitial ? { instanceInitial } : {})}
             {...(baseline ? { baseline } : {})}

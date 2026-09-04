@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 워크스페이스 멤버 BFF 프록시 — infra-panel 이 최초 오픈 시 lazy 로 불러 작성자 이름/아바타를 붙인다.
-// 레이아웃(모든 페이지)에 멤버 조회를 얹지 않기 위한 온디맨드 경로. 실패는 502 봉투.
+// The workspace members BFF proxy — the infra panel loads it lazily on first open to attach author names and avatars.
+// An on-demand path, so a member lookup is not laid on the layout (i.e. on every page). A failure comes back as a 502 envelope.
 export async function GET(): Promise<Response> {
   const ctx = await authContext()
   try {

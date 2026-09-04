@@ -1,16 +1,16 @@
-// ANSI 이스케이프 파서 — 컨테이너·셸이 뱉은 raw 프로세스 출력을 브라우저가 그릴 수 있는 조각으로 나눈다.
-// 서비스(DB·에이전트 서버·웹 프레임워크)는 자기가 TTY 에 붙었다고 판단하면 컬러 코드를 그대로 실어 보내는데,
-// 그 원문을 <pre> 에 꽂으면 ESC(U+001B)가 글리프 없는 제어문자라 브라우저가 "가로줄 몇 개짜리 상자"로 그린다.
-// 로그 본문이 영어면 단어는 읽히고 그 사이사이가 상자로 깨져 보이므로 인코딩 깨짐처럼 오인되기 쉽다.
+// The ANSI escape parser — it splits the raw process output a container or shell emitted into pieces a browser can draw.
+// A service (a database, an agent server, a web framework) that decides it is attached to a TTY sends colour codes verbatim, and
+// putting that source into a <pre> makes the browser draw "a row of boxes", because ESC (U+001B) is a control character with no glyph.
+// With an English log body the words still read and the gaps between them break into boxes, which is easily mistaken for a broken encoding.
 //
-// 그래서 표시 직전에 한 번 걸러 낸다: SGR(색·굵기·흐림·기울임·밑줄)은 스타일로 살리고 — 서비스가 ERROR 를
-// 빨강으로 칠한 건 런타임 디버깅 패널에서 그대로 신호다 — 커서 이동·화면 지우기·OSC(창 제목) 같은 나머지
-// 시퀀스와 C0 제어문자는 버린다. 색은 CSS 변수(--ansi-*)로만 내보내서 라이트/다크에서 각각 읽히는 값이 된다.
+// So it is filtered once, just before display: SGR (colour, bold, dim, italic, underline) survives as style — a service painting ERROR red
+// IS a signal in a runtime debugging panel — while the rest (cursor movement, screen clears, OSC window titles) and the C0 control
+// characters are discarded. Colour is emitted only as CSS variables (--ansi-*) so it resolves to a readable value in light and dark alike.
 
 const ESC = '\u001b'
 const BEL = '\u0007'
 
-// SGR 30~37 / 40~47 의 기본 8색 이름. 밝은 변형(90~97, 100~107)은 `bright-` 접두사를 붙인 같은 이름을 쓴다.
+// The eight base colour names of SGR 30–37 / 40–47. The bright variants (90–97, 100–107) use the same names with a `bright-` prefix.
 const BASIC_COLORS = [
   'black',
   'red',
@@ -40,8 +40,8 @@ function colorVar(name: string): string {
   return `var(--ansi-${name})`
 }
 
-// xterm 256색 인덱스 → CSS 색. 0~15 는 기본/밝은 팔레트(테마 변수)로, 16~231 은 6×6×6 큐브,
-// 232~255 는 그레이스케일 램프로 푼다. 큐브·램프는 절대색이라 테마 변수로 옮길 대상이 아니다.
+// xterm 256-colour index → CSS colour. 0–15 resolve to the base/bright palette (theme variables), 16–231 to the 6×6×6 cube, and
+// 232–255 to the greyscale ramp. The cube and the ramp are ABSOLUTE colours, so they are not candidates for theme variables.
 function xterm256(n: number): string | undefined {
   if (n >= 0 && n < 8) return colorVar(BASIC_COLORS[n])
   if (n < 16) return colorVar(`bright-${BASIC_COLORS[n - 8]}`)
@@ -57,8 +57,8 @@ function xterm256(n: number): string | undefined {
   return undefined
 }
 
-// 38/48 확장색 — `5;<n>`(256색) 또는 `2;<r>;<g>;<b>`(트루컬러). 소비한 파라미터 개수를 함께 돌려줘서
-// 호출부가 커서를 그만큼 밀 수 있게 한다. 소비하지 않으면 남은 숫자가 다음 SGR 코드로 오해된다.
+// The 38/48 extended colours — `5;<n>` (256-colour) or `2;<r>;<g>;<b>` (true colour). It also returns how many parameters it consumed so
+// the caller can advance its cursor by that much. Not consuming them makes the remaining numbers read as the next SGR codes.
 function extendedColor(
   params: number[],
   at: number
@@ -74,13 +74,13 @@ function extendedColor(
     const inRange = [r, g, b].every((v) => v >= 0 && v <= 255)
     return { color: inRange ? `rgb(${r} ${g} ${b})` : undefined, consumed: 5 }
   }
-  return { color: undefined, consumed: 1 } // 알 수 없는 확장 형식 — 코드 자체만 버린다
+  return { color: undefined, consumed: 1 } // an unknown extended form — only the code itself is dropped
 }
 
-// SGR 파라미터를 현재 스타일에 적용한다. 인식 못 하는 코드(반전·깜빡임 등)는 조용히 무시 —
-// 텍스트로 새어 나가지만 않으면 되고, 로그 가독성에 기여하지 않는 효과까지 흉내 낼 이유는 없다.
+// Apply SGR parameters to the current style. An unrecognised code (inverse, blink, …) is silently ignored — all that matters is that it
+// does not leak into the TEXT, and there is no reason to imitate effects that contribute nothing to log readability.
 function applySgr(base: AnsiStyle, params: number[]): AnsiStyle {
-  if (params.length === 0) return {} // "ESC[m" 은 "ESC[0m"(리셋)과 같다
+  if (params.length === 0) return {} // "ESC[m" means the same as "ESC[0m" (reset)
   const style: AnsiStyle = { ...base }
   let i = 0
   while (i < params.length) {
@@ -122,8 +122,8 @@ function applySgr(base: AnsiStyle, params: number[]): AnsiStyle {
   return style
 }
 
-// "1;31" → [1, 31]. 빈 파라미터는 스펙상 0(리셋)이다. 콜론 형식(38:5:196)처럼 숫자로 안 떨어지는 토큰은
-// 버린다 — 잘못 해석해 엉뚱한 색을 입히느니 스타일을 포기하는 쪽이 낫고, 어차피 텍스트로는 새지 않는다.
+// "1;31" → [1, 31]. An empty parameter is 0 (reset) by the spec. A token that does not parse as a number, such as the colon form
+// (38:5:196), is DROPPED — giving up the style beats misreading it into the wrong colour, and it never leaks into the text either way.
 function parseParams(raw: string): number[] {
   if (raw === '') return []
   return raw
@@ -132,12 +132,12 @@ function parseParams(raw: string): number[] {
     .filter((n) => Number.isInteger(n) && n >= 0)
 }
 
-// 걸러 낼 것이 하나도 없는 입력을 가려내는 검사 — 제어문자(줄바꿈·탭 제외)가 아예 없으면 아래 문자 단위
-// 루프를 돌 이유가 없다. 라이브 로그 패널은 몇 초마다 수십만 자짜리 전체 스냅샷을 통째로 다시 넘기는데,
-// 그 대부분은 색을 쓰지 않는 평범한 텍스트다.
+// The check that spots input with nothing to filter — with no control characters at all (newline and tab aside), there is no reason to run
+// the per-character loop below. The live log panel re-sends a whole snapshot of hundreds of thousands of characters every few seconds,
+// and most of it is ordinary text using no colour.
 const NEEDS_PARSING = /[\u0000-\u0008\u000b-\u001f\u007f]/
 
-// raw 출력 → 스타일 조각 배열. 스타일이 바뀌는 지점에서만 조각이 나뉘므로 색 없는 로그는 조각 하나로 끝난다.
+// Raw output → an array of styled pieces. A piece is split only where the STYLE changes, so an uncoloured log ends as a single piece.
 export function parseAnsi(input: string): AnsiSpan[] {
   if (input === '') return []
   if (!NEEDS_PARSING.test(input)) return [{ text: input, style: {} }]
@@ -159,11 +159,11 @@ export function parseAnsi(input: string): AnsiSpan[] {
     if (ch === ESC) {
       const next = i + 1 < input.length ? input[i + 1] : undefined
       if (next === '[') {
-        // CSI: 파라미터 바이트 → 중간 바이트 → 최종 바이트(@~). 최종이 'm' 인 것만 SGR 이고 나머지는 버린다.
+        // CSI: parameter bytes → intermediate bytes → the final byte (@~). Only a final byte of 'm' is SGR; the rest are discarded.
         let j = i + 2
         while (j < input.length && /[0-9;:?<=>]/.test(input[j])) j++
         while (j < input.length && /[ -/]/.test(input[j])) j++
-        if (j >= input.length) break // 잘린 시퀀스 — 남은 꼬리는 표시할 것이 없다
+        if (j >= input.length) break // a truncated sequence — the remaining tail has nothing to display
         if (input[j] === 'm') {
           flush()
           style = applySgr(style, parseParams(input.slice(i + 2, j)))
@@ -172,7 +172,7 @@ export function parseAnsi(input: string): AnsiSpan[] {
         continue
       }
       if (next === ']') {
-        // OSC(창 제목 등): BEL 또는 ST(ESC \) 까지 통째로 버린다.
+        // OSC (a window title, etc.): discarded whole, up to BEL or ST (ESC \).
         let j = i + 2
         while (j < input.length) {
           if (input[j] === BEL) break
@@ -182,7 +182,7 @@ export function parseAnsi(input: string): AnsiSpan[] {
         i = j < input.length && input[j] === ESC ? j + 2 : j + 1
         continue
       }
-      i += next === undefined ? 1 : 2 // 그 밖의 2바이트 이스케이프
+      i += next === undefined ? 1 : 2 // any other two-byte escape
       continue
     }
 
@@ -191,8 +191,8 @@ export function parseAnsi(input: string): AnsiSpan[] {
       i++
       continue
     }
-    // CR 은 줄바꿈으로 접는다: CRLF 는 LF 하나로, 진행바가 쓰는 단독 CR 은 새 줄로. 통째로 버리면
-    // 진행바 갱신이 전부 한 줄에 이어 붙어 끝없이 긴 줄이 된다.
+    // CR folds into a newline: CRLF becomes one LF, and the lone CR a progress bar writes becomes a new line. Discarded entirely, every
+    // progress-bar update would be appended onto one endlessly long line.
     if (ch === '\r') {
       if (!(i + 1 < input.length && input[i + 1] === '\n')) buffer += '\n'
       i++
@@ -200,7 +200,7 @@ export function parseAnsi(input: string): AnsiSpan[] {
     }
     const code = ch.charCodeAt(0)
     if (code < 0x20 || code === 0x7f) {
-      i++ // 나머지 C0 제어문자 + DEL — 글리프가 없어 상자로 그려지므로 버린다
+      i++ // the remaining C0 control characters plus DEL — no glyph, so they draw as boxes and are dropped
       continue
     }
     buffer += ch

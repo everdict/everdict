@@ -9,12 +9,12 @@ import { cn } from '@/shared/lib/utils'
 import { DropdownLabel, DropdownMenu, useDropdownClose } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
 
-// 「필터」 — 리니어의 두 단계 메뉴(축 고르기 → 값 고르기). 적용된 필터는 메뉴 안이 아니라 툴바에 토큰으로
-// 서고, 토큰마다 자기 제거 버튼을 갖는다: 걸어 둔 것을 보려고 메뉴를 다시 열어야 한다면 그건 숨긴 것이다.
+// "Filter" — Linear's two-step menu (pick an axis → pick values). Applied filters stand as TOKENS in the toolbar rather than inside the menu,
+// and each token carries its own remove button: having to reopen a menu to see what is applied means it is hidden.
 //
-// 어떤 자원의 목록인지 이 컴포넌트는 모른다 — 축과 값은 `facets` 로 받고, 켜고 끄는 일은 `onToggle` 이
-// 한다. 이슈 목록과 평가 자원 목록들이 **같은** 필터 UI 를 쓰기 위한 것이고, 그래야 한쪽만 다르게 생기는
-// 일이 생기지 않는다.
+// This component does not know which resource's list it is on — the axes and values arrive as `facets`, and toggling is `onToggle`'s job.
+// It exists so the issue list and the evaluation resource lists use the **same** filter UI, which is what stops one of them from looking
+// different.
 
 export interface FacetOption {
   value: string
@@ -82,8 +82,8 @@ function FilterPanel({
 }) {
   const t = useTranslations('listView')
   const close = useDropdownClose()
-  // 두 단계 메뉴의 현재 자리. 값을 고른 뒤에도 이 자리에 남는다 — 라벨 세 개를 걸려고 메뉴를 세 번 여는
-  // 것은 필터 메뉴가 아니라 필터 대화상자다.
+  // The two-step menu's current position. It STAYS here after a value is picked — opening the menu three times to attach three labels is a
+  // filter dialog rather than a filter menu.
   const [facetKey, setFacetKey] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const facet = facets.find((candidate) => candidate.key === facetKey)
@@ -173,7 +173,7 @@ function FilterPanel({
   )
 }
 
-// 지금 걸려 있는 것들 — 하나씩 뗄 수 있는 토큰. 메뉴 밖에 서는 이유는 위 주석과 같다.
+// What is applied right now — tokens that can be removed one at a time. They stand outside the menu for the reason in the comment above.
 function FilterTokens({
   facets,
   filters,
@@ -193,7 +193,7 @@ function FilterTokens({
       {facets.flatMap((facet) => {
         const values = filters[facet.key] ?? []
         return values.map((value) => {
-          // 지워진 프로젝트를 가리키는 필터처럼 이름을 못 찾는 값은 값 자체를 보여 준다 — 빈 칩보다 낫다.
+          // A value whose name cannot be found (a filter pointing at a deleted project, say) shows the value itself — better than an empty chip.
           const label = facet.options.find((option) => option.value === value)?.label ?? value
           return (
             <span

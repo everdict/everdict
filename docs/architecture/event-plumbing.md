@@ -21,12 +21,12 @@ updated: 2026-08-11
 
 Three legs, two already designed:
 
-- **배관 (WHEN)** — this document: facts published as the system operates → subscriptions decide what
+- **Plumbing (WHEN)** — this document: facts published as the system operates → subscriptions decide what
   reacts. Demand arrives exactly when the world changed, not when a human noticed or a poller woke.
-- **게이트 (HOW MUCH)** — execution-model §5: every reaction is admitted (envelope, class=background,
+- **The gate (HOW MUCH)** — execution-model §5: every reaction is admitted (envelope, class=background,
   fan-out guards). Perception without the gate is the runaway vector; with it, an event storm queues
   instead of burning.
-- **공급 (WHERE)** — placement + autoscaler + attachable runtimes absorb what admission lets through.
+- **Supply (WHERE)** — placement + autoscaler + attachable runtimes absorb what admission lets through.
 
 Events are the *timing* leg: without them the platform either polls (wasteful, late) or waits for humans
 (idle capacity, stale reactions). With them, `throughput = f(what actually happened)`.
@@ -131,7 +131,7 @@ remain as *producers*; reacting is one mechanism.
 Two subsystems now claim "the system's main part": the event plane (this document) and Temporal
 ([orchestration.md](../orchestration.md)). They must not blur — and one line separates them:
 
-> **완결 정의가 있는가 — does the work have a definition of done?**
+> **Does the work have a definition of done?**
 > Yes → Temporal (orchestration of a finite, known plan). No → the event plane (open-ended narration
 > and reaction).
 

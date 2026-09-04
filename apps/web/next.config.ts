@@ -38,12 +38,12 @@ const FORMER_TEAM_SECTIONS = {
   cycles: 'issues',
 } as const
 
-// 첫 세그먼트가 워크스페이스인 주소만 이 규칙들의 대상이다 — `api` 같은 예약어는 워크스페이스가 아니다
-// (`RESERVED_TOP_LEVEL`, 미들웨어가 읽는 그 목록). 가드가 없으면 우리 BFF 라우트가 통째로 걸린다:
-// `/api/issues/:id/attachment` 가 `/api/issue/:id/attachment`(없는 주소)로 307 되어, 이슈 본문의 GitHub
-// 첨부 이미지와 런 녹화 다운로드가 조용히 죽는다 — 라우트는 멀쩡한데 요청이 도달하지 못한다.
-// ⚠️ 세그먼트의 끝은 `$` 가 아니라 `(?:/|$)` 다: path-to-regexp 가 만든 정규식에서 `$` 는 **경로 전체**의
-// 끝을 뜻하므로, 뒤에 무언가 더 붙는 첫 세그먼트에는 영원히 걸리지 않는다(가드가 통째로 무력해진다).
+// Only an address whose FIRST segment is a workspace is subject to these rules — a reserved word such as `api` is not a workspace
+// (`RESERVED_TOP_LEVEL`, the same list the middleware reads). Without the guard our BFF routes are caught wholesale:
+// `/api/issues/:id/attachment` 307s to `/api/issue/:id/attachment` (an address that does not exist), and the GitHub attachment images in an
+// issue body and the run recording downloads die quietly — the routes are fine and the requests never reach them.
+// ⚠️ A segment ends with `(?:/|$)` rather than `$`: in the regex path-to-regexp builds, `$` means the end of the **whole path**, so a first
+// segment with anything after it never matches (which disables the guard entirely).
 const WORKSPACE = `:workspace((?!(?:${[...RESERVED_TOP_LEVEL].join('|')})(?:/|$))[^/]+)`
 
 async function movedDetailRoutes() {
@@ -81,8 +81,8 @@ async function movedDetailRoutes() {
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   redirects: movedDetailRoutes,
-  // undici 는 번들하지 않고 런타임에 node_modules 에서 require — instrumentation 의 setGlobalDispatcher 가
-  // Node 내장 fetch 가 읽는 전역 심볼(Symbol.for 레지스트리)과 동일 인스턴스 의미론으로 동작하게 한다(프록시 지원).
+  // undici is not bundled and is required from node_modules at runtime — so instrumentation's setGlobalDispatcher operates with the same
+  // instance semantics as the global symbol Node's built-in fetch reads (the Symbol.for registry), which is what makes proxy support work.
   serverExternalPackages: ['undici'],
   // If dev and build share the same .next, in this shared WIP tree another session's next build pollutes the dev turbopack
   // cache (SST persist failure / buildManifest ENOENT → hydration dies and every click is unresponsive).

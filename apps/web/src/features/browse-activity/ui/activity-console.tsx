@@ -144,9 +144,9 @@ export function ActivityConsole({ workspace }: { workspace: string }) {
             block.kind === 'run' ? (
               <RunRow key={block.run.id} run={block.run} workspace={workspace} />
             ) : block.kind === 'session' ? (
-              // 대화 세션 — 스코어카드 배치와 같은 문법의 접힌 헤더. 턴들은 피드와 함께 이미 도착해 있어
-              // 지연 로드가 없고, 펼치면 시간순(턴 1→n)으로 읽힌다. 세션 id 클릭 = 셸의 에이전트 챗에서
-              // 그 대화 열기(iframe 안에서도 postMessage 로 탈출).
+              // A conversation session — a collapsed header in the same grammar as a scorecard batch. The turns already arrived with the feed so
+              // there is no lazy load, and expanded they read in time order (turn 1→n). Clicking the session id opens that conversation in the
+              // shell's agent chat (escaping through postMessage even from inside the iframe).
               <Fragment key={block.session.id}>
                 <TR
                   className="cursor-pointer bg-muted/40 hover:bg-muted/60"

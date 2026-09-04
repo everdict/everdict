@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
 
 // Page top title block — Linear st. understated 19px title + 13px secondary description + right-side actions.
-// 자유 텍스트 제목(이슈처럼 제목 자체가 본문인 화면)은 이 원자를 쓰지 않는다 — 그런 화면은 제목이 페이지
-// 이름이 아니라 내용이라 자기 크기의 h1 을 직접 세운다(app/[workspace]/issues/[id]).
+// A screen whose title is free text (an issue, where the title IS the body) does not use this atom — on such a screen the title is CONTENT rather
+// than the page's name, so it stands its own h1 at its own size (app/[workspace]/issues/[id]).
 export function PageHeader({
   title,
   description,

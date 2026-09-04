@@ -16,13 +16,13 @@ import { createPortal } from 'react-dom'
 import { fileNameForUrl } from '@/shared/lib/media'
 import { cn } from '@/shared/lib/utils'
 
-// 본문에 실린 이미지를 제자리에서 크게 보는 뷰어. 이슈 화면의 스크린샷은 본문 열 폭(속성 열을 뺀 나머지)으로
-// 줄어들어 들어오는데, 버그 리포트에 붙는 그림은 대개 "이 픽셀을 보라"는 그림이라 그 폭에서는 읽히지 않는다.
+// The viewer that enlarges a body image in place. A screenshot on an issue screen arrives shrunk to the body column's width (what is left
+// after the attribute column), and a picture attached to a bug report is usually a "look at THIS pixel" picture, unreadable at that width.
 //
-// 이미지마다 클라이언트 섬을 심지 않고 영역 하나가 위임(delegation)으로 받는 이유: 이 영역 안에는 서버가 그린
-// 본문과 클라이언트가 그린 코멘트가 섞여 있고, 코멘트는 폴링으로 계속 다시 그려진다. 클릭 시점에 DOM 을 훑으면
-// 그 순간 화면에 있는 이미지가 곧 좌우 이동의 목록이 되므로, 두 렌더 경로가 서로를 알 필요가 없다.
-// 표식은 `Markdown` 이 이미지에 붙이는 `data-media-preview` 뿐이다.
+// Why one REGION receives it by delegation rather than planting a client island per image: this region mixes a body the server drew with
+// comments the client drew, and the comments keep re-rendering from polling. Sweeping the DOM at CLICK time makes the images on screen at that
+// moment the list for left/right navigation, so neither render path has to know about the other.
+// The only marker is the `data-media-preview` that `Markdown` puts on an image.
 
 interface Shot {
   src: string
@@ -37,8 +37,8 @@ function clampScale(value: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, value))
 }
 
-// 링크로 감싼 이미지는 링크가 우선이다 — 배지(shields.io)나 "누르면 저쪽으로 가는 그림"이 대개 그 모양이라,
-// 확대가 링크를 가로채면 갈 곳이 사라진다.
+// An image wrapped in a link belongs to the LINK — a badge (shields.io) or a "press the picture to go there" is usually that shape, and zoom
+// hijacking the link removes the destination.
 function previewable(node: Element | null): node is HTMLImageElement {
   return node instanceof HTMLImageElement && node.closest('a') === null
 }
@@ -69,7 +69,7 @@ export function MediaLightbox({
 
   return (
     <>
-      {/* 위임 영역. 클릭은 이미지에서만 의미가 생기고, 나머지 클릭은 그대로 흘려보낸다. */}
+      {/* The delegation region. A click means something only on an image; every other click passes straight through. */}
       <div
         ref={rootRef}
         onClick={onClick}
@@ -111,7 +111,7 @@ function LightboxOverlay({
     setScale((s) => clampScale(s * factor))
   }, [])
 
-  // 배율이 1 로 돌아오면 끌어 둔 위치도 같이 돌아온다 — 안 그러면 원본 크기인데 화면 밖에 가 있다.
+  // When the zoom returns to 1 the dragged position returns with it — otherwise it is at original size and off screen.
   useEffect(() => {
     if (scale === MIN_SCALE) setPan({ x: 0, y: 0 })
   }, [scale])
@@ -121,7 +121,7 @@ function LightboxOverlay({
     setPan({ x: 0, y: 0 })
   }, [])
 
-  // 사진을 넘기면 확대와 위치는 처음으로. 앞 사진에서 당겨 둔 배율이 다음 사진에 남으면 어디를 보고 있는지 알 수 없다.
+  // Moving to the next picture resets zoom and position. A zoom pulled in on the previous picture, left on the next one, makes it impossible to tell what is being looked at.
   useEffect(() => {
     reset()
   }, [at, reset])
@@ -144,7 +144,7 @@ function LightboxOverlay({
     }
   }, [at, shots.length, onAt, onClose, zoom, reset])
 
-  // 휠 확대는 리스너를 직접 단다 — React 의 onWheel 은 패시브라 preventDefault 가 먹지 않아 페이지가 같이 스크롤된다.
+  // Wheel zoom attaches its listener directly — React's onWheel is passive, so preventDefault does not take and the page scrolls along with it.
   useEffect(() => {
     const el = frameRef.current
     if (!el) return
@@ -228,7 +228,7 @@ function LightboxOverlay({
         </button>
       </div>
 
-      {/* 가운데의 빈 자리를 누르면 닫힌다(Esc·닫기 버튼과 같은 일) — 사진 자체는 끌어서 움직이는 자리라 겹치면 안 된다. */}
+      {/* Pressing the empty space in the middle closes it (the same as Esc and the close button) — the picture itself is a place to DRAG, so they must not overlap. */}
       <div
         ref={frameRef}
         onMouseDown={(e) => {

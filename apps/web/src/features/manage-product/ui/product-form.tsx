@@ -26,7 +26,7 @@ interface ServiceRow {
   host: string
   source: 'releases' | 'tags'
   tagPrefix: string
-  // 모노레포에서 이 서비스가 사는 경로 — 스트림 정체성이 아니라 구성 정보라, 바꿔도 워터마크는 살아 있다.
+  // Where this service lives in the monorepo — configuration rather than stream identity, so the watermark survives a change to it.
   path: string
 }
 
@@ -38,7 +38,7 @@ interface SeriesRow {
   judgeIds: string[]
 }
 
-// 시리즈 key 는 추이의 영속 정체성 — 라벨에서 슬러그를 만들어 주되, 손으로 고칠 수 있게 둔다.
+// A series key is the trend's durable identity — a slug is suggested from the label, but it stays hand-editable.
 function slugOf(label: string): string {
   return label
     .toLowerCase()
@@ -47,7 +47,7 @@ function slugOf(label: string): string {
     .slice(0, 64)
 }
 
-// GitHub App 이 고르게 해 주는 레포 하나 — value 인코딩은 `fullName` (GHE 는 `fullName@@host`).
+// One repo the GitHub App offers — the value encoding is `fullName` (GHE uses `fullName@@host`).
 export interface RepoOption {
   fullName: string
   host?: string
@@ -57,8 +57,8 @@ export interface RepoOption {
 const repoValueOf = (repo: { fullName: string; host?: string }): string =>
   repo.host !== undefined ? `${repo.fullName}@@${repo.host}` : repo.fullName
 
-// 폼이 미리 채워 받는 기존 프로덕트 — 있으면 수정 모드다. 서비스의 sync 상태는 폼이 만지지 않는다
-// (애그리게이트가 소스 좌표가 같은 한 워터마크를 이어 준다).
+// The existing product the form is prefilled with — present, it is edit mode. The form never touches a service's sync state
+// (the aggregate carries the watermark forward as long as the source coordinates are unchanged).
 export interface ProductFormInitial {
   id: string
   name: string
@@ -81,8 +81,8 @@ export interface ProductFormInitial {
   }[]
 }
 
-// 프로덕트 등록/수정 폼. 선택지는 서버가 좁혀 온다(피커 규칙): 데이터셋/하네스/저지는 워크스페이스가 실제로
-// 등록한 id 들이고, 컨트롤 플레인은 없는 id 를 400 으로 거절한다.
+// The product register/edit form. The choices are narrowed by the SERVER (the picker rule): the datasets, harnesses and judges are ids the
+// workspace actually registered, and the control plane refuses an id that does not exist with a 400.
 export function ProductForm({
   workspace,
   datasetOptions,
@@ -95,7 +95,7 @@ export function ProductForm({
   datasetOptions: string[]
   harnessOptions: string[]
   judgeOptions: string[]
-  // GitHub App 설치 레포 — 싱크가 실제로 닿을 수 있는 집합. 비어 있으면 수동 입력으로 내려간다.
+  // The GitHub App's installed repos — the set a sync can actually reach. Empty, it falls back to manual entry.
   repoOptions: RepoOption[]
   initial?: ProductFormInitial
 }) {
@@ -157,7 +157,7 @@ export function ProductForm({
     void (async () => {
       setPending(true)
       try {
-        // 수정은 결과 집합을 통째로 보낸다(리스트 치환 규칙) — 빈 리스트도 "전부 지웠다"는 진짜 답이다.
+        // An edit sends the WHOLE result set (the list-replacement rule) — an empty list is a real answer too ("I deleted them all").
         const r = initial
           ? await updateProductAction(initial.id, {
               name: name.trim(),
@@ -248,7 +248,7 @@ export function ProductForm({
           </p>
         )}
         {services.map((row, index) => (
-          // 이름이 정체성이지만 편집 중에는 비어 있을 수 있어 index 로 그린다(제출 시 빈 행은 걸러진다).
+          // The name is the identity, but it can be empty mid-edit, so rows are drawn by index (empty rows are filtered out on submit).
           <div
             key={index}
             className="grid gap-2 @md:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_7rem_7rem_7rem_auto]"
@@ -260,8 +260,8 @@ export function ProductForm({
               aria-label={t('serviceName')}
             />
             {repoOptions.length > 0 ? (
-              // GitHub App 이 있으면 레포는 고르는 것이다 — 피커는 컨트롤 플레인이 받아 주는 것만 내놓는다
-              // (설치 밖 레포는 싱크가 토큰을 못 받아 어차피 실패한다). 이름이 비어 있으면 레포 꼬리로 채운다.
+              // With the GitHub App present a repo is PICKED — the picker offers only what the control plane will accept
+              // (a repo outside the installation fails anyway, since the sync cannot get a token). An empty name is filled from the repo's tail.
               <Combobox
                 options={repoOptions.map((repo) => ({
                   value: repoValueOf(repo),
@@ -354,7 +354,7 @@ export function ProductForm({
                   onChange={(e) =>
                     patchSeries(index, {
                       label: e.target.value,
-                      // key 를 손대기 전까지는 라벨을 따라간다 — 저장 뒤에는 라벨을 바꿔도 key 는 남는다.
+                      // The key follows the label until it is touched — after a save the key stays even when the label changes.
                       ...(row.key === slugOf(row.label) || row.key === ''
                         ? { key: slugOf(e.target.value) }
                         : {}),

@@ -9,11 +9,11 @@ import { Input } from '@/shared/ui/input'
 import { FacetFilterMenu, type FacetSpec } from './facet-filter-menu'
 import { ListDisplayMenu } from './list-display-menu'
 
-// 목록 화면의 한 줄 — 왼쪽은 **무엇을 볼 것인가**(검색 + 필터), 오른쪽은 **어떻게 볼 것인가**(개수 + 표시).
-// 네 평가 자원 목록이 글자 하나까지 같은 줄을 쓰기 위한 것이고, 이슈 목록의 툴바와도 같은 배치다.
+// One line on a list screen — the left is **what to look at** (search + filters) and the right is **how to look at it** (the count + display).
+// It exists so the four evaluation resource lists use a line identical down to the last character, and it is the same arrangement as the issue list's toolbar.
 //
-// 묶기·정렬의 이름은 공용 어휘(`listView.groupBy` / `listView.orderBy`)에서 온다: 「팀」이 하네스 목록과
-// 스코어카드 목록에서 다른 단어로 불릴 이유가 없다.
+// The grouping and ordering names come from the shared vocabulary (`listView.groupBy` / `listView.orderBy`): there is no reason for "team" to be
+// called by a different word on the harness list and the scorecard list.
 export function ListToolbar({
   search,
   onSearch,

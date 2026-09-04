@@ -10,11 +10,11 @@ import { Button } from '@/shared/ui/button'
 
 import { runProductSeriesAction } from '../api/products'
 
-// 워치 시리즈를 지금 평가한다 — Sync 의 짝이다. Sync 가 버전 축(GitHub 릴리즈/태그)을 당긴다면 이 버튼은
-// 품질 축을 당긴다. 이게 없던 동안에는 "새 버전 임포트"만이 시리즈를 돌리는 유일한 계기여서, 이미 백필이
-// 끝난 프로덕트에 시리즈를 새로 선언하면 다음 업스트림 릴리즈까지 추이가 비어 있었다.
+// Evaluate the watch series now — Sync's counterpart. Where Sync pulls the version axis (GitHub releases and tags), this button pulls the
+// QUALITY axis. While it did not exist, "importing a new version" was the only trigger that ran a series, so declaring a new series on a product
+// whose backfill was already done left the trend empty until the next upstream release.
 //
-// seriesKey 없이 쓰면 프로덕트가 지금 지켜보는 전부, 주면 그 시리즈 하나.
+// Used with no seriesKey it runs everything the product is currently watching; given one, that single series.
 export function RunSeriesButton({
   productId,
   seriesKey,
@@ -40,7 +40,7 @@ export function RunSeriesButton({
           toast.error(r.error ?? t('runSeriesError'))
           return
         }
-        // 제출되지 못한 시리즈를 삼키면 "물어봤는데 아무 답도 없었다"로 읽힌다 — 실패는 성공과 같은 크기로 말한다.
+        // Swallowing the series that could NOT be submitted reads as "we asked and got no answer at all" — a failure is stated at the same size as a success.
         if (r.result.failedSeries.length > 0) {
           toast.warning(
             t('runSeriesPartial', {

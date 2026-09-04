@@ -365,7 +365,7 @@ describe("CommentService discussion agent (askAgent)", () => {
       },
     };
     let n = 0;
-    let clock = 0; // now()를 명시적으로 진행시켜 sweep의 staleness 판정을 검증한다
+    let clock = 0; // now() is advanced explicitly to verify the sweep's staleness judgement
     const service = new CommentService({
       store,
       discussionRunner: runner,

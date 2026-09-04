@@ -13,11 +13,11 @@ import { updateIssueAction } from '../api/issues'
 import { toggleLabelId, withCreatedLabels } from '../lib/label-selection'
 import { IssueLabelOptions, RemovableLabelChip } from './issue-label-picker'
 
-// 이슈의 라벨 — 상태·우선순위·팀과 같은 자리(속성 열)에서 바로 바꾼다. 예전에는 칩만 그리고 편집은 ⋯ 메뉴의
-// 다이얼로그 안에만 있었는데, 라벨 하나 떼려고 이슈 전체 폼을 열게 하는 건 Linear 의 동선이 아니다.
+// An issue's labels — changed right where status, priority and team are (the attribute column). It used to draw the chips only, with editing
+// living inside the ⋯ menu's dialog, and opening a whole issue form to remove one label is not Linear's path.
 //
-// 붙이기·떼기는 즉시 저장한다(폼이 아니라 컨트롤이다). 저장 결과를 기다리는 동안에도 칩은 바뀐 대로 보이고,
-// 거절당하면 되돌린 뒤 제어 평면의 사유를 그대로 보여 준다.
+// Attaching and detaching save immediately (this is a control, not a form). The chips show as changed while the save is in flight, and on a
+// refusal they roll back and show the control plane's reason verbatim.
 export function IssueLabelControl({
   id,
   labelIds,
@@ -26,7 +26,7 @@ export function IssueLabelControl({
 }: {
   id: string
   labelIds: string[]
-  // 워크스페이스 라벨 레지스트리 — 고를 대상이자 칩을 그리는 근거.
+  // The workspace label registry — both what can be picked and the basis for drawing the chips.
   labels: IssueLabel[]
   canWrite: boolean
 }) {
@@ -37,8 +37,8 @@ export function IssueLabelControl({
   const [seen, setSeen] = useState(labelIds.join(' '))
   const [pending, setPending] = useState(false)
 
-  // 서버가 실어 온 값이 진실이다 — 저장이 끝나 페이지가 새로 그려졌거나 다른 화면이 고쳤으면 거기에 맞춘다.
-  // 저장 중에는 맞추지 않는다: 연달아 두 번 토글하면 첫 응답이 두 번째 선택을 되돌려 깜빡인다.
+  // What the SERVER carried is the truth — once a save finishes and the page re-renders, or another screen edits it, this follows.
+  // It does not follow while a save is in flight: toggling twice in a row would make the first response undo the second choice and flicker.
   const fromServer = labelIds.join(' ')
   if (!pending && fromServer !== seen) {
     setSeen(fromServer)
@@ -47,7 +47,7 @@ export function IssueLabelControl({
 
   const known = useMemo(() => withCreatedLabels(labels, created), [labels, created])
   const byId = useMemo(() => Object.fromEntries(known.map((l) => [l.id, l])), [known])
-  // 정의가 사라진 id 는 그리지 않는다 — 삭제가 이슈에서 id 를 같이 떼어내므로 정상 경로에서는 생기지 않는다.
+  // An id whose definition is gone is not drawn — it does not arise on the normal path, since deleting a label detaches its id from the issues too.
   const chips = selected.map((x) => byId[x]).filter((l): l is IssueLabel => l !== undefined)
 
   function apply(next: string[]): void {
@@ -103,7 +103,7 @@ export function IssueLabelControl({
             className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground transition-colors hover:border-border-strong hover:bg-accent hover:text-foreground"
           >
             {pending ? <Loader2 className="size-3 animate-spin" /> : <Plus className="size-3" />}
-            {/* 아직 아무것도 안 붙은 이슈에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다. */}
+            {/* On an issue with nothing attached yet, this button is the only affordance — that is the only time it wears a label. */}
             {chips.length === 0 && <span>{t('labelAdd')}</span>}
           </button>
         )}

@@ -8,8 +8,8 @@ export interface SetAgentModelResult {
   error?: string
 }
 
-// 내 대화의 기본 LLM — 워크스페이스 AgentSpec(관리자가 모두를 위해 고른 하나)은 건드리지 않고 "나"의 오버레이만 바꾼다.
-// model=null 은 선택 해제(= 워크스페이스 기본값 따르기). 등록되지 않은 모델 id 는 컨트롤플레인이 404 로 거절한다.
+// The default LLM for MY conversations — it leaves the workspace AgentSpec (the one an admin chose for everyone) untouched and changes only MY overlay.
+// model=null clears the selection (= follow the workspace default). An unregistered model id is refused by the control plane with a 404.
 export async function setAgentModelAction(model: string | null): Promise<SetAgentModelResult> {
   const ctx = await authContext()
   try {

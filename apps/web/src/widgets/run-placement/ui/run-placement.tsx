@@ -13,7 +13,7 @@ import { cn } from '@/shared/lib/utils'
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 const POLL_MS = 5000
 
-// 배치 phase → 표시 색(시맨틱): blocked=경고, dead=위험, running=성공, 그 외=중립.
+// A placement phase → its display colour (semantic): blocked = warning, dead = danger, running = success, everything else = neutral.
 const PHASE_DOT: Record<CasePlacement['phase'], string> = {
   queued: 'bg-muted-foreground/60',
   blocked: 'bg-[var(--color-warning)]',
@@ -22,10 +22,10 @@ const PHASE_DOT: Record<CasePlacement['phase'], string> = {
   dead: 'bg-destructive',
 }
 
-// 케이스 배치 패널(런타임 디버깅) — 케이스 잡이 클러스터 안에서 어디까지 갔는지 5초마다 폴링한다:
-// queued(스케줄러 대기) · blocked(용량 부족 — 스케줄러의 판정문 표시) · starting(이미지 풀 등) · running · dead.
-// 배치 정보가 아예 없는 run(셀프호스티드 레인·프리디스패치)은 첫 발견 전까지 통째로 숨긴다(빈 섹션 금지).
-// run이 종료되면 폴링을 멈추고 마지막 읽기를 그대로 둔다.
+// The case placement panel (runtime debugging) — it polls every 5s for how far a case job got inside the cluster:
+// queued (waiting on the scheduler) · blocked (out of capacity — the scheduler's verdict is shown) · starting (an image pull, etc.) · running · dead.
+// A run with no placement information at all (a self-hosted lane, pre-dispatch) hides entirely until the first discovery (no empty sections).
+// Once the run ends, polling stops and the last read is left standing.
 export function RunPlacement({ runId, initialStatus }: { runId: string; initialStatus: string }) {
   const t = useTranslations('runPlacement')
   const [placement, setPlacement] = useState<CasePlacement | null>(null)
@@ -45,10 +45,10 @@ export function RunPlacement({ runId, initialStatus }: { runId: string; initialS
           }
           if (stopped) return
           if (body.found && body.placement) setPlacement(body.placement)
-          if (TERMINAL.has(body.status)) return // run 종료 — 마지막 읽기를 남기고 폴링 중단
+          if (TERMINAL.has(body.status)) return // the run ended — keep the last read and stop polling
         }
       } catch {
-        // 일시 오류 — 폴링 지속
+        // a transient error — keep polling
       }
       if (!stopped) timer = setTimeout(tick, POLL_MS)
     }
@@ -59,7 +59,7 @@ export function RunPlacement({ runId, initialStatus }: { runId: string; initialS
     }
   }, [runId, initialStatus])
 
-  // 배치 읽기가 아직/전혀 없는 run — 빈 박스 대신 통째로 숨긴다.
+  // A run with no placement read yet, or none at all — hidden entirely rather than shown as an empty box.
   if (!placement) return null
 
   const meta: Array<{ label: string; value: string }> = [

@@ -2,7 +2,7 @@ import { DatasetListView } from '@/widgets/dataset-list'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스의 데이터셋 목록 — 하네스와 같다. `?team=` 은 경로가 아니라 이 목록의 필터로 읽힌다.
+// The workspace's dataset list — the same as harnesses. `?team=` is read as a FILTER on this list rather than as a path.
 export default async function DatasetsPage({
   params,
   searchParams,

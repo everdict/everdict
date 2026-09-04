@@ -27,16 +27,16 @@ import { IssueFilterMenu } from './issue-filter-menu'
 import { IssueGroup } from './issue-group'
 import { IssueRow } from './issue-row'
 
-// 이슈 목록의 본문 — 툴바와 행들. 보기(필터·표시)를 **여기가** 들고 있는 것이 이 화면의 핵심이다.
+// The body of the issue list — the toolbar and the rows. That the VIEW (filters and display) is held **here** is the heart of this screen.
 //
-// 예전에는 필터를 켜면 `router.push`, 묶는 기준을 바꾸면 서버 액션 + `router.refresh()` 였다. 둘 다 라우트를
-// 통째로 다시 그리는 일이라 화면이 스켈레톤으로 비워졌고, 목록과 아무 상관 없는 읽기(멤버·프로젝트·라벨·
-// 사이클 로스터, GitHub App 상태)까지 매번 다시 돌았다. 이제 바뀌는 것은 목록뿐이고, 새 목록이 도착할
-// 때까지 **이전 목록이 화면에 그대로 서 있는다** — 리니어가 그렇듯이.
+// It used to be `router.push` for a filter and a server action plus `router.refresh()` for a grouping change. Both re-render the whole
+// route, so the screen emptied into a skeleton and every read unrelated to the list (members, projects, labels, the cycle roster, GitHub
+// App state) ran again each time. Now only the list changes, and **the previous list stays on screen** until the new one arrives —
+// exactly as Linear does.
 //
-// 주소는 뒤따라온다: 필터만 `history.replaceState` 로 적는다(서버 렌더를 일으키지 않는 문). 그래서 붙여넣을
-// 수 있는 링크라는 성질은 그대로고, 표시 설정은 여전히 주소에 실리지 않는다 — 보낸 링크가 받는 사람의 화면
-// 배치를 바꾸면 안 된다.
+// The address FOLLOWS: only the filters are written, with `history.replaceState` (the door that causes no server render). So the property of
+// being a pasteable link is unchanged, and the display settings still never ride in the address — a link you send must not rearrange the
+// recipient's screen.
 export function IssueListBody({
   workspace,
   basePath,
@@ -52,7 +52,7 @@ export function IssueListBody({
   workspace: string
   basePath: string
   viewKey: string
-  // 주소가 정한 좁히기(팀·트리아지·사이클) — 보기를 바꿔도 변하지 않는다.
+  // The narrowing the address decides (team, triage, cycle) — unchanged when the view changes.
   base: IssueViewBase
   initialView: IssueView
   initialData: IssueViewData
@@ -60,21 +60,21 @@ export function IssueListBody({
   projects: { id: string; name: string }[]
   canWrite: boolean
   timeZone: string
-  // 워크스페이스 전체 목록의 팀 칩 — 서버가 그려 넘긴다(보기와 무관하고, 링크일 뿐이다).
-  // 일괄 편집 바 — 고를 대상이 있는 화면에서만.
+  // The team chips on the workspace-wide list — drawn and passed by the server (unrelated to the view, and only links).
+  // The bulk edit bar — only on a screen with something to select.
 }) {
   const t = useTranslations('issuesPage')
   const [view, setView] = useState(initialView)
   const [data, setData] = useState(initialData)
   const [pending, setPending] = useState(false)
-  // 늦게 도착한 응답이 최신 화면을 덮어쓰지 않게 — 빠르게 두 번 만지면 순서가 뒤집힐 수 있다.
+  // So a late response cannot overwrite a newer screen — two quick interactions can otherwise land out of order.
   const sequence = useRef(0)
 
   const apply = useCallback(
     (next: IssueView) => {
       const merged: IssueView = { ...normalizeIssueDisplay(next), filters: next.filters }
       setView(merged)
-      // 필터만 주소에, 표시 설정만 쿠키에. 둘 다 서버 왕복이 없다.
+      // Filters into the address only, display settings into the cookie only. Neither costs a server round trip.
       window.history.replaceState(null, '', issueViewHref(basePath, merged))
       saveIssueDisplay(viewKey, merged)
       const seq = sequence.current + 1
@@ -113,14 +113,14 @@ export function IssueListBody({
 
   return (
     <>
-      {/* 툴바 — 무엇을 볼 것인가(필터)와 어떻게 볼 것인가(표시). */}
+      {/* The toolbar — WHAT to look at (filters) and HOW to look at it (display). */}
       <div className="flex flex-wrap items-center gap-2">
         <IssueFilterMenu
           filters={view.filters}
           directories={directories}
           projects={projects}
           onToggle={(facet, value) => {
-            // 공용 메뉴는 축을 문자열로 돌려준다 — 이슈가 아는 축인지 여기서 좁힌다(단언 대신).
+            // The shared menu returns an axis as a string — narrowing it to an axis the issue knows happens here (rather than with an assertion).
             const known = ISSUE_FILTER_FACETS.find((candidate) => candidate === facet)
             if (known === undefined) return
             apply({ ...view, filters: toggleIssueFilter(view.filters, known, value) })
@@ -137,7 +137,7 @@ export function IssueListBody({
         </div>
       </div>
 
-      {/* 새 목록을 기다리는 동안 이전 목록이 그대로 서 있는다 — 스켈레톤으로 비우면 방금 본 것이 사라진다. */}
+      {/* The previous list stays standing while the new one is awaited — emptying into a skeleton removes what was just being read. */}
       <div
         aria-busy={pending}
         className={cn('transition-opacity duration-150', pending && 'opacity-55')}
@@ -205,7 +205,7 @@ export function IssueListBody({
           </div>
         ) : null}
 
-        {/* 조용한 상한은 "전부 봤다"로 읽힌다 — 몇 그룹을 안 세웠는지 말한다. */}
+        {/* A silent cap reads as "you have seen everything" — say how many groups were not stood up. */}
         {data.droppedGroups > 0 && (
           <p className="pt-3 text-[11.5px] text-muted-foreground">
             {t('groupsTruncated', { count: data.droppedGroups })}
@@ -216,8 +216,8 @@ export function IssueListBody({
   )
 }
 
-// 묶지 않은 목록의 한 장과 그 다음 장들. 예전에는 커서를 주소에 실은 링크였는데, 그러면 「더 보기」 한 번이
-// 라우트를 다시 그렸고 지금까지 읽던 자리도 잃었다 — 그룹의 「더 보기」와 같은 방식으로 이어 붙인다.
+// One page of an ungrouped list plus the pages after it. This used to be a link carrying the cursor in the address, which made a single
+// "show more" re-render the route and lose the place being read — it is appended the same way a group's "show more" is.
 function FlatIssues({
   workspace,
   data,
@@ -236,7 +236,7 @@ function FlatIssues({
   const [cursor, setCursor] = useState(data.flat?.nextCursor)
   const [loading, setLoading] = useState(false)
 
-  // 서버가 새로 그린 첫 장이 진실이다 — 보기가 바뀌면 더 불러온 행은 사라져야 한다(그 목록에 속하지 않는다).
+  // The server's freshly drawn FIRST page is the truth — when the view changes, the extra rows loaded must disappear (they do not belong to that list).
   const [seen, setSeen] = useState(data.flat)
   if (seen !== data.flat) {
     setSeen(data.flat)

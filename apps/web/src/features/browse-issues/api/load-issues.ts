@@ -6,11 +6,11 @@ import { controlPlane } from '@/shared/lib/control-plane'
 
 import type { IssuePageQuery } from '../model/page-query'
 
-// 한 그룹의 다음 장. 묶인 화면은 그룹마다 자기 장을 들고 있으므로 「더 보기」도 그룹마다 따로다 — 전체를
-// 다시 그리는 대신 그 그룹에만 행을 이어 붙인다(리니어의 그룹 안 더 보기와 같은 동선).
+// One group's next page. A grouped screen gives each group its own page, so "show more" is per group too — rather than redrawing everything,
+// rows are appended to THAT group (the same path as Linear's in-group show more).
 //
-// 실패는 던지지 않고 돌려준다: 목록 한 귀퉁이의 버튼이 페이지 전체를 에러 경계로 날리면 안 되고, 사유는
-// 그 자리에서 읽혀야 한다.
+// Failures are returned rather than thrown: a button in one corner of a list must not blow the whole page into an error boundary, and the
+// reason has to be readable right there.
 export async function loadIssuePageAction(
   query: IssuePageQuery
 ): Promise<{ ok: true; page: IssuePage } | { ok: false; error: string }> {

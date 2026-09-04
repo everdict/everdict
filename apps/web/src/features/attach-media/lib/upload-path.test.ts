@@ -13,7 +13,7 @@ describe('safeFileName', () => {
     )
   })
 
-  // 한글 이름은 허용 문자 밖이라 통째로 접힌다 — 경로는 확장자만 지키고, 사람이 읽을 이름은 본문의 대체 텍스트가 든다.
+  // A Korean name is outside the allowed characters and folds away entirely — the path keeps only the extension, and the human-readable name is carried by the body's alt text.
   it('falls back to a generic stem when nothing safe survives', () => {
     expect(safeFileName('스크린샷.png')).toBe('file.png')
   })
@@ -43,7 +43,7 @@ describe('uploadPathFor', () => {
 })
 
 describe('uploadUrlFor', () => {
-  // 주소가 실제 파일 이름으로 끝나야 뷰어의 확장자 판정과 다운로드 이름이 성립한다.
+  // The address has to END in the real file name for the viewer's extension judgement and the download name to work.
   it('ends in the file name so the viewer can read the medium off it', () => {
     expect(uploadUrlFor('uploads/2026-08/a1-clip.mp4')).toBe(
       '/api/fs/file/uploads/2026-08/a1-clip.mp4'

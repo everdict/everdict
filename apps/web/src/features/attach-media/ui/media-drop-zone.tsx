@@ -10,13 +10,13 @@ import { Callout } from '@/shared/ui/callout'
 import { mediaSnippet } from '../lib/insert'
 import { uploadedMediaSchema } from '../model/schema'
 
-// 글 쓰는 자리에 파일을 붙여넣거나 끌어다 놓으면 워크스페이스 파일시스템에 올리고 본문에 문법을 끼워 넣는다.
-// 이슈 설명·코멘트·하위 이슈 작성기가 같은 것을 쓴다 — 첨부는 이 화면들에서 같은 동작이어야 한다.
+// Pasting or dropping a file where writing happens uploads it to the workspace filesystem and inserts the syntax into the body.
+// The issue description, comments and the sub-issue composer all use the same one — attaching has to be the SAME action on these screens.
 //
-// 커서 자리에 넣는 일은 이 컴포넌트가 하지 않는다. 텍스트영역의 값을 쥐고 있는 것은 부르는 쪽이고, 값과 커서를
-// 둘 다 만지는 코드가 두 곳에 있으면 반드시 어긋난다 — 여기서는 넣을 문법만 만들어 넘긴다.
+// Inserting at the caret is NOT this component's job. The caller holds the textarea's value, and code touching both the value and the caret in
+// two places will inevitably diverge — here only the syntax to insert is built and handed over.
 
-// 제어 평면의 파일 한도 거울(라우트의 것과 같은 값) — 올리기 전에 돌려보내기 위한 것.
+// A mirror of the control plane's file limit (the same value as the route's) — for turning a file back before uploading.
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 export function MediaDropZone({
@@ -34,13 +34,13 @@ export function MediaDropZone({
   const [uploading, setUploading] = useState<string[]>([])
   const [error, setError] = useState<string>()
   const [dragging, setDragging] = useState(false)
-  // dragenter/leave 는 자식 위를 지날 때마다 오간다 — 깊이를 세지 않으면 표시가 깜빡인다.
+  // dragenter/leave fire back and forth every time the pointer crosses a child — without counting depth the indicator flickers.
   const depth = useRef(0)
 
   async function accept(files: File[]) {
     if (disabled || files.length === 0) return
     setError(undefined)
-    // 한 번에 한 개씩 올린다 — 놓은 순서가 곧 본문에 박히는 순서여야 한다.
+    // Uploaded ONE at a time — the order they were dropped in has to be the order they are pinned into the body.
     for (const file of files) {
       if (file.size > MAX_UPLOAD_BYTES) {
         setError(t('tooLarge', { name: file.name }))
@@ -75,7 +75,7 @@ export function MediaDropZone({
 
   function onPaste(e: ClipboardEvent<HTMLDivElement>) {
     const files = Array.from(e.clipboardData.files)
-    // 파일이 실려 있을 때만 가로챈다 — 평범한 글 붙여넣기는 그대로 지나가야 한다.
+    // Intercepted only when files are carried — an ordinary text paste has to pass straight through.
     if (files.length === 0) return
     e.preventDefault()
     void accept(files)
@@ -95,7 +95,7 @@ export function MediaDropZone({
         setDragging(true)
       }}
       onDragOver={(e) => {
-        // 이걸 막지 않으면 브라우저가 파일을 열어 버려 페이지가 통째로 바뀐다.
+        // Without preventing this the browser OPENS the file and the whole page is replaced.
         if (!disabled && carriesFiles(e)) e.preventDefault()
       }}
       onDragLeave={() => {

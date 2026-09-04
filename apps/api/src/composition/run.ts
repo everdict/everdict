@@ -95,7 +95,7 @@ export function buildRun(deps: {
   // Cascade cancel (§5.5 O8) — late-bound to ScorecardService.cancelCausedBy (built after the run service).
   onAgentRunCancelled?: (tenant: string, runId: string) => Promise<{ cancelled: number; failures: string[] }>;
   meteredDispatcher: CoreDispatcher;
-  // 저지의 하네스 위임 경로가 쓰는 공유 디스패처 — dispatch 만 쓰므로 인터페이스에 의존한다(backends 규칙).
+  // The shared dispatcher the judge's harness delegation path uses — it needs only `dispatch`, so it depends on the interface (the backends rule).
   dispatcher: CoreDispatcher;
   settingsStore: WorkspaceSettingsStore;
   harnessInstanceRegistry: HarnessInstanceRegistry;

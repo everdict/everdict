@@ -60,7 +60,7 @@ export function CommentThread({
   comments: ThreadComment[]
   mentionables: Mentionable[]
   canComment: boolean
-  // 첨부는 워크스페이스 파일시스템에 쓰는 일이라 코멘트 권한과 별개의 판정이다(files:write).
+  // An attachment is a WRITE to the workspace filesystem, so it is judged separately from comment permission (files:write).
   canAttach: boolean
 }) {
   const t = useTranslations('discuss')
@@ -199,8 +199,8 @@ function activityLabel(
   return t('activityThinking')
 }
 
-// 한 코멘트가 그리는 데 실제로 쓰는 것이 같은가. 폴링은 스레드를 통째로 다시 조립해 오므로(서버가 행에서 새로
-// 만든다) 객체 정체성으로는 "안 바뀐 코멘트"를 알아볼 수 없다 — 그래서 필드로 비교한다.
+// Is what one comment actually DRAWS the same. Polling re-assembles the whole thread (the server builds it fresh from rows), so object identity
+// cannot recognise "an unchanged comment" — hence the field-by-field comparison.
 function sameCard(
   a: { item: ThreadComment; mentionables: Mentionable[] },
   b: { item: ThreadComment; mentionables: Mentionable[] }
@@ -223,10 +223,10 @@ function sameCard(
   )
 }
 
-// 한 코멘트. 에이전트가 답하는 동안 스레드는 2.5초마다 스스로 갱신되는데, 이 카드는 마크다운을 unified 파이프라인
-// (remark-gfm → rehype-raw → sanitize) 전체로 다시 파싱한다 — 본문 하나에 약 5.6ms(node 기준, 브라우저 재조정
-// 전)라 코멘트 20개면 갱신 한 번이 약 112ms 다. 그동안 화면은 멈춘다. 메모가 그 일을 건너뛰게 하는 유일한 방법이다
-// (agent chat 이 같은 이유로 같은 처방을 받았다 — features/agent-chat/ui/transcript-render.test.tsx).
+// One comment. While the agent answers, the thread refreshes itself every 2.5s, and this card re-parses its markdown through the whole unified
+// pipeline (remark-gfm → rehype-raw → sanitize) — about 5.6ms per body (on node, before browser reconciliation), so twenty comments make one
+// refresh about 112ms, and the screen freezes for that long. Memoization is the only way to skip that work
+// (agent chat received the same prescription for the same reason — features/agent-chat/ui/transcript-render.test.tsx).
 export const CommentCard = memo(function CommentCard({
   item,
   mentionables,
@@ -377,7 +377,7 @@ function AgentCommentBody({
 // Inline HITL: the parked write-tool asks, decidable RIGHT IN the comment (any member — the discussion session
 // is workspace-visible and the permission route accepts it). Polls the session's /pending while parked; a
 // decision posts to the normal /permission route and the thread's own polling reflects the resumed turn.
-// 렌더링은 채팅 패널과 같은 PermissionPrompt — 승인 카드는 어디서 보든 도구명+실행 인자를 같이 보여줘야 한다.
+// Rendered as the same PermissionPrompt as the chat panel — an approval card has to show the tool name and its arguments together wherever it is seen.
 function ApprovalStrip({ sessionId }: { sessionId: string }) {
   const t = useTranslations('discuss')
   const [asks, setAsks] = useState<PendingPermission[]>([])
@@ -491,8 +491,8 @@ function Composer({
       taRef.current?.setSelectionRange(pos, pos)
     })
   }
-  // 올라간 첨부는 커서 자리에 들어간다. 현재 값은 상태가 아니라 텍스트영역에서 읽는다 — 파일 여러 개를 놓으면
-  // 업로드가 하나씩 이어지는데, 그 사이 렌더에서 닫힌 상태 값은 이미 지난 값이기 때문이다.
+  // An uploaded attachment goes in at the caret. The current value is read from the TEXTAREA rather than from state — dropping several files
+  // chains the uploads one after another, and the state value closed over in between renders is already stale.
   function insertSnippet(snippet: string) {
     const ta = taRef.current
     const current = ta?.value ?? value
@@ -550,7 +550,7 @@ function Composer({
 
   return (
     <div className="space-y-2 rounded-lg border bg-card/40 p-3">
-      {/* 스크린샷은 논의의 절반이다 — 붙여넣거나 끌어다 놓으면 그 자리에서 첨부되고 본문에 문법이 들어간다. */}
+      {/* A screenshot is half the discussion — pasted or dropped, it is attached on the spot and its syntax goes into the body. */}
       <MediaDropZone onInsert={insertSnippet} disabled={!canAttach}>
         <div className="relative">
           <Textarea

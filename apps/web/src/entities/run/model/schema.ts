@@ -56,9 +56,9 @@ export const trajectoryResponseSchema = z.object({
     sealedAt: z.string(),
   }),
   events: z.array(traceEventSchema).default([]),
-  // 이 run에 기여한 EMITTER들 — 실행 자신의 기록 + 자기 스팬을 이 run에 밀어넣은 서비스마다 하나
-  // (`service:<service.name>`). 실행 세그먼트 하나만 `events`를 생략한다(그 스트림이 top-level `events`라
-  // 같은 트레이스를 두 번 싣지 않는다). 다중 평면 등급 이전 컨트롤 플레인은 아예 보내지 않으므로 기본값은 빈 배열.
+  // The EMITTERS that contributed to this run — the execution's own record plus one per service that pushed its spans into this run
+  // (`service:<service.name>`). Only the execution segment omits `events` (that stream IS the top-level `events`, so the same trace is
+  // not carried twice). A control plane older than multi-plane grading sends none at all, so the default is an empty array.
   segments: z
     .array(
       z.object({
@@ -100,8 +100,8 @@ export const resultSchema = z
         url: z.string().optional(),
         dom: z.string().optional(),
         domRef: z.string().optional(), // full page DOM offloaded to object storage (dom = inline preview)
-        // prompt=환경-없는 QA의 최종 답변(주 신호는 trace라 비어 있을 때가 많음). os-use=보이는 창 제목. repo=최종 diff+변경 파일.
-        // 스냅샷 kind별 실제 표시 대상 — 이게 비면 상세에서 스냅샷 섹션을 통째로 숨긴다(빈 JSON 덤프 방지).
+        // prompt = the final answer of an environment-less QA (often empty, since the main signal is the trace). os-use = the visible window title. repo = the final diff plus changed files.
+        // What each snapshot kind actually DISPLAYS — empty, and the detail hides the snapshot section entirely (no empty JSON dump).
         output: z.string().optional(),
         windows: z.array(z.string()).optional(),
         diff: z.string().optional(),
@@ -157,9 +157,9 @@ export const runSchema = z.object({
     .optional(),
   result: resultSchema.optional(),
   usage: usageSchema.optional(),
-  // 케이스 판정 — 서버가 result.scores 에서 권위 순위(@everdict/domain caseVerdict: 실측 > 객관 비교 > 저지)로
-  // 계산해 usage 와 같은 read 에서 실어 보낸다. 클라이언트는 절대 재계산하지 않는다(P1g 에서 지운 미러를
-  // 되살리지 않는다 — 스코어카드의 케이스 판정과 같은 규칙, 같은 출처). undefined = 판정할 그레이더가 없었다.
+  // The case verdict — the server computes it from result.scores by authority rank (@everdict/domain caseVerdict: measured > objective
+  // comparison > judge) and sends it on the same read as usage. The client NEVER recomputes it (the mirror deleted in P1g is not brought
+  // back — the same rule and the same source as the scorecard's case verdict). undefined = there was no grader to judge with.
   verdict: z.boolean().optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
   // provenance (activity view source axis): web|mcp|api|scorecard|schedule|front-door… unset=direct API.
@@ -170,11 +170,11 @@ export const runSchema = z.object({
   runtime: z.string().optional(),
   // the scorecard batch this run belongs to (if any). The control plane excludes children (where set) from the activity list by default.
   parentScorecardId: z.string().optional(),
-  // 이 run이 속한 오케스트레이션 — 스코어카드의 케이스, 대화의 턴, 일반 자식(parentScorecardId 의 일반화).
-  // 에이전트 턴이면 group.id 가 대화 id 라서, 상세에서 그 대화로 건너갈 수 있는 유일한 좌표다.
+  // The orchestration this run belongs to — a scorecard's case, a conversation's turn, an ordinary child (the generalization of parentScorecardId).
+  // On an agent turn the group.id IS the conversation id, which makes it the only coordinate from which the detail can jump to that conversation.
   group: z.object({ id: z.string(), role: z.enum(['case', 'turn', 'child']) }).optional(),
-  // 구조화된 WHY(자유문자 trigger 의 후계). causedByRunId 가 핵심이다 — run 이 run 을 낳은 간선이라
-  // "이 실행은 누가 시켰나"가 상세에서 처음으로 클릭 가능한 사실이 된다(수요 그래프 = 감사 추적).
+  // The structured WHY (the successor to the free-text `trigger`). causedByRunId is the heart of it — the edge where a run BORE a run,
+  // which makes "who asked for this execution" a clickable fact on the detail for the first time (a demand graph = an audit trail).
   origin: z
     .object({
       cause: z.enum(['member', 'schedule', 'event', 'run', 'ci', 'api']),
@@ -185,10 +185,10 @@ export const runSchema = z.object({
       causedByRunId: z.string().optional(),
     })
     .optional(),
-  // 살아 있는 동안 이 run 이 여는 채널. 라이브 패널을 이걸로 건다 — 선언 안 한 채널의 패널을 띄우면
-  // (에이전트 턴의 터미널처럼) 영원히 "컨테이너 없음"만 답하는 죽은 UI가 된다.
+  // The channels this run opens while it is alive. The live panels hang off this — putting up a panel for an undeclared channel
+  // (a terminal on an agent turn, say) is dead UI that answers "no container" forever.
   attach: z.array(z.enum(['logs', 'exec', 'terminal', 'screen', 'cdp', 'tasks'])).optional(),
-  // 위임받은 예산(§5.2) — 캡이 있으면 경제 카드가 "얼마 중 얼마"를 말할 수 있다.
+  // The delegated budget (§5.2) — with a cap, the economics card can say "how much OF how much".
   envelope: z
     .object({
       id: z.string(),
@@ -254,10 +254,10 @@ export const runsSchema = z.array(runSchema)
 export const runListItemSchema = runSchema.extend({ canonical: z.boolean().optional() })
 export const runListSchema = z.array(runListItemSchema)
 
-// 제출된 케이스 본문에서 "무엇을 시켰나"만 뽑아 읽는 좁은 렌즈 — 상세가 요청 프롬프트를 보여주기 위한 것이다
-// (특히 플레이그라운드 케이스: 무슨 과제를 던졌는지가 화면 어디에도 없었다). runSchema 에 넣지 않는 이유는
-// 드리프트 가드다: 와이어의 caseSpec 은 환경·그레이더까지 갖춘 EvalCase 라, 부분만 모델링하면 "웹 ⊆ 와이어"가
-// 깨진다(가드를 느슨하게 만드는 것보다 렌즈를 따로 두는 쪽이 옳다). 같은 응답 바이트를 두 번 읽을 뿐이다.
+// A narrow lens that reads only "what was it asked to do" out of the submitted case body — so the detail can show the request prompt
+// (especially for a playground case: what task was thrown at it appeared nowhere on screen). It is kept out of runSchema as a DRIFT GUARD:
+// the wire's caseSpec is a full EvalCase with environment and graders, so modelling only part of it breaks "web ⊆ wire" (a separate lens is
+// the right answer rather than loosening the guard). It only reads the same response bytes twice.
 export const runCaseSpecSchema = z.object({
   caseSpec: z
     .object({

@@ -32,16 +32,16 @@ export interface IssueBoardColumn {
   key: string | null
   count: number
   items: IssueSummary[]
-  // 컬럼이 자기 몫보다 적게 들고 있을 때 — 보드는 훑는 화면이라 그룹 안 페이지네이션 대신 사실을 말한다.
+  // When a column holds fewer than its share — a board is a screen you SWEEP, so instead of paginating inside a group it states the fact.
   truncated: boolean
 }
 
-// 보드 — 컬럼이 곧 그룹이고, 카드를 끌어다 놓는 것이 그 축의 값을 바꾸는 것이다. 상태 축에서 완료 컬럼에
-// 떨어뜨리면 해결 다이얼로그가 뜬다: 이슈를 닫는다는 건 "무엇이 그것을 증명했나"를 남기는 일이라, 드래그
-// 한 번으로 그 기록을 건너뛰게 할 수 없다(목록의 상태 컨트롤과 정확히 같은 규칙).
+// The board — a column IS a group, and dragging a card changes that axis' value. Dropping onto the done column on the status axis raises the
+// resolution dialog: closing an issue means recording "what proved it", so one drag cannot be allowed to skip that record
+// (exactly the same rule as the list's status control).
 //
-// 사이클 축만 드래그가 없다: 이슈를 이터레이션에 넣고 빼는 표면이 제어 평면에 아직 없다. 끌리는 것처럼
-// 보였다가 아무 일도 일어나지 않는 것보다, 처음부터 안 끌리는 편이 정직하다.
+// Only the cycle axis has no dragging: the control plane has no surface yet for adding an issue to and removing it from an iteration. Not
+// being draggable from the start is more honest than looking draggable and then doing nothing.
 export function IssueBoard({
   workspace,
   groupBy,
@@ -59,7 +59,7 @@ export function IssueBoard({
   const refresh = useRefresh()
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
-  // 완료 컬럼에 떨어진 카드 — 해결 정보를 받은 뒤에야 실제로 옮긴다.
+  // A card dropped on the done column — it is only actually moved once the resolution details have been given.
   const [resolving, setResolving] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
@@ -91,7 +91,7 @@ export function IssueBoard({
     setDragging(null)
     setOver(null)
     if (id === null || !draggable) return
-    // 완료는 해결을 남긴다 — 어느 스코어카드가 증명했는지 없이 닫히는 이슈가 트래커의 요점을 지운다.
+    // Done leaves a RESOLUTION — an issue closing with no record of which scorecard proved it erases the point of the tracker.
     if (groupBy === 'status' && key === 'done') {
       setResolving(id)
       return
@@ -109,7 +109,7 @@ export function IssueBoard({
               key={columnId}
               onDragOver={(e) => {
                 if (!draggable || dragging === null) return
-                e.preventDefault() // 기본값은 "여기 못 놓음"이다 — 막아야 드롭이 열린다
+                e.preventDefault() // the default is "cannot drop here" — preventing it is what opens the drop
                 setOver(columnId)
               }}
               onDragLeave={() => setOver((prev) => (prev === columnId ? null : prev))}
@@ -176,7 +176,7 @@ export function IssueBoard({
                   {t('boardColumnEmpty')}
                 </p>
               )}
-              {/* 조용히 자르지 않는다 — 컬럼이 몇 개를 안 그리고 있는지 말하고, 전부는 목록에서 본다. */}
+              {/* Nothing is truncated silently — the column says how many it is not drawing, and everything is seen in the list. */}
               {column.truncated && (
                 <p className="px-1 text-[11.5px] text-muted-foreground">
                   {t('boardColumnMore', { count: Math.max(column.count - column.items.length, 0) })}
@@ -202,8 +202,8 @@ export function IssueBoard({
   )
 }
 
-// 어느 축의 보드냐가 곧 어떤 변경이냐다. 상태만 워크플로 전이(`setIssueStatus`)이고 나머지는 내용 편집 —
-// 제어 평면이 그렇게 나뉘어 있고, 여기서 합치면 이력에 "상태가 바뀌었다"는 잘못된 줄이 남는다.
+// Which axis the board is on IS which kind of change it makes. Only status is a workflow transition (`setIssueStatus`); the rest are content
+// edits — the control plane is split that way, and merging them here would leave a false "the status changed" line in the history.
 async function applyGroupMove(
   groupBy: IssueGroupBy,
   id: string,

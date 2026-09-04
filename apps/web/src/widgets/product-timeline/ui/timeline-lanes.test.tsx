@@ -57,7 +57,7 @@ describe('TimelineLanes today marker', () => {
   it('stands the today line even when the window ends today (nothing planned)', () => {
     const html = render(timelineWith({}))
     expect(html).toContain(`>${en.productPage.today}<`)
-    // 선 자체 — 미래 밴드 없이도 서 있어야 한다.
+    // The line itself — it has to stand even with no future band.
     expect(html).toContain('bg-primary/40')
     expect(html).not.toContain('bg-muted/50')
   })
@@ -103,7 +103,7 @@ describe('TimelineLanes capability lanes', () => {
     )
     expect(html).toContain(`>${en.productPage.laneCapability.harness}<`)
     expect(html).toContain(`>${en.productPage.laneCapability.dataset}<`)
-    // 저지 사건이 없으면 저지 레인도 없다 — 빈 레인은 정보가 아니다.
+    // With no judge events there is no judge lane — an empty lane is not information.
     expect(html).not.toContain(`>${en.productPage.laneCapability.judge}<`)
     expect(html).toContain('copilot@2.0.0')
     expect(html).toContain('href="/acme/harness/copilot"')
@@ -123,8 +123,8 @@ describe('TimelineLanes issue track packing', () => {
   })
 
   it('spreads three overlapping lifespans onto three distinct tracks', () => {
-    // 예전의 index 홀짝 배정은 첫째와 셋째를 같은 트랙에 눕혀 정확히 겹치게 했다 — 겹침이 실제로 있는
-    // 만큼만 트랙이 생겨야 한다.
+    // The old odd/even-by-index assignment laid the first and third on the same track, exactly overlapping — only as many tracks as there is
+    // real overlap should be created.
     const html = render(
       timelineWith({
         issues: [

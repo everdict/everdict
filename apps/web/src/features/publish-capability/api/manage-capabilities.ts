@@ -13,7 +13,7 @@ import {
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// capability 목록을 렌더하는 모든 표면 — 스토어(카탈로그·내 발행)와 설정의 관리 페이지들(도구/환경/내 도구·스킬).
+// Every surface that renders a capability list — the store (the catalog and my publications) and the settings management pages (tools/environments/my tools and skills).
 function revalidateCapabilityPages(): void {
   for (const path of [
     '/[workspace]/store',
@@ -39,8 +39,8 @@ export interface SaveCapabilityActionResult {
   error?: string
 }
 
-// capability 발행/편집(PUT /capabilities/:id) — 버전 없는 upsert(새 id→1.0.0, 콘텐츠 변경→패치 범프). owner-or-admin,
-// public 발행은 admin(컨트롤플레인 강제). visibility/sharedWith 는 생성 시에만, 편집은 현재 reach 상속.
+// Publishing or editing a capability (PUT /capabilities/:id) — a versionless upsert (a new id → 1.0.0, changed content → a patch bump). Owner-or-admin;
+// publishing public is admin (enforced by the control plane). visibility/sharedWith are set at CREATION only; an edit inherits the current reach.
 export async function saveCapabilityAction(
   id: string,
   body: SaveCapabilityInput
@@ -63,7 +63,7 @@ export interface CapabilityActionResult {
   error?: string
 }
 
-// capability 공개범위 변경(PATCH /capabilities/:id/visibility) — 전 라이브 버전 관통. owner-or-admin, public 은 admin.
+// Changing a capability's visibility (PATCH /capabilities/:id/visibility) — it cuts through every live version. Owner-or-admin, and public is admin.
 export async function setCapabilityVisibilityAction(
   id: string,
   body: { visibility: CapabilityVisibility; sharedWith: string[] }
@@ -80,7 +80,7 @@ export async function setCapabilityVisibilityAction(
   }
 }
 
-// capability 버전 삭제(DELETE /capabilities/:id/versions/:version) — 버전의 작성자-or-admin(컨트롤플레인).
+// Deleting a capability version (DELETE /capabilities/:id/versions/:version) — the version's author-or-admin (the control plane).
 export async function deleteCapabilityVersionAction(
   id: string,
   version: string

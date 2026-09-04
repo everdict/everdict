@@ -335,7 +335,7 @@ export function computeAnalysis(
   scorecards: ScorecardRecord[],
   config: AnalysisConfig,
   resolveOwner: (s: string) => string = (s) => s,
-  allLabel: string = '전체' // single-series label when there is no series dimension (the caller injects t('all'))
+  allLabel: string = 'All' // single-series label when there is no series dimension (the caller injects t('all'))
 ): AnalysisResult {
   const filtered = scorecards.filter((sc) => passesFilters(sc, config, resolveOwner))
   const metric = config.metric

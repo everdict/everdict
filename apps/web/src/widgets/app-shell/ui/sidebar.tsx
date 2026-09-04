@@ -43,9 +43,9 @@ const rowClass =
 const iconClass =
   'size-[17px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'
 
-// 사이드바의 링크도 `shared/ui/link` 를 쓴다 — 즉 prefetch 가 꺼져 있다. 여기가 가장 크게 체감되는
-// 자리였다: 항상 떠 있는 18줄이 라우터 캐시가 무효화될 때마다 한꺼번에 다시 prefetch 되면서, 진행 중인
-// 변이의 트랜지션을 그 큐 뒤로 밀어냈다. 이유와 실측은 `shared/ui/link` 주석에 있다.
+// The sidebar's links use `shared/ui/link` too — which means prefetch is OFF. This was where it was felt most: eighteen rows that are always
+// on screen re-prefetching all at once whenever the router cache was invalidated, pushing the in-flight mutation's transition behind that
+// queue. The reasons and the measurements are in the `shared/ui/link` comment.
 //
 // Active nav-row markup (shared by the app nav + the settings nav): indigo active bar + accent fill.
 function navRowClass(active: boolean) {
@@ -57,12 +57,12 @@ function navRowClass(active: boolean) {
   )
 }
 
-// 접이식 **항목**(Workspace › More)의 열림 상태 저장소 키. next-themes 없이 localStorage 를 쓰는 테마 토글과
-// 같은 방식 — 의존성 추가 없이 사용자가 한 번 펼친 것은 다음 방문에도 펼쳐진 채로 남는다.
+// The storage key for the open state of the collapsible **item** (Workspace › More). The same approach as the theme toggle, which uses
+// localStorage without next-themes — with no added dependency, what a user expanded once stays expanded on the next visit.
 const NAV_GROUP_STORAGE_PREFIX = 'everdict-nav-group:'
 
-// 저장소 키이자 상태 키 — 쓰는 쪽과 복원하는 쪽이 같은 문자열을 만들게 한다(예전에는 `item:` 키를 쓰기만 하고
-// 복원할 때는 섹션 키만 읽어서, 사용자가 펼친 그룹이 새로고침마다 도로 접혔다).
+// Both the storage key and the state key — so the writing side and the restoring side build the SAME string (this used to write an `item:` key
+// and read only the section key when restoring, so a group the user expanded collapsed again on every refresh).
 function navItemGroupKey(labelKey: string): string {
   return `item:${labelKey}`
 }
@@ -72,10 +72,10 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
   const t = useTranslations('nav')
   // Eval nav + the pinned Resources group (guide + agent-connect entry points) render as one sectioned list.
   const sections = [...NAV_SECTIONS, RESOURCES_SECTION]
-  // 사용자가 직접 토글한 항목만 기록한다(미기록 = 기본 접힘 + 활성 경로 자동 펼침).
+  // Only items the user toggled themselves are recorded (unrecorded = collapsed by default plus auto-expansion on the active path).
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
-  // localStorage 는 렌더 중에 읽으면 하이드레이션이 어긋나므로 마운트 후에 반영한다. 첫 페인트는 기본값(접힘)이라
-  // 어차피 우리가 원하는 초기 상태다.
+  // Reading localStorage during render breaks hydration, so it is applied after mount. The first paint uses the default (collapsed), which is
+  // the initial state we want anyway.
   useEffect(() => {
     const restored: Record<string, boolean> = {}
     for (const item of NAV_SECTIONS.flatMap((section) => section.items)) {
@@ -102,7 +102,7 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
         return (
           <Fragment key={key}>
             <div className="flex flex-col gap-0.5">
-              {/* 섹션 헤딩은 라벨이지 버튼이 아니다 — 축을 통째로 감추는 접기는 두지 않는다(nav-config 참고). */}
+              {/* A section heading is a label rather than a button — there is no collapse that hides a whole axis (see nav-config). */}
               {(section.headingKey || section.heading) && (
                 <p className="px-2 pb-1 text-[11px] font-[510] tracking-wide text-faint">
                   {section.headingKey ? t(section.headingKey) : section.heading}
@@ -112,8 +112,8 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
                 const href = `/${workspace}${item.href}` // suffix → prefixed with the active workspace
                 const active = isActiveItem(item.href, item.exact)
                 const Icon = item.icon
-                // children 을 가진 항목(Workspace › More)은 링크가 아니라 그 자리에서 펼쳐지는 버튼이다 —
-                // 별도 섹션으로 빼면 Workspace 그룹 밖으로 나가버린다.
+                // An item with children (Workspace › More) is a button that expands IN PLACE rather than a link —
+                // split out as its own section it would leave the Workspace group.
                 if (item.children) {
                   const itemKey = navItemGroupKey(item.labelKey)
                   const holdsActiveChild = item.children.some((c) => isActiveItem(c.href, c.exact))
@@ -166,9 +166,9 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
                     href={href}
                     onClick={onNavigate}
                     aria-current={active ? 'page' : undefined}
-                    // data-tour: 온보딩 투어의 스포트라이트 앵커(nav-agents 등). 접이식 항목(Workspace › More) 안의
-                    // 앵커는 투어가 해당 라우트로 먼저 이동하면서(step.href) 자동 펼침이 걸려 살아난다 — 앵커를 못
-                    // 찾아도 투어는 카드만 중앙에 띄우고 계속된다.
+                    // data-tour: the onboarding tour's spotlight anchor (nav-agents, etc.). An anchor inside a collapsible item (Workspace › More)
+                    // survives because the tour navigates to that route first (step.href), which triggers the auto-expansion — and even with the
+                    // anchor not found the tour continues with the card centred.
                     data-tour={`nav-${item.labelKey}`}
                     className={navRowClass(active)}
                   >

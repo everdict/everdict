@@ -24,9 +24,9 @@ import { z } from 'zod'
 
 import { trackerHistoryEntrySchema } from '@/entities/issue'
 
-// 프로덕트 타임라인(docs/architecture/product-timeline.md) — "무엇을 배포하는가"의 축. 프로덕트는 실제 제품을
-// 구성하는 서비스들(GitHub 릴리즈/태그가 버전 원장으로 들어온다)과, 제품의 품질을 판정하는 워치 시리즈
-// (데이터셋×하네스×저지)를 선언한다. 릴리즈는 그 축 위의 게이트 달린 체크포인트다.
+// The product timeline (docs/architecture/product-timeline.md) — the "what do we ship" axis. A product declares
+// the services its real composition is made of (GitHub releases/tags arrive as a version ledger) and the watch
+// series that judge its quality (dataset × harness × judges). A release is a gated checkpoint on that axis.
 // Runtime boundary validation stays here (zod v4); the EXPORTED types come from @everdict/contracts.
 
 const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -39,32 +39,32 @@ export const productServiceSyncSchema = z.object({
   lastError: z.object({ at: z.string(), message: z.string() }).optional(),
 })
 
-// 추적 서비스 하나 — 이름이 타임라인의 키다(레포/소스/프리픽스가 바뀌면 워터마크가 리셋되고 새 트랙이 된다).
+// One tracked service — its NAME is the timeline's key (change the repo/source/prefix and the watermark resets into a new track).
 export const productServiceSchema = z.object({
   name: z.string(),
   host: z.string().optional(),
   repository: z.string(),
   source: productServiceSourceSchema,
   tagPrefix: z.string().optional(),
-  // 레포 안에서 이 서비스가 사는 경로(모노레포) — 스트림 정체성이 아니라 구성 정보다.
+  // Where this service lives inside the repo (a monorepo) — configuration, not stream identity.
   path: z.string().optional(),
   sync: productServiceSyncSchema.optional(),
 })
 
 const seriesCapabilityRefSchema = z.object({
   id: z.string(),
-  // 없음 = 실행 시점의 latest — 상시 시리즈의 의미 그대로(CI 재핀이 새 인스턴스 버전을 찍으면 그걸 평가한다).
+  // Absent = latest at run time — exactly what a standing series means (a CI re-pin mints a new instance version and that is what gets evaluated).
   version: z.string().optional(),
 })
 
-// 워치 시리즈 하나 — key 가 추이의 영속 정체성이다(라벨을 바꿔도 이력은 그대로 이어진다).
+// One watch series — `key` is the trend's durable identity (rename the label and the history still follows).
 export const productSeriesSchema = z.object({
   key: z.string(),
   label: z.string(),
   dataset: seriesCapabilityRefSchema,
   harness: seriesCapabilityRefSchema,
   judges: z.array(seriesCapabilityRefSchema).default([]),
-  // 릴리즈 게이트 대상 여부 — 부재 = true(fail-closed). 게이트 제외는 명시적 제품 정책이지 근거 부재의 추론이 아니다.
+  // Whether the release gate reads it — absent = true (fail-closed). Exemption is an explicit product policy, never an inference from missing evidence.
   requiredForRelease: z.boolean().optional(),
 })
 
@@ -76,8 +76,8 @@ export const productAutoEvalSchema = z.object({
 export const productSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // URL 이 실어 나르는 주소 — 이름에서 생성되고 이후 불변(mig 0169). 컬럼이 생기기 전에 쓰인 행은 없을
-  // 수 있고, 그때는 id 로 주소된다(`productRef`).
+  // The address the URL carries — derived from the name and immutable afterwards (mig 0169). Rows written before
+  // the column existed may have none, and are addressed by id instead (`productRef`).
   slug: z.string().optional(),
   name: z.string(),
   description: z.string().optional(),
@@ -95,13 +95,13 @@ export const productsSchema = z.array(productSchema)
 export const RELEASE_STATUSES = ['planned', 'released', 'cancelled'] as const
 export const releaseStatusSchema = z.enum(RELEASE_STATUSES)
 
-// 이 릴리즈가 내보내는 구성 한 줄 — 서비스 하나와 그 버전. version 없음 = "아직 안 정해짐"(계획 단계의
-// 진짜 상태다. 원장 최신값으로 채워 버리면 아무도 고르지 않은 버전이 계획에 박힌다).
+// One line of the composition this release ships — a service and its version. No version = "not decided yet", which
+// is the real state of a plan (filling it from the ledger's latest pins a version nobody chose into the plan).
 export const releaseComponentSchema = z.object({
   service: z.string(),
   version: z.string().optional(),
-  // 피커가 고른 원장 행 그 자체 — 같은 이름의 서비스가 저장소를 옮기면 스트림이 갈라지고, 두 스트림이
-  // 같은 v1.0.0 을 발행할 수 있다. 버전 문자열만 보내면 출시 시점에 어느 행이었는지 아무도 답할 수 없다.
+  // The exact ledger row the picker chose — a service of the same name that moves repository forks the stream, and two
+  // streams can both publish a v1.0.0. Send only the version string and nobody can answer which row shipped.
   versionRecordId: z.string().optional(),
 })
 
@@ -114,9 +114,9 @@ export const releaseSchema = z.object({
   status: releaseStatusSchema,
   targetDate: calendarDateSchema.optional(),
   releasedAt: z.string().optional(),
-  // 이 릴리즈가 판정받는 시리즈 선택. 없음 = 프로덕트의 모든 시리즈.
+  // Which series judge this release. Absent = every series the product declares.
   seriesKeys: z.array(z.string()).optional(),
-  // 어떤 서비스 버전들이 함께 나가는가. 없음 = 구성을 선언한 적 없음(빈 배열 = 추적 서비스가 하나도 안 나감).
+  // Which service versions go out together. Absent = no composition was ever declared (an empty array = no tracked service ships).
   components: z.array(releaseComponentSchema).optional(),
   history: z.array(trackerHistoryEntrySchema).default([]),
   createdBy: z.string(),
@@ -127,7 +127,7 @@ export const releaseSchema = z.object({
 export const PRODUCT_VERSION_KINDS = ['release', 'tag'] as const
 export const productVersionKindSchema = z.enum(PRODUCT_VERSION_KINDS)
 
-// 임포트된 버전 원장 한 행 — publishedAt 은 원격(GitHub)의 시계다.
+// One imported version-ledger row — `publishedAt` is the REMOTE's clock (GitHub's).
 export const productVersionSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -148,8 +148,8 @@ export const productDetailSchema = productSchema.extend({
   versions: z.array(productVersionSchema),
 })
 
-// 릴리즈 준비도 — 시리즈별 판정은 스코어카드 게이트의 어휘 그대로(제품 레이어는 진실을 재발명하지 않는다).
-// not_evaluated 는 필수 시리즈에서 절대 green 이 아니다: 평가 없음은 통과가 아니라 차단이다.
+// Release readiness — the per-series verdict is the scorecard gate's own vocabulary (the product layer does not reinvent truth).
+// `not_evaluated` is never green on a required series: no evaluation is a block, not a pass.
 export const seriesVerdictSchema = z.enum([
   'pass',
   'no_baseline',
@@ -157,17 +157,17 @@ export const seriesVerdictSchema = z.enum([
   'blocked_missing',
   'not_comparable',
   'not_evaluated',
-  // 첫 출하: 증거는 있지만 비교할 기준이 없다. "비교 불가"와 "출하해도 된다"는 다른 문장이라
-  // 기본은 차단이고, 시리즈 정책 allowNoBaseline 이 명시 승인이다(arch-review 8 P1).
+  // First ship: there is evidence and nothing to compare it against. "Cannot compare" and "safe to ship" are different
+  // sentences, so the default is a block and the series policy `allowNoBaseline` is the explicit approval (arch-review 8 P1).
   'bootstrap_required',
-  // 이 릴리즈가 판정 기준으로 약속한 시리즈를 제품이 더는 선언하지 않는다(arch-review 12 P0).
-  // 측정 결과가 아니라 게이트 자체가 사라진 상태라, 통과가 아니라 항상 차단이다.
+  // The product no longer declares the series this release promised to be judged by (arch-review 12 P0).
+  // Not a measurement — the GATE itself is gone, so it always blocks rather than passes.
   'scope_invalid',
-  // 증거는 있지만 지금 시리즈가 선언한 평가 계약(데이터셋/하네스/저지)과 다른 계약에서 나왔다(arch-review 13 P0).
-  // 질문이 바뀌었으므로 다른 질문에 대한 답이고, 한 번도 평가하지 않은 것과 똑같이 차단한다.
+  // There is evidence, and it came from a different evaluation contract than the one this series now declares (dataset/harness/judges, arch-review 13 P0).
+  // The question changed, so it is an answer to a different question, and it blocks exactly as never having evaluated does.
   'contract_stale',
-  // 지금 시리즈가 무엇을 묻는지 자체를 해석할 수 없다 — 데이터셋 삭제, 레지스트리 장애(arch-review 14 P0).
-  // "확인할 수 없었다"는 "괜찮다"의 동의어였던 적이 없으므로 필수 시리즈에서는 차단한다.
+  // What this series even ASKS cannot be resolved — a deleted dataset, a registry outage (arch-review 14 P0).
+  // "We could not find out" has never been a synonym for "it is fine", so a required series blocks.
   'contract_unverifiable',
 ])
 export const releaseSeriesStateSchema = z.object({
@@ -178,7 +178,7 @@ export const releaseSeriesStateSchema = z.object({
       scorecardId: z.string(),
       passRate: z.number().optional(),
       createdAt: z.string(),
-      // 어느 판정인가 — 스코어카드 id 는 re-score 가 가능해진 순간부터 증거 참조가 아니다.
+      // WHICH verdict — a scorecard id stopped being an evidence reference the moment a re-score became possible.
       scoring: z.object({ revision: z.number(), scorePlaneDigest: z.string() }).optional(),
       serviceVersion: z.string().optional(),
     })
@@ -188,15 +188,15 @@ export const releaseSeriesStateSchema = z.object({
       scorecardId: z.string(),
       passRate: z.number().optional(),
       createdAt: z.string(),
-      // 어느 판정인가 — 스코어카드 id 는 re-score 가 가능해진 순간부터 증거 참조가 아니다.
+      // WHICH verdict — a scorecard id stopped being an evidence reference the moment a re-score became possible.
       scoring: z.object({ revision: z.number(), scorePlaneDigest: z.string() }).optional(),
     })
     .optional(),
   verdict: seriesVerdictSchema,
-  // 이 시리즈가 결정 시점에 게이트였는가 — 제품 정책은 편집 가능하므로 결정 이후 재조회로는 답할 수 없다.
+  // Was this series a gate AT DECISION TIME — product policy is editable, so a re-read after the decision cannot answer it.
   required: z.boolean().optional(),
   reasons: z.array(z.string()).optional(),
-  // 이 시리즈가 출하를 차단하는가 — required && verdict ∉ {pass, no_baseline}
+  // Does this series block the ship — required && verdict ∉ {pass, no_baseline}
   regressed: z.boolean(),
 })
 
@@ -211,7 +211,7 @@ export const releaseDetailSchema = releaseSchema.extend({
   readiness: releaseReadinessSchema,
 })
 
-// GET /products/:id/timeline — 서버가 스토어를 합성해 주는 한 번의 read. 웹은 그리기만 한다.
+// GET /products/:id/timeline — one read the server composes out of the stores. The web only draws it.
 export const productSeriesPointSchema = z.object({
   scorecardId: z.string(),
   status: z.string(),
@@ -221,9 +221,9 @@ export const productSeriesPointSchema = z.object({
   releaseId: z.string().optional(),
 })
 
-// 워치 시리즈가 선언한 능력(하네스·데이터셋·저지)의 버전 등록 사건 — 서비스가 움직이는 동안 평가 계약이
-// 무엇을 했는가. seriesKeys 는 이 능력을 지켜보는 시리즈들(시리즈가 여럿인 제품에서 "누구의 계약이
-// 움직였나"의 답).
+// Version-registration events for the capabilities a watch series declares (harness · dataset · judges) — what the
+// evaluation contract did while the service moved. `seriesKeys` are the series watching this capability (on a product
+// with several series, the answer to "whose contract moved").
 export const productTimelineCapabilitySchema = z.object({
   kind: z.enum(['harness', 'dataset', 'judge']),
   id: z.string(),
@@ -233,9 +233,9 @@ export const productTimelineCapabilitySchema = z.object({
 })
 
 export const productTimelineSchema = z.object({
-  // `to` 는 "지금"이 아니라 프로덕트가 약속한 가장 먼 목표일까지다 — 계획된 릴리즈를 축 위에 놓으려면
-  // 창이 미래를 덮어야 한다. `now` 는 그래서 창의 일부다: 일어난 구간과 예정 구간의 경계이고,
-  // 끝나지 않은 스팬(미해결 이슈)이 멈추는 지점이다.
+  // `to` is not "now" but the furthest goal date the product promised — putting a PLANNED release on the axis needs
+  // the window to cover the future. `now` is therefore part of the window: the boundary between what happened and
+  // what is scheduled, and where an unfinished span (an open issue) stops.
   window: z.object({ from: z.string(), to: z.string(), now: z.string() }),
   releases: z.array(releaseSchema),
   versions: z.array(productVersionSchema),
@@ -252,8 +252,8 @@ export const productTimelineSchema = z.object({
       identifier: z.string(),
       title: z.string(),
       status: z.string(),
-      // 이 이슈가 타임라인에 올라온 경로 — 명시 링크(product/release)인지, 이 프로덕트의 평가 증거를
-      // 인용/근거로 삼은 것(evidence)인지. 둘은 서로 다른 주장이라 레인도 다르게 그린다.
+      // How this issue reached the timeline — an explicit link (product/release), or citing this product's evaluation
+      // evidence as its grounds (evidence). Two different claims, so they are drawn in different lanes.
       via: z.enum(['product', 'release', 'evidence']),
       createdAt: z.string(),
       resolvedAt: z.string().optional(),
@@ -261,12 +261,12 @@ export const productTimelineSchema = z.object({
       releaseId: z.string().optional(),
     })
   ),
-  // 경계 default — 이 필드가 생기기 전의 컨트롤 플레인과 웹이 한 배포 주기 어긋나도 타임라인 전체가
-  // 죽지 않는다(능력 레인만 비는 정직한 강등).
+  // A boundary default — the whole timeline does not die when the control plane and the web are one deploy apart
+  // on this field (an honest degradation where only the capability lane is empty).
   capabilities: z.array(productTimelineCapabilitySchema).default([]),
 })
 
-// GET /products/repo-options — GitHub App 설치 레포(= 싱크가 토큰을 받을 수 있는 집합).
+// GET /products/repo-options — the GitHub App's installed repos (= the set a sync can get a token for).
 export const repoOptionsSchema = z.array(
   z.object({
     fullName: z.string(),
@@ -275,9 +275,9 @@ export const repoOptionsSchema = z.array(
   })
 )
 
-// POST /products/discover — 레포가 스스로 말하는 구성. 위자드는 이 응답만으로 서비스 행을 "고르게" 한다
-// (프리픽스를 손으로 치면 오타가 조용히 0건 임포트로 끝난다). versions 는 클라이언트가 프리픽스를 바꿀 때
-// 다시 세는 표본이라, 프리뷰가 GitHub 왕복을 더 만들지 않는다.
+// POST /products/discover — the composition a repo states about itself. The wizard makes the user PICK service rows
+// out of this response alone (typing a prefix by hand ends in a silent zero-row import). `versions` is the sample the
+// client re-counts when the prefix changes, so a preview costs no extra GitHub round trip.
 export const repoVersionSampleSchema = z.object({
   name: z.string(),
   kind: productVersionKindSchema,
@@ -297,7 +297,7 @@ export const productServiceSuggestionSchema = z.object({
   path: z.string().optional(),
   source: productServiceSourceSchema,
   tagPrefix: z.string().optional(),
-  // 실제 스트림이 뒷받침하는 제안만 기본 선택 — 나머지는 "배포 단위처럼 보이는 디렉터리"다.
+  // Only suggestions a real stream backs are selected by default — the rest are "directories that look like a deploy unit".
   recommended: z.boolean(),
   matched: z.number(),
   latestVersion: z.string().optional(),
@@ -312,7 +312,7 @@ export const productRepoDiscoverySchema = z.object({
   versions: z.array(repoVersionSampleSchema),
   packages: z.array(repoPackageSchema),
   suggestions: z.array(productServiceSuggestionSchema),
-  // false = 읽기가 천장에 닿았다 → 모든 카운트는 하한이다.
+  // false = the read hit its ceiling → every count is a lower bound.
   complete: z.boolean(),
 })
 
@@ -328,8 +328,8 @@ export const productSyncResultSchema = z.object({
   failedSeries: z.array(z.object({ key: z.string(), error: z.string() })).optional(),
 })
 
-// 시리즈 온디맨드 실행의 결과 — 제출된 배치와, 제출되지 못한 시리즈. 후자를 삼키면 "물어봤는데 아무 답도
-// 없었다"로 읽힌다.
+// The result of an on-demand series run — the batches submitted, and the series that could NOT be. Swallowing the
+// latter reads as "we asked and got no answer at all".
 export const productSeriesRunResultSchema = z.object({
   triggered: z.array(z.string()),
   failedSeries: z.array(z.object({ key: z.string(), error: z.string() })),

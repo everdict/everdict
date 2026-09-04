@@ -41,7 +41,7 @@ export function AppShell({
   fileExecution?: boolean // this deployment can run a workspace file (GET /me config) — gates the viewer's Run
   children: ReactNode
 }) {
-  // 대화 패널의 사용자 턴 아바타 — 사이드바 계정 표시와 같은 해석(프로필 이름 > 사용자명 > 이메일 > subject).
+  // The user turn's avatar in the conversation panel — the same resolution as the sidebar account display (profile name > username > email > subject).
   const chatUserName = profile?.name ?? profile?.username ?? email ?? subject
   return (
     <InfraPanelProvider workspace={workspace}>
@@ -77,7 +77,7 @@ export function AppShell({
       </div>
       <CommandPalette workspace={workspace} />
       <TopControls workspace={workspace} />
-      {/* 신규 유저 온보딩 투어 — 사이드바 크롬을 짚어가며 안내. AppShell 에 마운트되어 라우트 전환에도 상태 유지(비-embed 셸에서만). */}
+      {/* The onboarding tour for a new user — it guides by pointing at the sidebar chrome. Mounted on AppShell so its state survives route changes (in the non-embed shell only). */}
       <ProductTour workspace={workspace} />
     </InfraPanelProvider>
   )

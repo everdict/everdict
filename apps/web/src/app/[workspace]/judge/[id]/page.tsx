@@ -90,8 +90,8 @@ export default async function JudgeDetailPage({
     .then((r) => scorecardsSchema.parse(r))
     .then((list) => [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt)))
     .catch(() => [])
-  // 이 저지를 지켜보는 이슈들 + 태어난 자리 — 상세가 "왜 이게 있나"를 답하는 근거. 보조 정보라
-  // 실패해도 상세는 그대로 그린다.
+  // The issues watching this judge plus where it was born — the grounds on which the detail answers "why does this exist". Supporting
+  // information, so the detail still renders on failure.
   const linkedIssues = await loadLinkedIssues(ctx, 'judge', id)
   const origin = pickOrigin(summary.versionOrigins, latest, summary.versions)
   const members =
@@ -253,7 +253,7 @@ export default async function JudgeDetailPage({
         </div>
       </div>
 
-      {/* 리니지 — 이 저지가 어디서 태어났고 어떤 이슈들이 그것을 지켜보는지. 그릴 게 없으면 섹션이 없다. */}
+      {/* Lineage — where this judge was born and which issues watch it. With nothing to draw there is no section. */}
       <CapabilityLineage
         workspace={workspace}
         kind="judge"

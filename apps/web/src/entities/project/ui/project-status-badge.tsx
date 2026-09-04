@@ -14,7 +14,7 @@ import { Badge } from '@/shared/ui/badge'
 import type { ProjectStatus } from '../model/schema'
 
 const TONE: Record<ProjectStatus, 'neutral' | 'success' | 'info' | 'outline'> = {
-  // 백로그는 "아직 아무것도 아님", 멈춤은 "버린 건 아니지만 지금은 안 움직임" — 둘 다 진행 중처럼 보이면 안 된다.
+  // `backlog` is "not anything yet" and `paused` is "not abandoned but not moving right now" — neither may look like in-progress.
   backlog: 'neutral',
   planned: 'outline',
   paused: 'outline',

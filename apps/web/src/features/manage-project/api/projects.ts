@@ -11,9 +11,9 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // 409 while the project has open issues. `force` is the deliberate override (a release ships with known gaps)
 // and is recorded on the fact, so the history says the deadline was overridden rather than met.
 //
-// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
-// (무효화할 캐시가 없는데 Next 16 은 선언만으로 prefetch 캐시를 통째로 버려 화면의 모든 `<Link>` 가
-// 다시 prefetch 되고, 변이의 트랜지션이 그 큐에 묶인다). 근거는 `docs/web.md`.
+// ⚠️ Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here
+// (there is no cache to invalidate, and Next 16 throws the whole prefetch cache away on the DECLARATION alone, so every `<Link>` on screen
+// re-prefetches and the mutation's transition is bound behind that queue). The grounds are in `docs/web.md`.
 
 export interface ProjectActionResult {
   ok: boolean
@@ -51,7 +51,7 @@ export async function updateProjectAction(
   patch: {
     name?: string
     description?: string | null
-    // 목록은 통째로 대체된다 — 빈 배열이 "전부 떼기"를 표현하는 유일한 방법이다.
+    // The lists are replaced WHOLE — an empty array is the only way to express "detach them all".
     initiativeIds?: string[]
     targetDate?: string | null
   }
@@ -93,7 +93,7 @@ export async function setProjectStatusAction(
   }
 }
 
-// 업데이트 올리기 — 판정과 그 이유를 함께. 본문 없는 판정은 서버가 400 으로 거절한다.
+// Post an update — the verdict together with its reason. A verdict with no body is refused by the server with a 400.
 export async function postProjectUpdateAction(
   id: string,
   input: { health: TrackerHealth; body: string }
@@ -120,7 +120,7 @@ export async function addProjectMilestoneAction(
   }
 }
 
-// 체크포인트를 지우면 그걸 가리키던 이슈들이 같은 동작에서 떨어져 나온다(서버가 한다).
+// Deleting a checkpoint detaches the issues pointing at it in the same operation (the server does it).
 export async function removeProjectMilestoneAction(
   id: string,
   milestoneId: string

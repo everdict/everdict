@@ -35,8 +35,8 @@ export interface NavItem {
   icon: LucideIcon
   exact?: boolean
   keywords?: string // command palette fuzzy-match aid words (Korean/English side by side)
-  // 항목 자체가 펼쳐지는 경우(리니어의 Workspace › More). 섹션이 아니라 항목이 여는 이유는 이것이 워크스페이스
-  // 그룹의 일부이기 때문이다 — 별도 섹션으로 빼면 Workspace 밖으로 나가버린다.
+  // The case where the ITEM itself expands (Linear's Workspace › More). It is the item that opens rather than the section because this is
+  // part of the Workspace group — split out as its own section it would leave Workspace entirely.
   children?: NavItem[]
 }
 
@@ -46,10 +46,10 @@ export interface NavSection {
   items: NavItem[]
 }
 
-// 섹션에는 접기가 없다 — 헤딩은 라벨이지 버튼이 아니고, 그 아래 줄들은 항상 보인다(워크스페이스 그룹이 그렇듯).
-// 접히는 것은 섹션이 아니라 **항목**이다(Workspace › More, 팀 › 평가): 자주 가지 않는 목적지 몇 개를 한 줄
-// 뒤로 미루는 것과, 축 하나를 통째로 감추는 것은 다른 일이다. 에이전트는 매일 쓰는 축이라 접힌 채로 시작하던
-// 것을 되돌렸다 — 접힌 그룹은 "이 제품에 그런 게 있다"는 사실 자체를 화면에서 지운다.
+// A section does not collapse — a heading is a label rather than a button, and the rows beneath it are always visible (as the workspace group's are).
+// What collapses is an **item**, not a section (Workspace › More, Team › Evaluation): pushing a few rarely-visited destinations one row back
+// and hiding a whole AXIS are different things. Agents start expanded again, reverting the collapsed default — a collapsed group erases from
+// the screen the very fact that the product HAS such a thing.
 
 // Issues ARE a top-level entry. They were not, while a team minted the identifier and owned the list, and the
 // sidebar's "Your teams" group was where you found them; the workspace is the only boundary now, so there is
@@ -291,7 +291,7 @@ const CAMPAIGNS_ITEM: NavItem = {
 }
 
 export const ALL_NAV_ITEMS: NavItem[] = [
-  // children 까지 평탄화 — 펼치지 않아도 Cmd+K 로는 닿아야 한다.
+  // Flattened down to the children too — reachable through Cmd+K even while collapsed.
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
   WORKSPACE_ISSUES_ITEM,
   AGENTS_ITEM,

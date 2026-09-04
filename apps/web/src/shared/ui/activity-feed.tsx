@@ -5,13 +5,13 @@ import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 
-// Linear st. 활동 피드 — "누가 · 무엇을 했다 · 언제"를 한 줄로 읽히게 하는 공용 뼈대.
-// 이력을 보여주는 화면(이슈·프로젝트·이니셔티브의 History, 데이터셋의 Activity)은 전부 이 한 벌을 쓴다:
-// 화면마다 `event · name · date` 를 다시 조립하면 같은 사건이 화면마다 다르게 읽히기 때문이다.
-// 이 아톰은 훅을 쓰지 않는다(서버·클라이언트 양쪽에서 그대로 렌더된다) — 로케일/타임존은 호출부가 넘긴다.
+// A Linear-style activity feed — the shared skeleton that makes "who · did what · when" read as one line.
+// Every screen that shows history (the History of an issue, project or initiative; a dataset's Activity) uses this one set:
+// re-assembling `event · name · date` per screen makes the same event read differently on each of them.
+// This atom uses no hooks (it renders identically on the server and the client) — the locale and timezone are passed in by the caller.
 export type ActivityTone = 'neutral' | 'success' | 'danger' | 'warning' | 'info'
 
-// 노드 배지의 아이콘 색 — 사건의 성격(성공·경보·진행)을 한 눈에 구분하는 유일한 색 신호다.
+// The node badge's icon colour — the only colour signal, distinguishing an event's nature at a glance (success, alert, in progress).
 const TONE_TEXT: Record<ActivityTone, string> = {
   neutral: 'text-muted-foreground',
   success: 'text-[var(--color-success)]',
@@ -29,10 +29,10 @@ export function ActivityFeed({ children, className }: { children: ReactNode; cla
   return <ol className={cn('space-y-0', className)}>{children}</ol>
 }
 
-// 한 줄 = 노드(행위자 얼굴 + 사건 아이콘 배지) · 문장 · 값 칩 · 상대 시각.
-// 행위자를 아는 경우 얼굴이 노드가 되고 사건 아이콘은 오른쪽 아래 배지로 붙는다(사람의 행동).
-// 모르는 주체(GitHub 동기화·회귀 감시 같은 시스템)는 얼굴 대신 사건 아이콘 자체가 노드가 된다.
-// 노드 사이를 잇는 세로선은 두지 않는다 — 줄마다 얼굴이 서면 선까지 그리는 순간 장식이 내용을 이긴다.
+// One line = the node (the actor's face plus an event icon badge) · the sentence · value chips · a relative time.
+// When the actor is known the FACE is the node and the event icon attaches as a badge at its lower right (a person's action).
+// For an unknown subject (a system such as GitHub sync or regression watching) the event icon itself is the node instead of a face.
+// There is no vertical line connecting the nodes — with a face on every row, drawing the line too lets decoration beat content.
 export function ActivityRow({
   actor,
   icon: Icon,
@@ -89,12 +89,12 @@ export function ActivityRow({
   )
 }
 
-// 행위자 이름 — 문장의 주어. 이름만 진하게 두고 서술어는 muted 로 남겨 훑을 때 사람이 먼저 보인다.
+// The actor's name — the sentence's subject. Only the name is bold and the predicate stays muted, so the PERSON is seen first when sweeping.
 export function ActivityActorName({ name }: { name: string }) {
   return <span className="font-[560] text-foreground">{name}</span>
 }
 
-// 상대 시각(호버 시 절대 시각). 문장 끝에 붙어 줄바꿈을 자연스럽게 따라간다.
+// The relative time (absolute on hover). It attaches to the end of the sentence and wraps naturally with it.
 export function ActivityTime({
   at,
   locale,

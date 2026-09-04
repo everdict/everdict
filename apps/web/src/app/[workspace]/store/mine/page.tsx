@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
 import { CapabilityStore } from '@/features/publish-capability'
-// server-only 로더(controlPlane)라 클라이언트가 쓰는 배럴을 통하지 않고 직접 임포트한다(download-desktop/api 선례).
+// A server-only loader (controlPlane), so it is imported directly rather than through the barrel the client uses (following download-desktop/api).
 import { loadStoreContext } from '@/features/publish-capability/api/store-context'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
 import { can } from '@/shared/auth/can'
@@ -13,8 +13,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// My published — 내 워크스페이스가 발행한 capability(모든 공개범위). 여기서 발행·편집·공개범위 변경·삭제하고, 스토어(공개
-// 카탈로그)는 브라우즈 전용이다. 첫당사자(매니지드) 항목은 워크스페이스 소유가 아니라 목록에서 제외된다.
+// My published — the capabilities my workspace published (every visibility). Publishing, editing, changing visibility and deleting happen here, and
+// the store (the public catalog) is browse-only. First-party (managed) entries are not workspace-owned and are excluded from this list.
 export default async function MyPublishedPage({
   params,
 }: {
@@ -41,7 +41,7 @@ export default async function MyPublishedPage({
   let mine: Capability[] = []
   let error: string | undefined
   try {
-    // 내가 볼 수 있는 것 중 내 워크스페이스가 소유한 것만 — 남의 public/subset·첫당사자는 스토어에서 다룬다.
+    // Of what I can see, only what MY workspace owns — somebody else's public/subset and the first-party ones are handled in the store.
     mine = capabilitiesSchema
       .parse(await controlPlane.listCapabilities(ctx))
       .filter((c) => c.tenant === currentWorkspace)

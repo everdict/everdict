@@ -10,8 +10,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 프로덕트 편집 — 등록 폼의 재사용(초기값 프리필). 리스트는 결과 집합으로 치환되고, 소스 좌표가 같은
-// 서비스는 워터마크를 애그리게이트가 이어 준다.
+// Product editing — a reuse of the registration form (prefilled with initial values). Lists are REPLACED by the result set, and a service whose
+// source coordinates are unchanged has its watermark carried forward by the aggregate.
 export default async function EditProductPage({
   params,
 }: {

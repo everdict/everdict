@@ -37,7 +37,7 @@ export const SCORECARD_ORDERS = ['recent'] as const
 
 export const DEFAULT_SCORECARD_DISPLAY: ListDisplay = { grouping: 'day', order: 'recent' }
 
-// 상태 그룹의 순서 — 어휘 자체가 순서다.
+// The order of the status groups — the vocabulary itself IS the order.
 const STATUS_ORDER = ['running', 'queued', 'failed', 'succeeded', 'cancelled', 'superseded']
 
 // The bucket a row falls under, for a client arranging the page it holds under headers the SERVER counted.
@@ -62,7 +62,7 @@ export function scorecardGroupKeyOf(row: ScorecardRow, grouping: string): string
 }
 
 // How the server's group rows are stood up. A closed vocabulary IS its own order; a date reads newest-first
-// (어제가 지난달 아래에 서면 그건 목록이 아니다); everything else — people, teams, capabilities — has no
+// (yesterday standing below last month is not a list); everything else — people, teams, capabilities — has no
 // order of its own, so the biggest group leads. The unset bucket goes last wherever it came from.
 export function orderScorecardGroups<T extends { key: string | null; count: number }>(
   groups: readonly T[],

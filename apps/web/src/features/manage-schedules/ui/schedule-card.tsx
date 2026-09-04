@@ -16,7 +16,8 @@ import { Tooltip } from '@/shared/ui/tooltip'
 export type Author = { name: string; avatarUrl?: string }
 
 // Identity sentinel for when runtime is unset — used as search/filter identity, so the value is fixed. Display is localized by runtimeChipLabel.
-export const RUNTIME_DEFAULT = '기본 백엔드'
+// It is deliberately NOT a locale string: a sentinel that reads as one language's UI text is a value nobody can compare against in another.
+export const RUNTIME_DEFAULT = '__default_runtime__'
 
 export function runtimeLabelOf(s: Schedule): string {
   return s.runTemplate.runtime ?? RUNTIME_DEFAULT

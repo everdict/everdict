@@ -15,10 +15,10 @@ export function registerAgentRoutes(app: FastifyInstance, deps: ServerDeps): voi
       return reply.code(404).send({ code: "NOT_FOUND", message: "agent registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 "이 팀 것으로 만든다"이므로,
-    // 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
+    // The owning team of a new asset is decided FIRST and the gate is applied against that team — registering means "make this the team's",
+    // so registering under a team you do not belong to is the same grounds for refusal as editing another team's asset.
     try {
-      // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
+      // Resolving the team ref (an id or a key) happens here — a team that does not exist is a 404, and that answer has to leave from the same place as the gate.
       gate(principal, "agents:write");
     } catch (err) {
       return sendError(reply, err); // no permission 403 (gate before validation)

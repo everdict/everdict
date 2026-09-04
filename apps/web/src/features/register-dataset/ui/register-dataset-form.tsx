@@ -75,9 +75,9 @@ export function RegisterDatasetForm({
     }
   }
 
-  // 스토어의 환경 이미지를 케이스에 적용 — case.image 는 그 케이스가 도는 컨테이너라 보통 데이터셋 하나가 환경
-  // 하나를 쓴다. 그래서 캐럿 삽입(JSON 을 깨기 쉽다) 대신 파싱→모든 케이스에 image 세팅→재직렬화로 눈에 보이게
-  // 고친다. ref 는 스토어의 no-rewrite 불변대로 그대로 넣는다. 파싱 실패면 아무것도 건드리지 않고 사유만 띄운다.
+  // Applying a store environment image to the cases — case.image is the container that case runs in, so one dataset usually uses ONE environment.
+  // So rather than a caret insert (which breaks JSON easily), it parses → sets `image` on every case → re-serializes, making the change VISIBLE.
+  // The ref goes in verbatim, per the store's no-rewrite invariant. On a parse failure nothing is touched and only the reason is shown.
   function applyEnvironmentImage(image: string) {
     let parsed: unknown
     try {

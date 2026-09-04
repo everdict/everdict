@@ -212,7 +212,7 @@ describe("runSuite failure classification", () => {
       logTail: "panic: boom",
     });
     expect(result?.trace).toEqual([
-      // 인프라 플레인이 먼저 — the placement events as infra evidence, then the log tail, then the error.
+      // The INFRA plane first — the placement events as infra evidence, then the log tail, then the error.
       { t: 0, kind: "infra", scope: "placement", message: "Terminated: Exit Code: 1", unit: "a1", node: "n1" },
       { t: 1, kind: "log", stream: "stderr", text: "panic: boom" },
       { t: 2, kind: "error", message: "alloc failed" },

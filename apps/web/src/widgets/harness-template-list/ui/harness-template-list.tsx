@@ -7,8 +7,8 @@ import type { HarnessTemplate } from '@/entities/harness'
 import { Link } from '@/shared/ui/link'
 import { StatCard } from '@/shared/ui/stat-card'
 
-// 한 형상당 한 줄 — 무엇인지(kind·category·서비스 수) + 그 위에 올라탄 하네스들 + 하나 더 만들기.
-// 아무도 올라타지 않은 형상은 별도로 표시한다: 그게 이 화면이 존재하는 이유(하네스 목록에는 나타나지 않는다).
+// One row per shape — what it is (kind · category · service count) plus the harnesses sitting on it plus "make one more".
+// A shape nobody sits on is marked separately: that is why this screen exists (it does not appear on the harness list at all).
 export function HarnessTemplateList({
   workspace,
   templates,
@@ -104,7 +104,7 @@ export function HarnessTemplateList({
                   <span className="inline-flex flex-wrap items-center gap-1">
                     <Boxes className="size-3.5" />
                     {ids.length === 0 ? (
-                      // 아무도 올라타지 않은 형상 — 하네스 목록에는 아예 나오지 않으므로 여기서만 보인다.
+                      // A shape nobody sits on — it never appears on the harness list, so it is visible only here.
                       <span className="text-muted-foreground">{t('noHarness')}</span>
                     ) : (
                       ids.slice(0, 4).map((id) => (

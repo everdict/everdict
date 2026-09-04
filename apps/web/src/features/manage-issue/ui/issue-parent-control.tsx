@@ -18,19 +18,18 @@ export interface IssueParentOption {
   id: string
   identifier: string
   title: string
-  // 상태까지 들고 온다 — 이미 끝난 이슈 아래로 일을 넣는 것과 진행 중인 것 아래로 넣는 것은 다른 결정이다.
+  // The status comes along too — putting work under an issue that is already FINISHED and under one in progress are different decisions.
   status: IssueStatus
 }
 
-// 고를 것이 이만큼 넘어가면 검색 줄을 낸다 — 프로젝트 선택기와 같은 문턱값.
+// Past this many choices a search line appears — the same threshold as the project picker.
 const SEARCH_FROM = 7
 
-// 이 이슈가 쪼개져 나온 상위 이슈 — 상태·프로젝트·사이클과 같은 자리(속성 열)에서 읽고 바꾼다.
+// The parent issue this one was split out of — read and changed right where status, project and cycle are (the attribute column).
 //
-// 예전에는 상위 이슈가 브레드크럼의 식별자 한 조각으로만 있었다. 그래서 하위 이슈를 열어도 "이게 무엇의
-// 하위인가"는 그 짧은 `ENG-11` 하나로 짐작해야 했고, 붙이거나 떼는 길은 화면 어디에도 없었다(에이전트만
-// 할 수 있었다). 속성 열은 이 이슈가 무엇에 속하는지를 모아 두는 자리이고, 상위 이슈는 그중에서도 가장
-// 먼저 읽혀야 하는 소속이다.
+// The parent used to exist only as a fragment of an identifier in the breadcrumb. So opening a sub-issue left "what is this a sub-issue OF"
+// to be guessed from that short `ENG-11`, and there was nowhere on screen to attach or detach one (only an agent could). The attribute column
+// is where what this issue BELONGS TO is collected, and the parent issue is the belonging that has to be read first of all.
 export function IssueParentControl({
   workspace,
   id,
@@ -41,8 +40,8 @@ export function IssueParentControl({
   workspace: string
   id: string
   parent: IssueParentOption | undefined
-  // 상위로 세울 수 있는 이슈들 — 같은 팀의 이슈를 화면이 걸러 온다. 자기 자신과 자기 하위 이슈는 빠져 있다
-  // (자기 자손을 부모로 세우면 고리가 닫힌다). 더 깊은 자손까지는 제어 평면이 판정하고, 거절은 그대로 뜬다.
+  // The issues that could be set as parent — the screen filters to the same team's. Itself and its own sub-issues are excluded
+  // (setting your own descendant as parent closes a cycle). Deeper descendants are judged by the control plane, and its refusal is shown verbatim.
   options: IssueParentOption[]
   canWrite: boolean
 }) {
@@ -51,7 +50,7 @@ export function IssueParentControl({
   const [query, setQuery] = useState('')
   const [pending, setPending] = useState(false)
 
-  // `null` 은 비운다 — 상위 이슈에서 뗀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
+  // `null` CLEARS it — it means detach from the parent, and it must never be conflated with `undefined` (untouched).
   function assign(parentId: string | null): void {
     if (parentId === (parent?.id ?? null)) return
     void (async () => {
@@ -112,7 +111,7 @@ export function IssueParentControl({
               'shrink-0 transition-colors disabled:opacity-50',
               parent
                 ? 'inline-flex size-5 items-center justify-center rounded text-faint hover:bg-accent hover:text-foreground'
-                : // 아직 어디에도 속하지 않은 이슈에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다.
+                : // On an issue that belongs nowhere yet, this button is the only affordance — that is the only time it wears a label.
                   'inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground'
             )}
           >
@@ -136,7 +135,7 @@ export function IssueParentControl({
               autoFocus
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('parentSearchPlaceholder')}
-              // 이 컨트롤이 폼 안에 놓이는 날을 대비한다 — Enter 가 폼을 제출해 버리면 고르다 말고 저장된다.
+              // Guarding against the day this control sits inside a form — an Enter that submits the form would save mid-selection.
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault()
               }}

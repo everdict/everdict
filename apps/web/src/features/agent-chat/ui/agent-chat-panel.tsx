@@ -51,7 +51,7 @@ function mergeMessages(prev: AgentMessage[], incoming: AgentMessage[]): AgentMes
   return [...byId.values()].sort((a, b) => a.seq - b.seq)
 }
 
-// 공용 SSE 프레임 리더 — 전송(POST /chat)과 재접속(GET /stream)이 같은 파서로 같은 이벤트 어휘를 소비한다.
+// The shared SSE frame reader — sending (POST /chat) and re-attaching (GET /stream) consume the same event vocabulary through one parser.
 async function readSseStream(
   body: ReadableStream<Uint8Array>,
   onEvent: (event: string, data: unknown) => void
@@ -88,7 +88,7 @@ async function readSseStream(
 // pendingMention (+ onConsumeMention) is threaded down from the infra panel: an entity detail page asked to
 // analyze its entity here, so drop it into the composer as a reference chip and/or pre-type a draft prompt
 // (nothing auto-sends — the member reviews and presses send). It may also carry a MISSION — a domain-specific
-// entry such as Settings › Skills 상세의 "대화로 편집하기" — which lands on a fresh draft and reframes the empty
+// entry such as Settings › Skills detail's "edit by conversation" — which lands on a fresh draft and reframes the empty
 // chat (title/body/suggestions) for that task; the surface itself is unchanged. pendingSession (+ onConsumeSession) is the same
 // channel for a comment thread's "view details": open a SPECIFIC (workspace-visible discussion) session and WATCH
 // it — a background turn streams its SSE to nobody, so the panel polls /messages?since= + /pending instead. The
@@ -121,21 +121,21 @@ export function AgentChatPanel({
   const [messages, setMessages] = useState<AgentMessage[]>([])
   // Emitted analysis artifacts (charts/tables/reports) — hydrated per session, appended live via SSE `artifact`.
   const [artifacts, setArtifacts] = useState<AnalysisArtifact[]>([])
-  // 보냈지만 아직 서버 레코드로 되돌아오지 않은 내 메시지들. `queued` 는 실행 중인 턴에 끼워 넣은(리다이렉트)
-  // 것이라 진행 중인 답변 "아래"에 놓여야 한다 — 첫 전송은 답변보다 앞이다. 하나가 아니라 목록인 이유는
-  // 연속 리다이렉트가 실제로 가능하기 때문(단일 슬롯이면 앞의 것이 화면에서 사라진다).
+  // My messages that were sent and have not come back as a server record yet. A `queued` one was slipped into a RUNNING turn
+  // (a redirect), so it belongs BELOW the answer in progress — a first send belongs above it. It is a list rather than one slot
+  // because consecutive redirects genuinely happen (with a single slot the earlier one vanishes from the screen).
   const [pendingUsers, setPendingUsers] = useState<PendingUserMessage[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [references, setReferences] = useState<AgentReference[]>([])
-  // 전용 진입으로 들어온 임무(스킬 편집 등) + 그 대상 이름 — 빈 대화의 문구·제안을 그 작업에 맞춘다.
-  // 대상은 함께 떨어진 참조 칩에서 그대로 가져온다(추측 없음). 대화를 바꾸면 사라진다.
+  // The mission a dedicated entry arrived with (a skill edit, etc.) plus the name of its subject — the empty conversation's
+  // wording and suggestions are framed for that work. The subject is taken verbatim from the reference chip that arrived with it (no guessing). It clears when the conversation changes.
   const [mission, setMission] = useState<{ kind: AgentChatMission; target?: string } | null>(null)
   const [attachments, setAttachments] = useState<AgentAttachmentInput[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamingReasoning, setStreamingReasoning] = useState('')
-  // 일시 장애 배너: 루프가 모델 실패를 재시도 대기 중(`retry`)이거나 예비 모델로 전환(`fallback`)했음을
-  // 알린다 — 없으면 긴 대기가 "얼어붙은 패널"로 보인다. 진행 이벤트(delta/reasoning/message)가 지운다.
+  // The transient-trouble banner: the loop is waiting to retry a model failure (`retry`) or has switched to the fallback model
+  // (`fallback`) — without it a long wait looks like a frozen panel. Any progress event (delta/reasoning/message) clears it.
   const [streamNotice, setStreamNotice] = useState<
     | { kind: 'retry'; attempt: number; delayMs: number; persistent?: boolean }
     | { kind: 'fallback'; to: string }
@@ -143,19 +143,19 @@ export function AgentChatPanel({
   >(null)
   const [pendingPermissions, setPendingPermissions] = useState<PendingPermission[]>([])
   const [modelIds, setModelIds] = useState<string[]>([])
-  // 드래프트(세션 미생성) 상태에서 고른 모델 — 첫 전송의 세션 생성에 실려 간다.
+  // The model chosen while still a draft (no session yet) — it rides along on the first send that creates the session.
   const [draftModel, setDraftModel] = useState<string | null>(null)
-  // 드래프트에서 고른 실행 권한 모드 — 'default'(항상 확인)가 기본이라 기본값이면 생성 요청에 싣지 않는다.
+  // The permission mode chosen in the draft — 'default' (always confirm) is the default, so it is not sent on create when unchanged.
   const [draftPermissionMode, setDraftPermissionMode] = useState<AgentPermissionMode>('default')
   // The caller's live teammates (docs/architecture/agent-teams.md) — long-lived autonomous agents that watch platform
   // events and wake to react. Loaded on mount and refreshed after each turn (the agent can self-spawn via a tool).
   const [teammates, setTeammates] = useState<AgentTeammate[]>([])
   const abortRef = useRef<AbortController | null>(null)
-  // 스트림이 정착할 때 어느 대화의 트랜스크립트를 다시 맞출지 판정하는 기준 — 그 사이 대화를 옮겼다면
-  // 남의 트랜스크립트를 섞지 않는다.
+  // What decides WHICH conversation's transcript to reconcile when a stream settles — if the conversation moved meanwhile,
+  // somebody else's transcript is not mixed in.
   const activeIdRef = useRef<string | null>(null)
   activeIdRef.current = activeId
-  // 명시적으로 멈춘 직후의 재접속 한 번을 건너뛴다(stop 참고).
+  // Skip exactly one re-attach right after an explicit stop (see stop).
   const suppressAttachRef = useRef(false)
   // Watch mode (a discussion session opened from a comment thread): a background turn streams SSE to nobody, so
   // while this session is active the panel polls its persisted transcript + parked approvals instead.
@@ -275,15 +275,15 @@ export function AgentChatPanel({
         })
         if (!res.ok) return
         const parsed = agentMessageListSchema.safeParse(await res.json())
-        // 병합(교체 아님): 전환 시엔 이미 비워져 있고, 첫 전송이 방금 만든 세션이면 스트리밍으로 먼저
-        // 도착한 레코드를 빈 서버 응답이 덮어쓰면 안 된다.
+        // MERGE, not replace: on a switch it is already empty, and when the first send just created the session an empty server
+        // response must not overwrite the record that arrived first over the stream.
         if (!cancelled && parsed.success)
           setMessages((prev) => mergeMessages(prev, parsed.data.messages))
       } catch {
         // silent
       }
     })()
-    // 이 대화의 분석 아티팩트(차트/표/리포트) — 트랜스크립트에 시간순으로 끼워 렌더된다.
+    // This conversation's analysis artifacts (charts/tables/reports) — rendered inline in the transcript in time order.
     void (async () => {
       try {
         const res = await fetch(`/api/agent/sessions/${encodeURIComponent(activeId)}/artifacts`, {
@@ -305,18 +305,18 @@ export function AgentChatPanel({
     }
   }, [activeId])
 
-  // 다른 대화로 컨텍스트를 전환한다 — 리더만 내려 이전 세션의 스트림이 새 화면에 섞이지 않게 한다. 턴 자체는
-  // 서버에서 계속 돌고, 되돌아오면 재접속 효과가 라이브 스트림에 다시 붙는다.
+  // Switch context to another conversation — only the reader is torn down, so the previous session's stream is not mixed into the
+  // new screen. The turn itself keeps running on the server, and coming back re-attaches to the live stream.
   const switchTo = useCallback((id: string | null) => {
     abortRef.current?.abort()
-    suppressAttachRef.current = false // 중단 억제는 그 대화에만 한정 — 새 대화는 정상 재접속한다
+    suppressAttachRef.current = false // the attach suppression is scoped to THAT conversation — a new one re-attaches normally
     setActiveId(id)
     setMessages([])
     setPendingUsers([])
     setArtifacts([])
-    setWatchId(null) // 워치 모드는 열어 준 그 세션에만 한정 — 다른 대화로 가면 폴링 중단
+    setWatchId(null) // watch mode is scoped to the session that opened it — moving to another conversation stops the polling
     setPendingPermissions([])
-    setMission(null) // 임무는 진입한 그 대화에만 붙는다
+    setMission(null) // a mission belongs only to the conversation it was entered through
   }, [])
 
   const newConversation = useCallback(() => {
@@ -370,7 +370,7 @@ export function AgentChatPanel({
   const changeModel = useCallback(
     async (model: string | null) => {
       if (!activeId) {
-        // 드래프트엔 아직 서버 세션이 없다 — 로컬에 들고 있다가 첫 전송의 생성 요청에 싣는다.
+        // A draft has no server session yet — hold it locally and send it with the create request on the first send.
         setDraftModel(model)
         return
       }
@@ -396,7 +396,7 @@ export function AgentChatPanel({
   const changePermissionMode = useCallback(
     async (mode: AgentPermissionMode) => {
       if (!activeId) {
-        // 드래프트엔 아직 서버 세션이 없다 — 로컬에 들고 있다가 첫 전송의 생성 요청에 싣는다.
+        // A draft has no server session yet — hold it locally and send it with the create request on the first send.
         setDraftPermissionMode(mode)
         return
       }
@@ -421,7 +421,7 @@ export function AgentChatPanel({
     [activeId, loadSessions, t]
   )
 
-  // 낙관적 버블 하나를 걷는다(같은 내용이 여러 개면 하나만) — 연속 리다이렉트가 같은 문장을 두 번 담을 수 있다.
+  // Retire ONE optimistic bubble (just one, when several share the content) — consecutive redirects can carry the same sentence twice.
   const dropPending = useCallback((text: string) => {
     setPendingUsers((prev) => {
       const i = prev.findIndex((p) => p.text === text)
@@ -494,8 +494,8 @@ export function AgentChatPanel({
         if (!parsed.success) return
         setMessages((prev) => mergeMessages(prev, [parsed.data]))
         setStreamNotice(null)
-        // 낙관적 버블은 그 내용의 레코드가 도착했을 때만 걷는다 — 팀원 메시지·플랫폼 이벤트도 user 역할로
-        // 들어오므로, 아무 user 레코드에나 걷으면 내가 보낸 것이 화면에서 사라진다.
+        // An optimistic bubble is retired only when the record FOR THAT CONTENT arrives — teammate messages and platform events also
+        // come in with the user role, so retiring on any user record makes what I sent disappear from the screen.
         if (parsed.data.role === 'user') dropPending(parsed.data.content)
         // Each assistant record carries this turn's finalized reasoning + text, so retire the live buffers when it lands.
         if (parsed.data.role === 'assistant') {
@@ -507,7 +507,7 @@ export function AgentChatPanel({
           }
         }
       } else if (event === 'retry') {
-        // 루프가 일시 장애를 대기 중 — 조용한 턴의 이유를 배너로. 최신 시도가 이전 배너를 대체한다.
+        // The loop is waiting out transient trouble — a banner for why the turn is quiet. The newest attempt replaces the previous banner.
         if (data !== null && typeof data === 'object' && 'attempt' in data && 'delayMs' in data) {
           const d = data as { attempt?: unknown; delayMs?: unknown; persistent?: unknown }
           if (typeof d.attempt === 'number' && typeof d.delayMs === 'number')
@@ -519,7 +519,7 @@ export function AgentChatPanel({
             })
         }
       } else if (event === 'fallback') {
-        // 예비 모델로 전환 — 한 줄 안내(다음 진행 이벤트가 지운다).
+        // Switched to the fallback model — a one-line notice (the next progress event clears it).
         const to =
           data !== null && typeof data === 'object' && 'to' in data
             ? (data as { to?: unknown }).to
@@ -531,7 +531,7 @@ export function AgentChatPanel({
         if (data !== null && typeof data === 'object')
           window.dispatchEvent(new CustomEvent('everdict:view-config', { detail: data }))
       } else if (event === 'agent_draft') {
-        // 에이전트가 크래프팅 캔버스를 빚었다(craft_agent) — 같은 창 브로드캐스트; 스튜디오가 적용한다.
+        // The agent shaped a crafting canvas (craft_agent) — a same-window broadcast; the studio applies it.
         if (data !== null && typeof data === 'object')
           window.dispatchEvent(new CustomEvent('everdict:agent-draft', { detail: data }))
       } else if (event === 'artifact') {
@@ -546,7 +546,7 @@ export function AgentChatPanel({
           const d = data as { requestId?: unknown; name?: unknown; input?: unknown }
           const requestId = d.requestId
           const name = d.name
-          // 재접속 스트림은 대기 중 승인을 replay 하므로 requestId 로 중복을 걸러 프롬프트가 두 번 뜨지 않게 한다.
+          // A re-attached stream REPLAYS pending approvals, so duplicates are filtered by requestId and the prompt does not appear twice.
           if (typeof requestId === 'string' && typeof name === 'string')
             setPendingPermissions((prev) =>
               prev.some((p) => p.requestId === requestId)
@@ -555,8 +555,8 @@ export function AgentChatPanel({
             )
         }
       } else if (event === 'error') {
-        // 턴이 실패했다. 보통은 실패 사유가 어시스턴트 레코드로도 남지만(그건 트랜스크립트의 몫), 루프에 닿기
-        // 전에 죽은 턴(모델 해석 실패·툴 세션 실패)은 레코드가 없다 — 그때 이 토스트가 유일한 신호다.
+        // The turn failed. Usually the reason also lands as an assistant record (that is the transcript's job), but a turn that died
+        // BEFORE reaching the loop (model resolution failure, tool session failure) has no record — then this toast is the only signal.
         const detail =
           data !== null && typeof data === 'object' && 'message' in data
             ? (data as { message?: unknown }).message
@@ -579,15 +579,15 @@ export function AgentChatPanel({
     [t, dropPending, scheduleStreamFlush]
   )
 
-  // 스트림 소유권 토큰: 전송/재접속 리더가 시작될 때마다 증가. 끝난(또는 끊긴) 리더의 뒷정리는 자신이 아직
-  // 최신 소유자일 때만 상태를 건드린다 — 낡은 finally 가 새 스트림의 sending 표시를 지우는 사고 방지.
+  // Stream ownership token: incremented every time a send/re-attach reader starts. A finished (or broken) reader only touches state
+  // in its own cleanup while it is still the newest owner — this is what stops a stale `finally` clearing a new stream's sending flag.
   const streamSeqRef = useRef(0)
-  // 스트림이 하나 정리될 때마다 증가 — 재접속 효과의 재실행 트리거(턴 종료 후 204 확인, 네트워크 단절 복구).
+  // Incremented every time one stream is cleaned up — the re-run trigger for the re-attach effect (a 204 check after a turn ends, recovery from a network drop).
   const [attachEpoch, setAttachEpoch] = useState(0)
 
-  // 서버가 이 대화에 대해 실제로 가진 트랜스크립트로 화면을 다시 맞춘다. 스트림은 취소·네트워크 단절로
-  // 언제든 끊길 수 있고, 그 순간 서버가 이미 영속했지만 우리에게 닿지 못한 레코드가 남는다 — 다시 맞추지
-  // 않으면 그 기록은 화면에서 영구히 사라졌다가 다음에 대화를 열 때 중간에서 되살아난다(리스트 훼손).
+  // Reconcile the screen with the transcript the server actually HAS for this conversation. A stream can break at any moment from a
+  // cancel or a network drop, and at that moment records the server already persisted may not have reached us — without reconciling,
+  // those disappear from the screen permanently and then reappear mid-list the next time the conversation is opened (a corrupted list).
   const reconcileMessages = useCallback(async (sessionId: string) => {
     try {
       const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
@@ -598,11 +598,11 @@ export function AgentChatPanel({
       if (parsed.success && activeIdRef.current === sessionId)
         setMessages((prev) => mergeMessages(prev, parsed.data.messages))
     } catch {
-      // silent — 다음 정착에서 다시 맞춘다
+      // silent — the next settle reconciles again
     }
   }, [])
 
-  // 스트림(전송/재접속) 하나가 끝났을 때의 공통 정리. 턴이 만든 엔티티(View/스케줄/팀원)까지 새로고침한다.
+  // The shared cleanup for one stream (send or re-attach) finishing. It also refreshes the entities the turn created (View/schedule/teammate).
   const settleStream = useCallback(
     (seq: number, sessionId: string | null) => {
       if (streamSeqRef.current !== seq) return
@@ -626,12 +626,12 @@ export function AgentChatPanel({
     async (textArg?: string, refsArg?: AgentReference[]) => {
       const text = (textArg ?? input).trim()
       if (text.length === 0) return
-      // 보낸 프롬프트는 컴포저의 ↑ 히스토리로 들어간다(Claude Code 의 전역 history). 전송이 실패해도 남겨
-      // 두는 편이 낫다 — 실패한 프롬프트야말로 다시 꺼내 쓰게 된다.
+      // A sent prompt enters the composer's ↑ history (Claude Code's global history). Keeping it even when the send FAILED is the better
+      // default — a failed prompt is exactly the one you reach for again.
       pushPromptHistory(text)
-      // 진행 중인 턴으로의 전송 = REDIRECT (queue-then-interrupt — Claude Code 의 ESC 재해석): 메시지를 러닝
-      // 턴의 메일박스에 큐잉하고 현재 스텝만 끊는다 — 루프는 살아서 다음 경계에서 메시지를 흡수하고 방향을
-      // 튼다. 칩(레퍼런스/첨부)은 전체 챗 파이프라인이 필요하므로 리다이렉트에 실을 수 없다 — Stop 후 재전송.
+      // A send into a running turn is a REDIRECT (queue-then-interrupt — a reinterpretation of Claude Code's ESC): the message is queued
+      // into the running turn's mailbox and only the current step is cut — the loop stays alive, absorbs the message at the next boundary
+      // and changes direction. Chips (references/attachments) need the whole chat pipeline, so they cannot ride a redirect — Stop, then resend.
       if (sending) {
         if (!activeId || textArg !== undefined) return
         if (references.length > 0 || attachments.length > 0) {
@@ -642,8 +642,8 @@ export function AgentChatPanel({
         setInput('')
         setPendingUsers((prev) => [...prev, { text, queued: true }])
         try {
-          // 원자적 리다이렉트: 서버가 라이브니스 확인 후 큐+절단을 한 번에 — 턴 종료와 레이스하면 아무것도
-          // 큐하지 않고 404(고아 메일박스 메시지 방지) → 입력 복원 + 재전송 안내.
+          // An atomic redirect: the server checks liveness and queues+cuts in one — racing the turn's end queues NOTHING and answers 404
+          // (no orphaned mailbox message) → restore the input and say to resend.
           const r = await fetch(`/api/agent/sessions/${encodeURIComponent(target)}/interrupt`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -664,7 +664,7 @@ export function AgentChatPanel({
         return
       }
 
-      // 드래프트의 첫 전송 — 이제서야 서버 세션을 만든다(드래프트에서 고른 모델·실행 권한 모드를 실어서).
+      // A draft's first send — only now is the server session created (carrying the model and permission mode chosen in the draft).
       let sessionId = activeId
       if (!sessionId) {
         try {
@@ -698,8 +698,8 @@ export function AgentChatPanel({
         setReferences([])
         setAttachments([])
       }
-      // 이 전송이 스트림 소유권을 가진다 — 열려 있던 재접속 리더는 내리고(턴은 서버에서 계속된다), 소유권
-      // 토큰을 올려 낡은 뒷정리가 이 전송의 상태를 지우지 못하게 한다.
+      // THIS send owns the stream — any open re-attach reader is torn down (the turn continues on the server) and the ownership token is
+      // raised so a stale cleanup cannot clear this send's state.
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
@@ -730,8 +730,8 @@ export function AgentChatPanel({
       window.dispatchEvent(new Event('everdict:canvas-state-request'))
       window.removeEventListener('everdict:canvas-state', captureCanvas)
 
-      // 크래프팅 캔버스도 같은 계약(agent-automation B2/B3): 열려 있으면 전송 직전 현 draft 를 캡처해
-      // 매 턴이 수동 편집 포함 라이브 상태에 근거한다. 캔버스 없음 → 응답 없음 → undefined.
+      // The crafting canvas has the same contract (agent-automation B2/B3): while open, the current draft is captured just before sending,
+      // so every turn rests on the live state INCLUDING manual edits. No canvas → no answer → undefined.
       let agentDraft: { draft: Record<string, unknown>; agentId?: string } | undefined
       const captureDraft = (e: Event) => {
         const detail = (e as CustomEvent<unknown>).detail
@@ -761,8 +761,8 @@ export function AgentChatPanel({
           signal: controller.signal,
         })
         if (res.status === 409) {
-          // 이미 이 대화에서 턴이 실행 중(다른 탭·되돌아온 세션) — 중복 실행 대신 재접속한다: 입력은 돌려주고,
-          // 정리(settleStream) 뒤 재접속 효과가 진행 중 스트림에 붙는다.
+          // A turn is already running in this conversation (another tab, a session returned to) — re-attach instead of running twice: the
+          // input is handed back, and after settleStream the re-attach effect binds to the stream in progress.
           if (fromComposer) setInput(text)
           toast.info(t('errorBusy'))
           return
@@ -809,10 +809,10 @@ export function AgentChatPanel({
   // the draft prompt, then clear the buffer so a later tab re-mount (the agent tab unmounts when another infra
   // tab is shown) does not re-inject the same prefill. A prompt overwrites only an empty composer — never a
   // member's in-progress draft.
-  // 새 대화에서 시작할지는 진입이 정한다(startsFreshConversation): edit 임무는 언제나, analyze/ask 는 진입이
-  // `fresh` 를 선언했을 때만 — 스코어카드 둘을 한 대화에서 비교하는 흐름은 기본으로 지키고, 대화의 주제가 그
-  // 레코드 하나인 진입(이슈 상세, 빈 분석 캔버스)만 예외를 고른다. 임무 프레이밍은 빈 화면에서만 뜨므로 이
-  // 판정이 곧 "진입할 때마다 그 작업에 맞는 패널을 보게 되는가"다.
+  // Whether to start in a NEW conversation is the entry's decision (startsFreshConversation): an edit mission always does, analyze/ask only
+  // when the entry declared `fresh` — the flow of comparing two scorecards in one conversation is kept by default, and only entries whose
+  // subject IS that one record (an issue detail, an empty analysis canvas) opt out. Mission framing appears only on an empty screen, so this
+  // decision IS "do you get a panel framed for the work every time you enter".
   useEffect(() => {
     if (!pendingMention) return
     if (startsFreshConversation(pendingMention) && activeId !== null) newConversation()
@@ -853,7 +853,7 @@ export function AgentChatPanel({
     })()
   }, [pendingSession, onConsumeSession, activeId, switchTo])
 
-  // 트랜스크립트의 최신 seq — 워치 폴링의 ?since= 커서 (메시지 병합마다 갱신).
+  // The transcript's newest seq — the ?since= cursor for watch polling (refreshed on every message merge).
   useEffect(() => {
     maxSeqRef.current = messages.reduce((max, m) => (m.seq > max ? m.seq : max), -1)
   }, [messages])
@@ -910,17 +910,17 @@ export function AgentChatPanel({
     }
   }, [watchId, activeId, sending])
 
-  // 열린 대화에 LIVE 턴이 있으면 그 스트림에 다시 붙는다 — 세션을 떠났다 돌아온 경우, 다른 탭에서 시작한 턴,
-  // 네트워크 단절로 스트림만 잃은 턴(턴은 서버에서 계속 돈다). 204 = 진행 중 없음 → 조용히 idle. 붙는 동안은
-  // sending 으로 표시해 컴포저가 스트리밍 상태(Stop 포함)를 그대로 보여 준다. attachEpoch 는 스트림 하나가
-  // 정리될 때마다 재실행을 트리거한다(턴 종료 뒤엔 204 확인으로 끝나는 값싼 왕복). 소유권 확인은 abortRef —
-  // 전송이 이미 리더를 잡고 있으면 붙지 않는다(같은 피드를 이중 소비하면 델타가 두 번 적용된다).
+  // If the open conversation has a LIVE turn, re-attach to its stream — a session left and returned to, a turn started in another tab, a turn
+  // whose stream alone was lost to a network drop (the turn keeps running on the server). 204 = nothing in progress → quietly idle. While
+  // attaching it shows as sending so the composer keeps the streaming state (Stop included). attachEpoch triggers a re-run every time one stream
+  // is cleaned up (after a turn ends that is a cheap round trip ending in a 204). Ownership is checked through abortRef —
+  // it does not attach when a send already holds the reader (consuming the same feed twice applies every delta twice).
   useEffect(() => {
-    void attachEpoch // 재실행 트리거로만 쓰인다(값 자체는 의미 없음)
+    void attachEpoch // used purely as a re-run trigger (the value itself means nothing)
     if (!activeId || abortRef.current) return
-    // 방금 명시적으로 멈춘 턴에는 붙지 않는다: 서버는 루프가 풀린 뒤에야 턴 슬롯을 닫으므로 그 사이의
-    // GET /stream 은 아직 200 + 방금 취소한 부분 답변을 replay 한다 — 취소한 내용이 되살아났다 사라지는
-    // 깜빡임의 정체다. 한 번만 건너뛴다(대화를 옮기면 switchTo 가 초기화한다).
+    // Do not attach to a turn that was just explicitly stopped: the server closes the turn slot only after the loop unwinds, so a GET /stream in
+    // between still answers 200 and REPLAYS the partial answer just cancelled — that is the flicker where cancelled content comes back and
+    // disappears. Skipped exactly once (moving conversation resets it through switchTo).
     if (suppressAttachRef.current) {
       suppressAttachRef.current = false
       return
@@ -941,8 +941,8 @@ export function AgentChatPanel({
         setSending(true)
         resetStreaming()
         await readSseStream(res.body, applyStreamEvent)
-        // 최초 트랜스크립트 로드와 스트림 구독 사이에 영속된 레코드가 낄 수 있다 — 꼬리를 한 번 더 병합해
-        // 닫는다(id 병합이라 중복 무해).
+        // A record can land between the initial transcript load and the stream subscription — merge the tail once more to close that
+        // window (merging by id, so duplicates are harmless).
         if (!controller.signal.aborted) {
           const tail = await fetch(`/api/agent/sessions/${encodeURIComponent(id)}/messages`, {
             cache: 'no-store',
@@ -953,7 +953,7 @@ export function AgentChatPanel({
           }
         }
       } catch {
-        // aborted(세션 전환·전송 시작·언마운트) 또는 네트워크 — 다음 재실행에서 다시 시도한다
+        // aborted (session switch, send start, unmount) or network — the next re-run tries again
       } finally {
         if (seq !== null) settleStream(seq, id)
       }
@@ -961,9 +961,9 @@ export function AgentChatPanel({
     return () => controller.abort()
   }, [activeId, attachEpoch, applyStreamEvent, resetStreaming, settleStream])
 
-  // Stop = 명시적 서버 중단(POST /stop). 연결을 끊는 것으로는 더 이상 턴이 멈추지 않는다(턴은 연결과 분리됐다)
-  // — 서버가 루프를 abort 하면 터미널 이벤트가 우리 스트림을 닫고 settleStream 이 정리한다. 요청이 실패해도
-  // 로컬 리더는 내린다(404 = 이미 끝난 턴, 무해).
+  // Stop = an explicit server abort (POST /stop). Dropping the connection no longer stops a turn (the turn was decoupled from the connection)
+  // — when the server aborts the loop, a terminal event closes our stream and settleStream cleans up. Even when the request fails the local
+  // reader is torn down (404 = a turn that already ended, harmless).
   const stop = useCallback(() => {
     const id = activeId
     if (!id) {
@@ -974,9 +974,9 @@ export function AgentChatPanel({
     void fetch(`/api/agent/sessions/${encodeURIComponent(id)}/stop`, { method: 'POST' })
       .then(async (res) => {
         if (!res.ok) return
-        // 리다이렉트로 큐에 넣었지만 루프가 끝내 흡수하지 못한 메시지를 서버가 돌려준다 — 입력창에 되돌려
-        // 놓는다(Claude Code 의 "Esc 가 큐를 입력으로 되돌린다"). 그러지 않으면 그 문장은 트랜스크립트에도
-        // 입력창에도 없이 사라진다. 이미 뭔가 타이핑 중이면 덮지 않는다.
+        // The server hands back a message that was queued by a redirect and that the loop never absorbed — it goes back into the composer
+        // (Claude Code's "Esc returns the queue to the input"). Otherwise that sentence is gone from the transcript AND the input.
+        // Anything already being typed is not overwritten.
         const data = (await res.json()) as { dropped?: unknown }
         const dropped = Array.isArray(data.dropped)
           ? data.dropped.filter((d): d is string => typeof d === 'string' && d.length > 0)

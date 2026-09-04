@@ -13,10 +13,10 @@ import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropd
 
 import { deleteProductAction } from '../api/products'
 
-// 프로덕트 헤더의 ⋯ 메뉴 — 수정은 라우팅된 편집 화면으로, 삭제는 확인을 거쳐서(릴리즈와 버전 원장이 함께
-// 사라진다는 사실을 말하고 지운다).
-// `productRef` — 슬러그 또는 id. 편집 주소가 상세 주소와 같은 철자를 쓰도록 참조 그대로 받는다
-// (컨트롤 플레인은 둘 다 같은 레코드로 해석한다).
+// The ⋯ menu in the product header — editing goes to the routed edit screen, and deletion goes through a confirmation (which SAYS that the
+// releases and the version ledger disappear with it).
+// `productRef` — a slug or an id. The reference is taken verbatim so the edit address uses the same spelling as the detail address
+// (the control plane resolves both to the same record).
 export function ProductActionsMenu({
   workspace,
   productRef,

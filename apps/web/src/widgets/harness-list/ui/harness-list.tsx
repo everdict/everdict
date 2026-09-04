@@ -53,8 +53,8 @@ function LatestResult({ rel }: { rel?: HarnessRelation }) {
   )
 }
 
-// 한 형상 위의 하네스들을 구분하는 것은 이름이 아니라 **무엇을 바꿨는가**다. 제어 평면이 인스턴스 델타에서
-// 뽑아 주므로(손으로 쓴 설명과 달리 낡지 않는다) 여기서는 그리기만 한다. 넘치는 것은 "+N".
+// What distinguishes the harnesses on one shape is not their names but **what they changed**. The control plane extracts it from the instance
+// delta (so unlike a hand-written description it cannot go stale) and this only draws it. The overflow becomes "+N".
 const VARIATION_LIMIT = 3
 
 function VariationChips({ variation }: { variation?: { scope?: string; label: string }[] }) {
@@ -78,8 +78,8 @@ function VariationChips({ variation }: { variation?: { scope?: string; label: st
   )
 }
 
-// 사람이 단 라벨(버전 태그)이 목록에서 그 하네스의 이름표가 된다 — 어느 버전에 붙었는지는 hover 로.
-// 델타 칩(무엇을 바꿨는가)과 달리 이것은 사람이 부르는 이름이라, 목록에서 "각각이 무엇인지"를 답한다.
+// A label a person attached (a version tag) becomes that harness's name plate in the list — which version it was attached to is on hover.
+// Unlike the delta chips (what was changed) this is the name a PERSON calls it by, so it answers "what is each of these" in the list.
 const TAG_LIMIT = 4
 
 function HarnessTagChips({ harness }: { harness: Harness }) {
@@ -120,7 +120,7 @@ export function HarnessList({
   harnesses: Harness[]
   relations: Record<string, HarnessRelation>
   authors: Record<string, Author>
-  // 팀 축의 이름표 — id 를 사람이 부르는 이름으로 바꾸는 데만 쓴다.
+  // The team axis' name plate — used only to turn an id into the name people call it by.
   scope: ListViewScope
   // Admin — reveal a per-row delete (removes the whole harness); all listed harnesses are workspace-owned (delete-eligible).
   canDelete?: boolean
@@ -161,7 +161,7 @@ export function HarnessList({
 
   const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
 
-  // 축의 값은 **이 컬렉션에 있는 것만** 제시한다 — 고르면 언제나 빈 목록인 선택지를 내밀지 않기 위해서다.
+  // An axis offers **only the values present in this collection** — so a choice that would always give an empty list is never presented.
   const facets = useMemo((): FacetSpec[] => {
     const of = (facet: string, labelOf: (value: string) => string, unset?: string) => ({
       key: facet,
@@ -178,7 +178,7 @@ export function HarnessList({
       of('kind', (value) => value, list('unset.kind')),
       of('creator', creatorName, list('unset.creator')),
       of('tag', (value) => value, list('unset.tag')),
-      // 팀이 하나도 없는 워크스페이스에 팀 축을 세워 봐야 고를 것이 없다.
+      // Standing a team axis in a workspace with no teams leaves nothing to pick.
     ].filter((facet) => facet.options.length > 0)
   }, [harnesses, list, authors])
 
@@ -192,7 +192,7 @@ export function HarnessList({
     [harnesses, view.filters, view.search, view.display]
   )
 
-  // 그룹 하나의 이름표. 축마다 어휘가 달라서(형상은 식별자, 팀·사람은 이름) 한 곳에서 푼다.
+  // One group's name plate. The vocabulary differs per axis (a shape is an identifier, teams and people are names), so it is resolved in one place.
   function groupLabel(key: string | null) {
     if (key === null) return list(`unset.${view.display.grouping}`)
     if (view.display.grouping === 'template')

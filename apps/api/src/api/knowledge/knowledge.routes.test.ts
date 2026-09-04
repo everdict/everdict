@@ -97,7 +97,7 @@ async function build(withKnowledge: boolean) {
   const latestVersionOf = async (_tenant: string, ref: NodeRef) =>
     ref.type === "harness" && ref.key === "web-agent" ? "2.3.0" : undefined;
   const knowledgeEntryService = new KnowledgeEntryService({ store: knowledgeEntryStore, latestVersionOf });
-  // 추출 라우트: 코멘트 1 스레드 + 캔드 완성(candidate 1개) — 라우트/게이트/왕복 검증용 (모델 호출 없음)
+  // The extraction route: one comment thread plus a canned completion (one candidate) — for verifying the route, the gate and the round trip (no model call)
   const comments = new InMemoryCommentStore();
   await comments.add({
     id: "root",

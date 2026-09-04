@@ -13,14 +13,14 @@ import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { createReleaseAction } from '../api/products'
 
-// 릴리즈 계획 — 이름 · 목표일 · 이 릴리즈가 판정받을 워치 시리즈(비우면 전부). 출하는 릴리즈 상세의
-// 게이트를 통해서만 간다.
+// Planning a release — a name · a target date · the watch series this release will be judged by (empty means all of them). SHIPPING goes only
+// through the gate on the release detail.
 export function PlanReleaseButton({
   productId,
   seriesOptions,
 }: {
   productId: string
-  // 프로덕트가 선언한 시리즈들 — 선택지는 컨트롤 플레인이 받아 주는 것만(없는 키는 400 이다).
+  // The series the product declared — the choices are only what the control plane will accept (a key that does not exist is a 400).
   seriesOptions: { key: string; label: string }[]
 }) {
   const t = useTranslations('productsPage')

@@ -23,8 +23,8 @@ import {
   removeWorkspaceImageAction,
 } from '../api/manage-workspace-images'
 
-// 이 리포지토리를 선언한 환경 capability — 이미지 상세가 보여주는 "everdict 쪽 컨텍스트". bytes(레지스트리)와
-// 에이전트 컨텍스트(instructions/contents)가 합쳐져야 환경 이미지라는 도메인 판단의 UI 면이다.
+// The environment capability that DECLARED this repository — the "everdict-side context" the image detail shows. It is the UI face of the
+// domain judgement that an environment image is bytes (the registry) plus agent context (instructions/contents) together.
 export interface ImageEnvironmentLink {
   id: string
   version: string
@@ -37,17 +37,17 @@ export interface ImageEnvironmentLink {
   arch?: string
 }
 
-// OCI history 의 created_by 를 Dockerfile 문장으로 되돌린다: "#(nop)" 뒤가 메타데이터 인스트럭션 본문이고,
-// "/bin/sh -c …"는 RUN 이 셸로 감싼 형태다. 원문을 해치지 않는 선에서만 정돈한다(모르는 형태는 그대로).
+// Turn an OCI history's created_by back into a Dockerfile statement: what follows "#(nop)" is the body of a metadata instruction, and
+// "/bin/sh -c …" is a RUN wrapped in a shell. It tidies only as far as it can without harming the source (an unknown shape is left alone).
 function dockerfileStep(createdBy: string): string {
   const nop = createdBy.match(/#\(nop\)\s+(.*)$/)
   if (nop?.[1]) return nop[1].trim()
   return createdBy.replace(/^\/bin\/sh -c\s+/, 'RUN ').trim()
 }
 
-// Settings › Images › 상세 — JFrog 류 레지스트리 UI 의 문법: 버전(태그)이 먼저, 고른 버전의 다이제스트·크기·
-// 플랫폼, 그 아래 "이 이미지가 어떻게 만들어졌나"(OCI config history)와 런타임 계약, 마지막으로 everdict 쪽
-// 컨텍스트(이 이미지를 선언한 환경). 상세는 라우트다 — 우측 대화 패널과 나란히 두고 쓰는 화면이므로.
+// Settings › Images › detail — the grammar of a JFrog-style registry UI: versions (tags) first, then the chosen version's digest, size and
+// platform, beneath that "how was this image built" (the OCI config history) and the runtime contract, and finally the everdict-side
+// context (the environment that declared this image). The detail is a ROUTE — it is a screen used beside the conversation panel on the right.
 export function WorkspaceImageDetail({
   workspace,
   name,
@@ -60,7 +60,7 @@ export function WorkspaceImageDetail({
 }: {
   workspace: string
   name: string
-  image: string // 태그 없는 ref — "<endpoint>/<namespace>/<name>"
+  image: string // the ref with no tag — "<endpoint>/<namespace>/<name>"
   tags: string[]
   initialReference: string | null
   initialInspect: WorkspaceImageInspect | null
@@ -88,7 +88,7 @@ export function WorkspaceImageDetail({
       setPending(true)
       try {
         const res = await inspectWorkspaceImageAction(name, tag)
-        // 실패해도 행은 남는다 — null 캐시로 "요약을 못 읽었다"를 표시하고 다시 고르면 재시도하지 않는다.
+        // The row survives a failure — a null cache marks "the summary could not be read", and re-selecting does not retry.
         setDetails((prev) => ({ ...prev, [tag]: res.ok ? res.inspect : null }))
         if (!res.ok) setError(res.error)
       } finally {
@@ -108,7 +108,7 @@ export function WorkspaceImageDetail({
 
   return (
     <div className="space-y-6">
-      {/* 메타 스트립 — 고른 버전의 ref 가 곧 스펙에 들어가는 값이므로 복사가 1클릭이어야 한다. */}
+      {/* The meta strip — the chosen version's ref is what goes into a spec, so copying it has to be one click. */}
       <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
         <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
           {selectedRef}
@@ -134,7 +134,7 @@ export function WorkspaceImageDetail({
 
       {error && <Callout tone="danger">{error}</Callout>}
 
-      {/* 버전이 먼저다 — 리포지토리는 껍데기고 사용자가 고르는 것은 태그다. */}
+      {/* Versions come FIRST — the repository is a shell and what a user picks is a tag. */}
       <section className="space-y-3">
         <SectionHeader title={t('versionsTitle')} />
         {tags.length === 0 ? (
@@ -212,7 +212,7 @@ export function WorkspaceImageDetail({
         )}
       </section>
 
-      {/* 어떻게 만들어졌나 — OCI config history 를 Dockerfile 문장으로 되돌려 보여준다. */}
+      {/* How it was built — the OCI config history turned back into Dockerfile statements. */}
       {inspect?.history && inspect.history.length > 0 && (
         <section className="space-y-3">
           <SectionHeader
@@ -249,7 +249,7 @@ export function WorkspaceImageDetail({
         </section>
       )}
 
-      {/* 런타임 계약 — 이미지가 실행될 때의 약속. 빈 항목은 렌더하지 않는다(상세뷰 관습). */}
+      {/* The runtime contract — the promises made when the image runs. An empty entry is not rendered (the detail-view convention). */}
       {inspect?.config && (
         <section className="space-y-3">
           <SectionHeader title={t('runtimeTitle')} />
@@ -311,8 +311,8 @@ export function WorkspaceImageDetail({
         </section>
       )}
 
-      {/* everdict 쪽 컨텍스트 — 이 이미지를 선언한 환경 capability. bytes 만이 아니라 에이전트가 받는 지침까지가
-          환경 이미지라는 도메인 판단을 상세에서 그대로 보여준다. 없으면 섹션째 숨긴다. */}
+      {/* The everdict-side context — the environment capability that declared this image. It shows, on the detail, the domain judgement that an
+          environment image is not bytes alone but the instructions the agent receives too. Absent, the whole section hides. */}
       {environments.length > 0 && (
         <section className="space-y-3">
           <SectionHeader

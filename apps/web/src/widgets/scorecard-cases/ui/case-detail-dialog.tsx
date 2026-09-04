@@ -41,11 +41,11 @@ import {
   type ScorecardCaseView,
 } from '../model/case-view'
 
-// 케이스 상세 다이얼로그 — 분석하는 사람의 세 질문에 위에서 아래로 답한다:
-// ① 어떤 케이스였나(데이터셋 과제) → ② 실제로 어떻게 실행됐나(에이전트 궤적 + 스냅샷/에러) →
-// ③ 어떻게 평가됐나(판정 근거 + 저지/그레이더 점수와 리즈닝). 궤적은 봉인 증거의 단일 읽기 표면인
-// TrajectoryView 로 연다(자식 run → 궤적 원장, 없으면 임베디드 케이스 트레이스). 헤더·메타·prev/next·←/→ 는
-// TrajectoryDetailDialog 와 같은 문법.
+// The case detail dialog — it answers an analyst's three questions from top to bottom:
+// ① which case was this (the dataset task) → ② how did it actually execute (the agent trajectory plus the snapshot/error) →
+// ③ how was it judged (the grounds for the verdict plus judge/grader scores and reasoning). The trajectory opens through TrajectoryView,
+// the single read surface for sealed evidence (the child run → the trajectory ledger, else the embedded case trace). The header, meta,
+// prev/next and ←/→ share TrajectoryDetailDialog's grammar.
 //
 // **The evidence arrives per case, on open.** The task body, each score's rationale, the full error text and
 // the screenshot do not ride the list payload — on a batch of hundreds that WAS why the screen stalled. A row
@@ -138,7 +138,7 @@ export function CaseDetailDialog({
     })
   }
 
-  // ←/→ 로 형제 케이스 이동 (궤적/외부 트레이스 상세와 동일한 조작).
+  // ←/→ moves between sibling cases (the same gesture as the trajectory and external trace details).
   const navigable = nav.index >= 0
   const hasPrev = navigable && nav.index > 0
   const hasNext = navigable && nav.index < nav.total - 1
@@ -171,7 +171,7 @@ export function CaseDetailDialog({
       labelledBy="scorecard-case-dialog-title"
       className="flex h-[92vh] max-h-[92vh] max-w-[1200px] flex-col"
     >
-      {/* 좁은 화면에선 액션 묶음이 제목 아래로 줄바꿈된다 — 다이얼로그 폭이 좁아도 헤더가 넘치지 않게. */}
+      {/* On a narrow screen the action group wraps under the title — so the header does not overflow even in a narrow dialog. */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-border px-5 py-4">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <Badge tone={c.verdict == null ? 'neutral' : c.verdict ? 'success' : 'danger'}>
@@ -183,14 +183,14 @@ export function CaseDetailDialog({
           >
             {c.caseId}
           </h2>
-          {/* 트라이얼 배치 — 같은 caseId 가 여러 행이므로 어느 트라이얼을 보고 있는지 헤더가 밝힌다. */}
+          {/* The trial badge — the same caseId appears on several rows, so the header says WHICH trial is being viewed. */}
           {c.trial !== undefined && (
             <Badge tone="neutral">{t('caseTrialBadge', { n: c.trial })}</Badge>
           )}
           {c.snapshot?.kind && <Badge tone="neutral">{c.snapshot.kind}</Badge>}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* 이 케이스의 자식 run — 전체 실행 상세(사용량·출처·라이브 채널)로 가는 문. */}
+          {/* This case's child run — the door to the full execution detail (usage, provenance, live channels). */}
           {c.runId !== undefined && (
             <Link
               href={`/${workspace}/run/${encodeURIComponent(c.runId)}`}
@@ -200,7 +200,7 @@ export function CaseDetailDialog({
               {t('caseOpenRun')}
             </Link>
           )}
-          {/* 트레이스 싱크 딥링크 — 관측 플랫폼의 원본/내보낸 트레이스. */}
+          {/* The trace sink deep link — the original or exported trace on the observability platform. */}
           {c.exportUrl !== undefined && (
             <a
               href={c.exportUrl}
@@ -211,7 +211,7 @@ export function CaseDetailDialog({
               {c.sinkKind ?? 'trace'} ↗
             </a>
           )}
-          {/* 열림 상태가 ?case= 로 URL 에 미러링되므로, 지금 주소가 곧 이 케이스의 공유 링크다. */}
+          {/* The open state is mirrored into the URL as ?case=, so the current address IS this case's shareable link. */}
           <CopyLinkButton
             label={t('caseCopyLink')}
             message={t('caseLinkCopied')}
@@ -254,7 +254,7 @@ export function CaseDetailDialog({
       </div>
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
-        {/* ① 어떤 케이스였나 — 데이터셋 케이스 정의 (과제 본문 + 환경/채점/태그 메타). */}
+        {/* ① Which case was this — the dataset case definition (the task body plus environment/grading/tag meta). */}
         {hasIdentity && (
           <section className="space-y-2">
             <SectionLabel>{t('caseDialogTask')}</SectionLabel>
@@ -289,18 +289,18 @@ export function CaseDetailDialog({
           </section>
         )}
 
-        {/* ② 실제로 어떻게 실행됐나 — 에이전트 궤적 + 실행이 남긴 것(스크린샷·최종 URL·DOM·에러·러너 힌트). */}
+        {/* ② How did it actually execute — the agent trajectory plus what the execution left behind (screenshot, final URL, DOM, errors, runner hints). */}
         {hasExecution && (
           <section className="space-y-2.5">
             <SectionLabel>{t('caseDialogExecution')}</SectionLabel>
-            {/* 어떤 세계에서 돌았나 — 궤적 위에 한 줄. 기록이 없으면 통째로 숨는다(빈 섹션 숨김 관습). */}
+            {/* Which WORLD it ran in — one line above the trajectory. With no record it hides entirely (the empty-section convention). */}
             {c.execution && <ExecutionStrip execution={c.execution} />}
             {traceError !== undefined ? (
               <Callout tone="danger">{t('caseTraceError', { error: traceError })}</Callout>
             ) : pending && segments === undefined ? (
               <p className="px-1 py-2 text-[12px] text-faint">{t('caseTraceLoading')}</p>
             ) : segments !== undefined && segments.length > 0 ? (
-              // TrajectoryView 는 호스트가 확정 높이를 줘야 한다 — run 상세의 증거 섹션과 같은 규칙.
+              // TrajectoryView needs its host to give it a definite height — the same rule as the run detail's evidence section.
               <div className="h-[46vh] min-h-[320px] rounded-lg border border-border bg-card p-3">
                 {traceNextAfter !== undefined && (
                   <p className="flex items-center gap-3 pb-2 text-[12px] text-faint">
@@ -330,7 +330,7 @@ export function CaseDetailDialog({
                 className="max-h-80 w-auto rounded-lg border"
               />
             )}
-            {/* browser — 에이전트가 도달한 최종 URL (+ 오프로드된 전체 DOM 다운로드). */}
+            {/* browser — the final URL the agent reached (plus a download of the offloaded full DOM). */}
             {c.snapshot?.url && (
               <p className="break-all font-mono text-[12px] text-muted-foreground">
                 <span className="font-[510] text-foreground">final url</span> · {c.snapshot.url}
@@ -369,7 +369,7 @@ export function CaseDetailDialog({
                 </div>
               )
             )}
-            {/* self-hosted 러너 실패 힌트 — 서버가 로스터를 읽어 로컬라이즈까지 끝낸 문장. */}
+            {/* The self-hosted runner failure hint — a sentence the server already localized after reading the roster. */}
             {c.runnerHint && (
               <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-700 dark:text-amber-400">
                 {c.runnerHint}
@@ -378,7 +378,7 @@ export function CaseDetailDialog({
           </section>
         )}
 
-        {/* ③ 어떻게 평가됐나 — 판정 근거(어느 권위 층이 결정했나) + 점수 행(리즈닝 펼침, 실패 행은 기본 펼침). */}
+        {/* ③ How was it judged — the grounds for the verdict (which authority layer decided) plus the score rows (reasoning expands; a failing row is expanded by default). */}
         <section className="space-y-2.5">
           <SectionLabel>{t('caseDialogEvaluation')}</SectionLabel>
           {(c.verdict !== undefined || c.verdictBasis !== undefined) && (
@@ -441,10 +441,10 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">{children}</p>
 }
 
-// 실행 매니페스트 스트립 — "이 케이스가 실제로 어떤 세계에서 돌았나". 스코어카드 매니페스트가 평가의
-// 정의(데이터셋·하네스·저지 버전)를 고정한다면 이건 평가의 세계를 고정한다.
-// osResolved 가 defaulted 면 케이스가 os 를 쓴 적이 없다는 뜻 — 선언된 linux 와 구별되는 사실이라 배지로
-// 따로 말한다(설명은 인라인 문구가 아니라 툴팁으로).
+// The execution manifest strip — "which world did this case actually run in". Where the scorecard manifest pins the DEFINITION of the
+// evaluation (dataset, harness and judge versions), this pins its WORLD.
+// An `osResolved` of `defaulted` means the case never used an os at all — a fact distinct from a declared linux, so it is stated as its own
+// badge (with the explanation in a tooltip rather than as inline prose).
 function ExecutionStrip({ execution }: { execution: CaseExecutionView }) {
   const t = useTranslations('scorecardsPage')
   const defaulted = execution.osResolved === 'defaulted'
@@ -484,7 +484,7 @@ function ExecutionFact({
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="text-faint">{label}</span>
-      {/* 이미지 레퍼런스는 길다 — 줄바꿈으로 스트립을 무너뜨리지 말고 잘라 두고 전체는 title 로 준다. */}
+      {/* An image reference is long — truncate it rather than letting it break the strip, and give the whole thing in `title`. */}
       <span
         className={cn(
           'font-mono text-[11.5px] text-muted-foreground',
@@ -498,17 +498,17 @@ function ExecutionFact({
   )
 }
 
-// 한 점수의 값 — categorical `label` 은 그대로(gold / correct / B), 아니면 단위 추론 포맷. 판정 배지가
-// 따로 서 있으므로 run 상세의 값 칸처럼 0/1 도 실제 값으로 보여준다.
+// One score's value — a categorical `label` verbatim (gold / correct / B), otherwise the unit-inferred format. The verdict badge stands
+// separately, so 0/1 is shown as the real value here, exactly as the run detail's value cell does.
 function displayValue(s: CaseScoreView): string {
   if (s.label !== undefined && s.label !== '') return s.label
-  // 측정이 아닌 행은 호출 전에 걸러진다(isUnmeasuredScore) — 그래도 값이 없으면 대시가 정직한 표시다.
+  // Unmeasured rows are filtered out before this is called (isUnmeasuredScore) — a dash is still the honest mark when there is no value.
   if (s.value === undefined) return '–'
   return fmtMetricValue(classifyMetric({ metric: s.metric, mean: s.value }), s.value)
 }
 
-// 한 지표 행 — run 상세 EvalOutcome 의 행 문법과 동일: detail(판정 근거)이 있으면 펼칠 수 있고, 실패한
-// 행은 기본으로 펼쳐진다. "왜 실패했나"가 가장 깊은 곳에 접혀 있던 게 이전 케이스 카드의 핵심 문제였다.
+// One metric row — the same row grammar as the run detail's EvalOutcome: it expands when there is a `detail` (the grounds for the verdict),
+// and a FAILING row is expanded by default. "Why did it fail" being folded away deepest was the previous case card's central problem.
 function ScoreRow({
   score,
   siblings,

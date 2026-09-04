@@ -9,9 +9,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Settings › Images — 관리형 이미지 스토어(everdict 자체 레지스트리)의 워크스페이스 네임스페이스.
-// 읽기는 harnesses:read, 회수는 images:push. 관리형 스토어를 안 돌리는 배포에서는 라우트가 404이므로
-// 빈 목록이 아니라 "설정되지 않음"으로 구분해서 보여준다 — 이미지가 없는 것과 스토어가 없는 것은 다른 상태다.
+// Settings › Images — the workspace namespace of the managed image store (everdict's own registry).
+// Reading is harnesses:read and unpublishing is images:push. On a deployment not running a managed store the route answers 404, so it is shown
+// distinctly as "not configured" rather than as an empty list — having no images and having no store are different states.
 export default async function WorkspaceImagesPage() {
   const t = await getTranslations('workspaceImages')
   const { principal } = await currentPrincipal()

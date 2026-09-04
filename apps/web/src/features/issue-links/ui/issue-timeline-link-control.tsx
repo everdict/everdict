@@ -14,20 +14,20 @@ import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
-// 능력 컨트롤과 같은 문턱값 — 스크롤로만 찾게 두지 않는다.
+// The same threshold as the capability control — people are not left to find things by scrolling.
 const SEARCH_FROM = 7
 
-// 프로덕트/릴리즈 한 항목 — 링크는 UUID 를 들고 있으므로, 이 컨트롤은 항상 **이름으로** 그린다.
+// One product or release entry — the link holds a UUID, so this control always draws it **by name**.
 export interface TimelineLinkOption {
   id: string
   label: string
   hint?: string
 }
 
-// 이 이슈가 막거나 속하는 프로덕트/릴리즈 — 상태·프로젝트와 같은 속성 열의 한 줄이다. 능력 컨트롤과 같은
-// 문법(즉시 저장·실패 시 되돌림)이지만 별도 컴포넌트인 이유: 능력 칩은 id 가 사람이 읽는 이름이지만
-// 프로덕트/릴리즈의 id 는 UUID 라 항상 이름으로 풀어 그려야 하고, 대상이 지워졌으면 그 사실을 말해야 한다.
-// 릴리즈 게이트는 이 링크를 역방향 질의로 세므로, 여기서 거는 것이 곧 게이트의 근거가 된다.
+// The products and releases this issue blocks or belongs to — a row in the same attribute column as status and project. It shares the capability
+// control's grammar (save immediately, roll back on failure) but is a separate component because a capability chip's id IS the name a person
+// reads, while a product's or release's id is a UUID that always has to be resolved into a name — and a deleted target has to SAY so.
+// The release gate counts these links with a reverse query, so attaching one here becomes the gate's own grounds.
 export function IssueTimelineLinkControl({
   workspace,
   issueId,
@@ -51,7 +51,7 @@ export function IssueTimelineLinkControl({
   const [selected, setSelected] = useState<string[]>(() => links.map((link) => link.id))
   const [seen, setSeen] = useState(() => links.map((link) => link.id).join(' '))
 
-  // 서버가 실어 온 값이 진실 — 능력 컨트롤과 같은 재동기화 규칙(저장 중에는 맞추지 않는다).
+  // What the SERVER carried is the truth — the same resynchronization rule as the capability control (it does not follow while a save is in flight).
   const fromServer = links.map((link) => link.id).join(' ')
   if (!pending && fromServer !== seen) {
     setSeen(fromServer)

@@ -1,19 +1,19 @@
-// 바이트를 그대로 돌려주는 BFF 라우트(첨부 이미지·워크스페이스 파일)가 공유하는 응답 조립.
+// The response assembly shared by the BFF routes that return bytes verbatim (attachment images, workspace files).
 //
-// Range 를 지원하는 이유는 성능이 아니라 재생 자체다: Safari 는 서버가 206 을 못 내면 <video> 를 아예 틀지
-// 않고, Chrome 도 Range 없이는 버퍼 밖으로 탐색하지 못한다. 우리 라우트는 어차피 바이트를 통째로 손에 쥐고
-// 있으니(제어 평면이 그렇게 준다) 잘라 주는 것은 공짜다.
+// Range is supported for PLAYBACK rather than performance: Safari will not play a <video> at all when the server cannot answer 206, and even
+// Chrome cannot seek beyond its buffer without Range. Our routes hold the whole byte string in hand anyway (that is how the control plane
+// serves it), so slicing it is free.
 
 export interface ByteRange {
   start: number
-  end: number // 포함 경계(RFC 7233)
+  end: number // an INCLUSIVE bound (RFC 7233)
 }
 
 const RANGE_RE = /^bytes=(\d*)-(\d*)$/
 
-// undefined = Range 요청이 아니다(전체를 준다) · 'unsatisfiable' = 파일 밖을 요구했다(416).
-// 여러 구간을 한 번에 요구하는 요청(`bytes=0-9,20-29`)은 전체 응답으로 답한다 — 규격이 허용하는 답이고,
-// multipart/byteranges 를 조립할 이유가 이 라우트에는 없다.
+// undefined = not a Range request (serve the whole thing) · 'unsatisfiable' = asked for something outside the file (416).
+// A request asking for several ranges at once (`bytes=0-9,20-29`) is answered with the whole response — an answer the spec allows, and there
+// is no reason for these routes to assemble multipart/byteranges.
 export function parseByteRange(
   header: string | null | undefined,
   size: number
@@ -24,7 +24,7 @@ export function parseByteRange(
   const [, rawStart = '', rawEnd = ''] = m
   if (rawStart === '' && rawEnd === '') return undefined
 
-  // `bytes=-500` = 마지막 500 바이트. 파일보다 큰 접미 길이는 전체를 뜻한다.
+  // `bytes=-500` = the LAST 500 bytes. A suffix length larger than the file means the whole thing.
   if (rawStart === '') {
     if (size === 0) return 'unsatisfiable'
     const suffix = Number(rawEnd)
@@ -39,17 +39,17 @@ export function parseByteRange(
   return { start, end }
 }
 
-// 이 바이트는 "그 이슈/그 워크스페이스를 읽을 수 있는 사람"의 것이라, 공용 캐시에 사본이 남으면 안 된다.
+// These bytes belong to "whoever can read that issue / that workspace", so no copy may be left in a shared cache.
 const PRIVATE_CACHE = 'private, max-age=300'
 
-// 응답 본문으로 넘길 뷰. `new Uint8Array(buffer)` 로 감싸면 요청마다 파일을 통째로 복사한다(5 MiB 영상이면
-// 요청당 5 MiB) — 같은 메모리를 가리키는 뷰를 만들어 복사를 없앤다. Buffer 를 그대로 주지 않는 건 타입 때문이다
-// (BodyInit 은 Buffer 를 모른다).
+// The view passed as the response body. Wrapping it as `new Uint8Array(buffer)` copies the whole file on every request (5 MiB per request for
+// a 5 MiB video) — a view over the SAME memory removes the copy. The Buffer is not passed directly because of types
+// (BodyInit does not know Buffer).
 function view(bytes: Buffer): Uint8Array<ArrayBuffer> {
   const { buffer } = bytes
   if (buffer instanceof ArrayBuffer)
     return new Uint8Array(buffer, bytes.byteOffset, bytes.byteLength)
-  // Node 의 Buffer 가 SharedArrayBuffer 위에 앉는 일은 없지만 타입은 그 가능성을 남긴다 — 그 경우에만 복사한다.
+  // Node's Buffer never sits on a SharedArrayBuffer, but the type leaves that possibility open — only then is it copied.
   return new Uint8Array(bytes)
 }
 
@@ -66,7 +66,7 @@ export function bytesResponse(
     'cache-control': PRIVATE_CACHE,
     'accept-ranges': 'bytes',
   })
-  // 이름은 첨부가 아니라 표시용이다 — 본문 안에서 그려져야 하니 inline, 다운로드할 때 쓸 이름만 실어 준다.
+  // The name is for DISPLAY rather than for an attachment — it has to render inside the body, so `inline`, carrying only the name to use when downloading.
   if (fileName !== undefined) {
     headers.set('content-disposition', `inline; filename*=UTF-8''${encodeURIComponent(fileName)}`)
   }

@@ -19,14 +19,14 @@ import { ISSUE_PRIORITIES, ISSUE_STATUSES, type IssuePriority, type IssueStatus 
 //
 // Only the type crosses from `./display` — the runtime direction is display → view, never back.
 
-// 묶는 기준. 전부 이슈의 스칼라 필드라 한 이슈는 정확히 한 그룹에 속한다 — 라벨이 빠진 이유는 제어 평면과
-// 같다(이슈 하나가 여러 라벨을 들고 있어서 그룹 합이 목록보다 커진다).
+// The grouping key. All of them are SCALAR fields of an issue, so one issue belongs to exactly one group — labels are excluded for the
+// same reason as in the control plane (one issue carries several labels, so the groups would sum to more than the list).
 export const ISSUE_GROUP_BYS = ['status', 'assignee', 'priority', 'project'] as const
 export const issueGroupBySchema = z.enum(ISSUE_GROUP_BYS)
 export type IssueGroupBy = WireIssueGroupBy
 
-// 묶지 않고 한 줄로 — 그룹 기준의 한 값이 아니라 별도 값이다. 제어 평면의 `groupBy` 는 집계를 위한 것이라
-// "안 묶음"이라는 답이 없다(집계할 것이 없으니까).
+// Ungrouped, as one flat list — a separate value rather than one of the grouping keys. The control plane's `groupBy` exists for the
+// AGGREGATE, so it has no answer for "not grouped" (there is nothing to aggregate).
 export const ISSUE_GROUPINGS = ['none', ...ISSUE_GROUP_BYS] as const
 export const issueGroupingSchema = z.enum(ISSUE_GROUPINGS)
 export type IssueGrouping = (typeof ISSUE_GROUPINGS)[number]
@@ -35,8 +35,8 @@ export const ISSUE_ORDERS = ['updated', 'created', 'priority', 'due'] as const
 export const issueOrderSchema = z.enum(ISSUE_ORDERS)
 export type IssueOrder = WireIssueOrder
 
-// 목록이냐 보드냐. 보드는 그룹을 컬럼으로 세우므로 「묶지 않음」과는 함께 설 수 없다 — `issueViewOf` 가
-// 그 조합을 상태 그룹으로 되돌린다(빈 화면 대신 뜻이 통하는 화면).
+// List or board. A board stands its groups up as columns, so it cannot coexist with "ungrouped" — `issueViewOf` folds that combination
+// back to grouping by status (a screen that means something, rather than an empty one).
 export const ISSUE_LAYOUTS = ['list', 'board'] as const
 export const issueLayoutSchema = z.enum(ISSUE_LAYOUTS)
 export type IssueLayout = (typeof ISSUE_LAYOUTS)[number]
@@ -60,12 +60,12 @@ export interface IssueView extends IssueDisplay {
   filters: IssueFilters
 }
 
-// 필터는 축마다 "이 중 아무거나". 빈 배열이 아니라 아예 없는 것이 「그 축은 안 걸었다」다 — 배열이 비었다는
-// 건 "고르긴 했는데 아무것도" 라서 제어 평면이 아무것도 안 주는 게 맞다.
+// A filter is "any of these" per axis. ABSENT, rather than an empty array, is "that axis is not filtered" — an empty array means
+// "something was picked and it was nothing", and the control plane is right to return nothing for it.
 export interface IssueFilters {
   status?: IssueStatus[]
   priority?: IssuePriority[]
-  // 빈 문자열은 「담당자 없음」 — 쿼리 파라미터에는 null 이 없고, 그 버킷은 실제로 사람들이 거르는 그룹이다.
+  // The empty string is "unassigned" — a query parameter has no null, and that bucket is a group people genuinely filter by.
   assignee?: string[]
   label?: string[]
   project?: string[]
@@ -97,7 +97,7 @@ export type IssueViewParams = {
   cursor?: string
 }
 
-// 하나든 여럿이든 배열로. `?status=todo&status=done` 이 집합의 철자다.
+// One or many, always as an array. `?status=todo&status=done` is how a set is spelled.
 function asArray(value: string | string[] | undefined): string[] | undefined {
   if (value === undefined) return undefined
   return Array.isArray(value) ? value : [value]
@@ -149,8 +149,8 @@ export function issueViewHref(basePath: string, view: IssueView): string {
   return `${basePath}${qs ? `?${qs}` : ''}`
 }
 
-// 한 축의 값을 켜고 끈다 — 필터 메뉴의 유일한 동작. 마지막 값을 끄면 그 축 자체가 사라진다(빈 배열로 남으면
-// "아무것도 안 고른 축"이 되어 목록이 통째로 빈다).
+// Toggle one value on an axis — the only action of the filter menu. Turning the LAST value off removes the axis itself (left as an empty
+// array it becomes "an axis with nothing picked" and the list empties entirely).
 export function toggleIssueFilter(
   filters: IssueFilters,
   facet: IssueFilterFacet,
@@ -168,8 +168,8 @@ export function issueFilterCount(filters: IssueFilters): number {
   return ISSUE_FILTER_FACETS.reduce((sum, facet) => sum + (filters[facet]?.length ?? 0), 0)
 }
 
-// 화면 → 제어 평면 질의. 「완료 감춤」이 상태 필터로 번역되는 곳이 여기다: 서버가 이해하는 어휘는 상태
-// 집합뿐이고, 사용자가 상태를 직접 골랐다면 그 선택이 이긴다(명시적 선택을 UI 기본값이 덮으면 고장이다).
+// The screen → the control plane query. This is where "hide completed" is translated into a status filter: the only vocabulary the server
+// understands is a status SET, and an explicit user choice of statuses wins (a UI default overriding an explicit choice is a defect).
 export function issueQueryFilters(view: IssueView): IssueFilters & { parent?: string } {
   const status =
     view.filters.status ??
@@ -181,8 +181,8 @@ export function issueQueryFilters(view: IssueView): IssueFilters & { parent?: st
   }
 }
 
-// 그룹을 그릴 순서. 상태와 우선순위는 어휘 자체가 순서다(진행 중이 백로그 위에 있어야 보드로 읽힌다);
-// 사람·프로젝트·사이클은 이름의 순서가 없으므로 제어 평면이 준 「큰 그룹 먼저」를 그대로 따른다.
+// The order the groups are drawn in. For status and priority the vocabulary IS the order (in-progress has to sit above backlog for it to
+// read as a board); people, projects and cycles have no name order, so the control plane's "largest group first" is followed verbatim.
 const STATUS_BOARD_ORDER: IssueStatus[] = [
   'regressed',
   'in_progress',
@@ -211,9 +211,9 @@ export function orderIssueGroups(
   })
 }
 
-// 보드/그룹 목록이 실제로 세우는 그룹들. 제어 평면은 이슈가 있는 그룹만 세지만, 상태·우선순위는 **비어
-// 있어도 컬럼이 서야** 한다 — 아무도 안 하고 있는 「진행 중」이 사라지면 보드는 그 칸이 없는 것처럼 읽히고,
-// 무엇보다 그리로 카드를 끌어다 놓을 자리가 없어진다.
+// The groups a board or grouped list actually stands up. The control plane counts only groups that HAVE issues, but status and priority
+// must **stand a column even when empty** — an "in progress" nobody is in disappearing makes the board read as though that column does
+// not exist, and above all leaves nowhere to drag a card to.
 export function issueGroupsToRender(
   counts: readonly IssueGroupCount[],
   groupBy: IssueGroupBy,
@@ -222,7 +222,7 @@ export function issueGroupsToRender(
   const seen = new Map(counts.map((group) => [group.key, group.count]))
   if (groupBy === 'status') {
     const columns = STATUS_BOARD_ORDER.filter(
-      // 「완료 이슈 표시」를 끈 화면에 완료 컬럼을 세우면 언제나 0 이다 — 끈 것을 다시 보여주는 셈이다.
+      // Standing a done column on a screen with "show completed issues" turned off is always zero — it is showing back what was turned off.
       (status) =>
         view.filters.status?.includes(status) ??
         (view.showCompleted || !COMPLETED_STATUSES.includes(status))
@@ -234,12 +234,12 @@ export function issueGroupsToRender(
       (priority) => view.filters.priority?.includes(priority) ?? true
     ).map((priority) => ({ key: priority, count: seen.get(priority) ?? 0 }))
   }
-  // 나머지 축은 어휘가 열려 있다 — 워크스페이스의 모든 멤버로 컬럼을 세우면 한 번도 이슈를 받은 적 없는
-  // 사람들의 빈 칸이 화면을 채운다. 제어 평면이 센 그룹만, 센 순서(큰 것 먼저)대로.
+  // The remaining axes have an OPEN vocabulary — standing a column for every workspace member fills the screen with empty slots for
+  // people who never received an issue. Only the groups the control plane counted, in the order it counted them (largest first).
   return [...counts]
 }
 
-// 드리프트 가드 — 로컬 어휘와 와이어 계약이 상호 대입 가능해야 한다.
+// The drift guard — the local vocabulary and the wire contract must be mutually assignable.
 type AssertAssignable<A extends B, B> = A
 type _groupByFwd = AssertAssignable<z.infer<typeof issueGroupBySchema>, WireIssueGroupBy>
 type _groupByBack = AssertAssignable<WireIssueGroupBy, z.infer<typeof issueGroupBySchema>>

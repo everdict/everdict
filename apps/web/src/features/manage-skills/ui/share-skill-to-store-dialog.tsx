@@ -12,21 +12,21 @@ import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
 
-// 스킬 → 스토어 발행. 워크스페이스 스킬(living doc)을 capability 스토어의 버전드 skill 자산으로 퍼블리시한다 —
-// upsert 라 재발행이 곧 갱신(콘텐츠 변경 시 패치 범프, 동일하면 no-op). 이후 이곳의 수정은 자동 반영되지 않는다
-// (스토어는 불변 버전, 스킬은 제자리 편집 — 갱신하려면 다시 발행).
+// Skill → store publication. It publishes a workspace skill (a living doc) as a VERSIONED skill asset in the capability store —
+// it is an upsert, so republishing IS updating (a patch bump when the content changed, a no-op when identical). Edits here afterwards are NOT reflected automatically
+// (the store holds immutable versions and a skill is edited in place — to update it, publish again).
 export function ShareSkillToStoreDialog({
   skill,
   canPublishPublic,
   onClose,
 }: {
   skill: Skill
-  canPublishPublic: boolean // admin 이거나 인스턴스 정책(allowMemberPublicPublish)이 열려 있을 때 true
+  canPublishPublic: boolean // true for an admin, or when the instance policy (allowMemberPublicPublish) is open
   onClose: () => void
 }) {
   const t = useTranslations('skillsManager')
   const tc = useTranslations('capabilityStore')
-  // 스토어 id 는 kebab 관례 — 스킬 이름에서 제안하되 편집 가능(같은 id 재발행 = 같은 자산의 새 버전).
+  // A store id follows the kebab convention — suggested from the skill name but editable (republishing the same id = a new version of the same asset).
   const [capId, setCapId] = useState(
     skill.name
       .toLowerCase()
@@ -36,8 +36,8 @@ export function ShareSkillToStoreDialog({
   const [reach, setReach] = useState<'private' | 'workspace' | 'public'>('workspace')
   const [pending, setPending] = useState(false)
 
-  // public 도 항상 목록에 노출 — 권한이 없으면 숨기는 대신 선택 시 사유를 보여주고 발행만 막는다
-  // (스토어 에디터와 동일 패턴; 말없이 숨기면 "왜 없지?"가 된다). 컨트롤플레인이 최종 강제.
+  // `public` is ALWAYS listed — rather than hiding it without permission, selecting it shows the reason and only the publish is blocked
+  // (the same pattern as the store editor; hidden silently it becomes "why is it not there?"). The control plane enforces finally.
   const reachOptions = [
     { value: 'workspace', label: t('reachWorkspace') },
     { value: 'private', label: t('reachPrivate') },
@@ -99,7 +99,7 @@ export function ShareSkillToStoreDialog({
           )}
         </div>
 
-        {/* 무엇이 발행되는지 요약 — 본문 + 파일 수 (내용 미리보기는 스토어 상세가 담당) */}
+        {/* A summary of what will be published — the body plus the file count (a content preview is the store detail's job) */}
         <p className="text-[12px] text-muted-foreground">
           {t('shareToStoreSummary', { name: skill.name, count: skill.files.length })}
         </p>

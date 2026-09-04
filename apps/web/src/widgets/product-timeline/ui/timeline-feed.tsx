@@ -20,10 +20,10 @@ import { ActivityFeed, ActivityRow, type ActivityTone } from '@/shared/ui/activi
 import { Link } from '@/shared/ui/link'
 import { SectionHeader } from '@/shared/ui/section-header'
 
-// GitHub 프로젝트 타임라인 식 사건 피드 — 레인이 "언제쯤 무슨 일이"를 훑게 해 준다면, 이 피드는 같은
-// 사건들을 날짜로 묶어 문장으로 읽게 해 준다: 버전 발행 · 릴리즈 출하/목표 · 이슈 열림/닫힘 · 시리즈
-// 평가 · 평가 계약(하네스/데이터셋/저지)의 버전 등록. 전부 서버가 합성해 준 타임라인 read 에서만 그린다.
-// 날짜·시각은 레인과 같은 UTC 로 읽는다 — 레인의 점이 8/12 인데 피드가 8/13 이라 말하면 어느 쪽도 못 믿는다.
+// A GitHub-project-timeline-style event feed — where the lanes let you SWEEP "roughly when did what happen", this feed groups the same events
+// by date and lets them be READ as sentences: a version published · a release shipped or targeted · an issue opened or closed · a series
+// evaluated · a version of an evaluation contract (harness/dataset/judge) registered. All of it drawn only from the server-composed timeline read.
+// Dates and times are read in the same UTC as the lanes — with a lane dot on 8/12 and the feed saying 8/13, neither can be trusted.
 
 const FEED_INITIAL = 25
 
@@ -35,7 +35,7 @@ interface FeedEvent {
   body: ReactNode
 }
 
-// 원격 주소(GitHub 릴리즈)는 새 탭의 <a> 로, 우리 화면은 Link 로 — 레인의 버전 점과 같은 규칙.
+// A remote address (a GitHub release) is an <a> to a new tab and our own screens are Links — the same rule as the lanes' version dots.
 function linked(href: string, className: string, children: ReactNode): ReactNode {
   return href.startsWith('http') ? (
     <a href={href} target="_blank" rel="noreferrer" className={className}>
@@ -107,8 +107,8 @@ export function TimelineFeed({
       })
     }
     for (const release of timeline.releases) {
-      // 출하는 일어난 사건, 계획은 약속한 날짜 — 톤과 동사가 다르다. 취소된 릴리즈는 피드에 서지 않는다:
-      // 아무도 향해 가지 않는 날짜는 뉴스가 아니다(레인의 지평선 규칙과 같은 이유).
+      // A ship is an event that HAPPENED and a plan is a date that was PROMISED — different tones and different verbs. A cancelled release does
+      // not stand in the feed: a date nobody is heading toward is not news (the same reason as the lanes' horizon rule).
       if (release.status === 'released' && release.releasedAt !== undefined) {
         out.push({
           key: `release:${release.id}`,
@@ -168,7 +168,7 @@ export function TimelineFeed({
             <>
               <Subject href={href}>{issue.identifier}</Subject>
               <span>{t('feed.issueResolved')}</span>
-              {/* 닫힘이 딛고 선 증거 — "해결됨"을 검증 가능한 주장으로 만드는 배치. */}
+              {/* The evidence the closure rests on — the batch that makes "resolved" a checkable claim. */}
               {issue.resolvedByScorecardId !== undefined && (
                 <RefChip href={`/${workspace}/scorecard/${issue.resolvedByScorecardId}`}>
                   {t('feed.evidence')}
@@ -228,7 +228,7 @@ export function TimelineFeed({
   const visible = expanded ? events : events.slice(0, FEED_INITIAL)
   const hidden = events.length - visible.length
 
-  // 날짜 헤더 아래로 그 날의 사건들 — 최신 날부터. UTC 달력 날짜라 레인의 눈금과 같은 날을 말한다.
+  // The events of each day under a date header — newest day first. They are UTC calendar dates, so they name the same day as the lane ticks.
   const days: Array<{ day: string; rows: FeedEvent[] }> = []
   for (const event of visible) {
     const day = event.at.slice(0, 10)

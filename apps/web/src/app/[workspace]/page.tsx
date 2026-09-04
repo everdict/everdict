@@ -22,11 +22,11 @@ import { Skeleton } from '@/shared/ui/skeleton'
 
 export const dynamic = 'force-dynamic'
 
-// 홈 = 프로덕트 타임라인 (사용자 결정 2026-08-08: 펄스 현황판을 걷어내고 제품 축으로 교체).
+// Home = the product timeline (a user decision, 2026-08-08: the pulse status board was removed and replaced by the product axis).
 //
-// 워크스페이스가 결국 답해야 하는 질문은 "우리 제품이 릴리즈 사이에 어떻게 움직였나"다 — 릴리즈(과거+계획),
-// 그 아래에서 움직인 서비스 버전, 워치 시리즈의 품질 추이, 걸린 이슈의 수명이 프로덕트마다 한 축에 눕는다.
-// 프로덕트가 여럿이면 각자 자기 Suspense 로 스트리밍한다: 느린 타임라인 하나가 홈 전체를 잡지 않는다.
+// The question a workspace ultimately has to answer is "how did our product move between releases" — releases (past and planned), the service
+// versions that moved beneath them, the watch series' quality trend, and the lifetime of the issues attached, laid on one axis per product.
+// With several products, each streams behind its own Suspense: one slow timeline does not hold up the whole home screen.
 export default async function OverviewPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('overviewPage')
@@ -78,8 +78,8 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
   )
 }
 
-// 프로덕트 하나의 타임라인 — 홈의 본문. 읽기 실패는 그 프로덕트 칸만 조용히 비운다(상세 페이지가 진짜
-// 오류를 말한다); 컨트롤(싱크·릴리즈 계획·편집)은 전부 프로덕트 자기 페이지의 것이다.
+// One product's timeline — the body of home. A read failure quietly empties only that product's slot (the detail page states the real error);
+// the controls (sync, planning a release, editing) all belong to the product's own page.
 async function ProductTimelineSection({
   workspace,
   product,
@@ -117,7 +117,7 @@ async function ProductTimelineSection({
           </Link>
         }
       />
-      {/* 홈은 요약이라 행동은 걸지 않는다 — 시리즈를 돌리는 건 프로덕트 자신의 화면에서 한다. */}
+      {/* Home is a summary, so no actions are attached — running a series happens on the product's own screen. */}
       <ProductTimelineView
         workspace={workspace}
         productId={product.id}

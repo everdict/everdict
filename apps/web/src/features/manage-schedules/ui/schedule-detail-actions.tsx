@@ -17,9 +17,9 @@ import {
   setScheduleEnabledAction,
 } from '../api/schedule-actions'
 
-// 예약 상세 헤더의 액션 묶음 — 지금 실행 · 일시중지/재개 · 편집 · 삭제.
-// 상태 토글은 목록 카드의 StateIcon+드롭다운 대신, 상세에서는 라벨 버튼(발견성 우선, judge 상세와 동형).
-// 권한은 모두 컨트롤 플레인이 최종 강제 — 여기서는 노출만 제어한다.
+// The action group in the schedule detail header — run now · pause/resume · edit · delete.
+// The state toggle is a LABELLED button on the detail rather than the list card's StateIcon + dropdown (discoverability first, isomorphic to the judge detail).
+// Every permission is enforced finally by the control plane — only the VISIBILITY is controlled here.
 export function ScheduleDetailActions({
   workspace,
   id,
@@ -30,8 +30,8 @@ export function ScheduleDetailActions({
   workspace: string
   id: string
   enabled: boolean
-  canWrite: boolean // 지금 실행 · 토글 · 삭제 (member+)
-  canEdit: boolean // 편집 (생성자 or admin)
+  canWrite: boolean // run now · toggle · delete (member+)
+  canEdit: boolean // edit (the creator or an admin)
 }) {
   const router = useRouter()
   const refresh = useRefresh()

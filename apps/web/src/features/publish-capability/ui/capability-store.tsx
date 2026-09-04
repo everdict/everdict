@@ -68,11 +68,11 @@ import { ReachDialog, VisibilityPicker, WorkspacePicker } from './reach-controls
 
 type Author = { name: string; avatarUrl?: string }
 
-// Store — 매니지드/공개 발행된 capability 카탈로그. 하네스·데이터셋 목록과 같은 행 레이아웃(스탯 + 필터 + 행)이고,
-// 행은 **상세 페이지로 가는 링크**다(제자리 확장도, 모달도 아니다 — 상세는 주소를 가진 라우트라야 인프라 패널과
-// 나란히 놓이고 공유된다). variant='catalog' 는 공개 목록만(가져옴/채택 여부를 행에 표시), variant='mine' 는 내
-// 워크스페이스가 발행한 것(편집/공개범위/삭제 관리 + 발행). 매니지드(첫당사자) 항목은 "기본 제공"이 아니라 스토어가
-// 매니지드하는 것 → 배지로 구분하고, 워크스페이스에 추가하는 일은 상세에서 한다.
+// Store — the catalog of managed/publicly published capabilities. The same row layout as the harness and dataset lists (stats +
+// filters + rows), and a row is a **link to the detail PAGE** (neither an in-place expansion nor a modal — a detail needs an address
+// to sit beside an infra panel and to be shared). variant='catalog' shows public publications only (marking imported/adopted on the
+// row), variant='mine' shows what my workspace published (edit/visibility/delete management plus publishing). A managed (first-party)
+// entry is not "built in" but STORE-MANAGED → distinguished by a badge, and adding it to the workspace happens on the detail.
 export function CapabilityStore({
   items,
   variant,
@@ -93,7 +93,7 @@ export function CapabilityStore({
   authors: Record<string, Author>
   canWrite: boolean
   adoptedKeys: string[]
-  // 이미 가져온 스킬 예제의 출처 키(source/id) — 스킬은 참조가 아니라 워크스페이스 스킬 사본이 되므로 판정 기준이 다르다.
+  // The source keys (source/id) of skill examples already imported — a skill becomes a workspace COPY rather than a reference, so it is judged differently.
   importedSkillKeys: string[]
   adoptedEnvironments: AdoptedEnvironment[]
   myWorkspaces: { id: string; name: string }[]
@@ -104,7 +104,7 @@ export function CapabilityStore({
   allowMemberPublicPublish: boolean
 }) {
   const t = useTranslations('capabilityStore')
-  // 클라이언트 페이지네이션 — 큰 카탈로그에서 한 번에 렌더할 행 수(더 보기로 증가). 필터 변경 시 리셋.
+  // Client-side pagination — how many rows to render at once from a large catalog (raised by "show more"). Reset when a filter changes.
   const PAGE = 24
   const [visibleCount, setVisibleCount] = useState(PAGE)
   const [editing, setEditing] = useState<Capability | 'new' | null>(null)
@@ -112,8 +112,8 @@ export function CapabilityStore({
   const [confirming, setConfirming] = useState<Capability | null>(null)
   const [pending, setPending] = useState(false)
 
-  // 필터 — 하네스/데이터셋 목록과 동일한 지속 필터(검색·종류·상태·정렬). 워크스페이스 + variant 별로 기억.
-  // 카탈로그에서 상태 필터가 사라졌으므로(있는 것은 아예 안 보임) 저장 키를 v2 로 올려 예전 값이 되살아나지 않게 한다.
+  // Filters — the same persisted filters as the harness/dataset lists (search, kind, state, sort). Remembered per workspace and variant.
+  // The state filter is gone from the catalog (what is already there is simply not shown), so the storage key is bumped to v2 so an old value cannot come back.
   const FILTER_DEFAULTS = { query: '', type: 'all', status: 'all', sort: 'recent' }
   const { values, set, reset, dirty } = usePersistentFilters(
     `store:${variant}:v2:${currentWorkspace}`,
@@ -122,14 +122,14 @@ export function CapabilityStore({
   const { query, type, status, sort } = values
 
   const adopted = useMemo(() => new Set(adoptedKeys), [adoptedKeys])
-  // 가져온(import) 환경 이미지 — source/id → 인벤토리 항목(사용가능 검증 상태). environment 의 "가져옴/가져오기"용.
+  // Imported environment images — source/id → inventory entry (its usability verification state). For environment's "imported / import".
   const adoptedEnvMap = useMemo(
     () => new Map(adoptedEnvironments.map((e) => [`${e.source}/${e.id}`, e])),
     [adoptedEnvironments]
   )
-  // 이미 가져온 스킬 예제 — 라이브러리의 사본이 그 출처를 기억한다(구독이 아니라 복사라 채택 목록에는 없다).
+  // Skill examples already imported — the library copy remembers its source (a copy, not a subscription, so it is not in the adoption list).
   const importedSkills = useMemo(() => new Set(importedSkillKeys), [importedSkillKeys])
-  // 이미 워크스페이스에 있는가 — 환경은 인벤토리, 스킬은 라이브러리 사본, 그 외는 에이전트 채택.
+  // Is it already in the workspace — an environment is the inventory, a skill is the library copy, everything else is an agent adoption.
   const inWorkspace = useCallback(
     (c: Capability): boolean =>
       c.spec.type === 'environment'
@@ -140,9 +140,9 @@ export function CapabilityStore({
     [adopted, adoptedEnvMap, importedSkills]
   )
 
-  // public 발행 가능? admin 은 항상, 멤버는 인스턴스 정책이 열려 있을 때. (서버가 최종 강제 — 여기선 UX 게이팅)
+  // May they publish public? An admin always; a member when the instance policy allows it. (The server enforces it finally — this is UX gating.)
   const canPublishPublic = isAdmin || allowMemberPublicPublish
-  // 관리 메뉴(편집/공개범위/삭제)는 내 발행(mine) 뷰에서 + 매니지드가 아니고 + 생성자/admin 일 때만. 카탈로그는 브라우즈 전용.
+  // The management menu (edit/visibility/delete) appears only in the "mine" view, only when not managed, and only for the creator or an admin. The catalog is browse-only.
   const canManage = (c: Capability) =>
     variant === 'mine' && !isBuiltInCapability(c) && (c.createdBy === currentSubject || isAdmin)
   const authorOf = (createdBy: string): Author => {
@@ -153,8 +153,8 @@ export function CapabilityStore({
     }
   }
 
-  // 카탈로그는 발견 목록이다 — 이미 워크스페이스에 있는 것은 여기서 감춘다(관리는 설정 › 에이전트 · 환경).
-  // 내 발행(mine)은 내가 낸 것을 전부 보여줘야 하므로 감추지 않고, 상태 필터로 구분한다.
+  // The catalog is a DISCOVERY list — what is already in the workspace is hidden here (managed under Settings › Agent · Environments).
+  // "Mine" must show everything I published, so it hides nothing and distinguishes with the state filter instead.
   const browsable = useMemo(
     () => (variant === 'catalog' ? items.filter((c) => !inWorkspace(c)) : items),
     [items, variant, inWorkspace]
@@ -173,7 +173,7 @@ export function CapabilityStore({
         c.tags.some((tag) => tag.toLowerCase().includes(q))
       )
     })
-    // 매니지드(카탈로그의 얼굴)를 위로, 그다음 선택한 정렬. recent=발행 최신, name=이름, type=종류.
+    // Managed (the catalog's face) first, then the chosen sort. recent = newest publication, name = by name, type = by kind.
     return [...filtered].sort((a, b) => {
       if (isBuiltInCapability(a) !== isBuiltInCapability(b)) return isBuiltInCapability(a) ? -1 : 1
       if (sort === 'name') return a.name.localeCompare(b.name)
@@ -183,7 +183,7 @@ export function CapabilityStore({
     })
   }, [browsable, query, type, status, sort, variant, inWorkspace])
 
-  // 필터가 바뀌면 페이지네이션을 처음으로 되돌린다.
+    // Reset pagination to the first page whenever a filter changes.
   useEffect(() => setVisibleCount(PAGE), [query, type, status, sort])
   const visible = list.slice(0, visibleCount)
 
@@ -264,7 +264,7 @@ export function CapabilityStore({
         <StatCard
           label={
             variant === 'catalog' ? (
-              // 목록에서 감춘 항목이 어디로 갔는지 — 인라인 안내문 대신 info 아이콘으로.
+              // Where the entries hidden from the list went — an info icon rather than an inline paragraph.
               <span className="inline-flex items-center gap-1">
                 {t('statInWorkspace')}
                 <InfoTip content={t('statInWorkspaceTip')} align="start" />
@@ -297,7 +297,7 @@ export function CapabilityStore({
           className="w-[140px]"
           aria-label={t('typeLabel')}
         />
-        {/* 상태 필터는 내 발행 뷰 전용 — 카탈로그는 "아직 워크스페이스에 없는 것"만 담기 때문에 고를 상태가 없다. */}
+        {/* The state filter is exclusive to the "mine" view — the catalog only ever holds "not yet in the workspace", so there is no state to pick. */}
         {variant === 'mine' && (
           <Combobox
             options={statusOptions}
@@ -319,7 +319,7 @@ export function CapabilityStore({
       </div>
 
       {list.length === 0 ? (
-        // 카탈로그를 전부 가져간 경우와 "아직 아무것도 없음"은 다른 상황 — 감춘 이유를 말해 준다.
+        // Having imported the whole catalog and "there is nothing yet" are different situations — say why things are hidden.
         variant === 'catalog' && browsable.length === 0 && items.length > 0 ? (
           <EmptyState icon={<CircleCheck />} title={t('allAddedTitle')} hint={t('allAddedHint')} />
         ) : (
@@ -389,9 +389,9 @@ export function CapabilityStore({
                       <RowMeta capability={c} />
                     </div>
                   </div>
-                  {/* 우측 — 행은 읽기 전용이다. 워크스페이스에 추가/제거는 상세에서만 하므로 행마다 버튼이 자리를 먹지
-                      않는다(리니어st. 조용한 행 + 호버 시 드릴인 신호). 관리 메뉴만 제자리에 남고, 행 전체가 상세로 가는
-                      링크이므로 메뉴 클릭은 이동을 막는다. */}
+                  {/* Right — the row is READ-ONLY. Adding to or removing from the workspace happens only on the detail, so no button eats row space
+                      (Linear-style: a quiet row, with a drill-in signal on hover). Only the management menu stays in place, and since the whole row is
+                      a link to the detail, a click on the menu suppresses the navigation. */}
                   <div className="flex shrink-0 items-center gap-1.5">
                     {canManage(c) && (
                       <span
@@ -508,7 +508,7 @@ export function CapabilityStore({
   )
 }
 
-// 행 메타 — 종류별 한 줄 요약(mcp=제공 도구, code=언어+읽기전용, environment=이미지 참조) + 태그 몇 개. 없으면 렌더 안 함.
+// Row meta — a one-line summary per kind (mcp = the tools it provides, code = language + read-only, environment = the image ref) plus a few tags. Nothing to say: not rendered.
 function RowMeta({ capability }: { capability: Capability }) {
   const t = useTranslations('capabilityStore')
   const s = capability.spec
@@ -551,7 +551,7 @@ function RowMeta({ capability }: { capability: Capability }) {
   )
 }
 
-// 발행/편집 다이얼로그. 새 capability 면 id + 타입 선택 + 공개범위 선택; 편집이면 콘텐츠만(reach 는 ⋯ → reach 변경).
+// The publish/edit dialog. A NEW capability picks id + type + visibility; an edit is content only (reach is ⋯ → change reach).
 function CapabilityEditorDialog({
   capability,
   myWorkspaces,
@@ -581,25 +581,25 @@ function CapabilityEditorDialog({
 
   // mcp
   const mcp = capability?.spec.type === 'mcp' ? capability.spec : undefined
-  // 두 transport: 원격 HTTP url(default) 또는 컨테이너 이미지(stdio). 편집 시 image 가 있으면 이미지 모드.
+  // Two transports: a remote HTTP url (default) or a container image (stdio). When editing, the presence of an image means image mode.
   const [mcpImageMode, setMcpImageMode] = useState(!!mcp?.image)
   const [url, setUrl] = useState(mcp?.url ?? '')
   const [image, setImage] = useState(mcp?.image ?? '')
   const [imageArgs, setImageArgs] = useState((mcp?.args ?? []).join(' '))
   const [provides, setProvides] = useState((mcp?.provides ?? []).join(', '))
   const [mcpWrite, setMcpWrite] = useState(mcp?.write ?? false)
-  // 효과 계약(O4) — mcp/code 공용 한 벌. write 가능해질 때만 폼에 나오고, 저장 시에도 그때만 실린다:
-  // 읽기 전용 도구에 계약을 붙이는 건 허용되지만, 자동으로 만들어 붙이면 아무도 하지 않은 선언이 된다.
+  // The effect contract (O4) — one set shared by mcp and code. It appears in the form only once the tool can WRITE, and it is sent only then:
+  // attaching a contract to a read-only tool is allowed, but generating one automatically makes it a declaration nobody made.
   const [effects, setEffects] = useState<EffectContract>(
     (capability?.spec.type === 'mcp' || capability?.spec.type === 'code'
       ? capability.spec.effects
       : undefined) ?? { sideEffect: 'workspace' }
   )
-  // mcp 연결 테스트(probe) — 테스트 전용 토큰(미저장) + 결과(도달성 + 발견 도구, provides 자동채움).
+  // The mcp connection test (probe) — a test-only token (never stored) plus the result (reachability + discovered tools, which fill `provides`).
   const [probeToken, setProbeToken] = useState('')
   const [probing, setProbing] = useState(false)
   const [probeResult, setProbeResult] = useState<ProbeCapabilityMcpResult | null>(null)
-  // 저장 전 검증(dry-run) 결과 — 전 종류 공통(footer 에 인라인 표시).
+  // The pre-save validation (dry-run) result — common to every kind (shown inline in the footer).
   const [validateResult, setValidateResult] = useState<ValidateCapabilityResult | null>(null)
   // code
   const code = capability?.spec.type === 'code' ? capability.spec : undefined
@@ -607,7 +607,7 @@ function CapabilityEditorDialog({
   const [source, setSource] = useState(code?.code ?? '')
   const [params, setParams] = useState(code ? JSON.stringify(code.parametersSchema, null, 2) : '{}')
   const [isReadOnly, setIsReadOnly] = useState(code?.isReadOnly ?? true)
-  // 워크드 예제(행 편집: 이름/입력 JSON/노트) — 스토어 상세·try 실행·에이전트 tool description 3중 용도.
+  // Worked examples (row editing: name / input JSON / note) — used three ways: the store detail, the try runner, and the agent tool description.
   const [codeExamples, setCodeExamples] = useState<{ name: string; input: string; note: string }[]>(
     (code?.examples ?? []).map((e) => ({
       name: e.name ?? '',
@@ -615,7 +615,7 @@ function CapabilityEditorDialog({
       note: e.note ?? '',
     }))
   )
-  // skill · environment 공용 — 둘 다 instructions 본문을 가진다(스킬=절차, 환경=구성 설명).
+  // Shared by skill and environment — both carry an instructions body (a skill = the procedure, an environment = the composition described).
   const skill = capability?.spec.type === 'skill' ? capability.spec : undefined
   const env = capability?.spec.type === 'environment' ? capability.spec : undefined
   const [instructions, setInstructions] = useState(skill?.instructions ?? env?.instructions ?? '')
@@ -626,7 +626,7 @@ function CapabilityEditorDialog({
   const [envOs, setEnvOs] = useState(env?.contents?.os ?? '')
   const [envArch, setEnvArch] = useState(env?.contents?.arch ?? '')
   const [envPreset, setEnvPreset] = useState(env?.preset ? JSON.stringify(env.preset, null, 2) : '')
-  // environment 이미지 태그 피커 — 워크스페이스 레지스트리의 repository 태그를 조회해 image ref(host/repo:tag)를 조립.
+  // The environment image tag picker — reads the workspace registry's repository tags and assembles an image ref (host/repo:tag).
   const [tagRegistry, setTagRegistry] = useState(imageRegistries[0]?.name ?? '')
   const [tagRepo, setTagRepo] = useState('')
   const [tagLoading, setTagLoading] = useState(false)
@@ -684,7 +684,7 @@ function CapabilityEditorDialog({
           return { error: t('paramsInvalid') }
         }
       }
-      // 예제 행 → spec.examples. 완전히 빈 행은 건너뛰고, 입력이 JSON 오브젝트가 아니면 저장을 막는다.
+      // Example rows → spec.examples. A completely empty row is skipped, and an input that is not a JSON object blocks the save.
       const examples: NonNullable<Extract<CapabilitySpec, { type: 'code' }>['examples']> = []
       for (const row of codeExamples) {
         if (
@@ -718,7 +718,7 @@ function CapabilityEditorDialog({
       }
     }
     if (type === 'environment') {
-      // preset 은 토폴로지 서브어휘 JSON — 편집은 raw JSON(overrides JSON textarea 선례), 최종 검증은 컨트롤플레인.
+      // A preset is topology sub-vocabulary JSON — edited as raw JSON (following the overrides JSON textarea), and finally validated by the control plane.
       type EnvPreset = NonNullable<Extract<CapabilitySpec, { type: 'environment' }>['preset']>
       let preset: EnvPreset | undefined
       const rawPreset = envPreset.trim()
@@ -755,11 +755,11 @@ function CapabilityEditorDialog({
         instructions,
       }
     }
-    // 부속 파일은 위저드가 저작하지 않는다 — 기존 스킬을 편집할 땐 원본 파일셋을 보존(안 그러면 편집이 파일을 지운다).
+    // The wizard does not author attached files — editing an existing skill PRESERVES the original file set (otherwise an edit deletes the files).
     return { type: 'skill', instructions, files: skill?.files ?? [] }
   }
 
-  // mcp 연결 테스트 — URL(+ 선택 토큰)로 test-connect 하고 도구를 발견한다. 실패는 결과(reachable:false)로 표시.
+  // The mcp connection test — test-connect with the URL (+ optional token) and discover its tools. A failure is a RESULT (reachable:false), not an error.
   const runProbe = () => {
     setProbing(true)
     setProbeResult(null)
@@ -769,12 +769,12 @@ function CapabilityEditorDialog({
       else toast.error(r.error ?? t('probeError'))
     })
   }
-  // 발견한 도구 이름을 provides 로 채운다(수동 입력 대체).
+  // Fill `provides` from the discovered tool names (replacing manual entry).
   const fillProvides = () => {
     if (probeResult) setProvides(probeResult.tools.map((tool) => tool.name).join(', '))
   }
 
-  // environment 이미지 태그 조회 — repository(+ 선택 레지스트리)의 태그 목록.
+  // Environment image tag lookup — the tag list of a repository (+ an optional registry).
   const runListTags = () => {
     setTagLoading(true)
     setImageTags(null)
@@ -784,13 +784,13 @@ function CapabilityEditorDialog({
       else toast.error(r.error ?? t('tagsError'))
     })
   }
-  // 태그를 고르면 host/repository:tag 로 image ref 를 조립한다. (mutable 태그 경고는 저장/검증에서 안내)
+  // Picking a tag assembles the image ref as host/repository:tag. (A mutable-tag warning is raised at save/validate.)
   const pickTag = (tag: string) => {
     const host = imageRegistries.find((reg) => reg.name === tagRegistry)?.host
     setEnvImage(`${host ? `${host}/` : ''}${tagRepo.trim()}:${tag}`)
   }
 
-  // 저장 전 검증(dry-run) — 새 capability/새 버전 여부 + 예측 버전 + 이미지 경고를 인라인으로 보여준다.
+  // Pre-save validation (dry-run) — shows inline whether this is a new capability or a new version, the predicted version, and image warnings.
   const runValidate = () =>
     void (async () => {
       setPending(true)
@@ -831,7 +831,7 @@ function CapabilityEditorDialog({
         })
         if (r.ok) {
           toast.success(isNew ? t('published', { name }) : t('saved', { name }))
-          // 이미지 분류 경고(warn-not-block) — 발행은 성공, 풀 보장/재현성만 주의 환기.
+          // Image classification warnings (warn, not block) — the publish succeeds; only pull guarantees and reproducibility are flagged.
           for (const w of r.result?.imageWarnings ?? [])
             toast.warning(
               t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
@@ -897,7 +897,7 @@ function CapabilityEditorDialog({
           />
         </div>
 
-        {/* 타입 — 새 capability 만 선택 가능(콘텐츠 정체성) */}
+        {/* Type — selectable only on a NEW capability (it is content identity) */}
         <div className="space-y-1">
           <Label>{t('type')}</Label>
           <div className="flex gap-1">
@@ -922,7 +922,7 @@ function CapabilityEditorDialog({
 
         {type === 'mcp' && (
           <>
-            {/* transport 토글 — 원격 HTTP url vs 컨테이너 이미지(stdio, `docker run -i`) */}
+            {/* The transport toggle — a remote HTTP url vs a container image (stdio, `docker run -i`) */}
             <div className="space-y-1">
               <Label>{t('mcpTransport')}</Label>
               <div className="flex gap-1">
@@ -983,7 +983,7 @@ function CapabilityEditorDialog({
                     className="font-mono text-[13px]"
                   />
                 </div>
-                {/* 연결 테스트 — URL(+선택 토큰)로 test-connect 하고 도구를 발견 → provides 자동채움 */}
+                {/* Connection test — test-connect with the URL (+ optional token) and discover its tools → fills `provides` */}
                 <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
                   <div className="flex flex-wrap items-end gap-2">
                     <div className="min-w-[10rem] flex-1 space-y-1">
@@ -1123,7 +1123,7 @@ function CapabilityEditorDialog({
               <span>{t('isReadOnly')}</span>
             </label>
             {!isReadOnly && <EffectContractEditor value={effects} onChange={setEffects} t={t} />}
-            {/* 워크드 예제 — 이 도구가 무엇을 하는지 입력 형태로 보여준다(상세 표시·try·tool description 3중 용도) */}
+            {/* Worked examples — show what this tool does in the shape of its INPUT (used three ways: the detail view, try, and the tool description) */}
             <div className="space-y-1.5">
               <Label>{t('examplesLabel')}</Label>
               <p className="text-[12px] text-muted-foreground">{t('examplesHint')}</p>
@@ -1182,7 +1182,7 @@ function CapabilityEditorDialog({
                 {t('addExample')}
               </Button>
             </div>
-            {/* 발행 전 검증 — check(구문)와 run(예제 실행). 코드만 보고 발행하지 않는다. */}
+            {/* Pre-publish validation — check (syntax) and run (execute an example). Nothing is published on a reading of the code alone. */}
             <CodeTryPanel
               showCheck
               buildTarget={() => {
@@ -1221,7 +1221,7 @@ function CapabilityEditorDialog({
                 className="font-mono text-[13px]"
               />
             </div>
-            {/* 이미지 태그 피커 — 워크스페이스 레지스트리의 repository 태그를 조회해 image ref 를 조립(수동 타이핑 대체) */}
+            {/* The image tag picker — reads the workspace registry's repository tags and assembles the image ref (replacing manual typing) */}
             {imageRegistries.length > 0 && (
               <div className="space-y-2 rounded-md border border-border bg-secondary/30 p-3">
                 <div className="flex flex-wrap items-end gap-2">
@@ -1386,7 +1386,7 @@ function CapabilityEditorDialog({
           </div>
         )}
 
-        {/* 저장 전 검증(dry-run) 결과 — 새 capability/새 버전 여부 + 예측 버전 + 스펙 오류/이미지 경고 */}
+        {/* The pre-save validation (dry-run) result — new capability or new version, the predicted version, and spec errors / image warnings */}
         {validateResult &&
           (validateResult.ok ? (
             <div className="space-y-1.5 rounded-md border border-border bg-secondary/30 p-3 text-[12.5px]">
@@ -1443,10 +1443,10 @@ function CapabilityEditorDialog({
   )
 }
 
-// 필요 시크릿 편집 — 이름 + 설명 행(추가/삭제). 채택자가 자기 시크릿으로 채운다(값 아님, 이름만).
-// 효과 계약(O4) 편집기 — write 가능한 도구에서만 보인다. 컨트롤플레인 도메인 가드가 write 도구에 선언을
-// 요구하므로(선언 없이 저장하면 400), 이 폼이 없으면 웹에서는 변경 도구를 아예 만들 수 없었다. 되돌리기는
-// 태그된 형태다: 문자열 산문은 사람만 읽지만, 호출 시점 권한 게이트는 답을 **판정**해야 한다.
+// Required-secret editing — name + description rows (add/remove). The adopter fills them with their own secrets (names, never values).
+// The effect contract (O4) editor — visible only on a tool that can write. The control plane's domain guard REQUIRES a declaration on a
+// write tool (saving without one is a 400), so without this form the web could not create a mutating tool at all. A rollback is a TAGGED
+// shape: prose is read by people only, and the permission gate at call time has to DECIDE on the answer.
 function EffectContractEditor({
   value,
   onChange,

@@ -15,9 +15,9 @@ import { SectionHeader } from '@/shared/ui/section-header'
 import { TimelineFeed } from './timeline-feed'
 import { TimelineLanes } from './timeline-lanes'
 
-// 프로덕트 타임라인 — 서버가 합성해 준 한 번의 read 를 그린다(웹은 파생하지 않는다).
-// 시리즈마다 선 차트 하나: x 는 그 시리즈의 배치 시각, 점을 고르면 그 스코어카드로 간다. 릴리즈와 버전은
-// 같은 축의 사건이라 차트 위아래에 스트립/피드로 눕는다 — 측정이 없던 지점은 null 로 선이 끊긴다(0 이 아니다).
+// The product timeline — it draws the one read the server composed (the web derives nothing).
+// One line chart per series: x is that series' batch time, and picking a point goes to that scorecard. Releases and versions are events on
+// the SAME axis, so they lie above and below the chart as a strip and a feed — a point with no measurement breaks the line as null (not 0).
 export function ProductTimelineView({
   workspace,
   productId,
@@ -30,9 +30,9 @@ export function ProductTimelineView({
   productId: string
   timeline: ProductTimeline
   canWrite: boolean
-  // 레인 제목 옆에 서는 페이지 소유의 컨트롤(기간 프리셋) — 홈 요약에는 없다.
+  // Page-owned controls that stand beside the lane title (the range preset) — absent from the home summary.
   toolbar?: ReactNode
-  // 상세 페이지에서만 켜지는 사건 피드 — 홈은 요약이라 레인과 추이까지만 그린다.
+  // The event feed, on the detail page only — home is a summary, so it draws only the lanes and the trend.
   detailed?: boolean
 }) {
   const t = useTranslations('productPage')
@@ -47,7 +47,7 @@ export function ProductTimelineView({
     })
     return (iso: string) => format.format(new Date(iso))
   }, [locale])
-  // 호버 카드의 전체 시각 — 축 눈금과 같은 UTC 로 읽는다(레인의 규칙과 동일).
+  // The hover card's full timestamp — read in the same UTC as the axis ticks (the same rule as the lanes).
   const stamp = useMemo(() => {
     const format = new Intl.DateTimeFormat(locale, {
       dateStyle: 'medium',
@@ -61,7 +61,7 @@ export function ProductTimelineView({
     return (value: number) => format.format(value)
   }, [locale])
 
-  // 릴리즈 마커: 시리즈 차트 위에 눕는 스트립. 계획된 릴리즈는 목표일, 나간 릴리즈는 출하 시각으로 정렬.
+  // Release markers: a strip lying above the series charts. A planned release sorts by its target date, a shipped one by its ship time.
   const releaseStrip = [...timeline.releases].sort((a, b) =>
     (a.releasedAt ?? a.targetDate ?? a.createdAt).localeCompare(
       b.releasedAt ?? b.targetDate ?? b.createdAt
@@ -70,8 +70,8 @@ export function ProductTimelineView({
 
   return (
     <div className="space-y-6">
-      {/* 비례 시간축 개요 — 언제 무슨 일이 있었나(릴리즈·버전·이슈). 시리즈의 품질 추이는 아래 차트가 답한다.
-          그릴 사건이 하나도 없으면 섹션째 숨긴다(빈 섹션 숨김). */}
+      {/* The proportional time-axis overview — when did what happen (releases, versions, issues). A series' quality trend is answered by the
+          chart below. With no event to draw at all the whole section hides (empty-section hiding). */}
       {timeline.releases.length +
         timeline.versions.length +
         timeline.issues.length +
@@ -117,17 +117,17 @@ export function ProductTimelineView({
               action={
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-xs text-muted-foreground">{series.key}</span>
-                  {/* 이 시리즈를 지금 평가한다 — 새 버전 임포트만이 유일한 계기이던 시절, 시리즈를 선언해 놓고
-                      업스트림이 릴리즈할 때까지 아무 점도 생기지 않던 자리다. */}
+                  {/* Evaluate this series NOW — the place where, back when importing a new version was the only trigger, a declared series
+                      produced no point at all until upstream happened to release. */}
                   {canWrite && <RunSeriesButton productId={productId} seriesKey={series.key} />}
                 </span>
               }
             />
             <div className="rounded-lg border bg-card p-3.5 shadow-raise">
               {series.points.length === 0 ? (
-                // 비어 있음은 두 가지 사실이다 — "이 기간에 평가가 없다"와 "무엇이 이걸 돌리는가". 후자를
-                // 적어 두지 않으면 선언만 해 놓고 기다리는 사람이 무엇을 기다리는지 알 수 없다(그리고 필수
-                // 시리즈라면 그동안 릴리즈가 막혀 있다).
+                // Empty states two facts — "there was no evaluation in this window" and "what makes this run". Without writing the second
+                // down, somebody who declared a series and is waiting cannot tell what they are waiting FOR (and on a required
+                // series, releases are blocked the whole time).
                 <div className="space-y-1.5 py-6 text-center">
                   <p className="text-sm text-muted-foreground">{t('seriesEmpty')}</p>
                   <p className="text-xs text-muted-foreground">{t('seriesEmptyHint')}</p>
@@ -146,8 +146,8 @@ export function ProductTimelineView({
                     const point = series.points[columnIndex]
                     if (point) router.push(`/${workspace}/scorecard/${point.scorecardId}`)
                   }}
-                  // 점 하나가 무엇인지 — 통과율만으로는 "이 점은 왜 생겼나"에 답할 수 없다. 이 배치를
-                  // 돌게 만든 서비스 버전과 배치의 종결 상태를 같은 카드에 적는다.
+                  // What one point IS — a pass rate alone cannot answer "why does this point exist". The service version that made this batch
+                  // run and the batch's terminal state go on the same card.
                   renderPointDetail={(columnIndex) => {
                     const point = series.points[columnIndex]
                     if (!point) return null
@@ -165,7 +165,7 @@ export function ProductTimelineView({
                 />
               )}
             </div>
-            {/* 이 시리즈를 돌게 만든 버전들 — 점과 같은 순서로, 무엇이 바뀌어 이 점이 생겼는지를 적는다. */}
+            {/* The versions that made this series run — in the same order as the points, saying what changed to produce each one. */}
             {series.points.some((point) => point.serviceVersion !== undefined) && (
               <p className="text-xs text-muted-foreground">
                 {series.points
@@ -178,8 +178,8 @@ export function ProductTimelineView({
         ))
       )}
 
-      {/* 상세 페이지는 GitHub 식 사건 피드가 이슈 목록을 대체한다 — 축의 모든 사건(버전·릴리즈·이슈·
-          평가·계약)이 날짜로 묶여 한 흐름으로 읽힌다. 홈 요약은 가벼운 이슈 목록까지만. */}
+      {/* On the detail page a GitHub-style event feed replaces the issue list — every event on the axis (versions, releases, issues,
+          evaluations, contracts) grouped by date and read as one stream. The home summary goes no further than a light issue list. */}
       {detailed ? (
         <TimelineFeed workspace={workspace} timeline={timeline} />
       ) : (

@@ -1,8 +1,8 @@
 import type { AgentTaskRecord } from '@everdict/contracts'
 import { z } from 'zod'
 
-// 워크스페이스 태스크 원장(agent-teams) — 대화·에이전트를 넘는 조율 작업 단위. 경계 검증은 여기 zod v4,
-// EXPORT 타입은 @everdict/contracts 에 고정(P4 드리프트 가드). `import type` 만.
+// The workspace task ledger (agent-teams) — the unit of coordination work that spans conversations and agents. Boundary validation is this zod v4,
+// and the EXPORTED types are pinned to @everdict/contracts (the P4 drift guard). `import type` only.
 
 export const agentTaskStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'cancelled'])
 export type AgentTaskStatus = z.infer<typeof agentTaskStatusSchema>
@@ -26,7 +26,7 @@ export const agentTaskSchema = z.object({
 export type AgentTask = z.infer<typeof agentTaskSchema>
 export const agentTaskListSchema = z.array(agentTaskSchema)
 
-// 드리프트 가드 — 계약 레코드와 양방향(형태 동일 엔티티).
+// The drift guard — bidirectional with the contract record (an entity of identical shape).
 type AssertAssignable<A extends B, B> = A
 type _TaskFwd = AssertAssignable<AgentTask, AgentTaskRecord>
 type _TaskBack = AssertAssignable<AgentTaskRecord, AgentTask>

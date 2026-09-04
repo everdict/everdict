@@ -26,7 +26,7 @@ interface LiveTurn {
   listeners: Set<LiveTurnListener>;
   streamingText: string;
   streamingReasoning: string;
-  // 명시적 undefined 리셋(plan 결정 후)을 위해 required | undefined 로 둔다 (delete 금지 규칙).
+  // Kept as required | undefined so an explicit undefined reset (after a plan decision) is possible (the no-delete rule).
   pendingPlan: { requestId: string; plan: string } | undefined;
   pendingRetry: { attempt: number; delayMs: number; persistent?: boolean } | undefined;
   // The loop's soft-interrupt trigger (parked via setInterrupt once the turn's loop starts). Aborts only the

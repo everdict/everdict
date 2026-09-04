@@ -2,9 +2,9 @@ import type { ListDisplay, ListViewSpec } from '@/shared/lib/list-view'
 
 import type { DatasetSummary } from './schema'
 
-// 데이터셋 목록의 어휘 — 하네스와 같은 문법이다(`entities/harness/model/list-view.ts` 참고).
-// 태그는 한 데이터셋이 여럿 들 수 있으므로 **거르기**에만 쓰고 묶기에는 쓰지 않는다: 묶으면 그룹 합이
-// 목록보다 커져 헤더의 숫자가 거짓말을 한다.
+// The dataset list's vocabulary — the same grammar as the harness's (see `entities/harness/model/list-view.ts`).
+// A dataset can hold several tags, so they are used for **filtering** only and never for grouping: grouped, the groups would sum to more than
+// the list and the header's number would be a lie.
 export const DATASET_FACETS = ['creator', 'tag'] as const
 export const DATASET_GROUPINGS = ['none', 'creator'] as const
 export const DATASET_ORDERS = ['name', 'updated', 'created', 'cases'] as const

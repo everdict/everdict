@@ -9,13 +9,13 @@ import { Input } from '@/shared/ui/input'
 export interface MultiSelectOption {
   value: string
   label: string
-  // 행과 칩 앞에 붙는 표식(팀 키 배지 등). 없으면 이름만 선다.
+  // The mark in front of a row and a chip (a team key badge, say). Absent, only the name stands.
   badge?: ReactNode
 }
 
-// 여러 개를 고르는 자리의 공용 문법 — 고른 것은 칩으로 위에, 고를 것은 검색 가능한 목록으로 아래에.
-// `Combobox`(하나만 고르는 자리)와 짝을 이루고, 이슈 라벨 선택기의 생김새를 그대로 따른다: 라벨 선택기는
-// "그 자리에서 새로 정의하기"라는 라벨만의 동선을 갖고 있어 일반화하는 대신 문법만 공유한다.
+// The shared grammar for a place that picks SEVERAL — what is picked stands above as chips, what can be picked below as a searchable list.
+// It pairs with `Combobox` (a place that picks one) and follows the issue label picker's appearance exactly: the label picker has a path all its
+// own ("define a new one right here"), so rather than generalizing it, only the grammar is shared.
 export function MultiSelect({
   id,
   options,
@@ -31,12 +31,12 @@ export function MultiSelect({
   selected: string[]
   onChange: (next: string[]) => void
   placeholder: string
-  // 고를 것이 하나도 남지 않았을 때의 한 줄. 목록을 통째로 감추면 "고장인가"로 읽힌다.
+  // The one line for when nothing is left to pick. Hiding the list entirely reads as "is it broken".
   emptyLabel: string
-  // 칩의 제거 버튼에 붙는 접근성 이름 — 이름을 받아 문장을 만든다.
+  // The accessible name on a chip's remove button — it takes the name and builds the sentence.
   removeLabel: (name: string) => string
-  // 여기까지는 지운다 — 그 아래로 내려가는 제거 버튼은 아예 그리지 않는다(프로젝트의 팀처럼 "최소 하나"가
-  // 규칙인 자리). 기본값 0 = 다 뺄 수 있는 보통의 다중 선택.
+  // Removal stops here — a remove button that would go below this is not drawn at all (a place where "at least one" is the rule, like a
+  // project's teams). The default 0 is the ordinary multi-select where everything can be removed.
   minSelected?: number
 }) {
   const [query, setQuery] = useState('')

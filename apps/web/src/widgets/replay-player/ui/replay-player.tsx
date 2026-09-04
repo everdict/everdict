@@ -55,15 +55,15 @@ function CpuSparkline({ samples }: { samples: { cpuPct?: number }[] }) {
   )
 }
 
-// 리플레이 플레이어 — run을 하나의 벽시계(t0) 타임라인에서 재생한다. **agent trace가 척추**다:
-// 어떤 하네스(Claude Code·Codex·browser-use·직접 만든 확장)든 trace는 항상 있으므로, 프레임이 없어도
-// trace 이벤트 + 로그를 시점 동기로 스크럽할 수 있다(= 코딩 에이전트 replay). 환경이 프레임을 남긴 run
-// (browser/os-use)은 같은 스크러버가 그 시점의 화면까지 오버레이한다. 프레임·트레이스·로그는 모두 같은
-// 클럭(Date.now epoch, D1)을 공유하므로 하나의 재생 헤드로 정렬된다. docs/architecture/replay.md — Principle 1.
+// The replay player — it replays a run on one wall-clock (t0) timeline. **The agent trace is the SPINE**:
+// whatever the harness (Claude Code, Codex, browser-use, a hand-built extension), there is always a trace, so trace events plus logs can be
+// scrubbed in time sync even with no frames (= a coding agent replay). A run whose ENVIRONMENT left frames (browser/os-use) has the same
+// scrubber overlay the screen at that moment. Frames, traces and logs all share one clock (the Date.now epoch, D1), so they align under a
+// single playhead. docs/architecture/replay.md — Principle 1.
 //
-// **라이브 = 아직 안 끝난 리플레이.** 실행 중이면 녹화 tail(peek)과 라이브 궤적을 폴링해 같은 타임라인에
-// 얹는다: 재생 헤드가 끝에 고정(LIVE)되어 새 순간을 따라가고, 뒤로 스크럽하는 순간 고정이 풀린다. run이
-// 종료되면 폴링을 멈추고 그 자리가 그대로 리플레이가 된다 — 뷰 두 개가 아니라 상태 두 개다.
+// **Live is a replay that has not finished.** While running, it polls the recording tail (peek) and the live trajectory onto the same
+// timeline: the playhead pins to the end (LIVE) and follows each new moment, and scrubbing backwards releases the pin. When the run ends the
+// polling stops and that same place simply becomes the replay — two STATES, not two views.
 export function ReplayPlayer({
   runId,
   initialStatus,
@@ -100,7 +100,7 @@ export function ReplayPlayer({
       } catch {
         // no recording — trace-only replay still works
       }
-      // 실행 중엔 라이브 궤적도 같은 박자로 — 봉인 전의 agent lane. 종료 후엔 서버 렌더가 sealed trace를 넘긴다.
+      // While running, the live trajectory keeps the same beat — the pre-seal agent lane. After it ends, the server render hands over the sealed trace.
       const wasRunning = initialStatus !== undefined && !TERMINAL.has(nextStatus ?? initialStatus)
       if (wasRunning) {
         try {
@@ -118,7 +118,7 @@ export function ReplayPlayer({
       if (cancelled) return
       if (nextStatus) setStatus(nextStatus)
       const stillRunning = initialStatus !== undefined && !TERMINAL.has(nextStatus ?? initialStatus)
-      if (stillRunning) timer = setTimeout(tick, 3000) // run 종료 = 폴링 종료(마지막 상태가 곧 리플레이)
+      if (stillRunning) timer = setTimeout(tick, 3000) // the run ending ends the polling (the last state IS the replay)
     }
     void tick()
     return () => {
@@ -127,7 +127,7 @@ export function ReplayPlayer({
     }
   }, [runId, initialStatus])
 
-  // 봉인된 trace(서버 렌더)가 있으면 그것이 정본; 없으면(=실행 중) 라이브 궤적이 agent lane을 채운다.
+  // A sealed trace (the server render) is canonical when present; without one (= still running) the live trajectory fills the agent lane.
   const events = trace.length > 0 ? trace : liveTrace
   const frames = rec?.tracks.frames ?? []
   const logs = rec?.tracks.logs ?? []
@@ -160,8 +160,8 @@ export function ReplayPlayer({
   }
   const steps = Array.from(stepSet).sort((a, b) => a - b)
 
-  // LIVE 고정 — 실행 중이고 고정돼 있으면 새 순간이 도착할 때마다 재생 헤드를 끝으로 당긴다.
-  // 스크럽/재생을 만지는 순간 고정이 풀리고, LIVE 칩으로 다시 고정한다.
+  // The LIVE pin — while running and pinned, the playhead is pulled to the end each time a new moment arrives.
+  // Touching the scrubber or playback releases the pin, and the LIVE chip pins it again.
   const stepCount = steps.length
   useEffect(() => {
     if (running && pinnedLive && stepCount > 0) setIndex(stepCount - 1)
@@ -274,7 +274,7 @@ export function ReplayPlayer({
             value={clamped}
             onChange={(e) => {
               setPlaying(false)
-              setPinnedLive(false) // 뒤로 스크럽 = 라이브 고정 해제 (다시 붙으려면 LIVE 칩)
+              setPinnedLive(false) // scrubbing backwards releases the live pin (the LIVE chip re-attaches)
               setIndex(Number(e.target.value))
             }}
             className="h-1 flex-1 cursor-pointer accent-primary"
@@ -283,7 +283,7 @@ export function ReplayPlayer({
           <span className="shrink-0 text-[11.5px] tabular-nums text-faint">
             {t('stepOf', { i: clamped + 1, n: steps.length })} · {elapsedSec.toFixed(1)}s
           </span>
-          {/* 실행 중일 때만 — 끝 고정이면 점이 맥박 치고, 과거를 보는 중이면 눌러서 라이브 엣지로 복귀. */}
+          {/* Only while running — pinned to the end the dot pulses, and while looking at the past it is pressed to return to the live edge. */}
           {running && (
             <button
               type="button"

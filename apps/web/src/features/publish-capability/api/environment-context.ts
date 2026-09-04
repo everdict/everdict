@@ -8,18 +8,18 @@ import { workspacesSchema } from '@/entities/workspace'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
 
 export interface EnvironmentContext {
-  // 작성자 표시 — subject → 이름 + 아바타(멤버 프로필).
+  // The author display — subject → name plus avatar (the member profile).
   authors: Record<string, { name: string; avatarUrl?: string }>
-  // 워크스페이스가 가져온(import) 환경 이미지 인벤토리 — 통합 목록의 "가져옴/풀 가능" 행.
+  // The inventory of environment images the workspace imported — the "imported / pullable" rows of the merged list.
   adoptedEnvironments: AdoptedEnvironment[]
-  // subset 공유 대상 피커용 — 내가 속한 워크스페이스(id + 이름).
+  // For the subset sharing-target picker — the workspaces I belong to (id + name).
   myWorkspaces: { id: string; name: string }[]
-  // 이미지 태그 도우미용 — 워크스페이스 레지스트리(이름 + host).
+  // For the image tag helper — the workspace registries (name + host).
   imageRegistries: { name: string; host: string }[]
 }
 
-// Settings › Environments 보조 데이터 — 스토어 컨텍스트(loadStoreContext)에서 환경 표면이 실제로 쓰는
-// 것만 추린 로더(에이전트 채택 키·시크릿 이름은 환경과 무관). 전부 소프트(실패해도 빈 값).
+// The supporting data for Settings › Environments — a loader carrying only what the environment surface actually uses out of the store context
+// (loadStoreContext); agent adoption keys and secret names have nothing to do with environments. All of it is SOFT (empty on failure).
 export async function loadEnvironmentContext(ctx: AuthContext): Promise<EnvironmentContext> {
   const members = await controlPlane
     .listMembers(ctx)

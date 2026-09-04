@@ -89,19 +89,19 @@ describe('TimelineFeed', () => {
         ],
       })
     )
-    // 한 이슈가 두 사건으로 선다 — 열림과 해결(해결은 딛고 선 증거 링크까지).
+    // One issue stands as TWO events — opened and resolved (the resolution including the evidence link it rests on).
     expect(html).toContain(en.productPage.feed.issueOpened)
     expect(html).toContain(en.productPage.feed.issueResolved)
     expect(html).toContain('href="/acme/scorecard/sc-1"')
-    // 버전 발행은 원격(GitHub)으로 나가는 문이다.
+    // A version publication is the door out to the remote (GitHub).
     expect(html).toContain(en.productPage.feed.versionPublished)
     expect(html).toContain('https://github.com/acme/api/releases/v1.2.0')
-    // 시리즈 평가는 통과율과 함께, 계약(저지 버전 등록)은 능력 상세로 링크된 채.
+    // A series evaluation comes with its pass rate, and a contract (a judge version registration) linked to the capability detail.
     expect(html).toContain(en.productPage.feed.seriesEvaluated)
     expect(html).toContain(en.productPage.feed.capabilityRegistered)
     expect(html).toContain('href="/acme/judge/strict-judge"')
     expect(html).toContain('strict-judge@1.1.0')
-    // 날짜 헤더 — 최신 날이 먼저 온다.
+    // The date headers — the newest day comes first.
     expect(html.indexOf('Aug 12')).toBeLessThan(html.indexOf('Aug 5'))
   })
 })

@@ -6,11 +6,11 @@ import type {
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// 모델(추론/판정용 LLM) 경계 검증은 여기 zod v4 에서만 하고, EXPORT 타입은 @everdict/contracts 에 고정(재아키텍처 P4).
-// `import type` 만 — zod v3 wire 스키마는 웹에서 실행되지 않는다.
+// Boundary validation for a model (the LLM used for inference and judging) lives only in this zod v4, and the EXPORTED types are pinned to @everdict/contracts (re-architecture P4).
+// `import type` only — the zod v3 wire schemas do not run in the web.
 
-// GET /models 200 — 모델 id 당 한 항목(워크스페이스 소유 + _shared 폴백).
-// createdBy = 최초 등록 버전의 등록자 subject(seed/_shared 는 없음) — 누가 삭제할 수 있는지(등록자-or-admin) 판단용.
+// GET /models 200 — one entry per model id (workspace-owned plus the _shared fallback).
+// createdBy = the subject that registered the FIRST version (absent for seed/_shared) — used to decide who may delete it (registrant-or-admin).
 export const modelSummarySchema = z.object({
   id: z.string(),
   versions: z.array(z.string()),
@@ -20,8 +20,8 @@ export const modelSummarySchema = z.object({
 export const modelsSchema = z.array(modelSummarySchema)
 export type ModelSummary = z.infer<typeof modelSummarySchema>
 
-// GET /models/:id/versions/:version 200 — 전체 ModelSpec. provider 연결정보 + apiKeySecret(시크릿 NAME, 값 아님).
-// apiKeySecret 은 하네스의 에이전트 서버/저지가 이 모델을 쓸 때 연결할 워크스페이스 SecretStore 키 이름 — 값은 디스패치 직전 해석.
+// GET /models/:id/versions/:version 200 — the whole ModelSpec. The provider connection details plus apiKeySecret (a secret NAME, never a value).
+// apiKeySecret is the name of the workspace SecretStore key a harness's agent server or judge connects with when it uses this model — the value is resolved just before dispatch.
 export const modelSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
@@ -36,8 +36,8 @@ export const modelSpecSchema = z.object({
       maxTokens: z.number().optional(),
     })
     .optional(),
-  // 이 모델이 에이전트를 구동할 때 함께 뛰는 컴패니언 티어 — 같은 카탈로그의 다른 등록 모델 ref.
-  // small=다이제스트/메모리 추출, fallback=지속 장애 시 전환, subagent=하위 에이전트. 스펙이 배포 env 기본값을 이긴다.
+  // The companion tiers that run alongside this model when it drives an agent — refs to other registered models in the same catalog.
+  // small = digest/memory extraction, fallback = switching on a persistent failure, subagent = sub-agents. The spec beats the deployment env defaults.
   companions: z
     .object({
       small: z.string().optional(),
@@ -49,7 +49,7 @@ export const modelSpecSchema = z.object({
 })
 export type ModelSpec = z.infer<typeof modelSpecSchema>
 
-// POST /models/test-connection 200 — 더미콜 결과. ok:true 면 응답 텍스트 프리뷰, ok:false 면 실패 사유(4xx 아님).
+// POST /models/test-connection 200 — the result of a dummy call. ok:true carries a response text preview, ok:false the failure reason (NOT a 4xx).
 export const testModelConnectionResultSchema = z.union([
   z.object({
     ok: z.literal(true),
@@ -67,7 +67,7 @@ export const testModelConnectionResultSchema = z.union([
 ])
 export type TestModelConnectionResult = z.infer<typeof testModelConnectionResultSchema>
 
-// PUT /models/:id 200 — 버전 없는 저장(업서트). created=false 면 기존 latest 와 동일해 새 버전 안 씀(멱등).
+// PUT /models/:id 200 — a versionless save (an upsert). created=false means it was identical to the existing latest and no new version was written (idempotent).
 export const saveModelResultSchema = z.object({
   workspace: z.string(),
   id: z.string(),
@@ -76,8 +76,8 @@ export const saveModelResultSchema = z.object({
 })
 export type SaveModelResult = z.infer<typeof saveModelResultSchema>
 
-// 드리프트 가드 — 요약은 wire 리스트 엔트리와 동일 형태라 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다);
-// 스펙은 web→contract 단방향(웹은 표시/등록만, wire 계약이 SSOT).
+// The drift guard — the summary has the same shape as the wire list entry, so it is bidirectional (a field change on either side breaks the web typecheck);
+// the spec is web→contract only (the web merely displays and registers; the wire contract is the SSOT).
 type AssertAssignable<A extends B, B> = A
 type _SummaryFwd = AssertAssignable<ModelSummary, ModelListEntry>
 type _SummaryBack = AssertAssignable<ModelListEntry, ModelSummary>

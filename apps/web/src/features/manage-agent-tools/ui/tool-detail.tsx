@@ -21,10 +21,10 @@ import { InfoTip } from '@/shared/ui/tooltip'
 import { setAgentToolAction } from '../api/set-agent-tool'
 import { bindAgentToolSecretsAction, probeAgentToolAction } from '../api/tool-detail'
 
-// Settings › Agent › Tools › 상세 — 목록이 스위치라면 여기는 그 스위치 뒤의 설명이다. 사용자가 이 도구를 신뢰할지
-// 정하기 위해 필요한 것: 어떻게 도달하는지(transport), 모델 앞에 어떤 function 을 어떤 이름으로 놓는지, 모델이 읽는
-// description 이 정확히 무엇인지, 어떤 시크릿을 필요로 하고 그게 나에게 풀리는지, 그리고 정말 도는지(연결 테스트 ·
-// 예제 실행). 편집은 여기서 폼으로 하지 않는다 — 도구 뒤의 capability 를 대화에서 고치고 버전을 올린다(상세 스킬과 동형).
+// Settings › Agent › Tools › detail — where the list is a switch, this is the explanation behind that switch. What a user needs in order to
+// decide whether to trust this tool: how it is reached (transport), what function it puts in front of the model and under what name, exactly
+// what description the model reads, which secrets it needs and whether those resolve for me, and whether it actually runs (a connection test ·
+// running an example). Editing is not a form here — the capability BEHIND the tool is edited in conversation and version-stamped (isomorphic to the skill detail).
 
 export function ToolDetail({
   tool: initial,
@@ -33,9 +33,9 @@ export function ToolDetail({
   actions,
 }: {
   tool: AgentToolDetail
-  secretNames: string[] // 내가 닿는 시크릿 이름(워크스페이스 + 개인) — 바인딩 피커의 후보
-  canBind: boolean // agents:write — 서버가 최종 강제, 여기선 컨트롤 숨김
-  actions?: ReactNode // "대화로 편집하기" 등 앱 레이어가 조립해 내려주는 진입
+  secretNames: string[] // the secret names I can reach (workspace + personal) — the binding picker's candidates
+  canBind: boolean // agents:write — the server enforces finally; here it only hides the control
+  actions?: ReactNode // entries the app layer assembles and passes down, such as "edit by conversation"
 }) {
   const [tool, setTool] = useState(initial)
 
@@ -57,7 +57,7 @@ export function ToolDetail({
   )
 }
 
-// 메타 스트립 — 종류 · 출처 · 범위 · 버전 · 쓰기 여부. 빈 값은 렌더하지 않는다(상세뷰 관습).
+// The meta strip — kind · origin · scope · version · whether it writes. An empty value is not rendered (the detail-view convention).
 function MetaStrip({ tool }: { tool: AgentToolDetail }) {
   const t = useTranslations('agentTools')
   return (
@@ -85,7 +85,7 @@ function MetaStrip({ tool }: { tool: AgentToolDetail }) {
   )
 }
 
-// 이 도구를 내 에이전트가 지금 들고 있는가 — 목록의 토글과 같은 결정을, 상세를 보는 자리에서.
+// Does my agent hold this tool right now — the same decision as the list toggle, made from where you are reading the detail.
 function UsageSection({
   tool,
   onChanged,
@@ -136,8 +136,8 @@ function UsageSection({
   )
 }
 
-// 어떻게 동작하는가 — 런타임이 이 도구에 도달하는 방식(transport) + 이 도구가 어디서 왔는지(origin). 둘 다 한 문장씩,
-// 그리고 실제 목적지(URL · 이미지 · 언어)를 그대로 보여 준다.
+// How it works — the way the runtime reaches this tool (transport) plus where the tool came from (origin). One sentence each,
+// and the real destination (URL · image · language) shown verbatim.
 function HowItWorksSection({ tool }: { tool: AgentToolDetail }) {
   const t = useTranslations('agentTools')
   const { transport } = tool
@@ -191,7 +191,7 @@ function HowItWorksSection({ tool }: { tool: AgentToolDetail }) {
   )
 }
 
-// 모델이 읽는 문장 그대로 — 도구를 언제 고를지는 이 한 줄이 정한다. 편집하지 않고 있는 그대로 보여 주는 게 요점.
+// The sentence the model reads, verbatim — this one line decides WHEN the tool is chosen. Showing it as-is rather than editing it is the point.
 function ModelViewSection({ tool }: { tool: AgentToolDetail }) {
   const t = useTranslations('agentTools')
   return (
@@ -203,8 +203,8 @@ function ModelViewSection({ tool }: { tool: AgentToolDetail }) {
   )
 }
 
-// 이 도구가 포함하는 function 들. 선언값(저자가 적은 provides / code 도구 자신)이 기본이고, MCP 도구는 연결 테스트로
-// 서버가 진짜 제공하는 목록으로 교체한다 — 선언과 현실이 어긋나는 것을 볼 수 있는 유일한 자리.
+// The functions this tool contains. The DECLARED set is the default (the `provides` its author wrote, or the code tool itself), and an MCP
+// tool replaces it with what the server really offers via a connection test — the only place a divergence between declaration and reality is visible.
 function FunctionsSection({ tool }: { tool: AgentToolDetail }) {
   const t = useTranslations('agentTools')
   const [live, setLive] = useState<AgentToolFunction[] | null>(null)
@@ -306,9 +306,9 @@ function FunctionRow({ fn }: { fn: AgentToolFunction }) {
   )
 }
 
-// 필요한 시크릿 — 모든 채널이 바인딩 저장처를 갖는다(채택 capability=CapabilityRef · 직접 배선 서버=authSecret ·
-// 기본 제공/미채택 발행물=AgentSpec.toolSecretBindings 오버레이). 그래서 화면은 권한으로만 갈린다: agents:write 면
-// 기존 시크릿을 골라 잇거나 인라인으로 새로 만들고(피커), 아니면 도구가 읽는 이름 그대로 값을 넣어 주는 것이 해결이다.
+// The required secrets — every channel has somewhere to store a binding (an adopted capability = CapabilityRef · a hand-wired server =
+// authSecret · a built-in default or an unadopted publication = the AgentSpec.toolSecretBindings overlay). So the screen splits on PERMISSION
+// alone: with agents:write you pick an existing secret or create one inline (the picker); without it, the fix is to put a value under the exact name the tool reads.
 function SecretsSection({
   tool,
   secretNames,
@@ -346,7 +346,7 @@ function SecretsSection({
   )
 }
 
-// 바인딩 가능한 경우 — 선언 이름을 내 시크릿 이름에 잇는다. 값은 오가지 않는다(피커는 이름만 고른다).
+// The bindable case — join the declared name to one of my secret names. No value travels (the picker chooses a NAME only).
 function BindSecretRow({
   toolKey,
   secret,
@@ -395,7 +395,7 @@ function BindSecretRow({
   )
 }
 
-// 이름으로 읽는 경우 — 고를 것이 없다. 정확히 이 이름의 시크릿에 값을 넣어 주는 것이 전부라서, 이름은 고정하고 값만 받는다.
+// The read-by-name case — there is nothing to pick. Putting a value under exactly this name is the whole fix, so the name is fixed and only the value is taken.
 function NamedSecretRow({ secret }: { secret: AgentToolSecret }) {
   const t = useTranslations('agentTools')
   const [open, setOpen] = useState(false)
@@ -494,7 +494,7 @@ function SecretHeader({
   )
 }
 
-// code 도구의 고정된 소스 + 예제 + 실제 1회 실행. "코드만 읽고 신뢰하지 않는다"는 스토어의 검증 루프를 그대로 가져온다.
+// A code tool's pinned source plus its examples plus one real execution. It carries over the store's verification loop: "nothing is trusted on a reading of the code alone".
 function SourceSection({ tool }: { tool: AgentToolDetail }) {
   const t = useTranslations('agentTools')
   const capability = tool.capability

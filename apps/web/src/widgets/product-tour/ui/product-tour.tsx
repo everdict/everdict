@@ -8,28 +8,28 @@ import { START_TOUR_EVENT } from '@/shared/lib/tour'
 import { cn } from '@/shared/lib/utils'
 import { buttonVariants } from '@/shared/ui/button'
 
-// 신규 유저용 인터랙티브 온보딩 투어(코치마크) — 의존성 없이 직접 구현.
-// 환영 카드 → 사이드바의 핵심 요소(data-tour 앵커)를 스포트라이트로 짚으며, 각 스텝은 본문 화면을 해당 섹션으로
-// 이동시켜 "화면이 움직이며 짚어주는" 경험을 준다. 앵커는 모든 라우트에 존재하는 사이드바라서 소프트 내비게이션에도
-// 안정적이다(ProductTour 는 AppShell 에 마운트되어 라우트 전환에도 상태 유지). 첫 데스크탑 방문에 자동 시작(localStorage),
-// 이후 `everdict:start-tour` 이벤트로 재실행(가이드 페이지의 "둘러보기" 버튼).
+// The interactive onboarding tour (coach marks) for a new user — implemented directly, with no dependency.
+// A welcome card → a spotlight over the sidebar's key elements (data-tour anchors), with each step moving the MAIN screen to that section
+// so it reads as "the screen moves and points". The anchors are the sidebar, which exists on every route, so they survive soft navigation
+// (ProductTour mounts on AppShell and keeps its state across route changes). It starts automatically on the first desktop visit
+// (localStorage) and is re-run afterwards through the `everdict:start-tour` event (the guide page's "take the tour" button).
 const TOUR_VERSION = 'v1'
 const DONE_KEY = `everdict:tour:done:${TOUR_VERSION}`
 
 type Placement = 'right' | 'left' | 'bottom' | 'top'
 
 interface TourStep {
-  anchor: string // 화면 요소의 data-tour 값(사이드바 nav·검색·인프라 레일·알림·계정)
+  anchor: string // the data-tour value of a screen element (sidebar nav · search · the infra rail · notifications · account)
   titleKey: string
   bodyKey: string
   placement: Placement
-  href?: string // 이 스텝에서 본문을 이동시킬 워크스페이스 상대 경로('' = 개요/워크스페이스 루트, undefined = 이동 없음)
+  href?: string // the workspace-relative path this step moves the main screen to ('' = the overview/workspace root, undefined = do not move)
 }
 
-// 모든 주요 화면을 사이드바 nav 순서대로 훑는다: 워크스페이스 → 검색 → 개요 → 이슈 → 프로젝트 → 이니셔티브(트래커,
-// "왜 평가하는가") → 하니스 → 데이터셋 → 스코어카드 → 평가자 → 스토어 → 뷰 → 가이드 → 알림 → 인프라 → 계정.
-// 평가 primitive 스텝들의 앵커는 접힌 「평가」 그룹 안에 있지만, 각 스텝이 href 로 먼저 그 화면으로 이동하면서
-// 그룹이 자동으로 펼쳐지므로 스포트라이트가 정상 동작한다.
+// It sweeps every major screen in sidebar-nav order: workspace → search → overview → issues → projects → initiatives (the tracker,
+// "why we evaluate") → harnesses → datasets → scorecards → judges → store → views → guide → notifications → infra → account.
+// The evaluation-primitive steps have their anchors inside the collapsed "Evaluation" group, but each step navigates to that screen first
+// through href, which expands the group automatically, so the spotlight works.
 const STEPS: TourStep[] = [
   {
     anchor: 'workspace-switcher',
@@ -129,7 +129,7 @@ function isDesktop(): boolean {
   return typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches
 }
 
-// 스포트라이트 — 하이라이트 영역(구멍) 둘레를 4개의 어두운 패널로 덮어 대상만 또렷하게 남긴다(구멍 영역은 클릭 통과).
+// The spotlight — four dark panels around the highlighted region (the hole) leave only the target crisp (clicks pass through the hole).
 function Spotlight({ rect }: { rect: DOMRect }) {
   const pad = 4
   const x = rect.left - pad
@@ -160,14 +160,14 @@ export function ProductTour({ workspace }: { workspace: string }) {
 
   const step = running && !welcome ? STEPS[index] : null
 
-  // 첫 방문 자동 시작(데스크탑 한정 — 모바일은 사이드바가 드로어라 앵커가 숨겨짐).
+  // Automatic start on a first visit (desktop only — on mobile the sidebar is a drawer, so the anchors are hidden).
   useEffect(() => {
     if (!isDesktop()) return
     let done = false
     try {
       done = localStorage.getItem(DONE_KEY) !== null
     } catch {
-      done = true // 스토리지 접근 불가(프라이빗 모드 등)면 자동 시작하지 않는다.
+      done = true // with storage unreachable (private mode, etc.) it does not auto-start.
     }
     if (done) return
     const id = window.setTimeout(() => {
@@ -178,7 +178,7 @@ export function ProductTour({ workspace }: { workspace: string }) {
     return () => window.clearTimeout(id)
   }, [])
 
-  // 재실행 이벤트(가이드 페이지 버튼 등). 투어 앵커는 데스크탑 사이드바라 모바일에선 조용히 무시한다.
+  // The re-run event (the guide page button, etc.). The tour anchors are the desktop sidebar, so it is silently ignored on mobile.
   useEffect(() => {
     const start = () => {
       if (!isDesktop()) return
@@ -197,26 +197,26 @@ export function ProductTour({ workspace }: { workspace: string }) {
     try {
       localStorage.setItem(DONE_KEY, '1')
     } catch {
-      // 스토리지 실패는 무시 — 세션 내에서 닫히기만 하면 된다.
+      // A storage failure is ignored — all that matters is that it closes for this session.
     }
   }, [])
 
-  // 스텝이 href 를 가지면 본문 화면을 이동(사이드바 앵커는 그대로라 스포트라이트는 안정적).
-  // href === '' 는 개요(워크스페이스 루트)로 이동을 의미하므로 undefined 만 "이동 없음"으로 취급한다.
+  // A step with an href moves the main screen (the sidebar anchor stays put, so the spotlight remains stable).
+  // href === '' means "go to the overview (the workspace root)", so only `undefined` counts as "do not move".
   useEffect(() => {
     if (step?.href === undefined) return
     const target = `/${workspace}${step.href}`
     if (pathname !== target) router.push(target)
   }, [step, workspace, pathname, router])
 
-  // 대상 앵커 위치 측정(스텝 변경 + 스크롤/리사이즈). 라우트 이동 직후엔 레이아웃이 앉도록 약간 지연.
+  // Measure the target anchor's position (on a step change and on scroll/resize). Slightly delayed right after a route change so the layout can settle.
   useEffect(() => {
     if (!step) return
     let raf = 0
     const measure = () => {
       const el = document.querySelector<HTMLElement>(`[data-tour="${step.anchor}"]`)
       if (!el) {
-        setRect(null) // 앵커를 못 찾으면 카드만 중앙에 띄운다(스텝이 사라지지 않도록).
+        setRect(null) // with no anchor found, only the card is shown centred (so the step does not disappear).
         return
       }
       el.scrollIntoView({ block: 'nearest' })
@@ -239,7 +239,7 @@ export function ProductTour({ workspace }: { workspace: string }) {
     }
   }, [step])
 
-  // 카드 위치 — 대상 rect + 카드 실제 크기로 placement 계산 후 뷰포트 안으로 클램프.
+  // The card's position — the placement is computed from the target rect plus the card's real size, then clamped inside the viewport.
   useLayoutEffect(() => {
     if (!rect || !cardRef.current || !step) return
     const card = cardRef.current.getBoundingClientRect()
@@ -248,7 +248,7 @@ export function ProductTour({ workspace }: { workspace: string }) {
     const vh = window.innerHeight
     let top = rect.top
     let left = rect.left
-    const midY = rect.top + rect.height / 2 - card.height / 2 // 좌/우 배치는 대상 세로 중앙에 정렬(가는 세로 레일에도 자연스럽게)
+    const midY = rect.top + rect.height / 2 - card.height / 2 // left/right placement aligns to the target's vertical centre (natural even against a thin vertical rail)
     if (step.placement === 'right') {
       left = rect.right + gap
       top = midY
@@ -269,7 +269,7 @@ export function ProductTour({ workspace }: { workspace: string }) {
 
   if (!running) return null
 
-  // 환영 카드 — 중앙 모달. 시작/건너뛰기.
+  // The welcome card — a centred modal. Start or skip.
   if (welcome) {
     return (
       <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 backdrop-blur-[1px] p-4">

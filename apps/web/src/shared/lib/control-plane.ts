@@ -79,8 +79,8 @@ async function callWithEnvelope(
   return { ok: res.ok, status: res.status, body }
 }
 
-// 응답이 JSON 이 아니라 바이트인 호출 — 원격 이미지 프록시가 유일한 사용처다. content-type 을 함께 돌려주는 건
-// 브라우저에 그대로 넘겨야 하기 때문이다(우리가 추측하면 GitHub 이 준 형식과 어긋난다).
+// Calls whose response is BYTES rather than JSON — the remote image proxy is the only one. The content-type comes
+// back with them because it must be handed to the browser verbatim (guessing it disagrees with what GitHub sent).
 async function callBytes(
   auth: AuthContext,
   path: string,
@@ -108,31 +108,31 @@ async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Pr
   if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
 }
 
-// 이슈 목록의 좁히기. 행(`listIssues`)과 그룹 개수(`countIssues`)가 같은 문자열을 만들도록 한곳에 둔다 —
-// 헤더가 12 라고 하는데 그 아래 목록이 3 줄만 그리는 일은, 두 곳에서 각자 쿼리를 조립할 때 생긴다.
+// Narrowing for the issue list. Rows (`listIssues`) and group counts (`countIssues`) build the same string from one
+// place — a header saying 12 over a list drawing 3 rows is what happens when two sites assemble the query separately.
 export interface IssueListQuery {
-  // 축마다 집합이다: `?status=todo&status=in_progress`. 축끼리는 AND, 축 안에서는 OR.
+  // Each axis is a SET: `?status=todo&status=in_progress`. AND across axes, OR within one.
   status?: string[]
   priority?: string[]
-  // 빈 문자열은 「담당자 없음」 — 쿼리 파라미터에 null 이 없어서 그 버킷을 그렇게 부른다.
+  // The empty string is "unassigned" — a query parameter has no null, so that is what the bucket is called.
   assignee?: string[]
   project?: string[]
   cycle?: string[]
   label?: string[]
   team?: string
   mine?: boolean
-  // 한 부모의 하위 이슈들, 또는 `none` 으로 최상위만. 자식이 목록에 두 번(자기 줄 + 부모 아래) 나오지
-  // 않게 하려면 보드는 후자를 쓴다.
+  // One parent's sub-issues, or `none` for top level only. A board uses the latter so a child is not drawn twice
+  // (its own row, and again under its parent).
   parent?: string
   triage?: boolean
   linkType?: string
   linkId?: string
-  // 이슈를 이름으로 찾는다(식별자·제목의 부분 일치). 피커가 창 하나를 받아 클라이언트에서 거르면
-  // 워크스페이스가 그 창보다 커지는 순간 조용히 못 찾기 시작한다 — 그래서 서버가 좁힌다.
+  // Find issues by name (partial match on identifier/title). A picker that takes one page and filters client-side
+  // starts silently failing to find things the moment the workspace outgrows that page — so the server narrows.
   search?: string
-  // GitHub 대량 동기화의 작업 집합. 전체 목록을 받아 클라이언트에서 거르는 대신 서버가 좁힌다.
+  // The work set for a bulk GitHub sync. The server narrows instead of the client filtering a full list.
   syncPull?: boolean
-  // 아래 셋은 PAGE 만의 것 — 집계에는 장도 순서도 없다.
+  // The three below are PAGE-only — an aggregate has neither pages nor order.
   order?: string
   limit?: number
   cursor?: string
@@ -191,7 +191,7 @@ function scorecardQueryString(query?: ScorecardListQuery): URLSearchParams {
   else if (query.judge) q.set('judge', query.judge)
   if (query.dataset) q.set('dataset', query.dataset)
   if (query.harness) q.set('harness', query.harness)
-  // 팀 스코프는 위 좁힘과 결합한다 — "이 중에 우리 팀 것"이 팀 사이드바가 묻는 질문이다.
+  // Team scope composes with the narrowing above — "which of these are ours" is what the team sidebar asks.
   if (query.team) q.set('team', query.team)
   if (query.day) q.set('day', query.day)
   if (query.q) q.set('q', query.q)
@@ -458,19 +458,19 @@ export const controlPlane = {
       auth,
       `/runs/${encodeURIComponent(id)}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ''}`
     ),
-  // 라이브 궤적 스냅숏 (LiveTrace 위젯이 폴링) — 실행 중 쌓이는 TraceEvent 전량(봉인 전 미리보기).
+  // Live trajectory snapshot (polled by the LiveTrace widget) — every TraceEvent accumulated so far (a pre-seal preview).
   getRunLiveTrace: <T>(auth: AuthContext, id: string, after?: number) =>
     call<T>(
       auth,
       `/runs/${encodeURIComponent(id)}/trajectory/live${after === undefined ? '' : `?after=${after}`}`
     ),
-  // 케이스 배치 조회(런타임 디버깅) — 케이스 잡이 클러스터 안에서 어디까지 갔는지(blocked 용량 판정·노드·이벤트 피드).
+  // Case placement read (runtime debugging) — how far a case job got inside the cluster (blocked-capacity verdict, node, event feed).
   getRunPlacement: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/placement`),
-  // 토폴로지 헬스 로스터(서비스 하네스) — 웜 토폴로지의 서비스별 상태(재시작·OOM·최근 이벤트).
+  // Topology health roster (service harnesses) — per-service state of a warm topology (restarts, OOM, recent events).
   getRunTopology: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/topology`),
-  // 토폴로지 서비스 1개의 로그 테일 — "스택은 떠 있는데 케이스가 실패한다"의 서비스 쪽 답.
+  // Log tail for ONE topology service — the service-side answer to "the stack is up and the case still fails".
   getTopologyServiceLogs: <T>(auth: AuthContext, id: string, service: string) =>
     call<T>(
       auth,
@@ -488,16 +488,16 @@ export const controlPlane = {
   // Sealed replay recording of a settled run (ReplayPlayer). Creator-or-admin, enforced by the control plane.
   getRunRecording: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/recording`),
-  // 멀티플렉스 라이브 SSE(④) — 위젯별 폴러를 대체하는 한 연결. RAW Response를 그대로 반환(BFF가 무버퍼 프록시).
+  // Multiplexed live SSE (④) — one connection replacing the per-widget pollers. Returns the RAW Response (the BFF proxies unbuffered).
   streamRunLive: (auth: AuthContext, id: string, lanes: string) =>
     fetch(
       `${env.CONTROL_PLANE_URL.replace(/\/$/, '')}/runs/${encodeURIComponent(id)}/live/stream?lanes=${encodeURIComponent(lanes)}`,
       { headers: requestHeaders(auth), cache: 'no-store' }
     ),
-  // 러닝 케이스 샌드박스의 라이브 리포 파일 트리(런 워크벤치 탐색기). Creator-or-admin은 컨트롤 플레인이 강제.
+  // Live repo file tree of a running case's sandbox (the run workbench explorer). Creator-or-admin is enforced by the control plane.
   getRunFs: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/fs`),
-  // 그 리포의 파일 1개 + 워킹트리 diff(런 워크벤치 에디터 패널).
+  // One file of that repo plus its working-tree diff (the run workbench editor panel).
   getRunFsFile: <T>(auth: AuthContext, id: string, path: string) =>
     call<T>(auth, `/runs/${encodeURIComponent(id)}/fs/file?path=${encodeURIComponent(path)}`),
   // Interactive run-SCREEN ticket (⑦b) — take over the browser the case is driving. Creator-or-admin, enforced by
@@ -642,8 +642,8 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  // `team` 은 한 팀 소유의 것만 남긴다 — 소유권이 읽기에 하는 일은 필터이지 403 이 아니다.
-  // 팀 사이드바의 하네스·데이터셋·저지가 이 파라미터로 좁혀진다.
+  // `team` keeps only what one team owns — what ownership does to a READ is filter, never 403.
+  // The team sidebar's harnesses, datasets and judges narrow through this parameter.
   listHarnesses: <T>(auth: AuthContext, team?: string) =>
     call<T>(auth, team ? `/harnesses?team=${encodeURIComponent(team)}` : '/harnesses'),
   // GET /harnesses/:id — a harness's instance version tag list.
@@ -710,8 +710,8 @@ export const controlPlane = {
     call<T>(auth, '/harness-templates', { method: 'POST', body: JSON.stringify(spec) }),
   validateHarnessTemplate: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/harness-templates/validate', { method: 'POST', body: JSON.stringify(spec) }),
-  // `team` 은 한 팀 소유의 것만 남긴다 — 소유권이 읽기에 하는 일은 필터이지 403 이 아니다.
-  // 팀 사이드바의 하네스·데이터셋·저지가 이 파라미터로 좁혀진다.
+  // `team` keeps only what one team owns — what ownership does to a READ is filter, never 403.
+  // The team sidebar's harnesses, datasets and judges narrow through this parameter.
   listDatasets: <T>(auth: AuthContext, team?: string) =>
     call<T>(auth, team ? `/datasets?team=${encodeURIComponent(team)}` : '/datasets'),
   getDataset: <T>(auth: AuthContext, id: string, version: string) =>
@@ -794,7 +794,7 @@ export const controlPlane = {
     }),
   deleteTask: (auth: AuthContext, id: string) =>
     callVoid(auth, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 워크스페이스의 보드 — 컬럼 이름·색·순서, 그리고 각 컬럼이 어느 정규 상태인지.
+  // The workspace's board — column names, colours and order, and which canonical status each column is.
   listWorkflowStates: <T>(auth: AuthContext) => call<T>(auth, '/workflow-states'),
   createWorkflowState: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workflow-states', { method: 'POST', body: JSON.stringify(body) }),
@@ -815,11 +815,11 @@ export const controlPlane = {
     }),
   deleteIssueLabel: (auth: AuthContext, id: string) =>
     call<void>(auth, `/issue-labels/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 삭제 전에 "몇 개 이슈에서 떨어져 나가는지"를 보여주기 위한 카운트.
+  // A count, so a delete can show how many issues it detaches from first.
   issueLabelUsage: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issue-labels/${encodeURIComponent(id)}/usage`),
-  // 한 PAGE 를 준다 — `{ items, nextCursor? }`. 행은 축약본(issueSummarySchema)이고, 본문·이력·링크 목록은
-  // 상세(`getIssue`)에만 있다. 전체를 훑어야 하는 화면은 `nextCursor` 를 되돌려 넣어 다음 장을 잇는다.
+  // Serves ONE page — `{ items, nextCursor? }`. Rows are the summary shape (issueSummarySchema); body, history and the
+  // link list live only on the detail read (`getIssue`). A screen that must sweep everything feeds `nextCursor` back.
   listIssues: <T>(auth: AuthContext, filter?: IssueListQuery) => {
     const q = issueListParams(filter)
     if (filter?.order) q.set('order', filter.order)
@@ -828,8 +828,8 @@ export const controlPlane = {
     const qs = q.toString()
     return call<T>(auth, qs ? `/issues?${qs}` : '/issues')
   },
-  // 그룹별 개수 — 묶인 화면의 헤더. 목록과 같은 필터를 받고 별도 엔드포인트인 이유는, 묶인 화면이 그룹마다
-  // 한 장씩 들고 있어서 자기 행을 세면 페이지 크기를 되풀이할 뿐이기 때문이다.
+  // Per-group counts — the header of a grouped screen. It takes the list's filters and is a separate endpoint because a
+  // grouped screen holds one page per group, so counting its own rows would only restate the page size.
   countIssues: <T>(auth: AuthContext, groupBy: string, filter?: IssueListQuery) => {
     const q = issueListParams(filter)
     q.set('groupBy', groupBy)
@@ -851,9 +851,9 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  // 팀 이동 — 상태 이동과 같은 이유로 전용 엔드포인트다: 식별자를 다시 찍는 전이라서, 이름 바꾸기 곁다리로
-  // 일어나면 안 된다. 응답의 identifier 가 새 이름이다(예전 이름도 계속 해석된다).
-  // 프로젝트 업데이트 — 트래커가 기록하는 유일한 판단(판정 + 그렇게 읽히는 이유).
+  // Team move — a dedicated endpoint for the same reason a status move is: it re-stamps the identifier, so it must not
+  // happen as a side effect of a rename. The response's identifier is the new name (the old one still resolves).
+  // Project update — the only JUDGEMENT the tracker records (a verdict, and why it reads that way).
   postProjectUpdate: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/projects/${encodeURIComponent(id)}/updates`, {
       method: 'POST',
@@ -919,9 +919,9 @@ export const controlPlane = {
   // Detach drops the remote link only — the local issue and its whole history stay.
   detachIssueGithub: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, { method: 'DELETE' }),
-  // 이슈 본문·코멘트에 박힌 GitHub 첨부 이미지의 바이트. GHE 첨부(그리고 비공개 리포 첨부)는 리포와 똑같은 인증
-  // 뒤에 있고 이 화면을 보는 브라우저에는 그 세션이 없다 — 그래서 컨트롤플레인이 워크스페이스 App 설치로 대신
-  // 받아온다. 이슈:read 한 번으로 게이트되고, url 은 저쪽에서 그 이슈의 GitHub 호스트로 고정 검사된다.
+  // The bytes of a GitHub attachment image embedded in an issue body or comment. GHE attachments (and private-repo ones)
+  // sit behind the same auth as the repo, and the browser viewing this screen has no such session — so the control plane
+  // fetches them with the workspace App installation instead. Gated by one issues:read, and the url is checked over there against that issue's GitHub host.
   getIssueAttachment: (auth: AuthContext, id: string, url: string) =>
     callBytes(auth, `/issues/${encodeURIComponent(id)}/attachment?url=${encodeURIComponent(url)}`),
   // `team` is derived server-side (a project has no team of its own — it means "the projects this team has
@@ -970,7 +970,7 @@ export const controlPlane = {
   // omits.
   getInitiative: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/initiatives/${encodeURIComponent(id)}`),
-  // 목표 자체에 올라온 판정 — 프로젝트 업데이트와 같은 계약, 한 층 위.
+  // A verdict posted on the GOAL itself — the same contract as a project update, one layer up.
   postInitiativeUpdate: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/initiatives/${encodeURIComponent(id)}/updates`, {
       method: 'POST',
@@ -993,11 +993,11 @@ export const controlPlane = {
     }),
   deleteInitiative: (auth: AuthContext, id: string) =>
     callVoid(auth, `/initiatives/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 프로덕트 타임라인(docs/architecture/product-timeline.md) — "무엇을 배포하는가"의 축.
+  // The product timeline (docs/architecture/product-timeline.md) — the "what do we ship" axis.
   listProducts: <T>(auth: AuthContext) => call<T>(auth, '/products'),
   getProduct: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/products/${encodeURIComponent(id)}`),
-  // 서버가 스토어를 합성해 주는 타임라인 한 방 read — 릴리즈 + 버전 원장 + 시리즈 포인트 + 이슈 마커.
+  // The timeline in one read, composed by the server out of the stores — releases + version ledger + series points + issue markers.
   getProductTimeline: <T>(
     auth: AuthContext,
     id: string,
@@ -1023,11 +1023,11 @@ export const controlPlane = {
     }),
   deleteProduct: (auth: AuthContext, id: string) =>
     callVoid(auth, `/products/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // 지금 GitHub 을 당겨온다 — 첫 싱크는 백필(조용), 그 뒤의 새 버전이 워치 시리즈를 돌린다.
+  // Pull GitHub now — the first sync is a backfill (quiet), and genuinely new versions after it run the watch series.
   syncProduct: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/products/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
-  // 품질 축의 수동 문 — Sync 가 버전 축을 당긴다면 이쪽은 시리즈를 지금 평가한다. keys 없음 = 프로덕트가
-  // 지금 지켜보는 전부.
+  // The quality axis's manual door — where Sync pulls the version axis, this evaluates the series now. No keys = everything
+  // the product is currently watching.
   runProductSeries: <T>(auth: AuthContext, id: string, keys?: string[]) =>
     call<T>(auth, `/products/${encodeURIComponent(id)}/series/run`, {
       method: 'POST',
@@ -1038,14 +1038,14 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  // 추적 서비스가 가리킬 수 있는 레포들 — 워크스페이스 GitHub App 설치 레포(= 싱크가 토큰을 받을 수 있는
-  // 정확히 그 집합). 비어 있으면 App 미설치.
+  // The repos a tracked service can point at — the workspace GitHub App's installed repos (= exactly the set a sync can
+  // get a token for). Empty means the App is not installed.
   listProductRepoOptions: <T>(auth: AuthContext) => call<T>(auth, '/products/repo-options'),
-  // 레포 하나를 읽어 "이 제품은 무엇으로 구성되는가"를 답한다 — 발행 중인 버전 스트림 + 트리의 배포 단위 +
-  // 그걸 합친 서비스 제안. 아무것도 저장하지 않는다(위자드가 고르게 하는 근거 read).
+  // Read one repo and answer "what is this product made of" — the version streams it publishes, the deploy units in its
+  // tree, and the service suggestions that join them. Stores nothing (a read that lets the wizard CHOOSE).
   discoverProductRepo: <T>(auth: AuthContext, body: { repository: string; host?: string }) =>
     call<T>(auth, '/products/discover', { method: 'POST', body: JSON.stringify(body) }),
-  // 워크스페이스 전체 릴리즈(피커의 read) — ?product= 로 한 프로덕트로 좁힐 수 있다.
+  // Every release in the workspace (the picker's read) — narrow to one product with ?product=.
   listReleases: <T>(auth: AuthContext, product?: string) =>
     call<T>(auth, product ? `/releases?product=${encodeURIComponent(product)}` : '/releases'),
   getRelease: <T>(auth: AuthContext, id: string) =>
@@ -1055,7 +1055,7 @@ export const controlPlane = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  // 릴리즈 게이트 — 열린 링크 이슈/회귀 시리즈를 이고 오는 409 계약(force 로만 넘는다).
+  // The release gate — the 409 contract it answers when it carries open linked issues or a regressed series (force is the only way past).
   setReleaseStatus: (auth: AuthContext, id: string, body: unknown) =>
     callWithEnvelope(auth, `/releases/${encodeURIComponent(id)}/status`, {
       method: 'POST',
@@ -1101,15 +1101,15 @@ export const controlPlane = {
   },
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
-  // 오프로드된 분석 아티팩트(요약+케이스별 verdict/scores)를 컨트롤플레인이 오브젝트스토어에서 읽어 JSON 으로 준다.
-  // 브라우저가 오브젝트스토어를 직접 치지 않는 이유 = 저장된 ref 는 서버 내부 주소(minio:9000)이고 presigned 라 만료된다.
+  // The offloaded analysis artifact (summary + per-case verdict/scores), read from object storage by the control plane and served as JSON.
+  // The browser does not hit object storage directly because the stored ref is an internal address (minio:9000) and presigned URLs expire.
   getScorecardAnalysis: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/analysis`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
   retryScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
-  // Full re-run (전체 재실행) — a new scorecard re-running the source's ENTIRE case set, optionally with a re-score
+  // Full re-run — a new scorecard re-running the source's ENTIRE case set, optionally with a re-score
   // override (grading plan / judge model / trace sink) in the body. Distinct from retry (failed-only, carry-over).
   rerunScorecard: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/rerun`, {
@@ -1413,8 +1413,8 @@ export const controlPlane = {
   },
   // Agent Judges (workspace-owned + _shared defaults) — model (LLM/VLM call) | harness (delegate to an agent).
   // Read judges:read (viewer+), register/validate judges:write (member+) — the control plane enforces.
-  // `team` 은 한 팀 소유의 것만 남긴다 — 소유권이 읽기에 하는 일은 필터이지 403 이 아니다.
-  // 팀 사이드바의 하네스·데이터셋·저지가 이 파라미터로 좁혀진다.
+  // `team` keeps only what one team owns — what ownership does to a READ is filter, never 403.
+  // The team sidebar's harnesses, datasets and judges narrow through this parameter.
   listJudges: <T>(auth: AuthContext, team?: string) =>
     call<T>(auth, team ? `/judges?team=${encodeURIComponent(team)}` : '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
@@ -1531,10 +1531,10 @@ export const controlPlane = {
     call<T>(auth, '/subscriptions/import-agent-triggers', { method: 'POST' }),
   getAgent: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
-  // 플랫폼 이벤트 로그(라이프사이클 사실, 최신순) — 크래프팅 스튜디오의 리플레이 피커. events:read(viewer+).
+  // The platform event log (lifecycle facts, newest first) — the crafting studio's replay picker. events:read (viewer+).
   listPlatformEvents: <T>(auth: AuthContext, limit = 20) => call<T>(auth, `/events?limit=${limit}`),
-  // 워크스페이스 펄스 — 홈 화면의 단 한 번의 읽기(현황 + 추이). 지표를 목록 여덟 개에서 조립하지 않는 이유는
-  // 왕복 여덟 번 때문만이 아니라, 그 산식이 서버 것이기 때문이다(웹이 다시 구현하면 두 곳이 갈라진다).
+  // The workspace pulse — the home screen's single read (state + trends). The metrics are not assembled out of eight lists,
+  // and not only because of eight round trips: the arithmetic is the SERVER's, and a web re-implementation is two that diverge.
   getWorkspacePulse: <T>(auth: AuthContext, days?: number) =>
     call<T>(auth, days === undefined ? '/workspace/pulse' : `/workspace/pulse?days=${days}`),
   saveAgent: <T>(auth: AuthContext, id: string, body: unknown) =>
@@ -1544,25 +1544,25 @@ export const controlPlane = {
     }),
   // The built-in (first-party) default tools catalog — powers the Settings › Agent built-in-tools toggles.
   listAgentDefaults: <T>(auth: AuthContext) => call<T>(auth, '/agents/defaults'),
-  // 로그인한 멤버 자신의 에이전트 도구셋(Settings › Agent › Tools). 워크스페이스 AgentSpec 이 기준선이고 각 멤버가
-  // 자기 on/off 를 얹는다 — 셀프 스코프(개인 시크릿과 동형)라 별도 역할 게이트 없음. setAgentTool 의 enabled=null 은
-  // 오버라이드 해제(= 워크스페이스 기본값 따르기).
+  // The signed-in member's own agent toolset (Settings › Agent › Tools). The workspace AgentSpec is the baseline and each member
+  // lays their own on/off over it — self-scoped (isomorphic to personal secrets), so no separate role gate. `enabled: null` on
+  // setAgentTool clears the override (= follow the workspace default).
   listAgentTools: <T>(auth: AuthContext) => call<T>(auth, '/agent/tools'),
   setAgentTool: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
     call<T>(auth, '/agent/tools', { method: 'PUT', body: JSON.stringify({ key, enabled }) }),
-  // 도구 상세 — 목록 행 뒤의 설명(도달 방식·모델이 부르는 function·시크릿·출처). 키에 `:`/`/`가 들어가므로 인코딩한다.
+  // Tool detail — what sits behind a list row (how it is reached, the function the model calls, its secrets, its provenance). Keys contain `:`/`/`, so they are encoded.
   getAgentTool: <T>(auth: AuthContext, key: string) =>
     call<T>(auth, `/agent/tools/${encodeURIComponent(key)}`),
-  // 연결 테스트 — 내 바인딩된 시크릿으로 실제 접속해 서버가 진짜 제공하는 function 을 확인(원격 HTTP MCP 만).
+  // Connection test — connect with MY bound secrets and read back the functions the server actually offers (remote HTTP MCP only).
   probeAgentTool: <T>(auth: AuthContext, key: string) =>
     call<T>(auth, `/agent/tools/${encodeURIComponent(key)}/probe`, { method: 'POST' }),
-  // 시크릿 바인딩 — 값이 아니라 이름을 잇는다. 워크스페이스 AgentSpec 편집이라 agents:write.
+  // Secret binding — it joins NAMES, never values. This edits the workspace AgentSpec, so agents:write.
   bindAgentToolSecrets: <T>(auth: AuthContext, key: string, bindings: Record<string, string>) =>
     call<T>(auth, `/agent/tools/${encodeURIComponent(key)}/secrets`, {
       method: 'PUT',
       body: JSON.stringify({ bindings }),
     }),
-  // 같은 오버레이의 스킬 채널 — 워크스페이스 라이브러리가 "지원하는 절차", 이건 "내 에이전트가 따르는 절차".
+  // The skill channel of the same overlay — the workspace library is "the procedures we support", this is "the procedures MY agent follows".
   listAgentSkills: <T>(auth: AuthContext) => call<T>(auth, '/agent/skills'),
   setAgentSkill: <T>(auth: AuthContext, key: string, enabled: boolean | null) =>
     call<T>(auth, '/agent/skills', { method: 'PUT', body: JSON.stringify({ key, enabled }) }),
@@ -1588,11 +1588,11 @@ export const controlPlane = {
     callVoid(auth, `/skills/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   generateSkill: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/skills/generate', { method: 'POST', body: JSON.stringify(body) }),
-  // 스토어 발행물(everdict 예제 / 다른 워크스페이스 발행)을 이 워크스페이스 라이브러리로 **복사**한다 —
-  // 가져온 뒤에는 직접 쓴 스킬과 완전히 같다(편집·버전 찍기 모두 여기서). skills:write.
+  // COPY a store publication (an everdict example, or another workspace's) into this workspace's library — once imported it is
+  // exactly like a skill written here (edited and version-stamped from here on). skills:write.
   importSkill: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/skills/import', { method: 'POST', body: JSON.stringify(body) }),
-  // 스킬의 버전 라인 — 지금 내용을 한 버전으로 "찍고"(stamp), 찍힌 버전은 불변으로 남는다.
+  // A skill's version line — stamp the current content as a version, and a stamped version stays immutable.
   listSkillVersions: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/skills/${encodeURIComponent(id)}/versions`),
   getSkillVersion: <T>(auth: AuthContext, id: string, version: string) =>
@@ -1602,8 +1602,8 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  // Capability Store — 한 판별자 엔티티(mcp|code|skill)를 저작·발행·채택. read capabilities:read(viewer+);
-  // save/reach/delete capabilities:write(member+, 특정 capability 는 owner-or-admin, public 승격은 admin).
+  // Capability Store — author, publish and adopt one discriminated entity (mcp | code | skill). Reads are capabilities:read (viewer+);
+  // save/reach/delete are capabilities:write (member+; some capabilities owner-or-admin, and promotion to public is admin).
   listCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities'),
   listPublicCapabilities: <T>(auth: AuthContext) => call<T>(auth, '/capabilities/public'),
   getCapability: <T>(auth: AuthContext, id: string, version?: string, source?: string) => {
@@ -1617,7 +1617,7 @@ export const controlPlane = {
         : `/capabilities/${encodeURIComponent(id)}${suffix}`
     )
   },
-  // 버전 관리(레지스트리 엔티티 패리티) — 버전 목록·구조 diff·버전 태그(생성자-or-admin). source=크로스테넌트 public/subset 오너.
+  // Versioning (parity with the registry entities) — version list, structural diff, version tags (creator-or-admin). `source` = the cross-tenant public/subset owner.
   listCapabilityVersions: <T>(auth: AuthContext, id: string, source?: string) =>
     call<T>(
       auth,
@@ -1669,8 +1669,8 @@ export const controlPlane = {
       auth,
       `/workspace/image-registries/tags?repository=${encodeURIComponent(repository)}${registry ? `&registry=${encodeURIComponent(registry)}` : ''}`
     ),
-  // GET /workspace/image-registries/verify — 이 워크스페이스가 그 ref 를 실제로 pull 할 수 있는지(+ digest).
-  // 실패는 에러가 아니라 결과(pullable:false + reason) — 저작 화면이 배지로 렌더한다.
+  // GET /workspace/image-registries/verify — whether this workspace can actually pull that ref (+ its digest).
+  // A failure is a RESULT, not an error (pullable:false + reason) — the authoring screen renders it as a badge.
   verifyImage: <T>(auth: AuthContext, image: string) =>
     call<T>(auth, `/workspace/image-registries/verify?image=${encodeURIComponent(image)}`),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
@@ -1807,12 +1807,12 @@ export const controlPlane = {
     callVoid(auth, `/workspace/image-registries/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
-  // 관리형 이미지 스토어 — everdict가 직접 운영하는 워크스페이스 이미지 네임스페이스(BYO 레지스트리와 별개).
-  // 목록/태그는 harnesses:read, 회수(unpublish)는 images:push. 관리형 스토어가 없는 배포에서는 전부 404.
+  // The managed image store — the workspace image namespace everdict operates itself (separate from a BYO registry).
+  // List/tags are harnesses:read, unpublish is images:push. All 404 on a deployment with no managed store.
   listWorkspaceImages: <T>(auth: AuthContext) => call<T>(auth, '/workspace/images'),
   listWorkspaceImageTags: <T>(auth: AuthContext, repository: string) =>
     call<T>(auth, `/workspace/images/${encodeURIComponent(repository)}/tags`),
-  // 태그/다이제스트 하나의 상세 — 핀 다이제스트 + (best-effort) OCI config 유래 빌드 히스토리·런타임 구성·크기.
+  // Detail for one tag/digest — the pinned digest plus (best-effort) build history, runtime config and size from the OCI config.
   inspectWorkspaceImage: <T>(auth: AuthContext, repository: string, reference: string) =>
     call<T>(
       auth,

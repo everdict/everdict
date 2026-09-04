@@ -1,15 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 
-// 이 파일이 잠그는 것: @-피커의 이슈 검색은 제어 평면이 한다. 라우트는 `search` 를 넘겨 서버가 좁힌 답을
-// 그대로 통과시켜야 한다 — 서버 의미론(식별자·제목 밖 매치)으로 찾은 행을 부분문자열로 한 번 더 걸러
-// 떨어뜨리면, 최근 창 밖의 이슈는 피커에서 조용히 못 찾게 된다. 창 전체를 받아오는 나머지 타입은
-// 여전히 라우트가 거른다.
+// What this file locks down: the @-picker's issue search is the CONTROL PLANE's. The route passes `search` through and lets the server's
+// narrowed answer past verbatim — filtering it again by substring would drop rows found by SERVER semantics (a match outside the identifier
+// and title), and an issue outside the recent window would silently stop being findable in the picker. The other types, which fetch a whole
+// window, are still filtered by the route.
 
 vi.mock('@/shared/auth/principal', () => ({ authContext: async () => ({}) }))
 vi.mock('@/shared/lib/control-plane', () => ({
   controlPlane: {
     listIssues: vi.fn(async (_ctx: unknown, filter?: { search?: string }) => ({
-      // 서버 검색은 설명 본문까지 본다 — 매치된 행의 식별자·제목에는 검색어가 없다.
+      // The server search looks into the description body too — the matched row's identifier and title do not contain the term.
       items:
         filter?.search === 'flaky'
           ? [{ id: 'uuid-1', identifier: 'ENG-12', title: 'The judge drops cost scores' }]
@@ -39,7 +39,7 @@ describe('mention-picker search route', () => {
       search: 'flaky',
       limit: 50,
     })
-    // 참조 키는 식별자(ENG-12), 라벨은 제목 — 서버가 찾은 행이 그대로 후보가 된다.
+    // The reference key is the identifier (ENG-12) and the label is the title — the row the SERVER found becomes the candidate verbatim.
     expect(body.items).toEqual([{ id: 'ENG-12', label: 'The judge drops cost scores' }])
   })
 

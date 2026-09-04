@@ -14,12 +14,11 @@ import type { IssuePageQuery } from '../model/page-query'
 import { IssueGroupLabel } from './issue-group-label'
 import { IssueRow } from './issue-row'
 
-// 한 그룹 — 접을 수 있는 머리글(이름 + **진짜** 개수)과 그 아래 행들. 개수가 서버 집계에서 오는 것이
-// 요점이다: 그룹마다 한 장씩 들고 있으므로 받은 행을 세면 페이지 크기를 되풀이할 뿐이고, "진행 중 3"이
-// 실제로는 40 건인 화면은 헤더가 없느니만 못하다.
+// One group — a collapsible header (the name plus the **real** count) with its rows beneath. The point is that the count comes from the SERVER
+// aggregate: each group holds one page, so counting the received rows only restates the page size, and a screen saying "in progress 3" for
+// something that is really 40 is worse than having no header at all.
 //
-// 「더 보기」도 그룹마다 따로다(리니어와 같은 동선) — 이어 붙이는 것은 이 그룹의 행뿐이라, 다른 그룹을
-// 펼쳐 둔 상태가 흐트러지지 않는다.
+// "Show more" is per group too (the same path as Linear) — only THIS group's rows are appended, so another group left expanded is undisturbed.
 export function IssueGroup({
   workspace,
   groupBy,
@@ -38,7 +37,7 @@ export function IssueGroup({
   count: number
   initial: IssueSummary[]
   initialCursor?: string
-  // 이 그룹의 다음 장을 가져올 질의 — 서버가 첫 장에 쓴 것과 같은 것이다.
+  // The query that fetches this group's next page — the same one the server used for the first.
   query: IssuePageQuery
   directories: IssueDirectories
   canWrite: boolean
@@ -50,8 +49,8 @@ export function IssueGroup({
   const [cursor, setCursor] = useState(initialCursor)
   const [pending, setPending] = useState(false)
 
-  // 서버가 새로 그린 첫 장이 진실이다 — 상태를 바꿔 `refresh()` 가 돌면 여기에 맞춘다. 더 불러온
-  // 행은 그때 사라진다: 필터가 바뀐 뒤에도 남아 있으면 그 그룹에 속하지 않는 행이 계속 서 있게 된다.
+  // The server's freshly drawn first page is the truth — when a status change makes `refresh()` run, this follows it. The extra loaded rows
+  // disappear then: left standing after a filter change, rows that do not belong to the group would keep standing.
   const [seen, setSeen] = useState(initial)
   if (seen !== initial) {
     setSeen(initial)
@@ -119,7 +118,7 @@ export function IssueGroup({
               className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
             >
               {pending && <Loader2 className="size-3 animate-spin" />}
-              {/* 남은 수를 말한다 — 개수를 아는 화면이 "더 보기"라고만 하는 건 아는 것을 숨기는 것이다. */}
+              {/* It states how many REMAIN — a screen that knows the count saying only "show more" is hiding what it knows. */}
               {t('groupLoadMore', { count: Math.max(count - items.length, 0) })}
             </button>
           )}

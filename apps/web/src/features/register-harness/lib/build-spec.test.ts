@@ -84,7 +84,7 @@ describe('instanceStateFromSpec with a baseline', () => {
       ['image', 'model'],
       baseline
     )
-    // 상속된 OPENAI_BASE_URL 이 화면에 남아 있어야 사람이 템플릿을 고치러 가지 않는다.
+    // The inherited OPENAI_BASE_URL has to stay ON SCREEN, or a person goes off to edit the template.
     expect(state.cmdEnvRows).toEqual([
       { key: 'OPENAI_BASE_URL', secret: false, value: 'http://litellm:4000' },
       { key: 'LOG_LEVEL', secret: false, value: 'debug' },
@@ -142,7 +142,7 @@ describe('instanceStateFromSpec with a baseline', () => {
       baseline
     )
     expect(s.cmdEnvRows.map((r) => r.key)).toEqual(['LOG_LEVEL'])
-    // 그대로 다시 저장해도 뜻이 유지된다(왕복).
+    // Saving it again unchanged preserves the meaning (a round trip).
     expect(buildOverrides(s, baseline)).toEqual({ unsetEnv: ['OPENAI_BASE_URL'] })
   })
 })

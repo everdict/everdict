@@ -2,11 +2,11 @@ import type { ListDisplay, ListViewSpec } from '@/shared/lib/list-view'
 
 import type { Harness } from './schema'
 
-// 하네스 목록이 자기에 대해 아는 것 — 어느 축으로 거르고, 어떻게 묶고, 무엇으로 정렬하는가. 어휘가 여기
-// 있는 이유는 목록 화면과 주소 해석이 같은 단어를 써야 하기 때문이다(모르는 축은 주소에서 버려진다).
+// What the harness list knows about itself — which axes it filters on, how it groups, and what it sorts by. The vocabulary lives here because
+// the list screen and the address parsing have to use the SAME words (an unknown axis is dropped from the address).
 //
-// 팀이 축의 하나인 것이 이 목록의 핵심 변화다. 한동안 팀은 경로였지만(`…/team/ENG/harnesses`), 사람은
-// "우리 팀 하네스"를 팀 화면에서 찾는 게 아니라 하네스 목록에서 좁혀 찾는다.
+// Team being one of the axes is this list's central change. Team was a PATH for a while (`…/team/ENG/harnesses`), but people do not look for
+// "our team's harnesses" on a team screen — they narrow to them from the harness list.
 export const HARNESS_FACETS = ['category', 'kind', 'creator', 'tag'] as const
 export const HARNESS_GROUPINGS = [
   'none',
@@ -18,18 +18,18 @@ export const HARNESS_GROUPINGS = [
 ] as const
 export const HARNESS_ORDERS = ['name', 'updated', 'created', 'versions'] as const
 
-// 기본은 형상(템플릿)으로 묶기 — env 나 모델 하나만 다른 변형은 서로 무관한 하네스가 아니라 한 형상의
-// 형제이고, 그렇게 보이지 않으면 목록이 "비슷한 이름 열두 개"가 된다.
+// The default is grouping by shape (template) — a variation differing in one env value or one model is not an unrelated harness but a SIBLING
+// on one shape, and without looking that way the list becomes "twelve similarly named things".
 export const DEFAULT_HARNESS_DISPLAY: ListDisplay = { grouping: 'template', order: 'name' }
 
 function versionsOf(harness: Harness): number {
   return harness.versionCount ?? harness.versions.length
 }
 
-// 하네스를 부르는 라벨 = 버전 태그의 합집합(최신 버전 우선, 중복 제거). 하네스가 많아지면 이름만으로
-// 각각이 뭔지 안 보인다는 요구의 답이 이것이다 — 어느 버전에 붙었든 사람이 단 라벨은 목록에서 그
-// 하네스의 이름표로 남는다(새 버전을 찍어도 옛 버전의 라벨이 사라지지 않도록 최신 것만 쓰지 않는다).
-// 데이터셋과 같은 이유로 거르기 전용이다: 여럿 들 수 있어 묶으면 그룹 합이 목록보다 커진다.
+// The labels a harness is called by = the union of its version tags (newest version first, deduplicated). This is the answer to "with many
+// harnesses, the names alone do not say what each one is" — a label a person attached, to whichever version, stays that harness's name plate
+// in the list (only the newest is NOT used, so an older version's label does not disappear when a new version is stamped).
+// Filter-only for the same reason as datasets: several can be held, so grouping by it would make the groups sum to more than the list.
 export function harnessTags(harness: Harness): string[] {
   const byVersion = harness.versionTags
   if (!byVersion) return []
@@ -61,8 +61,8 @@ export const harnessListSpec: ListViewSpec<Harness> = {
         return []
     }
   },
-  // 검색이 훑는 것은 사람이 그 하네스를 부를 만한 모든 이름이다 — id 뿐 아니라 부제(모델·커맨드)와
-  // 형상, 그리고 사람이 직접 단 버전 태그까지.
+  // What a search sweeps is every name a person might call that harness by — not just the id, but the subtitle (model, command),
+  // the shape, and the version tags a person attached themselves.
   searchText: (harness) =>
     [
       harness.id,

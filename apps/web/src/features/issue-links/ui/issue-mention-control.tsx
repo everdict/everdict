@@ -18,12 +18,12 @@ import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
-// 이 이슈가 **언급한** 다른 이슈들 — GitHub 이 `#123` 으로 적는 교차참조를, 여기서는 골라서 만든다
-// (사용자 결정: 본문 텍스트 자동 파싱이 아니라 피커). 저장은 언급하는 쪽 레코드에 한 방향으로만 하고,
-// 언급당한 이슈는 자기 화면에서 역방향 질의로 「언급한 이슈」 줄을 그린다 — 그래서 양쪽에서 보인다.
+// The other issues this one **mentions** — the cross-reference GitHub writes as `#123`, made here by PICKING
+// (a user decision: a picker rather than auto-parsing the body text). It is stored one-directionally on the mentioning record, and the
+// mentioned issue draws its own "mentioned by" row from a reverse query — so it is visible from both sides.
 //
-// 링크가 들고 있는 것은 UUID 라서 그 자체로는 사람에게 아무 말도 하지 않는다. 그리기 위한 식별자·제목·상태는
-// 서버 컴포넌트가 이미 풀어서 넘겨 주고(`mentions`), 여기서 방금 고른 것은 피커가 준 행을 그대로 쓴다.
+// The link holds a UUID, which says nothing to a person by itself. The identifier, title and status needed to draw it are already resolved and
+// passed down by the server component (`mentions`), and something just picked here uses the row the picker gave verbatim.
 export function IssueMentionControl({
   workspace,
   issueId,
@@ -33,9 +33,9 @@ export function IssueMentionControl({
 }: {
   workspace: string
   issueId: string
-  // 지금은 `issue` 하나 — 어휘가 늘면 같은 컨트롤이 그 종류를 받는다(`ISSUE_MENTION_LINK_TYPES`).
+  // Today that is `issue` alone — as the vocabulary grows, the same control takes the kind (`ISSUE_MENTION_LINK_TYPES`).
   type: IssueMentionLinkType
-  // 이 이슈가 언급한 것들, 이미 풀린 상태로.
+  // What this issue mentions, already resolved.
   mentions: IssueOption[]
   canWrite: boolean
 }) {
@@ -45,8 +45,8 @@ export function IssueMentionControl({
   const [selected, setSelected] = useState<IssueOption[]>(mentions)
   const [seen, setSeen] = useState(() => mentions.map((m) => m.id).join(' '))
 
-  // 서버가 실어 온 값이 진실이다 — 저장이 끝나 페이지가 새로 그려졌거나 다른 화면이 고쳤으면 거기에 맞춘다.
-  // 저장 중에는 맞추지 않는다: 연달아 두 번 고르면 첫 응답이 두 번째 선택을 되돌려 깜빡인다.
+  // What the SERVER carried is the truth — once a save finishes and the page re-renders, or another screen edits it, this follows.
+  // It does not follow while a save is in flight: picking twice in a row would make the first response undo the second choice and flicker.
   const fromServer = mentions.map((m) => m.id).join(' ')
   if (!pending && fromServer !== seen) {
     setSeen(fromServer)
@@ -136,12 +136,12 @@ export function IssueMentionControl({
             ) : (
               <ChevronDown className="size-3" />
             )}
-            {/* 아직 아무것도 안 걸린 줄에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다. */}
+            {/* On a row with nothing attached yet, this button is the only affordance — that is the only time it wears a label. */}
             {chips.length === 0 && <span>{t('add')}</span>}
           </button>
         )}
       >
-        {/* 자기 자신과 이미 언급한 것은 후보가 아니다 — 고를 수 있는 것은 실제로 새로 걸리는 것들뿐이다. */}
+        {/* Itself and what it already mentions are not candidates — the only selectable things are those that would genuinely be new links. */}
         <IssueSearchOptions
           autoFocus
           exclude={[issueId, ...selected.map((issue) => issue.id)]}

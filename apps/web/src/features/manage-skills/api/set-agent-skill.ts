@@ -10,8 +10,8 @@ export interface SetAgentSkillResult {
   error?: string
 }
 
-// 내 에이전트가 따르는 스킬 on/off — 워크스페이스 라이브러리는 그대로 두고 "나"의 오버레이만 바꾼다.
-// enabled=null 은 오버라이드 해제(워크스페이스 기본값 따르기). 컨트롤플레인이 셀프 스코프를 강제한다.
+// The on/off for a skill my agent follows — it leaves the workspace library untouched and changes only MY overlay.
+// enabled=null clears the override (following the workspace default). The control plane enforces the self scope.
 export async function setAgentSkillAction(
   key: string,
   enabled: boolean | null

@@ -13,15 +13,15 @@ export const judgeSummarySchema = z.object({
   // all, and it is re-fileable (`POST /<resource>/:id/team`), so the detail shows it and offers the move.
   // Absent = unowned (a `_shared` entry, or one from before the axis), which is the workspace's.
   versions: z.array(z.string()),
-  // 첫 등록의 주체/시각, 그리고 가장 최근 등록 시각. 저지 상세가 "누가 언제 만들었나"를 말할 근거이며,
-  // 아래 versionOrigins 와 함께 리니지 한 줄을 이룬다(시드/_shared 는 등록 주체가 없다).
+  // Who first registered it and when, plus the most recent registration time. The grounds on which a judge detail says "who made this and when",
+  // and together with versionOrigins below it forms one line of lineage (a seed or `_shared` has no registering subject).
   createdBy: z.string().optional(),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec.
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
-  // version → 그 버전이 어디서 왔는가(찍힌 버전만). 이슈에서 태어났는지, 어떤 에이전트가 어느 대화에서
-  // 만들었는지 — 상세가 리니지를 그리는 근거.
+  // version → where that version came from (stamped versions only). Whether it was born from an issue, and which agent made it in which
+  // conversation — the grounds on which the detail draws lineage.
   versionOrigins: versionOriginsSchema.optional(),
 })
 export const judgesSchema = z.array(judgeSummarySchema)

@@ -25,7 +25,7 @@ export function summarizeTraceEvent(e: TraceEvent): string {
     case 'log':
       return `[${String(a.stream ?? '')}] ${String(a.text ?? '').slice(0, 140)}`
     case 'infra': {
-      // 인프라 플레인 기록(배치/서비스) — [scope/service] event: message (node)
+      // An infra-plane record (placement/service) — [scope/service] event: message (node)
       const head = a.service
         ? `${String(a.scope ?? '')}/${String(a.service)}`
         : String(a.scope ?? '')

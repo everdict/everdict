@@ -6,25 +6,25 @@ import type {
 } from '@everdict/contracts'
 import { z } from 'zod'
 
-// Capability Store — 멤버가 저작·발행하고 다른 멤버가 채택(도구 kind)하거나 하네스 저작에서 소비(environment)하는 하나의
-// 판별자 엔티티(mcp|code|skill|environment). 경계 검증은 여기 zod v4 에서만, EXPORT 타입은 @everdict/contracts 고정(P4).
-// `import type` 만 — 계약의 zod v3 스키마는 웹에서 실행되지 않는다.
+// Capability Store — one discriminated entity (mcp|code|skill|environment) a member authors and publishes, and another member
+// adopts (the tool kinds) or consumes while authoring a harness (environment). Boundary validation lives only in this zod v4, and the
+// EXPORTED types are pinned to @everdict/contracts (P4). `import type` only — the contract's zod v3 schemas do not run in the web.
 
-// 공개범위(reach) 4단계. subset=작성자 자기 워크스페이스들 중 일부(sharedWith), public=전체 노출(admin 게이트).
+// Four levels of reach. subset = some of the author's own workspaces (sharedWith); public = visible to everyone (admin-gated).
 export const capabilityVisibilitySchema = z.enum(['private', 'workspace', 'subset', 'public'])
 export type CapabilityVisibility = z.infer<typeof capabilityVisibilitySchema>
 
 export const capabilityTypeSchema = z.enum(['mcp', 'code', 'skill', 'environment', 'delegation'])
 export type CapabilityType = z.infer<typeof capabilityTypeSchema>
 
-// 채택자가 자기 시크릿으로 채워야 하는 값 — 이름 + 설명만(값 아님).
+// What an adopter must fill with their own secrets — name and description only, never a value.
 const requiredSecretSchema = z.object({ name: z.string(), description: z.string() })
 
-// 판별자 spec — 한 capability 는 정확히 세 종류 중 하나.
-// mcp — 두 transport: 원격 HTTP(`url`) 또는 컨테이너 stdio(`image`, `docker run -i`). 정확히 하나(계약 저장 경계에서 강제).
-// 효과 계약(O4) — 이 도구를 호출하면 샌드박스 바깥 세계에 무슨 일이 일어나는가. write 가능한 도구는
-// 컨트롤플레인 도메인 가드가 선언을 요구하고(assertCapabilityEffects), 에이전트 권한 게이트는 이름이 아니라
-// 이 선언으로 위험도를 판정한다(effectsRequireConsent). 되돌리기는 문자열(구버전 호환)이거나 태그된 형태다.
+// The discriminated spec — a capability is exactly one of the kinds.
+// mcp — two transports: remote HTTP (`url`) or container stdio (`image`, `docker run -i`). Exactly one (enforced at the contract's storage boundary).
+// The effect contract (O4) — what happens to the world OUTSIDE the sandbox when this tool is called. A tool that can write is
+// REQUIRED by the control plane's domain guard to declare one (assertCapabilityEffects), and the agent permission gate judges risk
+// from this declaration rather than from a name (effectsRequireConsent). A rollback is either a string (older compatibility) or a tagged shape.
 export const rollbackPlanSchema = z.union([
   z.string(),
   z.object({ kind: z.literal('capability'), capability: z.string() }),
@@ -38,8 +38,8 @@ export const effectContractSchema = z.object({
   idempotent: z.boolean().optional(),
   rollback: rollbackPlanSchema.optional(),
   partialFailure: z.string().optional(),
-  // 본 것(reads)과 그것이 갈 수 있는 곳(egress) — sideEffect 로는 표현되지 않는 축. 읽기 전용 도구도
-  // 바깥으로 내보낼 수 있으면 민감하다.
+  // What it SAW (reads) and where that can go (egress) — an axis `sideEffect` does not express. A read-only tool is sensitive too
+  // when it can send outward.
   dataAccess: z
     .object({
       reads: z.enum(['none', 'workspace', 'external']).optional(),
@@ -59,7 +59,7 @@ const mcpToolSpecSchema = z.object({
   write: z.boolean(),
   effects: effectContractSchema.optional(),
 })
-// code 도구의 워크드 예제 — 스토어 상세 표시·try 실행·에이전트 tool description 3중 용도(입력 형태를 실호출로 보여준다).
+// A code tool's worked examples — used three ways: the store detail, the try runner, and the agent tool description (showing the input shape as a real call).
 export const codeToolExampleSchema = z.object({
   name: z.string().optional(),
   input: z.record(z.string(), z.unknown()),
@@ -85,8 +85,8 @@ const skillCapabilitySpecSchema = z.object({
   files: z.array(z.object({ path: z.string(), content: z.string() })),
 })
 
-// environment — 평가환경 이미지 자산(docs/architecture/environment-image-store.md). preset 은 깊은 토폴로지 서브어휘라
-// 런타임은 shallow 체크만(컨트롤플레인이 실스키마로 검증·서빙, traceEvent passthrough 선례), 타입은 계약 앵커.
+// environment — an evaluation-environment image asset (docs/architecture/environment-image-store.md). A preset is deep topology sub-vocabulary,
+// so the runtime shallow-checks it only (the control plane validates and serves it against the real schema, following the traceEvent passthrough), with the type anchored to the contract.
 const environmentContentsSchema = z.object({
   benchmark: z.string().optional(),
   packages: z.array(z.string()),
@@ -104,9 +104,9 @@ const environmentImageSpecSchema = z.object({
   instructions: z.string(),
 })
 
-// delegation — 에버딕트가 일을 맡기는 작업 환경. 어떤 대화형 에이전트가 · 어떤 이미지에서 · 어떤 모델/env로 ·
-// 어떤 상시 지시(instructions) 아래 도는지를 한 번 정의해두고 참조로만 위임한다(capability-store.md §Fifth kind).
-// env 값은 리터럴 또는 {secretRef} — 컨트롤플레인 EnvValueSchema 미러(웹은 표시만 하고 재구성하지 않는다).
+// delegation — the work environment everdict hands work to. WHICH conversational agent, in WHICH image, under WHICH model/env and
+// under WHICH standing instructions, defined once and delegated to by reference only (capability-store.md §Fifth kind).
+// An env value is a literal or {secretRef} — mirroring the control plane's EnvValueSchema (the web only displays it, never rebuilds it).
 const delegationEnvValueSchema = z.union([
   z.string(),
   z.object({ secretRef: z.string(), scope: z.enum(['user', 'workspace']).optional() }),
@@ -134,8 +134,8 @@ export const capabilitySpecSchema = z.discriminatedUnion('type', [
 ])
 export type CapabilitySpec = z.infer<typeof capabilitySpecSchema>
 
-// GET /capabilities · /capabilities/public · /capabilities/:id — 전체 CapabilityRecord
-// + (environment kind 만) 뷰어 워크스페이스 레지스트리 기준 imageClass 주석(컨트롤플레인 계산·비영속, P1g 선례).
+// GET /capabilities · /capabilities/public · /capabilities/:id — the whole CapabilityRecord
+// plus (for the environment kind only) an imageClass annotation against the VIEWER's workspace registry (computed by the control plane, not persisted, following P1g).
 export const capabilityImageClassSchema = z.enum([
   'managed',
   'workspace',
@@ -161,7 +161,7 @@ export const capabilitySchema = z.object({
 export const capabilitiesSchema = z.array(capabilitySchema)
 export type Capability = z.infer<typeof capabilitySchema>
 
-// PUT /capabilities/:id 200 — 저장 결과(할당된 버전) + (environment) 이미지 분류 경고(warn-not-block).
+// PUT /capabilities/:id 200 — the save result (the assigned version) plus (environment) image classification warnings (warn, not block).
 export const saveCapabilityResultSchema = z.object({
   workspace: z.string(),
   id: z.string(),
@@ -171,7 +171,7 @@ export const saveCapabilityResultSchema = z.object({
 })
 export type SaveCapabilityResult = z.infer<typeof saveCapabilityResultSchema>
 
-// POST /capabilities/validate 200 — save dry-run: 스펙 파싱 실패(ok:false) 또는 버전 예측 + 이미지 경고(ok:true).
+// POST /capabilities/validate 200 — the save dry-run: a spec parse failure (ok:false), or the predicted version plus image warnings (ok:true).
 export const validateCapabilityResultSchema = z.union([
   z.object({ ok: z.literal(false), errors: z.array(z.string()) }),
   z.object({
@@ -186,7 +186,7 @@ export const validateCapabilityResultSchema = z.union([
 ])
 export type ValidateCapabilityResult = z.infer<typeof validateCapabilityResultSchema>
 
-// POST /capabilities/probe-mcp 200 — mcp 연결 테스트: 도달성 + 발견한 도구(provides 자동채움용). 실패는 결과(reachable:false).
+// POST /capabilities/probe-mcp 200 — the mcp connection test: reachability plus the discovered tools (to fill `provides`). A failure is a RESULT (reachable:false).
 export const probeCapabilityMcpResultSchema = z.object({
   reachable: z.boolean(),
   detail: z.string(),
@@ -195,7 +195,7 @@ export const probeCapabilityMcpResultSchema = z.object({
 })
 export type ProbeCapabilityMcpResult = z.infer<typeof probeCapabilityMcpResultSchema>
 
-// GET /workspace/image-registries/tags — environment 이미지 피커용 태그 목록.
+// GET /workspace/image-registries/tags — the tag list for the environment image picker.
 export const imageTagsSchema = z.object({
   registry: z.string(),
   repository: z.string(),
@@ -203,8 +203,8 @@ export const imageTagsSchema = z.object({
 })
 export type ImageTags = z.infer<typeof imageTagsSchema>
 
-// GET /workspace/image-registries/verify — 저작 시점 실 pull 검증. 정적 분류 경고(imageWarnings)와 달리 레지스트리에
-// 실제로 물어본 결과이고, digest 가 오면 그것이 재현 가능한 핀이다. 실패도 200 결과(pullable:false + reason).
+// GET /workspace/image-registries/verify — a real pull verification at authoring time. Unlike the static classification warnings
+// (imageWarnings) this is what the registry actually ANSWERED, and a digest that comes back is a reproducible pin. A failure is a 200 result too (pullable:false + reason).
 export const imageVerifySchema = z.object({
   pullable: z.boolean(),
   reason: z.enum(['ok', 'auth', 'not-found', 'unreachable', 'unregistered-host']),
@@ -212,8 +212,8 @@ export const imageVerifySchema = z.object({
 })
 export type ImageVerify = z.infer<typeof imageVerifySchema>
 
-// POST /agent/code-tools/try 200 — code 도구 검증 결과. check=구문(파스만) · run=예제 입력 실제 실행(에이전트와 동일
-// 실행계약+샌드박스 게이트). 무상태·영속 안 됨(스킬 try 와 동형이라 계약 앵커 없이 로컬 형태만).
+// POST /agent/code-tools/try 200 — the code tool verification result. check = syntax (parse only) · run = actually executing the example input
+// (the same execution contract and sandbox gate as the agent). Stateless and not persisted (isomorphic to the skill try, so a local shape with no contract anchor).
 export const codeToolTryResultSchema = z.object({
   mode: z.enum(['check', 'run']),
   ok: z.boolean(),
@@ -223,8 +223,8 @@ export const codeToolTryResultSchema = z.object({
 })
 export type CodeToolTryResult = z.infer<typeof codeToolTryResultSchema>
 
-// GET /capabilities/:id/versions — 이 워크스페이스가 볼 수 있는 라이브 버전(오름차순) + 버전→태그 표시맵.
-// source=오너 워크스페이스(내 것, 또는 크로스테넌트 public/subset 오너). API 전용 응답이라 계약 앵커 없음.
+// GET /capabilities/:id/versions — the live versions this workspace can see (ascending) plus a version → tag display map.
+// `source` = the owning workspace (mine, or the cross-tenant public/subset owner). An API-only response, so no contract anchor.
 export const capabilityVersionsSchema = z.object({
   id: z.string(),
   source: z.string(),
@@ -233,7 +233,7 @@ export const capabilityVersionsSchema = z.object({
 })
 export type CapabilityVersions = z.infer<typeof capabilityVersionsSchema>
 
-// GET /capabilities/:id/diff — 두 버전의 불변 콘텐츠(name/description/spec) 구조 diff. 타입은 계약 고정(드리프트 가드).
+// GET /capabilities/:id/diff — the structural diff of two versions' immutable content (name/description/spec). The type is pinned to the contract (a drift guard).
 const capabilityFieldChangeSchema = z.object({
   path: z.string(),
   before: z.string(),
@@ -255,7 +255,7 @@ export const capabilitySpecDiffSchema = z.object({
 })
 export type CapabilitySpecDiff = z.infer<typeof capabilitySpecDiffSchema>
 
-// 드리프트 가드 — 레코드는 양방향(어느 쪽 필드 변경도 웹 타입체크를 깨뜨린다).
+// The drift guard — the record is checked in BOTH directions (a change to a field on either side breaks the web typecheck).
 type AssertAssignable<A extends B, B> = A
 type _CapFwd = AssertAssignable<Capability, ContractCapabilityRecord>
 type _CapBack = AssertAssignable<ContractCapabilityRecord, Capability>

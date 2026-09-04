@@ -48,9 +48,9 @@ export default async function WorkspaceLayout({
   const isMember = principal.workspaces?.some((w) => w.id === slug) ?? false
   if (!isMember) redirect(`/${principal.workspace}`)
 
-  // 사이드바의 팀 섹션(Linear 의 "Your teams") — 내가 속한 팀만. 팀 목록 조회가 곧 불변식 복구 지점이라
-  // (기본팀이 없으면 서버가 만든다) 새 워크스페이스도 첫 렌더에서 팀 하나를 갖는다. 셸이 팀 때문에 죽으면
-  // 안 되므로 실패는 빈 목록으로 흡수한다 — 섹션이 사라질 뿐 나머지 내비게이션은 그대로다.
+  // The sidebar's team section (Linear's "Your teams") — only the teams I belong to. Reading the team list IS the invariant recovery point
+  // (with no default team the server creates one), so even a new workspace has one team on its first render. The shell must not die over teams,
+  // so a failure is absorbed as an empty list — only the section disappears and the rest of the navigation stands.
 
   return (
     <ShellSwitch

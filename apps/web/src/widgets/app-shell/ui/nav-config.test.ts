@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 
 import { ALL_NAV_ITEMS, ALL_SIDEBAR_ROWS, isNavItemActive } from './nav-config'
 
-// 사이드바가 지금 어디인지 말하는 방법은 활성 행 하나다. 두 행이 동시에 켜지면 그 말은 거짓이 된다 —
-// 이 파일은 그 불변식을 나브 설정 전체에 대해 진술한다(항목이 늘어나도 같이 검사된다).
+// The sidebar has one way of saying where you are: a single active row. Two rows lit at once makes that statement FALSE —
+// this file states that invariant over the whole nav configuration (so it is checked as items are added).
 const activeRows = (pathname: string, workspace = 'acme') =>
   ALL_SIDEBAR_ROWS.filter((item) => isNavItemActive(item, pathname, workspace)).map(
     (item) => item.labelKey
@@ -22,8 +22,8 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme/store/mine')).toEqual(['store'])
   })
 
-  // 평가 자원은 워크스페이스 축이다 — 한동안 팀 아래에만 있어서 사이드바에 행이 아예 없었고, 그러면
-  // "이 제품에 그런 게 있다"는 사실 자체가 화면에서 사라진다.
+  // Evaluation resources are a WORKSPACE axis — living only under a team for a while meant they had no sidebar row at all, and that erases
+  // from the screen the very fact that the product HAS them.
   it('gives every evaluation collection a workspace row of its own', () => {
     for (const collection of ['harnesses', 'datasets', 'judges', 'scorecards']) {
       expect(activeRows(`/acme/${collection}`)).toEqual([collection])
@@ -52,8 +52,8 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme/issue/ENG-12')).toEqual([])
   })
 
-  // 에이전트 저작 표면이 아직 얇아서 사이드바 행을 내리기로 했다 — 그렇다고 주소가 사라진 것은 아니다.
-  // 행은 없고 팔레트에는 남는다는 이 두 진술이 같이 서 있어야, 다음 사람이 한쪽만 되돌리지 않는다.
+  // The agent authoring surface is still thin, so its sidebar row was dropped — which does not mean the address disappeared.
+  // These two statements have to stand together (no row, still in the palette) so the next person does not revert only one of them.
   it('keeps the agent fleet out of the sidebar while leaving it reachable from the palette', () => {
     expect(activeRows('/acme/agents')).toEqual([])
     expect(ALL_NAV_ITEMS.map((item) => item.href)).toContain('/agents')

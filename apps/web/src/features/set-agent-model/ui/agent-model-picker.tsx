@@ -8,13 +8,13 @@ import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 
 import { setAgentModelAction } from '../api/set-agent-model'
 
-// "워크스페이스 기본값"을 고르는 값 — 빈 문자열은 콤보박스에서 "값 없음"과 구분되지 않아 센티넬을 쓴다.
+// The value that selects "the workspace default" — the empty string is indistinguishable from "no value" in a combobox, so a sentinel is used.
 const FOLLOW_WORKSPACE = '__workspace__'
 
-// 내 대화가 기본으로 쓰는 모델. 즉시 적용되는 discrete 컨트롤(설정 UI 규약)이라 저장 버튼이 없고, 낙관적으로 로컬
-// 상태를 먼저 옮긴 뒤 실패하면 되돌리고 토스트로 알린다.
-// 첫 항목은 항상 "워크스페이스 기본값"이고, 기준선이 있으면 그 모델 id 를 힌트로 달아 준다 — 무엇을 따르는지 모르면
-// 기본값을 고르는 선택이 되지 않는다.
+// The model my conversations use by default. It is a DISCRETE control applied immediately (the settings UI convention), so there is no save
+// button: local state moves optimistically first and rolls back with a toast on failure.
+// The first entry is always "the workspace default", and when there is a baseline its model id is attached as a hint — without knowing WHAT it
+// follows, choosing the default is not a choice.
 export function AgentModelPicker({
   model,
   workspaceDefault,

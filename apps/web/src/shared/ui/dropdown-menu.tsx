@@ -16,7 +16,7 @@ import { cn } from '@/shared/lib/utils'
 // Dependency-free lightweight dropdown menu (Linear st. popover). Closes on outside-click/Esc, aligned to the trigger.
 const Ctx = createContext<{ close: () => void } | null>(null)
 
-// 트리거와 팝오버 사이 간격(px). 예전의 mt-1.5/mb-1.5 를 fixed 좌표 계산으로 옮긴 값.
+// The gap (px) between the trigger and the popover. The old mt-1.5/mb-1.5 moved into the fixed coordinate calculation.
 const GAP = 6
 
 // The box a popover aligns to — the four viewport edges of `getBoundingClientRect()`, and nothing more, so
@@ -69,13 +69,13 @@ export function DropdownMenu({
   contentClassName?: string
 }) {
   const [open, setOpen] = useState(false)
-  // 트리거의 뷰포트 좌표. 팝오버는 body 로 포털링해 fixed 로 여기에 정렬한다
-  // (부모의 overflow-hidden 에 잘리지 않도록 — 예: 설정 카드 SettingsList).
+  // The trigger's viewport coordinates. The popover portals to the body and aligns to them with `fixed`
+  // (so it is not clipped by a parent's overflow-hidden — a settings card's SettingsList, for example).
   const [box, setBox] = useState<Box | null>(null)
   const triggerRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
 
-  // 트리거 좌표를 다시 잰다(열기·스크롤·리사이즈 시).
+    // Re-measure the trigger's coordinates (on open, scroll and resize).
   function measure() {
     const el = triggerRef.current
     if (el) setBox(triggerBoxOf(el))
@@ -86,7 +86,7 @@ export function DropdownMenu({
       setOpen(false)
       return
     }
-    measure() // 열기 전에 좌표를 확보해 첫 페인트 깜빡임을 없앤다
+    measure() // secure the coordinates BEFORE opening, so the first paint does not flicker
     setOpen(true)
   }
 
@@ -94,14 +94,14 @@ export function DropdownMenu({
     if (!open) return
     function onDown(e: MouseEvent) {
       const target = e.target as Node
-      // 트리거 또는 포털된 콘텐츠 안의 클릭이면 유지(콘텐츠는 triggerRef 의 DOM 자식이 아니다).
+      // A click on the trigger or inside the portalled content keeps it open (the content is not a DOM child of triggerRef).
       if (triggerRef.current?.contains(target) || contentRef.current?.contains(target)) return
       setOpen(false)
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false)
     }
-    // 캡처 단계로 어떤 스크롤 컨테이너의 스크롤이든 따라잡는다.
+    // The capture phase keeps up with a scroll in ANY scroll container.
     window.addEventListener('scroll', measure, true)
     window.addEventListener('resize', measure)
     document.addEventListener('mousedown', onDown)
@@ -152,7 +152,7 @@ export function DropdownMenu({
   )
 }
 
-// DropdownItem 밖의 커스텀 복합 행(중첩 액션 버튼이 있어 단일 버튼으로 못 만드는 행)에서 메뉴를 닫을 때 쓴다.
+// Used to close the menu from a custom composite row outside DropdownItem (a row with a nested action button, which cannot be one button).
 export function useDropdownClose(): () => void {
   const ctx = useContext(Ctx)
   return ctx?.close ?? (() => {})
@@ -169,7 +169,7 @@ export function DropdownItem({
   children: ReactNode
   onSelect?: () => void
   icon?: ReactNode
-  // 행 오른쪽 끝에 붙는 후행 슬롯(예: 선택 체크마크) — flex-1 라벨과 형제여야 같은 행에 정렬된다.
+  // The trailing slot pinned at the row's right end (a selection checkmark, say) — it has to be a SIBLING of the flex-1 label to align on the same row.
   trailing?: ReactNode
   tone?: 'default' | 'danger'
   className?: string

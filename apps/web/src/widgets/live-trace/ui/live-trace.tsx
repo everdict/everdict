@@ -11,11 +11,11 @@ import { SectionHeader } from '@/shared/ui/section-header'
 const TERMINAL = new Set(['succeeded', 'failed', 'superseded', 'cancelled'])
 const POLL_MS = 3000
 
-// 라이브 트레이스 패널 (observability ⑨) — 실행 중인 run의 궤적이 쌓이는 대로 3초마다 폴링해 그린다:
-// 디스패치 배치 마크(수락→대기→시작) + 러너 푸시 배치 + 매니지드 잡의 이벤트 센티널. 스냅숏 의미론이라
-// 매 폴이 지금까지의 전량을 돌려주고, 위젯은 통째로 교체한다(diff 없음 — LiveLogs 와 같은 선택).
-// 아직 아무 이벤트도 없으면 통째로 숨긴다(빈 섹션 금지); run 이 종료되면 폴링을 멈추고 마지막 읽기를
-// 남긴다 — 봉인된 증거 섹션이 권위 표면이고, 이 패널은 그 미리보기다.
+// The live trace panel (observability ⑨) — it polls every 3s and draws a running run's trajectory as it accumulates:
+// the dispatch batch marks (accepted → queued → started) plus runner-pushed batches plus a managed job's event sentinels. The semantics are
+// SNAPSHOT, so every poll returns everything so far and the widget replaces it whole (no diffing — the same choice as LiveLogs).
+// With no event yet it hides entirely (no empty sections); once the run ends it stops polling and leaves the last read
+// standing — the sealed evidence section is the authoritative surface and this panel is its preview.
 export function LiveTrace({ runId, initialStatus }: { runId: string; initialStatus: string }) {
   const t = useTranslations('liveTraceView')
   const [events, setEvents] = useState<TraceEvent[]>([])
@@ -50,8 +50,8 @@ export function LiveTrace({ runId, initialStatus }: { runId: string; initialStat
           }
           if (stopped) return
           setStatus(body.status)
-          // 페이지의 toEvidence 와 같은 이벤트 단위 엄격 렌즈: 이 빌드가 모르는 kind 는 그 이벤트만
-          // 빠지고 나머지는 그대로 그려진다 — 서버가 어휘를 늘려도 라이브 뷰가 통째로 비지 않는다.
+          // The same per-event strict lens as the page's toEvidence: a kind this build does not know drops only THAT event and the rest
+          // still draw — so the live view does not empty entirely when the server grows its vocabulary.
           const evidence: TraceEvent[] = []
           for (const event of body.events) {
             const parsed = traceEventSchema.safeParse(event)
@@ -62,10 +62,10 @@ export function LiveTrace({ runId, initialStatus }: { runId: string; initialStat
           const appends = body.incremental === true && cursor !== undefined
           setEvents((held) => (appends ? (evidence.length > 0 ? [...held, ...evidence] : held) : evidence))
           if (typeof body.next === 'number') cursor = body.next
-          if (TERMINAL.has(body.status)) return // run 종료 — 마지막 읽기를 남기고 폴링 중단
+          if (TERMINAL.has(body.status)) return // the run ended — keep the last read and stop polling
         }
       } catch {
-        // 일시 오류 — 폴링 지속
+        // a transient error — keep polling
       }
       if (!stopped) timer = setTimeout(tick, POLL_MS)
     }
@@ -76,10 +76,10 @@ export function LiveTrace({ runId, initialStatus }: { runId: string; initialStat
     }
   }, [runId, initialStatus])
 
-  // 봉인된 증거 뷰와 같은 읽기 표면(TrajectoryView) — 라이브는 실행 자신의 단일 세그먼트다.
+  // The same read surface as the sealed evidence view (TrajectoryView) — live is the execution's own single segment.
   const segments = useMemo(() => asSingleSegment(events, 'run'), [events])
 
-  // 아직 아무것도 도착하지 않은 run — 빈 박스 대신 통째로 숨긴다.
+  // A run where nothing has arrived yet — hidden entirely rather than shown as an empty box.
   if (events.length === 0) return null
 
   const live = !TERMINAL.has(status)

@@ -3,10 +3,10 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 분석 결과 아티팩트 다운로드 BFF — 스코어카드 상세의 "분석 결과 다운로드"가 여기로 온다.
-// 레코드의 analysisRef 를 브라우저에 그대로 주면 안 된다: 그 URL 은 (1) 서버 내부 엔드포인트(예: http://minio:9000)라
-// 외부 사용자가 해석할 수 없고 (2) presigned 라 1시간이면 만료된다. 그래서 컨트롤플레인이 오브젝트스토어에서 읽어주고
-// 웹은 그것을 첨부파일로 흘려보낸다 — 브라우저가 보는 주소는 언제나 우리 앱이다.
+// The analysis artifact download BFF — the scorecard detail's "download analysis" comes here.
+// The record's analysisRef must not be handed to the browser: that URL is (1) an internal server endpoint (http://minio:9000, say) an external
+// user cannot resolve, and (2) presigned, so it expires within the hour. So the control plane reads it from object storage and the web streams
+// it out as an attachment — the address the browser sees is always our own app.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

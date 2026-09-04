@@ -4,13 +4,13 @@ import { authContext } from '@/shared/auth/principal'
 
 import { loadIssueViewData, type IssueViewData, type IssueViewRequest } from './issue-view-data'
 
-// 보기를 바꿨을 때 화면이 새로 받아 오는 것 — **목록뿐**이다. 라우트를 다시 그리지 않으므로 헤더·툴바·
-// 디렉터리(멤버·프로젝트·라벨)는 그 자리에 그대로 있고, 그것들을 읽는 왕복도 다시 일어나지 않는다.
+// What the screen re-fetches when the view changes — **the list alone**. The route is not re-rendered, so the header, toolbar and
+// directories (members, projects, labels) stay where they are and the round trips that read them do not happen again.
 //
-// 클라이언트가 좁히기를 조립해 보내도 되는 이유는 「더 보기」와 같다: 인가는 여전히 제어 평면이 한다.
-// 이 요청은 로그인한 사람의 토큰으로 나가고, 워크스페이스·팀 가시성은 서버가 다시 건다.
+// The client may assemble and send the narrowing for the same reason as "show more": authorization is still the CONTROL PLANE's.
+// This request goes out with the signed-in person's token, and workspace and team visibility are applied again by the server.
 //
-// 실패는 던지지 않고 값으로 돌려준다 — 목록 한 귀퉁이의 조작이 페이지 전체를 에러 경계로 날리면 안 된다.
+// Failures are returned as VALUES rather than thrown — an interaction in one corner of a list must not blow the whole page into an error boundary.
 export async function loadIssueViewAction(request: IssueViewRequest): Promise<IssueViewData> {
   const ctx = await authContext()
   try {

@@ -9,9 +9,9 @@ import { Callout } from '@/shared/ui/callout'
 import { CodeBlock } from '@/shared/ui/code-block'
 import { Link } from '@/shared/ui/link'
 
-// 코딩 에이전트 연결 허브 — 데스크탑 / Claude Code / Codex 를 경로 기반 탭(/connect/<tab>)으로 전환한다.
-// 탭을 라우트로 두면 사이드바(RESOURCES 그룹)의 개별 항목이 각자 활성 표시되고, 각 탭은 서버에서 그대로 렌더된다.
-// 커맨드 스니펫은 코드이므로 로케일과 무관하게 영어 그대로; mcpUrl(공개 컨트롤플레인 …/mcp)만 실제 값으로 주입한다.
+// The coding agent connection hub — it switches between Desktop / Claude Code / Codex as path-based tabs (/connect/<tab>).
+// Making the tabs routes lets each item in the sidebar (the RESOURCES group) show its own active state, and each tab renders straight from the server.
+// Command snippets are CODE, so they stay English regardless of locale; only the mcpUrl (the public control plane's …/mcp) is injected as a real value.
 export type ConnectTab = 'desktop' | 'claude-code' | 'codex'
 export const CONNECT_TABS: ConnectTab[] = ['desktop', 'claude-code', 'codex']
 
@@ -21,7 +21,7 @@ const TAB_ICON: Record<ConnectTab, typeof Laptop> = {
   codex: Terminal,
 }
 
-// 번호가 붙은 설치 스텝 — 제목/본문 + (선택) 코드 블록. 프레젠테이션 전용(문자열은 상위에서 t()로 해석).
+// A numbered installation step — a title and body plus an optional code block. Presentation only (the strings are resolved with t() by the parent).
 function Step({
   n,
   title,
@@ -74,7 +74,7 @@ export async function ConnectHub({
     codex: t('tabs.codex'),
   }
 
-  // t.rich 청크 — 본문 안의 "API 키 만들기" 링크와 인라인 코드 표기.
+  // The t.rich chunks — the "create an API key" link inside the body, and inline code formatting.
   const apiKeyLink = (chunks: ReactNode) => (
     <Link href={apiKeysHref} className="font-[510] text-primary underline-offset-2 hover:underline">
       {chunks}

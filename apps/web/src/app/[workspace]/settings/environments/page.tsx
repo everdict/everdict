@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
-// server-only 로더(controlPlane)라 클라이언트가 쓰는 배럴을 통하지 않고 직접 임포트한다(download-desktop/api 선례).
+// A server-only loader (controlPlane), so it is imported directly rather than through the barrel the client uses (following download-desktop/api).
 import { loadEnvironmentContext } from '@/features/publish-capability/api/environment-context'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
 import { can } from '@/shared/auth/can'
@@ -15,9 +15,9 @@ import { EnvironmentRegistry, loadEnvironments } from '@/features/browse-environ
 
 export const dynamic = 'force-dynamic'
 
-// Settings › Workspace › Environments — 이 워크스페이스가 쓸 수 있는 평가환경을 한 목록으로: 직접 저작한 환경
-// (등록/공유/버전)과 스토어에서 가져온 환경(풀 가능 검증)을 환경의 어휘로 관리한다. 남의 발행물 발견·가져오기는
-// 스토어(카탈로그)가 담당 — 여기서는 링크만 건다.
+// Settings › Workspace › Environments — the evaluation environments this workspace can use, in ONE list: the environments authored here
+// (registration, sharing, versions) and those imported from the store (pull verification), managed in the environment's own vocabulary.
+// Discovering and importing somebody else's publications is the store's (the catalog) — only a link is offered here.
 export default async function EnvironmentsSettingsPage() {
   const t = await getTranslations('settingsNav')
   const s = await getTranslations('settingsPage')
@@ -42,7 +42,7 @@ export default async function EnvironmentsSettingsPage() {
   let authored: Capability[] = []
   let error: string | undefined
   try {
-    // 내 워크스페이스가 저작·소유한 환경 이미지만 — 남의 발행물은 스토어(카탈로그)에서 브라우즈·가져오기 한다.
+    // Only environment images MY workspace authored and owns — somebody else's publications are browsed and imported from the store (the catalog).
     authored = capabilitiesSchema
       .parse(await controlPlane.listCapabilities(ctx))
       .filter((cap) => cap.tenant === currentWorkspace && cap.spec.type === 'environment')

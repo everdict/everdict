@@ -1,5 +1,5 @@
-// 제품 투어 재실행 신호 — 크로스커팅 상수라 shared 에 둔다(위젯 ProductTour 가 수신, feature/앱이 발신).
-// FSD 상향 참조를 피하려고 위젯 내부 상수 대신 여기서 공유한다.
+// The product tour re-run signal — a cross-cutting constant, so it lives in shared (the ProductTour widget receives it; a feature or the app sends it).
+// It is shared from here rather than as a constant inside the widget, to avoid an upward FSD reference.
 export const START_TOUR_EVENT = 'everdict:start-tour'
 
 export function startProductTour(): void {

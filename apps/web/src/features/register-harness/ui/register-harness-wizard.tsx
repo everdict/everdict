@@ -189,10 +189,10 @@ export function RegisterHarnessWizard({
 }: {
   secrets?: ScopedSecretNames
   modelIds?: string[] // registered Model ids — offered as options for a command/service model binding
-  // 이 워크스페이스의 형상 목록 — 인스턴스 탭의 피커. 기존 형상 위에 하네스를 하나 더 얹는 길이 열려야
-  // env 변형이 새 템플릿으로 새지 않는다.
+  // This workspace's shapes — the instance tab's picker. A path to putting one more harness on an EXISTING shape has to be open, or an env
+  // variation leaks into a new template.
   templates?: { id: string; versions: string[] }[]
-  instanceInitial?: InstanceState // 고른 템플릿의 유효값으로 미리 채운 상태(서버가 만든다)
+  instanceInitial?: InstanceState // prefilled with the chosen template's effective values (the server builds it)
   baseline?: OverrideBaseline
   templateKind?: Kind
   startTab?: Tab
@@ -224,7 +224,7 @@ export function RegisterHarnessWizard({
         />
       ) : (
         <InstanceForm
-          // 템플릿이 바뀌면 슬롯도 상속값도 통째로 달라지므로 폼을 새로 세운다(key).
+          // A template change replaces the slots and the inherited values wholesale, so the form is rebuilt (key).
           key={`${instanceInitial?.templateId ?? ''}@${instanceInitial?.templateVersion ?? ''}`}
           workspace={workspace}
           existingVersions={[]}
@@ -233,8 +233,8 @@ export function RegisterHarnessWizard({
           baseline={baseline}
           {...(instanceInitial ? { initial: instanceInitial } : {})}
           {...(templateKind ? { kind: templateKind } : {})}
-          // 고른 형상은 URL 이 들고 있는다 — 서버가 그 템플릿의 유효값을 만들어 폼에 내려주므로,
-          // 상속값을 클라이언트에서 다시 받아올 필요가 없다.
+          // The chosen shape is held in the URL — the server builds that template's effective values and passes them down to the form,
+          // so the inherited values never have to be re-fetched on the client.
           onPickTemplate={(id, version) =>
             router.replace(
               `/${workspace}/harnesses/new?tab=instance&template=${encodeURIComponent(id)}${
@@ -314,8 +314,8 @@ export function TemplateForm({
   }
 
   return (
-    // @container: 폼의 열 수는 뷰포트가 아니라 폼 자신의 폭을 따른다 — 같은 폼이 전체폭(새 버전 페이지)·카드 안·
-    // 인프라 패널이 열려 반쪽이 된 좌측 컬럼·모바일에서 모두 렌더되므로 뷰포트 브레이크포인트는 잘못된 축을 잰다.
+    // @container: the form's column count follows the FORM's own width rather than the viewport — the same form renders full width (the new
+    // version page), inside a card, in a left column halved by an open infra panel, and on mobile, so viewport breakpoints measure the wrong axis.
     <div className="@container space-y-5">
       <ModeToggle
         mode={mode}
@@ -853,9 +853,9 @@ export function InstanceForm({
   // The kind of the template this instance rides on — if known, only the overrides block matching that kind is exposed (edit screen).
   // If the kind is unknown (like the new-instance wizard), undefined → all blocks exposed (backward compatible).
   kind?: Kind
-  // 템플릿이 정한 유효값. 있으면 폼이 상속값을 그려주고 저장 시 바뀐 것만 델타로 내보낸다.
+  // The effective values the template set. Given them, the form draws the inherited values and exports only what changed as a delta on save.
   baseline?: OverrideBaseline
-  // 고를 수 있는 형상 목록(신규 등록 화면). 주면 template id/version 이 자유 입력 대신 피커가 된다.
+  // The selectable shapes (the new-registration screen). Given them, the template id/version becomes a picker rather than free input.
   templates?: { id: string; versions: string[] }[]
   onPickTemplate?: (id: string, version: string) => void
 }) {
@@ -909,10 +909,10 @@ export function InstanceForm({
   }
 
   return (
-    // @container — TemplateForm 과 같은 이유(폼 자신의 폭이 기준축).
+    // @container — the same reason as TemplateForm (the form's own width is the axis).
     <div className="@container space-y-5">
       {templates ? (
-        // 형상을 고른다 — id/버전을 외워서 치게 두면 "인스턴스 추가"가 템플릿 편집보다 비싸진다.
+        // Pick the shape — leaving people to type an id and version from memory makes "add an instance" cost more than editing the template.
         <TemplatePicker
           templates={templates}
           templateId={s.templateId}
@@ -1090,8 +1090,8 @@ export function InstanceForm({
   )
 }
 
-// 설정(환경변수·리소스) 편집기 — 템플릿의 유효값을 깔고 그 위에서 고친다. 저장되는 것은 바뀐 것뿐(델타).
-// 기준선을 아는 화면에서는 처음부터 펼쳐 둔다: 접어 두면 "여기엔 아무것도 없다"로 읽혀서 사람이 템플릿을 고치러 간다.
+// The configuration (environment variables, resources) editor — the template's effective values are laid down and edited on top. Only what changed is saved (the delta).
+// On a screen that knows the baseline it starts EXPANDED: collapsed it reads as "there is nothing here", and a person goes off to edit the template.
 function hasOverrides(s: InstanceState): boolean {
   return (
     s.serviceOverrides.length > 0 ||
@@ -1154,7 +1154,7 @@ function OverridesEditor({
             <>
               <Section
                 title={baseline.known ? t('svcSettingsTitle') : t('svcOverrideTitle')}
-                // 템플릿을 아는 화면에서는 행이 형상으로 고정된다 — 서비스 이름을 손으로 치게 두면 오타 하나가 400 이 된다.
+                // On a screen that knows the template the rows are fixed by the shape — leaving a service name to be typed makes one typo a 400.
                 {...(baseline.known
                   ? {}
                   : {
@@ -1197,7 +1197,7 @@ function OverridesEditor({
                             </>
                           )}
                         </div>
-                        {/* 같은 토폴로지에 모델만 바꾸는 변형 — 가장 흔한 변형이면서 예전엔 템플릿 편집이었다. */}
+                        {/* A variation of the same topology with only the model changed — the commonest variation there is, and previously a template edit. */}
                         <LabeledInput
                           label={t('svcModelOverrideLabel')}
                           tip={t('svcModelOverrideTip')}
@@ -1329,7 +1329,7 @@ function OverridesEditor({
                   className="font-mono text-[12px]"
                 />
               </div>
-              {/* 더 큰 상자를 쓰는 변형 — 이것도 예전엔 템플릿을 고쳐야 했고, 그래서 실행마다 형상이 갈라졌다. */}
+              {/* A variation using a bigger box — this too used to require editing the template, which forked the shape on every run. */}
               <div className="grid gap-2 @sm:grid-cols-2">
                 <NumField
                   label={t('cpuLabel')}
@@ -1352,7 +1352,7 @@ function OverridesEditor({
   )
 }
 
-// 이 서비스 행이 템플릿과 달라졌는지 — 달라진 것만 저장되므로, 무엇이 델타인지 화면에서 바로 보여야 한다.
+// Whether this service row differs from the template — only differences are saved, so what the delta IS has to be visible on screen.
 function InheritTag({ base, row }: { base: ServiceOverrideRow; row: ServiceOverrideRow }) {
   const t = useTranslations('registerHarness')
   const envChanged =
@@ -1376,7 +1376,7 @@ function InheritTag({ base, row }: { base: ServiceOverrideRow; row: ServiceOverr
   )
 }
 
-// 형상 피커 — 템플릿 id 와 그 안의 버전. 고르면 상위가 그 템플릿의 유효값으로 폼을 다시 세운다.
+// The shape picker — a template id and a version within it. Choosing one makes the parent rebuild the form from that template's effective values.
 function TemplatePicker({
   templates,
   templateId,

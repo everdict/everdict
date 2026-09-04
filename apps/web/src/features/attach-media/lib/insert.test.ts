@@ -9,7 +9,7 @@ describe('mediaSnippet', () => {
     )
   })
 
-  // 상대 주소는 GFM 자동링크가 잡지 않는다 — 태그로 적어야 재생기로 그려진다.
+  // GFM autolinks do not catch a relative address — it has to be written as a TAG to be drawn as a player.
   it('writes a recording as a player tag, not a bare address', () => {
     expect(mediaSnippet('video', 'clip.mp4', '/api/fs/file/uploads/a1-clip.mp4')).toBe(
       '<video src="/api/fs/file/uploads/a1-clip.mp4" controls></video>'
@@ -35,7 +35,7 @@ describe('withBlockInsertion', () => {
     expect(withBlockInsertion('', 0, 0, '![a](/x)')).toEqual({ value: '![a](/x)\n', caret: 9 })
   })
 
-  // 쓰던 문장 뒤에 그대로 붙으면 그 문단에 흡수된다 — 앞줄을 끊어 준다.
+  // Appended straight after the sentence being written it is absorbed into that paragraph — the preceding line is broken.
   it('breaks the line when the caret sits at the end of a sentence', () => {
     expect(withBlockInsertion('보세요', 3, 3, '![a](/x)')).toEqual({
       value: '보세요\n![a](/x)\n',

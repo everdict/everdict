@@ -36,8 +36,8 @@ export const sandboxSessionViewSchema = z.object({
         .optional(),
       // true = the task feed is one CONVERSATION (turns), not independent cases — the chat-shaped feed.
       conversation: z.boolean().optional(),
-      // 위임 프로필로 부팅된 세션이면 그 상대 — 어떤 하네스 바이너리가 도는지가 아니라 WHO에게 맡겼는지를
-      // 화면이 말할 수 있게(컨트롤플레인이 resolved 버전까지 실어 보낸다; 툴 인자에는 버전이 없다).
+      // For a session booted with a delegation profile, WHO it was handed to — so the screen can say who the work went to rather than which
+      // harness binary runs (the control plane carries the RESOLVED version too; the tool arguments have no version).
       profile: z.object({ source: z.string(), id: z.string(), version: z.string() }).optional(),
       tasks: z.array(sandboxTaskSummarySchema),
     })

@@ -37,10 +37,10 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType, q: string):
     case 'skill':
       return controlPlane.listSkills<Row[]>(ctx)
     case 'knowledge':
-      // 지식 엔트리 — normalize 가 `title` 을 라벨로 집는다(엔트리엔 name 이 없음).
+      // A knowledge entry — normalize picks `title` as the label (an entry has no name).
       return controlPlane.listKnowledgeEntries<Row[]>(ctx)
     case 'environment': {
-      // 환경 = capability 스토어의 environment kind — 하나의 스토어 목록에서 그 kind 만 추린다.
+      // An environment = the capability store's environment kind — that kind alone is filtered out of the one store list.
       const capabilities = await controlPlane.listCapabilities<Row[]>(ctx)
       return (Array.isArray(capabilities) ? capabilities : []).filter((c) => {
         const spec = (c as Row).spec
@@ -48,7 +48,7 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType, q: string):
       })
     }
     case 'tool': {
-      // 도구 = capability 스토어의 mcp|code kind — 환경과 같은 목록에서 그 두 kind 만 추린다.
+      // A tool = the capability store's mcp|code kinds — those two are filtered out of the same list as environments.
       const capabilities = await controlPlane.listCapabilities<Row[]>(ctx)
       return (Array.isArray(capabilities) ? capabilities : []).filter((c) => {
         const spec = (c as Row).spec
@@ -58,13 +58,13 @@ async function fetchRows(ctx: AuthContext, type: AgentReferenceType, q: string):
       })
     }
     case 'issue':
-      // 평가 트래커의 이슈 — normalize 가 `title` 을 라벨로 집는다(이슈엔 name 이 없음).
-      // 열려 있는 것부터 보이도록 최근 활동순 슬라이스만 가져온다(닫힌 이슈까지 @-피커에 쏟지 않는다).
-      // 목록은 한 PAGE(`{ items, nextCursor? }`)로 오고, @-피커는 첫 장이면 충분하다.
-      // 참조 키는 UUID 가 아니라 식별자(ENG-12) — get_issue 가 둘 다 받고, 이슈를 부르는 이름은 식별자다.
-      // 이슈 상세의 "대화에서 분석" 진입도 같은 키를 쓰므로 두 경로가 같은 참조를 만든다.
-      // 검색은 제어 평면이 한다(`search`) — 창 하나를 받아 아래에서 거르면 워크스페이스가 그 창보다
-      // 커지는 순간 조용히 못 찾기 시작한다(이슈만 서버 검색이 있다; 나머지는 아래의 클라이언트 여과).
+      // An eval tracker issue — normalize picks `title` as the label (an issue has no name).
+      // Only a recent-activity slice is fetched so that OPEN ones surface first (closed issues are not poured into the @-picker).
+      // The list arrives as one PAGE (`{ items, nextCursor? }`), and the first is enough for an @-picker.
+      // The reference key is the identifier (ENG-12) rather than the UUID — get_issue accepts both, and the identifier is what an issue is CALLED.
+      // The issue detail's "analyze in conversation" entry uses the same key, so both paths build the same reference.
+      // The SEARCH is the control plane's (`search`) — taking one page and filtering below starts silently failing to find things the moment
+      // the workspace outgrows that page (only issues have a server search; the rest are filtered client-side below).
       return controlPlane
         .listIssues<{ items: Row[] }>(ctx, { ...(q ? { search: q } : {}), limit: 50 })
         .then((page) =>
@@ -109,9 +109,9 @@ export async function GET(
     let items = (Array.isArray(rows) ? rows : [])
       .map(normalize)
       .filter((x): x is MentionItem => x !== null)
-    // 이슈는 제어 평면이 이미 검색해 좁힌 답이다(fetchRows 가 `search` 를 넘긴다) — 여기서 부분문자열로
-    // 한 번 더 거르면 서버 의미론으로 찾은 행(식별자·제목 밖 매치)이 조용히 떨어진다. 창 전체를 받아오는
-    // 나머지 타입만 여기서 거른다.
+    // Issues are already the control plane's searched-and-narrowed answer (fetchRows passes `search`) — filtering by substring once more here
+    // would silently drop rows found by SERVER semantics (a match outside the identifier and title). Only the other types, which fetch a whole
+    // page, are filtered here.
     if (q && type !== 'issue')
       items = items.filter(
         (it) => it.id.toLowerCase().includes(q) || it.label.toLowerCase().includes(q)

@@ -9,14 +9,14 @@ import { cn } from '@/shared/lib/utils'
 import { seriesColorAt } from '@/shared/ui/charts'
 import { Link } from '@/shared/ui/link'
 
-// 비례 시간축 멀티레인 — 릴리즈(마커) · 서비스별 버전(점) · 이슈(발생/해결 마커 + 수명 스팬)를 한 축에 눕힌다.
-// SpanWaterfall 의 방식 그대로 %-포지셔닝 div 로 그린다(차트 패밀리는 범주축이라 시간 비례를 못 그린다);
-// 색은 시리즈 슬롯(palette)과 시맨틱 토큰에서만 온다. 시리즈의 품질 추이는 아래 패밀리 차트가 답한다 —
-// 이 레인들은 "언제 무슨 일이 있었나"만 답한다.
+// A proportional time axis with several lanes — releases (markers), per-service versions (dots) and issues (opened/resolved
+// markers plus a lifetime span) laid on one axis. Drawn as %-positioned divs exactly the way SpanWaterfall does (the chart
+// family has a categorical axis and cannot draw time proportionally); colour comes only from the series slot (palette) and the
+// semantic tokens. A series' quality TREND is answered by the family chart below — these lanes answer only "when did what happen".
 //
-// 점 하나하나가 무엇인지는 HOVER 가 답한다. 예전엔 네이티브 `title` 이었는데, 그건 1초쯤 기다려야 뜨고,
-// 줄바꿈이 브라우저마다 다르게 렌더되고, 무엇보다 축 위에서 서로 2px 떨어진 점 두 개를 구별하려는
-// 사람에게는 없는 것과 같다. 마크와 같은 레이어에 우리가 그리는 카드가 그 질문에 답한다.
+// What each dot IS is answered by HOVER. It used to be the native `title`, which takes about a second to appear, wraps differently
+// in every browser and — above all — might as well not exist for someone trying to tell apart two dots 2px apart on the axis.
+// A card we draw on the same layer as the marks answers that question instead.
 
 interface HoverCard {
   atPct: number
@@ -41,12 +41,12 @@ export function TimelineLanes({
   const from = Date.parse(timeline.window.from)
   const to = Date.parse(timeline.window.to)
   const span = Math.max(1, to - from)
-  // 창 밖의 사건도 가장자리에 눌러서 보여 준다 — 사라지는 것보다 낫다. 다만 계획된 릴리즈의 목표일은
-  // 서버가 창의 끝(horizon)에 넣어 주므로 여기서 눌릴 일이 없다.
+  // Events outside the window are pressed against the edge rather than dropped — better than disappearing. A planned release's
+  // target date is never pressed here, though, because the server puts it at the window's horizon.
   const pct = (iso: string): number =>
     Math.min(100, Math.max(0, ((Date.parse(iso) - from) / span) * 100))
-  // "지금"은 창의 일부다(서버가 준다 — 클라이언트 시계로 그리면 SSR 과 어긋난다). 창이 미래까지 뻗은
-  // 경우에만 의미가 있다: 일어난 구간과 예정 구간의 경계선이고, 열린 스팬이 멈추는 지점.
+  // "Now" is part of the window (the server supplies it — drawing from the client clock disagrees with SSR). It means something only
+  // when the window reaches into the future: the boundary between what happened and what is scheduled, and where an open span stops.
   const nowPct = pct(timeline.window.now)
   const hasFuture = nowPct < 99.5
 
@@ -58,8 +58,8 @@ export function TimelineLanes({
     })
     return (ms: number) => format.format(new Date(ms))
   }, [locale])
-  // 호버 카드의 날짜 — 축 눈금과 같은 UTC 로 읽는다. 카드가 8/13 이라 말하는데 바로 아래 눈금이 8/12 면
-  // 둘 중 무엇이 사건의 날짜인지 아무도 답할 수 없다.
+  // The hover card's date — read in the same UTC as the axis ticks. With the card saying 8/13 over a tick saying 8/12, nobody can
+  // answer which of the two is the event's date.
   const stamp = useMemo(() => {
     const format = new Intl.DateTimeFormat(locale, {
       dateStyle: 'medium',
@@ -69,14 +69,14 @@ export function TimelineLanes({
     const day = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeZone: 'UTC' })
     return {
       instant: (iso: string) => format.format(new Date(iso)),
-      // 달력 날짜(YYYY-MM-DD)는 그 날 전체를 뜻한다 — 시각을 붙이면 없는 정밀도를 주장하게 된다.
+      // A calendar date (YYYY-MM-DD) means the whole day — attaching a time claims precision that does not exist.
       day: (iso: string) => day.format(new Date(`${iso.slice(0, 10)}T00:00:00.000Z`)),
     }
   }, [locale])
 
   const services = [...new Set(timeline.versions.map((version) => version.service))]
-  // 능력 레인 — 서비스가 움직이는 동안 평가 계약이 무엇을 했나. 종류(하네스·데이터셋·저지)별로 한 레인,
-  // 그 종류의 사건이 창 안에 있을 때만 선다(빈 섹션 숨김과 같은 규칙).
+  // The capability lane — what the evaluation contract did while the service moved. One lane per kind (harness, dataset, judge),
+  // and only when that kind has an event inside the window (the same rule as empty-section hiding).
   const capabilityKinds = (['harness', 'dataset', 'judge'] as const).filter((kind) =>
     timeline.capabilities.some((capability) => capability.kind === kind)
   )
@@ -86,15 +86,15 @@ export function TimelineLanes({
   if (!hasReleases && services.length === 0 && !hasIssues && capabilityKinds.length === 0)
     return null
 
-  // 이슈 스팬의 트랙 배정 — 겹치는 수명끼리만 다른 트랙으로 흩는다(그리디 인터벌 패킹). 예전의 index
-  // 홀짝 배정은 이웃끼리만 흩어서, 같은 주에 이슈 셋이 열리면 첫째와 셋째가 한 트랙에서 정확히 겹쳤다.
-  // 트랙 수 = 실제 최대 동시 겹침이라, 밀도가 높은 창에서는 레인이 그만큼 키를 늘린다(겹쳐 그려서
-  // 안 보이는 것보다 낫다).
+  // Track assignment for issue spans — only OVERLAPPING lifetimes are spread across tracks (greedy interval packing). The old
+  // odd/even-by-index assignment only separated neighbours, so three issues opened in one week put the first and third on one track,
+  // exactly overlapping. The track count is the real maximum concurrent overlap, so a dense window grows the lane by that much
+  // (better than drawing them on top of each other and seeing none).
   const issueSpans = timeline.issues
     .map((issue) => {
       const start = pct(issue.createdAt)
-      // 열린 스팬의 끝은 오늘 — 단, 창 전체가 미래인(호출자가 from 을 미래로 지정한) 퇴화 케이스에서
-      // 뒤로 그리지 않게 시작점 아래로는 내려가지 않는다.
+      // An open span ends TODAY — except it never goes below its own start, so a degenerate window that is entirely in the future
+      // (a caller passing a future `from`) does not draw backwards.
       const resolved = issue.resolvedAt !== undefined
       const end = issue.resolvedAt !== undefined ? pct(issue.resolvedAt) : Math.max(start, nowPct)
       return { issue, start, end, resolved }
@@ -102,7 +102,7 @@ export function TimelineLanes({
     .sort((a, b) => a.start - b.start || a.end - b.end)
   const trackEnds: number[] = []
   const trackedIssues = issueSpans.map((span) => {
-    // 발생/해결 마커(축 위 ±1% 남짓)까지 여유를 두고 비어 있는 첫 트랙을 재사용한다.
+    // Reuse the first free track, leaving room for the opened/resolved markers (roughly ±1% on the axis).
     let track = trackEnds.findIndex((end) => span.start > end + 2)
     if (track === -1) {
       track = trackEnds.length
@@ -113,10 +113,10 @@ export function TimelineLanes({
     return { ...span, track }
   })
   const issueTrackCount = Math.max(1, trackEnds.length)
-  // 트랙 피치 12px, 위아래 여백 10px — 두 트랙까지는 예전 레인 높이(h-8) 그대로다.
+  // Track pitch 12px with 10px above and below — up to two tracks this is the old lane height (h-8) unchanged.
   const issueLaneHeight = Math.max(32, 20 + (issueTrackCount - 1) * 12)
 
-  // 축 눈금 4칸 — 창을 균등 분할한 날짜 라벨.
+  // Four axis ticks — date labels dividing the window evenly.
   const ticks = [0, 1, 2, 3, 4].map((step) => ({
     at: from + (span * step) / 4,
     pct: (step / 4) * 100,
@@ -138,10 +138,10 @@ export function TimelineLanes({
       onPointerLeave={() => setHover(undefined)}
     >
       <div className="relative space-y-0">
-        {/* 오늘 선은 항상 선다 — 창이 오늘로 끝나도 "지금이 축의 어디인가"는 이 그래프가 답해야 하는
-            질문이다(그때는 오른쪽 끝에 선다). 예정 구간의 밴드만 창이 미래까지 뻗었을 때 생긴다: 계획은
-            사건이 아니라서 같은 바닥에 그리면 안 된다. 레인 행들이 뒤에 오므로(둘 다 positioned) 마커는
-            이 레이어 위에 그려진다 — 라벨 폭 w-28 = left-28 이 레인 영역의 왼쪽 끝. */}
+        {/* The today line always stands — even when the window ends today, "where is now on this axis" is a question this graph has to
+            answer (it stands at the right edge then). Only the scheduled BAND appears when the window reaches into the future: a plan is
+            not an event and must not be drawn on the same floor. The lane rows come after it (both positioned), so markers draw above
+            this layer — label width w-28 = left-28 is the left edge of the lane area. */}
         <div className="pointer-events-none absolute inset-y-0 left-28 right-0" aria-hidden="true">
           {hasFuture && (
             <div
@@ -159,13 +159,13 @@ export function TimelineLanes({
                 const at = release.releasedAt ?? release.targetDate
                 if (at === undefined) return null
                 const released = release.status === 'released'
-                // 목표일은 달력 날짜(YYYY-MM-DD)라 그 날의 시작으로 읽는다.
+                // A target date is a calendar date (YYYY-MM-DD), so it is read as the START of that day.
                 const atPct = pct(at.length === 10 ? `${at}T00:00:00.000Z` : at)
                 return (
                   <Link
                     key={release.id}
                     href={releaseHref(workspace, release.id)}
-                    // 구성까지 붙인다 — 릴리즈 마커의 질문은 "언제"이고, 바로 다음 질문이 "무엇이 나갔나"다.
+                    // The composition rides along too — a release marker's question is "when", and the very next one is "what shipped".
                     {...enter('releases', {
                       atPct,
                       title: release.name,
@@ -195,8 +195,8 @@ export function TimelineLanes({
                       )}
                     />
                     {showReleaseNames && (
-                      // 축 오른쪽 끝의 마커(= 보통 가장 먼 계획)는 이름을 왼쪽에 건다 — 오른쪽에 걸면
-                      // 정작 보러 온 그 릴리즈의 이름만 카드 밖으로 잘려 나간다.
+                      // A marker at the axis' right edge (usually the furthest plan) hangs its name on the LEFT — hung on the right, the
+                      // name of the very release you came to read is what gets clipped out of the card.
                       <span
                         className={cn(
                           'absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-[10px] text-muted-foreground group-hover:text-foreground',
@@ -244,8 +244,8 @@ export function TimelineLanes({
                     style: { left: `${atPct}%` },
                     'aria-label': `${service} ${version.version}`,
                   }
-                  // 원격에 주소가 있으면 점이 그리로 나가는 문이 된다 — 버전 점을 보고 나서 사람이 하는
-                  // 다음 행동은 대체로 "그래서 그 릴리즈에 뭐가 들었지"다.
+                  // With an address on the remote, the dot becomes the door out to it — after looking at a version dot, the next thing a
+                  // person does is usually "so what was in that release".
                   return version.url !== undefined ? (
                     <a
                       key={version.id}
@@ -278,9 +278,9 @@ export function TimelineLanes({
                   const atPct = pct(capability.registeredAt)
                   const reference = `${capability.id}@${capability.version}`
                   return (
-                    // 마크는 능력 자신의 상세로 나가는 문이다 — "계약이 움직였다"를 본 사람의 다음 질문은
-                    // "그래서 그 버전이 뭔데"다. info 톤: 시리즈 점(팔레트)·릴리즈(primary)와 다른 축의
-                    // 사건임을 색이 먼저 말한다.
+                    // A mark is the door out to the capability's own detail — after seeing "the contract moved", the next question is
+                    // "moved to WHAT". The info tone: colour says first that this is an event on a different axis from the series dots
+                    // (palette) and releases (primary).
                     <Link
                       key={`${reference}:${capability.registeredAt}`}
                       href={issueLinkHref(workspace, capability.kind, capability.id)}
@@ -291,8 +291,8 @@ export function TimelineLanes({
                         badge: t(`capabilityKind.${capability.kind}`),
                         lines: [
                           t('tipRegisteredAt', { at: stamp.instant(capability.registeredAt) }),
-                          // 이 능력을 지켜보는 시리즈들 — 시리즈가 여럿인 제품에서 "누구의 계약이
-                          // 움직였나"의 답. 키만 있고 라벨이 사라진 시리즈는 키 그대로 말한다.
+                          // The series watching this capability — on a product with several series, the answer to "whose contract moved".
+                          // A series whose label is gone but whose key remains speaks as the bare key.
                           ...(capability.seriesKeys.length > 0
                             ? [
                                 t('tipWatchedBy', {
@@ -320,10 +320,10 @@ export function TimelineLanes({
           <div className="relative flex items-center">
             <span className={label}>{t('laneIssues')}</span>
             <div className={cn(lane, 'flex-1')} style={{ height: `${issueLaneHeight}px` }}>
-              {/* 이슈는 수명이 스팬이지만, 사람이 타임라인에서 찾는 건 두 순간이다: 언제 터졌고 언제
-                  끝났나. 그래서 스팬은 배경이 되고 그 위에 발생(◆)과 해결(●) 마커를 따로 세운다 —
-                  막대만 있으면 "8월 초에 뭔가 열려 있었다"까지밖에 못 읽는다.
-                  해결됨=success, 회귀=danger, 열림=warning — 배지와 같은 시맨틱 토큰만 쓴다. */}
+              {/* An issue's lifetime is a span, but what a person looks for on a timeline is two MOMENTS: when it broke and when it ended.
+                  So the span becomes the background and the opened (◆) and resolved (●) markers stand on top of it — with the bar alone you
+                  can read no further than "something was open in early August".
+                  resolved=success, regressed=danger, open=warning — only the same semantic tokens the badges use. */}
               {trackedIssues.map(({ issue, start, end, resolved, track }) => {
                 const tone =
                   issue.status === 'regressed' ? 'danger' : resolved ? 'success' : 'warning'
@@ -337,8 +337,8 @@ export function TimelineLanes({
                   success: 'border-[var(--color-success)] bg-[var(--color-success)]',
                   warning: 'border-[var(--color-warning)] bg-[var(--color-warning)]',
                 }[tone]
-                // `moment` 는 지금 가리키고 있는 순간 — 마커일 때만 붙는다. 수명 막대 위에서는 어느
-                // 순간도 가리키고 있지 않으므로 배지 없이 이슈 자체를 말한다.
+                // `moment` is the instant currently being pointed at — present only on a marker. Over the lifetime bar no instant is being
+                // pointed at, so it speaks about the issue itself with no badge.
                 const card = (atPct: number, moment?: string): HoverCard => ({
                   atPct,
                   title: `${issue.identifier} · ${issue.title}`,
@@ -349,8 +349,8 @@ export function TimelineLanes({
                     ...(issue.resolvedAt !== undefined
                       ? [t('tipResolvedAt', { at: stamp.instant(issue.resolvedAt) })]
                       : [t('tipStillOpen')]),
-                    // 이 이슈가 왜 이 프로덕트의 축에 있는가 — 사람이 건 링크인지, 이 프로덕트의 평가
-                    // 증거를 인용/근거로 삼은 것인지. 둘은 다른 주장이라 카드가 그걸 말한다.
+                    // Why this issue is on THIS product's axis — a link a person made, or a relation derived from citing this product's
+                    // evaluation evidence. Two different claims, so the card says which.
                     t(`tipVia.${issue.via}`),
                   ],
                 })
@@ -366,8 +366,8 @@ export function TimelineLanes({
                       top: `${10 + track * 12}px`,
                     }}
                   >
-                    {/* 수명 — 배경. `evidence` 로 올라온 이슈는 점선 테두리로 눕힌다: 사람이 선언한
-                        링크가 아니라 증거에서 유도된 관계라는 사실 자체가 정보다. */}
+                    {/* The lifetime — the background. An issue that arrived through `evidence` is laid out with a dashed border: that it is a
+                        relation derived from evidence rather than a link a person declared is itself information. */}
                     <span
                       {...enter('issues', card((start + end) / 2))}
                       className={cn(
@@ -376,7 +376,7 @@ export function TimelineLanes({
                         issue.via === 'evidence' && 'opacity-70'
                       )}
                     />
-                    {/* 발생 — 왼쪽 끝의 마름모. */}
+                    {/* Opened — the diamond at the left end. */}
                     <span
                       {...enter('issues', card(start, t('momentRaised')))}
                       className={cn(
@@ -384,8 +384,8 @@ export function TimelineLanes({
                         ink
                       )}
                     />
-                    {/* 해결 — 오른쪽 끝의 원. 아직 열려 있으면 마커가 없다: 끝나지 않은 일에 끝점을
-                        찍으면 그건 사실이 아니라 예언이다. */}
+                    {/* Resolved — the circle at the right end. Still open means no marker: putting an end point on work that has not ended is
+                        not a fact, it is a prophecy. */}
                     {resolved && (
                       <span
                         {...enter('issues', card(end, t('momentResolved')))}
@@ -408,7 +408,7 @@ export function TimelineLanes({
         <span className={label} />
         <div className="relative h-4 flex-1">
           {ticks.map((tick, index) => {
-            // 오늘 라벨과 겹치는 눈금은 뺀다 — 두 날짜가 한 자리에서 서로를 못 읽게 만드는 쪽이 손해다.
+            // Drop a tick that collides with the today label — two dates in one place making each other unreadable is the worse trade.
             if (Math.abs(tick.pct - nowPct) < 9) return null
             return (
               <span
@@ -426,8 +426,8 @@ export function TimelineLanes({
               </span>
             )
           })}
-          {/* 오늘 — 축에서 유일하게 강조되는 날짜, 위의 선과 같은 자리. 오른쪽 끝에 붙으면(창이 오늘로
-              끝나는 보통의 경우) 가운데 정렬이 라벨을 컨테이너 밖으로 자르니 선에 오른끝을 맞춘다. */}
+          {/* Today — the one emphasised date on the axis, in the same place as the line above. Pinned at the right edge (the ordinary case,
+              where the window ends today) centring would clip the label out of the container, so its right end is aligned to the line. */}
           <span
             className="absolute top-0 whitespace-nowrap font-mono text-[10px] text-primary"
             style={
@@ -444,8 +444,8 @@ export function TimelineLanes({
   )
 }
 
-// 마크 바로 아래에 뜨는 카드. 축의 양 끝에서는 카드가 잘리므로 정렬을 바꿔 붙인다 — 가장 오른쪽 점은
-// 대개 가장 최근 사건이고, 그게 읽히지 않으면 호버의 의미가 없다.
+// The card that appears directly under a mark. At either end of the axis a card would be clipped, so its alignment flips — the
+// rightmost dot is usually the most recent event, and hover means nothing if that one cannot be read.
 function LaneTooltip({ card }: { card: HoverCard }): ReactNode {
   const nearRight = card.atPct > 70
   const nearLeft = card.atPct < 30

@@ -18,7 +18,7 @@ function run(overrides: Partial<Run> & { id: string; updatedAt: string }): Run {
 describe('buildActivityBlocks', () => {
   it('folds an agent conversation into ONE session block, turns in chronological order', () => {
     const standalone: Run[] = [
-      // 같은 대화의 턴 3개 — 원장에는 최신순으로 온다
+      // Three turns of the same conversation — the ledger delivers them newest first
       run({
         id: 't3',
         kind: 'agent',
@@ -38,7 +38,7 @@ describe('buildActivityBlocks', () => {
         status: 'failed',
         updatedAt: '2026-08-05T02:00:00Z',
       }),
-      // 대화가 아닌 단독 eval run 은 그대로 자기 행
+      // A standalone eval run that is not a conversation keeps its own row
       run({ id: 'e1', kind: 'eval', updatedAt: '2026-08-05T02:30:00Z' }),
     ]
     const blocks = buildActivityBlocks(standalone, [])
@@ -47,7 +47,7 @@ describe('buildActivityBlocks', () => {
     if (session?.kind !== 'session') throw new Error('expected a session block')
     expect(session.session.id).toBe('conv-1')
     expect(session.session.count).toBe(3)
-    // 헤더는 최신 턴의 상태/시각을 대표하고, 턴은 대화 읽기 순서(1→n)
+    // The header represents the newest turn's status and time, and the turns read in conversation order (1→n)
     expect(session.session.status).toBe('succeeded')
     expect(session.session.updatedAt).toBe('2026-08-05T03:00:00Z')
     expect(session.session.turns.map((t) => t.id)).toEqual(['t1', 't2', 't3'])

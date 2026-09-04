@@ -2,7 +2,7 @@ import { IssueListView, type IssueListFilters } from '@/widgets/issue-list'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스 전체의 이슈 — 워크스페이스가 유일한 경계이므로 주소도 하나다.
+// Every issue in the workspace — the workspace is the only boundary, so there is only one address.
 export default async function IssuesPage({
   params,
   searchParams,

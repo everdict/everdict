@@ -16,8 +16,8 @@ import { Input } from '@/shared/ui/input'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { Tooltip } from '@/shared/ui/tooltip'
 
-// 한 사람 = 워크스페이스 멤버십 + 그 사람이 올라가 있는 팀 로스터. 팀 소속은 멤버 레코드에 없으므로
-// (별도 로스터) 서버가 합쳐서 넘긴다 — 이 위젯은 이미 합쳐진 행만 그린다.
+// One person = a workspace membership plus the team rosters they are on. Team membership is not on the member record
+// (it is a separate roster), so the server joins them and passes them down — this widget draws only already-joined rows.
 export interface MemberRow {
   subject: string
   role: string
@@ -31,7 +31,7 @@ type Sort = 'name' | 'joined' | 'role'
 
 const FILTER_DEFAULTS = { query: '', role: '', sort: 'name' as Sort }
 
-// 역할은 서버가 소유한 열린 문자열이다 — 아는 값만 번역하고 모르는 값은 그대로 보여준다(카탈로그 미스로 화면이 깨지지 않도록).
+// A role is an OPEN string the server owns — only known values are translated and an unknown one is shown as-is (so a catalog miss does not break the screen).
 const ROLE_KEYS: Record<string, string> = {
   admin: 'roleAdmin',
   member: 'roleMember',
@@ -40,12 +40,12 @@ const ROLE_KEYS: Record<string, string> = {
 }
 const ROLE_RANK: Record<string, number> = { admin: 0, member: 1, viewer: 2, ci: 3 }
 
-// 사람 · 팀 · 역할 · 합류 — 헤더와 행이 같은 트랙을 공유해야 열이 어긋나지 않으므로 한 곳에 둔다.
-// 컨테이너 쿼리다(뷰포트 아님): 같은 목록이 전체 폭에서도, 인프라 패널이 열린 좁은 칼럼에서도 그려진다.
+// Person · teams · role · joined — the header and the rows have to share the same tracks or the columns misalign, so they live in one place.
+// It is a CONTAINER query (not the viewport): the same list is drawn at full width and in a narrow column with the infra panel open.
 const ROW =
   'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 @lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_88px] @2xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_88px_96px]'
 
-// 사람 이름 — 이름 > 이메일 로컬파트 > 축약한 subject. 불투명한 Keycloak sub 를 그대로 세우면 사람 목록이 id 목록이 된다.
+// A person's name — name > the email local part > an abbreviated subject. Standing an opaque Keycloak sub as-is turns a people list into an id list.
 function labelOf(m: MemberRow): string {
   if (m.name) return m.name
   if (m.email) return m.email.split('@')[0] ?? m.email
@@ -162,7 +162,7 @@ export function MemberList({
         />
       ) : (
         <div className="overflow-hidden rounded-lg border border-border bg-card">
-          {/* 열 이름 — 숨겨진 셀은 트랙을 차지하지 않으므로 행과 같은 순서로 두면 좁은 폭에서도 헤더가 따라 접힌다. */}
+          {/* The column names — a hidden cell takes no track, so keeping them in the same order as the rows makes the header fold along at narrow widths. */}
           <div
             className={cn(
               ROW,
@@ -181,7 +181,7 @@ export function MemberList({
               return (
                 <li
                   key={m.subject}
-                  // 이메일/부제가 있는 행만 두 줄이 되면 리듬이 깨진다 — 최소 높이로 행 높이를 고정한다.
+                  // Only rows with an email or subtitle becoming two lines breaks the rhythm — a min height fixes the row height.
                   className={cn(ROW, 'min-h-[52px] py-2 transition-colors hover:bg-accent/40')}
                 >
                   <span className="flex min-w-0 items-center gap-2.5">
@@ -217,7 +217,7 @@ export function MemberList({
                         </span>
                       ) : (
                         m.email && (
-                          // 이메일은 그대로 mailto 링크다 — 디렉토리에서 가장 흔한 다음 행동이 연락이라, 별도 액션 버튼을 두지 않는다.
+                          // The email is a plain mailto link — contacting is the commonest next action from a directory, so there is no separate action button.
                           <a
                             href={`mailto:${m.email}`}
                             className="block truncate text-[12px] text-muted-foreground hover:text-foreground hover:underline"

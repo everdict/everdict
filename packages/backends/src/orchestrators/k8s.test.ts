@@ -634,7 +634,7 @@ describe("K8s harness resources + OOM classification", () => {
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     const result = await backend.dispatch(JOB);
     const infra = result.trace.filter((e) => e.kind === "infra");
-    // 이벤트는 실제 타임스탬프(t) 순으로 정렬돼 실린다 — 구성만 단언(순서는 소스 타임스탬프에 따름).
+    // Events are carried sorted by their real timestamp (t) — only the COMPOSITION is asserted (the order follows the source timestamps).
     expect(infra.map((e) => (e.kind === "infra" ? e.event : undefined)).sort()).toEqual([
       "Pulled",
       "placed",

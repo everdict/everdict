@@ -10,13 +10,13 @@ import { MetricChip } from '@/shared/ui/chip'
 import { Link } from '@/shared/ui/link'
 import { StatusIcon } from '@/shared/ui/status-pill'
 
-// 한 페이지에 노출할 개수 — 대량 렌더를 막고 "더보기"로 점진 노출(저지 이력과 동일).
+// How many to show per page — it stops a bulk render and reveals progressively through "show more" (the same as the judge history).
 const PAGE_SIZE = 10
 
-// 실행 이력 한 행에 필요한 최소 데이터 — 서버에서 조립해 전달(직렬화 가능한 평면 형태).
+// The minimum data one run-history row needs — assembled on the server and passed down (a serializable flat shape).
 export interface ScheduleRunEntry {
   id: string
-  traceEval: boolean // 트레이스 평가 모드인가(dataset/harness 없음)
+  traceEval: boolean // is it trace evaluation mode (no dataset/harness)
   // mean is ABSENT for a zero-measurement metric (every score unmeasured) — the chip renders the unmeasured
   // marker; dropping the field here is what turned dead graders into 0.00 rows.
   metrics: { metric: string; mean?: number; passRate?: number | null; unmeasured?: number }[]
@@ -25,8 +25,8 @@ export interface ScheduleRunEntry {
   runner?: { name: string; avatarUrl?: string }
 }
 
-// 이 예약이 만든 스코어카드들의 "주요 지표"를 시간순으로 뽑아 추이를 만든다.
-// 주요 지표 = 완료된 실행들에서 가장 자주 등장하는 메트릭(동률이면 먼저 나온 것). 데이터 포인트 2개 미만이면 추이는 그리지 않는다.
+// Take the "primary metric" of the scorecards this schedule produced, in time order, to make a trend.
+// The primary metric = the metric appearing most often across the completed runs (ties go to whichever came first). With fewer than two data points no trend is drawn.
 function primaryTrend(
   entries: ScheduleRunEntry[]
 ): { metric: string; points: { at: string; value: number }[] } | null {
@@ -42,8 +42,8 @@ function primaryTrend(
       metric = name
     }
   }
-  // 오래된 → 최신 순으로(입력은 최신순). 해당 메트릭이 MEASURED된 실행만 — mean이 없는(전멸 unmeasured)
-  // 포인트를 0으로 그리면 grader 장애가 추이 붕괴로 위장된다.
+  // Oldest → newest (the input is newest first). Only runs where that metric was MEASURED — drawing a point with no mean (everything
+  // unmeasured) as 0 disguises a grader outage as a collapsing trend.
   const points = [...entries]
     .reverse()
     .map((e) => {
@@ -54,7 +54,7 @@ function primaryTrend(
   return points.length >= 2 ? { metric, points } : null
 }
 
-// 추이 스파크라인 — 주요 지표의 평균값을 시간순 꺾은선으로. 값의 좋고 나쁨은 가정하지 않는다(중립).
+// The trend sparkline — the primary metric's mean as a line in time order. It assumes nothing about whether a value is good or bad (neutral).
 function RunTrend({ entries }: { entries: ScheduleRunEntry[] }) {
   const t = useTranslations('scheduleDetail')
   const trend = useMemo(() => primaryTrend(entries), [entries])
@@ -125,8 +125,8 @@ function RunTrend({ entries }: { entries: ScheduleRunEntry[] }) {
   )
 }
 
-// 예약 상세의 실행 이력 — 이 예약이 만든 스코어카드들(최신순). 상단에 주요 지표 추이 스파크라인.
-// 행: 상태 · 주요 지표 칩 · (트레이스 평가 태그) · 실행자 · 시각 → 스코어카드 상세로 링크.
+// A schedule detail's run history — the scorecards this schedule produced (newest first), with the primary metric's trend sparkline on top.
+// A row: status · the primary metric chip · (a trace-evaluation tag) · who ran it · the time → linking to the scorecard detail.
 export function ScheduleRuns({
   workspace,
   entries,
@@ -144,8 +144,8 @@ export function ScheduleRuns({
   return (
     <div className="space-y-3">
       <RunTrend entries={entries} />
-      {/* 하나의 카드에 구분선으로 나뉜 행들 — 능력 상세의 "이 능력을 지켜보는 이슈" 목록과 같은 문법이다.
-          카드를 행마다 띄우면 목록이 아니라 카드 더미로 읽힌다. */}
+      {/* Rows divided by separators inside ONE card — the same grammar as the capability detail's "issues watching this capability" list.
+          Floating a card per row makes it read as a pile of cards rather than a list. */}
       <div className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
         {shown.map((s) => {
           const siblings = s.metrics.map((m) => m.metric)
@@ -158,7 +158,7 @@ export function ScheduleRuns({
               <span className="flex w-5 shrink-0 justify-center">
                 <StatusIcon status={s.status} />
               </span>
-              {/* 주요 지표 칩 — 예약은 대상(데이터셋·하네스)이 고정이라 지표가 행의 주 정보. */}
+              {/* The primary metric chip — a schedule has a fixed subject (dataset, harness), so the METRIC is the row's main information. */}
               <div className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
                 {s.traceEval && (
                   <span className="mr-1 shrink-0 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[10.5px] font-[510] text-muted-foreground">
@@ -183,7 +183,7 @@ export function ScheduleRuns({
                   <span className="truncate text-[12px] text-faint">{t('runNoMetrics')}</span>
                 )}
               </div>
-              {/* 실행자 · 시각 — 고정 폭 */}
+              {/* Who ran it · when — fixed width */}
               <div className="flex shrink-0 items-center gap-2.5">
                 <span className="flex w-6 justify-center">
                   {s.runner && (

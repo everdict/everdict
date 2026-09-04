@@ -17,7 +17,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 작성자 표시(멤버 프로필 → 이름/아바타, 실패 시 subject 축약).
+// The author display (a member profile → name/avatar, falling back to an abbreviated subject).
 function authorOf(members: Member[], subject: string): { name: string; avatarUrl?: string } {
   const member = members.find((m) => m.subject === subject)
   return {
@@ -26,16 +26,16 @@ function authorOf(members: Member[], subject: string): { name: string; avatarUrl
   }
 }
 
-// Workspace › Skills › 상세 — SKILL.md 본문 + 부속 파일 + 버전 라인. **이 워크스페이스가 소유한 스킬만 온다**:
-// 스토어 발행물은 "가져오기"로 사본이 되는 순간부터 여기 자기 id 로 서고, 그때부터 직접 쓴 스킬과 구분이 없다
-// (읽기 전용 ?source= 갈래는 그래서 사라졌다 — 스토어 것은 스토어에서 본다).
-// 상세는 언제나 페이지이지 다이얼로그가 아니다 — 오른쪽 대화 패널에서 이 스킬을 두고 편집·실험해야 하므로
-// 화면 절반을 덮는 모달이면 그 흐름 자체가 성립하지 않는다.
+// Workspace › Skills › detail — the SKILL.md body plus attached files plus the version line. **Only skills THIS workspace owns arrive here**:
+// a store publication stands here under its own id from the moment "import" makes it a copy, and from then on it is indistinguishable from a
+// hand-written skill (which is why the read-only ?source= branch is gone — a store item is viewed in the store).
+// A detail is always a PAGE and never a dialog — you have to edit and experiment on this skill with the conversation panel on the right,
+// which a modal covering half the screen makes impossible.
 //
-// 편집 주 경로는 "대화로 편집하기": 우측 대화 패널을 열고(닫혀 있으면) 이 스킬 @참조를 떨어뜨린 뒤 패널을
-// skillEdit 임무로 프레이밍한다 — 프리필 프롬프트 없이, 무엇을 고칠지는 사용자가 말한다(에이전트가
-// get_skill/update_skill 로 검토·수정, HITL 승인). 고친 결과가 마음에 들면 "새 버전 찍기"로 그 내용을 이름 붙여
-// 고정한다. 수동 편집 다이얼로그는 보조 경로. 비공개 스킬은 작성자 외 404(컨트롤플레인이 강제).
+// The main editing path is "edit by conversation": it opens the conversation panel (if closed), drops an @-reference to this skill and frames
+// the panel with the skillEdit mission — with NO prefilled prompt, because what to change is what the user says (the agent reviews and edits
+// through get_skill/update_skill, under HITL approval). Once the result is right, "stamp a new version" fixes that content under a name.
+// The manual edit dialog is the secondary path. A private skill 404s for anyone but its author (enforced by the control plane).
 export default async function SkillDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const t = await getTranslations('skillsManager')
@@ -46,7 +46,7 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
     return <EmptyState title={s('noPermissionTitle')} hint={s('noPermissionHint')} />
   }
 
-  // 작성자 표시용 멤버 프로필 — 소프트 실패(실패 시 subject 축약으로 폴백).
+  // The member profile for the author display — a soft failure (falling back to an abbreviated subject).
   const members = await controlPlane
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
@@ -56,19 +56,19 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
   try {
     skill = skillSchema.parse(await controlPlane.getSkill(ctx, id))
   } catch {
-    notFound() // 없거나(타 워크스페이스 포함) 남의 비공개 초안 — 존재 누설 없이 404.
+    notFound() // absent (another workspace included) or somebody else's private draft — a 404 that leaks no existence.
   }
 
   const isAdmin = (principal?.roles ?? []).includes('admin')
   const canManage =
     can(principal?.roles, 'skills:write') && (skill.createdBy === principal?.subject || isAdmin)
-  // 스토어 public 발행 가능 여부 — admin 또는 인스턴스 정책(GET /me 의 config.allowMemberPublicPublish).
-  // UX 게이팅용일 뿐 최종 강제는 컨트롤플레인(CapabilityService).
+  // Whether public publishing to the store is possible — an admin, or the instance policy (GET /me's config.allowMemberPublicPublish).
+  // UX gating only; the control plane (CapabilityService) enforces it finally.
   const canPublishPublic = isAdmin || principal?.config?.allowMemberPublicPublish === true
 
   const author = authorOf(members, skill.createdBy)
 
-  // 찍힌 버전들(최신 우선) — 소프트 실패: 버전 라인을 못 읽어도 스킬 본문은 그대로 보여야 한다.
+  // The stamped versions (newest first) — a soft failure: the skill body must still render even when the version line cannot be read.
   const versions = await controlPlane
     .listSkillVersions(ctx, id)
     .then((r) => skillVersionsSchema.parse(r))
@@ -78,11 +78,11 @@ export default async function SkillDetailPage({ params }: { params: Promise<{ id
   try {
     modelIds = modelsSchema.parse(await controlPlane.listModels(ctx)).map((m) => m.id)
   } catch {
-    // 모델 미등록/권한 없음 — 편집 다이얼로그의 AI 위저드만 비활성.
+    // No registered model or no permission — only the edit dialog's AI wizard is disabled.
   }
 
-  // 대화 패널 진입은 "대화로 편집하기" 하나 — 참조 칩을 떨어뜨리고 패널을 skillEdit 임무로 프레이밍한다(같은
-  // 대화 구조에 그 작업의 문구·제안). 위젯 버튼은 앱 레이어가 조립해 feature 에 내려준다.
+  // There is one entry into the conversation panel, "edit by conversation" — it drops the reference chip and frames the panel with the
+  // skillEdit mission (the same conversation structure, with that work's wording and suggestions). The app layer assembles the widget button and passes it to the feature.
   const reference = { type: 'skill' as const, id: skill.id, label: skill.name }
   return (
     <div className="space-y-6">

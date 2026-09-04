@@ -26,8 +26,8 @@ import { Input } from '@/shared/ui/input'
 
 import { createTaskAction, deleteTaskAction, updateTaskAction } from '../api/tasks'
 
-// 태스크 원장 보드 — 워크스페이스 공유 조율 작업(멤버·에이전트 공용). 행 액션은 상태 전이 동사(claim/complete/
-// cancel/reopen)와 삭제(creator·admin — 서버가 403 으로 판정)뿐; 전이 팩트는 컨트롤플레인이 방출한다.
+// The task ledger board — the workspace's shared coordination work (used by members and agents alike). The row actions are only the transition
+// verbs (claim/complete/cancel/reopen) and delete (creator/admin — judged by the server with a 403); the transition facts are emitted by the control plane.
 const STATUS_ORDER: AgentTaskStatus[] = ['pending', 'in_progress', 'completed', 'cancelled']
 
 const STATUS_TONE: Record<AgentTaskStatus, string> = {

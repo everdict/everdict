@@ -282,7 +282,7 @@ export default async function ScorecardDetailPage({
     authorName = m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(createdBy)
   }
 
-  // 소유 팀을 이름으로 부르고, 넘길 수 있는 사람에게는 그 자리에서 다시 세우게 하기 위한 로스터. 배치는
+  // The roster, so the owning team can be called by name and anyone who may transfer it can re-assign on the spot. The batch
 
   const summary = record.summary ?? []
   const summaryMetrics = summary.map((m) => m.metric) // sibling context for judge-metric disambiguation
@@ -428,8 +428,8 @@ export default async function ScorecardDetailPage({
   const runnerOnline = (lastSeenAt?: string) =>
     !!lastSeenAt && Date.now() - new Date(lastSeenAt).getTime() < 90_000
 
-  // "이 케이스가 무엇이었는가" — 케이스 상세 다이얼로그가 과제 본문(데이터셋 케이스 정의)으로 답한다.
-  // 보조 정보라 실패해도 상세는 그대로 선다(정체 섹션만 빠진다); 트레이스 평가는 데이터셋이 없다.
+  // "What WAS this case" — the case detail dialog answers with the task body (the dataset case definition).
+  // Supporting information, so a failure still leaves the detail standing (only the identity section is missing); a trace evaluation has no dataset.
   let datasetCaseById = new Map<string, DatasetCase>()
   if (results.length > 0 && !isTraceEvaluation(record)) {
     try {
@@ -442,7 +442,7 @@ export default async function ScorecardDetailPage({
     }
   }
 
-  // self-hosted 러너 실패 힌트 — 로스터 조회·로케일은 서버의 일이므로 문장까지 만들어 뷰에 싣는다.
+  // The self-hosted runner failure hint — roster lookup and localization are the server's job, so the sentence is built there and carried to the view.
   const runnerHintFor = (failure?: { runnerId?: string }): string | undefined => {
     const rid = failure?.runnerId
     if (!rid) return undefined
@@ -455,9 +455,9 @@ export default async function ScorecardDetailPage({
     })
   }
 
-  // 트라이얼 배치의 행 정체성 — 같은 caseId 가 결과에 여러 번(트라이얼마다 한 행) 등장하므로, 레코드의
-  // 원본 results 순서(=디스패치 순서) 기준 등장 순번이 그 행의 트라이얼 순번이자 유일 키의 재료다.
-  // 필터/정렬(shown)과 무관하게 원본 순서로 세므로 ?case= 딥링크가 필터를 바꿔도 같은 행을 가리킨다.
+  // Row identity for a trial batch — the same caseId appears several times in the results (one row per trial), so its ordinal in the record's
+  // ORIGINAL results order (= dispatch order) is both that row's trial number and the material for its unique key.
+  // It is counted in the original order regardless of filtering or sorting (shown), so a ?case= deep link points at the same row even when filters change.
   const occurrenceByResult = new Map<(typeof results)[number], number>()
   const trialTotals = new Map<string, number>()
   for (const r of results) {
@@ -531,7 +531,7 @@ export default async function ScorecardDetailPage({
               ...(r.snapshot.kind === 'browser' && r.snapshot.url !== undefined
                 ? { url: r.snapshot.url }
                 : {}),
-              // dev 인메모리 스토어의 memory:// ref 는 브라우저가 못 여니 http(s)만 싣는다 (기존 게이트 유지).
+              // The dev in-memory store's memory:// refs cannot be opened by a browser, so only http(s) is carried (keeping the existing gate).
               ...(r.snapshot.kind === 'browser' &&
               r.snapshot.domRef !== undefined &&
               /^https?:\/\//.test(r.snapshot.domRef)
@@ -555,8 +555,8 @@ export default async function ScorecardDetailPage({
       ...(errorSummary !== undefined ? { errorSummary } : {}),
       ...(runnerHint !== undefined ? { runnerHint } : {}),
       hasTrace: (r.trace ?? []).length > 0,
-      // 실행 매니페스트는 그대로 넘긴다 — 없는 케이스(디스패치 실패 합성·ingest)는 없는 채로 넘겨서
-      // 다이얼로그가 스트립을 감춘다. 여기서 기본값을 채우면 "기록 없음"이 "linux"로 둔갑한다.
+      // The execution manifest is passed through verbatim — a case that has none (a synthesized dispatch failure, an ingest) is passed with none,
+      // so the dialog hides the strip. Filling a default here would turn "no record" into "linux".
       ...(r.execution !== undefined
         ? {
             execution: {
@@ -582,8 +582,8 @@ export default async function ScorecardDetailPage({
   const caseViewIds = new Set(caseViews.map((c) => c.caseId))
 
   return (
-    // @container: 아래 그리드들은 뷰포트가 아니라 이 컬럼의 폭에 반응한다 — 인프라 패널이 열리면
-    // 뷰포트는 넓어도 이 컬럼은 ~500px 로 좁아지므로, run 상세와 같은 컨테이너 쿼리 기준을 쓴다.
+    // @container: the grids below respond to THIS COLUMN's width rather than the viewport — with the infra panel open the viewport is still wide
+    // while this column narrows to ~500px, so it uses the same container-query basis as the run detail.
     <div className="@container space-y-7">
       {/* In progress: periodically re-run the server component to live-update steps (stops once terminal). */}
       <AutoRefresh enabled={live} />
@@ -597,7 +597,7 @@ export default async function ScorecardDetailPage({
               : `${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`
           }
           actions={
-            // 액션이 많은 상세라(다운로드·재실행·삭제·상태 필) 좁은 컬럼에서는 줄바꿈으로 살아남는다.
+            // A detail with many actions (download, re-run, delete, status pills) survives a narrow column by wrapping.
             <div className="flex flex-wrap items-center justify-end gap-2">
               <MentionInChatButton
                 reference={{ type: 'scorecard', id: record.id, label: record.id.slice(0, 8) }}
@@ -672,7 +672,7 @@ export default async function ScorecardDetailPage({
         />
       </div>
 
-      {/* 실행 중인 케이스 (라이브) — 지금 실행 중인 자식 run들. 열면 실행 중 화면(browser-use 크롬 등)·로그를 라이브로 볼 수 있다. */}
+      {/* Running cases (live) — the child runs executing right now. Opening one shows the running screen (browser-use's Chrome, etc.) and its logs live. */}
       {live && liveCases.length > 0 && (
         <section className="space-y-2.5">
           <SectionHeader
@@ -859,7 +859,7 @@ export default async function ScorecardDetailPage({
               </MetaItem>
             )
           })()}
-        {/* Trigger provenance (origin/출처) — CI/schedule/API/web + commit · PR · CI run links, folded into the meta card. */}
+        {/* Trigger provenance (origin) — CI/schedule/API/web + commit · PR · CI run links, folded into the meta card. */}
         {record.origin && (
           <MetaItem label={t('metaSource')}>
             <OriginInline origin={record.origin} />
@@ -873,7 +873,7 @@ export default async function ScorecardDetailPage({
           label="updated"
           value={new Date(record.updatedAt).toLocaleString(undefined, { timeZone })}
         />
-        {/* Duration (소요시간) — wall-clock from submit (createdAt) to completion (updatedAt). While the batch is
+        {/* Duration — wall-clock from submit (createdAt) to completion (updatedAt). While the batch is
             still live there is no end yet, so show the elapsed-so-far (the page auto-refreshes, so it ticks up). */}
         <Prop
           label={t('metaDuration')}
@@ -1022,7 +1022,7 @@ export default async function ScorecardDetailPage({
         </Callout>
       )}
 
-      {/* 케이스를 여는 문(타임라인 스텝 칩 · 케이스 행)이 하나의 상세 다이얼로그를 공유한다 — ?case= 딥링크 포함. */}
+      {/* The doors that open a case (a timeline step chip, a case row) share ONE detail dialog — including the ?case= deep link. */}
       <ScorecardCasesProvider
         workspace={workspace}
         scorecardId={record.id}

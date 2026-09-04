@@ -22,8 +22,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { ScorecardList } from './scorecard-list'
 
-// 배치 평가 결과 목록 — 워크스페이스 하나의 주소다. 소유 팀은 레지스트리에 남아 "누가 고칠 수 있나"를
-// 정하되, 찾아가는 길은 하나이고 "우리 팀 것만"은 이 목록의 필터 한 축이다.
+// The batch evaluation result list — one address per workspace. The owning team remains in the registry and decides "who may edit it", while
+// there is ONE route to find things and "only our team's" is one filter axis on this list.
 export async function ScorecardListView({
   workspace,
   params,

@@ -9,9 +9,9 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
-// 임포트된 버전 원장 — 서비스별로. 한 프로덕트가 여러 서비스를 조립하면 버전은 각자의 스트림에서
-// 따로 움직이고, 한 표에 시간순으로 섞어 놓으면 "api 가 지금 어디까지 왔나"라는 실제 질문에 답할 수
-// 없다(스크롤하며 이름을 눈으로 걸러야 한다). 그래서 축은 서비스이고, 시간은 그 안에서만 흐른다.
+// The imported version ledger — per SERVICE. When one product assembles several services their versions move in separate streams, and mixed
+// into one table in time order it cannot answer the actual question, "how far along is api right now"
+// (you would have to scroll and filter names by eye). So the axis is the service, and time flows only inside it.
 const COLLAPSED_ROWS = 6
 
 interface LedgerGroup {
@@ -36,9 +36,9 @@ export function ProductVersionLedger({
       if (rows) rows.push(version)
       else byService.set(version.service, [version])
     }
-    // 선언된 서비스가 먼저, 선언 순서 그대로 — 원장은 프로덕트의 구성을 비추는 것이지 자기 순서를
-    // 주장하지 않는다. 선언에 없는데 원장에 남아 있는 이름은 뒤에 따로 세운다: 이름이 바뀌었거나
-    // 저장소를 옮긴 서비스의 과거이고, 조용히 감추면 "임포트가 사라졌다"로 읽힌다.
+    // Declared services first, in declaration order — the ledger REFLECTS the product's composition rather than asserting an order of its own.
+    // A name left in the ledger that is no longer declared stands separately at the end: it is the past of a service that was renamed or moved
+    // repository, and hiding it quietly reads as "the import disappeared".
     const declared: LedgerGroup[] = services.map((service) => ({
       service: service.name,
       tracked: service,
@@ -76,8 +76,8 @@ function ServiceLedgerCard({
 }) {
   const t = useTranslations('productPage')
   const [expanded, setExpanded] = useState(false)
-  // 원장은 최신 발행부터. publishedAt 은 원격(GitHub)의 시계다 — 우리가 언제 가져왔는지가 아니라
-  // 세상에서 언제 나갔는지가 순서를 정한다.
+  // The ledger runs newest-published first. publishedAt is the REMOTE's (GitHub's) clock — the order is decided by when it went out in the world,
+  // not by when we imported it.
   const ordered = [...group.versions].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt))
   const shown = expanded ? ordered : ordered.slice(0, COLLAPSED_ROWS)
   const hidden = ordered.length - shown.length
@@ -116,7 +116,7 @@ function ServiceLedgerCard({
               key={version.id}
               className={cn(
                 'flex items-baseline gap-2 rounded px-1 py-1 text-[12.5px]',
-                // 가장 최신 한 줄만 강조한다 — "지금 이 서비스는 어디까지 왔나"가 이 카드의 첫 질문이다.
+                // Only the newest row is emphasised — "how far along is this service right now" is this card's first question.
                 index === 0 && !expanded ? 'bg-elevated' : null
               )}
             >
@@ -136,7 +136,7 @@ function ServiceLedgerCard({
                 )}
               </span>
               {version.prerelease && <Badge tone="warning">{t('prerelease')}</Badge>}
-              {/* 릴리즈가 아니라 태그에서 온 행이라는 사실은 남긴다 — 같은 원장 안에서 근거의 무게가 다르다. */}
+              {/* The fact that a row came from a TAG rather than a release is kept — within the same ledger the weight of the evidence differs. */}
               {version.kind === 'tag' && (
                 <Tag className="size-3 shrink-0 self-center text-muted-foreground" aria-hidden />
               )}

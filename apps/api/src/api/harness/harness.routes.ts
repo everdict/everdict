@@ -34,8 +34,8 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
     const parsed = HarnessInstanceSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      // 새 자산의 소유 팀을 먼저 정하고 그 팀으로 게이트한다 — 등록은 곧 "이 팀 것으로 만든다"이므로,
-      // 내가 속하지 않은 팀 앞으로 등록하는 것도 남의 팀 자산을 고치는 것과 같은 거절 사유다.
+      // The owning team of a new asset is decided FIRST and the gate is applied against that team — registering means "make this the team's",
+      // so registering under a team I do not belong to is the same grounds for refusal as editing another team's asset.
       gate(principal, "harnesses:register");
       // Structural portability errors are hard-blocked inside the registry's register (the single chokepoint every path
       // — route/bundle/MCP — flows through). Host-literal warnings do NOT block; surface them so the author can migrate.

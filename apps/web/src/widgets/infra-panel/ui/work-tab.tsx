@@ -618,7 +618,7 @@ export function WorkTab({ onNavigate }: { onNavigate: () => void }) {
               <p className="text-[11.5px] text-faint">
                 {t.rich('personalEmpty', {
                   link: (chunks) => (
-                    // 인프라 링크는 왼쪽 라우터가 아니라 패널 안 런타임 탭으로 — 좌우 내비게이션 독립.
+                    // An infra link goes to the runtime tab INSIDE the panel rather than to the left router — left and right navigation stay independent.
                     <button
                       type="button"
                       onClick={() => openTab('runtimes')}

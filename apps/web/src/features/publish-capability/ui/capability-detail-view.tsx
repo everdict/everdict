@@ -48,12 +48,12 @@ import {
 } from '../lib/capability-display'
 import { CodeTryPanel } from './code-try-panel'
 
-// 스토어 상세 — 목록 행에서 드릴인한 한 capability 의 전부(메타 · 버전 라인 · 스펙 본문 · 워크스페이스 추가/제거).
-// 상세는 언제나 라우트이지 다이얼로그가 아니다: 오른쪽 인프라/대화 패널에서 이 항목을 두고 실험·편집해야 하는데
-// 화면 절반을 덮는 모달이면 그 흐름이 성립하지 않고, 주소로 공유할 수도 없다.
+// The store detail — everything about one capability drilled into from a list row (meta · the version line · the spec body · add/remove from the workspace).
+// A detail is always a ROUTE and never a dialog: you have to experiment on and edit this entry with the infra/conversation panel on the
+// right, which a modal covering half the screen makes impossible, and which cannot be shared as an address either.
 //
-// 목록 행은 읽기 전용이고, **워크스페이스에 넣고 빼는 일은 여기서만** 한다 — 환경(인벤토리)·스킬(라이브러리 사본)·
-// 도구(에이전트 채택)는 저장되는 곳도 권한 축도 다르지만 사용자에게는 같은 한 가지 동작이라 문구는 하나다.
+// A list row is read-only, and **putting it into and taking it out of the workspace happens only here** — an environment (inventory), a
+// skill (a library copy) and a tool (an agent adoption) are stored in different places under different permissions, but to the user it is one action, so there is one wording.
 export function CapabilityDetailView({
   capability,
   variant,
@@ -75,7 +75,7 @@ export function CapabilityDetailView({
   currentSubject?: string
   isAdmin: boolean
   inWorkspace: boolean
-  // 이 환경이 워크스페이스 인벤토리에 있을 때의 항목 — pull 검증 상태(재검증 버튼)를 위해.
+  // The inventory entry for this environment when the workspace has one — for its pull verification state (and the re-verify button).
   adoptedEnv?: AdoptedEnvironment
   canAdopt: boolean
   canImportEnvironment: boolean
@@ -85,9 +85,9 @@ export function CapabilityDetailView({
   const t = useTranslations('capabilityStore')
   const refresh = useRefresh()
   const [pending, setPending] = useState(false)
-  // 필요 시크릿/쓰기 옵션이 있을 때만 뜨는 바인딩 다이얼로그(없으면 바로 추가).
+  // The binding dialog, which appears only when there are required secrets or a write option (otherwise it is added directly).
   const [adopting, setAdopting] = useState(false)
-  // 상세에 표시할 레코드 — 최신(라우트가 실어 온 것) 또는 버전 스위처로 고른 과거 버전.
+  // The record the detail shows — the newest (the one the route carried) or a past version chosen in the version switcher.
   const [shown, setShown] = useState<Capability>(capability)
   useEffect(() => setShown(capability), [capability])
 
@@ -96,18 +96,18 @@ export function CapabilityDetailView({
   const managed = isBuiltInCapability(capability)
   const isEnv = capability.spec.type === 'environment'
   const isSkill = capability.spec.type === 'skill'
-  // 환경은 워크스페이스 인벤토리(settings:write), 스킬은 스킬 라이브러리(skills:write), 그 외는 내 에이전트
-  // (agents:write) — 저장되는 곳도 권한도 다르지만 사용자에게는 같은 한 가지 동작이라 문구는 하나다.
+  // An environment goes to the workspace inventory (settings:write), a skill to the skill library (skills:write), everything else to my agent
+  // (agents:write) — different places and different permissions, but to the user it is one action, so there is one wording.
   const canChange = isEnv ? canImportEnvironment : isSkill ? canImportSkill : canAdopt
-  // 스킬은 여기서 뺄 수 없다: 가져온 것은 참조가 아니라 우리 워크스페이스 스킬 사본이라, 지우는 일은
-  // Settings › Agent › Skills 에서 그 스킬을 지우는 일이다(스토어가 남의 편집물을 회수할 수는 없다).
+  // A skill cannot be removed here: what was imported is a COPY of our workspace skill rather than a reference, so deleting it is deleting
+  // that skill under Settings › Agent › Skills (a store cannot recall somebody else's edits).
   const canRemoveHere = canChange && !isSkill
-  // 우리가 발행한 스킬을 우리가 다시 가져오는 것은 같은 이름의 사본을 하나 더 만드는 일일 뿐이다 — 원본 Skill 은
-  // 이미 라이브러리에 있다(발행은 남들에게 복사거리를 내주는 행위이지, 내 라이브러리에 뭔가를 더하는 게 아니다).
+  // Re-importing a skill WE published only makes one more copy under the same name — the original Skill is already in the library
+  // (publishing hands others something to copy; it does not add anything to my own library).
   const ownPublication = isSkill && capability.tenant === currentWorkspace
   const verify = adoptedEnv?.verify
 
-  // 추가/제거는 서버 액션이 관련 목록을 revalidate 하고, 이 페이지는 라우터 새로고침으로 자기 상태(있음/없음)를 다시 읽는다.
+  // Add/remove is a server action that revalidates the related lists, and this page re-reads its own state (present/absent) with a router refresh.
   const startAdopt = () => {
     if (requiredSecretsOf(capability).length > 0 || offersWrite(capability)) setAdopting(true)
     else adopt({}, false)
@@ -148,8 +148,8 @@ export function CapabilityDetailView({
       }
     })()
 
-  // 스킬 추가 — 참조를 pin 하는 게 아니라 **사본**을 만든다. 그 순간부터 Settings › Agent › Skills 의 워크스페이스
-  // 스킬이고, 편집도 버전 찍기도 거기서 한다(everdict 매니지드 스킬이 워크스페이스에 들어오는 유일한 경로).
+  // Adding a skill makes a **copy** rather than pinning a reference. From that moment it is a workspace skill under Settings › Agent › Skills,
+  // and it is edited and version-stamped there (the only path by which an everdict-managed skill enters a workspace).
   const importSkill = () =>
     void (async () => {
       setPending(true)
@@ -168,7 +168,7 @@ export function CapabilityDetailView({
       }
     })()
 
-  // environment 추가/제거 — 워크스페이스 인벤토리에 넣고, 넣을 때 pull 가능성을 검증한다(warn-not-block).
+  // Environment add/remove — put into the workspace inventory, verifying pullability on the way in (warn, not block).
   const importEnv = () =>
     void (async () => {
       setPending(true)
@@ -223,7 +223,7 @@ export function CapabilityDetailView({
 
   return (
     <div className="space-y-6">
-      {/* 메타 스트립 — 종류 · 매니지드 · 공개범위(내 발행) · 버전 · 작성자. 결정(추가/제거)은 오른쪽. */}
+      {/* The meta strip — kind · managed · visibility (my publications) · version · author. The DECISION (add/remove) is on the right. */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
           <Badge tone="outline" className="gap-1">
@@ -271,8 +271,8 @@ export function CapabilityDetailView({
           ) : ownPublication ? (
             <span className="text-[12px] text-muted-foreground">{t('skillOwnPublication')}</span>
           ) : isSkill ? (
-            // 스킬만 결과가 다르다 — 참조가 붙는 게 아니라 우리가 고칠 수 있는 사본이 생긴다. InfoTip 이 아니라
-            // 버튼 옆 한 줄로 두는 이유: 누르기 전에 알아야 하는 사실이다.
+            // A skill alone has a different outcome — no reference is attached; a copy WE can edit appears. It sits as a line beside the button
+            // rather than in an InfoTip because it is a fact you need before you press it.
             <span className="text-[12px] text-muted-foreground">{t('skillCopyHint')}</span>
           ) : null}
           {inWorkspace
@@ -302,7 +302,7 @@ export function CapabilityDetailView({
 
       {managed && <p className="text-[12.5px] text-muted-foreground">{t('managedHint')}</p>}
 
-      {/* 인벤토리에 있는 환경의 pull 상태 — 못 끌어오는 이유까지 그대로, 그 자리에서 다시 검증. */}
+      {/* The pull state of an environment in the inventory — including why it cannot be pulled, and re-verified on the spot. */}
       {isEnv && inWorkspace && verify && (
         <div className="flex items-center gap-3">
           <Badge tone={verify.pullable ? 'success' : 'warning'}>
@@ -351,7 +351,7 @@ export function CapabilityDetailView({
   )
 }
 
-// 스펙 본문 — 버전 패널(목록·스위처·태그·diff) + 종류별 전체 스펙(mcp/code/skill/environment)을 읽기 전용으로.
+// The spec body — the version panel (list, switcher, tags, diff) plus the full per-kind spec (mcp/code/skill/environment), read-only.
 function CapabilitySpecPanel({
   capability,
   shown,
@@ -368,10 +368,10 @@ function CapabilitySpecPanel({
   onShowVersion: (record: Capability) => void
 }) {
   const t = useTranslations('capabilityStore')
-  // 크로스테넌트 public/subset 은 오너 워크스페이스를 source 로 넘겨 버전을 조회한다. 내 워크스페이스 것이면 생략.
+  // A cross-tenant public/subset entry passes its owner workspace as `source` to read versions. Omitted for one of my own workspace.
   const source = capability.tenant !== currentWorkspace ? capability.tenant : undefined
   const builtin = isBuiltInCapability(capability)
-  // 버전 태그 편집 = 내 워크스페이스 소유 + 버전 생성자-or-admin(서버가 최종 강제). 빌트인/크로스테넌트는 읽기전용.
+  // Version tag editing = owned by my workspace AND creator-or-admin of the version (the server enforces finally). Built-in and cross-tenant are read-only.
   const canManageVersions =
     !builtin && source === undefined && (capability.createdBy === currentSubject || isAdmin)
   const s = shown.spec
@@ -446,7 +446,7 @@ function CapabilitySpecPanel({
               ))}
             </div>
           )}
-          {/* 예제로 직접 실행 — 코드만 읽고 채택하지 않는다(타 워크스페이스 코드는 격리 런타임에서만; 서버가 판정). */}
+          {/* Run it directly from an example — nothing is adopted on a reading of the code alone (another workspace's code only in an isolated runtime; the server judges). */}
           <CodeTryPanel
             showCheck={false}
             buildTarget={() => ({
@@ -457,12 +457,12 @@ function CapabilitySpecPanel({
         </>
       )}
       {s.type === 'skill' && (
-        // 멀티문서 스킬 뷰어(SKILL.md + 부속 파일 탭) — 스킬 관리 상세와 동일한 공용 뷰어를 공유.
+        // The multi-document skill viewer (SKILL.md plus attached-file tabs) — sharing the same viewer as the skill management detail.
         <SkillDocs instructions={s.instructions} files={s.files} />
       )}
       {s.type === 'environment' && (
         <div className="space-y-3">
-          {/* 이미지 참조 + 뷰어 기준 분류 + 벤치마크/OS 요약 */}
+          {/* The image ref, the viewer's classification of it, and the benchmark/OS summary */}
           <div className="flex flex-wrap items-center gap-1.5">
             <code className="min-w-0 truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border">
               {s.image}
@@ -482,7 +482,7 @@ function CapabilitySpecPanel({
           </div>
           <div>
             <p className="text-[11px] font-[510] text-muted-foreground">{t('envInstructions')}</p>
-            {/* instructions 는 마크다운 문서 — 렌더링해 보여준다 */}
+            {/* `instructions` is a markdown document — rendered rather than shown raw */}
             <Markdown content={s.instructions} className="mt-1 text-[12.5px] leading-relaxed" />
           </div>
           {s.preset && (
@@ -519,9 +519,9 @@ function CapabilitySpecPanel({
   )
 }
 
-// 버전 관리 패널(레지스트리 엔티티 패리티) — 버전 목록·스위처·버전 태그·구조 diff. 상세가 라우트가 되어도 버전 목록은
-// 페이지 props 가 아니라 온디맨드로 읽는다(스위처가 고르는 순간에만 필요한 데이터). 내 워크스페이스 소유 + 생성자/admin
-// 이면 태그 편집(canManage), 아니면 읽기전용. source=크로스테넌트 public/subset 오너(내 것이면 생략).
+// The version management panel (parity with the registry entities) — version list, switcher, version tags, structural diff. Even with the detail
+// being a route, the version list is read ON DEMAND rather than as a page prop (data needed only the moment the switcher picks). Owned by my
+// workspace and creator/admin means tag editing (canManage), otherwise read-only. `source` = the cross-tenant public/subset owner (omitted for mine).
 function CapabilityVersionsPanel({
   id,
   source,
@@ -564,7 +564,7 @@ function CapabilityVersionsPanel({
     reload()
   }, [reload])
 
-  // 스위처 — 고른 버전의 전체 레코드를 불러 상세 spec 을 교체.
+  // The switcher — load the chosen version's whole record and swap the detail spec.
   const showVersion = (version: string) => {
     if (version === shownVersion) return
     startSwitch(async () => {
@@ -592,7 +592,7 @@ function CapabilityVersionsPanel({
   if (error) return <p className="text-[11px] text-[var(--color-danger)]">{error}</p>
   if (!data || data.versions.length === 0) return null
 
-  const descending = [...data.versions].reverse() // 최신 먼저
+  const descending = [...data.versions].reverse() // newest first
 
   return (
     <div className="space-y-2 rounded-md border border-border/70 bg-background/40 p-2.5">
@@ -690,7 +690,7 @@ function VersionSelect({
   )
 }
 
-// 구조 diff 렌더 — 필드 경로별 before → after + added/removed/changed 톤. typeChanged(종류 재구성) 힌트.
+// The structural diff render — before → after per field path, with added/removed/changed tones. A typeChanged (kind restructure) hint.
 function CapabilityDiffView({ diff }: { diff: CapabilitySpecDiff }) {
   const t = useTranslations('capabilityStore')
   if (diff.changes.length === 0)
@@ -733,7 +733,7 @@ function CapabilityDiffView({ diff }: { diff: CapabilitySpecDiff }) {
   )
 }
 
-// 추가 다이얼로그 — 필요 시크릿을 내 워크스페이스 시크릿 이름으로 바인딩 + 쓰기 옵트인. 그 다음 에이전트에 pin 추가.
+// The add dialog — bind the required secrets to my own workspace secret NAMES plus the write opt-in. Then add the pin to the agent.
 function AdoptDialog({
   capability,
   secretNames,

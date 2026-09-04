@@ -942,7 +942,7 @@ async function waitTerminal(store: InMemoryScorecardStore, id: string): Promise<
   throw new Error("pull ingest did not finish");
 }
 
-describe("ScorecardService.rerun — full re-run of a finished batch (전체 재실행)", () => {
+describe("ScorecardService.rerun — full re-run of a finished batch", () => {
   // Dispatch returns a scored result so the background track settles cleanly (the assertions read the
   // synchronously-created new record either way).
   const okDispatch: Dispatcher = {

@@ -28,18 +28,17 @@ const CREATABLE_STATUSES: IssueStatus[] = [
 export interface CreateIssueDialogProps {
   workspace: string
   projects: { id: string; name: string }[]
-  // 이 팀의 열린 이터레이션. 팀 스코프 화면에서만 채워진다 — 여러 팀이 섞인 목록에서는 "어느 팀의 3번인가"에
-  // 답할 수 없고, 이슈는 자기 팀의 사이클에만 들어간다.
-  // 팀이 하나뿐이면 고를 게 없다 — 필드를 숨기고 서버가 기본팀으로 보낸다.
+  // This team's open iterations. Filled only on a team-scoped screen — on a list mixing several teams there is no answer to "whose cycle 3 is
+  // this", and an issue only enters its own team's cycles.
+  // With only one team there is nothing to pick — the field hides and the server sends it to the default team.
   teams?: { id: string; key: string; name: string }[]
-  // 하위 이슈로 접수할 부모. 있으면 제목이 "하위 이슈 추가"로 읽히고, 만든 뒤에도 부모 화면에 남는다 —
-  // 쪼개는 중에 매번 자식 화면으로 튕겨 나가면 다음 조각을 이어서 적을 수 없다.
+  // The parent to file this under as a sub-issue. Present, the title reads "add sub-issue" and it STAYS on the parent screen after creation —
+  // being bounced to the child screen every time makes it impossible to keep writing the next piece while splitting work up.
   parentId?: string
 }
 
-// 새 이슈 폼 그 자체. 트리거에서 떼어 낸 이유는 하위 이슈 때문이다 — "하위 이슈 추가"는 버튼이 아니라
-// ⋯ 메뉴의 한 줄이어야 하고(리니어와 같다), 메뉴 항목이 버튼을 렌더할 수는 없다. 여는 쪽이 상태를 들고
-// 이 다이얼로그는 열림 여부만 받는다.
+// The new-issue form itself. It is separated from the trigger because of sub-issues — "add sub-issue" has to be a row in the ⋯ menu rather than
+// a button (as in Linear), and a menu item cannot render a button. The OPENER holds the state and this dialog receives only whether it is open.
 export function CreateIssueDialog({
   workspace,
   projects,
@@ -87,7 +86,7 @@ export function CreateIssueDialog({
         setPriority('none')
         setEstimate('')
         setDueDate('')
-        // 하위 이슈를 만들 때는 부모 화면에 머문다(다음 조각을 이어서 적는 흐름) — 그 외에는 만든 이슈로 간다.
+        // Creating a sub-issue stays on the parent screen (the flow of writing the next piece) — everything else goes to the issue just created.
         if (parentId !== undefined) refresh()
         else router.push(issueHref(workspace, r.issue.identifier, r.issue.title))
       } finally {

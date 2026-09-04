@@ -175,7 +175,7 @@ export function ScorecardList({
     lastRequested.current = key
     request(currentView)
   })
-  // 날짜로 묶었을 때만 행이 시각만 보여 준다 — 머리글이 이미 날짜를 말했으니 줄마다 되풀이할 이유가 없다.
+  // A row shows the time alone only when grouped BY DATE — the header already said the date, so there is no reason to repeat it per row.
   const byDay = view.display.grouping === 'day'
 
   // Multi-select delete — a Set of selected scorecard ids (only ever deletable rows). While anything is selected the
@@ -232,7 +232,7 @@ export function ScorecardList({
   }, [selectionMode, confirming, selectionStorageKey])
 
   const creatorName = (subject: string): string => authors[subject]?.name ?? fmtSubject(subject)
-  // 예약된 트레이스 평가 표식은 친절한 이름으로 — 목록에 `_traces` 라는 내부 문자열이 뜨면 안 된다.
+  // The scheduled trace-evaluation marker gets a friendly name — the internal string `_traces` must never appear in the list.
   const refName = (id: string): string => (id === TRACE_EVAL_REF ? t('traceEvaluation') : id)
   const runtimeName = (target: string): string =>
     runtimeChipLabel(target, {
@@ -313,7 +313,7 @@ export function ScorecardList({
 
   const matchedCount = data.total
   const groups = data.groups
-  // 화면에 실제로 서 있는 순서 그대로 — shift 범위 선택과 「보이는 것 전체」가 이 순서를 읽는다.
+  // Exactly the order they actually stand on screen — shift range selection and "everything visible" read this order.
   const visible = useMemo(() => groups.flatMap((group) => group.items), [groups])
 
   // The label reads the server's KEY, never the rows under it: a group whose rows are further down the

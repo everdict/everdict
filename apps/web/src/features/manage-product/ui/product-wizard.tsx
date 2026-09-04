@@ -32,12 +32,12 @@ import { MultiSelect } from '@/shared/ui/multi-select'
 import { createProductAction, discoverRepoAction, syncProductAction } from '../api/products'
 import type { RepoOption } from './product-form'
 
-// 프로덕트 생성 위자드 — 원칙은 하나다: **치게 하지 말고 고르게 한다.**
-// 서비스 행에서 사람을 가장 자주 배신하는 필드는 tagPrefix 다. `api-` 라고 쳤는데 실제 태그가 `api/v1.2.0`
-// 이면 아무 데도 에러가 나지 않는다 — 싱크는 "0개 임포트"라고 말하고 타임라인은 영원히 비어 있다. 그래서
-// 이 위자드는 레포를 먼저 읽고(발행 중인 버전 스트림 + 트리의 배포 단위), 거기서 나온 제안을 체크하게 한다.
-// 모노레포는 이 구조에서 자연스럽다: 한 레포가 여러 subpath 를 갖고, 각 subpath 가 자기 태그 스트림을 갖거나
-// 레포 전역 스트림을 함께 탄다.
+// The product creation wizard — there is one principle: **make them PICK, not type.**
+// The field that betrays people most often on a service row is tagPrefix. Type `api-` when the real tags are `api/v1.2.0` and nothing errors
+// anywhere — the sync says "0 imported" and the timeline stays empty forever. So this wizard reads the repo FIRST (the version streams it
+// publishes plus the deploy units in its tree) and has them tick the suggestions that come out of it.
+// A monorepo is natural in this structure: one repo has several subpaths, and each subpath either has its own tag stream or rides the
+// repo-wide one.
 
 const STEPS = ['basics', 'services', 'series', 'review'] as const
 type Step = (typeof STEPS)[number]
@@ -70,12 +70,12 @@ function slugOf(label: string): string {
 const repoKeyOf = (repository: string, host?: string): string =>
   host ? `${repository}@@${host}` : repository
 
-// 서비스 행 하나의 정체성 — 이름이 아니라 좌표다(같은 레포에서 프리픽스만 다른 두 서비스가 공존한다).
+// One service row's identity — a COORDINATE rather than a name (two services in the same repo differing only by prefix coexist).
 const rowKeyOf = (row: Pick<ServiceRow, 'repository' | 'host' | 'tagPrefix' | 'path'>): string =>
   [row.host, row.repository, row.tagPrefix, row.path].join('\u0001')
 
-// 프리픽스가 실제로 무엇을 집는지 — 싱크와 **같은 규칙**(startsWith, 없으면 전부)으로 표본을 다시 센다.
-// 서버 왕복 없이 즉시 갱신되므로 프리픽스를 손보는 순간 "몇 개가 잡히는지"가 눈에 보인다.
+// What a prefix actually catches — the sample is re-counted by the **same rule** as the sync (startsWith, or everything when absent).
+// It updates instantly with no server round trip, so touching the prefix makes "how many does this catch" visible.
 function previewOf(
   discovery: ProductRepoDiscovery | undefined,
   tagPrefix: string
@@ -110,7 +110,7 @@ export function ProductWizard({
   const [name, setName] = useState('')
   const [icon, setIcon] = useState('')
   const [description, setDescription] = useState('')
-  // 읽어 본 레포들 — 제안의 출처이자, 프리픽스 프리뷰가 다시 세는 표본.
+  // The repos that were read — the source of the suggestions, and the sample the prefix preview re-counts.
   const [discoveries, setDiscoveries] = useState<Record<string, ProductRepoDiscovery>>({})
   const [repoValue, setRepoValue] = useState('')
   const [reading, setReading] = useState(false)
@@ -125,7 +125,7 @@ export function ProductWizard({
     setServices((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }
 
-  // 레포 하나를 읽고, 스트림이 뒷받침하는 제안(recommended)만 미리 담는다 — 나머지는 체크로 담게 둔다.
+  // Read one repo and pre-tick only the suggestions a real stream backs (recommended) — the rest are left to be ticked.
   function readRepo() {
     const [repository = '', host = ''] = repoValue.split('@@')
     if (repository.length === 0) return
@@ -218,8 +218,8 @@ export function ProductWizard({
           toast.error(r.error ?? t('createError'))
           return
         }
-        // 첫 싱크는 백필이다: 릴리즈 이력이 조용히 들어와 시간축이 생기고, 아무것도 평가되지 않는다.
-        // 실패해도 프로덕트는 이미 만들어졌으므로 이동은 막지 않는다(상세에서 다시 누를 수 있다).
+        // The first sync is a BACKFILL: the release history arrives quietly and makes a time axis, and nothing is evaluated.
+        // A failure does not block navigation, since the product already exists (it can be pressed again from the detail).
         if (syncAfter && payloadServices.length > 0) {
           const sync = await syncProductAction(r.product.id)
           if (!sync.ok) toast.error(sync.error ?? t('syncError'))
@@ -241,7 +241,7 @@ export function ProductWizard({
           <li key={entry} className="flex items-center gap-2">
             <button
               type="button"
-              // 뒤로는 언제든, 앞으로는 이름이 있어야 — 절차가 아니라 안내다.
+              // Back is always available, forward needs a name — guidance rather than a procedure.
               onClick={() => (i < index || name.trim().length > 0) && setStep(entry)}
               className={cn(
                 'rounded-md px-2 py-1 transition-colors',

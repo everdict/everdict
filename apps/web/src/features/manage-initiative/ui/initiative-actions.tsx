@@ -17,7 +17,7 @@ import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { deleteInitiativeAction, updateInitiativeAction } from '../api/initiatives'
 
-// 반쯤 적다 만 줄은 저장하지 않는다 — 주소 없는 리소스는 링크가 아니다.
+// A half-written row is not saved — a resource with no address is not a link.
 function cleanResources(rows: readonly InitiativeResource[]): InitiativeResource[] {
   return rows
     .map((row) => ({ label: row.label.trim(), url: row.url.trim() }))
@@ -49,11 +49,11 @@ export function InitiativeActions({
 }: {
   workspace: string
   initiative: Initiative
-  // 상위 후보 — 자기 자신은 뺀다. 자기 하위로 옮기는 시도는 제어 평면이 409 로 거절하므로, 여기서는
-  // 명백히 불가능한 선택지(자기 자신)만 지운다.
+  // The parent candidates — itself excluded. Trying to move under its own descendant is refused by the control plane with a 409, so only the
+  // plainly impossible choice (itself) is removed here.
   initiatives: { id: string; name: string }[]
-  // 책임자 후보 — 워크스페이스 멤버. 이름은 화면이 이미 갖고 있으므로(멤버 디렉터리) 여기서는 고를 목록만
-  // 받는다.
+  // The lead candidates — workspace members. The screen already has the names (the member directory), so only the list to choose from is
+  // received here.
   members: { subject: string; name: string }[]
 }) {
   const t = useTranslations('initiativesPage')
@@ -67,7 +67,7 @@ export function InitiativeActions({
   const [lead, setLead] = useState(initiative.lead ?? '')
   const [icon, setIcon] = useState(initiative.icon ?? '')
   const [memberIds, setMemberIds] = useState<string[]>(initiative.memberIds)
-  // 빈 줄 하나를 항상 남겨 두지 않는다 — 추가 버튼이 줄을 만든다. 저장할 때 라벨/주소가 빈 줄은 버린다.
+  // One empty row is not left standing permanently — the add button creates a row. On save, a row with an empty label or address is discarded.
   const [resources, setResources] = useState<InitiativeResource[]>(initiative.resources)
   const [targetDate, setTargetDate] = useState(initiative.targetDate ?? '')
   const [pending, setPending] = useState(false)

@@ -12,8 +12,8 @@ import { Dialog } from '@/shared/ui/dialog'
 
 import { setReleaseStatusAction } from '../api/products'
 
-// 릴리즈 게이트의 UI 절반. "출하"가 409 로 거절되면 그 이유(열린 이슈 수·회귀한 시리즈)를 그대로 보여 주고,
-// 강행은 별도의 명시적 확인을 거친다 — 기록되는 오버라이드지, 두 번 누르면 되는 버튼이 아니다.
+// The UI half of the release gate. When "ship" is refused with a 409, the REASON (the open issue count, the regressed series) is shown verbatim,
+// and forcing goes through a separate explicit confirmation — it is a RECORDED override, not a button you press twice.
 export function ReleaseStatusControl({
   releaseId,
   status,
@@ -24,7 +24,7 @@ export function ReleaseStatusControl({
   const t = useTranslations('releasePage')
   const refresh = useRefresh()
   const [pending, setPending] = useState(false)
-  // 게이트가 거절한 이유 — 강행 확인 다이얼로그의 본문이 된다.
+  // Why the gate refused — it becomes the body of the force confirmation dialog.
   const [blockedReason, setBlockedReason] = useState<string | null>(null)
 
   function move(to: ReleaseStatus, force?: boolean) {
@@ -49,7 +49,7 @@ export function ReleaseStatusControl({
     })()
   }
 
-  // 나간 릴리즈는 역사다 — 되돌릴 수 있는 컨트롤 자체를 그리지 않는다.
+  // A shipped release is HISTORY — no control that could undo it is drawn at all.
   if (status === 'released') return null
 
   return (

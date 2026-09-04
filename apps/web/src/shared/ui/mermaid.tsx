@@ -2,19 +2,19 @@
 
 import { useEffect, useState } from 'react'
 
-// mermaid.render 는 임시 DOM id 를 요구한다 — React useId 는 CSS 셀렉터 불가 문자가 섞이므로 전역 순번 사용.
+// mermaid.render requires a temporary DOM id — React's useId mixes in characters a CSS selector cannot take, so a global counter is used.
 let renderSeq = 0
 
-// ```mermaid 펜스 소스를 SVG 다이어그램으로 렌더하는 뷰어. 라이브러리는 동적 import(별도 청크)라 다이어그램이
-// 실제로 화면에 나올 때만 로드된다. 테마는 html.dark 를 관찰해 라이트/다크를 따라가고(토글 시 재렌더), 파싱
-// 실패(문법 오류·작성 중 스트리밍)는 조용히 원문 코드 블록으로 폴백한다. SVG 주입은 dangerouslySetInnerHTML
-// 이지만 mermaid 가 securityLevel 'strict'(기본)로 라벨을 새니타이즈한 자체 생성물이라 원문 HTML 이 아니다.
+// The viewer that renders a ```mermaid fence's source as an SVG diagram. The library is a dynamic import (its own chunk), so it loads only when a
+// diagram actually reaches the screen. The theme follows light/dark by observing html.dark (re-rendering on a toggle), and a parse failure
+// (a syntax error, or a fence still streaming) falls back QUIETLY to the raw code block. The SVG is injected with dangerouslySetInnerHTML, but it
+// is mermaid's own output with labels sanitized at securityLevel 'strict' (the default) rather than source HTML.
 export function MermaidDiagram({ chart }: { chart: string }) {
   const [svg, setSvg] = useState('')
   const [failed, setFailed] = useState(false)
   const [dark, setDark] = useState(false)
 
-  // 부모 앱의 테마 권위는 html.dark 클래스 하나 — 그것만 관찰한다(자체 prefers-color-scheme 계산 금지).
+  // The parent app's theme authority is the single html.dark class — that alone is observed (never computing prefers-color-scheme ourselves).
   useEffect(() => {
     const el = document.documentElement
     const sync = () => setDark(el.classList.contains('dark'))
@@ -34,7 +34,7 @@ export function MermaidDiagram({ chart }: { chart: string }) {
           securityLevel: 'strict',
           theme: dark ? 'dark' : 'default',
         })
-        // render 는 실패 시 임시 요소를 남길 수 있어 parse 로 먼저 검증(파싱만, DOM 부수효과 없음).
+        // `render` can leave a temporary element behind on failure, so `parse` validates first (parsing only, no DOM side effects).
         await mermaid.parse(chart)
         const { svg: rendered } = await mermaid.render(`everdict-mermaid-${renderSeq++}`, chart)
         if (!cancelled) {
@@ -50,9 +50,9 @@ export function MermaidDiagram({ chart }: { chart: string }) {
     }
   }, [chart, dark])
 
-  // 로딩 중/실패 = 원문 코드 블록(펜스 기본 표현과 동일) — 렌더 성공 시에만 다이어그램으로 교체.
-  // data-mermaid 는 두 상태에 다 붙는다: "이 펜스는 다이어그램으로 갔다"가 서버 출력만 봐도 보여야
-  // 렌더 성공 여부(브라우저에서만 갈리는 것)와 배선 여부(여기서 갈리는 것)를 따로 확인할 수 있다.
+  // Loading or failed = the raw code block (a fence's default presentation) — replaced by the diagram only on a successful render.
+  // data-mermaid is attached in BOTH states: "this fence went to a diagram" has to be visible from the server output alone, so that whether the
+  // render succeeded (which differs only in the browser) and whether it is wired (which differs here) can be checked separately.
   if (failed || svg === '') {
     return (
       <pre

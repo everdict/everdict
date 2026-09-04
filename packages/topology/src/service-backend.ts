@@ -553,7 +553,7 @@ export class ServiceTopologyBackend
     // agent's first step and the infra half of the run is invisible.
     const t0 = Date.now();
     const infraMarks: TraceEvent[] = [];
-    const markMessages: string[] = []; // 같은 마크의 문자열판 — 실패 throw 의 placement.events 증거로 동반된다
+    const markMessages: string[] = []; // the string form of the same marks — carried as placement.events evidence on a failure throw
     const mark = (event: string, message: string, service?: string): void => {
       const now = Date.now();
       markMessages.push(message);
@@ -852,8 +852,8 @@ export class ServiceTopologyBackend
               reason: "completion-timeout",
               budgetSec: job.evalCase.timeoutSec,
               ...(health ? { topologyHealth: health } : {}),
-              // 여기까지의 인프라 마크를 증거로 동반 — classifyFailure 가 CaseFailure.placement.events 로 들어
-              // 올리고 failedCaseResult 가 궤적에 봉인하므로, "예산 소진 전까지 어디까지 갔나"가 기록에 남는다.
+              // The infrastructure marks up to this point are carried as evidence — classifyFailure lifts them into CaseFailure.placement.events
+              // and failedCaseResult seals them into the trajectory, so "how far it got before the budget ran out" survives in the record.
               placement: { events: markMessages },
             },
             `The agent did not finish within the per-case budget (timeoutSec).${health ? ` Topology health: ${health}` : ""}`,
@@ -876,7 +876,7 @@ export class ServiceTopologyBackend
             runId,
             reason: "completion-timeout",
             ...(health ? { topologyHealth: health } : {}),
-            // 예산 경로와 동일 — 인프라 마크를 실패 증거로 동반해 궤적에 봉인되게 한다.
+            // Identical to the budget path — the infrastructure marks are carried as failure evidence so they are sealed into the trajectory.
             placement: { events: markMessages },
           },
           `The agent did not finish within the completion deadline.${health ? ` Topology health: ${health}` : ""}`,

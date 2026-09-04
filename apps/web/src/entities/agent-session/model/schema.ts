@@ -80,11 +80,11 @@ export const AGENT_REFERENCE_TYPES = [
   'judge',
   'view',
   'skill',
-  'knowledge', // reified claim(get_knowledge_entry) — 워크스페이스가 배운 것, 계보(supersedes/verifiedAt) 포함
-  'environment', // environment kind 의 capability(get_capability) — 평가 환경 이미지 자산
-  'tool', // mcp|code kind 의 capability(get_capability) — 에이전트가 실제로 호출하는 도구. source=소유 워크스페이스
+  'knowledge', // a reified claim (get_knowledge_entry) — what the workspace learned, lineage included (supersedes/verifiedAt)
+  'environment', // a capability of the environment kind (get_capability) — an evaluation environment image asset
+  'tool', // a capability of the mcp|code kind (get_capability) — the tool the agent actually calls. source = the owning workspace
   'trace',
-  'issue', // 평가 트래커의 이슈(get_issue) — 무엇을 왜 평가하는지, 어떻게 닫혔고 왜 회귀했는지의 맥락
+  'issue', // an eval tracker issue (get_issue) — the context of what is evaluated and why, how it closed and why it regressed
 ] as const
 export const agentReferenceTypeSchema = z.enum(AGENT_REFERENCE_TYPES)
 export type AgentReferenceType = z.infer<typeof agentReferenceTypeSchema>
@@ -102,9 +102,9 @@ export const agentReferenceSchema = z.object({
 })
 export type AgentReference = z.infer<typeof agentReferenceSchema>
 
-// 대화 패널에 실리는 "임무" — 특정 도메인 상세의 전용 진입("대화로 편집하기" 등)으로 들어왔을 때, 패널의 구조는
-// 그대로 두고 빈 화면의 라이팅과 제안만 그 작업에 맞춘다(범용 "대화에서 분석" 진입은 임무 없음 = 기본 문구).
-// 값은 메시지 카탈로그 네임스페이스(agentChat.missions.<kind>)이기도 하므로 카탈로그 키와 1:1로 유지한다.
+// The "mission" the conversation panel carries — entered through a domain detail's dedicated entry ("edit by conversation", etc.), it leaves
+// the panel's STRUCTURE alone and frames only the empty screen's writing and suggestions for that work (the generic "analyze in conversation"
+// entry has no mission = the default wording). The value is also a message catalog namespace (agentChat.missions.<kind>), so it is kept 1:1 with the catalog keys.
 export const AGENT_CHAT_MISSIONS = [
   'skillEdit',
   'toolEdit',
@@ -123,9 +123,10 @@ export const AGENT_CHAT_MISSIONS = [
 export const agentChatMissionSchema = z.enum(AGENT_CHAT_MISSIONS)
 export type AgentChatMission = z.infer<typeof agentChatMissionSchema>
 
-// 임무의 성격 — 패널이 진입을 어떻게 다루는지 이걸로 갈린다. `edit`(저작물을 고치는 전용 작업)는 항상 새 대화에서
-// 시작하고(남의 스레드를 이어받을 일이 없다) 기본 라벨이 "대화로 편집하기"가 된다. `analyze`/`ask`(결과·지식을 두고
-// 묻는 진입)는 열려 있는 대화에 참조 칩만 얹는다 — 스코어카드 둘을 한 대화에서 비교하는 흐름을 끊지 않기 위해서다.
+// The NATURE of a mission — it is what decides how the panel treats an entry. `edit` (a dedicated job editing an authored artifact) always
+// starts a NEW conversation (there is never a reason to inherit somebody else's thread) and its default label becomes "edit by conversation".
+// `analyze`/`ask` (entries that ASK about a result or knowledge) only drop a reference chip onto the open conversation — so as not to break the
+// flow of comparing two scorecards in one conversation.
 export const AGENT_CHAT_MISSION_INTENTS = {
   skillEdit: 'edit',
   toolEdit: 'edit',
@@ -143,11 +144,11 @@ export const AGENT_CHAT_MISSION_INTENTS = {
 } as const satisfies Record<AgentChatMission, 'edit' | 'analyze' | 'ask'>
 export type AgentChatMissionIntent = (typeof AGENT_CHAT_MISSION_INTENTS)[AgentChatMission]
 
-// 이 진입이 새 대화에서 시작하는가. 임무 프레이밍(제목·설명·제안)은 빈 화면에서만 뜨므로, 이 판정이 곧
-// "진입할 때마다 그 작업에 맞는 패널을 실제로 보게 되는가"이기도 하다. `edit` 임무는 언제나 — 저작물을
-// 고치는 일이 남의 스레드를 이어받을 이유가 없다. `analyze`/`ask` 는 진입이 `fresh` 를 명시했을 때만:
-// 기본값은 열린 스레드 유지(스코어카드 둘을 한 대화에서 비교하는 흐름)이고, 대화의 주제가 열려 있던 것이
-// 아니라 이 레코드 하나인 진입(이슈 상세, 빈 분석 캔버스)이 그 예외를 스스로 선언한다.
+// Whether this entry starts in a NEW conversation. Mission framing (the title, description and suggestions) appears only on an empty screen, so
+// this decision IS "do you actually see a panel framed for the work every time you enter". An `edit` mission always does — editing an authored
+// artifact has no reason to inherit somebody else's thread. `analyze`/`ask` only when the entry states `fresh`:
+// the default is keeping the open thread (the flow of comparing two scorecards in one conversation), and an entry whose SUBJECT is this one
+// record rather than whatever was open (an issue detail, an empty analysis canvas) declares that exception for itself.
 export function startsFreshConversation(entry: {
   mission?: AgentChatMission
   fresh?: boolean

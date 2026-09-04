@@ -35,9 +35,9 @@ export type IssueListFilters = IssueViewParams
 // address (it decides only how they are drawn, so a link must not impose it). `entities/issue/model/display.ts`
 // carries the full reasoning.
 //
-// 서버가 하는 일은 **첫 화면**까지다 — 디렉터리(멤버·프로젝트·라벨)와 목록의 첫 장을 읽어 넘기면,
-// 그 뒤로 보기를 바꾸는 것은 전부 `IssueListBody` 가 목록만 새로 받아 처리한다. 그래서 필터 하나를 켜는 데
-// 이 페이지 전체가 다시 렌더되지 않는다(그게 "그룹 바꾸면 왜 이렇게 오래 걸리지"의 정체였다).
+// What the server does ends at the **first screen** — it reads the directories (members, projects, labels) and the list's first page and hands
+// them over, and every view change after that is handled by `IssueListBody` fetching only the list. So turning on one filter does not re-render
+// this whole page (which is what "why does changing the grouping take so long" actually was).
 export async function IssueListView({
   workspace,
   filters,
@@ -53,7 +53,7 @@ export async function IssueListView({
   const display = issueDisplayFor((await cookies()).get(ISSUE_DISPLAY_COOKIE)?.value, viewKey)
   const view = issueViewOf(filters, display)
 
-  // 강제는 제어 평면 몫이고, 여기서는 확실히 403 이 날 버튼을 감춘다.
+  // Enforcement is the control plane's; here it only hides a button that would certainly 403.
   const canWrite = can(principal?.roles, 'issues:write')
   // The import picker needs the workspace App's repo list — a github:read (member+) read now that using the
   // integration and configuring it are separate actions, so the entry point follows it instead of the admin-only
@@ -61,11 +61,11 @@ export async function IssueListView({
   // toggles): those ride issues:write and never touch the App configuration.
   const canReadIntegrations = can(principal?.roles ?? [], 'github:read')
 
-  // 주소가 정한 좁히기 — 보기를 바꿔도 변하지 않는 부분이다.
+  // The narrowing the address decides — the part that does not change when the view does.
   const base: IssueViewBase = {}
 
-  // 이 읽기들은 서로를 기다릴 이유가 없다 — 순차 await 이면 왕복 시간이 그대로 더해진다. 목록만 실패를
-  // 표면에 올리고, 나머지는 자기 자리만 비운다.
+  // These reads have no reason to wait for each other — awaited in sequence, their round trips simply add up. Only the LIST surfaces a failure;
+  // the rest just leave their own slot empty.
   const [data, projects, labels, members] = await Promise.all([
     loadIssueViewData(ctx, { base, view }),
     // Projects power both the filter and the per-row project name; a failure here must not blank the list.
@@ -73,13 +73,13 @@ export async function IssueListView({
       .listProjects(ctx, undefined)
       .then((r) => projectsSchema.parse(r))
       .catch((): Project[] => []),
-    // 행의 라벨 칩은 id→정의 조인이 있어야 그려진다. 실패해도 목록은 뜬다(칩만 사라진다).
+    // A row's label chips need the id→definition join to be drawn. The list still renders on failure (only the chips disappear).
     controlPlane
       .listIssueLabels(ctx)
       .then((r) => issueLabelsSchema.parse(r))
       .catch((): IssueLabel[] => []),
-    // 담당자는 이슈에 subject 로만 저장된다 — 그대로 그리면 uuid 나 `key:acme` 같은 내부 문자열이 뜬다.
-    // 상세 페이지와 같은 디렉터리 조인으로 이름·아바타를 붙인다(라벨·프로젝트와 같은 조인).
+    // An assignee is stored on the issue as a subject alone — drawn as-is it shows a uuid or an internal string like `key:acme`.
+    // The name and avatar are attached by the same directory join as the detail page uses (the same join as labels and projects).
     controlPlane
       .listMembers(ctx)
       .then((r) => membersSchema.parse(r))
@@ -98,7 +98,7 @@ export async function IssueListView({
     })),
   }
 
-  // 이 목록의 주소 — 워크스페이스 전체 목록이다.
+  // This list's address — the workspace-wide list.
   const basePath = `/${workspace}/issues`
 
   const body = (
@@ -108,8 +108,8 @@ export async function IssueListView({
         description={t('description')}
           actions={
             canWrite ? (
-              // 버튼 세 개가 GitHub App 설치 상태와 동기화 저장소 목록을 기다린다 — 그 대기를 목록의 임계
-              // 경로에서 떼어 자기 경계 뒤로 보낸다.
+              // Three buttons wait on the GitHub App installation state and the synced-repository list — that wait is taken off the list's
+              // critical path and put behind its own boundary.
               <Suspense fallback={<IssueListActionsSkeleton />}>
                 <IssueListActions
                   workspace={workspace}

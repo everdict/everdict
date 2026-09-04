@@ -13,9 +13,9 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
-// 대화창 헤더의 "팀" 버튼 → 플로팅 드롭다운. 사용자가 스폰한 장수 자율 에이전트(teammate) 목록을 보여주고,
-// 새 teammate 스폰(이름 + 상시 작업 지시 + 구독할 이벤트 종류)과 중지를 페이지 전환 없이 메뉴 안에서 처리한다.
-// teammate 는 구독한 이벤트(run/scorecard 완료 등)가 오면 스스로 깨어나 반응한다(proactive team, S4/S5).
+// The "team" button in the chat header → a floating dropdown. It lists the long-lived autonomous agents (teammates) the user spawned, and
+// spawning a new teammate (a name + standing task instructions + the event kinds to subscribe to) and stopping one both happen inside the menu with no page change.
+// A teammate wakes ITSELF and reacts when a subscribed event arrives (a run or scorecard completing, etc.) — a proactive team (S4/S5).
 
 function kindLabel(t: ReturnType<typeof useTranslations>, kind: string): string {
   // Known kinds get a friendly label; an unknown kind (future server-side) falls back to its raw id.
