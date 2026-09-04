@@ -94,11 +94,13 @@ describe('what a round verdict says', () => {
 })
 
 describe('the gate answer', () => {
-  it('is one of exactly three, and refuses anything else', () => {
-    // The arithmetic is the frame's. A free-form string would let the page render a fourth answer the record
-    // has no rule for, and a reader would act on it.
-    for (const answer of ['continue', 'adopt', 'halt'] as const)
-      expect(campaignDecisionSchema.parse({ answer }).answer).toBe(answer)
-    expect(() => campaignDecisionSchema.parse({ answer: 'probably' })).toThrow()
+  it('is a union on `kind`, and the page never invents a fourth arm', () => {
+    // The arithmetic is the frame's. This is PARSED rather than cast, because a cast is exactly what let a
+    // field the answer has never carried read as `undefined` — and `undefined !== 'continue'` then offered a
+    // settle the record refuses.
+    expect(campaignDecisionSchema.parse({ kind: 'continue', roundsLeft: 3, consecutiveRejected: 0 })).toEqual(
+      { kind: 'continue', roundsLeft: 3, consecutiveRejected: 0 }
+    )
+    expect(() => campaignDecisionSchema.parse({ answer: 'adopt' })).toThrow()
   })
 })

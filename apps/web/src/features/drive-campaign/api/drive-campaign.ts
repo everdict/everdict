@@ -1,5 +1,6 @@
 'use server'
 
+import { type CampaignDecision, campaignDecisionSchema } from '@/entities/campaign'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -86,7 +87,7 @@ export interface CampaignAdoptionView {
 }
 
 export interface CampaignReads {
-  decision?: { answer: string; reason?: string }
+  decision?: CampaignDecision
   adoption?: CampaignAdoptionView
   brief?: string
   builds: { id?: string; state?: string }[]
@@ -104,7 +105,9 @@ export async function loadCampaignReads(id: string): Promise<CampaignReads> {
     out.error = out.error ?? (e instanceof Error ? e.message : String(e))
   }
   try {
-    out.decision = await controlPlane.campaignDecision<{ answer: string; reason?: string }>(ctx, id)
+    // PARSED, not cast. A cast is what let the previous version read a field the answer has never carried,
+    // and a shape the page cannot understand must be a failure it reports rather than a button it draws.
+    out.decision = campaignDecisionSchema.parse(await controlPlane.campaignDecision(ctx, id))
   } catch (e) {
     note(e)
   }

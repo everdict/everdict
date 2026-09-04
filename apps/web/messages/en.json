@@ -31,6 +31,7 @@
     "noVerdict": "no verdict recorded",
     "notComparable": "not comparable",
     "rounds": "Rounds",
+    "roundsLeft": "{left} rounds left · {rejected} rejected in a row",
     "settle": "Settle",
     "settleError": "The settle was refused.",
     "settleTitle": "Write the gate's answer. Refused while the answer is `continue` — a campaign settles on an adoptable candidate or on its own ending.",

@@ -31,6 +31,7 @@
     "noVerdict": "판정 기록 없음",
     "notComparable": "비교 불가",
     "rounds": "라운드",
+    "roundsLeft": "남은 라운드 {left} · 연속 기각 {rejected}",
     "settle": "정착",
     "settleError": "정착이 거부되었습니다.",
     "settleTitle": "게이트의 답을 기록합니다. 답이 `continue` 인 동안에는 거부됩니다 — 캠페인은 채택 가능한 후보나 자신의 종료 조건에서 정착합니다.",

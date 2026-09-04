@@ -94,12 +94,37 @@ export const campaignSchema = z.object({
 export type CampaignView = z.infer<typeof campaignSchema>
 export const campaignListSchema = z.array(campaignSchema.omit({ rounds: true }))
 
-// `continue` | `adopt` | `halt` — the gate's answer, ASKED rather than computed. A reader who counted rounds
-// themselves would be answering a different question from the one the frame asks.
-export const campaignDecisionSchema = z.object({
-  answer: z.enum(['continue', 'adopt', 'halt']),
-  reason: z.string().optional(),
-})
+// The gate's answer, ASKED rather than computed — a reader who counted rounds themselves would be answering a
+// different question from the one the frame asks.
+//
+// ⚠️ It is a union discriminated on `kind`, and the first version of this file called it `answer`. Nothing
+// caught that: the read was CAST rather than parsed, so `decision.answer` was `undefined` at runtime and
+// `undefined !== 'continue'` offered a settle button on every campaign the gate was still saying continue to
+// — the exact state the button is hidden to prevent. Only driving it against a live control plane found it,
+// which is why the payloads are now a fixture (`fixtures/campaign-wire.json`) and this read is parsed.
+//
+// `CampaignGateAnswer` lives in `@everdict/domain`, which the web may not import, so there is no drift guard
+// for this one — the fixture is what stands in for it.
+export const campaignDecisionSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('adopt'),
+    version: z.string(),
+    provingScorecardId: z.string().optional(),
+    waivedAxes: z.array(z.string()).default([]),
+  }),
+  // Real numbers a driver acts on: how many rounds the budget still allows, and how long the rejected streak
+  // is. Both are the frame's arithmetic, which is the reason to render them rather than recompute them.
+  z.object({
+    kind: z.literal('continue'),
+    roundsLeft: z.number().optional(),
+    consecutiveRejected: z.number().optional(),
+  }),
+  z.object({
+    kind: z.literal('halt'),
+    reason: z.string(),
+    detail: z.string().optional(),
+  }),
+])
 export type CampaignDecision = z.infer<typeof campaignDecisionSchema>
 
 // ── THE GUARDS ─────────────────────────────────────────────────────────────────────────────────────

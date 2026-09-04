@@ -280,8 +280,8 @@ name a caller that is not a browser.
 ### What the self-review found, and why it is the census's own lesson
 
 The first campaigns surface was written from skill `evolve` rather than from the contract, and it shipped
-green: typecheck, lint, tests, the reach gate. Six readings were dead, and every one of them was a field that
-**does not exist on the wire**:
+green: typecheck, lint, tests, the reach gate. SEVEN readings were dead, and every one of them was a field
+that **does not exist on the wire**:
 
 | written | the wire | what it did |
 |---|---|---|
@@ -291,6 +291,7 @@ green: typecheck, lint, tests, the reach gate. Six readings were dead, and every
 | `settle().close.answer` | `close.outcome.kind` | the settle result never said what it decided |
 | `adoption.operation !== 'decided'` | `operation` is an OBJECT | every campaign read as already spent |
 | `learned: z.string()` | `.optional()` on the row | **one legacy round takes down the campaign list** |
+| `decision.answer` | the gate answers `{kind}` | **`undefined !== 'continue'` — a settle button on every campaign the gate was still saying continue to** |
 
 The last one is the one to keep. It is the outage
 `packages/contracts/src/records/legacy-campaign-decode.counterexample.test.ts` was written for — a creation
@@ -305,7 +306,36 @@ assignability ignores an extra optional), and asserting the wire type is assigna
 a field the web requires and the row may omit. Both were seen RED against the shipped code.
 
 This is the fifth-extraction-error lesson in a different costume: the numbers were wrong five times and the
-FIELDS were wrong six, and in both cases the fix was a mechanical check rather than a more careful reading.
+FIELDS were wrong seven, and in both cases the fix was a mechanical check rather than a more careful reading.
+
+### …and what only RUNNING it found — the seventh
+
+Six of the seven were caught by reading the contract during the review. The seventh was not, and it could not
+have been: `campaignDecision` was **cast rather than parsed**, so no schema was involved and no guard applied.
+`GET /campaigns/:id/decision` answers a union on `kind` (`CampaignGateAnswer`, which lives in
+`@everdict/domain` — a package the web may not import, so there is no drift guard available for it at all).
+Reading `decision.answer` gave `undefined`, and `undefined !== 'continue'` offered a settle the record refuses
+on every campaign still being driven — the precise state the button is hidden to prevent, produced by the
+code written to prevent it.
+
+    a compile-time guard proves the TYPES agree      ← six findings
+    only a live payload proves the ROUTE agrees      ← the seventh
+
+So the surface was driven for real: a control plane booted with an empty env, `scripts/live/evolution-campaign.mjs`
+run end to end (a campaign opened against a real issue, both sides run as real batches, verdicts derived by
+the platform, settled, the authorization spent), and the web pointed at it. What that rendered, and what it
+proved:
+
+| state | rendered |
+|---|---|
+| gate `continue` | `3 rounds left · 0 rejected in a row`, and **no settle button** |
+| closed `adopt`, authorization unspent | the owed callout naming `harness · patchbot @ 1.2.0` |
+| authorization spent | no callout; rounds reading `held-out +0 / −0` then `+4 / −0`, matching the gate's own output |
+
+The payloads are now `fixtures/campaign-wire.json`, decoded by
+`apps/web/src/entities/campaign/model/campaign-wire.test.ts`, and the fixture was driven RED against each
+defect it records. It is captured, never hand-written: a fixture somebody adjusted to pass has stopped
+answering the question. Re-capture by re-running the live script.
 
 ### ⚠️ The scanner's fifth extraction error, found by using it
 

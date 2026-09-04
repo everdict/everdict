@@ -1,0 +1,436 @@
+{
+  "note": "Captured from a REAL control plane (empty-env boot, in-memory stores) driven by scripts/live/evolution-campaign.mjs. Do not hand-edit: re-capture.",
+  "list": [
+    {
+      "id": "evc_88g7hchuvg",
+      "tenant": "acme",
+      "issueId": "fe96f79e-c75a-4e63-82fa-ec75351d63bb",
+      "frame": {
+        "subject": {
+          "type": "harness",
+          "id": "patchbot",
+          "baselineVersion": "1.0.0"
+        },
+        "scenarios": [
+          {
+            "id": "sum-1",
+            "heldOut": false
+          },
+          {
+            "id": "sum-2",
+            "heldOut": false
+          },
+          {
+            "id": "mul-1",
+            "heldOut": false
+          },
+          {
+            "id": "mul-2",
+            "heldOut": false
+          },
+          {
+            "id": "max-1",
+            "heldOut": true
+          },
+          {
+            "id": "max-2",
+            "heldOut": true
+          },
+          {
+            "id": "cat-1",
+            "heldOut": true
+          },
+          {
+            "id": "cat-2",
+            "heldOut": true
+          }
+        ],
+        "targets": [],
+        "judges": [],
+        "trialsPerCase": 5,
+        "budget": {
+          "maxRounds": 3
+        },
+        "stopAfterRejectedRounds": 3,
+        "significance": {
+          "fdrAlpha": 0.05,
+          "heldOutFamilySize": 3
+        },
+        "allowUnverifiedIdentity": true,
+        "allowLabelOnlyAdoption": false,
+        "oracleScope": [],
+        "observationPolicy": {
+          "allowDivergent": false
+        }
+      },
+      "frameDigest": "sha256:6a37bfff4a999f295f23e21f72942c40aff07d74181a5ff0354f65518d13be0d",
+      "rounds": [
+        {
+          "seq": 1,
+          "hypothesis": "A lookup keyed by case id fixes the family the issue names.",
+          "candidateVersion": "1.1.0",
+          "baselineScorecardId": "67109a6b-180a-4c31-a828-153edfadac81",
+          "candidateScorecardId": "15df0259-4104-41eb-b774-a6ece60fe31a",
+          "learned": "It fixes exactly the cases it was written from \u2014 the held-out families are untouched, which is what a lookup is.",
+          "informedBy": [],
+          "verdict": {
+            "comparable": true,
+            "significantImprovements": 0,
+            "significantRegressions": 0,
+            "heldOut": {
+              "improvements": 0,
+              "regressions": 0
+            },
+            "candidateSpecDigest": "sha256:b91d211ac3fa6d78b89131a7adff3ecef220f35296de0118364e3078f8d7e98b",
+            "candidateSource": {
+              "source": "api"
+            },
+            "observations": {
+              "divergent": 0,
+              "unclear": 0,
+              "assessed": 0,
+              "eligible": 0
+            },
+            "unverifiedAxes": ["execution_world"],
+            "confoundedAxes": [],
+            "evidence": {
+              "key": "campaigns/evc_88g7hchuvg/rounds/1/5b0cde372368.json",
+              "digest": "sha256:5b0cde372368ab195443fd7769b717edc191b3db66e444ea24b822f282c93c6a"
+            }
+          },
+          "at": "2026-09-04T10:46:42.638Z",
+          "by": "dev"
+        },
+        {
+          "seq": 2,
+          "hypothesis": "Running the failing test and searching the operator space generalizes.",
+          "candidateVersion": "1.2.0",
+          "baselineScorecardId": "67109a6b-180a-4c31-a828-153edfadac81",
+          "candidateScorecardId": "3f54edbf-c4a0-448b-9b6d-da70e2be9dfc",
+          "learned": "The agent that verifies is the one that generalizes; the one that memorises improves only where it was pushed.",
+          "informedBy": [],
+          "verdict": {
+            "comparable": true,
+            "significantImprovements": 6,
+            "significantRegressions": 0,
+            "heldOut": {
+              "improvements": 4,
+              "regressions": 0
+            },
+            "candidateSpecDigest": "sha256:6e9b456cb7aff526258d2078c8676bff8cba91864c6fcc9ca3f6b7e434f8cbf3",
+            "candidateSource": {
+              "source": "api"
+            },
+            "observations": {
+              "divergent": 0,
+              "unclear": 0,
+              "assessed": 0,
+              "eligible": 0
+            },
+            "unverifiedAxes": ["execution_world"],
+            "confoundedAxes": [],
+            "evidence": {
+              "key": "campaigns/evc_88g7hchuvg/rounds/2/24124d2dc3ea.json",
+              "digest": "sha256:24124d2dc3ea9123c3eb5051741ff90efaa52f00ab75850d1472416d5983c761"
+            }
+          },
+          "at": "2026-09-04T10:46:48.701Z",
+          "by": "dev"
+        }
+      ],
+      "state": "adopted",
+      "createdBy": "dev",
+      "createdAt": "2026-09-04T10:46:36.529Z",
+      "updatedAt": "2026-09-04T10:46:48.707Z",
+      "close": {
+        "outcome": {
+          "kind": "adopted",
+          "version": "1.2.0",
+          "provingScorecardId": "3f54edbf-c4a0-448b-9b6d-da70e2be9dfc",
+          "waivedAxes": ["execution_world"],
+          "candidateSpecDigest": "sha256:6e9b456cb7aff526258d2078c8676bff8cba91864c6fcc9ca3f6b7e434f8cbf3",
+          "candidateSource": {
+            "source": "api"
+          }
+        },
+        "at": "2026-09-04T10:46:48.707Z",
+        "by": "dev"
+      }
+    }
+  ],
+  "record": {
+    "id": "evc_88g7hchuvg",
+    "tenant": "acme",
+    "issueId": "fe96f79e-c75a-4e63-82fa-ec75351d63bb",
+    "frame": {
+      "subject": {
+        "type": "harness",
+        "id": "patchbot",
+        "baselineVersion": "1.0.0"
+      },
+      "scenarios": [
+        {
+          "id": "sum-1",
+          "heldOut": false
+        },
+        {
+          "id": "sum-2",
+          "heldOut": false
+        },
+        {
+          "id": "mul-1",
+          "heldOut": false
+        },
+        {
+          "id": "mul-2",
+          "heldOut": false
+        },
+        {
+          "id": "max-1",
+          "heldOut": true
+        },
+        {
+          "id": "max-2",
+          "heldOut": true
+        },
+        {
+          "id": "cat-1",
+          "heldOut": true
+        },
+        {
+          "id": "cat-2",
+          "heldOut": true
+        }
+      ],
+      "targets": [],
+      "judges": [],
+      "trialsPerCase": 5,
+      "budget": {
+        "maxRounds": 3
+      },
+      "stopAfterRejectedRounds": 3,
+      "significance": {
+        "fdrAlpha": 0.05,
+        "heldOutFamilySize": 3
+      },
+      "allowUnverifiedIdentity": true,
+      "allowLabelOnlyAdoption": false,
+      "oracleScope": [],
+      "observationPolicy": {
+        "allowDivergent": false
+      }
+    },
+    "frameDigest": "sha256:6a37bfff4a999f295f23e21f72942c40aff07d74181a5ff0354f65518d13be0d",
+    "rounds": [
+      {
+        "seq": 1,
+        "hypothesis": "A lookup keyed by case id fixes the family the issue names.",
+        "candidateVersion": "1.1.0",
+        "baselineScorecardId": "67109a6b-180a-4c31-a828-153edfadac81",
+        "candidateScorecardId": "15df0259-4104-41eb-b774-a6ece60fe31a",
+        "learned": "It fixes exactly the cases it was written from \u2014 the held-out families are untouched, which is what a lookup is.",
+        "informedBy": [],
+        "verdict": {
+          "comparable": true,
+          "significantImprovements": 0,
+          "significantRegressions": 0,
+          "heldOut": {
+            "improvements": 0,
+            "regressions": 0
+          },
+          "candidateSpecDigest": "sha256:b91d211ac3fa6d78b89131a7adff3ecef220f35296de0118364e3078f8d7e98b",
+          "candidateSource": {
+            "source": "api"
+          },
+          "observations": {
+            "divergent": 0,
+            "unclear": 0,
+            "assessed": 0,
+            "eligible": 0
+          },
+          "unverifiedAxes": ["execution_world"],
+          "confoundedAxes": [],
+          "evidence": {
+            "key": "campaigns/evc_88g7hchuvg/rounds/1/5b0cde372368.json",
+            "digest": "sha256:5b0cde372368ab195443fd7769b717edc191b3db66e444ea24b822f282c93c6a"
+          }
+        },
+        "at": "2026-09-04T10:46:42.638Z",
+        "by": "dev"
+      },
+      {
+        "seq": 2,
+        "hypothesis": "Running the failing test and searching the operator space generalizes.",
+        "candidateVersion": "1.2.0",
+        "baselineScorecardId": "67109a6b-180a-4c31-a828-153edfadac81",
+        "candidateScorecardId": "3f54edbf-c4a0-448b-9b6d-da70e2be9dfc",
+        "learned": "The agent that verifies is the one that generalizes; the one that memorises improves only where it was pushed.",
+        "informedBy": [],
+        "verdict": {
+          "comparable": true,
+          "significantImprovements": 6,
+          "significantRegressions": 0,
+          "heldOut": {
+            "improvements": 4,
+            "regressions": 0
+          },
+          "candidateSpecDigest": "sha256:6e9b456cb7aff526258d2078c8676bff8cba91864c6fcc9ca3f6b7e434f8cbf3",
+          "candidateSource": {
+            "source": "api"
+          },
+          "observations": {
+            "divergent": 0,
+            "unclear": 0,
+            "assessed": 0,
+            "eligible": 0
+          },
+          "unverifiedAxes": ["execution_world"],
+          "confoundedAxes": [],
+          "evidence": {
+            "key": "campaigns/evc_88g7hchuvg/rounds/2/24124d2dc3ea.json",
+            "digest": "sha256:24124d2dc3ea9123c3eb5051741ff90efaa52f00ab75850d1472416d5983c761"
+          }
+        },
+        "at": "2026-09-04T10:46:48.701Z",
+        "by": "dev"
+      }
+    ],
+    "state": "adopted",
+    "createdBy": "dev",
+    "createdAt": "2026-09-04T10:46:36.529Z",
+    "updatedAt": "2026-09-04T10:46:48.707Z",
+    "close": {
+      "outcome": {
+        "kind": "adopted",
+        "version": "1.2.0",
+        "provingScorecardId": "3f54edbf-c4a0-448b-9b6d-da70e2be9dfc",
+        "waivedAxes": ["execution_world"],
+        "candidateSpecDigest": "sha256:6e9b456cb7aff526258d2078c8676bff8cba91864c6fcc9ca3f6b7e434f8cbf3",
+        "candidateSource": {
+          "source": "api"
+        }
+      },
+      "at": "2026-09-04T10:46:48.707Z",
+      "by": "dev"
+    }
+  },
+  "decisionAdopt": {
+    "kind": "adopt",
+    "version": "1.2.0",
+    "provingScorecardId": "3f54edbf-c4a0-448b-9b6d-da70e2be9dfc",
+    "waivedAxes": ["execution_world"],
+    "candidateSpecDigest": "sha256:6e9b456cb7aff526258d2078c8676bff8cba91864c6fcc9ca3f6b7e434f8cbf3",
+    "candidateSource": {
+      "source": "api"
+    }
+  },
+  "adoption": {
+    "campaignId": "evc_88g7hchuvg",
+    "state": "adopted",
+    "operation": {
+      "operationId": "adopt/acme/evc_88g7hchuvg",
+      "tenant": "acme",
+      "proof": {
+        "campaignId": "evc_88g7hchuvg",
+        "frameDigest": "sha256:6a37bfff4a999f295f23e21f72942c40aff07d74181a5ff0354f65518d13be0d",
+        "roundSeq": 2,
+        "candidate": {
+          "identity": "exact",
+          "type": "harness",
+          "id": "patchbot",
+          "version": "1.2.0",
+          "specDigest": "sha256:6e9b456cb7aff526258d2078c8676bff8cba91864c6fcc9ca3f6b7e434f8cbf3"
+        },
+        "provingScorecardId": "3f54edbf-c4a0-448b-9b6d-da70e2be9dfc",
+        "candidateSource": {
+          "source": "api"
+        },
+        "issueId": "fe96f79e-c75a-4e63-82fa-ec75351d63bb",
+        "gateDigest": "sha256:a6ebffb898fa58e40d51780792da82569edfd8ba7ea8eea9713ca3ad7e97c6a9"
+      },
+      "state": "registered",
+      "createdAt": "2026-09-04T10:46:48.707Z",
+      "updatedAt": "2026-09-04T10:46:48.707Z",
+      "registeredVersion": "1.2.0"
+    }
+  },
+  "decisionContinue": {
+    "kind": "continue",
+    "roundsLeft": 3,
+    "consecutiveRejected": 0
+  },
+  "adoptionNone": {
+    "campaignId": "evc_sfqrqmhr5r",
+    "state": "open",
+    "operation": null
+  },
+  "recordFresh": {
+    "id": "evc_sfqrqmhr5r",
+    "tenant": "acme",
+    "issueId": "fe96f79e-c75a-4e63-82fa-ec75351d63bb",
+    "frame": {
+      "subject": {
+        "type": "harness",
+        "id": "patchbot",
+        "baselineVersion": "1.0.0"
+      },
+      "scenarios": [
+        {
+          "id": "sum-1",
+          "heldOut": false
+        },
+        {
+          "id": "sum-2",
+          "heldOut": false
+        },
+        {
+          "id": "mul-1",
+          "heldOut": false
+        },
+        {
+          "id": "mul-2",
+          "heldOut": false
+        },
+        {
+          "id": "max-1",
+          "heldOut": true
+        },
+        {
+          "id": "max-2",
+          "heldOut": true
+        },
+        {
+          "id": "cat-1",
+          "heldOut": true
+        },
+        {
+          "id": "cat-2",
+          "heldOut": true
+        }
+      ],
+      "targets": [],
+      "judges": [],
+      "trialsPerCase": 5,
+      "budget": {
+        "maxRounds": 3
+      },
+      "stopAfterRejectedRounds": 3,
+      "significance": {
+        "fdrAlpha": 0.05,
+        "heldOutFamilySize": 3
+      },
+      "allowUnverifiedIdentity": true,
+      "allowLabelOnlyAdoption": false,
+      "oracleScope": [],
+      "observationPolicy": {
+        "allowDivergent": false
+      }
+    },
+    "frameDigest": "sha256:6a37bfff4a999f295f23e21f72942c40aff07d74181a5ff0354f65518d13be0d",
+    "rounds": [],
+    "state": "open",
+    "createdBy": "dev",
+    "createdAt": "2026-09-04T10:47:56.933Z",
+    "updatedAt": "2026-09-04T10:47:56.934Z"
+  }
+}

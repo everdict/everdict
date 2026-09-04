@@ -8,6 +8,8 @@ import { useRefresh } from '@/shared/lib/use-refresh'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 
+import type { CampaignDecision } from '@/entities/campaign'
+
 import type { CampaignAdoptionView } from '../api/drive-campaign'
 import {
   loadRoundEvidence,
@@ -24,7 +26,7 @@ export function CampaignActions({
   adoption,
 }: {
   id: string
-  decision?: { answer: string; reason?: string }
+  decision?: CampaignDecision
   adoption?: CampaignAdoptionView
 }) {
   const t = useTranslations('campaignsPage')
@@ -52,18 +54,33 @@ export function CampaignActions({
       {/* THE GATE'S ANSWER, ASKED — not computed here. The arithmetic is the frame's, and a page that
           counted rounds itself would be answering a different question. */}
       {decision !== undefined && (
-        <Badge tone={decision.answer === 'adopt' ? 'success' : decision.answer === 'halt' ? 'danger' : 'neutral'}>
-          {t(`decision.${decision.answer}`)}
+        <Badge
+          tone={
+            decision.kind === 'adopt' ? 'success' : decision.kind === 'halt' ? 'danger' : 'neutral'
+          }
+        >
+          {t(`decision.${decision.kind}`)}
         </Badge>
       )}
-      {decision?.reason !== undefined && (
-        <span className="text-[12px] text-muted-foreground">{decision.reason}</span>
+      {/* A `continue` carries the frame's own arithmetic — how many rounds the budget still allows and how
+          long the rejected streak is. Both are what a driver decides on, and both are the frame's to compute
+          rather than the page's to count. */}
+      {decision?.kind === 'continue' && decision.roundsLeft !== undefined && (
+        <span className="text-[12px] text-muted-foreground">
+          {t('roundsLeft', {
+            left: decision.roundsLeft,
+            rejected: decision.consecutiveRejected ?? 0,
+          })}
+        </span>
+      )}
+      {decision?.kind === 'halt' && (
+        <span className="text-[12px] text-muted-foreground">{decision.detail ?? decision.reason}</span>
       )}
 
       {/* Settling REFUSES while the gate says `continue`. The button is hidden then rather than disabled:
           an act the record will refuse is not a choice being withheld, it is a choice that does not exist
           yet. */}
-      {decision !== undefined && decision.answer !== 'continue' && (
+      {decision !== undefined && decision.kind !== 'continue' && (
         <Button
           variant="outline"
           size="sm"
