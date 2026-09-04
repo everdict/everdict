@@ -1,6 +1,8 @@
 # Intent: the gate decides constantly and remembers nothing
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 86d231a3bf5709a48da39eb62050974b6ec43388
 
 ## Problem
 
