@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { PgVersionedStore } from "./pg-versioned-store.js";
 import { VersionedStore } from "./versioned-store.js";
 
-// Where a version came from is METADATA, not content — the same layer created_by and team_id live on. These
+// Where a version came from is METADATA, not content — the same layer created_by lives on. These
 // tests pin the two properties that makes it: it survives the round trip on both stores, and it never becomes
 // part of the spec (so it can neither mint a version nor be rewritten by a later identical registration).
 
@@ -71,7 +71,7 @@ describe("VersionedStore — a version remembers where it came from", () => {
 
 // The Pg twin must behave identically — asserted against the SQL it actually emits, because a column that is
 // never REQUESTED reads as "nothing was stamped" no matter what the row holds (the trap migration 0106's
-// team_id fell into).
+// the ownership axis fell into).
 interface Row {
   tenant: string;
   id: string;

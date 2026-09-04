@@ -157,9 +157,8 @@ function fakePg(): SqlClient {
         // (arch-review 119).
         return { rows: [{}] as R[] };
       }
-      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane's settle.
-      // This double holds no team_id, so the authority arm it models is always satisfied and the statement
-      // returns its row. A double that answered `[]` here would report every idempotent re-register as a
+      // `WITH revived AS (UPDATE …), origined AS (UPDATE …) SELECT 1` — the exact-version lane's settle. It
+      // returns its row: a double that answered `[]` here would report every idempotent re-register as a
       // refusal, which is the always-succeeds-double law with the polarity flipped (rule `testing`).
       if (/^WITH revived AS \(UPDATE/.test(t) || /^WITH origined AS \(UPDATE/.test(t))
         return { rows: [{ one: 1 }] as R[] };

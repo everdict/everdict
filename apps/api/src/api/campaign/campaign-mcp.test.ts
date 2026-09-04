@@ -146,10 +146,8 @@ function makeDeps(
     } as unknown as McpDeps["issueService"],
     // Through the PRODUCTION builder over a real registry — BFF↔MCP parity means the same consumer, not a
     // second one (arch-review 72 P0 / 73).
-    // …and the SAME registry the adoption writes through is what the route's second gate reads (arch-review
-    // 119). It was absent here, so `teamOfEntity(undefined, …)` answered `{}` — the permissive arm — and the
-    // gate could not refuse in any test in this file. The registry is empty, which is the unowned shape these
-    // cases mean; the difference is that it is now a fact the fixture states rather than one it omits.
+    // The SAME registry the adoption writes through — a fixture whose registry differs from the one under
+    // test proves nothing about what the adoption registered.
     agentRegistry: agents,
     campaignAdoption: buildCampaignAdoption({
       operations: store,

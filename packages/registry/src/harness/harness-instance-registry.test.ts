@@ -252,7 +252,6 @@ describe("an override the template's kind cannot apply", () => {
   });
 
   // Regression: the harness instance registry was the ONE versioned registry with no `ownVersions`, and the
-  // team axis reads ownership through it (`teamOfEntity` → `ownVersions` → `teamOfVersion`). Optional-method
   // call sites (`registry?.ownVersions?.(…)`) meant its absence was not a type error and not a runtime error —
   // it just answered "no versions", so every harness looked UNOWNED: a private team's harness stayed visible to
   // the whole workspace, and the re-pin gate authorized against no team at all.

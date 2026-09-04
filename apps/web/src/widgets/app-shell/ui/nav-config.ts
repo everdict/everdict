@@ -57,12 +57,10 @@ export interface NavSection {
 // Settings pages, which made them read as one-time configuration; they are none of that, they are the working
 // material of the agent and belong beside it. Their pages MOVED out of /settings rather than being copied, so the
 // product still has exactly one Skills page and one Tools page.
-// The third group is EVALUATION — the primitives that answer "what ran, against what, judged how". They carry an
-// owning team in the registry (`team_id`), and for a while that made the team their sidebar home; it doesn't any
-// more. A team owns them the way it owns a document — it decides who may CHANGE one — but nobody looks for a
-// harness by first choosing a team, and four collections repeated under every team turned the team group into a
-// wall. So there is ONE address per collection, and "our team's only" is a filter on it (the `team` facet), which
-// is what a narrowing of one list should have been all along.
+// The third group is EVALUATION — the primitives that answer "what ran, against what, judged how". ONE address
+// per collection. They were scoped under an owning team for a while, which put four collections under every
+// team and turned that group into a wall in front of the issues; the workspace is the only boundary now, so
+// there is nothing left for a path to scope by.
 // Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).

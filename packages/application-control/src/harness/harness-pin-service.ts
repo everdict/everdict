@@ -55,21 +55,6 @@ export async function repinHarnessImages(
   id: string,
   body: RepinBody,
   origin: RepinOrigin,
-  // ── THE OWNER THE CALLER WAS AUTHORIZED AGAINST (arch-review 117) ──────────────────────────────
-  //
-  // Both transports read `teamOfEntity` to gate `harnesses:register` and this function then lets the store
-  // re-read the owner where it writes. arch-review 77 closed the WRITER's window; the AUTHORIZER's is the
-  // same shape one frame out, and a transfer landing between the two files the successor under a team the
-  // caller may not write to.
-  //
-  // arch-review 115 closed it in the adoption lane and its commit message called this lane "unchanged by
-  // construction" — which was true and not the same as safe: unchanged means the window is still here. The
-  // one-lane-only shape, in a sentence I wrote while fixing the other lane.
-  // An OBJECT, not a bare string: the store distinguishes "no expectation" (absent) from "I was cleared over
-  // an UNOWNED entity" (present, undefined), and a bare optional string cannot express the second. The first
-  // draft always constructed one, so the lanes that pass no authority — the wave C regression case among them
-  // — read as declaring "unowned" and were refused against their own team. Caught by that existing test.
-  authority?: { expectedOwnerTeamId?: string },
 ): Promise<RepinResult> {
   if (!body.allowTags) {
     for (const [slot, image] of Object.entries(body.pins)) {

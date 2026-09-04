@@ -108,7 +108,7 @@ describe("PgRunStore", () => {
       createdAt: "2026-07-29T00:00:00.000Z",
       updatedAt: "2026-07-29T00:00:00.000Z",
     });
-    // Column order (mig 0092 tail, shifted one by team_id in mig 0106): …case_spec($14), kind, class, lifetime,
+    // Column order (mig 0092 tail, re-shifted by 0212 dropping team_id): …case_spec($13), kind, class, lifetime,
     // origin, envelope, placement, attach, group_ref, lineage, outputs, created_at, updated_at
     expect(calls[0]?.params?.[13]).toBe("eval");
     expect(calls[0]?.params?.[14]).toBe("batch");
