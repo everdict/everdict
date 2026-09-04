@@ -3,6 +3,7 @@ import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { CaseKeySchema } from "../execution/case-key.js";
 import { CaseResultSchema, GraderSpecSchema, PlacementOsSchema, ScorecardSchema } from "../execution/eval-case.js";
 import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
+import { CaseCommitReceiptSchema } from "./case-commit-receipt.js";
 import { GateDecisionSchema } from "./gate.js";
 import { ExportPayloadSourceSchema } from "./publication-operation.js";
 
@@ -854,6 +855,22 @@ export const CaseAttemptSchema = z.object({
   supersededAt: z.string(),
   supersededBy: z.string().optional(),
   result: CaseResultSchema,
+  // ── THE DISPLACED DECISION, PRESERVED WHOLE ────────────────────────────────────────────────────
+  //
+  // `resultsFromLedger` makes the commit receipt AUTHORITATIVE for a settled plane: it rebuilds `results`
+  // from `receipt.childRunId` and drops anything no receipt vouches for. The receipt store is deliberately
+  // not CRUD — "a decision that can be edited is not one" — and its key is (scorecard, case, trial), so a
+  // retry's second outcome has nowhere to go unless the pointer moves.
+  //
+  // It moves, and the decision it displaced is kept HERE, verbatim, beside the result it vouched for. That
+  // is the monotonic projection the record uses everywhere else: nothing edits a receipt, and nothing is
+  // lost — a new decision replaces the pointer under a named authority (`executions[]` says which pass,
+  // when, by whom and why), and the old one stays readable next to its own bytes.
+  //
+  // Absent on an attempt displaced before this existed, and on one whose deployment wires no receipt store.
+  // Absent is NOT "there was no receipt": it is "this ledger cannot say", which is why the settle refuses to
+  // supersede when it cannot preserve one rather than writing an entry that reads as an answer.
+  receipt: CaseCommitReceiptSchema.optional(),
 });
 export type CaseAttempt = z.infer<typeof CaseAttemptSchema>;
 

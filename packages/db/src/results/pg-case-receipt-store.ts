@@ -2,6 +2,7 @@ import type {
   CaseReceiptStore,
   CaseSettleOutcome,
   ExecutionAttemptStore,
+  ExecutionPassAuthority,
   IntermediateCleanupStore,
   RunStore,
 } from "@everdict/application-control";
@@ -152,6 +153,94 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
   // attempt row still saying `created` — the receipt claiming an execution the ledger never saw end. Both
   // twins below are bound to `tx`, so the receipt, the child's terminal write and the attempt's terminal
   // state are one decision or none of them.
+  // ── THE SUPERSEDING CLAIM (docs/architecture/in-place-case-retry-spec.md) ─────────────────────────
+  //
+  // The ordinary claim above is an insert that must not overwrite: `ON CONFLICT DO NOTHING`, because a
+  // receipt is the record of a decision and a decision that can be edited is not one. This does not edit
+  // one either — it makes a NEW decision under a named authority and hands the displaced one back, so the
+  // caller can preserve it verbatim on the scorecard's attempt ledger.
+  //
+  // ONE statement, because a read-then-write is not a claim. `prior` reads the row this commit is about to
+  // replace, from the same statement's snapshot, so the receipt reported as displaced is the one that was
+  // actually displaced.
+  //
+  // ⚠️ NO `FOR UPDATE` HERE, AND THAT IS THE POINT. The first version had one — the obvious way to make a
+  // read-then-replace safe — and against a real Postgres it made `prior` come back EMPTY every time: a row
+  // being updated by the same statement cannot be locked by that statement's own CTE, so the lock quietly
+  // became a skip. The upsert still moved the pointer, so the outcome read `committed` with no displaced
+  // receipt and the caller would have had nothing to preserve — the supersession degrading into exactly the
+  // silent edit this design exists to refuse, with a green SQL-text test either way. Found only by running
+  // it (skill `code-review` pass 6: the adapter is certified by a real engine or by nothing).
+  //
+  // MATERIALIZED pins it: `prior` is evaluated once, before the write, rather than left for a planner to
+  // inline into the join where it would re-read the updated row.
+  //
+  // What the lock was for is handled upstream instead. Two supersessions of one key cannot race, because an
+  // authority is minted only from a live `execution_pass` and that marker's claim is a compare-and-swap
+  // admitting exactly one pass per record. If that ever stops being true, this statement is where it shows —
+  // as two callers each believing they displaced the same receipt.
+  private async supersedeOn(
+    client: SqlClient,
+    receipt: CaseCommitReceipt,
+  ): Promise<Extract<CaseSettleOutcome, { kind: "committed" | "superseded" }>> {
+    const { rows } = await client.query<ReceiptRow & { displaced: ReceiptRow | null }>(
+      `WITH prior AS MATERIALIZED (
+         SELECT * FROM everdict_case_commit_receipts
+          WHERE scorecard_id = $1 AND case_id = $2 AND trial = $3
+       ), upsert AS (
+         INSERT INTO everdict_case_commit_receipts
+           (scorecard_id, case_id, trial, child_run_id, kind, source_scorecard_id, execution_id, generation,
+            attempt_id, result_digest, observation_digest, judge_closure_digest, committed_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         ON CONFLICT (scorecard_id, case_id, trial) DO UPDATE SET
+           child_run_id = EXCLUDED.child_run_id,
+           kind = EXCLUDED.kind,
+           source_scorecard_id = EXCLUDED.source_scorecard_id,
+           execution_id = EXCLUDED.execution_id,
+           generation = EXCLUDED.generation,
+           attempt_id = EXCLUDED.attempt_id,
+           result_digest = EXCLUDED.result_digest,
+           observation_digest = EXCLUDED.observation_digest,
+           judge_closure_digest = EXCLUDED.judge_closure_digest,
+           committed_at = EXCLUDED.committed_at
+         RETURNING *
+       )
+       SELECT upsert.*, to_jsonb(prior) AS displaced
+         FROM upsert LEFT JOIN prior ON true`,
+      [
+        receipt.scorecardId,
+        receipt.caseId,
+        receipt.trial,
+        receipt.childRunId,
+        receipt.kind ?? null,
+        receipt.sourceScorecardId ?? null,
+        receipt.executionId ?? null,
+        receipt.generation ?? null,
+        receipt.attemptId ?? null,
+        receipt.resultDigest,
+        receipt.observationDigest ?? null,
+        receipt.judgeClosureDigest ?? null,
+        receipt.committedAt,
+      ],
+    );
+    const row = rows[0];
+    // An upsert that returned nothing is a store fault, not an outcome: the statement either inserts or
+    // updates, and reporting "nobody committed" over a write that may have landed is the one direction
+    // this ledger must never fail in.
+    if (!row)
+      throw new InternalError(
+        "UPSTREAM_ERROR",
+        { scorecard: receipt.scorecardId, caseId: receipt.caseId, trial: receipt.trial },
+        "the superseding receipt claim returned no row.",
+      );
+    const prior = row.displaced;
+    // No prior row means this pass retried a case that had never committed — which is a legitimate shape
+    // (a case the original batch never got to), and an ordinary commit rather than a supersession.
+    return prior === null
+      ? { kind: "committed", receipt: toReceipt(row) }
+      : { kind: "superseded", receipt: toReceipt(row), displaced: toReceipt(prior) };
+  }
+
   async commitCase(
     receipt: CaseCommitReceipt,
     settle: (
@@ -165,10 +254,15 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
     _runs: RunStore,
     _attempts?: ExecutionAttemptStore,
     _cleanup?: IntermediateCleanupStore,
+    authority?: ExecutionPassAuthority,
   ): Promise<CaseSettleOutcome> {
+    // An authority is for ONE record: a pass on batch A may not move batch B's pointers, and nothing else
+    // in this store would notice. Checked here rather than trusted, because the caller assembling the
+    // receipt and the caller holding the authority are the same code and a mismatch is a wiring bug.
+    const superseding = authority !== undefined && authority.scorecardId === receipt.scorecardId;
     try {
       return await withTransaction(this.client, "the case commit (receipt + child settle)", async (tx) => {
-        const outcome = await this.commitOn(tx, receipt);
+        const outcome = superseding ? await this.supersedeOn(tx, receipt) : await this.commitOn(tx, receipt);
         if (outcome.kind === "already_committed") return outcome;
         // …and the cleanup ledger, bound to the SAME transaction (arch-review 71 P1). The release used to
         // run after this commit returned, so a crash in the gap left an already-terminal case holding
@@ -181,7 +275,11 @@ export class PgCaseReceiptStore implements CaseReceiptStore {
         // The fence refused the child's write → abort, which rolls the claim back too. Thrown (not returned)
         // because ROLLBACK is the transaction helper's contract for a throw; unwrapped below.
         if (settled === undefined) throw new UnsettledSignal();
-        return { kind: "committed" as const, receipt: outcome.receipt };
+        // The supersession's displaced receipt must survive to the caller — it is the only copy of the
+        // decision this commit replaced, and the caller owes it a home on the attempt ledger.
+        return outcome.kind === "superseded"
+          ? { kind: "superseded" as const, receipt: outcome.receipt, displaced: outcome.displaced }
+          : { kind: "committed" as const, receipt: outcome.receipt };
       });
     } catch (err) {
       if (err instanceof UnsettledSignal) return { kind: "unsettled" };

@@ -40,7 +40,54 @@ export type CaseSettleOutcome =
   //
   // The caller's answer is to READ BACK, never to decide: the exact receipt plus its child says committed,
   // both absent says safe to retry, and a read that also fails leaves the whole batch owed.
-  | { kind: "unknown"; reason: string };
+  | { kind: "unknown"; reason: string }
+  // ── A NEW DECISION REPLACED THE POINTER, AND THE OLD ONE IS HANDED BACK ────────────────────────────
+  //
+  // Only reachable when the caller presents an `ExecutionPassAuthority` (below). `displaced` is the receipt
+  // that WAS the case's answer, returned rather than dropped because the caller owes it a home on the
+  // scorecard's attempt ledger (`CaseAttempt.receipt`) — the store cannot write there, and a supersession
+  // whose displaced decision is lost is the edit this design exists to avoid.
+  | { kind: "superseded"; receipt: CaseCommitReceipt; displaced: CaseCommitReceipt };
+
+// ── THE AUTHORITY THAT MAY MOVE A COMMITTED CASE'S POINTER (protocol L1) ─────────────────────────────
+//
+// `resultsFromLedger` makes the receipt authoritative for a settled plane, and the receipt store is
+// deliberately not CRUD: "a decision that can be edited is not one". An in-place retry needs neither of
+// those sentences weakened. It needs a SECOND decision, made under a named authority, with the first one
+// preserved — which is a different act.
+//
+// This is that authority, and it is a required parameter rather than an optional flag for the reason L1
+// gives: an optional hook is a request, a required proof is a protocol. It is minted by ONE function
+// (`executionPassAuthority`, beside the claim that returns the persisted marker) so a caller cannot
+// assemble one from values it happens to be holding — the brand is what makes the type say that, and the
+// mint is what checks the marker it was handed is the one the store returned.
+// A REAL runtime symbol, not a `declare const` phantom. The first draft used the phantom — the usual
+// type-only branding trick — and then put the key in the object literal the mint returns, which throws
+// `EXECUTION_PASS_AUTHORITY is not defined` the moment anything calls it. A brand that only the type system
+// can see cannot also be the thing that makes the value unforgeable at runtime; this one is module-private,
+// so an authority can only be built here.
+const EXECUTION_PASS_AUTHORITY: unique symbol = Symbol("everdict.execution-pass-authority");
+export interface ExecutionPassAuthority {
+  readonly [EXECUTION_PASS_AUTHORITY]: true;
+  readonly scorecardId: string;
+  readonly passId: string;
+  // The revision this pass will append when it settles. Carried so a superseding commit can be read back
+  // and joined to the revision that authorized it — provenance born at the source (L3), not re-derived
+  // later from whichever revision happens to be last.
+  readonly targetRevision: number;
+}
+
+// The ONE mint. It takes the record the claim RETURNED — never a caller-built object — and refuses unless
+// that record's live marker is the pass being claimed for. A caller holding a stale record therefore cannot
+// produce an authority at all, which is the property the branded type is standing in for.
+export function executionPassAuthority(
+  claimed: { id: string; executionPass?: { passId: string; targetRevision: number; status: string } | null },
+  passId: string,
+): ExecutionPassAuthority | undefined {
+  const pass = claimed.executionPass;
+  if (!pass || pass.passId !== passId || pass.status !== "running") return undefined;
+  return { [EXECUTION_PASS_AUTHORITY]: true, scorecardId: claimed.id, passId, targetRevision: pass.targetRevision };
+}
 
 export interface CaseReceiptStore {
   // The raw claim — seeding/backfill only (see above). `already_committed` carries the receipt that won.
@@ -78,6 +125,10 @@ export interface CaseReceiptStore {
     // stamps through can never drift from the one it opened the attempt on.
     attempts?: ExecutionAttemptStore,
     cleanup?: IntermediateCleanupStore,
+    // Present ONLY on an in-place retry. Absent, the method behaves exactly as it always has: a committed
+    // case answers `already_committed` and nothing moves. Present, a committed case's pointer may move to
+    // this commit and the displaced receipt comes back for the caller to preserve.
+    authority?: ExecutionPassAuthority,
   ): Promise<CaseSettleOutcome>;
   // Every receipt of one batch — the parent's aggregation input, and the parity check against the ledger.
   list(scorecardId: string): Promise<CaseCommitReceipt[]>;
@@ -126,18 +177,27 @@ export class InMemoryCaseReceiptStore implements CaseReceiptStore {
     // The Pg twin is where the promotion is atomic; this one keeps the ordering and the refusal.
     attempts?: ExecutionAttemptStore,
     cleanup?: IntermediateCleanupStore,
+    authority?: ExecutionPassAuthority,
   ): Promise<CaseSettleOutcome> {
     const key = InMemoryCaseReceiptStore.key(receipt);
     const prior = this.commits.get(key) ?? Promise.resolve();
     const task = prior.then(async (): Promise<CaseSettleOutcome> => {
       const existing = this.receipts.get(key);
-      if (existing) return { kind: "already_committed", receipt: existing };
+      // WITHOUT an authority this is exactly what it has always been. WITH one — and only for the batch the
+      // authority names — the committed case's pointer may move, and the decision it displaces is handed
+      // back so the caller can preserve it on the attempt ledger. The scorecard id is checked because an
+      // authority is for ONE record: a pass on batch A must not be able to move batch B's pointers, and
+      // nothing else in this store would notice.
+      if (existing && (authority === undefined || authority.scorecardId !== receipt.scorecardId))
+        return { kind: "already_committed", receipt: existing };
       // The settle runs BEFORE the claim is visible, exactly like the Pg transaction: a throw or a refusal
       // leaves no receipt behind. Serialization above is what makes check-settle-set atomic here.
       const settled = await settle(runs, attempts, cleanup);
       if (settled === undefined) return { kind: "unsettled" };
       this.receipts.set(key, receipt);
-      return { kind: "committed", receipt };
+      return existing === undefined
+        ? { kind: "committed", receipt }
+        : { kind: "superseded", receipt, displaced: existing };
     });
     this.commits.set(
       key,

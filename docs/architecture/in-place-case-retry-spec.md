@@ -135,8 +135,50 @@ readable pass and no half-moved plane. A settle whose guarded write loses the CA
 The three readers that already exist and do not yet know about attempts, each an open question this slice
 answers rather than assumes:
 
-- **`CaseCommitReceipt`** is keyed by the case, and a second attempt commits a second outcome for one key.
-  Either the receipt carries the attempt, or the retry's commit is refused by the ledger it must pass.
+- **`CaseCommitReceipt` — DECIDED and Landed, and it is the hinge of the whole feature.** The table's key is
+  `(scorecard_id, case_id, trial)`, the store is deliberately not CRUD (*"there is no update and no delete.
+  A receipt is the record of a decision, and a decision that can be edited is not one"*), and
+  `resultsFromLedger` makes the receipt AUTHORITATIVE for the settled plane: it rebuilds `results` from
+  `receipt.childRunId` and drops anything the receipt does not vouch for. So a retried result that produces
+  no receipt is not merely unrecorded — it is *dropped at the next settle*, and the batch silently keeps the
+  answer the retry was repairing.
+
+  Two ways out, and the narrow one wins:
+
+  **Extend the receipt's key with an attempt ordinal.** Honest, and enormous: 20 modules read receipts and
+  `childKey` is spelled at ~40 sites. Worse, canonicity would then have to be derived — and "the latest row
+  is the winner" is the exact re-derivation protocol L3 bans.
+
+  **Keep one receipt per (case, trial) as the CURRENT decision, and preserve the displaced one verbatim on
+  the attempt ledger** (`CaseAttempt.receipt`). This is the monotonic projection the record already uses for
+  `current` everywhere else: the old decision is not edited and not lost — it moves, whole, to an append-only
+  ledger, and the authority that moved it is named (`executions[]` says which pass, when, by whom, why). The
+  receipt store gains ONE superseding arm, gated on a live execution pass whose `targetRevision` is ahead of
+  the record's last completed one; without that authority `commitCase` behaves exactly as it does today.
+
+  What this preserves is the sentence the store was built around. "A decision that can be edited is not one"
+  stays true: nothing edits a receipt. What changes is that a *new* decision may replace the pointer, under a
+  named authority, with the old one kept — which is a different act, and the one this feature is about.
+
+  **Landed**: `ExecutionPassAuthority` (a module-private branded value minted only by
+  `executionPassAuthority`, which takes the record the CLAIM RETURNED and refuses unless its live marker is
+  the pass being claimed for), the `superseded` outcome carrying the displaced receipt, and both stores.
+  Nine counterexamples: the mint refuses a record with no marker, a marker naming a rival pass, and a marker
+  that is no longer running; a commit with no authority leaves the pointer where it was; an authority for
+  another record is refused; an authority on a never-committed case is an ordinary commit, not a
+  supersession; and a REFUSED settle moves nothing.
+
+  ⚠️ **The engine taught this one, and a text test could not have.** The first superseding statement read the
+  row it was about to replace with `SELECT … FOR UPDATE` inside a CTE of the same statement — the obvious way
+  to make a read-then-replace safe. Against a real Postgres that CTE came back EMPTY every time: a row being
+  updated by the same statement cannot be locked by that statement's own CTE, so the lock became a skip. The
+  upsert still moved the pointer, so the outcome read `committed` with no displaced receipt and the caller
+  had nothing to preserve — the supersession degrading into precisely the silent edit this design refuses,
+  green either way on a fake client. `prior AS MATERIALIZED`, no lock, and what the lock was for is handled
+  upstream by the pass CAS, which admits exactly one pass per record.
+
+  **Still owed**: `resultsFromLedger` rebuilding a retried plane from the NEW receipt — the assertion that
+  proves the whole path end to end, and it needs the dispatch to exist first.
 - **Child runs.** Each case has an addressable child `RunRecord`; a retry makes another. The superseded
   attempt's child must stay readable, so `runIds` grows rather than being replaced.
 - **Storage — Landed.** Migration `0213` adds `executions` / `case_attempts` / `execution_pass` /
