@@ -11,6 +11,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
 import { SettingsEnvironments } from './settings-environments'
+import { EnvironmentRegistry, loadEnvironments } from '@/features/browse-environments'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,6 +21,7 @@ export const dynamic = 'force-dynamic'
 export default async function EnvironmentsSettingsPage() {
   const t = await getTranslations('settingsNav')
   const s = await getTranslations('settingsPage')
+  const tEnv = await getTranslations('settingsEnvironments')
   const { principal, ctx } = await currentPrincipal()
   const canRead = can(principal?.roles, 'capabilities:read')
   const canWrite = can(principal?.roles, 'capabilities:write')
@@ -48,6 +50,8 @@ export default async function EnvironmentsSettingsPage() {
     error = e instanceof Error ? e.message : String(e)
   }
   const context = await loadEnvironmentContext(ctx)
+  // The registry read is carried as a VALUE — a failure here must not take the image list above down.
+  const registry = await loadEnvironments(ctx)
 
   return (
     <div className="space-y-6">
@@ -69,6 +73,21 @@ export default async function EnvironmentsSettingsPage() {
           {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
         />
       )}
+
+      {/* …and the registry itself — the entity a case points at with `env: {kind: "ref"}` and a batch seals
+          the resolved version of. The imported environments above are IMAGES (bytes); this is the world
+          those bytes make, and only the second is an identity axis a batch can seal. Two pages would make a
+          reader memorise which one holds which noun. */}
+      <div className="border-t pt-6">
+        <h2 className="mb-3 text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {tEnv('registryHeading')}
+        </h2>
+        <EnvironmentRegistry
+          {...(registry.list ? { list: registry.list } : {})}
+          {...(registry.error !== undefined ? { error: registry.error } : {})}
+          canTag={canWrite}
+        />
+      </div>
     </div>
   )
 }

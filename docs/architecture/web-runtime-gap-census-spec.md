@@ -257,7 +257,11 @@ the client methods came back out — a client method with no caller is the unwir
 repository has a gate against, and adding one to make a counter move is the exact mistake this page is a
 record of.
 
-**41 remain OWED.** They are not one more afternoon: `campaigns` (11 routes) is the evolution domain with no
+| `/workspace/trace-thresholds` · `/workspace/trace-ingestion` | perception and admission — both applied to EVERY trajectory, neither readable from the web. A workspace could be silently dropping OTLP events past a quota nobody could see. `null` is kept apart from a number, because "no ceiling" and "admit nothing" are opposite settings and an empty box must not become the second |
+| `/workspace/images/mirror` · `/workspace/images/push-grant` | the managed store's two member acts. The push credential is shown ONCE and never stored — the web is not a place to keep it, and a page that saved it would be a second copy nobody asked for |
+| `/environments` · `versions/:v` · `versions/:v/tags` | the environment REGISTRY, beside the adopted images rather than on a page of its own: an image is bytes, an environment is the world those bytes make, and only the second is an identity axis a batch can seal. Two pages would make a reader memorise which one holds which noun |
+
+**34 remain OWED.** They are not one more afternoon: `campaigns` (11 routes) is the evolution domain with no
 page at all, `knowledge` authoring (8) is a write surface over a graph the web only reads, and the
 `sandboxes`/`groups`/`checkpoints`/`environments` clusters are each a product surface somebody has to
 design. Calling those

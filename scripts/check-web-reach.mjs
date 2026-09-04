@@ -90,19 +90,12 @@ const DECIDED = new Map([
   ["/checkpoints/:p/verify", "OWED — agent handoff evidence, read by people"],
   ["/fs", "OWED — the files page"],
   ["/fs/revisions", "OWED — the files page's revision history"],
-  ["/environments", "OWED — the environment REGISTRY (settings has image adoption, a different noun)"],
-  ["/environments/:p/versions/:p", "OWED — the environment registry"],
-  ["/environments/:p/versions/:p/tags", "OWED — the environment registry"],
   ["/benchmarks/:p/judge", "OWED — benchmark import"],
   ["/sandboxes/:p/git/push", "OWED — the sandbox surface"],
   ["/sandboxes/:p/snapshot", "OWED — the sandbox surface"],
   ["/sandboxes/:p/tasks/:p/trace", "OWED — the sandbox surface"],
   ["/sandboxes/:p/touch", "OWED — the sandbox surface"],
   ["/scorecards/gate", "OWED — the CI gate decision"],
-  ["/workspace/images/mirror", "OWED — a real user action on the managed image store"],
-  ["/workspace/images/push-grant", "OWED — the push credential a member mints for `everdict image push`"],
-  ["/workspace/trace-ingestion", "OWED — the OTLP door's quota/retention, with no settings page"],
-  ["/workspace/trace-thresholds", "OWED — perception config evaluated at seal time"],
 ]);
 
 const walk = (dir, out = []) => {

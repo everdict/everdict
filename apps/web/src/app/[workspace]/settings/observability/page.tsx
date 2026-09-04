@@ -11,6 +11,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { TraceConfigPanel, loadTraceConfig } from '@/features/trace-config'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,6 +38,10 @@ export default async function ObservabilityPage({
   }
 
   const canWrite = can(principal?.roles, 'settings:write')
+
+  // Read beside the source roster. Its own failure is carried as a value rather than thrown — the page's
+  // job is the sources, and a config read that failed must not take them down with it.
+  const traceConfig = await loadTraceConfig()
 
   // Deep-link params — each trace detail dialog mirrors its open state into the URL (?trajectory= for the owned
   // ledger, ?source=&trace= for a platform trace), so a pasted link must open the same dialog: read the pair back
@@ -106,6 +111,21 @@ export default async function ObservabilityPage({
               />
             </div>
           )}
+
+          {/* Perception and admission — the two settings every trajectory is measured against, and until now
+              the two nobody could read from the web. A workspace could be silently dropping OTLP events past
+              a quota with no way to see it. */}
+          <div className="border-t pt-6">
+            <h2 className="mb-3 text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {t('traceConfigHeading')}
+            </h2>
+            <TraceConfigPanel
+              {...(traceConfig.thresholds ? { thresholds: traceConfig.thresholds } : {})}
+              {...(traceConfig.ingestion ? { ingestion: traceConfig.ingestion } : {})}
+              {...(traceConfig.error !== undefined ? { error: traceConfig.error } : {})}
+              canWrite={canWrite}
+            />
+          </div>
         </div>
       )}
     </div>

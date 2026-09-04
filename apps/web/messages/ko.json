@@ -1,4 +1,10 @@
 {
+  "settingsEnvironments": {
+    "registryEmpty": "등록된 환경이 없습니다 — 환경을 참조하는 케이스는 해석되지 않습니다.",
+    "registryHeading": "환경 레지스트리",
+    "registryUnread": "레지스트리를 읽지 못했습니다 ({error}) — 비어 있다는 뜻이 아닙니다.",
+    "versionCount": "버전 {n}개"
+  },
   "approvalsPage": {
     "approve": "승인",
     "askedBy": "{agent} 요청",
@@ -3302,6 +3308,15 @@
     "historyHint": "저장할 때마다 버전이 발행됩니다. 이 파일은 셸과 에이전트도 편집하므로, 누가 무엇을 발행했는지 여기서 확인합니다."
   },
   "observabilityPage": {
+    "addThreshold": "임계값 추가",
+    "configSaveError": "설정을 저장하지 못했습니다.",
+    "configUnread": "트레이스 설정을 읽지 못했습니다 ({error}) — 아무것도 감시되지 않는다는 뜻이 아닙니다.",
+    "ingestionCap": "시간당 OTLP 이벤트",
+    "noCeiling": "상한 없음",
+    "noThresholds": "선언된 임계값이 없습니다 — 넘을 것이 없으니 표시될 것도 없습니다.",
+    "saveConfig": "저장",
+    "traceConfigHeading": "인지 · 수용",
+    "usedThisHour": "이번 시간 {used} 사용",
     "title": "트레이스",
     "description": "팀 관측 플랫폼을 등록하고, 보유한 트레이스와 메트릭을 여기서 바로 둘러봅니다.",
     "noPermissionTitle": "접근 권한 없음",
@@ -4856,6 +4871,13 @@
     "emptyHint": "이 뷰는 열 때마다 지금 데이터로 다시 계산돼요. 저장해두면 그때의 숫자가 워크스페이스 파일로 남아요."
   },
   "workspaceImages": {
+    "mirror": "가져오기",
+    "mirrorError": "이미지를 가져오지 못했습니다.",
+    "mirrorPlaceholder": "외부 이미지 — ghcr.io/org/image:tag",
+    "mirrorTitle": "외부 이미지를 이 워크스페이스의 관리 네임스페이스로 복사합니다 — 하네스 핀이 서 있는 출처 기준선입니다.",
+    "pushGrant": "푸시 자격증명 발급",
+    "pushGrantError": "자격증명을 발급하지 못했습니다.",
+    "pushGrantTitle": "`everdict image push` 가 쓰는 자격증명을 발급합니다. 한 번만 표시되고 여기에 저장되지 않습니다.",
     "title": "이미지",
     "description": "이 워크스페이스가 everdict 자체 이미지 스토어에 발행한 컨테이너 이미지입니다. 하네스와 환경이 ref로 고정해 쓰고, pull은 짧게 유효한 grant로 인가됩니다.",
     "notConfigured": "이 배포는 관리형 이미지 스토어를 운영하지 않습니다. 통합에서 등록한 레지스트리로 발행하세요.",

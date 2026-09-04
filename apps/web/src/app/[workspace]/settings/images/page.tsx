@@ -1,6 +1,6 @@
 import { getTranslations } from 'next-intl/server'
 
-import { WorkspaceImagesManager } from '@/features/manage-workspace-images'
+import { ImageStoreActions, WorkspaceImagesManager } from '@/features/manage-workspace-images'
 import { workspaceImageCatalogSchema, type WorkspaceImageCatalog } from '@/entities/workspace-image'
 import { can } from '@/shared/auth/can'
 import { authContext, currentPrincipal } from '@/shared/auth/principal'
@@ -33,6 +33,9 @@ export default async function WorkspaceImagesPage() {
         canPush={can(principal?.roles, 'images:push')}
         unavailable={unavailable}
       />
+      {/* The managed store's two member acts — bringing an external image IN, and minting the credential
+          `everdict image push` consumes. Both had routes and neither could be reached from the web. */}
+      {!unavailable && <ImageStoreActions canPush={can(principal?.roles, 'images:push')} />}
     </div>
   )
 }

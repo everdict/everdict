@@ -1126,6 +1126,56 @@ export const controlPlane = {
     }),
   estimateScorecard: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/scorecards/estimate${qs}`),
 
+  // ── OBSERVABILITY CONFIG — TWO SETTINGS WITH NO SETTINGS PAGE ───────────────────────────────────
+  //
+  // Both are evaluated on every trajectory and neither could be read or changed from the web, so a
+  // workspace could be silently dropping OTLP events past a quota nobody could see. Census slice 5.
+  // docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // Perception config: a crossing lands `trace.threshold_crossed` on the log at seal time.
+  traceThresholds: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-thresholds'),
+  setTraceThresholds: <T>(
+    auth: AuthContext,
+    thresholds: { name: string; metric: string; value: number }[]
+  ) =>
+    call<T>(auth, '/workspace/trace-thresholds', { method: 'PUT', body: JSON.stringify({ thresholds }) }),
+  // The OTLP door's admission: events/hour and retention. `null` means "no ceiling", which is a DIFFERENT
+  // setting from a large number and the wire says so with null rather than a sentinel.
+  traceIngestion: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-ingestion'),
+  setTraceIngestion: <T>(auth: AuthContext, maxEventsPerHour: number | null) =>
+    call<T>(auth, '/workspace/trace-ingestion', {
+      method: 'PUT',
+      body: JSON.stringify({ maxEventsPerHour }),
+    }),
+
+  // ── THE MANAGED IMAGE STORE'S TWO MEMBER ACTIONS ────────────────────────────────────────────────
+  //
+  // Mirror copies an external image into the workspace's managed namespace — the provenance baseline a
+  // harness pin rests on. The push grant mints the credential `everdict image push` consumes; a member who
+  // has to ask an agent for their own push credential is the gap this closes.
+  mirrorWorkspaceImage: <T>(auth: AuthContext, body: { image: string; repository?: string; tag?: string }) =>
+    call<T>(auth, '/workspace/images/mirror', { method: 'POST', body: JSON.stringify(body) }),
+  mintImagePushGrant: <T>(auth: AuthContext, repository: string) =>
+    call<T>(auth, '/workspace/images/push-grant', {
+      method: 'POST',
+      body: JSON.stringify({ repository }),
+    }),
+
+  // ── THE ENVIRONMENT REGISTRY — THE WORLD A CASE ACTS ON, AS AN ENTITY ────────────────────────────
+  //
+  // Settings has an *adopted environments* page, which is image adoption: a different noun. The REGISTRY is
+  // what makes the world its own identity axis — a case references it with `env: {kind: "ref"}` and a batch
+  // seals the version it resolved, so the world can move under an unchanged case and still be read. It had
+  // no web surface at all. Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+  listEnvironments: <T>(auth: AuthContext) => call<T>(auth, '/environments'),
+  getEnvironmentVersion: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  setEnvironmentVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(auth, `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    }),
+
   // ── THE REST OF THE BATCH ────────────────────────────────────────────────────────────────────────
   //
   // Attest a dataset version's ground_truth declarations — the approval a constitutional metric needs

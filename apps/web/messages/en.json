@@ -1,4 +1,10 @@
 {
+  "settingsEnvironments": {
+    "registryEmpty": "No environment is registered — a case that references one would not resolve.",
+    "registryHeading": "Environment registry",
+    "registryUnread": "The registry could not be read ({error}) — this is not the same as it being empty.",
+    "versionCount": "{n} version(s)"
+  },
   "approvalsPage": {
     "approve": "Approve",
     "askedBy": "asked by {agent}",
@@ -3302,6 +3308,15 @@
     "historyHint": "Every save publishes a revision. This file is editable from the shell and by agents too, so the history shows who published what."
   },
   "observabilityPage": {
+    "addThreshold": "Add a threshold",
+    "configSaveError": "The configuration could not be saved.",
+    "configUnread": "The trace configuration could not be read ({error}) — this is not the same as nothing being watched.",
+    "ingestionCap": "OTLP events per hour",
+    "noCeiling": "no ceiling",
+    "noThresholds": "No threshold is declared — nothing crosses, and nothing is flagged.",
+    "saveConfig": "Save",
+    "traceConfigHeading": "Perception & admission",
+    "usedThisHour": "{used} used this hour",
     "title": "Traces",
     "description": "Register your team's observability platforms and browse the traces and metrics they hold — right here.",
     "noPermissionTitle": "No access",
@@ -4856,6 +4871,13 @@
     "emptyHint": "This view recomputes from current data every time it opens. Capture it and the numbers of that moment stay as a workspace file."
   },
   "workspaceImages": {
+    "mirror": "Mirror in",
+    "mirrorError": "The image could not be mirrored.",
+    "mirrorPlaceholder": "external image — ghcr.io/org/image:tag",
+    "mirrorTitle": "Copy an external image into this workspace's managed namespace — the provenance baseline a harness pin rests on.",
+    "pushGrant": "Mint push credential",
+    "pushGrantError": "The credential could not be minted.",
+    "pushGrantTitle": "Mint the credential `everdict image push` consumes. Shown once and never stored here.",
     "title": "Images",
     "description": "Container images this workspace has published to everdict's own image store. Harnesses and environments pin them by ref; pulls are authorized by short-lived grants we mint.",
     "notConfigured": "This deployment does not run the managed image store. Publish to a registry you register under Integrations instead.",

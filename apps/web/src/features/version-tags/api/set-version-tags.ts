@@ -12,7 +12,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // `judge` was the one registry whose tags the web could not set — every other versioned entity had a
 // branch here and judges did not, so a judge version could be labelled by an agent and not by a person.
 // Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
-export type VersionTagEntity = 'harness' | 'dataset' | 'runtime' | 'rubric' | 'capability' | 'judge'
+export type VersionTagEntity = 'harness' | 'dataset' | 'runtime' | 'rubric' | 'capability' | 'judge' | 'environment'
 
 export async function setVersionTagsAction(input: {
   entity: VersionTagEntity
@@ -32,6 +32,8 @@ export async function setVersionTagsAction(input: {
       await controlPlane.setCapabilityVersionTags(ctx, input.id, input.version, input.tags)
     else if (input.entity === 'judge')
       await controlPlane.setJudgeVersionTags(ctx, input.id, input.version, input.tags)
+    else if (input.entity === 'environment')
+      await controlPlane.setEnvironmentVersionTags(ctx, input.id, input.version, input.tags)
     else await controlPlane.setRuntimeVersionTags(ctx, input.id, input.version, input.tags)
     return { ok: true }
   } catch (e) {
