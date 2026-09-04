@@ -825,6 +825,17 @@ export const CommandHarnessSpecSchema = z.object({
   // failure (OOM_KILLED) instead of an agent one. Unset = backend defaults.
   resources: ServiceResourcesSchema.optional(),
   workDir: z.string().optional(), // setup/command execution directory (default "work"). Environments without a work dir (os-use etc.) use an absolute path (e.g. "/tmp").
+  // ── THE PROMPT, AS A COMPONENT (evolution-program-gap-map.md G4.9) ──────────────────────────────
+  //
+  // The effective standing prompt this agent runs under, resolved from the template's `promptChannel` and the
+  // instance's `overrides.prompt`. It is DELIVERED through the channel (an env key the image reads) and named
+  // HERE so the platform can talk about it: `specDigest` seals it, `diffHarnessSpecs` reports `prompt` moving
+  // rather than `env.SOME_KEY`, and a delegate briefed to change the prompt has somewhere to put it.
+  //
+  // Absent = this harness declares no prompt channel, which is every command harness written before this. The
+  // field and the env key are two renderings of ONE resolved value (see `resolveHarnessInstance`), never two
+  // sources that can disagree.
+  prompt: z.string().max(200_000).optional(),
   setup: z.array(z.string()).default([]), // run once in the sandbox (e.g. "pip install aider-chat==0.74.0")
   command: z.string(), // e.g. "aider --yes --message {{task}} --model {{model}} --edit-format {{edit_format}} ."
   env: z.record(EnvValueSchema).default({}), // literal or { secretRef } — resolved just before execution

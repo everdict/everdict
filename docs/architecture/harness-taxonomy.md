@@ -297,6 +297,15 @@ Keep `pins` (slot → image string) for the common case and back-compat. Add an 
 - **command env / params**: `env`/`params` each merge over the template's; `params` feed generic `{{key}}`
   substitution in `CommandHarness` (generalizing the reserved `{{task}}`/`{{model}}`/`{{run_id}}`). `params` values
   are **not** shell-escaped (author-trusted, like `{{model}}`); only `{{task}}` (the untrusted eval input) is.
+- **command prompt**: `overrides.prompt` is the standing prompt, and it is an AXIS rather than another env key
+  (`evolution-program-gap-map.md` G4.9). The template declares the delivery — `promptChannel: { kind: "env",
+  name }` — because the answer differs per CLI and a campaign driver cannot guess it; `resolveHarnessInstance`
+  writes the text into that env key AND onto the resolved spec's own `prompt` field, from one value, so
+  `specDigest` seals it and `diffHarnessSpecs` reports `prompt` instead of `env.SOME_KEY`. Two refusals, both
+  because a silently-ignored variation registers a version that never varied: a `prompt` override with no
+  declared channel, and a `prompt` override beside a hand-written `env` entry for the same key. A template with
+  no channel is unchanged, and a template whose own `env` holds the channel key ships a DEFAULT prompt that the
+  resolved field reports.
 - scalars added later (`replicas`/`resources`/`readiness`/`volumes`) = **replace**, not merge.
 - **Unknown target** (a service name in `overrides.services` that the template lacks) → `BadRequestError`, the same
   discipline as image pins / `applyImagePins`.

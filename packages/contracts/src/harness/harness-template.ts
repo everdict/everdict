@@ -135,6 +135,18 @@ export const CommandTemplateSpecSchema = z.object({
   conversation: CommandHarnessSpecSchema.shape.conversation,
   // The API this CLI acts on — a static baseUrl (harness-definability-spec.md §1); carried onto the resolved spec.
   target: CommandHarnessSpecSchema.shape.target,
+  // ── HOW A PROMPT REACHES THIS CLI (evolution-program-gap-map.md G4.9) ──────────────────────────
+  //
+  // Declared by whoever knows the agent, because the answer differs per CLI (an env var one reads, a file
+  // another loads) and a campaign driver cannot guess it. With a channel declared, `overrides.prompt` is the
+  // axis; without one, a prompt override is REFUSED rather than silently ignored — the same law the pin and
+  // override checks already state, since an override nothing reads registers a version that never varied.
+  //
+  // One arm today, deliberately: `env` is what every command harness already does by hand. A `file` arm is a
+  // pure addition when a CLI needs one, and the union is what keeps that from being a shape change.
+  promptChannel: z
+    .discriminatedUnion("kind", [z.object({ kind: z.literal("env"), name: z.string().min(1).max(200) })])
+    .optional(),
 });
 
 // --- process template --- a single process (Claude Code/Codex). Nothing to pin (template version = structure).
@@ -202,6 +214,9 @@ export const InstanceOverridesSchema = z.object({
   // command template: env keys to DROP (applied after the merge) — same reason as the per-service `unsetEnv`.
   unsetEnv: z.array(z.string().min(1)).optional(),
   params: z.record(z.string()).optional(),
+  // command template: the standing prompt, delivered through the template's declared `promptChannel`. The axis
+  // exists so a prompt is a component the platform can name — see CommandHarnessSpec.prompt.
+  prompt: z.string().min(1).max(200_000).optional(),
   // command template: the job's resource request (scalar substitution). A heavier variation of the same CLI agent —
   // one that needs 8 GB where the template asks for 2 — was a template edit, so every such run forked the shape.
   resources: ServiceResourcesSchema.optional(),
@@ -264,7 +279,7 @@ function dropEnvKeys(env: Record<string, EnvValue>, unset: string[] | undefined)
 // A CREATION rule, consumed where a version is registered — never at resolve, which every READ runs (a rule
 // applied at decode time is a data outage for rows written before it).
 const APPLICABLE_OVERRIDES: Record<HarnessTemplateSpec["kind"], readonly string[]> = {
-  command: ["env", "unsetEnv", "params", "resources"],
+  command: ["env", "unsetEnv", "params", "prompt", "resources"],
   service: ["services", "frontDoor", "target", "resources"],
   process: ["resources"],
 };
@@ -422,6 +437,36 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
       );
       const params = overrides?.params ? { ...template.params, ...overrides.params } : template.params;
       const resources = overrides?.resources ?? template.resources;
+      // ── THE PROMPT: ONE RESOLVED VALUE, DELIVERED AND NAMED ────────────────────────────────────
+      //
+      // The channel is the template's (it knows the CLI); the text is the instance's. Resolved here so the
+      // spec's `prompt` field and the env key the image reads can never disagree — they are the same value
+      // written twice by one owner, which is the shape rule `protocol` L3 asks for when a value must travel
+      // two ways.
+      //
+      // Two refusals, both because a silently-ignored variation registers a version that did not vary:
+      //   · a prompt override with no declared channel has nowhere to go;
+      //   · a prompt override BESIDE a hand-written env entry for the same key is two spellings of one thing,
+      //     and whichever won would be an accident of merge order.
+      const channel = template.promptChannel;
+      if (overrides?.prompt !== undefined && channel === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { harness: instance.id, version: instance.version },
+          "this instance overrides `prompt`, and its template declares no `promptChannel` — there is nowhere to deliver it, so the version would be the template's own bytes under a new label. Declare a channel on the template, or use the env overlay directly.",
+        );
+      if (overrides?.prompt !== undefined && channel !== undefined && overrides.env?.[channel.name] !== undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { harness: instance.id, version: instance.version, channel: channel.name },
+          `this instance sets the prompt twice — once as \`overrides.prompt\` and once as \`overrides.env.${channel.name}\`, which is the channel the template declared for it. Keep the axis and drop the env entry.`,
+        );
+      // The EFFECTIVE prompt: the override, else whatever the template's own env already holds at the channel
+      // (a template that ships a default prompt). A `secretRef` value is not a prompt and is left alone.
+      const channelValue = channel !== undefined ? env[channel.name] : undefined;
+      const prompt =
+        overrides?.prompt ?? (typeof channelValue === "string" && channel !== undefined ? channelValue : undefined);
+      if (channel !== undefined && overrides?.prompt !== undefined) env[channel.name] = overrides.prompt;
       return CommandHarnessSpecSchema.parse({
         ...(instance.seeds !== undefined ? { seeds: instance.seeds } : {}),
         ...(template.target !== undefined ? { target: template.target } : {}),
@@ -432,6 +477,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         command: template.command,
         env,
         params,
+        ...(prompt !== undefined ? { prompt } : {}),
         trace: template.trace,
         ...(image !== undefined ? { image } : {}),
         ...(template.workDir !== undefined ? { workDir: template.workDir } : {}),

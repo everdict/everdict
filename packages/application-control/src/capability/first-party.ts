@@ -978,6 +978,7 @@ If you find yourself wanting either waiver, the BATCH is wrong, not the frame. F
 A candidate is an INSTANCE: \`{ template: {id, version}, id, version, pins, overrides? }\`. The template is the
 structure and the instance fills its slots, so the levers are ordered by how much structure they move:
 \`pins.model\` · \`overrides\` (env/params the template exposes: retries, tool budgets, timeouts) ·
+\`overrides.prompt\` (the standing prompt, when the template declares a \`promptChannel\`) ·
 \`pins.image\` (the scaffold's own bytes) · \`template.version\` (a different structure — the biggest lever,
 and the one that most deserves a fresh baseline). Load \`references/levers.md\` for what each one costs.
 
@@ -1053,6 +1054,14 @@ the cheapest to author: one pin, one new instance version.
 **\`overrides\`** — structure-invariant behaviour the template exposes (env, params, body): retry counts, tool
 budgets, timeouts, the parameters a template deliberately left open. Prefer these over prompt micro-edits;
 wording changes measure as noise, stop conditions and budgets do not.
+
+**\`overrides.prompt\`** — the standing prompt, when the template declares a \`promptChannel\`. It is its own
+axis rather than another env key, so the digest seals it and \`diff_harness_versions\` reports \`prompt\`
+moving — which is what lets a round say "the prompt was the lever" instead of "an env key changed". The
+sentence above still holds and is the reason this lever is listed AFTER the others: a rewording is a small
+effect on a per-case pass rate, and a small effect is exactly what a family-corrected exam refuses. Change the
+prompt when you can name the MECHANISM it changes (the agent never opens the second workbook), not to try
+different phrasings; and size \`trialsPerCase\` for the effect you expect (references/frame-design.md).
 
 **\`pins.image\`** — the scaffold's own bytes. \`pin_harness_images\` mints an image-only successor headlessly,
 which is the same door CI re-pins through, so a campaign candidate and a merge re-pin produce the same shape.
