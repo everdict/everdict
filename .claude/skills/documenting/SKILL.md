@@ -33,6 +33,25 @@ The test is one question: **what breaks if this is missing?** A defect written a
 design that goes the wrong way for lack of context is a skill. An argument nobody can reconstruct in six
 months is a document.
 
+## Two layers that are not any of the three
+
+`intent/` and `releases/` arrived after this page was written, and neither is a doc, a rule or a skill. The
+test that separates them from all three is tense:
+
+    RULE / SKILL / DOC     describe or constrain work — what to do, how, and why we chose it
+    intent/<date>-<slug>/  ASKS for work that has not happened, and is answered by a plan and a diff
+    releases/<tag>.md      SETTLES an act that cannot be undone, before it happens
+
+A record of a decision already made is a `decision` document. A request for a change nobody has made yet is an
+`intent.md`, and `pnpm intent-chain` refuses a plan that does not descend from one. An authorization for a
+tag push is a `releases/<tag>.md`, and the push gate refuses the tag without it. Neither carries the `kind:`
+frontmatter of a document, because neither is one — see `intent/README.md` and `releases/README.md`.
+
+The overlap worth naming: an intent that is accepted and shipped often DESERVES a `decision` document, and
+they are not the same artifact. The intent records what was wanted; the decision records what was chosen
+against. Writing only the first leaves the alternative unrecorded, which is the whole reason the decision
+layer exists.
+
 ## Choosing, in order
 
 1. **Is it a prohibition that fires while typing?** → rule. Keep it to the non-default: what an ecosystem

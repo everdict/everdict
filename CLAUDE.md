@@ -58,6 +58,14 @@ cover `trust-fast`** — a required check needing a real Postgres + object store
 a FAILED certification, and skipping is the local default without `EVERDICT_TRUST_DATABASE_URL`. Never push
 red; after pushing, confirm the run went green (`gh run watch … --exit-status`).
 
+## The harness's own directories
+- `intent/`   — where a change starts: `intent.md` → `spec.md` → `plan.md`, one directory per change. `pnpm intent-chain`.
+- `evals/`    — the regression suite over the configuration that steers the AGENT (not the product's scoring domain). `pnpm agent-evals`.
+- `releases/` — the authorization a release tag needs before it may leave. `releases/<tag>.md`, committed.
+- `REVIEW.md` — the review policy `pnpm review` applies to every push carrying product code.
+- `scripts/bands/`, `scripts/telemetry/` — what watches the harness and what collects what files cannot answer.
+See rule `.claude/rules/ci.md` for what each refuses and why; `docs/architecture/harness-observability.md` for what it can see about itself.
+
 ## The change chain — `intent/` before code
 A change whose *why* someone else would have to reconstruct starts as `intent/<YYYY-MM-DD>-<slug>/intent.md`,
 gains a `plan.md` **in a later commit**, and closes with `Status: shipped` + `Shipped: <sha>`. `pnpm intent-chain`

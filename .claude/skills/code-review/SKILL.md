@@ -4,6 +4,12 @@ description: How to review a change in this repository so the review finds what 
 allowed-tools: Read, Grep, Glob, Bash
 ---
 # Code review — the passes a diff cannot do
+> **This skill now has an enforcer.** `REVIEW.md` at the repository root is the policy `pnpm review` applies to
+> every push carrying `packages/**` or `apps/**`, and `scripts/hooks/pre-push-gate.mjs` refuses that push until
+> a review has run for HEAD. The passes below are the source of REVIEW.md's four; keep them in step, and when
+> they disagree the file the reviewer reads is the one that decides. ⚠️ The gate asks whether the review
+> HAPPENED, never whether it was clean — findings rank and inform, and the judgement stays yours.
+
 
 A review that reads the diff finds what the author already thought about. Everything this repository has
 shipped as a P0 was outside the diff: a field that did not change while its MEANING did, a bound composed
