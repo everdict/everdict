@@ -1,6 +1,8 @@
 # Intent: four plays still wait for somebody to start them
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: d6134798a8e9e071c1b8b816b67725145b67f81c
 
 ## Problem
 
