@@ -1,6 +1,8 @@
 # Intent: the configuration that steers the agent gets the regression testing the code gets
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: a045d54a69b9d389d4045439a470104c61c6bf50
 
 ## Problem
 
