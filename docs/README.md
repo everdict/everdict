@@ -46,6 +46,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [models.md](models.md) — workspace-registered LLM models (provider · model · baseUrl · `apiKeySecret`), referenced by id from a judge/harness
 - [runtimes.md](runtimes.md) — tenant-registered execution infra (`local` | `nomad` | `k8s`); "my machine" → self-hosted runner
 - [scorecards.md](scorecards.md) — batch evals (dataset×harness → `Scorecard`+summary), baseline↔candidate diff, push/pull trace ingest, leaderboard
+- [architecture/in-place-case-retry-spec.md](architecture/in-place-case-retry-spec.md) — retrying a case inside its own scorecard: the attempt ledger, the execution revision, and why the ordinal is not on `CaseResult`
 - [suites.md](suites.md) — suites & version regression (`everdict suite`, scorecard diff)
 - [command-harness.md](command-harness.md) — declarative `command` harness: bring any CLI agent as a `HarnessSpec`, no code adapter
 - [service-harness.md](service-harness.md) — service-topology harnesses (multi-service + browser/OS target env), Nomad/K8s, OTel/MLflow trace

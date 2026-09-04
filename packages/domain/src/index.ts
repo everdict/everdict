@@ -30,6 +30,15 @@ export {
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
 export {
+  attemptCounts,
+  attemptsForCase,
+  keysRequiringReason,
+  nextExecutionRevision,
+  retryReasonRequired,
+  retrySummaryOf,
+  supersedeAttempts,
+} from "./scorecard/execution-revision.js";
+export {
   type GateEvaluation,
   type GateInput,
   applyInputTrust,

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { JudgeRunConfigSchema } from "../execution/case-job.js";
 import { CaseKeySchema } from "../execution/case-key.js";
-import { GraderSpecSchema, PlacementOsSchema, ScorecardSchema } from "../execution/eval-case.js";
+import { CaseResultSchema, GraderSpecSchema, PlacementOsSchema, ScorecardSchema } from "../execution/eval-case.js";
 import { VerdictPolicyRefSchema, VerdictPolicySchema } from "../execution/verdict-policy.js";
 import { GateDecisionSchema } from "./gate.js";
 import { ExportPayloadSourceSchema } from "./publication-operation.js";
@@ -816,6 +816,105 @@ export const ScorecardDecisionContextSchema = z.object({
 });
 export type ScorecardDecisionContext = z.infer<typeof ScorecardDecisionContextSchema>;
 
+// ── THE EXECUTION AXIS: A CASE MAY RUN MORE THAN ONCE INSIDE ONE SCORECARD ───────────────────────────
+//
+// `scoring[]` made the JUDGMENT axis append-only: the score plane mutates in place on a re-score and the
+// revision ledger is what keeps identity. Execution had no such axis. A case that died on infrastructure
+// could only be re-run by forking a WHOLE NEW scorecard (`origin.retryOf`), which leaves the original
+// record permanently carrying a failure nobody can repair and splits one experiment's evidence across two
+// ids that no gate, diff or trend joins.
+//
+// So a retry now happens IN PLACE, and the fields below are what make that safe to say:
+//
+//   scorecard.results[]   the CURRENT attempt per (caseId, trial) — unchanged shape, unchanged readers.
+//                         A monotonic projection (protocol L4): the newest attempt is the case's answer.
+//   caseAttempts[]        the append-only ledger of SUPERSEDED attempts, with their whole CaseResult.
+//                         Evidence is never destroyed by a retry; it is moved off the current plane.
+//   executions[]          the revision ledger — which pass replaced which attempts, when, by whom, why.
+//
+// ⚠️ THE ATTEMPT ORDINAL IS NOT ON `CaseResult`, DELIBERATELY. arch-review 66 established that platform
+// lifecycle state on the measurement document is a defect with three consequences, and the first one is
+// fatal here: `caseResultDigest`/`caseObservationDigest` cover that document, so stamping an attempt number
+// onto it would make the SAME agent bytes digest differently depending on how many times the platform had
+// to ask — and every receipt, judgment-input comparison and experiment-identity check joins on those
+// digests. The ordinal is the platform's record ABOUT the execution, so it lives here, on the ledger the
+// platform writes, and `CaseResult` keeps answering only "what did the agent do".
+
+// One superseded execution of a (caseId, trial). Heavy (it carries the whole result, trace included) — a
+// detail-only field like `scorecard` itself, never served in a list.
+export const CaseAttemptSchema = z.object({
+  caseId: z.string(),
+  trial: z.number().int().nonnegative().optional(),
+  // 1-based ordinal of this execution within THIS scorecard. The first run of a case is attempt 1, so an
+  // entry here is always >= 1 and the current result's ordinal is `1 + (entries for that key)`. Absent is
+  // not a legal value: an entry that cannot say which attempt it was is not evidence of anything.
+  attempt: z.number().int().positive(),
+  // The execution revision that displaced it, so a reader can join an attempt to the pass that ended it.
+  revision: z.number().int().positive(),
+  supersededAt: z.string(),
+  supersededBy: z.string().optional(),
+  result: CaseResultSchema,
+});
+export type CaseAttempt = z.infer<typeof CaseAttemptSchema>;
+
+// One in-place execution pass. Append-only, 1-based, strictly increasing — the same contract
+// `ScoringRevisionSchema` holds for judgments, and for the same reason: a decision that cited this record
+// pins the revision it read, so a later retry is DETECTABLE DIVERGENCE rather than a silent rewrite.
+export const ExecutionRevisionSchema = z.object({
+  revision: z.number().int().positive(),
+  // `initial` is never written by a pass — it exists so a reader can say "revision 1 is the original run"
+  // without a special case, the way `ScoringRevision.kind` does.
+  kind: z.enum(["initial", "retry"]),
+  // The (case, trial) keys this pass re-executed, each with the ordinal it PRODUCED. Stated by the pass
+  // rather than derived from the ledger, because "which cases did this pass touch" and "which attempts
+  // ended up superseded" are different questions: a pass whose case failed to dispatch touched it and
+  // superseded nothing.
+  cases: z.array(
+    CaseKeySchema.extend({
+      attempt: z.number().int().positive(),
+      // Did this case's new attempt actually replace the old one? A pass that ran and produced nothing
+      // usable says so here rather than by being absent from a list.
+      replaced: z.boolean(),
+    }),
+  ),
+  // WHY. Required when the pass retries a case that already carried a real verdict — see
+  // `retryReasonRequired` in @everdict/domain. A retry that launders a failure is permitted and is never
+  // silent: this is the field that makes it visible.
+  reason: z.string().optional(),
+  passId: z.string().optional(),
+  createdAt: z.string(),
+  createdBy: z.string().optional(),
+});
+export type ExecutionRevision = z.infer<typeof ExecutionRevisionSchema>;
+
+// The in-flight retry pass — the shape `ScoringPassSchema` has, for the reason it has it: the pass row is
+// written and READ BACK before any case is dispatched (protocol L1), so a crash mid-retry leaves an
+// addressable operation rather than a batch whose results half moved.
+export const ExecutionPassSchema = z.object({
+  passId: z.string().min(1),
+  epoch: z.number().int().positive().optional(),
+  leaseUntil: z.string().optional(),
+  heartbeatAt: z.string().optional(),
+  targetRevision: z.number().int().positive(),
+  baseRevision: z.number().int().nonnegative(),
+  cases: z.array(CaseKeySchema).min(1),
+  reason: z.string().optional(),
+  startedAt: z.string(),
+  startedBy: z.string().optional(),
+  status: z.enum(["running", "failed"]),
+  failedAt: z.string().optional(),
+  failure: z.string().optional(),
+});
+export type ExecutionPass = z.infer<typeof ExecutionPassSchema>;
+
+// The light summary a LIST may carry — how many cases were re-executed and how many attempts that cost.
+// Derivable from `caseAttempts`, which a list never loads; that is the whole reason it exists separately.
+export const ScorecardRetrySummarySchema = z.object({
+  cases: z.number().int().nonnegative(),
+  attempts: z.number().int().nonnegative(),
+});
+export type ScorecardRetrySummary = z.infer<typeof ScorecardRetrySummarySchema>;
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -939,6 +1038,14 @@ export const ScorecardRecordSchema = z.object({
   // express deletion with undefined); readers treat null and absent alike. Rides the LIST projection —
   // product readiness and the regression watch decide on list/get rows and must see it.
   scoringPass: ScoringPassSchema.nullable().optional(),
+  // The EXECUTION axis, mirroring the two above (see THE EXECUTION AXIS): the append-only revision ledger,
+  // the heavy superseded-attempt ledger (detail only — never served in a list), the in-flight pass, and the
+  // light count a list can afford. `null` is the CLEAR value on the update wire for the pass, exactly as it
+  // is for `scoringPass`.
+  executions: z.array(ExecutionRevisionSchema).optional(),
+  caseAttempts: z.array(CaseAttemptSchema).optional(),
+  executionPass: ExecutionPassSchema.nullable().optional(),
+  retrySummary: ScorecardRetrySummarySchema.optional(),
   // The batch's ASK — cases × trials at submit (ingest: the trace count). The requested−executed gap is the
   // unlaunched/cancelled tally no per-result walk can recover once cases were skipped. mig 0127.
   requested: z.number().int().nonnegative().optional(),

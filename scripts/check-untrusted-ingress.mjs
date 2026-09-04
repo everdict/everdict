@@ -41,6 +41,8 @@ const ALLOWED = {
   "packages/contracts/src/execution/verifier-result-wire.ts": "the verifier's own sentinel, a separate wire",
   "packages/contracts/src/job-result-wire.ts": "declares the sentinel decoder; it parses with the UNTRUSTED variant",
   "packages/contracts/src/records/run.ts": "the stored run record",
+  "packages/contracts/src/records/scorecard.ts":
+    "the stored scorecard record — CaseAttempt holds a result WE moved off the current plane",
   "packages/contracts/src/wire/run/run-live-trace.ts": "a response shape WE serialize",
   "packages/contracts/src/wire/scorecard/scorecard.ts": "a response shape WE serialize",
   "packages/db/src/results/trajectory-body.ts": "decodes trajectory bytes WE sealed",
