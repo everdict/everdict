@@ -1,4 +1,10 @@
-import { BadRequestError, type CaseResult, type Scorecard, type VerdictPolicy } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type CaseResult,
+  FISHER_MAX_TRIALS,
+  type Scorecard,
+  type VerdictPolicy,
+} from "@everdict/contracts";
 import { caseVerdict } from "./scorecard.js";
 import { DEFAULT_VERDICT_POLICY } from "./verdict-policy.js";
 
@@ -164,7 +170,10 @@ function twoProportionZ(cb: number, nb: number, cc: number, nc: number): number 
 }
 
 // Below this many trials on either side the z normal approximation is unreliable — use Fisher's exact test.
-const FISHER_MAX_N = 30;
+// The threshold lives in `@everdict/contracts` because the campaign frame's creation rule needs it too: a
+// frame declaring fewer trials than its significance level can ever reach is refused at open, and that
+// refusal is only correct inside this regime (`equalArmFisherFloor`, and the parity test beside it).
+const FISHER_MAX_N = FISHER_MAX_TRIALS;
 
 const logFactCache: number[] = [0];
 function logFactorial(n: number): number {

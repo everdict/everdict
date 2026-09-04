@@ -30,7 +30,11 @@ const frame = (over: Partial<CampaignFrame> = {}): CampaignFrame =>
       { id: "held-2", heldOut: true },
     ],
     judges: [],
-    trialsPerCase: 3,
+    // FIVE, not three: at `fdrAlpha/heldOutFamilySize` = 0.01 the exact test's floor over two arms of three is
+    // 0.1, so this frame — the one this file calls "what a real campaign declares" — could never have recorded
+    // a significant case. `unwinnableFrameDefect` refuses it now; the number was incidental to what is asserted
+    // here, and its old value is why that rule exists.
+    trialsPerCase: 5,
     budget: { maxRounds: 5 },
     stopAfterRejectedRounds: 3,
     significance: { fdrAlpha: 0.05, heldOutFamilySize: 5 }, // frozen: the level, and the family it is corrected over

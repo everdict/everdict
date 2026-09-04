@@ -186,6 +186,31 @@ export type StoredCampaignFrame = z.infer<typeof StoredCampaignFrameSchema>;
 //
 // So the rule is exported as a predicate the creation schema and the decision path both consume. Written
 // twice it would already have diverged (rule `protocol` L3); written once, tightening it tightens both.
+// ── THE EXACT TEST HAS A FLOOR, AND A FRAME CAN DECLARE ITSELF BELOW IT ────────────────────────────
+//
+// A round's significance is Fisher exact while either arm is under `FISHER_MAX_TRIALS`, judged by
+// Benjamini-Hochberg at `fdrAlpha / heldOutFamilySize`. Fisher over two arms of n cannot return an arbitrarily
+// small p: the most extreme table two equal arms can produce is perfect separation (0/n against n/n), and its
+// two-sided p is 2/C(2n,n). No candidate, however good, goes below that.
+//
+// So `trialsPerCase` and the corrected level are not independent declarations. Below the floor, every round of
+// the campaign records zero significant cases for arithmetic reasons — before any agent runs.
+//
+// ⚠️ Owned here rather than beside the test in `@everdict/domain` because the CREATION schema is what has to
+// refuse it, and contracts is the root both cones reach. `equalArmFisherFloor` is not a second implementation
+// of the test — it is the test's minimum — and domain pins the two together against the real
+// `fisherExactTwoSided`, so a drift is a red suite rather than a silently wrong refusal.
+export const FISHER_MAX_TRIALS = 30;
+
+// The smallest two-sided Fisher p two arms of `trials` can produce: 2/C(2n,n), the perfect-separation table
+// counted from both tails. Total, and exact enough well past the regime it is asked about (n < 30).
+export function equalArmFisherFloor(trials: number): number {
+  if (!Number.isInteger(trials) || trials < 1) return 1;
+  let central = 1; // C(2n, n), as a product so no factorial overflows
+  for (let i = 1; i <= trials; i++) central *= (trials + i) / i;
+  return Math.min(1, 2 / central);
+}
+
 export function campaignFrameDefects(frame: {
   scenarios: ReadonlyArray<{ id: string; heldOut?: boolean }>;
   targets?: ReadonlyArray<string>;
@@ -229,9 +254,40 @@ export function campaignFrameDefects(frame: {
   return defects;
 }
 
+// ── A RULE THAT APPLIES AT CREATION AND NOWHERE ELSE ───────────────────────────────────────────────
+//
+// `campaignFrameDefects` is deliberately shared by the creation schema and every decision path, because its
+// rules are about whether a frame can produce VALID adoption evidence — true of a stored row as much as a new
+// one. This one is not that shape, and putting it there would have been wrong in a way worth naming.
+//
+// `trialsPerCase` is a FLOOR, not the experiment: `logRound` refuses a round that ran FEWER trials and accepts
+// one that ran more, and the diff tests whatever was actually run. So a campaign declaring 3 and running 20 is
+// legal today and produces perfectly good significance — and a decision-path refusal reading the DECLARED
+// number would have broken it, on a reading the platform's own round check contradicts.
+//
+// At creation there is no such ambiguity: the declaration is all that exists, it is about to be frozen, and the
+// driver can still change it. That is the one moment this arithmetic is both knowable and actionable.
+export function unwinnableFrameDefect(frame: {
+  trialsPerCase: number;
+  significance: { fdrAlpha?: number; heldOutFamilySize?: number };
+}): string | undefined {
+  const { fdrAlpha, heldOutFamilySize } = frame.significance;
+  // Asked only when both halves were declared — their absence is its own defect, and a second message about a
+  // level that does not exist is noise — and only in the exact-test regime, since at `FISHER_MAX_TRIALS` on
+  // both arms the diff switches to the two-proportion z and this floor stops being what binds.
+  if (fdrAlpha === undefined || heldOutFamilySize === undefined || frame.trialsPerCase >= FISHER_MAX_TRIALS)
+    return undefined;
+  const floor = equalArmFisherFloor(frame.trialsPerCase);
+  const level = fdrAlpha / heldOutFamilySize;
+  if (floor <= level) return undefined;
+  return `no round of this campaign can produce a significant case: with ${frame.trialsPerCase} trials per case the exact test cannot return a p below ${floor.toFixed(6)}, and this frame is judged at fdrAlpha/heldOutFamilySize = ${level.toFixed(6)} — raise trialsPerCase, or declare a level the trials can reach`;
+}
+
 // The CREATION schema: the shape above plus the discipline a NEW campaign must satisfy.
 export const CampaignFrameSchema = CampaignFrameShape.superRefine((frame, ctx) => {
   for (const message of campaignFrameDefects(frame)) ctx.addIssue({ code: "custom", path: ["scenarios"], message });
+  const unwinnable = unwinnableFrameDefect(frame);
+  if (unwinnable !== undefined) ctx.addIssue({ code: "custom", path: ["trialsPerCase"], message: unwinnable });
 });
 export type CampaignFrame = z.infer<typeof CampaignFrameSchema>;
 

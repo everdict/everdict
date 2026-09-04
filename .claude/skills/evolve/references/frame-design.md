@@ -124,6 +124,27 @@ has to carry the round alone.
 A twenty-round campaign at N=5 is a campaign that cannot adopt anything, and it will spend its whole budget
 finding that out.
 
+**The strictly-dead corner is now a door, not advice.** The N=3 row above is not "hard"; it is impossible, and
+`unwinnableFrameDefect` (`@everdict/contracts`, consumed by `CampaignFrameSchema` — creation only, because
+`trialsPerCase` is a floor a round may exceed) refuses the frame at open when the exact test's own floor
+exceeds `fdrAlpha / heldOutFamilySize`. At the ordinary `fdrAlpha: 0.05` that is every frame declaring four
+trials or fewer. It was added because a real wave burned nine rounds of live agent time discovering it from
+refusals, and because the repository's own "what a real campaign declares" fixture was in that state.
+
+**And inside the legal range, ask what a PARTIAL improvement is worth, because the answer is usually
+nothing.** At N=6 with alpha' = 0.05/3 and four cases, the only qualifying per-case result is a perfect flip:
+
+    0/6 → 6/6   p = 0.0022    counts
+    0/6 → 5/6   p = 0.0152    refused
+    0/6 → 4/6   p = 0.0606    refused
+    1/6 → 6/6   p = 0.0152    refused — a case that starts non-zero cannot qualify at all
+
+That is honest and it is also blind in a specific way: a strategy that takes a target from 0/6 to 5/6 and one
+that does nothing produce the SAME verdict (`0 significant`), so the round trace carries no gradient. The
+difference survives only in `learned`, which is advice and never evidence. If you expect partial movement —
+and on a hard benchmark you should — either raise N until a partial win clears (7/8 does), or accept that the
+campaign is a pass/fail exam and choose targets you believe can be flipped outright.
+
 ## What makes a round WIN
 
 The gate looks only at the LATEST round — adoption is of the current variant, never archaeology over the
