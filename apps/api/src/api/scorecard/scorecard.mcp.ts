@@ -208,7 +208,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       {
         annotations: { readOnlyHint: false },
         description:
-          "Retry a finished batch's FAILED cases as a new scorecard — passing results are carried over verbatim (full comparable case set), origin.retryOf keeps the lineage. The source record is never mutated.",
+          "Retry a finished batch's FAILED cases as a NEW scorecard — passing results are carried over verbatim (full comparable case set), origin.retryOf keeps the lineage. The source record is never mutated. This is the FORK; to repair the record you have, use retry_scorecard_cases.",
         inputSchema: {
           id: z.string().describe("source scorecard id (must be succeeded/failed)"),
           failure_class: z
@@ -228,6 +228,51 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
               id,
               submittedBy: principal.subject,
               ...(failure_class ? { failureClass: failure_class } : {}),
+            }),
+          );
+        }),
+    );
+
+    server.registerTool(
+      "retry_scorecard_cases",
+      {
+        annotations: { readOnlyHint: false },
+        description:
+          "Retry named cases INSIDE this scorecard — the same record, a new attempt per case, and the attempt each one replaces preserved on it with its own result and commit receipt. The newest attempt is the case's answer and retrySummary says how many times each case has run. Use this when a case died on infrastructure, or when a judge or grader failure needs the case re-executed: retry_scorecard forks a NEW scorecard and leaves this one carrying a failure nobody can repair. The cases re-run under the batch's OWN sealed plan (its dataset documents, grading plan, environments and harness closure at the recorded versions), so the experiment does not move. A case that already reached a verdict may be retried and REQUIRES a reason — that is allowed and is never silent, and the reason lands on the execution revision. Refuses a case the batch never ran, a batch still running, and a second retry while one is in flight.",
+        inputSchema: {
+          id: z.string().describe("scorecard id (must be terminal)"),
+          cases: z
+            .array(
+              z.object({
+                case_id: z.string().describe("the case to re-run"),
+                trial: z
+                  .number()
+                  .int()
+                  .nonnegative()
+                  .optional()
+                  .describe("which trial of a pass@k batch — omit for a single-run case"),
+              }),
+            )
+            .min(1)
+            .describe("the cases to re-run, each addressed as (case, trial)"),
+          reason: z
+            .string()
+            .optional()
+            .describe("why — REQUIRED when a named case already reached a verdict, recorded on the revision"),
+        },
+      },
+      ({ id, cases, reason }) =>
+        run(principal, "scorecards:run", async () => {
+          await assertBatchReachable(ctx, "scorecards:run", id);
+          return ok(
+            await scorecards.retryCases({
+              tenant: ws,
+              id,
+              cases: cases.map((c) =>
+                c.trial === undefined ? { caseId: c.case_id } : { caseId: c.case_id, trial: c.trial },
+              ),
+              ...(reason ? { reason } : {}),
+              submittedBy: principal.subject,
             }),
           );
         }),

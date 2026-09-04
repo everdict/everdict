@@ -1,15 +1,14 @@
 ---
 kind: spec
 title: "In-place case retry — a scorecard remembers that a case ran more than once"
-status: proposed
+status: landed
 updated: 2026-09-04
 anchors: [packages/contracts/src/records/scorecard.ts, packages/domain/src/scorecard/execution-revision.ts, packages/application-control/src/scorecard/retry-failed-batch.ts]
 ---
 # In-place case retry — a scorecard remembers that a case ran more than once
 
-> **Status: proposed.** Nothing below is implemented unless a section says **Landed**. Each slice names the
-> counterexample that has to be RED before it lands, because a retry path that cannot be shown to refuse is
-> a rewrite of history with a nicer name.
+> **Status: landed.** Every slice below is built. The counterexample each one owed is named with it, because
+> a retry path that cannot be shown to refuse is a rewrite of history with a nicer name.
 
 ## The gap, stated
 
@@ -91,7 +90,7 @@ Six invariants, each driven RED by neutralizing it in the production file and re
 | a retry may not ADD a case to a sealed batch | append the orphan to the plane |
 | a pass that produced nothing may not EMPTY a case | filter the plane to what came back |
 
-## Slice 2 — the pass: retry selected cases in place
+## Slice 2 — the pass: retry selected cases in place — **Landed**
 
 `ScorecardService.retryCases({tenant, id, cases[], reason?})`, and the sequence is the protocol:
 
@@ -106,29 +105,31 @@ Six invariants, each driven RED by neutralizing it in the production file and re
 6. settle in ONE guarded write: supersede → append the revision → recompute `summary` / `verdictSummary` /
    `trialSummary` / `retrySummary` → clear the pass.
 
-**Step 3 is Landed** (see slice 3). **Step 4's plan rebuild is Landed**: `rebuildSealedPlan`
+**The whole sequence is Landed** as `RetryCasesInPlace` (`ScorecardService.retryCases`). The plan rebuild is `rebuildSealedPlan`
 (`packages/application-control/src/scorecard/sealed-plan-rebuild.ts`) restores all five facets, and
 `RetryFailedBatch` was rewired onto it rather than keeping a second copy — a five-facet restoration written
 twice has already diverged (protocol L3), and the half that rots is the one whose author was thinking about
 something else. Its 21 behaviour tests pass unchanged.
 
-**What is NOT yet landed is the dispatch itself, and reading the existing path says why it is its own slice.**
-`WorkflowBatchDriver.runBatchCase` — the natural reuse, since it already runs exactly one (case, trial) of a
-batch — opens with two short-circuits an in-place retry must pass through:
+**The dispatch is `WorkflowBatchDriver.runBatchCase`**, which already runs exactly one (case, trial) of a
+batch. It opens with two short-circuits an in-place retry must pass through:
 
     if (current && ScorecardBatch.from(current).isTerminal()) return { settled: true, skipped: true };
     if (ctx.doneKeys.has(workKey))                            return { settled: true, skipped: true };
 
-Both are correct for what they guard (a terminal batch takes no more work; a committed case is not re-run)
-and both describe the retry's ordinary case. `doneKeys` is built from the receipt ledger, which is the same
-place slice 3's receipt question lives — so loosening these is not a flag, it is the design of how a pass
-authorizes work on a settled record. It is written where the receipt identity is decided, or the guard and
-the ledger will disagree.
+Both are correct for what they guard and both describe the retry's ordinary case. They now take
+`authority?: ExecutionPassAuthority` — absent (every ordinary dispatch, every Temporal activity, every
+recovery) the method is exactly what it was; present and naming THIS record, it walks them and threads the
+same authority to the commit. `doneKeys` is built from the receipt ledger, which is the ledger the commit
+supersedes under that same authority, so the guard and the ledger stay one decision.
 
-**Counterexamples owed.** A retry with no `reason` on a completed case is refused. A retry naming a case the
-batch never sealed is refused. Two concurrent retries: the second is refused, not merged — *this one is
-Landed, driven against a real Postgres and against the twin.* A crash between step 3 and step 6 leaves a
-readable pass and no half-moved plane. A settle whose guarded write loses the CAS supersedes nothing.
+**Counterexamples, all Landed.** An empty case list claims no pass. Another workspace's scorecard is 404 —
+the same answer the read gives. A running batch is refused. A case the batch never sealed is refused, and
+nothing is dispatched. A decided case with no `reason` is refused, and nothing is dispatched — a refusal is
+worth nothing if the compute was already spent. The same retry WITH a reason records it on the revision. An
+infra death needs none. A second retry while one is live is refused. A case that throws leaves the marker
+`failed` rather than cleared: a dead pass is addressable, a cleared one is indistinguishable from a pass that
+never ran. And the marker is cleared in the SAME write that appends the revision — the revision boundary.
 
 ## Slice 3 — the ledger's neighbours: receipts, child runs, storage — **storage Landed**
 
@@ -194,18 +195,24 @@ answers rather than assumes:
   statement no planner accepts: a fresh claim wins and the DATABASE mints the lease, a rival fresh claim is
   refused, the owner writes, a stranger is refused.
 
-## Slice 4 — the doors
+## Slice 4 — the doors — **Landed**
 
 `POST /scorecards/:id/retry-cases` (body: `cases[]`, `reason?`; gate `scorecards:run`; 404 for another
-workspace, the same answer the read gives) and the MCP twin — BFF↔MCP parity is structural, and an operation
-an agent cannot drive is one no agent loop can converge. The existing forking `/retry` stays, renamed in its
-own documentation as what it is: a fork, for when you want a separate experiment.
+workspace, the same answer the read gives) and the MCP twin `retry_scorecard_cases` — BFF↔MCP parity is
+structural, and an operation an agent cannot drive is one no agent loop can converge. The forking `/retry`
+stays, and both its route description and its MCP tool now say what it is and name its sibling.
 
-## Slice 5 — the surfaces
+## Slice 5 — the surfaces — **Landed**
 
-The case row shows its attempt count and lets a reader open a superseded attempt's trace; the scorecard shows
-`retrySummary`. Without this the ledger is a field nobody reads, which is the defect the whole record system
-is built to refuse.
+The case row shows its attempt count (`ran 2×`), derived from the ledger rather than read from a stored
+number — two counters of one fact diverge eventually. `RetryCaseButton` re-runs one case and asks for a
+reason first when the case already reached a verdict, while the control plane refuses without one rather
+than trusting the component to have asked. The web decodes only what it renders: `caseAttempts` is typed
+there WITHOUT the displaced result, because a schema that decoded one would put a second trace behind every
+case row.
+
+**Still owed here**: opening a superseded attempt's trace. The bytes are on the record; nothing reads them
+yet.
 
 ## What this does NOT do
 

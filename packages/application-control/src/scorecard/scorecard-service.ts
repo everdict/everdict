@@ -1755,6 +1755,18 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return this.batch.retryFailed(input);
   }
 
+  // …and the IN-PLACE retry: the same scorecard, a new attempt per named case, the displaced ones kept on
+  // the attempt ledger. `retryFailed` above forks a new record; this one repairs the record you have.
+  retryCases(input: {
+    tenant: string;
+    id: string;
+    cases: readonly CaseKey[];
+    reason?: string;
+    submittedBy?: string;
+  }): Promise<ScorecardRecord> {
+    return this.batch.retryCases(input);
+  }
+
   planBatch(id: string): Promise<{ caseIds: string[]; items: CaseKey[]; concurrency: number }> {
     return this.batch.planBatch(id);
   }

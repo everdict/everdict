@@ -18,6 +18,7 @@ import {
   scorecardPageOf,
 } from "./request/list-scorecards.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
+import { RetryCasesBodySchema } from "./request/retry-cases.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 import { scorecardDocs } from "./scorecard.docs.js";
 import { serveScorecard, serveScorecardListItem } from "./serve.js";
@@ -107,6 +108,41 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
       return sendError(reply, err); // not found 404 / not terminal · nothing failed 400
     }
   });
+
+  // Retry-cases — the same scorecard, a new attempt per named case, the displaced attempt preserved.
+  // `POST /retry` above FORKS; this one repairs the record you have. Same gate as submit (scorecards:run).
+  // docs/architecture/in-place-case-retry-spec.md
+  app.post<{ Params: { id: string } }>(
+    "/scorecards/:id/retry-cases",
+    { schema: scorecardDocs.retryCases },
+    async (req, reply) => {
+      if (!deps.scorecardService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        // The ROLE first, before any store work: a viewer is 403 without this route reading anything —
+        // the order `server.test.ts` pins by name ("gated before the service runs").
+        gate(principal, "scorecards:run");
+        // …then WHOSE batch it is. Refused as 404, the same answer the read gives for this id, so an
+        // outsider cannot operate on it (arch-review 119).
+        if (!(await scorecardIsOurs(deps, principal, req.params.id)))
+          return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
+        const body = RetryCasesBodySchema.parse(req.body);
+        return reply.send(
+          await deps.scorecardService.retryCases({
+            tenant: principal.workspace,
+            id: req.params.id,
+            cases: body.cases,
+            ...(body.reason ? { reason: body.reason } : {}),
+            submittedBy: principal.subject,
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err); // 400 unsealed case / no reason · 404 missing · 409 running or claimed
+      }
+    },
+  );
 
   // Targeted transient-scoring recovery: re-run ONLY the judges whose scores are retryable-unmeasured
   // (judge LLM/transport blips), replacing their rows in place — no case re-execution. Non-judge unmeasured

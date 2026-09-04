@@ -57,10 +57,12 @@ import { jobAttemptId, openPhysicalAttempt } from "../execution/open-physical-at
 function executionIdFor(batchId: string, key: CaseKey): ExecutionId {
   return caseExecutionId(batchId, key.caseId, key.trial);
 }
+import type { CaseCommitReceipt } from "@everdict/contracts";
 import type { ScoringService, SealedJudgeClosure } from "../execution/scoring-service.js";
 import { weightedTargets } from "../ops/shard-weights.js";
 import { SpeculationController } from "../ops/speculation.js";
 import { stampFacts } from "../platform-event/outbox.js";
+import type { ExecutionPassAuthority } from "../ports/case-receipt-store.js";
 import { settleScorecard } from "../ports/settle.js";
 import { sealExecutionPlanes } from "../ports/trajectory-store.js";
 import type { BatchDriverShared } from "./batch-driver-shared.js";
@@ -388,7 +390,23 @@ export class WorkflowBatchDriver {
   // it is present the whole execution — the claim, the child row, the correlation id, the job, the result's
   // own stamp and the done marker — carries it, because a trial is a separate physical execution with its own
   // receipt, not a repetition of the same one (arch-review 52, wave 1).
-  async runBatchCase(id: string, caseId: string, trial?: number): Promise<{ settled: boolean; skipped?: boolean }> {
+  // ── AN IN-PLACE RETRY PASSES THE TWO GUARDS BELOW, AND NOTHING ELSE DOES ───────────────────────────
+  //
+  // `authority` is the retry pass's proof (`ExecutionPassAuthority`, minted only from a live
+  // `execution_pass` marker the scorecard store returned). Absent — which is every ordinary dispatch,
+  // every Temporal activity, every recovery — this method is exactly what it was.
+  //
+  // Both guards are CORRECT for what they guard and both describe a retry's ordinary case: a terminal batch
+  // takes no more work, and a case already in `doneKeys` is not re-run. Loosening them for anyone would be
+  // a defect; loosening them for a caller that can prove one pass owns this record is the feature.
+  // `doneKeys` comes from the receipt ledger — the same ledger the commit will supersede under this same
+  // authority — so the guard and the ledger stay one decision rather than two that agree most of the time.
+  async runBatchCase(
+    id: string,
+    caseId: string,
+    trial?: number,
+    authority?: ExecutionPassAuthority,
+  ): Promise<{ settled: boolean; skipped?: boolean; displaced?: CaseCommitReceipt }> {
     const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
     const caseKey = caseKeyOf(caseId, trial);
     const workKey = encodeCaseKey(caseKey);
@@ -397,8 +415,11 @@ export class WorkflowBatchDriver {
     // queue, and it keys on TERMINAL (not just superseded): a user-cancelled batch's queued activities would
     // otherwise run whole cases — and mint fresh queued child runs — for a batch that is already dead.
     const current = await this.deps.store.get(id);
-    if (current && ScorecardBatch.from(current).isTerminal()) return { settled: true, skipped: true };
-    if (ctx.doneKeys.has(workKey)) return { settled: true, skipped: true };
+    // An authority is for ONE record. A pass on batch A must not walk batch B past its guards, and nothing
+    // downstream would notice — the same check the receipt store makes, for the same reason.
+    const retrying = authority !== undefined && authority.scorecardId === id;
+    if (!retrying && current && ScorecardBatch.from(current).isTerminal()) return { settled: true, skipped: true };
+    if (!retrying && ctx.doneKeys.has(workKey)) return { settled: true, skipped: true };
     // Concurrent-dispatch guard (gap 12): a Temporal retry can re-invoke runBatchCase for the SAME caseId (same worker)
     // while the original is still in-flight — before doneIds is set — so both used to execute the harness (wasted
     // compute; the durable result was already at-most-once via doneIds/planBatch). Claim the caseId SYNCHRONOUSLY here
@@ -723,6 +744,9 @@ export class WorkflowBatchDriver {
         ...(winnerAttemptId !== undefined ? { attemptId: winnerAttemptId } : {}),
         ...(unisolated || winnerUnisolated ? { unisolated: true } : {}),
         ...(ranOn ? { ranOn } : {}),
+        // The one seam where a committed case's pointer may move. Threaded rather than read from ambient
+        // state: a commit that cannot name its authority does not have one.
+        ...(retrying && authority ? { authority } : {}),
       });
       // A CHILD COMMIT THAT DID NOT HAPPEN IS NOT A SETTLED CASE (review 39 P0-3). `lost` means another
       // attempt owns the case (or this driver was displaced); `unwritten` means the store refused it. Either
@@ -742,7 +766,9 @@ export class WorkflowBatchDriver {
       });
       // The lifecycle FACT rode the commit transaction itself (finalizeCaseAttempt, E0) — persisted with the
       // child's terminal write and pushed to the live bus there, so nothing is emitted here.
-      return { settled: true };
+      // The displaced decision travels back to the pass, the only caller that can give it a home on the
+      // attempt ledger. Dropped here it would be the silent edit the supersession exists to refuse.
+      return { settled: true, ...(outcome.displaced ? { displaced: outcome.displaced } : {}) };
     } finally {
       ctx.inFlightKeys.delete(workKey); // release the claim so a failed/incomplete attempt (or the next one) is unblocked
     }

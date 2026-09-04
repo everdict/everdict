@@ -852,3 +852,4 @@ export {
   verifierOperation,
   type VerifierDurabilityPolicy,
 } from "./execution/verifier-operation.js";
+export { RetryCasesInPlace, type RetryCasesSupport, type RunRetryCase } from "./scorecard/retry-cases-in-place.js";

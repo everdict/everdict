@@ -110,6 +110,25 @@ policy's custom ground truth disappears and the built-in ladder re-decides every
   record, `ScorecardBatch.withTrialSummary` omits the roll-up, the regression watch never reopens an issue on
   one, and `retryFailed` refuses with a 400 rather than picking cases by re-judging them.
 
+## Retrying a case — in place, or as a fork
+
+Two different acts, and picking the wrong one is how a scorecard ends up permanently wrong:
+
+- **`POST /scorecards/:id/retry-cases`** (MCP `retry_scorecard_cases`) re-runs named cases **inside this
+  scorecard**. The newest attempt is the case's answer; the one it replaces is kept on the record with its own
+  result and commit receipt, and `retrySummary` says how many times each case has run. Use it when a case died
+  on infrastructure, or when anything needs the case re-executed rather than merely re-judged.
+- **`POST /scorecards/:id/retry`** (MCP `retry_scorecard`) forks a **new** scorecard from the failed cases,
+  carrying the passes over and linking back with `origin.retryOf`. Use it when you want a separate experiment.
+- **`POST /scorecards/:id/rescore-unmeasured`** re-runs only the judges behind retryable-unmeasured scores.
+  No case is re-executed. Use it for a judge LLM/transport blip.
+
+An in-place retry re-runs under the batch's **own sealed plan** — its dataset documents, grading plan,
+environments and harness closure at the versions it recorded — so the experiment does not move. A case that
+already reached a verdict may be retried and then **requires a `reason`**, which lands on the execution
+revision: laundering a failure is permitted and is never silent. See
+`docs/architecture/in-place-case-retry-spec.md` for the ledger, the pass claim and the supersession.
+
 ## Evidence completeness + the evidence era
 `evidenceStatus(result)` (`@everdict/domain`, served per case) reads how complete the evidence behind a case
 actually is: `trace: complete | partial | missing | deferred` and `snapshot: complete | missing`. It is

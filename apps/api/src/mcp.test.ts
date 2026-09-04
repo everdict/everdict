@@ -898,6 +898,7 @@ describe("MCP tools", () => {
       "rescore_unmeasured_scores",
       "resolve_harness_delegate",
       "retry_scorecard",
+      "retry_scorecard_cases",
       "revoke_api_key",
       "revoke_invite",
       "revoke_runner",

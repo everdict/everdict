@@ -21,6 +21,7 @@ const cases: ScorecardCaseView[] = Array.from({ length: CASES }, (_, index) => (
   key: `case-${index}`,
   caseId: `case-${index}`,
   occurrence: index,
+  attempts: 1,
   verdict: !isFailure(index),
   scores: [
     {

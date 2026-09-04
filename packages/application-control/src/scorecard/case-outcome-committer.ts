@@ -28,6 +28,7 @@ import {
 import type { SealedJudgeClosure } from "../execution/scoring-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import { offloadSnapshot } from "../ports/artifact-store.js";
+import type { ExecutionPassAuthority } from "../ports/case-receipt-store.js";
 import { requireAdopted } from "../ports/execution-attempt-store.js";
 import {
   type ReleasedCleanup,
@@ -402,7 +403,14 @@ export class CaseOutcomeCommitter {
     // nothing; without one, it falls back to the best-effort emit this fact always had.
     tenant?: string;
     announce?: { verdictPolicy?: VerdictPolicy; owner?: string };
-  }): Promise<{ kind: "committed"; result: CaseResult } | { kind: "lost" } | { kind: "unwritten" }> {
+    // Present ONLY on an in-place retry pass. Absent, every branch below is exactly what it was: a case
+    // that already committed answers `lost` and nothing moves. Present, this commit may replace the
+    // pointer, and the decision it displaces comes back on the outcome — the caller owes it a home on the
+    // scorecard's attempt ledger, which this committer cannot write.
+    authority?: ExecutionPassAuthority;
+  }): Promise<
+    { kind: "committed"; result: CaseResult; displaced?: CaseCommitReceipt } | { kind: "lost" } | { kind: "unwritten" }
+  > {
     // ── SCORE AUTHORITY IS SETTLED HERE, BEFORE ANY READER (F5) ─────────────────────────────────────
     //
     // Every reader below — the completion fact's verdict, the evidence assembly, the receipt's digest, the
@@ -614,10 +622,17 @@ export class CaseOutcomeCommitter {
         // …and the cleanup ledger, so a store with a transaction binds a twin and the release rides the
         // commit (arch-review 71 P1). Absent = this deployment has no ledger and nothing changes.
         this.deps.cleanup,
+        // The retry pass's authority, or nothing. This is the ONE seam where a committed case's pointer can
+        // move, so it is threaded as a parameter rather than read from ambient state: a commit that cannot
+        // name its authority does not have one.
+        input.authority,
       )
       .catch((err: unknown) => (err instanceof Error ? err : new Error(String(err))));
     if (outcome instanceof Error) return { kind: "unwritten" }; // the store could not take it — the batch must not pass
-    if (outcome.kind === "committed") {
+    // A supersession IS a commit — the same discharge, the same facts, the same terminal attempt — and it
+    // additionally hands back the decision it replaced. Folding it in here rather than adding a branch keeps
+    // every consequence of committing in one place; what differs is only what the caller is owed.
+    if (outcome.kind === "committed" || outcome.kind === "superseded") {
       // ── THE INTERMEDIATES ARE OWED NO LONGER (arch-review 64 P1-high) ──────────────────────────
       //
       // A two-phase case's staged half and staged verdict exist for one window, from the agent's container
@@ -652,7 +667,11 @@ export class CaseOutcomeCommitter {
       // An idempotent re-claim (already_committed below) pushes nothing — the first commit already did.
       if (stamped.length > 0) void this.deps.events?.pushPersisted?.(stamped);
       // …and the attempt reached its terminal state inside that same transaction (see the settle above).
-      return { kind: "committed", result: covered };
+      return {
+        kind: "committed",
+        result: covered,
+        ...(outcome.kind === "superseded" ? { displaced: outcome.displaced } : {}),
+      };
     }
     if (outcome.kind === "already_committed") {
       // The idempotent retry (a Temporal activity re-running its own commit) is a success; any OTHER child

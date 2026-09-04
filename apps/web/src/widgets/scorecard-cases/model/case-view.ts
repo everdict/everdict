@@ -61,6 +61,10 @@ export type ScorecardCaseView = {
   occurrence: number
   verdict?: boolean
   verdictBasis?: CaseVerdictBasisView
+  // How many times this (case, trial) has been EXECUTED in this scorecard — 1 unless a retry replaced an
+  // attempt. The list shows it because "this harness fails this task" and "our infrastructure was flaky on
+  // Tuesday" are different findings, and only the count separates them.
+  attempts: number
   scores: CaseScoreView[]
   // The child run that executed this case. When present, the dialog reads the trajectory from the ledger.
   runId?: string

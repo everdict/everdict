@@ -16,6 +16,7 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 import { AnalysisQueryBodySchema } from "./request/analysis-query.js";
 import { GateScorecardsBodySchema, OverrideGateBodySchema } from "./request/gate-scorecards.js";
 import { RerunScorecardBodySchema } from "./request/rerun-scorecard.js";
+import { RetryCasesBodySchema } from "./request/retry-cases.js";
 import { RunScorecardBodySchema } from "./request/run-scorecard.js";
 
 const scorecardIdParams = toJsonSchema(z.object({ id: z.string().describe("Scorecard id") }));
@@ -43,6 +44,7 @@ const docs = {
     description:
       "Creates a NEW scorecard that re-runs only the failed cases of a terminal batch; passing results are " +
       "carried over verbatim and origin.retryOf keeps the lineage (the source record is never mutated). " +
+      "This is the FORK — use POST /scorecards/:id/retry-cases to repair the record you have. " +
       "Requires scorecards:run (member+), workspace-scoped. 400 when the source is not terminal or nothing " +
       "failed. Optional ?class filter re-runs only that failure class's casualties.",
     tags: ["scorecard"],
@@ -58,6 +60,26 @@ const docs = {
     response: {
       202: { description: "Retry batch accepted (queued)", ...toJsonSchema(ScorecardResponseSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  retryCases: {
+    summary: "Retry named cases inside this scorecard",
+    description:
+      "Re-runs the named cases IN PLACE: the same scorecard, a new attempt per case, and the attempt each " +
+      "one replaces preserved on the record with its own result and commit receipt. The newest attempt is " +
+      "the case's answer and `retrySummary` says how many times each case has run — where POST /retry " +
+      "forks a NEW scorecard and leaves this one carrying a failure nobody can repair. The cases re-run " +
+      "under the batch's OWN sealed plan (its dataset documents, grading plan, environments and harness " +
+      "closure at the versions it recorded), so a retry measures the same experiment. Requires " +
+      "scorecards:run (member+), workspace-scoped. 400 when the batch has no results, when a named case is " +
+      "not in it, or when a case that already reached a verdict is retried with no `reason` — that is " +
+      "allowed and is never silent. 409 when the batch is still running or another retry pass owns it.",
+    tags: ["scorecard"],
+    params: scorecardIdParams,
+    body: toJsonSchema(RetryCasesBodySchema),
+    response: {
+      200: { description: "Retry settled", ...toJsonSchema(ScorecardResponseSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   rescoreUnmeasured: {

@@ -31,6 +31,7 @@ import { ExecutionPlan } from "./execution-plan.js";
 import { InProcessBatchDriver, type TrackOptions } from "./in-process-batch-driver.js";
 import { RecoveryPlanner } from "./recovery-planner.js";
 import { ResilientCaseRunner } from "./resilient-case-runner.js";
+import { RetryCasesInPlace } from "./retry-cases-in-place.js";
 import { RetryFailedBatch } from "./retry-failed-batch.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 import { embedHarnessSpec } from "./scorecard-plan.js";
@@ -77,6 +78,7 @@ export class ScorecardBatchService {
   private readonly workflow: WorkflowBatchDriver;
   // A terminal batch's successor (retry-failed), which produces a batch for whichever driver is configured.
   private readonly retry: RetryFailedBatch;
+  private readonly retryInPlace: RetryCasesInPlace;
 
   constructor(
     private readonly deps: ScorecardBatchDeps,
@@ -125,6 +127,15 @@ export class ScorecardBatchService {
       getRecord: shared.getRecord,
       childEnvelope: (record) => this.childEnvelope(record),
       track: (...args) => this.track(...args),
+    });
+    // The in-place retry — the same lifecycle one axis over (docs/architecture/in-place-case-retry-spec.md).
+    // It drives the WORKFLOW driver's per-case entry because that is the one that already runs exactly one
+    // (case, trial) of a batch; the authority it hands down is the only thing that walks a settled record's
+    // guards.
+    this.retryInPlace = new RetryCasesInPlace(deps, {
+      now: shared.now,
+      newId: shared.newId,
+      runCase: (id, caseId, trial, authority) => this.workflow.runBatchCase(id, caseId, trial, authority),
     });
     // ── A LEDGER WITH NO COMMIT POINT CANNOT SAY WHICH ATTEMPT ANSWERED (review 39, Phase 4) ─────────
     //
@@ -414,6 +425,18 @@ export class ScorecardBatchService {
     failureClass?: "infra" | "config" | "harness" | "agent";
   }): Promise<ScorecardRecord> {
     return this.retry.run(input);
+  }
+
+  // Retry named cases IN PLACE — the same scorecard, a new attempt, the displaced one kept. See
+  // `RetryCasesInPlace`; `retryFailed` above is the FORK, for when a separate experiment is what you want.
+  retryCases(input: {
+    tenant: string;
+    id: string;
+    cases: readonly CaseKey[];
+    reason?: string;
+    submittedBy?: string;
+  }): Promise<ScorecardRecord> {
+    return this.retryInPlace.run(input);
   }
 
   // The batch's progress timeline, appended through the per-batch context that serializes concurrent

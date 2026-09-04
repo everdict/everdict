@@ -253,6 +253,17 @@ const CaseListRow = memo(function CaseListRow({
           {t('caseTrialBadge', { n: item.trial })}
         </span>
       )}
+      {/* …and how many times it took to get this answer. A retried case reads exactly like a first-try one
+          without it, which is the difference between "this harness fails this task" and "our infrastructure
+          was flaky on Tuesday". */}
+      {item.attempts > 1 && (
+        <span
+          className="shrink-0 font-mono text-[11px] text-faint"
+          title={t('retryCaseAttemptsTitle', { attempts: item.attempts })}
+        >
+          {t('retryCaseAttempts', { attempts: item.attempts })}
+        </span>
+      )}
       {/* One line of what the case was (or what killed it) — so the list itself already says which case
           this is. */}
       {line !== undefined && (

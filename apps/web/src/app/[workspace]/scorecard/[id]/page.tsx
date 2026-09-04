@@ -540,6 +540,14 @@ export default async function ScorecardDetailPage({
           }
         : {}),
       hasScreenshot: hasOsUseShot(r.snapshot),
+      // How many times this (case, trial) has run in this scorecard — counted from the ledger, so 1 unless a
+      // retry displaced an attempt. Derived rather than read from a stored number: two counters of one fact
+      // diverge eventually, and the ledger is the half that has to be right.
+      attempts:
+        1 +
+        (record.caseAttempts ?? []).filter(
+          (a) => a.caseId === r.caseId && (a.trial ?? undefined) === (r.trial ?? undefined)
+        ).length,
       // How many there were and what the first one said — the full text belongs to the dialog. This one line
       // is how a failed row says "why it died" (before, that needed opening the case).
       errorCount: errors.length,

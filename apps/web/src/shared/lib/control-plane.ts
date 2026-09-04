@@ -1050,6 +1050,17 @@ export const controlPlane = {
   // Re-score ONLY the retryable-unmeasured judge scores in place (transient judge blips) — no case re-run.
   rescoreScorecardUnmeasured: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/rescore-unmeasured`, { method: 'POST' }),
+  // Retry named cases IN PLACE — the same scorecard, a new attempt per case. `retryScorecard` (the fork)
+  // makes a new record; this one repairs the record you are looking at.
+  retryScorecardCases: <T>(
+    auth: AuthContext,
+    id: string,
+    body: { cases: Array<{ caseId: string; trial?: number }>; reason?: string },
+  ) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}/retry-cases`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // Hard-delete a TERMINAL scorecard (record + child runs) — the batch's creator or a workspace admin; the
   // control plane enforces (403), and an in-flight batch is a 409 (stop it first). Returns { deleted: true }.
   deleteScorecard: <T>(auth: AuthContext, id: string) =>

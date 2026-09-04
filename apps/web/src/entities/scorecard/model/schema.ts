@@ -266,6 +266,26 @@ export const scorecardRecordSchema = z.object({
   casePass: z.object({ pass: z.number().int(), total: z.number().int() }).optional(),
   // Transient scoring failures a targeted re-score can recover (detail only) — the rescore button shows iff set.
   retryableUnmeasured: z.number().int().optional(),
+  // ── THE EXECUTION AXIS (docs/architecture/in-place-case-retry-spec.md) ─────────────────────────────
+  //
+  // Attempts a retry DISPLACED, detail only — the whole result of each is kept on the record, and the page
+  // reads only what it needs from them: how many times a (case, trial) has run. Deliberately not typed as
+  // the full `CaseAttempt` here, because the page never renders a displaced result and a schema that
+  // decoded one would make every case row carry a second trace.
+  caseAttempts: z
+    .array(
+      z.object({
+        caseId: z.string(),
+        trial: z.number().int().optional(),
+        attempt: z.number().int(),
+        revision: z.number().int(),
+        supersededAt: z.string(),
+        supersededBy: z.string().optional(),
+      }),
+    )
+    .optional(),
+  // …and the light count a LIST can afford: distinct cases re-executed, and the attempts that cost.
+  retrySummary: z.object({ cases: z.number().int(), attempts: z.number().int() }).optional(),
   // Server-computed case-fate denominators (detail only): an infra-failed case carries NO product verdict — it is
   // recovery work, never a product failure — so pass rate reads passed/verdicted, never passed/executed.
   outcomes: z
