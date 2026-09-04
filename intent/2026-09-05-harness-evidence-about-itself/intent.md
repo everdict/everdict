@@ -1,6 +1,8 @@
 # Intent: the harness holds no evidence about itself
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 46bd791777087b1352a1fb4c1bebfcd26c6a9531
 
 ## Problem
 
