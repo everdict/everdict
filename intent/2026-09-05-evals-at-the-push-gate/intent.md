@@ -1,6 +1,8 @@
 # Intent: the agent-eval suite is enforced at the push gate, not in CI
 
-Author: maintainer. Status: accepted
+Author: maintainer. Status: shipped
+
+Shipped: 7c23dc266b8538dbc0db1867f101dd7e6a8ea335
 
 ## Problem
 
