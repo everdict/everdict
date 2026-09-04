@@ -75,4 +75,10 @@ If it fails remotely despite local green, diff the environment (node 22, `pnpm i
 `gh run view <id> --log-failed` or `gh api repos/{owner}/{repo}/actions/jobs/<job-id>/logs` for
 the exact step output.
 
+## The gate the yml runs that this page used to omit
+`ci.yml` grew well past the four bullets above; the yml is the SSOT and this skill names only what changes how
+you work. One of them does: **`pnpm intent-chain`** enforces the Plan→Build handoff from the commit graph, so a
+`plan.md` must be committed in a LATER commit than the `intent.md` it cites. Writing both in one commit fails
+the gate — by design, because that is the shape a plan written after the diff takes. See `intent/README.md`.
+
 See rule `ci.md` for the pushed critical rules.

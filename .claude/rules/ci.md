@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -50,6 +50,12 @@ See skill `ci`.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
   and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
   gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
+- **`pnpm intent-chain` is the Plan→Build handoff, enforced instead of stated.** A plan written after the
+  diff is a description that agrees with itself, and no reader can tell the two apart: both are markdown that
+  matches the code. The witness is the commit graph, so the check asks it — a `plan.md` cites the commit that
+  introduced its `intent.md` (`From: intent.md @ <sha>`) and must DESCEND from it, and `Status: shipped` names
+  a commit strictly later than the plan. It refuses to run on a SHALLOW checkout instead of passing over
+  questions it could not ask, which is why the `core` job now checks out with `fetch-depth: 0`.
 - **`pnpm language-policy` keeps the repo English** (CLAUDE.md's language policy), as a RATCHET: the 550
   files that already carry Korean are recorded in `scripts/language-policy-baseline.txt` and pass, a file NOT
   in that list may not introduce it, and a baselined file that has been cleaned must leave the list in the

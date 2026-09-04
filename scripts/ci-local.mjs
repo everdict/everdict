@@ -71,6 +71,9 @@ run("pnpm convention-harness", "pnpm", ["convention-harness"]);
 // in this gate precisely because the script still exists: a manual run that is killed mid-rung can leave a
 // neutralized production file in the tree, and a commit must never carry one.
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
+// The Plan→Build handoff. A plan reads exactly the same whether it was written before the work or after it;
+// the commit order is the only witness, so this one asks git rather than the files.
+run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);

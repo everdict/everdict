@@ -48,6 +48,13 @@ gitleaks) and stamps `.git/everdict-ci-ok` on a clean green tree; a PreToolUse h
 pushes. `.github/workflows/ci.yml` is the SSOT; see rule `.claude/rules/ci.md` + skill `ci`. Never push
 red; after pushing, confirm the run went green (`gh run watch … --exit-status`).
 
+## The change chain — `intent/` before code
+A change whose *why* someone else would have to reconstruct starts as `intent/<YYYY-MM-DD>-<slug>/intent.md`,
+gains a `plan.md` **in a later commit**, and closes with `Status: shipped` + `Shipped: <sha>`. `pnpm intent-chain`
+asks git for that ordering, because a plan written after the diff reads exactly like one written before it —
+the files cannot tell them apart and the commit graph can. See `intent/README.md`. A one-line fix needs none;
+the test is whether the reason survives in the commit message alone.
+
 ## Architecture — one-way dependency, by concern
 ```
 contracts ← domain ← { application-execution · application-control } ← { drivers · environments · harnesses · graders · llm · trace · db · registry · backends · auth · storage · images · datasets } ← job-runner ← { orchestrator · topology } ← self-hosted-runner ← { apps/cli · apps/desktop }

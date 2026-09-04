@@ -23,6 +23,7 @@
     "protocol-mutations": "node scripts/trust/protocol-mutations.mjs",
     "plugin-manifests": "node scripts/check-plugin-manifests.mjs",
     "docs-check": "node scripts/check-docs.mjs",
+    "intent-chain": "node scripts/check-intent-chain.mjs",
     "constructed-casts": "node scripts/check-constructed-casts.mjs",
     "guarded-doubles": "node scripts/check-guarded-doubles.mjs",
     "unwired-capabilities": "node scripts/check-unwired-capabilities.mjs",

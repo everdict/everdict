@@ -17,6 +17,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+        with:
+          # `pnpm intent-chain` asks git WHEN each artifact was introduced — a plan that does not descend
+          # from its intent was written to fit work already done, and only the history can tell. A shallow
+          # checkout cannot answer it, and the check refuses to run rather than report green over an unasked
+          # question, so the core job takes the full history the way the secret scan already does.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v6 # version resolved from package.json "packageManager"
       - uses: actions/setup-node@v5
         with:
@@ -53,6 +59,10 @@ jobs:
       # rot is caused by CODE moves: a path-filtered docs job would never run for the commit that broke it.
       # It is now the ONLY gate over docs/ — the separate site workflow was removed with the site itself
       # (docs/architecture/docs-site-removal.md).
+      # The Plan→Build handoff: every change directory carries the request it came from, a plan descends
+      # from its intent, and a shipped intent names the commit that landed it. Commit order is the only
+      # witness that a plan was not written after the diff.
+      - run: pnpm intent-chain
       - run: pnpm docs-check
       # Every browser-facing route is reachable from the web, or carries the reason it is not. A door
       # nobody opens looks exactly like a door nobody needed, and nothing else asks.
