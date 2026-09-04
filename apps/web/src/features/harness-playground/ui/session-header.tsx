@@ -11,6 +11,7 @@ import { Button } from '@/shared/ui/button'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Tooltip } from '@/shared/ui/tooltip'
+import { SandboxSessionActions } from '@/features/sandbox-session'
 
 // What the member is holding open: which harness booted, in which image, how long it has left and how to end it.
 // A session's disposal is the invariant, so the TTL is not decoration — it is the deadline the control-plane
@@ -96,6 +97,10 @@ export function SessionHeader({
         {conversation && <Badge tone="outline">{t('conversationBadge')}</Badge>}
         <StatusPill status={record.status} />
         <div className="flex-1" />
+        {/* The three acts that make a live session worth keeping open — extend its deadline, publish its
+            filesystem as a world version, push its working tree. All three had routes and none had a
+            control, so a person could open a session, drive it, and lose everything it produced. */}
+        <SandboxSessionActions id={record.id} live={!closed} />
         {!closed && (
           <Button variant="ghost" size="xs" onClick={onClose} disabled={closing}>
             {closing ? t('closing') : t('close')}

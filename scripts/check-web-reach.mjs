@@ -74,12 +74,6 @@ const DECIDED = new Map([
   ["/campaigns/:p/decision", "OWED — the evolution domain has no web surface"],
   ["/campaigns/:p/rounds", "OWED — the evolution domain has no web surface"],
   ["/campaigns/:p/rounds/:p/evidence", "OWED — the evolution domain has no web surface"],
-  ["/fs", "OWED — the files page"],
-  ["/benchmarks/:p/judge", "OWED — benchmark import"],
-  ["/sandboxes/:p/git/push", "OWED — the sandbox surface"],
-  ["/sandboxes/:p/snapshot", "OWED — the sandbox surface"],
-  ["/sandboxes/:p/touch", "OWED — the sandbox surface"],
-  ["/scorecards/gate", "OWED — the CI gate decision"],
 ]);
 
 const walk = (dir, out = []) => {

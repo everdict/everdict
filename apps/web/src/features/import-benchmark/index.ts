@@ -14,3 +14,5 @@ export {
   type HfDatasetHit,
   type HfSplit,
 } from './api/import-benchmark'
+export { benchmarkJudgeAction, type BenchmarkJudgeResult } from './api/benchmark-judge'
+export { OfficialScorerNote } from './ui/official-scorer-note'

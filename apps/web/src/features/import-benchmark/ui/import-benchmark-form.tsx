@@ -12,6 +12,7 @@ import { Input, Label, Textarea } from '@/shared/ui/input'
 import { VersionField } from '@/shared/ui/version-field'
 
 import { importBenchmarkAction, type ImportBenchmarkResult } from '../api/import-benchmark'
+import { OfficialScorerNote } from './official-scorer-note'
 
 // A GET /benchmarks item (control-plane catalog). source=huggingface fetches by ID; jsonl needs a file upload.
 export interface BenchmarkCatalogItem {
@@ -199,6 +200,10 @@ export function ImportBenchmarkForm({
       )}
 
       <p className="text-[12px] leading-relaxed text-muted-foreground">{t('versionNote')}</p>
+
+      {/* Cases from the import, criterion from the benchmark's own scorer — the two halves travel together
+          or "we ran benchmark X" means something different in every workspace. */}
+      <OfficialScorerNote benchmarkId={selected?.value} />
 
       <Button type="button" onClick={onImport} disabled={busy || !selected}>
         {busy ? t('importing') : t('addToWorkspace')}

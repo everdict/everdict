@@ -9,13 +9,15 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { ClearWorkspaceFsButton } from '@/features/clear-workspace-fs'
 
 export const dynamic = 'force-dynamic'
 
 // The workspace Files page — the shared, workspace-isolated filesystem browsed like a shell: a lazy tree +
 // viewer/editor + a bash-style shell. Agents persist task outputs here (write_file); the team reads, edits, and
 // reorganizes them. Read = files:read (viewer+); every mutation pre-gates on files:write (control-plane enforced).
-export default async function FilesPage() {
+export default async function FilesPage({ params }: { params: Promise<{ workspace: string }> }) {
+  const { workspace } = await params
   const t = await getTranslations('files')
   const { principal, ctx } = await currentPrincipal()
 
@@ -53,6 +55,9 @@ export default async function FilesPage() {
           ) : undefined
         }
       />
+      {/* Governance, not content: this empties EVERY member's files, so it is admin-only and its confirm
+          asks for the workspace name rather than a yes. */}
+      <ClearWorkspaceFsButton workspace={workspace} canClear={can(principal?.roles, 'settings:write')} />
       {error === undefined && <FileSearch />}
       {error !== undefined ? (
         <EmptyState title={t('loadError')} hint={error} />

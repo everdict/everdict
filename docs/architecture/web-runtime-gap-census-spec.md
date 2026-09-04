@@ -267,7 +267,12 @@ record of.
 
 | `/knowledge/*` (all 8) | the web could DRAW the graph and author nothing in it. A graph a person can only look at is a report; the notes and the typed edges are what make it a place work accumulates. The note action sends NO author — a note whose author the client could choose is not attribution — and the predicate list is derived from the edges the graph already carries rather than hard-coded, because a second copy of a closed vocabulary drifts. `extract` is an explicit act, never something the page does on open: it is a real billable model call whose result is PROPOSED entries awaiting review |
 
-**18 remain OWED.**
+| `/sandboxes/:id/touch` · `snapshot` · `git/push` | a session could be opened, driven and closed, and the three acts that make one WORTH keeping open were an agent's alone: a person watching a session could only watch it expire, and everything it produced was lost with it. The snapshot's confirm says it mints an immutable world version other cases can reference — it is not a save button — and each act reports what it MADE, because an outward effect nobody can find is one nobody can review |
+| `/scorecards/gate` | the release gate, rehearsed on the pair already being compared. FOUR outcomes and only `pass` is a green light: collapsing `not_comparable` or `blocked_missing` into "block" tells a reader the candidate regressed when nobody could tell. An outcome the control plane has no rule for renders as ABSENT rather than as a badge, because a badge for an unknown word is a UI inventing a verdict |
+| `/benchmarks/:id/judge` | beside the import, because the halves travel together: cases from the import, criterion from the benchmark's own scorer. NO official scorer is the more important answer — it says the criterion is yours, and that "we ran benchmark X" will not mean the same thing elsewhere unless you say how you scored it |
+| `/fs` (DELETE) | governance, not content. It empties EVERY member's files, so the confirm asks for the workspace NAME rather than a yes — a yes/no dialog is the wrong shape for an act whose blast radius is other people's work |
+
+**12 remain OWED — all of them `campaigns`.**
 
 ### ⚠️ The scanner's fifth extraction error, found by using it
 

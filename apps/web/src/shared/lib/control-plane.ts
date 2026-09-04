@@ -610,6 +610,29 @@ export const controlPlane = {
         since !== undefined && since > 0 ? `?since=${since}` : ''
       }`
     ),
+  // ── THE THREE A LIVE SESSION COULD NOT DO FROM THE WEB ──────────────────────────────────────────
+  //
+  // A sandbox could be opened, driven and closed, and the three acts that make one WORTH keeping open were
+  // reachable only by an agent: extend its deadline, publish its filesystem, push its working tree.
+  // Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+  //
+  // Keep-alive. A session dies on its deadline, and until now a person watching one could only watch it
+  // expire.
+  touchSandbox: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/touch`, { method: 'POST' }),
+  // Publish the session's filesystem as the WORLD's next version — the seam where an exploratory session
+  // becomes a registered environment other cases can reference.
+  snapshotSandbox: <T>(auth: AuthContext, id: string, body: { version?: string } = {}) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/snapshot`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // Push the working tree to its remote, optionally opening a pull request.
+  pushSandboxGit: <T>(auth: AuthContext, id: string, body: { branch?: string; pullRequest?: boolean } = {}) =>
+    call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/git/push`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   closeSandbox: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/close`, { method: 'POST' }),
   // One-shot `sh -c` inside a live session's container (the playground's shell disclosure) — creator-or-admin,
@@ -1163,6 +1186,18 @@ export const controlPlane = {
       body: JSON.stringify(body),
     }),
   estimateScorecard: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/scorecards/estimate${qs}`),
+  // The release gate — the CI-facing decision over a baseline↔candidate comparison, recorded on the
+  // candidate. It has always been the CI's door and never a person's, so the decision a release rests on
+  // could not be rehearsed before a pipeline made it. Census slice 5.
+  gateScorecards: <T>(auth: AuthContext, body: { baseline: string; candidate: string }) =>
+    call<T>(auth, '/scorecards/gate', { method: 'POST', body: JSON.stringify(body) }),
+  // A benchmark's own evaluator, ready to register as a code judge. Pairs with the import: cases from the
+  // benchmark, criterion from here, so "we ran benchmark X" means the same thing in two workspaces.
+  benchmarkJudge: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/benchmarks/${encodeURIComponent(id)}/judge`),
+  // Empty the whole workspace tree. GOVERNANCE, not content mutation — admin-only, and the one fs act that
+  // is not about a file.
+  clearWorkspaceFs: <T>(auth: AuthContext) => call<T>(auth, '/fs', { method: 'DELETE' }),
 
   // ── OBSERVABILITY CONFIG — TWO SETTINGS WITH NO SETTINGS PAGE ───────────────────────────────────
   //

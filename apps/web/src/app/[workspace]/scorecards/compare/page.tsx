@@ -23,6 +23,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 import { InfoTip } from '@/shared/ui/tooltip'
+import { GateButton } from '@/features/gate-scorecards'
 
 export const dynamic = 'force-dynamic'
 
@@ -142,6 +143,9 @@ export default async function CompareScorecardsPage({
       ) : (
         <Card className="p-4">
           <ComparePicker options={options} baseline={baseline} candidate={candidate} />
+          {/* Rehearse the gate on the pair already on screen. The route is CI's door and has never been a
+              person's, so the decision a release rests on could not be seen until a pipeline made it. */}
+          <GateButton baseline={baseline} candidate={candidate} />
         </Card>
       )}
 

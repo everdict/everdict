@@ -1,4 +1,17 @@
 {
+  "sandboxSession": {
+    "keepAlive": "연장",
+    "keepAliveError": "세션을 연장하지 못했습니다.",
+    "keepAliveTitle": "세션 마감을 미룹니다. 이게 없으면 보고 있는 사람은 세션이 만료되는 것을 지켜볼 수밖에 없습니다.",
+    "push": "푸시",
+    "pushAsPr": "풀 리퀘스트도 열까요? 취소하면 브랜치만 푸시합니다.",
+    "pushError": "푸시에 실패했습니다.",
+    "pushTitle": "작업 트리를 리모트로 푸시합니다.",
+    "snapshot": "스냅샷",
+    "snapshotConfirm": "이 세션의 파일시스템을 세계의 \"다음 버전\"으로 발행할까요? 불변이 되고 다른 케이스가 참조할 수 있습니다 — 저장 버튼이 아닙니다.",
+    "snapshotError": "스냅샷에 실패했습니다.",
+    "snapshotTitle": "파일시스템을 세계의 다음 버전으로 발행합니다."
+  },
   "knowledgePage": {
     "contextEmpty": "이 앵커로는 에이전트가 받을 것이 없습니다.",
     "expand": "확장",
@@ -715,6 +728,11 @@
     "compare": "비교"
   },
   "importBenchmark": {
+    "hasOfficialScorer": "자체 채점기가 있습니다: {id} ({language}). 등록하면 기준이 케이스와 함께 옮겨집니다.",
+    "noOfficialScorer": "공식 채점기가 없습니다 — 기준은 직접 정해야 하고, 어떻게 채점했는지 밝히지 않으면 \"이 벤치마크를 돌렸다\"가 다른 곳에서 같은 뜻이 되지 않습니다.",
+    "officialScorer": "공식 채점기?",
+    "officialScorerError": "채점기를 읽지 못했습니다.",
+    "officialScorerTitle": "이 벤치마크가 자체 평가기를 제공합니까? 케이스는 import 에서, 기준은 여기서.",
     "modeBuild": "소스에서 만들기",
     "modeImport": "카탈로그 · 레시피",
     "fileUpload": "파일 업로드",
@@ -2823,6 +2841,15 @@
     "loadingMore": "불러오는 중…"
   },
   "scorecardsPage": {
+    "gate": "게이트 예행",
+    "gateError": "게이트를 평가하지 못했습니다.",
+    "gateOutcome": {
+      "block": "차단",
+      "blocked_missing": "차단 — 커버리지 부족",
+      "not_comparable": "비교 불가",
+      "pass": "통과"
+    },
+    "gateTitle": "CI 와 같은 방식으로 이 쌍에 릴리스 게이트를 돌립니다. 통과만이 초록불입니다.",
     "estimate": "예상",
     "estimateError": "예상치를 읽지 못했습니다.",
     "estimateNoHistory": "이 조합의 이력이 없습니다 — 근거가 없는 것이지 저렴한 것이 아닙니다.",
@@ -3242,6 +3269,10 @@
     "askInChat": "대화에서 물어보기"
   },
   "files": {
+    "clear": "트리 비우기",
+    "clearError": "트리를 비우지 못했습니다.",
+    "clearPrompt": "이 워크스페이스의 \"모든 멤버\" 파일을 지우며 되돌릴 수 없습니다. 확인하려면 워크스페이스 이름을 입력하세요: {workspace}",
+    "clearTitle": "워크스페이스 파일시스템 전체를 비웁니다. 관리자 전용이며, 당신 것만이 아니라 모든 멤버의 파일입니다.",
     "search": "검색",
     "searchError": "검색에 실패했습니다.",
     "searchGlobPlaceholder": "경로 glob — src/**/*.md",

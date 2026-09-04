@@ -1,4 +1,17 @@
 {
+  "sandboxSession": {
+    "keepAlive": "Extend",
+    "keepAliveError": "The session could not be extended.",
+    "keepAliveTitle": "Push the session's deadline out. Without this a person watching a session could only watch it expire.",
+    "push": "Push",
+    "pushAsPr": "Open a pull request as well? Cancel pushes the branch only.",
+    "pushError": "The push failed.",
+    "pushTitle": "Push the working tree to its remote.",
+    "snapshot": "Snapshot",
+    "snapshotConfirm": "Publish this session's filesystem as the world's NEXT VERSION? It becomes immutable and other cases can reference it — this is not a save button.",
+    "snapshotError": "The snapshot failed.",
+    "snapshotTitle": "Publish the filesystem as the world's next version."
+  },
   "knowledgePage": {
     "contextEmpty": "An agent would be handed nothing for this anchor.",
     "expand": "Expand",
@@ -715,6 +728,11 @@
     "compare": "Compare"
   },
   "importBenchmark": {
+    "hasOfficialScorer": "Ships its own scorer: {id} ({language}). Register it so the criterion travels with the cases.",
+    "noOfficialScorer": "No official scorer — the criterion is yours to define, and \"we ran this benchmark\" will not mean the same thing elsewhere unless you say how you scored it.",
+    "officialScorer": "Official scorer?",
+    "officialScorerError": "The scorer could not be read.",
+    "officialScorerTitle": "Does this benchmark ship its own evaluator? Cases from the import, criterion from here.",
     "modeBuild": "Build from source",
     "modeImport": "Catalog · recipes",
     "fileUpload": "file upload",
@@ -2823,6 +2841,15 @@
     "loadingMore": "Loading…"
   },
   "scorecardsPage": {
+    "gate": "Rehearse gate",
+    "gateError": "The gate could not be evaluated.",
+    "gateOutcome": {
+      "block": "BLOCK",
+      "blocked_missing": "blocked — not enough coverage",
+      "not_comparable": "not comparable",
+      "pass": "PASS"
+    },
+    "gateTitle": "Run the release gate over this pair, the way CI would. Only PASS is a green light.",
     "estimate": "Estimate",
     "estimateError": "The estimate could not be read.",
     "estimateNoHistory": "No history for this pair — nothing to estimate from, which is not the same as cheap.",
@@ -3242,6 +3269,10 @@
     "askInChat": "Ask in chat"
   },
   "files": {
+    "clear": "Empty the tree",
+    "clearError": "The tree could not be emptied.",
+    "clearPrompt": "This deletes EVERY member's files in this workspace and cannot be undone. Type the workspace name to confirm: {workspace}",
+    "clearTitle": "Empty the whole workspace filesystem. Admin only; every member's files, not just yours.",
     "search": "Search",
     "searchError": "The search failed.",
     "searchGlobPlaceholder": "path glob — src/**/*.md",
