@@ -106,15 +106,31 @@ Six invariants, each driven RED by neutralizing it in the production file and re
 6. settle in ONE guarded write: supersede → append the revision → recompute `summary` / `verdictSummary` /
    `trialSummary` / `retrySummary` → clear the pass.
 
-Most of step 4 exists inside `RetryFailedBatch.run` and must be EXTRACTED rather than copied — a plan rebuild
-written twice has already diverged (protocol L3), and this one resolves five sealed facets.
+**Step 3 is Landed** (see slice 3). **Step 4's plan rebuild is Landed**: `rebuildSealedPlan`
+(`packages/application-control/src/scorecard/sealed-plan-rebuild.ts`) restores all five facets, and
+`RetryFailedBatch` was rewired onto it rather than keeping a second copy — a five-facet restoration written
+twice has already diverged (protocol L3), and the half that rots is the one whose author was thinking about
+something else. Its 21 behaviour tests pass unchanged.
+
+**What is NOT yet landed is the dispatch itself, and reading the existing path says why it is its own slice.**
+`WorkflowBatchDriver.runBatchCase` — the natural reuse, since it already runs exactly one (case, trial) of a
+batch — opens with two short-circuits an in-place retry must pass through:
+
+    if (current && ScorecardBatch.from(current).isTerminal()) return { settled: true, skipped: true };
+    if (ctx.doneKeys.has(workKey))                            return { settled: true, skipped: true };
+
+Both are correct for what they guard (a terminal batch takes no more work; a committed case is not re-run)
+and both describe the retry's ordinary case. `doneKeys` is built from the receipt ledger, which is the same
+place slice 3's receipt question lives — so loosening these is not a flag, it is the design of how a pass
+authorizes work on a settled record. It is written where the receipt identity is decided, or the guard and
+the ledger will disagree.
 
 **Counterexamples owed.** A retry with no `reason` on a completed case is refused. A retry naming a case the
-batch never sealed is refused. Two concurrent retries: the second is refused, not merged. A crash between
-step 3 and step 6 leaves a readable pass and no half-moved plane. A settle whose guarded write loses the CAS
-supersedes nothing.
+batch never sealed is refused. Two concurrent retries: the second is refused, not merged — *this one is
+Landed, driven against a real Postgres and against the twin.* A crash between step 3 and step 6 leaves a
+readable pass and no half-moved plane. A settle whose guarded write loses the CAS supersedes nothing.
 
-## Slice 3 — the ledger's neighbours: receipts, child runs, storage
+## Slice 3 — the ledger's neighbours: receipts, child runs, storage — **storage Landed**
 
 The three readers that already exist and do not yet know about attempts, each an open question this slice
 answers rather than assumes:
@@ -123,9 +139,18 @@ answers rather than assumes:
   Either the receipt carries the attempt, or the retry's commit is refused by the ledger it must pass.
 - **Child runs.** Each case has an addressable child `RunRecord`; a retry makes another. The superseded
   attempt's child must stay readable, so `runIds` grows rather than being replaced.
-- **Storage.** `caseAttempts` is heavy (whole results, traces included) and belongs beside `scorecard` in the
-  detail projection, never in a list read. Migration + `PgScorecardStore` + the in-memory twin, and the twin
-  is not evidence for the adapter — the guarded settle is certified against a real Postgres or by nothing.
+- **Storage — Landed.** Migration `0213` adds `executions` / `case_attempts` / `execution_pass` /
+  `retry_summary`. `caseAttempts` is heavy (whole results, traces included) and is gated on `hasDetail`
+  exactly like `scorecard`; the other three ride the list projection for the reason `scoring_pass` does — a
+  reader deciding whether a plane is mid-repair must SEE the live pass to refuse it. The claim guards
+  (`expectExecutionPassId` / `expectExecutionPassReclaimable` / `stampExecutionLeaseSeconds`) are spelled as
+  the scoring pair, deliberately: this protocol was paid for twice already (arch-review 8's read-check-write
+  was not a lock; arch-review 10's lease was minted by one clock and judged by another), and a cleverer
+  second spelling would be the divergence.
+
+  Certified against a real Postgres 16, because a fake client that asserts on SQL TEXT answers happily to a
+  statement no planner accepts: a fresh claim wins and the DATABASE mints the lease, a rival fresh claim is
+  refused, the owner writes, a stranger is refused.
 
 ## Slice 4 — the doors
 

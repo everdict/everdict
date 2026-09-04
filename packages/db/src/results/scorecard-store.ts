@@ -112,6 +112,32 @@ export class InMemoryScorecardStore implements ScorecardStore {
           : Date.now() - Date.parse(live.startedAt) >= SCORING_PASS_STALE_MS);
       if (!reclaimable) return undefined;
     }
+    // ── THE EXECUTION PASS'S CLAIM, ANSWERING THE WAY THE REAL STORE DOES (mig 0213) ───────────────
+    //
+    // Spelled as the scoring pair above, because a twin that answers a guard MORE PERMISSIVELY than the
+    // adapter is the divergence rule `testing` exists for: every pass test would then prove the branch
+    // production never takes. Same identity check, same terminal-has-no-authority arm, same takeover
+    // exception, same reclaimability window.
+    if (guard?.expectExecutionPassId !== undefined) {
+      const owner = cur.executionPass?.passId ?? null;
+      if (owner !== guard.expectExecutionPassId) return undefined;
+      if (
+        guard.expectExecutionPassId !== null &&
+        guard.expectExecutionPassReclaimable !== true &&
+        cur.executionPass?.status !== "running"
+      )
+        return undefined;
+    }
+    if (guard?.expectExecutionPassReclaimable === true) {
+      const live = cur.executionPass;
+      const reclaimable =
+        !live ||
+        live.status === "failed" ||
+        (live.leaseUntil !== undefined
+          ? Date.parse(live.leaseUntil) <= Date.now()
+          : Date.now() - Date.parse(live.startedAt) >= SCORING_PASS_STALE_MS);
+      if (!reclaimable) return undefined;
+    }
     // The publication's fence (mig 0187) — the drain writes its receipt only while the plan it read is still
     // the pending one, so two publishers produce exactly one receipt.
     if (guard?.expectPublicationState !== undefined && cur.publication?.state !== guard.expectPublicationState)
@@ -135,6 +161,12 @@ export class InMemoryScorecardStore implements ScorecardStore {
       next.scoringPass = {
         ...next.scoringPass,
         leaseUntil: new Date(Date.now() + guard.stampScoringLeaseSeconds * 1000).toISOString(),
+      };
+    }
+    if (guard?.stampExecutionLeaseSeconds !== undefined && next.executionPass) {
+      next.executionPass = {
+        ...next.executionPass,
+        leaseUntil: new Date(Date.now() + guard.stampExecutionLeaseSeconds * 1000).toISOString(),
       };
     }
     this.cards.set(id, next);

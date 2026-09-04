@@ -16,8 +16,7 @@ import {
   newSeededScorecardChildRun,
   resolvePolicyResolution,
 } from "@everdict/domain";
-import { applyGradingPlan, initialScoringPassId, selectSubsetCases } from "@everdict/domain";
-import { resolveCaseEnvironments } from "../environment/case-environment.js";
+import { initialScoringPassId } from "@everdict/domain";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import type { ScoringService } from "../execution/scoring-service.js";
 import { OOM_ESCALATION_CAP_MB } from "../ops/oom-boost.js";
@@ -25,7 +24,7 @@ import type { CaseOutcomeCommitter } from "./case-outcome-committer.js";
 import { ExecutionPlan } from "./execution-plan.js";
 import type { TrackOptions } from "./in-process-batch-driver.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
-import { embedHarnessSpec } from "./scorecard-plan.js";
+import { rebuildSealedPlan } from "./sealed-plan-rebuild.js";
 
 // The in-process driver, as the retry hands work to it — the facade's `track`, whose positional shape the
 // call at the end of this file has always used.
@@ -138,43 +137,9 @@ export class RetryFailedBatch {
     const seed = results.filter((r) => !retryIds.has(r.caseId) && !recollectIds.has(r.caseId));
 
     // The SOURCE batch's plan — a retry re-runs that experiment, so every sealed facet it carries is the
-    // source's, asked once (arch-review 21).
-    const sourcePlan = ExecutionPlan.of(src);
-    const resolved = await this.deps.datasets.get(input.tenant, src.dataset.id, src.dataset.version);
-    const { cases } = selectSubsetCases(
-      resolved,
-      src.subset ? { ids: src.subset.ids, tags: src.subset.tags, limit: src.subset.limit } : undefined,
-    );
-    // Re-apply the recorded grading plan — a retry must score exactly like the original submit.
-    const graded = applyGradingPlan(cases, src.orchestration?.graders);
-    // The source batch's sealed environments, re-resolved at the pinned versions (§2) — a retry that read
-    // `latest` again would measure a different world under the source's manifest.
-    const retryEnvironments = await resolveCaseEnvironments({
-      tenant: input.tenant,
-      cases: graded,
-      ...(this.deps.environments ? { registry: this.deps.environments } : {}),
-      ...(sourcePlan.sealedEnvironments ? { sealed: sourcePlan.sealedEnvironments } : {}),
-    });
-    const dataset: Dataset = { ...resolved, cases: retryEnvironments.cases };
-
-    let harnessSpec: HarnessSpec | undefined;
-    const pins = src.origin?.pinOverrides;
-    if (this.deps.harnesses) {
-      const harnesses = this.deps.harnesses;
-      // Registered → embed the resolved spec; unregistered/built-in (NotFound) → no spec embedded (as at submit); a
-      // registered-but-invalid spec fails the retry with a clear 400 rather than re-dispatching a malformed job.
-      // The retry re-runs the SOURCE batch's experiment — its manifest closure pins the re-resolved spec's
-      // moving bindings, so a moved `latest` model cannot silently change what the retry executes (I6).
-      harnessSpec = sourcePlan.pinSpec(
-        await embedHarnessSpec(
-          () =>
-            pins && Object.keys(pins).length > 0
-              ? harnesses.resolveWithPins(input.tenant, src.harness.id, src.harness.version, pins)
-              : harnesses.get(input.tenant, src.harness.id, src.harness.version),
-          { id: src.harness.id, version: src.harness.version },
-        ),
-      );
-    }
+    // source's, asked once (arch-review 21). Five facets, restored by ONE function that the in-place retry
+    // pass shares: a restoration written twice has already diverged (protocol L3).
+    const { plan: sourcePlan, dataset, harnessSpec } = await rebuildSealedPlan(this.deps, input.tenant, src);
 
     // OOM auto-escalation: a case killed for memory dies the same way on an as-is retry, so its re-dispatch runs
     // with resources.memoryMb DOUBLED. The base is the previous retry's boost (origin.memoryBoostMb) when there

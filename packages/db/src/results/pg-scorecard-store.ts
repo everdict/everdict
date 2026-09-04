@@ -47,6 +47,11 @@ interface ScorecardRow {
   verdict_summary: unknown; // stamped-policy verdict aggregate (mig 0146) — what release-shaped surfaces read
   world: unknown; // the execution world cohort (mig 0161) — a comparison axis, NULL = no case reported one
   scoring_pass: unknown; // the LIVE scoring pass (mig 0147) — trust readers refuse while present
+  // THE EXECUTION AXIS (mig 0213) — the sibling of scoring/scoring_pass one axis over.
+  executions: unknown; // the append-only execution revision ledger
+  case_attempts: unknown; // SUPERSEDED attempts, whole results. HEAVY — detail only, never in a list read
+  execution_pass: unknown; // the LIVE retry pass, the same marker scoring_pass is for judgments
+  retry_summary: unknown; // the light count a list CAN afford
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -112,6 +117,22 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     ...(row.scoring_pass !== null && row.scoring_pass !== undefined
       ? { scoringPass: row.scoring_pass as ScorecardRecord["scoringPass"] }
       : {}),
+    // Lightweight, and rides the LIST projection for the reason `scoring_pass` does: a reader deciding
+    // whether a plane is mid-repair must SEE the live pass to refuse it.
+    ...(row.execution_pass !== null && row.execution_pass !== undefined
+      ? { executionPass: row.execution_pass as ScorecardRecord["executionPass"] }
+      : {}),
+    ...(row.executions !== null && row.executions !== undefined
+      ? { executions: row.executions as ScorecardRecord["executions"] }
+      : {}),
+    ...(row.retry_summary !== null && row.retry_summary !== undefined
+      ? { retrySummary: row.retry_summary as ScorecardRecord["retrySummary"] }
+      : {}),
+    // HEAVY, and gated on hasDetail exactly like `scorecard`: the superseded attempts carry whole traces,
+    // and a list that loaded them would carry the batch's entire execution history per row.
+    ...(hasDetail && row.case_attempts !== null && row.case_attempts !== undefined
+      ? { caseAttempts: row.case_attempts as ScorecardRecord["caseAttempts"] }
+      : {}),
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -119,7 +140,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
 
 // Postgres-backed scorecard store. Same contract as in-memory — apps/api just swaps the two.
 const SCORECARD_COLUMNS =
-  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world, publication)";
+  "(id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, orchestration, manifest, requested, scorecard, analysis_ref, sink_export, error, steps, run_ids, trace_projection_version, verdict_policy, gates, scoring, owner_replica, created_at, updated_at, verdict_summary, scoring_pass, world, publication, executions, case_attempts, execution_pass, retry_summary)";
 const SCORECARD_VALUES = insertPlaceholders(SCORECARD_COLUMNS);
 
 function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[] {
@@ -166,6 +187,10 @@ function scorecardInsertParams(r: ScorecardRecord, replicaId?: string): unknown[
     // update-era field does — a store that knows the column and drops the value turns a caller's stamp
     // into nothing.
     r.publication ? JSON.stringify(r.publication) : null,
+    r.executions ? JSON.stringify(r.executions) : null,
+    r.caseAttempts ? JSON.stringify(r.caseAttempts) : null,
+    r.executionPass ? JSON.stringify(r.executionPass) : null,
+    r.retrySummary ? JSON.stringify(r.retrySummary) : null,
   ];
 }
 
@@ -324,6 +349,40 @@ export class PgScorecardStore implements ScorecardStore {
         vals.push(patch.scoringPass ? JSON.stringify(patch.scoringPass) : null);
       }
     }
+    // ── THE EXECUTION AXIS'S PATCH LANE (mig 0213) ────────────────────────────────────────────────
+    //
+    // Four fields, and every one of them has to be here or the settle writes half a repair: a retry that
+    // superseded an attempt and could not record it is a plane that moved with no ledger saying so, which
+    // is worse than the failure it was repairing. This is the write-side twin of the list() omission the
+    // `world` comment above records.
+    if (patch.executions !== undefined) {
+      sets.push(`executions = $${i++}`);
+      vals.push(JSON.stringify(patch.executions));
+    }
+    if (patch.caseAttempts !== undefined) {
+      sets.push(`case_attempts = $${i++}`);
+      vals.push(JSON.stringify(patch.caseAttempts));
+    }
+    if (patch.retrySummary !== undefined) {
+      sets.push(`retry_summary = $${i++}`);
+      vals.push(JSON.stringify(patch.retrySummary));
+    }
+    if (patch.executionPass !== undefined) {
+      // Pass start (object) / settle-or-takeover clear (null), and the lease END is written by the DATABASE
+      // for the reason the scoring lane records above: the clock that later judges an interval expired must
+      // be the one that set it.
+      if (guard?.stampExecutionLeaseSeconds !== undefined && patch.executionPass !== null) {
+        const passIdx = i++;
+        const secIdx = i++;
+        sets.push(
+          `execution_pass = jsonb_set($${passIdx}::jsonb, '{leaseUntil}', to_jsonb(to_char((now() + ($${secIdx} || ' seconds')::interval) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))`,
+        );
+        vals.push(JSON.stringify(patch.executionPass), String(guard.stampExecutionLeaseSeconds));
+      } else {
+        sets.push(`execution_pass = $${i++}`);
+        vals.push(patch.executionPass ? JSON.stringify(patch.executionPass) : null);
+      }
+    }
     if (patch.verdictPolicy !== undefined) {
       // stamped by the domain's terminal transition (judgedUnder) — dropping it would leave historical
       // verdicts undated and silently re-derived under whatever policy the code ships next.
@@ -460,6 +519,31 @@ export class PgScorecardStore implements ScorecardStore {
         " OR (scoring_pass ? 'leaseUntil' AND (scoring_pass->>'leaseUntil')::timestamptz <= now())" +
         " OR (NOT (scoring_pass ? 'leaseUntil') AND (scoring_pass->>'startedAt')::timestamptz <= now() - interval '1 hour'))";
     }
+    // ── THE EXECUTION PASS'S CLAIM GUARDS (mig 0213) ──────────────────────────────────────────────
+    //
+    // Spelled the same way as the scoring pair above, deliberately. This is a protocol the repository has
+    // already paid to get right twice (arch-review 8's read-check-write was not a lock; arch-review 10's
+    // lease was minted by one clock and judged by another), and a second, cleverer spelling of it would be
+    // the divergence — not the duplication.
+    if (guard?.expectExecutionPassId !== undefined) {
+      if (guard.expectExecutionPassId === null) {
+        guardSql += " AND (execution_pass IS NULL OR execution_pass->>'passId' IS NULL)";
+      } else {
+        i++;
+        guardSql += ` AND execution_pass->>'passId' = $${i}`;
+        vals.push(guard.expectExecutionPassId);
+        // A writer naming an exact pass must also find it LIVE — unless it says it is taking over a dead
+        // one. Without this a paused pass that lost its lease could still write, which is the fence being
+        // a suggestion.
+        if (guard.expectExecutionPassReclaimable !== true) guardSql += " AND execution_pass->>'status' = 'running'";
+      }
+    }
+    if (guard?.expectExecutionPassReclaimable === true) {
+      guardSql +=
+        " AND (execution_pass IS NULL OR execution_pass->>'status' = 'failed'" +
+        " OR (execution_pass ? 'leaseUntil' AND (execution_pass->>'leaseUntil')::timestamptz <= now())" +
+        " OR (NOT (execution_pass ? 'leaseUntil') AND (execution_pass->>'startedAt')::timestamptz <= now() - interval '1 hour'))";
+    }
     if (guard?.expectScoringPassEpoch !== undefined) {
       if (guard.expectScoringPassEpoch === null) {
         guardSql += " AND (scoring_pass IS NULL OR scoring_pass->>'epoch' IS NULL)";
@@ -560,7 +644,7 @@ export class PgScorecardStore implements ScorecardStore {
       // batches a live replica is still driving. It is one text column, not a heavy one.
       // …and `publication` rides it for the same kind of reason (mig 0187): the publication reconciler finds
       // owed settlements through list(), so a column omitted here is a settlement nobody converges.
-      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, publication, owner_replica, owner_epoch, created_at, updated_at
+      `SELECT id, tenant, kind, dataset_id, dataset_version, harness_id, harness_version, status, summary, verdict_summary, world, scoring_pass, scoring, models, judge_models, origin, created_by, runtime, subset, error, trace_projection_version, verdict_policy, requested, gates, publication, execution_pass, executions, retry_summary, owner_replica, owner_epoch, created_at, updated_at
        FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC${limit}`,

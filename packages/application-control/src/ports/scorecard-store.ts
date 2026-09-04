@@ -244,6 +244,17 @@ export interface ScorecardUpdateGuard {
   // database considered expired on arrival, and its own healthy pass became reclaimable while it worked.
   // Producer and judge of an interval must share a clock; this makes them.
   stampScoringLeaseSeconds?: number;
+  // ── THE EXECUTION AXIS'S THREE, MIRRORING THE SCORING ONES ABOVE (mig 0213) ──────────────────────
+  //
+  // Separate fields rather than one shared "pass" guard, because a record may legitimately hold BOTH
+  // markers at once — a re-score of a plane whose retry has already settled, or the reverse — and a guard
+  // covering two markers would make each refuse the other's ordinary case. Their SEMANTICS are identical
+  // to the scoring three, deliberately: same claim CAS, same database-side reclaimability, same
+  // database-minted lease. A second spelling of a protocol this repository has already paid to get right
+  // would be the divergence, not the duplication.
+  expectExecutionPassId?: string | null;
+  expectExecutionPassReclaimable?: boolean;
+  stampExecutionLeaseSeconds?: number;
   // ── THE TEARDOWN IS OWED BY THE SAME TRANSACTION THAT DECIDES IT (arch-review 51 P0) ──────────────
   //
   // A WRITE INSTRUCTION like `claimOwnership`, here because only the store can make the pair atomic: the
