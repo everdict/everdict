@@ -2,7 +2,7 @@
 kind: wiki
 title: "Evolution program — the four pillars, what holds today, and the gap each spec closes"
 status: current
-updated: 2026-09-02
+updated: 2026-09-04
 anchors: [packages/contracts/src/harness/harness-template.ts, packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-service.ts, packages/application-control/src/capability/first-party.ts, packages/contracts/src/records/tracker.ts]
 ---
 # Evolution program — the four pillars, what holds today, and the gap each spec closes
@@ -163,7 +163,8 @@ build recipe, provides a world statically · per session · by CREATING one (wit
 teardown that reads back zero), publishes that world's own account onto the observation channel, and a case
 declares whether it is one-shot or a dialogue with a scripted or model-driven user.
 
-**Nothing on this page is open.** The four pillars' gaps are closed, including the last three adapters —
+**Nothing on this page was open when it was written.** (Two gaps have since been opened by a restatement of
+pillar 4 — see the REOPENED section below.) The four pillars' gaps were closed, including the last three adapters —
 tau-bench ships as a dialogue case whose verdict is the world's own final state — and a created world runs on
 any runtime that can prove its teardown (Nomad, K8s and the local Docker daemon all can; one that cannot say
 whether a topology still stands is refused rather than run into a leak).
@@ -178,6 +179,30 @@ That direction has since been taken too: a world SHARED across a batch's cases i
 without which the registration is refused, the batch's cases join one world through a single conditional
 write, and the reconciler unmakes it once nobody has been inside it for the idle window. What is left open
 there is a pool shared ACROSS batches, which is an admission-policy question rather than a lifecycle one.
+
+## REOPENED 2026-09-04 — pillar 4 restated, and two gaps the loop found by running
+
+This page's own trigger fired: *"A pillar restated by the maintainer … re-opens the map rather than a spec."*
+Pillar 4 was restated with an input contract it did not have —
+
+> Evolution must be able to reasonably modify EVERY component of a harness, and the input it is given must be
+> **evidence + goal**, plus **acceptance criteria** for knowing it is solved — otherwise it cannot be delegated
+> to another agent or sandbox, and cannot be reported on or improved.
+
+Assessed against the tree, not against this page. What each line below claims was verified by opening the file.
+
+| id | gap | state |
+|---|---|---|
+| G4.7 | **The delegation and the brief had never met.** `DelegationBrief` (goal · references · constraints · doneWhen) is materialized into a delegate's working directory and stamped on its trajectory; `RoundEvidence` is the platform's per-case account with diagnoses and the attributed slot. `grep -rn "brief" packages/application-control/src/evolution/` returned nothing. `logRound` reads `delegationRunId` for its TTL and spend and never asks what the delegate was TOLD, so a round could name a session briefed with nothing. The skill's `references/round-brief.md` said the right thing, and prose does not bind. | **closed 2026-09-04** — `campaignRoundBrief` renders it from the frozen frame + the last round's sealed evidence; `GET /campaigns/:id/brief` + `get_campaign_round_brief` serve it; held-out ids, rates and judge prose are excluded by construction, RED under neutralization. |
+| G4.8 | **A campaign could pre-register an exam no outcome passes.** Fisher over two arms of n cannot return a p below `2/C(2n,n)`; below `fdrAlpha / heldOutFamilySize` every round records zero significant cases before any agent runs, and the campaign burns its budget and halts `no_improvement` — indistinguishable from a subject that did not improve. At the ordinary `fdrAlpha: 0.05` that is every frame declaring four trials or fewer, and this repository's own "the frame a real campaign declares" fixture was in that state. | **closed 2026-09-04** — `unwinnableFrameDefect`, creation-only (`trialsPerCase` is a floor a round may exceed, so a decision-path refusal would break a legal campaign). |
+| G4.9 | **The PROMPT is not a component the platform can name.** A `command` harness's declared instance-variation channels are `env`, `unsetEnv`, `params` and `resources`. `params` is substituted RAW into the shell command (`packages/harnesses/src/command.ts`, beside `{{task}}` which is `shq`-quoted) — the CLI-flag channel, by design, not a text channel — so a multi-line prompt cannot live there. A campaign that evolves the prompt must smuggle it through an env key the image's entrypoint happens to read, which is what the SpreadsheetBench wave did (`overrides.env.CC_SCAFFOLD`). Nothing declares that a harness HAS a prompt, so `diff_harness_versions` reports "an env key changed", attribution cannot point at the prompt as a slot, and a delegate briefed to change the prompt has no named place to put it. | **OPEN** — needs a spec. An `agent` subject is unaffected (`instructions` is first-class); this is the `command`/`service` harness axis. |
+| G4.10 | **TOOLS are declared for attribution, not as a variable.** `owns: { tools }` on a topology service says which service owns which tool so a failure can be attributed; there is no per-version tool SET a round can add to, remove from or swap. Evolving "which tools the agent has" means rebuilding the image. | **OPEN** — needs a spec, and it may be the right answer that this belongs in the image; the point is that nothing says so. |
+
+**What the parallel half looks like, measured.** Three campaigns × three rounds ran concurrently against one
+self-hosted runner (`scripts/live/evolution-wave.mjs`, 4 workers), independent lineages sharing only a wiki of
+findings. That is parallel at the CAMPAIGN level and it is the shape `parallel-evolution.md` describes. What is
+still not built there is the merge: `continues` is one string, so the lineage is a tree and combining two leaves
+has no operation. Unchanged, and deliberately so — there is still no caller.
 
 ## What would reopen this page
 
