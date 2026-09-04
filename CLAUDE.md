@@ -41,11 +41,18 @@ reviewing what you now rest on.
 3. `pnpm typecheck`— `tsc --noEmit` across packages (turbo)
 4. `pnpm test`     — Vitest across packages (turbo)
 5. `pnpm build`    — turbo build
+⚠️ `biome check --write` does NOT apply Biome's **unsafe** fixes and exits 0 anyway, so a file can come back
+from it reporting success and still fail `pnpm lint`. Running the formatter is not evidence; `pnpm lint` after
+it is. (Found by the agent-eval suite: asked "biome exited 0, is lint green?", the answer cited this file's
+five commands and never reached the rule that records the trap — `.claude/rules/ci.md` is injected while you
+EDIT, and the question is asked before anything is touched.)
 Quality is non-negotiable: all five must pass before a PR.
 **Before ANY `git push`: `pnpm ci:local`** — mirrors the FULL GitHub Actions CI (the five commands
 above PLUS `pnpm cone` + `pnpm web-imports` + empty-env boot + the self-contained web job + full-history
 gitleaks) and stamps `.git/everdict-ci-ok` on a clean green tree; a PreToolUse hook denies unstamped
-pushes. `.github/workflows/ci.yml` is the SSOT; see rule `.claude/rules/ci.md` + skill `ci`. Never push
+pushes. `.github/workflows/ci.yml` is the SSOT; see rule `.claude/rules/ci.md` + skill `ci`. **`ci:local` does NOT
+cover `trust-fast`** — a required check needing a real Postgres + object store, where a scenario that SKIPS is
+a FAILED certification, and skipping is the local default without `EVERDICT_TRUST_DATABASE_URL`. Never push
 red; after pushing, confirm the run went green (`gh run watch … --exit-status`).
 
 ## The change chain — `intent/` before code

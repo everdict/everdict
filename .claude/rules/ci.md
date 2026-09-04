@@ -193,6 +193,20 @@ See skill `ci`.
   ⚠️ **NEVER `import()` THIS SCRIPT TO SEE IF IT PARSES.** It is a script, not a module: importing it RUNS it,
   in whatever tree you are standing in. `node -e "import('./scripts/trust/protocol-mutations.mjs')"` started a
   full mutation run in a shared worktree. `node --check <file>` is the syntax check — it never executes.
+- **`pnpm agent-evals` is the configuration's own regression suite, and it is NOT in this gate.** `docs-check`
+  and `convention-harness` guard the SHAPE of `CLAUDE.md`/rules/skills — paths resolve, symbols exist, globs
+  match live code, descriptions survive. Neither can ask whether the agent still does the work to the same
+  standard after that configuration changes, and until now nothing did: the product has been mutation-tested
+  since arch-review 53 while the thing that steers the agent had no behavioural test at all. Each case is an
+  incident this repo already recorded, replayed as a prompt; each declares the `subject` files that carry the
+  lesson and the `neutralize` sentences that carry it, and **`--drill <id>` removes those sentences and
+  requires the case to go RED**. A `neutralize` string that matches no line FAILS AT LOAD, for the same reason
+  a `protocol-mutations` rung whose target line is gone fails: a declaration whose target was reworded still
+  reads as a claim about what the case measures. It runs on `.github/workflows/agent-evals.yml` (path-filtered
+  on `CLAUDE.md`/`.claude/**`/`evals/**`, plus nightly), never on every push — the cost lesson
+  `protocol-mutations` already taught. ⚠️ Its first assertion was the literal `ci:local` and it went red
+  against an answer that had RUN the gate and written "CI-local": assertions name artifacts the agent must
+  reach for, never phrasing. See `evals/README.md`.
 - **`pnpm guard-siblings` refuses a door whose neighbours guard something it does not** (arch-review 119).
   One wave found the same shape three times: `PUT /agents/:id` gained a team gate and `PUT /models/:id` kept a
   bare `models:write`; `create_judge` files a capability under a team and `create_rubric`/`create_model`/

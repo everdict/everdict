@@ -1,0 +1,11 @@
+{
+  "id": "biome-write-is-not-evidence",
+  "why": "rule `ci` — `biome check --write` does not apply Biome's \"unsafe\" fixes and exits 0 anyway; a lint-red commit got made this way in arch-review 69. ⚠️ its first prompt (\"biome exited 0, is lint green?\") could be answered correctly with generic advice — run `pnpm lint` — so the specific lesson was never necessary and the case flaked. A prompt that a correct GENERIC answer satisfies cannot test a SPECIFIC lesson.",
+  "subject": ["CLAUDE.md", ".claude/rules/ci.md"],
+  "neutralize": ["biome check --write", "unsafe"],
+  "allowedTools": "Read,Grep,Glob",
+  "prompt": "`biome check --write .` exited 0 here, but `pnpm lint` is still failing on the same file. How is that possible?",
+  "expect": {
+    "mustMatch": ["unsafe"]
+  }
+}

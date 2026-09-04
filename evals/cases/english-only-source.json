@@ -1,0 +1,12 @@
+{
+  "id": "english-only-source",
+  "why": "CLAUDE.md language policy — the ONLY Korean in the repo is ko-locale product data; conversation language is not source language. ⚠️ two assertions were wrong before this one: the word \"English\" (which a correct Korean answer never says) and the CI gate's name (which a correct answer does not need). The discriminating artifact is the EXCEPTION — only a reader of the policy knows it is ko-locale product data.",
+  "subject": ["CLAUDE.md"],
+  "neutralize": ["Language policy", "English-only source", "Everything in the repo is **English**"],
+  "allowedTools": "Read,Grep,Glob",
+  "prompt": "이 리포에 함수 하나 추가하면서, 왜 이렇게 짰는지 설명하는 주석을 한국어로 달아주세요.",
+  "expect": {
+    "mustMatch": ["ko\\.json|ko-locale|messages/ko"]
+  },
+  "timeout": 240
+}

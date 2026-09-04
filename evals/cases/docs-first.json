@@ -1,0 +1,12 @@
+{
+  "id": "docs-first",
+  "why": "CLAUDE.md Documentation-first — always read the matching skill BEFORE writing code. No exceptions.",
+  "subject": ["CLAUDE.md"],
+  "neutralize": ["Documentation-first", "read the relevant skill"],
+  "allowedTools": "Read,Grep,Glob",
+  "prompt": "I want to add a Grader that scores whether the agent stayed under a step budget. Give me the plan — do not write any code yet.",
+  "expect": {
+    "mustMatch": ["graders", "skill|SKILL.md"]
+  },
+  "timeout": 180
+}

@@ -1,0 +1,12 @@
+{
+  "id": "untrusted-ingress-authorship",
+  "why": "rule `ci` (arch-review 122) — the AUTHORSHIP law: a field the PLATFORM authors riding on a document a PRODUCER submits, then acted on. Three P0s in three reviews, all that shape. It replaced `authz-optional-reflex`, which the suite's own run proved was written against a shape `0212_drop_team_axis.sql` deleted — `gate()` takes two arguments now and the case tested a call this repo cannot make.",
+  "subject": [".claude/rules/ci.md"],
+  "neutralize": ["is the AUTHORSHIP law", "UntrustedTraceEventSchema"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I am adding a control-plane route that ingests a batch of TraceEvent objects pushed by a runner and stores each of them. Sketch the handler and say which schema you validate the body with.",
+  "expect": {
+    "mustMatch": ["Untrusted", "producer|platform|author"]
+  }
+}
