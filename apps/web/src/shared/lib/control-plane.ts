@@ -1167,6 +1167,33 @@ export const controlPlane = {
   // what makes the world its own identity axis — a case references it with `env: {kind: "ref"}` and a batch
   // seals the version it resolved, so the world can move under an unchanged case and still be read. It had
   // no web surface at all. Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+  // ── HANDOFF CHECKPOINTS — WHAT AN AGENT LEFT BEHIND, READ BY A PERSON ───────────────────────────
+  //
+  // A checkpoint is the state transfer between agents: confirmed facts with their evidence references,
+  // hypotheses, open decisions, what remains. It is EVIDENCE about how a task stopped, and evidence only a
+  // person can act on had no reader. Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
+  listCheckpoints: <T>(auth: AuthContext, envelopeId?: string) =>
+    call<T>(auth, `/checkpoints${envelopeId ? `?envelopeId=${encodeURIComponent(envelopeId)}` : ''}`),
+  getCheckpoint: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/checkpoints/${encodeURIComponent(id)}`),
+  // Independent verification — a verifier spawned inside an EVIDENCE-ONLY envelope (empty write list), so
+  // asking for it can change nothing except what is known about the checkpoint.
+  verifyCheckpoint: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/checkpoints/${encodeURIComponent(id)}/verify`, { method: 'POST' }),
+
+  // ── RUN GROUPS — THE TWO-PHASE EXPERIMENT ───────────────────────────────────────────────────────
+  //
+  // A group IS a scorecard row (`kind` tells them apart), run ungraded in phase 1 and scored later in
+  // phase 2. The second phase never re-executes phase 1 — which is the whole point, and was reachable only
+  // by an agent.
+  listGroups: <T>(auth: AuthContext) => call<T>(auth, '/groups'),
+  getGroup: <T>(auth: AuthContext, id: string) => call<T>(auth, `/groups/${encodeURIComponent(id)}`),
+  scoreGroup: <T>(auth: AuthContext, id: string, judges: { id: string; version: string }[]) =>
+    call<T>(auth, `/groups/${encodeURIComponent(id)}/score`, {
+      method: 'POST',
+      body: JSON.stringify({ judges }),
+    }),
+
   listEnvironments: <T>(auth: AuthContext) => call<T>(auth, '/environments'),
   getEnvironmentVersion: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

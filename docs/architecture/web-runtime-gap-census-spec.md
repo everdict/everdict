@@ -261,7 +261,29 @@ record of.
 | `/workspace/images/mirror` · `/workspace/images/push-grant` | the managed store's two member acts. The push credential is shown ONCE and never stored — the web is not a place to keep it, and a page that saved it would be a second copy nobody asked for |
 | `/environments` · `versions/:v` · `versions/:v/tags` | the environment REGISTRY, beside the adopted images rather than on a page of its own: an image is bytes, an environment is the world those bytes make, and only the second is an identity axis a batch can seal. Two pages would make a reader memorise which one holds which noun |
 
-**34 remain OWED.** They are not one more afternoon: `campaigns` (11 routes) is the evolution domain with no
+| `/checkpoints` (+ get, verify) | a handoff is EVIDENCE about how a task stopped — and it could be written by an agent, verified by an agent, and read by nobody else. Not-verified is drawn apart from verified-and-inconclusive, because the first means nobody asked. Verification needs no confirm: the verifier runs with an empty write list, so asking changes nothing except what is known |
+| `/groups` (+ get, score) | the two-phase experiment. Phase 1 runs ungraded and phase 2 judges the runs that already exist without re-executing them — the split is what makes a second question cost only the judge, and only an agent could ask it. The list links each group to `/scorecard/:id` rather than growing a second detail view of one record |
+| `/fs/revisions` · `/sandboxes/:id/tasks/:id/trace` | **not gaps — the scanner was wrong.** See below |
+
+**26 remain OWED.**
+
+### ⚠️ The scanner's fifth extraction error, found by using it
+
+Two routes sat on the OWED list that the web has always called. The client wraps long query builders across
+lines:
+
+    `/fs/revisions?path=${encodeURIComponent(path)}${limit !== undefined ? `&limit=${limit}` : ""}${
+      before !== undefined ? `&before=${before}` : ""
+    }`
+
+and the scan broke its literal at the first newline — correct for a path, wrong INSIDE a `${…}` group,
+where a newline is ordinary formatting. It now breaks on a newline only at depth 0.
+
+That is the fifth spelling of this class (backticked-only matching · a character class without parens · a
+trailing `${qs}` read as a segment · a literal-prefix "reachable" check · this). The pattern is worth naming:
+**every one was a false report about the SAME kind of value**, and each was found only by driving the tool
+against the tree rather than by reading it. A census's extraction is the part that needs the counterexample,
+not its conclusions. They are not one more afternoon: `campaigns` (11 routes) is the evolution domain with no
 page at all, `knowledge` authoring (8) is a write surface over a graph the web only reads, and the
 `sandboxes`/`groups`/`checkpoints`/`environments` clusters are each a product surface somebody has to
 design. Calling those

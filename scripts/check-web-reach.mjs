@@ -82,18 +82,10 @@ const DECIDED = new Map([
   ["/campaigns/:p/decision", "OWED — the evolution domain has no web surface"],
   ["/campaigns/:p/rounds", "OWED — the evolution domain has no web surface"],
   ["/campaigns/:p/rounds/:p/evidence", "OWED — the evolution domain has no web surface"],
-  ["/groups", "OWED — the two-phase experiment has no surface"],
-  ["/groups/:p", "OWED — the two-phase experiment has no surface"],
-  ["/groups/:p/score", "OWED — the two-phase experiment has no surface"],
-  ["/checkpoints", "OWED — agent handoff evidence, read by people"],
-  ["/checkpoints/:p", "OWED — agent handoff evidence, read by people"],
-  ["/checkpoints/:p/verify", "OWED — agent handoff evidence, read by people"],
   ["/fs", "OWED — the files page"],
-  ["/fs/revisions", "OWED — the files page's revision history"],
   ["/benchmarks/:p/judge", "OWED — benchmark import"],
   ["/sandboxes/:p/git/push", "OWED — the sandbox surface"],
   ["/sandboxes/:p/snapshot", "OWED — the sandbox surface"],
-  ["/sandboxes/:p/tasks/:p/trace", "OWED — the sandbox surface"],
   ["/sandboxes/:p/touch", "OWED — the sandbox surface"],
   ["/scorecards/gate", "OWED — the CI gate decision"],
 ]);
@@ -172,7 +164,17 @@ const pathsIn = (source) => {
     let j = i + 1;
     for (; j < source.length; j++) {
       const c = source[j];
-      if (c === "\n") break; // a path literal does not span lines
+      // A newline ends a literal only OUTSIDE a `${…}` group. Inside one it is ordinary formatting, and
+      // this client wraps long query builders across lines:
+      //
+      //     `/fs/revisions?path=${encodeURIComponent(path)}${limit !== undefined ? `&limit=${limit}` : ""}${
+      //       before !== undefined ? `&before=${before}` : ""
+      //     }`
+      //
+      // Breaking on the newline truncated that to nothing and reported a route the files page calls as
+      // unreachable — the FIFTH spelling of the extraction error this census keeps making, and the reason
+      // the scanner's own parsing is the part worth testing.
+      if (c === "\n" && depth === 0) break;
       if (quote === "`" && c === "$" && source[j + 1] === "{") {
         depth++;
         j++;

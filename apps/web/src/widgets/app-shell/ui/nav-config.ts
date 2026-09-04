@@ -20,6 +20,8 @@ import {
   Users,
   Wrench,
   type LucideIcon,
+  FlaskConical,
+  Handshake,
 } from 'lucide-react'
 
 import { singularSegment } from '@/shared/lib/resource-routes'
@@ -259,12 +261,32 @@ const APPROVALS_ITEM: NavItem = {
   keywords: 'approval approve deny parked agent mutation hitl human in the loop',
 }
 
+// Handoffs keep the approvals posture — palette-reachable, no permanent row. They are evidence somebody
+// goes looking for after a task stopped, not a place to live.
+const CHECKPOINTS_ITEM: NavItem = {
+  href: '/checkpoints',
+  labelKey: 'checkpoints',
+  icon: Handshake,
+  keywords: 'handoff checkpoint agent transfer evidence verification',
+}
+
+// Experiments are scorecards that have not been judged yet, so they keep the palette-only posture rather
+// than a row beside the scorecard list — two rows for one record is how a reader learns to distrust both.
+const EXPERIMENTS_ITEM: NavItem = {
+  href: '/experiments',
+  labelKey: 'experiments',
+  icon: FlaskConical,
+  keywords: 'experiment group ungraded phase two judge later',
+}
+
 export const ALL_NAV_ITEMS: NavItem[] = [
   // children 까지 평탄화 — 펼치지 않아도 Cmd+K 로는 닿아야 한다.
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
   WORKSPACE_ISSUES_ITEM,
   AGENTS_ITEM,
   APPROVALS_ITEM,
+  CHECKPOINTS_ITEM,
+  EXPERIMENTS_ITEM,
 ]
 
 // Every row rendered in the app nav, flattened — the sidebar's `More` children included. The active-state

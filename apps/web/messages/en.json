@@ -1,4 +1,26 @@
 {
+  "experimentsPage": {
+    "description": "Ungraded phase-1 groups. Phase 2 applies judges over the runs that already exist and never re-executes them — the compute is spent, so asking a second question costs only the judge.",
+    "empty": "No experiment has been run.",
+    "loadError": "The experiments could not be read: {error}",
+    "noJudges": "no judge registered",
+    "pickJudge": "pick a judge",
+    "score": "Score",
+    "scoreError": "The scoring pass was refused.",
+    "scoreTitle": "Apply this judge over the group's existing runs (phase 2). Phase 1 is not re-executed.",
+    "title": "Experiments"
+  },
+  "checkpointsPage": {
+    "description": "State transfers agents left behind — confirmed facts with their evidence, open decisions, what remains.",
+    "empty": "No handoff has been published.",
+    "loadError": "The handoffs could not be read: {error}",
+    "title": "Handoffs",
+    "unverified": "not verified",
+    "verify": "Verify",
+    "verifyAgain": "Verify again",
+    "verifyError": "The verification could not be requested.",
+    "verifyTitle": "Ask an independent verifier to check this handoff. It runs with an empty write list, so asking changes nothing except what is known."
+  },
   "settingsEnvironments": {
     "registryEmpty": "No environment is registered — a case that references one would not resolve.",
     "registryHeading": "Environment registry",
@@ -1646,6 +1668,8 @@
     "usedBy": "Used by"
   },
   "nav": {
+    "experiments": "Experiments",
+    "checkpoints": "Handoffs",
     "approvals": "Approvals",
     "overview": "Overview",
     "harnesses": "Harnesses",
