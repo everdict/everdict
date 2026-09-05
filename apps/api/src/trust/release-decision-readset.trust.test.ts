@@ -143,12 +143,22 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST-121 — a ship CASes the whole decisio
       // Raw INSERT rather than the record mapper: this fixture only needs a ROW the fence can count, and
       // building a full IssueRecord would couple the scenario to every column the tracker later grows.
       await pg.client.query(
+        // ⚠️ THIS FIXTURE NAMED THREE COLUMNS THE TABLE NO LONGER HAS, and each removal left it behind:
+        // `team` (b9d5b674, "the team is gone" — which took the COLUMN out of this list and left its VALUE,
+        // `'team-trust'`, shifting every value after it by one), `cycle_id` (0212_drop_team_axis.sql) and
+        // `in_triage`. Postgres reports the missing COLUMN before it counts the values, so the arity error
+        // hid behind the name error and the scenario read as a failed CAS — `expected error … to match
+        // { code: 'CONFLICT' }` — rather than as a fixture that could not insert a row at all.
+        //
+        // A raw INSERT is deliberate (the comment below says why) and this is its price: it is the one shape
+        // in this suite a migration can break silently, because no compiler and no mapper reads it. The
+        // column list below is the table as `information_schema` reports it, in that order.
         `INSERT INTO everdict_issues
            (id, tenant, number, identifier, former_identifiers, title, description, status, priority,
-            estimate, due_date, parent_id, cycle_id, milestone_id, state_id, in_triage, project_id, assignee,
+            estimate, due_date, parent_id, milestone_id, state_id, project_id, assignee,
             label_ids, links, resolution, github, history, created_by, origin, created_at, updated_at)
-         VALUES ($1,'trust','team-trust',$3::int,'TRU-' || $3::text,'[]'::jsonb,'regression in checkout',NULL,'in_progress','none',
-                 NULL,NULL,NULL,NULL,NULL,NULL,false,NULL,NULL,
+         VALUES ($1,'trust',$3::int,'TRU-' || $3::text,'[]'::jsonb,'regression in checkout',NULL,'in_progress','none',
+                 NULL,NULL,NULL,NULL,NULL,NULL,NULL,
                  '[]'::jsonb,$2::jsonb,NULL,NULL,'[]'::jsonb,'dana',NULL,now(),now())`,
         // (number) is unique, and this suite runs against a SHARED database — a fixed number
         // collides with the previous run rather than testing anything.
