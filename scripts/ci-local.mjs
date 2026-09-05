@@ -104,6 +104,7 @@ run("pnpm scanner-watches", "pnpm", ["scanner-watches"]);
 run("pnpm controls-documented", "pnpm", ["controls-documented"]);
 // The incident-to-eval route, verified rather than promised. A lesson may say nothing was mechanised.
 run("pnpm lesson-evals", "pnpm", ["lesson-evals"]);
+run("pnpm swallowed-reads", "pnpm", ["swallowed-reads"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);

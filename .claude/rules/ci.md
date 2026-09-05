@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**, **`pnpm swallowed-reads`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -110,6 +110,22 @@ See skill `ci`.
   each published as a confident zero over a workbook the grader never opened. The campaign then consumed a
   comparable round and blamed hypotheses for an instrument. A reward written on the failure arm of `&&`/`||`
   is refused; branch on the exit code and publish NOTHING for the arm meaning "could not run".
+- **`pnpm swallowed-reads` is the L2 ban, enforced instead of stated.** `.claude/rules/protocol.md` names
+  `.catch(() => [])`, `.catch(() => undefined)` and `.catch(() => ({}))` in so many words, and
+  `grep -l "catch(() =>" scripts/check-*.mjs` returned nothing: twenty-seven bespoke gates, and the law with
+  the most case law behind it was enforced by prose. It came back —
+  `CampaignService.inheritedFindings` shipped `await this.deps.store.get(tenant, id).catch(() => undefined)`,
+  and that port returns `undefined` for a record the workspace does not have and THROWS when the read did not
+  happen, so the line spelled a store outage exactly like a deleted ancestor. The remedy already existed forty
+  lines above it in the same method (`evidenceUnavailable`), by the same author, in the same brief.
+  ⚠️ It matches ONE structural fact, deliberately: **the value gets a name**. `const x = await …catch(…)` is
+  flagged; `void notify(…).catch(…)` is not (fire-and-forget is its own hatch in L2 and needs a different
+  repair) and neither is `res.json().catch(…)` (decoding a body is not a failed read). The tree holds 331
+  occurrences of the spellings and 83 of that shape; wiring a gate over all 331 is how a check teaches people
+  to skip its output. A RATCHET over `scripts/swallowed-reads-baseline.txt`, because L2 says it itself — *"a
+  scanner with an allowlist is a design admission"* — and the baseline is that admission, counted. A file
+  whose count DROPPED must update the baseline in the same change: a debt that quietly stops shrinking on
+  paper stops being a debt anybody pays.
 - **`pnpm lesson-evals` verifies the incident-to-eval route instead of trusting it.** The article's rule is
   that each production incident becomes a permanent eval; `lessons/README.md` says where a lesson goes
   afterwards — an eval case, a scan class, a check, or nothing. That route was a paragraph and nothing a
