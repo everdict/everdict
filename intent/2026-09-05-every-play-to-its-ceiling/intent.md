@@ -1,6 +1,8 @@
 # Intent: take every play to its ceiling, and say where the ceiling is
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: e9278fa1c296d2bbe6dda3d39ccb286d2e216d9d
 
 ## Problem
 
