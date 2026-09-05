@@ -81,16 +81,31 @@ const pushed = haveBase ? git("rev-list", `${base}..HEAD`).stdout.split("\n").fi
 // branch behind base answers with base's own work inverted — so a config file main changed and this branch
 // never touched would read as a configuration change here. Over-gating is the safe direction and it is still
 // the wrong question.
-const touched = haveBase
-  ? git("diff", "--name-only", `${base}...HEAD`, "--", ...CONFIG_PATHSPEC)
-  : git("show", "--name-only", "--format=", "HEAD", "--", ...CONFIG_PATHSPEC);
-const configChanged = touched.status === 0 && touched.stdout.trim() !== "";
+//
+// ⚠️ AND A FAILED READ MEANS "CHANGED", NOT "UNCHANGED". This was `touched.status === 0 && …`, so any git
+// error — a version rejecting the `:(exclude)` magic pathspec, a transient failure, a corrupt index — made
+// `configChanged` false, which does not deny anything: it makes the eval-stamp and review arms sit out, and
+// the push goes through on the CI ledger alone. The gate's own ledger reads were hardened against exactly
+// this shape earlier (a missing ledger used to fail OPEN because a hook exiting non-zero lets the tool
+// through); the two facts BESIDE the ledgers were left reading a status code, which is the same collapse
+// wearing a different spelling. Cannot-find-out is an escalation, never a pass (rule `protocol` L2), and
+// two lines up this file already says over-gating is the safe direction.
+const changedUnderPathspec = (label, ...pathspec) => {
+  const result = haveBase
+    ? git("diff", "--name-only", `${base}...HEAD`, "--", ...pathspec)
+    : git("show", "--name-only", "--format=", "HEAD", "--", ...pathspec);
+  if (result.status !== 0) {
+    process.stderr.write(
+      `everdict push gate: could not read what this push changes under ${label} (git exited ${result.status}). Treating it as CHANGED, so the stamps for it are required.\n`,
+    );
+    return true;
+  }
+  return result.stdout.trim() !== "";
+};
+const configChanged = changedUnderPathspec("the configuration", ...CONFIG_PATHSPEC);
 
 // Product code — a docs-only or intent-only push carries nothing a review would find, and pays nothing.
-const product = haveBase
-  ? git("diff", "--name-only", `${base}...HEAD`, "--", ...PRODUCT_PATHS)
-  : git("show", "--name-only", "--format=", "HEAD", "--", ...PRODUCT_PATHS);
-const productChanged = product.status === 0 && product.stdout.trim() !== "";
+const productChanged = changedUnderPathspec("product code", ...PRODUCT_PATHS);
 
 // Release tags pointing at HEAD. Read from the TAG rather than from the push command: a tag created in
 // another checkout and pushed from this one is still a release leaving this machine, and parsing which refs a

@@ -65,9 +65,21 @@ const CLEAN_PATHSPEC = CONFIG_PATHSPEC;
 //
 // The digest is over the overlaid BYTES, which is what the session actually reads. `--fresh` still ignores
 // the cache entirely; the drill still never touches it.
+//
+// ⚠️ AND IT MUST NOT HASH WHAT A RUN WRITES, WHICH THE FIRST VERSION DID. `CONFIG` contains `evals`, and
+// `evals/` holds `.results/` — this cache — and `history.jsonl`, which every run appends to. So the key
+// churned on every invocation and the cache could never hit: the fix that closed a real hole (an
+// uncommitted config edit answered from a stale pass) silently destroyed the resume the cache exists for,
+// and the only visible symptom is a suite that costs full price every time, which reads like normal.
+//
+// The rule is already written down twice in this file: `CONFIG_PATHSPEC` excludes `history.jsonl` because
+// "the history is what a run WRITES, so it cannot be part of what a run attests", and the overlay itself
+// filters `evals` out at line 196. Same sentence, third place.
+const WRITTEN_BY_A_RUN = new Set([path.join("evals", ".results"), path.join("evals", "history.jsonl")]);
 const configDigest = (() => {
   const h = createHash("sha256");
   const walk = (rel) => {
+    if (WRITTEN_BY_A_RUN.has(rel)) return;
     const abs = path.join(root, rel);
     let st;
     try {

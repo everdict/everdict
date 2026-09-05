@@ -74,7 +74,16 @@ for (const file of lessons) {
   // A denial only counts when the section names no case at all. "There was no eval case before; now there is:
   // `x`" is a CLAIM wearing a negation, and reading it as a denial would skip the check that matters.
   const namedIds = [...section.matchAll(BACKTICKED)].map((m) => m[1]).filter((id) => id !== "evals");
-  if (!CLAIMS_EVAL.test(section) || (DENIES_EVAL.test(section) && namedIds.length === 0)) continue;
+  // ⚠️ AND A DENIAL IS OVERRIDDEN ONLY BY A CASE THAT EXISTS. The first repair of the negation-blindness
+  // asked `namedIds.length === 0`, which reads ANY lone hyphenated backtick as a claim — so a lesson saying
+  // "No eval case." while mentioning `check-python` or `swallowed-reads` in the same section stopped being a
+  // denial, and then failed for naming a case that is not there. That is the honest answer punished, which
+  // is the failure this whole check's header warns about, reintroduced by its own fix.
+  //
+  // The claim-wearing-a-negation this guard is really for — "there was no eval case before; now there is:
+  // `x`" — always names a case that EXISTS. So that is the test.
+  const deniesHonestly = DENIES_EVAL.test(section) && !namedIds.some((id) => cases.has(id));
+  if (!CLAIMS_EVAL.test(section) || deniesHonestly) continue;
   checked++;
   const named = namedIds;
   // ⚠️ EVERY named id, not at least one. Requiring a single hit let a lesson naming one real case and one
