@@ -152,6 +152,13 @@ where the next effect begins. The five laws, in full with case law, in skill `pr
 `pnpm protocol-mutations --only <rung>` red under neutralization (author-run; no longer a gate) → **the escape hatch deleted in the same change**. A test
 that stays green after its subject is deleted is a lost test (rule `testing`, vacuous-pass rules).
 
+## Writing a check: an empty corpus is not a pass
+A `scripts/check-*.mjs` that finds nothing must first prove there was something to find. **Refuse to report
+over an empty corpus** — no files matched, no routes extracted, no cases loaded — because a scanner with
+nothing to look at reads exactly like coverage, and the failure is silent for as long as nobody asks. Three
+checks here already encode it (`web-reach`, `scanner-watches`, `agent-evals`) and each was written after the
+question was asked too late.
+
 ## Critical rules (the non-default ones — see `.claude/rules/`)
 - No `any`, no non-null `!`, no silent nullable defaults; validate every boundary with Zod.
 - Errors: throw an `AppError` subclass (`@everdict/contracts`); HTTP status derives from the subtype.
