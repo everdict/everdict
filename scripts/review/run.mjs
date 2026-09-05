@@ -54,7 +54,23 @@ const haveBase = remote !== undefined && git("rev-parse", "--verify", "--quiet",
 // twenty-one "Important" findings of which nearly all were that artifact ("this reverts the English
 // translation", "this deletes a check"). A reviewer that cries wolf twenty-one times is one people stop
 // reading, which is the failure this repository names for scanners and had just built into its reviewer.
-const range = opts.range ?? (haveBase ? `${base}...HEAD` : "HEAD~1..HEAD");
+// ⚠️ AND AN UNRESOLVABLE BASE REFUSES. This used to fall back to `HEAD~1..HEAD` and then stamp, because the
+// no-stamp guard three hundred lines below is written against the `--range` FLAG rather than against the
+// question it is guarding — "did this review cover what the push carries". A fresh clone, a checkout with no
+// remote, a repo where main was never fetched: the reviewer read one commit and wrote a stamp the push gate
+// reads as covering all of them. That is the false certificate this whole file exists to refuse, produced by
+// the file itself, in the branch its own warning did not look at.
+//
+// Cannot-find-out is an escalation, never a pass (rule `protocol` L2). Pass `--range` deliberately if you
+// want a slice; that path is honest because it does not stamp.
+if (opts.range === undefined && !haveBase) {
+  console.error(
+    `✖ review: cannot resolve '${base}', so the range this push carries is unknown. Fetch it, or pass an
+  explicit --range — which reviews what you name and deliberately writes NO push stamp.`,
+  );
+  process.exit(1);
+}
+const range = opts.range ?? `${base}...HEAD`;
 
 const files = git("diff", "--name-only", range).stdout.split("\n").filter(Boolean);
 if (files.length === 0) {
@@ -178,7 +194,10 @@ let spend = 0;
 const partsDir = path.join(root, ".git", "everdict-review-parts");
 mkdirSync(partsDir, { recursive: true });
 const rangeKey = range.replace(/[^A-Za-z0-9]/g, "_");
-const partPath = (index) => path.join(partsDir, `${head.slice(0, 12)}-${rangeKey}-${index}.json`);
+// The MODEL is part of the key. Without it, `--model opus` after a sonnet run reused every part sonnet had
+// already produced and reported them as opus's — an override that silently overrode nothing.
+const partPath = (index) =>
+  path.join(partsDir, `${head.slice(0, 12)}-${rangeKey}-${opts.model.replace(/[^a-z0-9-]/gi, "_")}-${index}.json`);
 
 let failure;
 try {
