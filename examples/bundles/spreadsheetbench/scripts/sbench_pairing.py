@@ -88,37 +88,41 @@ def classify_pairing(inputs, answers):
                           if permutation[i] != n)
         return "refused", f"the answer key is mispaired ({pairs}){partial}", len(evident)
 
+    # ⚠️ `drifted` IS NEVER EMPTY HERE, and for one release this line was followed by `if drifted:` and a
+    # trailing `return "admitted", …`. The identity check above returns when every evident file pairs with its
+    # own input, so reaching this line means at least one does not. That trailing return was unreachable
+    # before the extraction and nobody could see it; afterwards it sat in a freshly unit-tested module, where
+    # dead code reads as covered code. Removed rather than guarded: a `raise` for "cannot happen" would abort
+    # a 912-instruction stage over an invariant, which is a worse answer than the one it replaces.
     drifted = [n for n in evident if n not in matches[n]]
-    if drifted:
-        # ── CLASSIFIED, NOT DUMPED ──────────────────────────────────────────────────────────────────
-        #
-        # 220 of the 912 land here and "a human should read these" is not a finding, it is 220 findings
-        # nobody will read. The difference splits three ways and only one of them is worth a human:
-        #
-        #   added    the answer has a value where the input had none — a helper cell the solution wrote,
-        #            which is what most tasks do. Ordinary.
-        #   removed  the input had a value the answer does not — the solution cleared it, or the answer
-        #            workbook is a trimmed result sheet. Ordinary.
-        #   changed  BOTH present and different: the answer's source data is not the input's. Nothing a
-        #            task does to a cell outside `answer_position` produces this, and it is the shape of
-        #            17047 (`A31` is -3039 in the input, -30 in the answer) and 30930 (`A6` is 0, then
-        #            15.44), whose instructions never write those columns.
-        #
-        # Classified from the VALUES, never from the rendered line — parsing this file's own output back
-        # into a decision is the re-derivation rule `protocol` L3 forbids.
-        kinds = {"added": 0, "removed": 0, "changed": 0}
-        detail = []
-        for n in drifted:
-            diff = sorted(k for k in set(answers[n]) | set(inputs[n]) if answers[n].get(k) != inputs[n].get(k))
-            for key in diff:
-                before, after = inputs[n].get(key), answers[n].get(key)
-                kinds["added" if before is None else "removed" if after is None else "changed"] += 1
-            shown = ", ".join(
-                f"{sheet}!{cell}: input={inputs[n].get((sheet, cell))} answer={answers[n].get((sheet, cell))}"
-                for sheet, cell in diff[:4]
-            )
-            detail.append(f"file {n} differs outside the answer range at {len(diff)} cell(s) — {shown}")
-        summary = " ".join(f"{k}={v}" for k, v in kinds.items() if v > 0)
-        head = "SOURCE DATA DIFFERS" if kinds["changed"] > 0 else "helper cells only"
-        return "admitted_with_report", f"[{head}: {summary}] " + "; ".join(detail) + partial, len(evident)
-    return "admitted", partial.strip(), len(evident)
+    # ── CLASSIFIED, NOT DUMPED ──────────────────────────────────────────────────────────────────
+    #
+    # 220 of the 912 land here and "a human should read these" is not a finding, it is 220 findings
+    # nobody will read. The difference splits three ways and only one of them is worth a human:
+    #
+    #   added    the answer has a value where the input had none — a helper cell the solution wrote,
+    #            which is what most tasks do. Ordinary.
+    #   removed  the input had a value the answer does not — the solution cleared it, or the answer
+    #            workbook is a trimmed result sheet. Ordinary.
+    #   changed  BOTH present and different: the answer's source data is not the input's. Nothing a
+    #            task does to a cell outside `answer_position` produces this, and it is the shape of
+    #            17047 (`A31` is -3039 in the input, -30 in the answer) and 30930 (`A6` is 0, then
+    #            15.44), whose instructions never write those columns.
+    #
+    # Classified from the VALUES, never from the rendered line — parsing this file's own output back
+    # into a decision is the re-derivation rule `protocol` L3 forbids.
+    kinds = {"added": 0, "removed": 0, "changed": 0}
+    detail = []
+    for n in drifted:
+        diff = sorted(k for k in set(answers[n]) | set(inputs[n]) if answers[n].get(k) != inputs[n].get(k))
+        for key in diff:
+            before, after = inputs[n].get(key), answers[n].get(key)
+            kinds["added" if before is None else "removed" if after is None else "changed"] += 1
+        shown = ", ".join(
+            f"{sheet}!{cell}: input={inputs[n].get((sheet, cell))} answer={answers[n].get((sheet, cell))}"
+            for sheet, cell in diff[:4]
+        )
+        detail.append(f"file {n} differs outside the answer range at {len(diff)} cell(s) — {shown}")
+    summary = " ".join(f"{k}={v}" for k, v in kinds.items() if v > 0)
+    head = "SOURCE DATA DIFFERS" if kinds["changed"] > 0 else "helper cells only"
+    return "admitted_with_report", f"[{head}: {summary}] " + "; ".join(detail) + partial, len(evident)
