@@ -20,7 +20,8 @@ const gitleaksCache = path.join(homedir(), ".cache", "everdict", `gitleaks-${GIT
 // to remember it exists at the moment something just went red. Bounded to the FIRST bespoke failure per run:
 // lint and typecheck explain themselves, and a model call restating a compiler error is the shape that teaches
 // people to ignore the tool.
-let triaged = false;
+// `run()` exits on the first failure, so a second bespoke failure is unreachable in one invocation: the flag
+// that used to bound this to "the first" was dead code describing a limit the control flow already imposed.
 const SELF_EXPLANATORY = new Set(["pnpm lint", "pnpm typecheck", "pnpm test", "pnpm build", "web lint", "web build"]);
 
 function run(label, command, args, opts = {}) {
@@ -37,12 +38,10 @@ function run(label, command, args, opts = {}) {
     const named = /^pnpm ([a-z-]+)$/.exec(label)?.[1];
     const gate = named === undefined ? undefined : (SCRIPT_FOR[named] ?? named);
     if (
-      !triaged &&
       gate !== undefined &&
       !SELF_EXPLANATORY.has(label) &&
       existsSync(path.join(root, "scripts", `check-${gate}.mjs`))
     ) {
-      triaged = true;
       process.stdout.write("\n▶ triaging it — the failing scanner's own header records the repairs it accepts\n");
       spawnSync("node", [path.join(root, "scripts", "triage.mjs"), gate], { cwd: root, stdio: "inherit" });
     }

@@ -160,6 +160,7 @@ const buildPrompt = (chunk, index) =>
 
 const findings = [];
 const summaries = [];
+let unstructuredParts = 0;
 let nitsOmitted = 0;
 let spend = 0;
 // ⚠️ NOTHING EXITS INSIDE THIS TRY. `process.exit()` skips the `finally` that removes the throwaway worktree —
@@ -183,8 +184,11 @@ try {
       const part = JSON.parse(readFileSync(cached, "utf8"));
       for (const f of part.findings ?? []) findings.push(f);
       nitsOmitted += Number(part.nitsOmitted ?? 0);
+      if (part.unstructured) unstructuredParts++;
       if (part.summary) summaries.push(part.summary);
-      console.log(`· part ${index + 1}/${chunks.length} (${chunk.files.length} files) — reused`);
+      console.log(
+        `· part ${index + 1}/${chunks.length} (${chunk.files.length} files) — reused${part.unstructured ? ", unstructured" : ""}`,
+      );
       continue;
     }
     process.stdout.write(`· part ${index + 1}/${chunks.length} (${chunk.files.length} files) …\r`);
@@ -242,6 +246,7 @@ try {
         summary: `[part ${index + 1}, unstructured] ${text.slice(0, 1200)}`,
       };
     }
+    if (part.unstructured) unstructuredParts++;
     writeFileSync(cached, JSON.stringify(part));
     for (const f of part.findings ?? []) findings.push(f);
     nitsOmitted += Number(part.nitsOmitted ?? 0);
@@ -255,7 +260,9 @@ if (failure !== undefined) {
   process.exit(1);
 }
 
-const report = { findings, nitsOmitted, summary: summaries.join(" ") };
+// The per-part `unstructured` flag reached the cache and stopped there, so a run holding a prose part read as
+// a clean structured review. `scripts/scan/run.mjs` keeps that flag at the top level for exactly this reason.
+const report = { findings, nitsOmitted, unstructuredParts, summary: summaries.join(" ") };
 const rank = (f) => (f.severity === "important" ? 0 : 1);
 findings.sort((a, b) => rank(a) - rank(b));
 
@@ -274,7 +281,7 @@ for (const f of findings) {
 if (report.nitsOmitted) console.log(`· ${report.nitsOmitted} further nit(s) summarised rather than listed`);
 console.log(`\n${report.summary ?? "(no summary)"}`);
 console.log(
-  `\n${findings.length} finding(s), ${important.length} Important · ${chunks.length} part(s) · ${path.relative(root, reportPath)} · $${spend.toFixed(4)}`,
+  `\n${findings.length} finding(s), ${important.length} Important · ${chunks.length} part(s)${unstructuredParts > 0 ? ` · ${unstructuredParts} UNSTRUCTURED (prose, uncounted)` : ""} · ${path.relative(root, reportPath)} · $${spend.toFixed(4)}`,
 );
 
 // Completion, not cleanliness. The gate asks whether the question was put.

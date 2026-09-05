@@ -224,7 +224,8 @@ const cachedPass = (c) => {
   }
 };
 
-const record = (c, fields) => {
+const record = (c, fields, { cache = true } = {}) => {
+  if (!cache) return; // a drill's result describes a NEUTRALIZED tree and may never be reused as a pass
   mkdirSync(resultDir, { recursive: true });
   writeFileSync(
     path.join(resultDir, `${c.id}.json`),
@@ -232,8 +233,12 @@ const record = (c, fields) => {
   );
 };
 
-const runCase = (c) => {
-  if (!opts.fresh) {
+const runCase = (c, { cache = true } = {}) => {
+  // ⚠️ THE DRILL NEVER READS THE CACHE. It calls this with the lesson removed from the worktree, and a cached
+  // pass under the same head would be reused — so the drill would report on a run that never happened, against
+  // a configuration it never saw. The cache was added an hour before this comment and defeated the one
+  // mechanism that makes the suite evidence rather than twenty answers.
+  if (cache && !opts.fresh) {
     const prior = cachedPass(c);
     if (prior !== undefined) return { pass: true, misses: [], seconds: prior.seconds, cost: 0, reused: true };
   }
@@ -245,7 +250,7 @@ const runCase = (c) => {
   // The deny flag is a request until something observes it refusing. This is that observation.
   const wrote = [...porcelain()].filter((p) => !before.has(p));
   if (wrote.length > 0) {
-    record(c, { pass: false, ...answer, seconds });
+    record(c, { pass: false, ...answer, seconds }, { cache });
     return {
       pass: false,
       misses: [
@@ -256,11 +261,11 @@ const runCase = (c) => {
     };
   }
   if (!answer.ok) {
-    record(c, { pass: false, ...answer, seconds });
+    record(c, { pass: false, ...answer, seconds }, { cache });
     return { pass: false, misses: [answer.note], seconds, cost: 0 };
   }
   const misses = judge(c, answer.text);
-  record(c, { pass: misses.length === 0, misses, ...answer, seconds });
+  record(c, { pass: misses.length === 0, misses, ...answer, seconds }, { cache });
   return { pass: misses.length === 0, misses, seconds, cost: answer.cost ?? 0 };
 };
 
@@ -301,7 +306,7 @@ if (opts.drill) {
       );
       return 1;
     }
-    const out = runCase(c);
+    const out = runCase(c, { cache: false });
     if (out.pass) {
       console.error(
         `\n✖ DRILL FAILED — "${c.id}" still passes with its lesson removed (${out.seconds}s).\n  The case is not measuring what it claims to. Either the lesson is carried somewhere \`subject\` does not name,\n  or the assertions are satisfied by something other than the configuration.`,
