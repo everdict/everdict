@@ -1,0 +1,12 @@
+{
+  "id": "completion-is-verified-zero",
+  "why": "rule `protocol` L5 — accepted ≠ gone. One verifier shared by the request path and the reconciler; \"cannot find out\" is an escalation field, never a terminal state.",
+  "subject": [".claude/rules/protocol.md"],
+  "neutralize": ["L5 — Completion is verified zero"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "Our teardown call returns 202 accepted. Can we mark the resource deleted once we get that?",
+  "expect": {
+    "mustMatch": ["verif|accepted (is )?not|reconcil|escalat"]
+  }
+}

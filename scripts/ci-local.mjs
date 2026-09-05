@@ -98,6 +98,8 @@ run("pnpm guardrails", "pnpm", ["guardrails"]);
 run("pnpm scanner-watches", "pnpm", ["scanner-watches"]);
 // A round that repairs every instance and ships no way to detect the next one bought a repair, not a rule.
 run("pnpm controls-documented", "pnpm", ["controls-documented"]);
+// The incident-to-eval route, verified rather than promised. A lesson may say nothing was mechanised.
+run("pnpm lesson-evals", "pnpm", ["lesson-evals"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);

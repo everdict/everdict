@@ -130,6 +130,17 @@ if (intentSha === undefined) {
   process.exit(1);
 }
 
+// The policies the spec was written UNDER. A spec that cannot say which version of `.claude/` constrained it
+// cannot be told from one written before a rule changed — and a plan is then written against constraints that
+// have since moved. The tree sha is cheap to write and the value is entirely in a later reader diffing it.
+const policySha = git("rev-parse", "HEAD:.claude").stdout.trim();
+if (policySha === "") {
+  console.error(
+    "✖ design: could not resolve the policy tree at HEAD:.claude, so the spec could not say what constrained it.",
+  );
+  process.exit(1);
+}
+
 const prompt = [
   "Produce a requirements and design spec for the intent below, for THIS repository.",
   "",

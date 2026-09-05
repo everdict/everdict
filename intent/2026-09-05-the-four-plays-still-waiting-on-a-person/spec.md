@@ -1,4 +1,5 @@
 From: intent.md @ 9d3afe4192b1bf6be0ea3f6626a037af6a42c7dd
+Policies: 30b860799cf6114dbf41226b839921349b859fe4
 
 <!-- Written by `pnpm design` from intent.md, model sonnet, 2026-09-04T22:09:18.011Z.
      A machine proposed this. It is in the working tree and committed by nobody; read it before a plan is

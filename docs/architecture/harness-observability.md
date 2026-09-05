@@ -70,6 +70,22 @@ signal names are in `scripts/telemetry/README.md`. Conversation content is delib
 recipe: this is a public repository, the sink writes to a plain file, and none of the three indicators needs
 prompt or response text.
 
+## The concurrency ceiling
+
+The article ties the number of parallel sessions to review capacity rather than to taste: *"add sessions only
+while review is keeping up."* Here that number is **three**, and the arithmetic is short.
+
+Every push carrying `packages/**` or `apps/**` costs one `pnpm review` — one to five chunked sessions, one to
+three minutes each — and the findings are triaged by one person. Three streams produce roughly one review
+queue that a person clears in the same sitting. A fourth does not fail; it produces findings faster than they
+are read, and unread findings are the state `REVIEW.md`'s nit cap already exists to prevent.
+
+It is a stated ceiling, not an enforced one — nothing counts sessions and refuses a fourth, and nothing
+should: the number is a judgement about attention, and the right response to exceeding it is to notice, not to
+be stopped. What makes it checkable is `claude_code.session.count` in `.git/everdict-telemetry.jsonl`, which
+carries a session id, so "how many ran at once last week" is a query rather than an impression. Revise the
+number when that query and the rework rate disagree with it.
+
 ## The gaps, stated rather than implied
 
 - **Telemetry is opt-in.** A session run without the recipe is invisible to the three indicators above, and

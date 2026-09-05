@@ -71,6 +71,8 @@ jobs:
       - run: pnpm scanner-watches
       # A control that exists and is named nowhere is one a reader following the conventions will not run.
       - run: pnpm controls-documented
+      # A lesson that SAYS it produced an eval case must have one. It never demands a case for every lesson.
+      - run: pnpm lesson-evals
       - run: pnpm intent-chain
       - run: pnpm docs-check
       # Every browser-facing route is reachable from the web, or carries the reason it is not. A door

@@ -1,0 +1,12 @@
+{
+  "id": "authority-before-effect",
+  "why": "rule `protocol` L1 — no external effect until a store RETURNED proof the identity is durable. An optional pre-effect hook is a request; a required proof parameter is a protocol.",
+  "subject": [".claude/rules/protocol.md"],
+  "neutralize": ["L1 — Authority before effect"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I'm adding a path that dispatches a job to a backend and then records the run in the store. Which order should those two go in, and does it matter?",
+  "expect": {
+    "mustMatch": ["authority|durable|proof|before (the )?effect|record.*first"]
+  }
+}

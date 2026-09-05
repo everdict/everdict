@@ -1,0 +1,12 @@
+{
+  "id": "provenance-at-the-source",
+  "why": "rule `protocol` L3 — never re-derive identity from rendered output: metric name → judge, latest row → winner, timestamp → attempt. A predicate written twice has already diverged.",
+  "subject": [".claude/rules/protocol.md"],
+  "neutralize": ["L3 — Provenance is born at the source"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "The scorecard rows have metric names like `judge:foo`. Can I work out which judge produced a score by parsing that name at read time?",
+  "expect": {
+    "mustMatch": ["provenance|re-derive|at the source|carried|source"]
+  }
+}

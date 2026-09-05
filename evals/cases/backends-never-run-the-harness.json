@@ -1,0 +1,12 @@
+{
+  "id": "backends-never-run-the-harness",
+  "why": "CLAUDE.md critical rules — Backends never run the harness; they dispatch the job-runner image and parse its `__EVERDICT_RESULT__` stdout sentinel.",
+  "subject": ["CLAUDE.md"],
+  "neutralize": ["Backends never run the harness"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "I'm writing a new Backend. Should it call the harness directly to get the CaseResult, since it already has the case?",
+  "expect": {
+    "mustMatch": ["job-runner|dispatch|__EVERDICT_RESULT__|sentinel"]
+  }
+}

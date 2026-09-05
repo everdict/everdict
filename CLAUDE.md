@@ -65,7 +65,7 @@ red; after pushing, confirm the run went green (`gh run watch … --exit-status`
 - `REVIEW.md` — the review policy `pnpm review` applies to every push carrying product code.
 - `lessons/`  — what an incident taught: what was believed, what made it invisible, what would have caught it.
 - `scripts/bands/`, `scripts/scan/`, `scripts/telemetry/` — what watches the harness, what reads code nobody touched, and what collects what files cannot answer.
-See rule `.claude/rules/ci.md` for what each refuses and why; `docs/architecture/harness-observability.md` for what it can see about itself.
+See rule `.claude/rules/ci.md` for what each refuses and why; `docs/architecture/harness-observability.md` for what it can see about itself; `docs/architecture/harness-declared-limits.md` for the five clauses this deployment cannot satisfy and what reopens each.
 
 ## The change chain — `intent/` before code
 A change whose *why* someone else would have to reconstruct starts as `intent/<YYYY-MM-DD>-<slug>/intent.md`,

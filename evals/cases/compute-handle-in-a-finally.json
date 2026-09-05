@@ -1,0 +1,12 @@
+{
+  "id": "compute-handle-in-a-finally",
+  "why": "CLAUDE.md critical rules — `ComputeHandle` is always released in a `finally`.",
+  "subject": ["CLAUDE.md"],
+  "neutralize": ["`ComputeHandle` is always released in a `finally`"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "Sketch the shape of code that acquires a ComputeHandle from a driver, runs the harness on it, and returns the result.",
+  "expect": {
+    "mustMatch": ["finally"]
+  }
+}

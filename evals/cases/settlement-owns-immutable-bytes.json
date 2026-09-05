@@ -1,0 +1,12 @@
+{
+  "id": "settlement-owns-immutable-bytes",
+  "why": "rule `protocol` L4 — decisions reference frozen payloads by key+digest; `current` is a monotonic projection; an at-least-once effect's idempotency key lives in the PUBLIC contract.",
+  "subject": [".claude/rules/protocol.md"],
+  "neutralize": ["L4 — A settlement owns immutable bytes"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "A decision record points at a config that can still be edited afterwards. Is that a problem if we log the config at decision time?",
+  "expect": {
+    "mustMatch": ["digest|immutable|frozen|settle"]
+  }
+}

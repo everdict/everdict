@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -102,6 +102,24 @@ See skill `ci`.
   `pnpm triage`, which reads that scanner's own header. Lint, typecheck, test and build are excluded — they
   explain themselves, and a model call restating a compiler error is the shape that teaches people to ignore
   the tool.
+- **`pnpm lesson-evals` verifies the incident-to-eval route instead of trusting it.** The article's rule is
+  that each production incident becomes a permanent eval; `lessons/README.md` says where a lesson goes
+  afterwards — an eval case, a scan class, a check, or nothing. That route was a paragraph and nothing a
+  machine read. ⚠️ **It never demands an eval for every lesson.** Not everything is mechanisable, and recording
+  the decision NOT to mechanise is the documented answer — demanding a case for every lesson would turn that
+  honest answer into a violation, and the first repair anybody reached for would be to stop writing lessons.
+  It asks only what the lesson itself claims: when "What was done about it" names an eval case, the case
+  exists.
+- **A spec carries the policy version it was written under.** `pnpm design` stamps `Policies: <tree sha of
+  .claude/>` beside the `From:` line and `pnpm intent-chain` requires it. Without it a spec that predates a
+  rule change cannot be told from one that followed it, and a plan then gets written against constraints that
+  have since moved.
+- **Five L4 clauses cannot be satisfied by this deployment and are DECLARED, not silently missing** —
+  `docs/architecture/harness-declared-limits.md`. Branch protection needs a second person; managed settings
+  need a device fleet; per-environment tiers and a rehearsed rollback need something deployed; four of the
+  eight containment-drill rows need managed settings; and "gate violations reaching production" has no
+  denominator. Each entry names what its absence does NOT mean and what would reopen it. **A blocked clause is
+  not a satisfied clause**: the play is scored at the rung it reaches and the grade says so.
 - **`pnpm scan` is the only control here that is NOT change-scoped**, and `lessons/` is where an incident's
   reasoning goes. Everything else reads a diff — review reads the range, the gates read what a commit touched,
   the evals fire on configuration that changed — so all of them are blind to code nobody has touched. A file

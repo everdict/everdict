@@ -140,6 +140,15 @@ for (const name of changes) {
         `${label}/spec.md: \`From:\` names ${short(citedSpec)}, but intent.md was introduced by ${short(intentSha)}.`,
       );
     }
+    // The policy version the spec was written under. Without it a spec that predates a rule change cannot be
+    // told from one that followed it, and a plan gets written against constraints that have since moved.
+    const policy = /^Policies:\s*([0-9a-f]{7,40})\s*$/m.exec(spec)?.[1];
+    if (!policy) {
+      fail(`${label}/spec.md: no \`Policies: <sha>\` line naming the \`.claude/\` tree it was written under.`);
+    } else if (!gitOk("cat-file", "-e", policy)) {
+      fail(`${label}/spec.md: \`Policies:\` names ${short(policy)}, which is not an object in this history.`);
+    }
+
     const specSha = introducedBy(specFile);
     if (specSha && intentSha && !isAncestor(intentSha, specSha)) {
       fail(

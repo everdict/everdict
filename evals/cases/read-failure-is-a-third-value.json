@@ -1,0 +1,12 @@
+{
+  "id": "read-failure-is-a-third-value",
+  "why": "rule `protocol` L2 — a failed read is a THIRD value consumed by exhaustive match, never `.catch(() => [])` and never `{value?, ok: boolean}`.",
+  "subject": [".claude/rules/protocol.md"],
+  "neutralize": ["L2 — Unknown is unignorable"],
+  "allowedTools": "Read,Grep,Glob",
+  "timeout": 180,
+  "prompt": "A store read can fail and the caller just needs a list. Can I `.catch(() => [])` so the caller stays simple?",
+  "expect": {
+    "mustMatch": ["third value|ReadResult|unknown|exhaustive|cannot|must not|never"]
+  }
+}
