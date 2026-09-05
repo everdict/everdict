@@ -23,8 +23,16 @@ export const CONFIG_PATHS = ["CLAUDE.md", ".claude", "evals"];
  */
 export const CONFIG_PATHSPEC = [...CONFIG_PATHS, ":(exclude)evals/history.jsonl"];
 
-/** Product code. A docs-only or intent-only push carries no risk a review would find, and pays nothing. */
-export const PRODUCT_PATHS = ["packages", "apps"];
+/**
+ * Code a review should see. A docs-only or intent-only push carries no risk a review would find, and pays
+ * nothing.
+ *
+ * ⚠️ `scripts` is here because the gates live in it. Without it a push touching only `scripts/` — the push
+ * gate itself, the review runner, the scan runner, `ci-local` — tripped neither this arm nor the eval arm, so
+ * the harness was the one thing its own review never had to look at. Found by the first review that ran on a
+ * merge-base range, in a batch that was almost entirely `scripts/`.
+ */
+export const PRODUCT_PATHS = ["packages", "apps", "scripts"];
 
 /** Tags that publish. Each needs an authorization committed at `releases/<tag>.md`. */
 export const RELEASE_TAG = /^(?:cli|desktop|api|web|agent|job-runner)-v\d|^v\d/;

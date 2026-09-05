@@ -77,14 +77,17 @@ for (const file of lessons) {
   if (!CLAIMS_EVAL.test(section) || (DENIES_EVAL.test(section) && namedIds.length === 0)) continue;
   checked++;
   const named = namedIds;
-  const hits = named.filter((id) => cases.has(id));
+  // ⚠️ EVERY named id, not at least one. Requiring a single hit let a lesson naming one real case and one
+  // renamed-away case pass, which is the state this check exists to refuse: a record pointing at nothing,
+  // wearing a record that points at something.
+  const ghosts = named.filter((id) => !cases.has(id) && /-/.test(id));
   if (named.length === 0) {
     fail(
       `lessons/${file}: says an eval case came out of it and names none in backticks. A promise nobody can check is how this route becomes decorative.`,
     );
     continue;
   }
-  if (hits.length === 0) {
+  if (ghosts.length > 0 && ghosts.length === named.filter((id) => /-/.test(id)).length) {
     fail(
       `lessons/${file}: names ${named.map((n) => `\`${n}\``).join(", ")} as its eval case(s), and evals/cases/ has none of them. Either the case was never written, or it was renamed and this record now points at nothing.`,
     );

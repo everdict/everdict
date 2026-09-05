@@ -52,6 +52,8 @@ for (let i = 0; i < argv.length; i++) {
 // prevent.
 const parseConfig = (text) => {
   const metrics = [];
+  const tiers = {};
+  let currentTier;
   let inMetrics = false;
   let current = null;
   let folding;
@@ -62,7 +64,21 @@ const parseConfig = (text) => {
       inMetrics = true;
       continue;
     }
-    if (!inMetrics) continue;
+    // ⚠️ The `tiers:` block above `metrics:` was never parsed — the parser only began collecting after the
+    // literal `metrics:` line, so the per-sigma actions and the 2σ session's tool list lived in this file's
+    // constants while the config claimed to declare them. A versioned threshold nobody reads is the exact
+    // shape this whole tree refuses, sitting in the file that exists so an alarm is reproducible.
+    if (!inMetrics) {
+      const tier = /^\s{2}(\d)sigma:/.exec(line);
+      if (tier) {
+        currentTier = tier[1];
+        tiers[currentTier] = {};
+        continue;
+      }
+      const tkv = /^\s{4}([a-zA-Z]+):\s*(.+)$/.exec(line);
+      if (tkv && currentTier !== undefined) tiers[currentTier][tkv[1]] = tkv[2].replace(/^["']|["']$/g, "");
+      continue;
+    }
     if (/^\s{2}-\s/.test(line)) {
       if (current) metrics.push(current);
       current = {};
@@ -87,17 +103,27 @@ const parseConfig = (text) => {
     }
   }
   if (current) metrics.push(current);
-  return metrics.filter((m) => m.id !== undefined);
+  return { metrics: metrics.filter((m) => m.id !== undefined), tiers };
 };
 
 if (!existsSync(CONFIG)) {
   console.error(`✖ watch-bands: ${path.relative(root, CONFIG)} is missing — there are no bands to apply.`);
   process.exit(1);
 }
-const metrics = parseConfig(readFileSync(CONFIG, "utf8"));
+const { metrics, tiers } = parseConfig(readFileSync(CONFIG, "utf8"));
 if (metrics.length === 0) {
   console.error("✖ watch-bands: the config declares no metrics. Refusing to report over an empty set.");
   process.exit(1);
+}
+// A tier the file claims and the code invents is a threshold nobody can reproduce, which is the one thing a
+// versioned band config exists to prevent.
+for (const sigma of ["1", "2", "3"]) {
+  if (tiers[sigma]?.action === undefined) {
+    console.error(
+      `✖ watch-bands: the config declares no action for ${sigma}σ. The tiers block is the alarm's definition; the code may not supply it.`,
+    );
+    process.exit(1);
+  }
 }
 
 // ── the series ───────────────────────────────────────────────────────────────────────────────────
@@ -234,7 +260,7 @@ for (const breach of breaches) {
         "--disallowedTools",
         "Edit,Write,Bash,Task,WebFetch,WebSearch",
         "--allowedTools",
-        "Read,Grep,Glob",
+        tiers["2"].tools ?? "Read,Grep,Glob",
       ],
       { cwd: root, encoding: "utf8", timeout: 300_000, maxBuffer: 32 * 1024 * 1024 },
     );
