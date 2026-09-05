@@ -322,11 +322,11 @@ try {
   teardown();
 }
 console.log(`\n${selected.length - failed}/${selected.length} passed · $${spend.toFixed(4)}`);
-if (failed > 0) {
-  console.error("\n✖ agent-evals RED — the configuration stopped carrying a lesson it is supposed to carry.");
-  process.exit(1);
-}
 
+// ⚠️ AFTER the history, never before. A failing run used to exit here, so `evals/history.jsonl` only ever
+// received SUCCESSES — and `eval-pass-rate`, the band whose entire job is to notice the suite getting worse,
+// watched a series that could not contain a regression. The one indicator here that is about behaviour was
+// structurally incapable of moving.
 // ── the history ──────────────────────────────────────────────────────────────────────────────────
 //
 // `.results/` is overwritten every run, so the eval pass rate — the one leading indicator this harness
@@ -357,7 +357,7 @@ appendFileSync(
 // And a run over DIRTY configuration says nothing about HEAD: the suite reads its cases from the working tree
 // and overlays the working tree's CLAUDE.md/.claude into the worktree, exactly so an edit can be tested before
 // it is committed, which is the same reason the stamp cannot then attest the commit.
-if (!opts.only) {
+if (!opts.only && failed === 0) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
   const dirty = spawnSync("git", ["status", "--porcelain", "--", ...CLEAN_PATHSPEC], { cwd: root, encoding: "utf8" })
     .stdout.split("\n")
@@ -374,4 +374,9 @@ if (!opts.only) {
       `\n· push stamp written for ${head.slice(0, 9)} — the gate will accept a configuration change on this HEAD.`,
     );
   }
+}
+
+if (failed > 0) {
+  console.error("\n✖ agent-evals RED — the configuration stopped carrying a lesson it is supposed to carry.");
+  process.exit(1);
 }

@@ -205,6 +205,8 @@ if (body.length < 200 || !body.includes("## Requirements")) {
 writeFileSync(
   specFile,
   `From: intent.md @ ${intentSha}
+Policies: ${policySha}
+Concerns: open
 
 <!-- Written by \`pnpm design\` from intent.md, model ${opts.model}, ${new Date().toISOString()}.
      A machine proposed this. It is in the working tree and committed by nobody; read it before a plan is

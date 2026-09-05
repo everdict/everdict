@@ -68,9 +68,11 @@ returned text. `scripts/trust/protocol-mutations.mjs` is the same idea one layer
 protocols — and where that gate costs ninety minutes of real builds and real suites, this one costs a single
 agent call, which is why it can stay.
 
-A killed drill leaves neutralized files behind (a `finally` does not run when the process is killed). It
-records what it touched in `.git/everdict-eval-drill-stale` and refuses to start again until they are
-restored — `git checkout -- <the files it names>`.
+A killed drill leaves nothing behind. The neutralization happens inside the throwaway worktree, so the
+repository is never edited and there is nothing to restore — which is why the `.git/everdict-eval-drill-stale`
+marker this section used to describe was removed along with the in-tree neutralization it protected. The
+description outlived the mechanism by a week, which is the ordinary way a document becomes a promise nobody
+keeps.
 
 ## Where it is enforced — the push gate, not CI
 
