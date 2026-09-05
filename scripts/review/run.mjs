@@ -17,7 +17,7 @@
 // permitted rather than restricting it, and a session started at this root inherits `.claude/settings.json`.
 // An agent that reviews a tree it can edit has already stopped being a reviewer.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -48,7 +48,13 @@ const head = git("rev-parse", "HEAD").stdout.trim();
 const remote = git("remote").stdout.split("\n").filter(Boolean)[0];
 const base = `${remote}/main`;
 const haveBase = remote !== undefined && git("rev-parse", "--verify", "--quiet", base).status === 0;
-const range = opts.range ?? (haveBase ? `${base}..HEAD` : "HEAD~1..HEAD");
+// ⚠️ THREE DOTS, NOT TWO. `base..HEAD` is "what HEAD has that base does not", which on a branch BEHIND base
+// includes undoing everything base did since they parted — so the reviewer reads main's work as this branch's
+// reversions. Measured here: 596 files two-dot against 122 three-dot, and the first full-range review returned
+// twenty-one "Important" findings of which nearly all were that artifact ("this reverts the English
+// translation", "this deletes a check"). A reviewer that cries wolf twenty-one times is one people stop
+// reading, which is the failure this repository names for scanners and had just built into its reviewer.
+const range = opts.range ?? (haveBase ? `${base}...HEAD` : "HEAD~1..HEAD");
 
 const files = git("diff", "--name-only", range).stdout.split("\n").filter(Boolean);
 if (files.length === 0) {
@@ -159,10 +165,28 @@ let spend = 0;
 // ⚠️ NOTHING EXITS INSIDE THIS TRY. `process.exit()` skips the `finally` that removes the throwaway worktree —
 // the same defect `evals/run.mjs`'s drill had, and the one that leaked a worktree here when a killed run took
 // the child with it. Failures set `failure` and break; the exit happens after teardown.
+// ⚠️ A LONG REVIEW THAT RESTARTS FROM ZERO IS A TOOL NOBODY RUNS. Six parts over 596 files is twenty-odd
+// minutes, and any interruption — a killed terminal, a timeout, a laptop lid — threw away every completed part
+// and every dollar of it. Each part is cached under its own head and range, so a re-run does only what is
+// left; a different head or range never reuses a part, because the cache key is what makes that safe.
+const partsDir = path.join(root, ".git", "everdict-review-parts");
+mkdirSync(partsDir, { recursive: true });
+const rangeKey = range.replace(/[^A-Za-z0-9]/g, "_");
+const partPath = (index) => path.join(partsDir, `${head.slice(0, 12)}-${rangeKey}-${index}.json`);
+
 let failure;
 try {
   console.log(`▶ review · ${range} · ${files.length} file(s) in ${chunks.length} part(s) · model ${opts.model}\n`);
   for (const [index, chunk] of chunks.entries()) {
+    const cached = partPath(index);
+    if (existsSync(cached)) {
+      const part = JSON.parse(readFileSync(cached, "utf8"));
+      for (const f of part.findings ?? []) findings.push(f);
+      nitsOmitted += Number(part.nitsOmitted ?? 0);
+      if (part.summary) summaries.push(part.summary);
+      console.log(`· part ${index + 1}/${chunks.length} (${chunk.files.length} files) — reused`);
+      continue;
+    }
     process.stdout.write(`· part ${index + 1}/${chunks.length} (${chunk.files.length} files) …\r`);
     // ⚠️ THE PROMPT GOES ON STDIN, NOT IN ARGV. Passing it as a positional argument worked for every small
     // range and died on the first real one: Linux caps a SINGLE argument at MAX_ARG_STRLEN (128 KiB) whatever
@@ -207,9 +231,18 @@ try {
     try {
       part = JSON.parse(json?.[0] ?? "");
     } catch {
-      failure = `part ${index + 1} did not answer with the findings envelope, so there is nothing to record.\n${text.slice(0, 800)}`;
-      break;
+      // ⚠️ AN UNSTRUCTURED PART IS STILL A READING — the same lesson `scripts/scan/run.mjs` learned when a prose
+      // answer was discarded along with a real defect inside it. The part is recorded with its prose so the run
+      // can finish and nothing is thrown away for a formatting reason; the summary says which parts were prose,
+      // because a reader deciding what to act on needs to know which halves were countable.
+      part = {
+        findings: [],
+        nitsOmitted: 0,
+        unstructured: true,
+        summary: `[part ${index + 1}, unstructured] ${text.slice(0, 1200)}`,
+      };
     }
+    writeFileSync(cached, JSON.stringify(part));
     for (const f of part.findings ?? []) findings.push(f);
     nitsOmitted += Number(part.nitsOmitted ?? 0);
     if (part.summary) summaries.push(part.summary);

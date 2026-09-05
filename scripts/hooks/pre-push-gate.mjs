@@ -77,14 +77,18 @@ const haveBase =
   remote !== undefined && spawnSync("git", ["rev-parse", "--verify", "--quiet", base], { cwd: root }).status === 0;
 const pushed = haveBase ? git("rev-list", `${base}..HEAD`).stdout.split("\n").filter(Boolean) : [head];
 
+// Three dots: the diff from the MERGE BASE. Two dots asks "what does HEAD have that base does not", which on a
+// branch behind base answers with base's own work inverted — so a config file main changed and this branch
+// never touched would read as a configuration change here. Over-gating is the safe direction and it is still
+// the wrong question.
 const touched = haveBase
-  ? git("diff", "--name-only", `${base}..HEAD`, "--", ...CONFIG_PATHSPEC)
+  ? git("diff", "--name-only", `${base}...HEAD`, "--", ...CONFIG_PATHSPEC)
   : git("show", "--name-only", "--format=", "HEAD", "--", ...CONFIG_PATHSPEC);
 const configChanged = touched.status === 0 && touched.stdout.trim() !== "";
 
 // Product code — a docs-only or intent-only push carries nothing a review would find, and pays nothing.
 const product = haveBase
-  ? git("diff", "--name-only", `${base}..HEAD`, "--", ...PRODUCT_PATHS)
+  ? git("diff", "--name-only", `${base}...HEAD`, "--", ...PRODUCT_PATHS)
   : git("show", "--name-only", "--format=", "HEAD", "--", ...PRODUCT_PATHS);
 const productChanged = product.status === 0 && product.stdout.trim() !== "";
 
