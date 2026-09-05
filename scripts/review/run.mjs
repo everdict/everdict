@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 
-const KNOWN = new Set(["--range", "--model", "--timeout"]);
+const KNOWN = new Set(["--range", "--at", "--model", "--timeout"]);
 const argv = process.argv.slice(2);
 const opts = { model: "sonnet", timeout: 900 };
 for (let i = 0; i < argv.length; i++) {
@@ -132,9 +132,14 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     process.exit(130);
   });
 }
+// The worktree is checked out at the TIP OF THE RANGE, not at HEAD. The reviewer is told to read REVIEW.md,
+// the rules and the changed files from this worktree — so reviewing somebody else's range from your own tree
+// shows it their diff against your file contents, which is a different change than the one it was asked
+// about. `--at <ref>` names the tip when the range is not the default one.
+const at = opts.at ?? "HEAD";
 rmSync(wt, { recursive: true, force: true });
-if (git("worktree", "add", "--detach", "--quiet", wt, "HEAD").status !== 0) {
-  console.error("✖ review: could not create the throwaway worktree.");
+if (git("worktree", "add", "--detach", "--quiet", wt, at).status !== 0) {
+  console.error(`✖ review: could not create the throwaway worktree at ${at}.`);
   process.exit(1);
 }
 
@@ -177,7 +182,9 @@ const partPath = (index) => path.join(partsDir, `${head.slice(0, 12)}-${rangeKey
 
 let failure;
 try {
-  console.log(`▶ review · ${range} · ${files.length} file(s) in ${chunks.length} part(s) · model ${opts.model}\n`);
+  console.log(
+    `▶ review · ${range} · read at ${at} · ${files.length} file(s) in ${chunks.length} part(s) · model ${opts.model}\n`,
+  );
   for (const [index, chunk] of chunks.entries()) {
     const cached = partPath(index);
     if (existsSync(cached)) {
@@ -290,8 +297,8 @@ console.log(
 // `HEAD~1..HEAD` would earn a stamp the gate reads as covering everything the push carries — a hole this
 // file's own convenience flag would have opened. (A rewound `origin/main` still widens the range under a
 // valid stamp; that edge is known and unhandled.)
-if (opts.range !== undefined) {
-  console.log("· no push stamp: --range reviewed a slice, and the gate asks about everything the push carries.");
+if (opts.range !== undefined || opts.at !== undefined) {
+  console.log("· no push stamp: --range/--at reviewed something other than what this push carries.");
   process.exit(0);
 }
 writeFileSync(path.join(root, ".git", "everdict-review-ok"), `${head}\n`);
