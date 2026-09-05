@@ -37,6 +37,8 @@ with the status read between them.
 
 ## What was done about it
 
+Eval case: none — `pnpm ci:local` already catches it, and a check about how an agent reads its own shell output belongs in the agent's configuration.
+
 Nothing mechanised, and the reason is that the failure is not in this repository. `pnpm ci:local` already
 catches it — it caught it both times, which is the gate working — and `pnpm ci:commits` catches it per
 commit before a push. A repository-side check that watches how an agent reads its own shell output would be

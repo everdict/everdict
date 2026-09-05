@@ -37,6 +37,8 @@ would cost, at the moment you are already looking.
 
 ## What was done about it
 
+Eval case: none — a property of the artifact set, not something an agent gets wrong in a session.
+
 Both. `intent/README.md` gains the constraint, and the check reports the count it is trusting.
 
 No eval case: this is not a thing an agent gets wrong in a session, it is a property of the artifact set. No

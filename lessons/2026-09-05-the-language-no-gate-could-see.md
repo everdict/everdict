@@ -49,6 +49,8 @@ runner — is the version whose cost is why nothing existed at all.
 
 ## What was done about it
 
+Eval case: none — the agent under test was never asked anything here; the harness had no eyes on a language.
+
 A gate: `pnpm python` (`scripts/check-python.mjs`), in `ci:local` and `ci.yml`, replacing the shell loop.
 It compiles every tracked `.py` and runs every `test_*.py` plus every declared self-test, and **a test that
 cannot run is a failure, not a skip** — the rule `scripts/trust/trust-suite.mjs` already applies to a

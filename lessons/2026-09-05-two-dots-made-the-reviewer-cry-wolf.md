@@ -41,6 +41,8 @@ because it was already there.
 
 ## What was done about it
 
+Eval case: none — a defect in one expression, not a lesson an agent applies in a session.
+
 Three dots in the reviewer and in the gate's `configChanged`/`productChanged` questions. The commit list keeps
 two dots, which is right for it.
 

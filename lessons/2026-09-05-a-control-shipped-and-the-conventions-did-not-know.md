@@ -39,6 +39,8 @@ previous round relied on.
 
 ## What was done about it
 
+Eval case: none — the failure was a control shipping undocumented, which `pnpm controls-documented` now refuses deterministically; a prompt replay would test the wrong subject.
+
 `pnpm controls-documented`, wired into `ci.yml` and `ci:local`. A control that exists and is named nowhere is
 now a red gate rather than a thing somebody notices while reading a diffstat.
 

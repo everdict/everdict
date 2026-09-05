@@ -41,6 +41,8 @@ the law was written down so well that writing it down felt like finishing.
 
 ## What was done about it
 
+Eval case: none — the configuration was right and unread, so replaying it as a prompt would test the agent rather than the missing reader.
+
 A check: `pnpm swallowed-reads` (`scripts/check-swallowed-reads.mjs`), wired into `ci:local` and `ci.yml`.
 
 It is narrow on purpose. The tree holds 331 occurrences of the banned spellings and only 83 have the shape

@@ -48,19 +48,31 @@ if (cases.size === 0) {
 
 const lessons = readdirSync(lessonsDir).filter((f) => f.endsWith(".md") && f !== "README.md" && f !== "TEMPLATE.md");
 
-// A lesson names a case by its id in backticks, the way every other reference in this tree does.
-const BACKTICKED = /`([a-z0-9][a-z0-9-]{3,})`/g;
-// The claim: the lesson's own closing section says an eval case came out of it.
+// ── IT READS A DECLARATION NOW, BECAUSE THE PROSE HEURISTIC WAS WRONG THREE TIMES ─────────────────
 //
-// ⚠️ AND A CLAIM OF ABSENCE IS NOT A CLAIM. The first version matched `/eval case/` and read "No eval case:
-// this is not a thing an agent gets wrong" — a lesson explaining why it mechanised NOTHING — as a promise of a
-// case, then failed for the missing name. It was caught by the first lesson written after the check existed,
-// which is the cheapest possible moment and still one commit late. `lessons/README.md` says a lesson may
-// answer "nothing"; a check that cannot read that answer punishes the honest one.
-const CLAIMS_EVAL = /eval case|evals\/cases\//i;
-const DENIES_EVAL = /\b(no|not|without|never|neither)\b[^.\n]{0,24}\beval/i;
+// A lesson's "What was done about it" section declares one line:
+//
+//     Eval case: `<id>`          …or…      Eval case: none — <why>
+//
+// The three rounds it took to stop guessing, because each is a real defect and the shape is the lesson:
+//
+//   1. Matched `/eval case/` and read "No eval case: this is not a thing an agent gets wrong" — a lesson
+//      explaining why it mechanised NOTHING — as a promise, then failed it for naming no case. The honest
+//      answer punished, which is how a route stops being used.
+//   2. Repaired by treating a denial as a denial UNLESS the section named ids — and "named an id" meant any
+//      lone hyphenated backtick. A lesson denying an eval case while mentioning `check-python` stopped being
+//      a denial and failed for a case that was never claimed. Same defect, other direction.
+//   3. Repaired again by requiring one named id to be a REAL case before a denial is overridden — which let
+//      "there was no eval case before; now there is: `renamed-away-case`" through as an honest denial. That
+//      is the exact record-pointing-at-nothing this check exists to refuse, and the fix for round 2 built it.
+//
+// Three rounds, two directions, one cause: the check was inferring intent from sentences people write
+// freely. This repository already knows the answer — `WATCHES`, `DECIDED`, `NEEDS`, `DECLARED_UNWIRED` —
+// a declaration is COMPLETE where a heuristic is opt-in, and it cannot be re-litigated by a rewording.
+const DECLARATION = /^Eval case:\s*(.+)$/m;
+const NAMED_CASE = /^`([^`]+)`\s*$/;
 
-let checked = 0;
+let declared = 0;
 for (const file of lessons) {
   const body = readFileSync(path.join(lessonsDir, file), "utf8");
   const section = /##\s*What was done about it\s*\n([\s\S]*?)(?=\n##\s|\s*$)/i.exec(body)?.[1];
@@ -70,41 +82,34 @@ for (const file of lessons) {
     );
     continue;
   }
-  // Produced something else, produced nothing, or said in so many words that it produced no eval. All fine.
-  // A denial only counts when the section names no case at all. "There was no eval case before; now there is:
-  // `x`" is a CLAIM wearing a negation, and reading it as a denial would skip the check that matters.
-  const namedIds = [...section.matchAll(BACKTICKED)].map((m) => m[1]).filter((id) => id !== "evals");
-  // ⚠️ AND A DENIAL IS OVERRIDDEN ONLY BY A CASE THAT EXISTS. The first repair of the negation-blindness
-  // asked `namedIds.length === 0`, which reads ANY lone hyphenated backtick as a claim — so a lesson saying
-  // "No eval case." while mentioning `check-python` or `swallowed-reads` in the same section stopped being a
-  // denial, and then failed for naming a case that is not there. That is the honest answer punished, which
-  // is the failure this whole check's header warns about, reintroduced by its own fix.
-  //
-  // The claim-wearing-a-negation this guard is really for — "there was no eval case before; now there is:
-  // `x`" — always names a case that EXISTS. So that is the test.
-  const deniesHonestly = DENIES_EVAL.test(section) && !namedIds.some((id) => cases.has(id));
-  if (!CLAIMS_EVAL.test(section) || deniesHonestly) continue;
-  checked++;
-  const named = namedIds;
-  // ⚠️ EVERY named id, not at least one. Requiring a single hit let a lesson naming one real case and one
-  // renamed-away case pass, which is the state this check exists to refuse: a record pointing at nothing,
-  // wearing a record that points at something.
-  const ghosts = named.filter((id) => !cases.has(id) && /-/.test(id));
-  if (named.length === 0) {
+  const answer = DECLARATION.exec(section)?.[1]?.trim();
+  if (answer === undefined) {
     fail(
-      `lessons/${file}: says an eval case came out of it and names none in backticks. A promise nobody can check is how this route becomes decorative.`,
+      `lessons/${file}: no \`Eval case:\` line in "What was done about it". Declare \`Eval case: \\\`<id>\\\`\` or \`Eval case: none — <why>\` — see lessons/TEMPLATE.md. This check used to read the prose and was wrong three times, in both directions.`,
     );
     continue;
   }
-  // ⚠️ ANY ghost, not every ghost. The first repair of this same finding required ALL named ids to be missing,
-  // which is the original defect with an extra condition on it — a lesson naming one real case and one
-  // renamed-away case still passed. The reviewer flagged the bug, the fix was wrong, and the reviewer caught
-  // the fix. Both rounds are why this comment is here.
-  if (ghosts.length > 0) {
-    fail(
-      `lessons/${file}: names ${ghosts.map((n) => `\`${n}\``).join(", ")} as an eval case, and evals/cases/ has no such case. Either it was never written, or it was renamed and this record now points at nothing.`,
-    );
+  if (/^none\b/i.test(answer)) {
+    // Not everything is mechanisable, and `lessons/README.md` says recording that decision IS the answer.
+    // A bare `none` is not one: without the reason the next person re-decides it from scratch.
+    if (!/^none\s*[—:-]\s*\S/.test(answer))
+      fail(
+        `lessons/${file}: declares \`Eval case: none\` with no reason. Deciding not to mechanise is a decision; a decision with no reason is a shrug the next reader cannot argue with.`,
+      );
+    continue;
   }
+  declared++;
+  const id = NAMED_CASE.exec(answer)?.[1];
+  if (id === undefined) {
+    fail(
+      `lessons/${file}: \`Eval case: ${answer}\` is neither \`none — <why>\` nor a single backticked case id. A promise nobody can check is how this route becomes decorative.`,
+    );
+    continue;
+  }
+  if (!cases.has(id))
+    fail(
+      `lessons/${file}: declares eval case \`${id}\`, and evals/cases/ has no such case. Either it was never written, or it was renamed and this record now points at nothing.`,
+    );
 }
 
 if (violations.length > 0) {
@@ -115,4 +120,6 @@ if (violations.length > 0) {
   );
   process.exit(1);
 }
-console.log(`PASS lesson evals: ${lessons.length} lesson(s), ${checked} claiming an eval case, all of them present.`);
+console.log(
+  `PASS lesson evals: ${lessons.length} lesson(s) declare an eval case; ${declared} name one, and every named case exists.`,
+);
