@@ -46,7 +46,7 @@ export const REFERENCE_TYPE_ICON: Record<AgentReferenceType, LucideIcon> = {
 // cross-source trace browse would be prohibitively wide. So the picker tabs offer every type EXCEPT trace.
 const PICKABLE_REFERENCE_TYPES = AGENT_REFERENCE_TYPES.filter((rt) => rt !== 'trace')
 
-// 타이핑이 멎기를 기다리는 시간(ms) — IssueSearchOptions 와 같은 값, 같은 이유.
+// How long (ms) to wait for typing to stop — the same value as IssueSearchOptions, for the same reason.
 const SEARCH_DEBOUNCE_MS = 200
 
 interface MentionItem {
@@ -114,9 +114,9 @@ export function MentionPicker({
     return () => window.removeEventListener('keydown', onKey, true)
   }, [type, onClose])
 
-  // 후보는 서버가 좁힌다(IssueSearchOptions 와 같은 이유): 라우트는 창 하나(20건)로 답하므로, 받아 둔
-  // 창을 여기서 거르면 컬렉션이 창보다 큰 타입(이슈)에서 조용히 못 찾기 시작한다. 취소는 두 겹 — 아직
-  // 안 나간 요청은 타이머로, 이미 나간 요청은 AbortController 로 접는다.
+  // The candidates are narrowed by the SERVER (the same reason as IssueSearchOptions): the route answers with one window (20 rows), so
+  // filtering that window here starts silently failing to find things on a type whose collection is larger than the window (issues).
+  // Cancellation has two layers — a request not yet sent is folded by the timer, one in flight by the AbortController.
   useEffect(() => {
     if (!type) return
     const controller = new AbortController()
@@ -131,7 +131,7 @@ export function MentionPicker({
           const data = res.ok ? await res.json() : { items: [] }
           setItems(Array.isArray(data.items) ? data.items : [])
         })
-        // 실패·중단이면 고를 것이 없는 것과 같다 — 빈 목록 문구가 답한다.
+        // A failure or an abort is the same as having nothing to pick — the empty-list message answers.
         .catch(() => undefined)
         .finally(() => setLoading(false))
     }, SEARCH_DEBOUNCE_MS)
@@ -169,7 +169,7 @@ export function MentionPicker({
                   type="button"
                   onClick={() => {
                     setQ('')
-                    // 이전 타입의 행이 디바운스 창 동안 남아 보이지 않게 — 바로 로딩 문구로 넘어간다.
+                    // So rows of the PREVIOUS type do not linger through the debounce window — it goes straight to the loading message.
                     setItems([])
                     setLoading(true)
                     setType(rt)

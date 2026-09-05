@@ -19,12 +19,12 @@ import { FacetFilterMenu, type FacetOption, type FacetSpec } from '@/shared/ui/l
 
 import type { IssueDirectories } from '../model/directories'
 
-// 미지정 버킷의 값. 쿼리 파라미터에는 null 이 없어서 빈 문자열이 그 이름이다 — 담당자·프로젝트·사이클
-// 없음은 실제로 사람들이 거르는 그룹이라 필터로 닿을 수 있어야 한다.
+// The unspecified bucket's value. A query parameter has no null, so the empty string is its name — no assignee, no project and no cycle are
+// groups people genuinely filter by and have to be reachable as filters.
 const UNSET = ''
 
-// 이슈 목록의 필터 축들을 어휘로 풀어 공용 필터 메뉴에 넘긴다. 메뉴의 생김새와 동작(두 단계 · 토큰)은
-// 평가 자원 목록들과 한 컴포넌트를 공유한다 — 한쪽에만 생긴 필터 UI 라는 것이 있을 수 없게.
+// It resolves the issue list's filter axes into a vocabulary and hands them to the shared filter menu. The menu's appearance and behaviour
+// (two steps · tokens) share ONE component with the evaluation resource lists — so a filter UI that exists on only one of them cannot happen.
 export function IssueFilterMenu({
   filters,
   directories,
@@ -41,7 +41,7 @@ export function IssueFilterMenu({
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
 
-  // 축의 값 목록. 닫힌 어휘(상태·우선순위)는 카탈로그에서, 열린 것(사람·라벨·프로젝트·사이클)은 디렉터리에서.
+  // The value list per axis. A closed vocabulary (status, priority) comes from the catalog; an open one (people, labels, projects, cycles) from the directory.
   const facets = useMemo((): FacetSpec[] => {
     const optionsOf = (facet: IssueFilterFacet): FacetOption[] => {
       switch (facet) {
@@ -92,7 +92,7 @@ export function IssueFilterMenu({
     }))
   }, [directories, projects, t, tracker])
 
-  // 이슈의 필터는 축이 고정된 형태라(어느 축이 있는지 타입이 안다) 공용 메뉴가 쓰는 열린 레코드로 한 번 옮긴다.
+  // The issue filters have a fixed shape (the TYPE knows which axes exist), so they are moved once into the open record the shared menu uses.
   const selected = useMemo((): ListFilters => {
     const out: Record<string, readonly string[]> = {}
     for (const facet of ISSUE_FILTER_FACETS) {

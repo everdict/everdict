@@ -94,7 +94,7 @@ export const campaignDocs: Record<
     summary: "Ask the adoption gate (pure read)",
     description:
       "The pure gate over the frame and the rounds: adopt (the latest candidate is significantly better " +
-      "with zero regressions over a verifiable world) | continue | halt (no_improvement, budget_exhausted, " +
+      "with zero regressions over a verifiable world) | continue | halt (no_improvement, budget_exhausted, exam_inert, " +
       "or identity_unverified — which refuses adoption but keeps the campaign open).",
     tags: ["campaign"],
     params: toJsonSchema(z.object({ id: z.string() })),
@@ -104,7 +104,7 @@ export const campaignDocs: Record<
     summary: "Settle the campaign per the gate's answer",
     description:
       "Close as adopted (recording the version, the proving scorecard, and any waived identity axes) or as " +
-      "the gate's own ending (no_improvement / budget_exhausted). A gate answering continue or " +
+      "the gate's own ending (no_improvement / budget_exhausted / exam_inert). A gate answering continue or " +
       "identity_unverified REFUSES the settle with 409 — the campaign is not done, or the fix is another " +
       "round. First terminal wins; a lost race reads what won.",
     tags: ["campaign"],

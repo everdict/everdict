@@ -107,7 +107,7 @@ function StepRail({
 // log block so the debugging signal is readable, not truncated into a chip. Non-measured rows (modern
 // `status` stamp OR legacy prose sentinel) never render their placeholder value as a 0.00 verdict — the
 // authoring preview is the screen that decides whether this judge is healthy.
-// 범주형 지표는 label 이 곧 읽을 값이다(value 는 순서 키로 강등) — 런 상세·스코어카드 케이스 상세의 쌍둥이와 같은 규칙.
+// For a categorical metric the label IS the value to read (`value` is demoted to a sort key) — the same rule as its twins on the run detail and the scorecard case detail.
 export function judgeScoreDisplay(score: JudgeScore): string {
   if (score.label !== undefined && score.label !== '') return score.label
   return score.value?.toFixed(2) ?? '–'

@@ -20,7 +20,7 @@ export interface WiringRow {
 export interface ServiceRow {
   name: string
   slot: string // slot name the instance pins (if left empty, name)
-  // 이 슬롯의 기본 이미지. 비우면 인스턴스가 반드시 핀해야 한다(종전 동작). 채워 두면 변형은 바꿀 것만 핀한다.
+  // This slot's default image. Left empty, an instance MUST pin it (the previous behaviour). Filled in, a variation pins only what it changes.
   image: string
   port: string
   needs: string // comma-separated
@@ -351,7 +351,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       return {
         name: sv.name,
         ...(sv.slot.trim() ? { slot: sv.slot } : {}), // if left empty, the control plane uses name as the slot
-        // host-exec 서비스는 컨테이너가 없으므로 이미지를 싣지 않는다(계약이 거절한다).
+        // A host-exec service has no container, so no image is carried (the contract refuses one).
         ...(sv.image.trim() ? { image: sv.image.trim() } : {}),
         ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
         needs: csv(sv.needs),
@@ -514,8 +514,8 @@ export interface ServiceOverrideRow {
 export interface InstanceState {
   templateId: string
   templateVersion: string
-  // 이 하네스의 이름. 한 템플릿(형상) 위에 이름이 다른 하네스를 여러 개 둘 수 있다 — env·모델만 다른 변형을
-  // "같은 id의 새 버전"으로 밀어넣으면 버전 목록이 *새것*과 *다른 것*의 뒤범벅이 되기 때문. 비우면 templateId.
+  // This harness's NAME. Several harnesses with different names can sit on one template (shape) — pushing a variation that differs only in
+  // env or model in as "a new version of the same id" turns the version list into a mixture of *newer* and *different*. Empty falls back to templateId.
   id: string
   version: string // instance tag (e.g. pr-123-sha-abc)
   description: string // this version's changelog (free text) — entered at deploy time, shown in detail
@@ -544,13 +544,13 @@ const EMPTY_SERVICE_OVERRIDE: ServiceOverrideRow = {
   readinessInterval: '',
 }
 
-// --- 유효 설정(effective) 편집의 기준선 ---
-// 인스턴스 폼은 델타 편집기가 아니라 **유효 설정 편집기**다: 템플릿이 정한 값을 그대로 보여주고(상속),
-// 사용자가 바꾼 것만 overrides 로 내보낸다. 유효값이 화면에 없으면 사람은 값이 보이는 템플릿을 고치러 가고,
-// env 한 줄 바꾸자고 형상 버전이 새로 생긴다 — 이 기준선이 그 경로를 끊는다.
-// known=false 는 템플릿을 아직 모르는 자유 입력 경로(기존 동작 그대로: 순수 델타 편집).
-// 기준선의 서비스 행은 편집 행과 같은 모양이다 — 그래야 "상속값을 깔고 그 위에서 고친다"가 한 자료형으로 성립하고,
-// 둘을 나란히 놓고 델타를 뜰 수 있다.
+// --- The baseline for editing the EFFECTIVE configuration ---
+// The instance form is not a delta editor but an **effective-configuration editor**: it shows the values the template set (inherited) and
+// exports only what the user changed as overrides. With the effective value absent from the screen, a person goes off to edit the TEMPLATE,
+// where the value is visible, and changing one env line mints a new shape version — this baseline cuts that path off.
+// known=false is the free-input path where the template is not known yet (unchanged behaviour: pure delta editing).
+// A baseline service row has the same shape as an edit row — that is what makes "lay down the inherited values and edit on top" one data
+// type, and what lets the two be placed side by side to take a delta.
 export type ServiceOverrideBaseline = ServiceOverrideRow
 
 export interface OverrideBaseline {
@@ -579,7 +579,7 @@ export const EMPTY_BASELINE: OverrideBaseline = {
   cmdMemoryMb: '',
 }
 
-// 템플릿 스펙 → 기준선. 인스턴스가 덮어쓸 수 있는 칸만 담는다(형상 자체는 여기 없다).
+// Template spec → baseline. It holds only the fields an instance may override (the shape itself is not here).
 export function baselineFromTemplate(t: HarnessTemplateSpec): OverrideBaseline {
   const completion = t.frontDoor?.completion
   return {
@@ -613,7 +613,7 @@ export function baselineFromTemplate(t: HarnessTemplateSpec): OverrideBaseline {
   }
 }
 
-// 기준선의 서비스 행(없으면 빈 기준선) — 템플릿을 모르는 경로에서 diff 가 곧 "전부 델타"가 되게 한다.
+// A baseline service row (an empty baseline when there is none) — so that on a path where the template is unknown, the diff IS "everything is a delta".
 export function serviceBaselineFor(
   baseline: OverrideBaseline,
   service: string
@@ -623,15 +623,15 @@ export function serviceBaselineFor(
   )
 }
 
-// 스칼라 델타 — 기준선과 같으면 내보내지 않는다(머지 결과가 같아 스펙만 부푼다). 비었으면 "상속".
+// A scalar delta — not exported when equal to the baseline (the merge result is the same and only the spec swells). Empty means "inherit".
 const scalarDelta = (effective: string, base: string): string =>
   effective.trim() === base.trim() ? '' : effective.trim()
 
-// env 값 동등 비교. envRowsToSpec 이 키 순서를 고정해 내보내므로 직렬화 비교가 안정적이다.
+// env value equality. `envRowsToSpec` exports keys in a fixed order, so comparing serializations is stable.
 const sameEnvValue = (a: EnvValue | undefined, b: EnvValue): boolean =>
   a !== undefined && JSON.stringify(a) === JSON.stringify(b)
 
-// 유효 env 행 → 델타(값이 기준선과 다른 키만).
+// Effective env rows → the delta (only the keys whose value differs from the baseline).
 export function envDelta(effective: EnvRow[], base: EnvRow[]): Record<string, EnvValue> {
   const baseSpec = envRowsToSpec(base)
   const out: Record<string, EnvValue> = {}
@@ -642,15 +642,15 @@ export function envDelta(effective: EnvRow[], base: EnvRow[]): Record<string, En
   return out
 }
 
-// 화면에서 지운 상속 키 → unsetEnv. 유효 설정 편집기이므로 "행을 지웠다"는 곧 "이 변형에는 없다"이고,
-// 오버라이드는 머지라서 그 뜻을 담을 칸이 따로 필요하다(계약 unsetEnv).
+// An inherited key deleted on screen → unsetEnv. In an effective-configuration editor "I deleted the row" means "this variation does not have
+// it", and because overrides MERGE, that meaning needs a field of its own (the contract's unsetEnv).
 export function envUnset(effective: EnvRow[], base: EnvRow[]): string[] {
   if (base.length === 0) return []
   const kept = new Set(effective.map((r) => r.key.trim()).filter(Boolean))
   return base.map((b) => b.key).filter((k) => k !== '' && !kept.has(k))
 }
 
-// KEY=VALUE 텍스트의 키 단위 델타(command params).
+// A per-key delta over KEY=VALUE text (command params).
 function kvDelta(effective: string, base: string): Record<string, string> {
   const baseMap = kvLines(base)
   const out: Record<string, string> = {}
@@ -661,7 +661,7 @@ function kvDelta(effective: string, base: string): Record<string, string> {
   return out
 }
 
-// JSON 오브젝트의 키 단위 델타(front-door 제출 바디). 제어 평면이 얕은 머지를 하므로 키 단위로 충분하다.
+// A per-key delta over a JSON object (the front-door submit body). The control plane does a shallow merge, so per-key is enough.
 function objectDelta(
   effective: Record<string, unknown>,
   base: Record<string, unknown>
@@ -674,8 +674,8 @@ function objectDelta(
   return out
 }
 
-// env 기준선 ⊕ 델타 − unset → 유효 행(기준선 순서 먼저, 그 뒤 델타에만 있는 키). 편집기가 보여줄 값이며,
-// 화면에 없는 키는 실행에도 없다(그래서 unset 은 여기서 빠져야 한다 — 안 그러면 지운 키가 되살아난다).
+// env baseline ⊕ delta − unset → the effective rows (baseline order first, then keys only the delta has). These are what the editor shows,
+// and a key not on screen is not in the run either (which is why unset must drop out here — otherwise a deleted key comes back).
 export function mergeEnvRows(base: EnvRow[], delta: EnvRow[], unset: string[] = []): EnvRow[] {
   const byKey = new Map(delta.map((r) => [r.key, r]))
   const dropped = new Set(unset)
@@ -684,11 +684,11 @@ export function mergeEnvRows(base: EnvRow[], delta: EnvRow[], unset: string[] = 
   return [...merged, ...delta.filter((r) => !baseKeys.has(r.key) && !dropped.has(r.key))]
 }
 
-// overrides 의 문자열 배열(unsetEnv) 안전 추출 — 느슨한 JSON 이므로 문자열이 아닌 항목은 버린다.
+// Safe extraction of the string array (unsetEnv) out of overrides — it is loose JSON, so a non-string entry is discarded.
 const asStrArray = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
 
-// KEY=VALUE 텍스트 병합(기준선 순서 유지).
+// Merging KEY=VALUE text (preserving baseline order).
 function mergeKvLines(base: string, delta: string): string {
   const merged = { ...kvLines(base), ...kvLines(delta) }
   return Object.entries(merged)
@@ -715,8 +715,8 @@ export function parseJsonObject(
   return { ok: true, value: parsed as Record<string, unknown> }
 }
 
-// 폼의 **유효 설정** → overrides(기준선과 다른 것만). 기준선을 모르면(EMPTY_BASELINE) 입력값 전체가 델타가 되어
-// 기존 동작과 같다. bodyTemplate 파싱 오류는 폼이 막으므로 여기서는 무시한다.
+// The form's **effective configuration** → overrides (only what differs from the baseline). With no baseline known (EMPTY_BASELINE) the whole
+// input becomes the delta, which is the previous behaviour. A bodyTemplate parse error is blocked by the form, so it is ignored here.
 export function buildOverrides(
   s: InstanceState,
   baseline: OverrideBaseline = EMPTY_BASELINE
@@ -747,7 +747,7 @@ export function buildOverrides(
       if (memoryMb) resources.memoryMb = Number(memoryMb)
     }
     if (Object.keys(resources).length) o.resources = resources
-    // volumes/readiness 는 스칼라 교체라 한 칸이라도 다르면 통째로 다시 낸다.
+    // volumes/readiness are scalar replacements, so a difference in even one entry re-emits the whole thing.
     if (r.volumes.trim() !== b.volumes.trim()) {
       const vols = lines(r.volumes)
       if (vols.length) o.volumes = vols
@@ -804,7 +804,7 @@ export function buildOverrides(
 }
 
 // Assemble the instance spec (template reference + pins + overrides). overrides is included only when non-empty.
-// id 는 하네스의 이름이다 — 비어 있을 때만 templateId 로 떨어진다(한 형상 위의 첫 하네스라는 관례).
+// `id` is the harness's NAME — it falls back to templateId only when empty (the convention for the first harness on a shape).
 export function buildInstance(
   s: InstanceState,
   baseline: OverrideBaseline = EMPTY_BASELINE
@@ -916,7 +916,7 @@ const kvToLines = (v: unknown): string => {
 }
 
 // existing overrides → structured form state (starting point for editing a new version). Inverse of buildOverrides.
-// unsetEnv 는 행이 아니라 "빠져야 할 키"라 따로 들고 다니다가 병합 시점에 적용한다.
+// unsetEnv is not a row but "a key that must be ABSENT", so it is carried separately and applied at merge time.
 function serviceOverridesFromSpec(
   ov: Record<string, unknown>
 ): { row: ServiceOverrideRow; unsetEnv: string[] }[] {
@@ -1032,8 +1032,8 @@ export function instanceStateFromSpec(
     overrides?: Record<string, unknown>
   },
   slots?: string[],
-  // 템플릿 기준선. 주면 폼이 **유효 설정**(상속 ⊕ 델타)으로 채워진다 — 이게 없으면 env 칸이 비어 보여서
-  // "환경변수는 템플릿에만 있다"고 읽히고, 사람은 형상을 고치러 간다.
+  // The template baseline. Given one, the form is filled with the **effective configuration** (inherited ⊕ delta) — without it the env box
+  // looks empty, which reads as "environment variables live only on the template", and a person goes off to edit the shape.
   baseline: OverrideBaseline = EMPTY_BASELINE
 ): InstanceState {
   const rowOf = (slot: string, value: string): PinRow => {
@@ -1054,7 +1054,7 @@ export function instanceStateFromSpec(
   return {
     templateId: inst.template.id,
     templateVersion: inst.template.version,
-    id: inst.id, // 이름은 그대로 이어받는다 — 새 버전이 다른 하네스로 등록되면 안 된다
+    id: inst.id, // the name carries over — a new version must not register as a DIFFERENT harness
     version: '',
     description: '', // a new version gets a new changelog — it does not inherit the previous version's description (same spirit as version tags)
     pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
@@ -1070,8 +1070,8 @@ export function instanceStateFromSpec(
   }
 }
 
-// 템플릿의 서비스마다 한 행 — 상속값을 깔고 그 위에 이 인스턴스의 델타를 얹는다. 템플릿에 없는 서비스를 가리키는
-// 기존 델타는 버리지 않고 뒤에 붙인다: 조용히 지우면 제어 평면이 거절하던 오타가 화면에서 사라진다.
+// One row per service in the template — the inherited values laid down with this instance's delta on top. An existing delta pointing at a
+// service the template does not have is appended rather than dropped: dropping it silently makes a typo the control plane refuses disappear from the screen.
 export function effectiveServiceRows(
   baseline: OverrideBaseline,
   deltas: { row: ServiceOverrideRow; unsetEnv: string[] }[]
@@ -1097,7 +1097,7 @@ export function effectiveServiceRows(
   return [...rows, ...deltas.filter((d) => !known.has(d.row.service.trim())).map((d) => d.row)]
 }
 
-// 템플릿만으로 만드는 새 인스턴스의 초기 상태 — 모든 슬롯 행 + 유효 설정 프리필.
+// The initial state of a new instance built from the template alone — every slot row plus the effective-configuration prefill.
 export function instanceStateFromTemplate(
   t: HarnessTemplateSpec,
   slots: string[],

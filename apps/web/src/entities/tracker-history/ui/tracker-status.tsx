@@ -5,14 +5,14 @@ import { IssueStatusBadge, issueStatusSchema } from '@/entities/issue'
 import { ProjectStatusBadge, projectStatusSchema } from '@/entities/project'
 import { Badge } from '@/shared/ui/badge'
 
-// 이력을 가진 트래커 레코드. 상태 어휘가 종류마다 달라(이슈 7 · 프로젝트 4 · 이니셔티브 3) 상태 칩을
-// 고를 때만 쓰인다.
+// A tracker record with a history. The status vocabulary differs per kind (issue 7 · project 4 · initiative 3), so it is used only for
+// choosing the status chip.
 export type TrackerKind = 'issue' | 'cycle' | 'project' | 'initiative'
 
-// 상태 칩은 목록·상세에서 쓰는 그 배지 그대로다 — 이력에서만 다른 모양을 쓰면 같은 상태가 화면마다 달라진다.
-// 값은 검증되지 않은 자유 값이라(이력 detail·플랫폼 이벤트 payload), 어휘에 없는 문자열은 원문 칩으로
-// 떨어진다. 이 파일에는 훅도 'use client' 도 없다 — 트래커 이력(클라이언트 섬)과 홈 활동 피드(서버
-// 컴포넌트)가 같은 칩 한 벌을 그리기 위해서다.
+// The status chip is the SAME badge the lists and details use — a different shape only in the history would make one status look different per screen.
+// The value is unvalidated free text (a history detail, a platform event payload), so a string outside the vocabulary falls back to a raw chip.
+// This file has no hooks and no 'use client' — so the tracker history (a client island) and the home activity feed (a server
+// component) draw the same one set of chips.
 export function TrackerStatusChip({ kind, value }: { kind: TrackerKind; value: string }) {
   if (kind === 'issue') {
     const parsed = issueStatusSchema.safeParse(value)
@@ -29,7 +29,7 @@ export function TrackerStatusChip({ kind, value }: { kind: TrackerKind; value: s
   return <Badge tone="outline">{value}</Badge>
 }
 
-// from → to. 옮겨 간 쪽(to)이 결론이라 화살표 뒤에 둔다. 한쪽만 읽히면 그 한쪽만 그린다.
+// from → to. Where it MOVED TO is the conclusion, so it goes after the arrow. When only one side reads, only that side is drawn.
 export function TrackerStatusMove({
   kind,
   from,

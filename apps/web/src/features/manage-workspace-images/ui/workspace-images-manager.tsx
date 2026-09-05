@@ -15,10 +15,10 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { removeWorkspaceImageAction } from '../api/manage-workspace-images'
 
-// Settings › Images — everdict가 직접 운영하는 워크스페이스 이미지 네임스페이스. BYO 레지스트리(Settings ›
-// Integrations)와 나란히가 아니라 별도 화면인 이유는 소유 관계가 다르기 때문이다: 여기 있는 것은 우리가 저장하고
-// grant를 발급하는 이미지고, BYO는 "당신이 알려준 레지스트리"다.
-// 목록은 레지스트리 UI 의 문법을 따른다: 행 이름이 곧 드릴인이고, 버전(태그)·빌드 히스토리·환경 컨텍스트는 상세가 답한다.
+// Settings › Images — the workspace image namespace everdict operates itself. It is a separate screen rather than sitting beside the BYO
+// registries (Settings › Integrations) because the OWNERSHIP differs: what is here are images we store and issue grants for,
+// while a BYO is "the registry you told us about".
+// The list follows a registry UI's grammar: a row's name IS the drill-in, and versions (tags), build history and environment context are answered by the detail.
 export function WorkspaceImagesManager({
   catalog,
   canPush,
@@ -33,7 +33,7 @@ export function WorkspaceImagesManager({
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
 
-  // 관리형 스토어를 안 돌리는 배포 — 라우트가 404를 준다. 빈 목록으로 위장하지 않고 그렇게 말한다.
+  // A deployment not running a managed store — the route answers 404. It SAYS so rather than disguising it as an empty list.
   if (unavailable || !catalog) {
     return <Callout tone="info">{t('notConfigured')}</Callout>
   }

@@ -33,9 +33,9 @@ const splitCsv = (s: string): string[] =>
     .map((v) => v.trim())
     .filter((v) => v.length > 0)
 
-// 환경 전용 등록/편집 다이얼로그 — 공용 4-kind 위저드가 아니라 환경의 저작 여정대로 섹션을 구성한다:
-// 기본 정보 → 이미지 → 구성 요소 → 에이전트 계약(핵심 — 결과 경로/엔트리포인트를 유도하는 스캐폴드 + 미리보기)
-// → 배선 프리셋(고급, 접힘) → 공유 범위(신규 기본 workspace — 팀 공유가 이 화면의 존재 이유).
+// The environment-specific register/edit dialog — rather than the shared four-kind wizard, its sections follow an environment's authoring
+// journey: basics → image → composition → the agent contract (the heart — a scaffold that elicits the result path and entry point, with a preview)
+// → wiring presets (advanced, collapsed) → sharing (new defaults to workspace — team sharing is why this screen exists).
 export function EnvironmentEditor({
   capability,
   myWorkspaces,
@@ -59,7 +59,7 @@ export function EnvironmentEditor({
   const [name, setName] = useState(capability?.name ?? '')
   const [description, setDescription] = useState(capability?.description ?? '')
   const [tags, setTags] = useState((capability?.tags ?? []).join(', '))
-  // 신규 기본 = workspace: "팀이 쓰게 한다"가 이 표면의 목적이라, private 기본(스토어 위저드)과 달리 공유가 기본이다.
+  // A new one defaults to workspace: "let the team use it" is this surface's purpose, so unlike the store wizard (private default) sharing is the default.
   const [visibility, setVisibility] = useState<CapabilityVisibility>(
     capability?.visibility ?? 'workspace'
   )
@@ -72,22 +72,22 @@ export function EnvironmentEditor({
   const [arch, setArch] = useState(env?.contents?.arch ?? '')
   const [instructions, setInstructions] = useState(env?.instructions ?? '')
   const [preset, setPreset] = useState(env?.preset ? JSON.stringify(env.preset, null, 2) : '')
-  // 프리셋은 고급 — 있을 때만 펼쳐서 시작(없는 저작자에게 토폴로지 어휘를 들이밀지 않는다).
+  // Presets are ADVANCED — expanded to start only when there are any (topology vocabulary is not pushed at an author who has none).
   const [presetOpen, setPresetOpen] = useState(env?.preset !== undefined)
   const [previewing, setPreviewing] = useState(false)
 
-  // 이미지 태그 도우미 — 워크스페이스 레지스트리의 repository 태그를 조회해 ref 를 조립.
+  // The image tag helper — reads the workspace registry's repository tags and assembles the ref.
   const [tagRegistry, setTagRegistry] = useState(imageRegistries[0]?.name ?? '')
   const [tagRepo, setTagRepo] = useState('')
   const [tagLoading, setTagLoading] = useState(false)
   const [imageTags, setImageTags] = useState<string[] | null>(null)
-  // 실 pull 검증 — 저장 시 붙는 정적 분류 경고(imageWarnings)는 "레지스트리에 등록된 호스트인가"만 보는 반면,
-  // 이건 레지스트리에 실제로 매니페스트를 물어본다(방금 push 한 내 이미지를 정말 당길 수 있는가 + digest).
+  // A real pull verification — the static classification warnings attached at save (imageWarnings) only ask "is the host a registered
+  // registry", while this asks the registry for the manifest itself (can the image I just pushed really be pulled, and its digest).
   const [verify, setVerify] = useState<ImageVerify | null>(null)
   const [verifying, setVerifying] = useState(false)
   const [pending, setPending] = useState(false)
 
-  // ref 가 바뀌면 이전 검증 결과는 거짓말이 된다 — 즉시 폐기한다(digest 핀 적용은 예외: 검증된 그 이미지 그대로다).
+  // A changed ref makes the previous verification a lie — it is discarded immediately (applying the digest pin is the exception: it is that same verified image).
   const changeImage = (next: string) => {
     setImage(next)
     setVerify(null)
@@ -105,7 +105,7 @@ export function EnvironmentEditor({
   const canPinDigest =
     verify?.pullable === true && verifiedDigest !== undefined && !image.includes('@')
 
-  // 프리셋 JSON 라이브 피드백 — 저장까지 기다리지 않고 입력 중에 유효성을 보여준다(기존 저장-시점-실패 UX 교정).
+  // Live feedback on the preset JSON — validity is shown WHILE typing rather than waiting for the save (correcting the old failure-at-save-time UX).
   const presetError = useMemo(() => {
     const raw = preset.trim()
     if (raw.length === 0) return null
@@ -185,7 +185,7 @@ export function EnvironmentEditor({
           toast.success(
             isNew ? t('published', { name: name.trim() }) : t('saved', { name: name.trim() })
           )
-          // 이미지 분류 경고(warn-not-block) — 등록은 성공, 풀 보장/재현성만 주의 환기.
+          // Image classification warnings (warn, not block) — the registration succeeds; only pull guarantees and reproducibility are flagged.
           for (const w of r.result?.imageWarnings ?? [])
             toast.warning(
               t(`imageWarning_${w.class === 'mutable-tag' ? 'mutableTag' : 'noPull'}`, {
@@ -223,7 +223,7 @@ export function EnvironmentEditor({
           {isNew ? t('envEditorNewTitle') : t('envEditorEditTitle')}
         </h3>
 
-        {/* ── 기본 정보 ─────────────────────────────────────────── */}
+        {/* ── Basics ────────────────────────────────────────────── */}
         <section className="space-y-3">
           {section(t('envSectionIdentity'))}
           {isNew && (
@@ -270,7 +270,7 @@ export function EnvironmentEditor({
           </div>
         </section>
 
-        {/* ── 이미지 ────────────────────────────────────────────── */}
+        {/* ── Image ─────────────────────────────────────────────── */}
         <section className="space-y-3">
           {section(t('envSectionImage'))}
           <div className="space-y-1">
@@ -306,7 +306,7 @@ export function EnvironmentEditor({
               </span>
             )}
             {canPinDigest && verifiedDigest !== undefined && (
-              // 검증된 그 이미지의 digest 로 바꾸는 것이므로 검증 결과는 유지한다(changeImage 가 아니라 setImage).
+              // This swaps in the digest OF THAT VERIFIED IMAGE, so the verification result is kept (setImage rather than changeImage).
               <Button
                 variant="ghost"
                 size="sm"
@@ -376,7 +376,7 @@ export function EnvironmentEditor({
           )}
         </section>
 
-        {/* ── 구성 요소 ─────────────────────────────────────────── */}
+        {/* ── Composition ───────────────────────────────────────── */}
         <section className="space-y-3">
           {section(t('envSectionContents'))}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -423,7 +423,7 @@ export function EnvironmentEditor({
           </div>
         </section>
 
-        {/* ── 에이전트 계약 — 이 자산의 핵심 콘텐츠 ────────────────── */}
+        {/* ── The agent contract — this asset's core content ─────── */}
         <section className="space-y-3">
           {section(t('envSectionContract'), t('envSectionContractHint'))}
           <div className="space-y-1">
@@ -466,7 +466,7 @@ export function EnvironmentEditor({
           </div>
         </section>
 
-        {/* ── 배선 프리셋(고급, 접힘) ─────────────────────────────── */}
+        {/* ── Wiring presets (advanced, collapsed) ──────────────── */}
         <section className="space-y-3">
           <button
             type="button"
@@ -503,7 +503,7 @@ export function EnvironmentEditor({
           )}
         </section>
 
-        {/* ── 공유 범위(신규만 — 편집은 행 메뉴의 공개범위 변경) ────── */}
+        {/* ── Sharing (new only — editing changes reach from the row menu) ── */}
         {isNew && (
           <section className="space-y-3">
             {section(t('visibility'), t('envReachDefaultHint'))}

@@ -33,7 +33,7 @@ export default async function MembersDirectoryPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 행 모델은 서버에서 완성한다 — 위젯은 검색·필터·정렬만 하고 데이터를 다시 모으지 않는다.
+  // The row model is completed on the SERVER — the widget only searches, filters and sorts, and never re-gathers the data.
   const rows: MemberRow[] = members.map((member) => ({
     subject: member.subject,
     role: member.role,

@@ -23,13 +23,13 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { HarnessList } from './harness-list'
 
-// 등록된 하네스 목록 — 워크스페이스 하나의 주소다. 한동안 팀 아래에도 같은 목록이 있었지만(그 팀이 소유한
-// 것), 그 축은 걷어냈다: 소유 팀은 남아서 "누가 고칠 수 있나"를 정하되 찾아가는 길은 하나이고, "우리 팀
-// 것만"은 이 목록의 필터 한 축(team)이다.
+// The registered harness list — one address per workspace. The same list also lived under a team for a while (the ones that team owned), but
+// that axis was removed: the owning team remains and decides "who may edit it", while there is ONE route to find things, and
+// "only our team's" is one filter axis (team) on this list.
 //
-// 서버가 하는 일은 컬렉션을 한 번 읽어 넘기는 것까지다 — 거르기·묶기·정렬은 전부 브라우저에서 일어난다.
-// 이 목록들은 페이지네이션이 없어 컬렉션 전체가 손에 들어오므로, 필터를 바꿀 때마다 라우트를 다시 그릴
-// 이유가 없다(그게 이슈 목록에서 "그룹 바꾸면 왜 이렇게 오래 걸리지"의 정체였다).
+// What the server does ends at reading the collection once and handing it over — filtering, grouping and ordering all happen in the browser.
+// These lists have no pagination so the whole collection is in hand, and there is no reason to re-render the route every time a filter changes
+// (which is what "why does changing the grouping take so long" on the issue list actually was).
 export async function HarnessListView({
   workspace,
   params,
@@ -89,7 +89,7 @@ export async function HarnessListView({
         description={t('description')}
         actions={
           <div className="flex items-center gap-3">
-            {/* 형상 카탈로그로 — "무엇으로 평가하는가"(여기)와 "어떤 형상이 있는가"는 다른 질문이다. */}
+            {/* To the shape catalog — "what do we evaluate WITH" (here) and "what shapes exist" are different questions. */}
             <Link
               href={`/${workspace}/harness-templates`}
               className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"

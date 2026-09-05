@@ -20,11 +20,11 @@ import {
 } from '../api/browse-trajectories'
 import { TrajectoryView } from './trajectory-view'
 
-// 봉인 궤적 상세 — 우리 스토어(N1)가 가진 증거를 설정 안에서 그대로 연다. run 소스만 run 상세로도 열리므로
-// (otlp 도착분은 익스포터가 찍은 everdict.run_id, materialize된 import는 ingest:<scorecardId>:<caseId> 로
-// 봉인돼 run 레코드가 없다) 목록의 유일한 상세 표면은 이 다이얼로그다. 외부 플랫폼 트레이스의
-// TraceDetailDialog 와 같은 문법(헤더·메타 스트립·prev/next·←/→)을 쓰고, 본문은 TrajectoryView 가
-// 시스템 뷰(에이전트·배치·서비스 평면 + 전문 페이로드)로 연다.
+// The sealed trajectory detail — it opens the evidence OUR store (N1) holds, right inside settings. Only a `run` source also opens on a run
+// detail (an OTLP arrival is sealed under the everdict.run_id its exporter stamped, and a materialized import under
+// ingest:<scorecardId>:<caseId>, so neither has a run record), which makes this dialog the list's only detail surface. It uses the same
+// grammar as an external platform trace's TraceDetailDialog (header · meta strip · prev/next · ←/→), and the body opens through
+// TrajectoryView as the system view (the agent, batch and service planes plus the full payload).
 export function TrajectoryDetailDialog({
   open,
   onClose,
@@ -35,8 +35,8 @@ export function TrajectoryDetailDialog({
   open: boolean
   onClose: () => void
   runId: string
-  // 목록의 행에서 열릴 때만 실려 온다 — 딥링크(?trajectory=)로 연 다이얼로그는 상세 읽기가 돌려주는 meta 로
-  // 같은 자리를 채운다(그동안 헤더는 id 만으로 선다).
+  // Carried only when opened from a list row — a dialog opened by deep link (?trajectory=) fills the same slot from the meta the detail read
+  // returns (and until then the header stands on the id alone).
   meta?: TrajectoryMeta
   nav?: { index: number; total: number; onPrev: () => void; onNext: () => void }
 }) {
@@ -103,7 +103,7 @@ export function TrajectoryDetailDialog({
 
   const shown = meta ?? fetchedMeta
 
-  // ←/→ 로 형제 궤적 이동 (외부 트레이스 상세와 동일한 조작).
+  // ←/→ moves between sibling trajectories (the same gesture as the external trace detail).
   const hasPrev = nav !== undefined && nav.index > 0
   const hasNext = nav !== undefined && nav.index < nav.total - 1
   useEffect(() => {
@@ -123,7 +123,7 @@ export function TrajectoryDetailDialog({
       labelledBy="trajectory-detail-title"
       className="flex h-[90vh] max-h-[90vh] max-w-[1400px] flex-col"
     >
-      {/* 좁은 화면에선 액션 묶음이 제목 아래로 줄바꿈된다 — 케이스 상세 다이얼로그와 같은 헤더 문법. */}
+      {/* On a narrow screen the action group wraps under the title — the same header grammar as the case detail dialog. */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 border-b border-border px-5 py-4">
         <div className="min-w-0 space-y-1">
           <h2
@@ -136,7 +136,7 @@ export function TrajectoryDetailDialog({
           <div className="truncate font-mono text-[11px] text-faint">{runId}</div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {/* run 소스만 run 레코드를 갖는다 — 없는 페이지로 보내는 링크는 아예 걸지 않는다. */}
+          {/* Only a `run` source has a run record — a link to a page that does not exist is not attached at all. */}
           {shown?.source === 'run' && workspace && (
             <Link
               href={`/${workspace}/run/${encodeURIComponent(runId)}`}
@@ -146,7 +146,7 @@ export function TrajectoryDetailDialog({
               {t('openRun')}
             </Link>
           )}
-          {/* 열림 상태가 ?trajectory= 로 URL 에 미러링되므로, 지금 주소가 곧 이 증거의 공유 링크다. */}
+          {/* The open state is mirrored into the URL as ?trajectory=, so the current address IS this evidence's shareable link. */}
           <CopyLinkButton
             label={t('copyLink')}
             message={t('linkCopied')}
@@ -188,7 +188,7 @@ export function TrajectoryDetailDialog({
         </div>
       </div>
 
-      {/* 딥링크로 여는 동안 meta 가 아직 없으면 스트립 자체를 접는다(빈 섹션 숨김) — 상세가 도착하면 선다. */}
+      {/* While opening by deep link, with no meta yet, the strip itself folds away (empty-section hiding) — it stands once the detail arrives. */}
       {shown && (
         <div className="flex flex-wrap gap-x-7 gap-y-2 border-b border-border bg-card/50 px-5 py-3">
           <Meta label={t('metaSource')} value={t(`source_${shown.source}`)} />

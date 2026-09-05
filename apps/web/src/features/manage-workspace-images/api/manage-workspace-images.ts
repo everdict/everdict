@@ -12,8 +12,8 @@ import { controlPlane } from '@/shared/lib/control-plane'
 
 export type WorkspaceImageActionResult = { ok: true } | { ok: false; error: string }
 
-// 리포지토리 회수(unpublish). 실패는 결과로 돌려주고(토스트용) 예외로 던지지 않는다 — 레지스트리가 죽어 있어도
-// 패널 전체가 에러 화면으로 넘어가면 나머지 행을 못 다룬다.
+// Repository unpublish. A failure comes back as a RESULT (for a toast) rather than being thrown — with the registry down, the whole panel
+// flipping to an error screen would leave the other rows unusable.
 export async function removeWorkspaceImageAction(
   repository: string
 ): Promise<WorkspaceImageActionResult> {
@@ -27,8 +27,8 @@ export async function removeWorkspaceImageAction(
   }
 }
 
-// 버전(태그) 하나의 상세 — 상세 화면에서 태그를 고를 때마다 호출된다. 실패는 결과로 돌려 화면이 요약으로 버틴다.
-// (태그 목록은 상세 페이지가 서버에서 읽는다 — 목록 화면의 행 펼침이 상세 라우트로 승격되면서 클라이언트 액션은 없어졌다.)
+// One version (tag) detail — called each time a tag is picked on the detail screen. A failure comes back as a result so the screen holds with the summary.
+// (The tag list is read on the server by the detail page — the client action disappeared when the list's row expansion was promoted to a detail route.)
 export async function inspectWorkspaceImageAction(
   repository: string,
   reference: string

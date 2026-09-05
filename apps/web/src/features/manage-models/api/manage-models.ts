@@ -4,11 +4,11 @@ import { saveModelResultSchema, testModelConnectionResultSchema } from '@/entiti
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 커넥션 테스트(더미콜) 결과의 평탄한 뷰 — UI 는 ok/응답텍스트/사유만 쓴다. throw(네트워크/403)도 ok:false 로 흡수.
+// A flat view of the connection test (dummy call) result — the UI uses only ok / the response text / the reason. A throw (network, 403) is absorbed as ok:false too.
 
-// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
-// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
-// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
+// Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here
+// (there is no cache to invalidate, and Next 16 throws away the whole client prefetch cache and imposes a 300ms cooldown on the DECLARATION
+// alone). The grounds are in `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface TestConnectionActionResult {
   ok: boolean
   text?: string
@@ -16,7 +16,7 @@ export interface TestConnectionActionResult {
   latencyMs?: number
 }
 
-// provider/model/baseUrl/apiKeySecret(이름) 로 최소 더미콜을 날려 응답이 오는지 확인. 실패는 4xx 가 아니라 ok:false 로 온다.
+// Sends a minimal dummy call with the provider/model/baseUrl/apiKeySecret (a name) to see whether anything answers. A failure arrives as ok:false rather than a 4xx.
 export async function testModelConnectionAction(
   connection: unknown
 ): Promise<TestConnectionActionResult> {
@@ -38,8 +38,8 @@ export interface SaveModelActionResult {
   error?: string
 }
 
-// 버전 없는 저장(PUT /models/:id). 새 id → 1.0.0, 커넥션 변경 → 내부 patch 자동 증가(새 불변 버전), 동일 → 멱등 no-op.
-// authZ(models:write)/버전 배정은 컨트롤플레인이 담당.
+// A versionless save (PUT /models/:id). A new id → 1.0.0, a changed connection → an automatic internal patch bump (a new immutable version), identical → an idempotent no-op.
+// AuthZ (models:write) and version assignment are the control plane's.
 export async function saveModelAction(id: string, body: unknown): Promise<SaveModelActionResult> {
   const ctx = await authContext()
   try {
@@ -50,9 +50,9 @@ export async function saveModelAction(id: string, body: unknown): Promise<SaveMo
   }
 }
 
-// 모델 전체 소프트-딜리트(DELETE /models/:id, versions 생략 = 이 워크스페이스 소유의 모든 라이브 버전). 툼스톤이라 이 모델을
-// 참조했던 과거 스코어카드는 재현 가능하게 보존되지만, 이후 이 모델을 참조하는 실행은 해석에 실패한다. authZ(등록자-or-admin)는
-// 컨트롤플레인이 강제 — fail-fast(하나라도 금지/부재면 아무것도 삭제 안 함).
+// A soft delete of the whole model (DELETE /models/:id with versions omitted = every live version this workspace owns). It is a TOMBSTONE, so past
+// scorecards that referenced this model stay reproducible while later runs referencing it fail to resolve. AuthZ (registrant-or-admin) is enforced
+// by the control plane — fail-fast (one forbidden or missing entry deletes nothing at all).
 export async function deleteModelAction(id: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await authContext()
   try {

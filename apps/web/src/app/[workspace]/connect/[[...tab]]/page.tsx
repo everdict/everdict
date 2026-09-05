@@ -13,9 +13,9 @@ function isConnectTab(value: string): value is ConnectTab {
   return (CONNECT_TABS as string[]).includes(value)
 }
 
-// 코딩 에이전트 연결 허브 — /connect(기본 desktop) 및 /connect/<tab>. 옵셔널 catch-all 로 한 파일에서 처리.
-// 데스크탑 다운로드는 기존 DownloadPanel 재사용, Claude/Codex 는 MCP 설치 스니펫. mcpUrl 은 러너와 동일한
-// 공개 컨트롤플레인 URL(resolveRunnerApiUrl) + /mcp — 러너가 dial 하는 주소와 개념 동일하다.
+// The coding agent connection hub — /connect (defaulting to desktop) and /connect/<tab>. Handled in one file with an optional catch-all.
+// The desktop download reuses the existing DownloadPanel; Claude and Codex are MCP installation snippets. The mcpUrl is the same public
+// control plane URL the runner uses (resolveRunnerApiUrl) plus /mcp — conceptually the same address the runner dials.
 export default async function ConnectPage({
   params,
 }: {

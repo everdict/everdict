@@ -8,7 +8,7 @@ import { Button } from '@/shared/ui/button'
 
 import { CreateIssueDialog, type CreateIssueDialogProps } from './create-issue-dialog'
 
-// 새 이슈를 접수하는 버튼 — 폼 자체는 `CreateIssueDialog` 가 들고 있고 여기서는 여는 일만 한다.
+// The button that files a new issue — the form itself is held by `CreateIssueDialog` and this only opens it.
 export function CreateIssueButton({
   label,
   ...dialog

@@ -15,13 +15,13 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Settings › Agent › Tools › 상세 — 목록의 스위치 뒤에 있는 것. 이 도구가 어떻게 도달되고, 모델 앞에 어떤 function 을
-// 어떤 이름으로 놓고, 모델이 읽는 description 이 무엇이고, 어떤 시크릿을 필요로 하는지. 그리고 정말 도는지(연결 테스트
-// · 예제 실행). 상세는 언제나 라우트이지 다이얼로그가 아니다 — 오른쪽 대화 패널에서 이 도구를 두고 실험·편집해야 한다.
+// Settings › Agent › Tools › detail — what sits behind the list's switch. How this tool is reached, what function it puts in front of the model
+// and under what name, what description the model reads, and which secrets it needs. And whether it actually runs (a connection test
+// · running an example). A detail is always a route and never a dialog — you have to experiment on and edit this tool with the conversation panel on the right.
 //
-// 편집의 주 경로는 스킬 상세와 같은 "대화로 편집하기": 참조 칩을 떨어뜨리고 패널을 toolEdit 임무로 프레이밍한다.
-// 에이전트가 get_capability 로 읽고 save_capability 로 새 버전을 낸다(HITL 승인) — 도구 스펙의 폼 편집은 스토어 소관.
-// 이 워크스페이스가 소유한 capability 만 편집 가능(기본 제공 도구와 남의 발행물은 읽기 전용).
+// The main editing path is the same "edit by conversation" as the skill detail: it drops a reference chip and frames the panel with the toolEdit mission.
+// The agent reads through get_capability and cuts a new version through save_capability (under HITL approval) — form-editing a tool spec is the store's business.
+// Only a capability THIS workspace owns is editable (a built-in tool and somebody else's publication are read-only).
 export default async function AgentToolDetailPage({
   params,
 }: {
@@ -40,17 +40,17 @@ export default async function AgentToolDetailPage({
   try {
     tool = agentToolDetailSchema.parse(await controlPlane.getAgentTool(ctx, key))
   } catch {
-    notFound() // 내 도구셋에 없는 키 — 존재 누설 없이 404(컨트롤플레인이 판정한다)
+    notFound() // a key not in my toolset — a 404 that leaks no existence (the control plane judges)
   }
 
-  // 바인딩 피커의 후보 — 워크스페이스 + 내 개인 시크릿 이름(값은 오지 않는다).
+  // The binding picker's candidates — the workspace plus my personal secret NAMES (no values arrive).
   let secretNames: string[] = []
   try {
     secretNames = secretsSchema
       .parse(await controlPlane.listSecrets(ctx))
       .map((secret) => secret.name)
   } catch {
-    // 시크릿 스토어 미구성 — 피커는 기존 이름 없이 새로 만들기만 제안한다.
+    // No secret store configured — the picker offers only creating a new one, with no existing names.
   }
 
   return (

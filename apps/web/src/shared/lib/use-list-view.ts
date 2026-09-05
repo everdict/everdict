@@ -10,16 +10,16 @@ import {
   type ListFilters,
 } from './list-view'
 
-// 목록 화면의 보기 상태를 브라우저가 든다 — 그게 "즉각적"의 전부다.
+// The browser holds a list screen's view state — that is the whole of "instant".
 //
-// 예전에는 필터를 켜면 `router.push` 가, 묶는 기준을 바꾸면 서버 액션 + `router.refresh()` 가 일어났다.
-// 둘 다 라우트 전체를 다시 그리는 일이라, 화면이 스켈레톤으로 한 번 비워지고 이 목록과 아무 상관 없는
-// 읽기들까지 같이 다시 돌았다. 컬렉션이 이미 손에 있는 화면에서는 그 왕복이 통째로 군더더기다.
+// It used to be `router.push` for a filter and a server action plus `router.refresh()` for a grouping change.
+// Both re-render the whole route, so the screen emptied into a skeleton once and every read unrelated to this list ran again with it.
+// On a screen that already holds the collection, that round trip is pure overhead.
 //
-// 그래서 상태는 여기 있고, 주소는 **뒤따라온다**: `history.replaceState` 는 Next 의 서버 렌더를 일으키지
-// 않으면서 주소창만 갱신하므로, 붙여넣을 수 있는 링크라는 성질은 그대로 남는다. 표시 설정은 쿠키에 바로
-// 적는다(다음 방문에 서버가 첫 화면을 그 설정으로 그리라고). `replace` 이지 `push` 가 아닌 이유: 필터를
-// 여섯 번 만지고 뒤로 가기를 눌렀을 때 여섯 번을 되짚는 것은 아무도 원하지 않는다.
+// So the state lives here and the address **follows**: `history.replaceState` updates the address bar without causing a Next server render,
+// so the property of being a pasteable link survives intact. Display settings are written straight to the cookie (so the server draws the
+// first screen with them on the next visit). `replace` rather than `push` because nobody wants to retrace six steps after touching filters
+// six times and pressing back.
 export interface ListViewControls {
   filters: ListFilters
   search: string
@@ -30,15 +30,15 @@ export interface ListViewControls {
   setDisplay: (next: Partial<ListDisplay>) => void
 }
 
-// 검색어가 주소에 적히기까지 기다리는 시간. 거르는 일 자체는 타이핑과 동시에 일어나고, 늦는 것은 주소뿐이다.
+// How long the search term waits before it is written to the address. The FILTERING happens as you type; only the address is late.
 const SEARCH_URL_DELAY_MS = 300
 
 export function useListView(input: {
-  // 이 목록의 주소 — 쿼리 없는 경로. 여기에 필터가 붙는다.
+  // This list's address — the path with no query. The filters attach to it.
   basePath: string
-  // 표시 설정을 기억할 키(화면마다 하나).
+  // The key the display settings are remembered under (one per screen).
   viewKey: string
-  // 이 목록이 아는 필터 축들 — 주소에 적히는 순서이기도 하다.
+  // The filter axes this list knows — also the order they are written to the address in.
   facets: readonly string[]
   initialFilters: ListFilters
   initialSearch: string
@@ -55,9 +55,9 @@ export function useListView(input: {
   const [search, setSearchValue] = useState(initialSearch)
   const [display, setDisplayValue] = useState<ListDisplay>(initialDisplay)
 
-  // 최신 값을 타이머와 핸들러가 읽을 수 있게 — 주소 쓰기는 항상 "지금 화면"을 적어야 하고, 상태 갱신은
-  // 비동기라 방금 만든 값을 다시 읽을 수 없다. 갱신 함수 안에서 계산하지 않는 이유는 그것이 순수해야 하기
-  // 때문이다(StrictMode 는 두 번 부른다).
+  // So the timer and the handlers can read the newest values — an address write must always write "the screen right now", and a state update
+  // is asynchronous, so a value just created cannot be read back. It is not computed inside the updater function because that has to stay
+  // pure (StrictMode calls it twice).
   const latest = useRef({ filters, search, display })
   latest.current = { filters, search, display }
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -107,7 +107,7 @@ export function useListView(input: {
       const merged = { ...latest.current.display, ...next }
       latest.current = { ...latest.current, display: merged }
       setDisplayValue(merged)
-      // 쿠키는 다음 방문을 위해서만 — 지금 화면은 이미 바뀌었다.
+      // The cookie is for the NEXT visit only — the current screen has already changed.
       saveListDisplay(viewKey, merged)
     },
     [viewKey]

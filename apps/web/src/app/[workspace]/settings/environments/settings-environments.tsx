@@ -8,9 +8,9 @@ import type { AgentReference } from '@/entities/agent-session'
 import type { Capability } from '@/entities/capability'
 import type { AdoptedEnvironment } from '@/entities/environment-adoption'
 
-// Settings › Environments 의 대화 진입점 소유자 — 우측 대화 패널(위젯)은 피처가 직접 못 쓰므로(FSD 상향 임포트 금지)
-// 페이지 레벨의 이 클라이언트 컴포넌트가 훅을 들고 워크벤치에 콜백만 내려준다(SettingsFilesExplorer 선례).
-// 패널 iframe 안에서 열렸을 때는 부모 창으로 postMessage — MentionInChatButton/AskAgentButton 과 같은 이중 경로.
+// The owner of Settings › Environments' conversation entry point — a feature cannot use the right conversation panel (a widget) directly (FSD
+// forbids importing upward), so this page-level client component holds the hook and passes only a callback down to the workbench (following SettingsFilesExplorer).
+// Opened inside the panel iframe it postMessages to the parent window instead — the same dual path as MentionInChatButton/AskAgentButton.
 export function SettingsEnvironments(props: {
   authored: Capability[]
   imported: AdoptedEnvironment[]
@@ -26,7 +26,7 @@ export function SettingsEnvironments(props: {
 }) {
   const infra = useInfraPanelOptional()
 
-  // 이 표면의 대화 진입은 전부 환경을 만들거나 고치는 작업이므로 임무는 여기서 고정한다(워크벤치는 임무를 모른다).
+  // Every conversation entry on this surface is work that creates or edits an environment, so the mission is fixed here (the workbench does not know about missions).
   const dispatch = useCallback(
     (reference?: AgentReference, prompt?: string) => {
       const framed = typeof window !== 'undefined' && window.self !== window.top

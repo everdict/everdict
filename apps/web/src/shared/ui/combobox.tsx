@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/utils'
 
-// 트리거와 팝오버 사이 간격(px) — dropdown-menu 와 동일.
+// The gap (px) between the trigger and the popover — the same as dropdown-menu.
 const GAP = 6
 
 // Option — value is the form value, label is the display (unset=value), hint is the secondary info on the right (owner/alias resolution, etc.),
@@ -64,8 +64,8 @@ export function Combobox({
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
-  // 트리거의 뷰포트 좌표. 팝오버는 body 로 포털링해 fixed 로 여기에 정렬한다 — 부모의 overflow-hidden
-  // (예: 설정 카드 SettingsList, Dialog 콘텐츠) 에 잘리지 않도록. dropdown-menu 와 동일한 방식.
+  // The trigger's viewport coordinates. The popover portals to the body and aligns to them with `fixed` — so it is not clipped by a parent's
+  // overflow-hidden (a settings card's SettingsList, or Dialog content). The same approach as dropdown-menu.
   const [rect, setRect] = useState<DOMRect | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
@@ -74,7 +74,7 @@ export function Combobox({
   const listId = useId()
   const t = useTranslations('ui')
 
-  // 트리거 좌표를 다시 잰다(열기·스크롤·리사이즈 시).
+  // Re-measure the trigger's coordinates (on open, scroll and resize).
   function measure() {
     const el = rootRef.current
     if (el) setRect(el.getBoundingClientRect())
@@ -85,7 +85,7 @@ export function Combobox({
       setOpen(false)
       return
     }
-    measure() // 열기 전에 좌표를 확보해 첫 페인트 깜빡임을 없앤다
+    measure() // secure the coordinates BEFORE opening, so the first paint does not flicker
     setOpen(true)
   }
 
@@ -111,11 +111,11 @@ export function Combobox({
     if (!open) return
     function onDown(e: MouseEvent) {
       const target = e.target as Node
-      // 트리거 또는 포털된 콘텐츠 안의 클릭이면 유지(콘텐츠는 rootRef 의 DOM 자식이 아니다).
+      // A click on the trigger or inside the portalled content keeps it open (the content is not a DOM child of rootRef).
       if (rootRef.current?.contains(target) || contentRef.current?.contains(target)) return
       setOpen(false)
     }
-    // 캡처 단계로 어떤 스크롤 컨테이너의 스크롤이든 따라잡는다.
+    // The capture phase keeps up with a scroll in ANY scroll container.
     window.addEventListener('scroll', measure, true)
     window.addEventListener('resize', measure)
     document.addEventListener('mousedown', onDown)
@@ -180,7 +180,7 @@ export function Combobox({
     }
   }
 
-  // 팝오버는 트리거 바로 아래에 fixed 로 뜬다 — 트리거와 같은 너비, align 에 따라 좌/우 정렬.
+  // The popover appears `fixed` directly under the trigger — the same width as it, aligned left or right per `align`.
   const style: CSSProperties | undefined = rect
     ? {
         position: 'fixed',

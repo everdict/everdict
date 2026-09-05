@@ -12,8 +12,8 @@ import { Markdown } from '@/shared/ui/markdown'
 
 import { trySkillAction } from '../api/manage-skills'
 
-// 스킬 테스트 드라이브 패널 — (미저장) 스킬 + 샘플 요청으로 에이전트를 실제 1턴 실행하고 트랜스크립트를 보여준다. 저장 전에
-// "이 스킬이 실제로 잘 도는지"(use_skill 로 로드했는지, 절차를 따랐는지, 좋은 답을 냈는지) 검증. 무상태 — 세션에 남지 않음.
+// The skill test-drive panel — it runs one REAL agent turn against the (possibly unsaved) skill plus a sample request and shows the transcript.
+// It verifies BEFORE saving whether the skill actually works (was it loaded through use_skill, was the procedure followed, was the answer good). Stateless — nothing is left in a session.
 export function TestSkillPanel({
   skill,
 }: {
@@ -111,7 +111,7 @@ export function TestSkillPanel({
   )
 }
 
-// use_skill({skill:"name"}) 인자에서 스킬명 추출(표시용). 파싱 실패 시 원문 축약.
+// Extracts the skill name from a use_skill({skill:"name"}) argument (for display). On a parse failure the raw text is abbreviated.
 function skillArg(argsJson: string): string {
   try {
     const parsed = JSON.parse(argsJson) as { skill?: unknown }

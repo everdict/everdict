@@ -9,9 +9,9 @@ import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { DropdownLabel, DropdownMenu, useDropdownClose } from '@/shared/ui/dropdown-menu'
 
-// 대화창 헤더의 히스토리 버튼 → 플로팅 드롭다운으로 지난 대화를 보여준다. 페이지 전환 없이(대화창을 떠나지 않고)
-// 세션 열기·이름변경·삭제를 전부 메뉴 안에서 처리한다. 삭제 확인은 다이얼로그 대신 행 인라인 2단계로 —
-// 포털된 다이얼로그 클릭이 드롭다운의 outside-click 으로 잡혀 메뉴가 닫히는 문제를 피한다.
+// The history button in the chat header → a floating dropdown showing past conversations. Opening, renaming and deleting a session all happen
+// inside the menu, with no page change (without leaving the chat). Deletion is confirmed as a two-step INLINE row rather than a dialog —
+// avoiding the problem where a click on a portalled dialog is caught as the dropdown's outside-click and closes the menu.
 
 type Bucket = 'today' | 'yesterday' | 'earlier'
 
@@ -105,7 +105,7 @@ function SessionRows({
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') commitRename(s.id)
                       else if (e.key === 'Escape') {
-                        // 드롭다운의 문서 레벨 Esc(메뉴 닫기)까지 번지지 않게 — 이름변경만 취소한다.
+                        // Stopped from reaching the dropdown's document-level Esc (which closes the menu) — it cancels the RENAME only.
                         e.stopPropagation()
                         setRenaming(null)
                       }
@@ -157,7 +157,7 @@ function SessionRows({
                       <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
                         {s.title}
                       </span>
-                      {/* 라이브 턴 진행 중 배지 — 세션 응답의 computed live 플래그. 열면 그 스트림에 재접속된다. */}
+                      {/* The live-turn badge — the computed live flag on the session response. Opening it re-attaches to that stream. */}
                       {s.live ? (
                         <span
                           className="relative flex size-2 shrink-0"

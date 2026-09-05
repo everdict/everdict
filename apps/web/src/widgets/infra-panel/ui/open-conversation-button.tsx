@@ -7,10 +7,10 @@ import { Button } from '@/shared/ui/button'
 
 import { OPEN_AGENT_SESSION_MESSAGE, useInfraPanelOptional } from '../model/infra-panel-context'
 
-// 대화 열기 — 이미 존재하는 대화를 오른쪽 패널의 에이전트 챗에서 연다. MentionInChatButton/AskAgentButton 이
-// "이 엔티티를 챗에 넘긴다"라면 이쪽은 "그 대화로 돌아간다"이고, run 상세의 에이전트 턴처럼 대화 id(group.id)를
-// 이미 아는 표면이 쓴다. 진입 경로는 형제 버튼들과 같다: eval 셸에서는 패널 컨텍스트, 패널 iframe 안에서
-// 렌더될 때는 부모로 same-origin postMessage.
+// Open a conversation — it opens an EXISTING conversation in the right panel's agent chat. Where MentionInChatButton/AskAgentButton are
+// "hand this entity to the chat", this is "go BACK to that conversation", and it is used by a surface that already knows the conversation id
+// (group.id), such as an agent turn on a run detail. The entry path is the same as its sibling buttons': the panel context inside the eval
+// shell, and a same-origin postMessage to the parent when rendered inside the panel iframe.
 export function OpenConversationButton({ sessionId }: { sessionId: string }) {
   const t = useTranslations('runsPage')
   const infra = useInfraPanelOptional()

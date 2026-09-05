@@ -18,9 +18,9 @@ import { Link } from '@/shared/ui/link'
 
 import type { IssueDirectories } from '../model/directories'
 
-// 목록 한 줄. 예전 행과 다른 점은 하나뿐이지만 그게 리니어의 핵심 속도다: 상태·우선순위·담당자를 **여기서**
-// 바꾼다. 그래서 행 전체가 `<Link>` 일 수 없다 — 링크 안의 버튼은 유효한 마크업도 아니고, 드롭다운을 여는
-// 클릭이 이슈로 이동해 버린다. 제목 영역만 링크이고 컨트롤은 그 형제로 선다(리니어와 같은 구성).
+// One list row. It differs from the old row in exactly one way, and that is Linear's central speed: status, priority and assignee are changed
+// **here**. Which is why the whole row cannot be a `<Link>` — a button inside a link is not valid markup either, and the click that opens a
+// dropdown would navigate to the issue. Only the title area is the link and the controls stand as its SIBLINGS (the same composition as Linear).
 // The row's stable identity in the DOM. It survived the bulk-selection feature it was written for — that
 // feature's only action was "move these into this cycle", and cycles went with teams — because a test and a
 // future range-select both address a row by it rather than by position.
@@ -66,7 +66,7 @@ export const IssueRow = memo(function IssueRow({
       />
       <Link href={issueHref(workspace, issue.identifier, issue.title)} className="min-w-0 flex-1">
         <p className="flex min-w-0 items-baseline gap-2">
-          {/* 사람이 부르는 이름 — `EVD-12`. 워크스페이스가 찍어 이슈에 저장된 값이다. */}
+          {/* The name people call it by — `EVD-12`. Stamped by the workspace and stored on the issue. */}
           <span className="shrink-0 font-mono text-[11.5px] text-muted-foreground">
             {issue.identifier}
           </span>
@@ -80,7 +80,7 @@ export const IssueRow = memo(function IssueRow({
           )}
           <IssueLabelChips labelIds={issue.labelIds} directory={directories.labels} />
           {issue.linkCount > 0 && <span>{t('rowLinkCount', { count: issue.linkCount })}</span>}
-          {/* 대화가 있을 때만 — 「댓글 0」은 매일 보면 노이즈다(빈 섹션 숨김과 같은 규칙). */}
+          {/* Only when there IS conversation — "0 comments" seen every day is noise (the same rule as empty-section hiding). */}
           {issue.commentCount !== undefined && issue.commentCount > 0 && (
             <span
               className="inline-flex items-center gap-0.5"
@@ -113,7 +113,7 @@ export const IssueRow = memo(function IssueRow({
         title={issue.updatedAt}
         className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @lg:block"
       >
-        {/* 목록의 시간은 상대적이다 — 훑는 화면에서 알고 싶은 건 "언제"가 아니라 "얼마나 됐나"다. */}
+        {/* Time in a list is RELATIVE — on a screen you sweep, what you want to know is "how long ago" rather than "when". */}
         {fmtTimeAgo(issue.updatedAt, locale, timeZone)}
       </time>
       <IssueAssigneeControl

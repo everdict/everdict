@@ -6,8 +6,8 @@ import { Badge } from '@/shared/ui/badge'
 
 import type { IssuePriority } from '../model/schema'
 
-// 상태 아이콘과 같은 문법: 우선순위도 한 눈에 훑는 축이라 아이콘이 먼저다. 리니어처럼 신호 세기(막대)로 급함을
-// 표현하고, 긴급만 경고 삼각형으로 따로 세운다 — "지금 멈추고 봐야 하는가"는 정도가 아니라 종류가 다르다.
+// The same grammar as the status icon: priority is an axis you sweep at a glance too, so the icon comes first. Urgency is expressed as signal
+// strength (bars) as in Linear, with only `urgent` standing apart as a warning triangle — "do I stop and look now" differs in KIND, not degree.
 const ICON: Record<IssuePriority, LucideIcon> = {
   urgent: TriangleAlert,
   high: SignalHigh,
@@ -16,7 +16,7 @@ const ICON: Record<IssuePriority, LucideIcon> = {
   none: Minus,
 }
 
-// 색은 긴급에만 준다. 다섯 단계를 전부 물들이면 목록이 신호가 아니라 무지개가 되고, 정작 급한 줄이 묻힌다.
+// Colour is given to `urgent` alone. Colouring all five levels turns the list into a rainbow rather than a signal, and buries the row that is actually urgent.
 function toneClass(priority: IssuePriority): string {
   if (priority === 'urgent') return 'text-destructive'
   if (priority === 'none') return 'text-faint'
@@ -38,7 +38,7 @@ export function IssuePriorityBadge({ priority }: { priority: IssuePriority }) {
   )
 }
 
-// 조밀한 행용 아이콘 단독 변형 — 라벨은 title 로 간다(상태 아이콘과 같은 처리).
+// The icon-only variant for dense rows — the label goes into `title` (the same treatment as the status icon).
 export function IssuePriorityIcon({
   priority,
   className,

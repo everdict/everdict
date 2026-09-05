@@ -272,7 +272,7 @@ describe("releaseReadiness — the SCORECARD GATE's verdicts, composed; never a 
 
   it("an UNVERIFIED observation blocks the ship — recorded doubt is enforced doubt (arch-review 47 P0-3)", () => {
     // The pass RAN its observation and states that no receipt vouches for what its judges read (an ingest
-    // batch, a ledger outage at judging time). The 46차 reading treated that as "says nothing" — which made
+    // batch, a ledger outage at judging time). The 46th review's reading treated that as "says nothing" — which made
     // unvouched evidence implicitly green on the strictest surface. It is not_comparable now; only a LEGACY
     // pin (no observation at all — pre-feature history) still says nothing, pinned below.
     const unverified = {

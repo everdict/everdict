@@ -11,8 +11,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스 지식 — reified claim(발견/결정/관례/컨텍스트) 라이브러리. 목록은 freshness 장식 포함(서버 계산);
-// 작성=member+(comments:write), 관리=작성자-or-admin(컨트롤플레인이 강제, UI 는 CTA 만 게이트).
+// Workspace knowledge — the library of reified claims (findings, decisions, conventions, context). The list includes freshness decoration (computed by the server);
+// authoring is member+ (comments:write) and management is author-or-admin (enforced by the control plane; the UI gates only the CTA).
 export default async function KnowledgePage() {
   const t = await getTranslations('knowledge')
   const { principal, ctx } = await currentPrincipal()

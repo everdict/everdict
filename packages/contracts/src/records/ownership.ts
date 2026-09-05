@@ -23,7 +23,7 @@ export const OWNERSHIP_ROLES = [
 export const OwnershipRoleSchema = z.enum(OWNERSHIP_ROLES);
 export type OwnershipRole = z.infer<typeof OwnershipRoleSchema>;
 
-// What a role's completion MEANS — its 종료조건 vocabulary. An executor finishing is a change_set (its own
+// What a role's completion MEANS — its completion-condition vocabulary. An executor finishing is a change_set (its own
 // claim); only a verifier's completion is a verified_verdict (the separation invariant lives in the domain
 // validator: an executor may not have verified_verdict as its completion).
 export const RoleCompletionSchema = z.enum([

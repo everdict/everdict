@@ -16,8 +16,8 @@ import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { deleteProjectAction, updateProjectAction } from '../api/projects'
 
-// 목록 필드는 순서까지 그대로일 때만 "안 바뀜"이다 — 서버는 받은 목록으로 통째로 대체하므로, 바뀐 것이
-// 없는데 보내면 이력에 빈 변경이 남는다.
+// A list field counts as "unchanged" only when the ORDER matches too — the server replaces it wholesale with what it receives, so sending it
+// when nothing changed leaves an empty change in the history.
 function sameIds(next: readonly string[], previous: readonly string[]): boolean {
   return next.length === previous.length && next.every((id, i) => id === previous[i])
 }

@@ -362,7 +362,7 @@ export class CommentService {
   }
 
   // Sweep for stranded agent answers: the lifecycle is driven by the agent service's callbacks, which die with it
-  // (a crash / severed detached turn) — a comment then shows "running"/"승인 대기" forever. Anything non-terminal
+  // (a crash / severed detached turn) — a comment then shows "running"/"awaiting approval" forever. Anything non-terminal
   // that has not been touched for `staleMs` is dead (activity ticks land far more often; an approval park times out
   // and resumes within the discussion window) → mark failed and ping the asker. Returns how many were swept.
   async sweepStuckAgentAnswers(staleMs: number): Promise<number> {

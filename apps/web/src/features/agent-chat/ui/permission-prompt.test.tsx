@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest'
 import en from '../../../../messages/en.json'
 import { PermissionPrompt, type PendingPermission } from './permission-prompt'
 
-// 승인 카드는 채팅 패널과 코멘트 스레드(discuss 의 ApprovalStrip)가 같이 쓰는 하나의 렌더러다. 이 파일이
-// 잠그는 것은 "무엇을 실행하려는지 보고 결정할 수 있는가" — 도구 이름만 있고 인자가 없는 승인 카드는
-// 코멘트 스레드에서 실제로 겪은 결함이라, 인자 프리뷰가 카드의 해부에서 빠지지 않게 고정한다.
+// The approval card is ONE renderer shared by the chat panel and the comment thread (discuss' ApprovalStrip). What this file
+// locks down is "can you see what is about to run and decide" — an approval card with only a tool name and no arguments is a defect actually
+// experienced in the comment thread, so it pins the argument preview into the card's anatomy.
 
 const render = (pending: PendingPermission[]): string =>
   renderToStaticMarkup(
@@ -27,7 +27,7 @@ describe('permission prompt', () => {
     ])
 
     expect(out).toContain('update_issue')
-    // 인자 프리뷰가 그려져야 승인자가 대상(ENG-12)을 보고 결정할 수 있다.
+    // The argument preview has to be drawn for an approver to see the TARGET (ENG-12) and decide.
     expect(out).toContain('ENG-12')
     expect(out).toContain('<pre')
   })

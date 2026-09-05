@@ -6,7 +6,7 @@ import { Badge } from '@/shared/ui/badge'
 import type { ReleaseStatus } from '../model/schema'
 
 const TONE: Record<ReleaseStatus, 'neutral' | 'success' | 'outline'> = {
-  // 계획됨은 아직 아무것도 나가지 않은 상태 — 진행색을 주면 날짜가 일처럼 보인다.
+  // `planned` is the state where nothing has shipped yet — given a progress colour, a DATE looks like work.
   planned: 'outline',
   released: 'success',
   cancelled: 'neutral',

@@ -1,18 +1,18 @@
-// 마크다운 본문을 한 줄 미리보기로 — 목록 행에는 렌더된 문서가 들어갈 자리가 없고, 그렇다고 원문을 그대로
-// 자르면 `## 제목`·`- 항목`·`[이름](url)` 같은 문법이 그대로 새어 나온다(목표 설명을 마크다운으로 바꾼 직후
-// 목록에서 실제로 그렇게 보였다). 렌더러를 한 줄에 욱여넣는 대신 **문법만 벗겨 낸 텍스트**를 만든다.
+// A markdown body as a one-line preview — a list row has no room for a rendered document, and truncating the SOURCE leaks syntax like
+// `## heading`, `- item` and `[name](url)` straight through (which is exactly how the list looked right after goal descriptions became
+// markdown). Rather than squeezing a renderer into one line, this produces text with **the syntax stripped off**.
 //
-// 파서가 아니라 미리보기다: 여는 문법을 지우고 공백을 접는 선까지만 하고, 표나 중첩 구조를 재현하지 않는다.
+// It is a preview, not a parser: it goes as far as removing opening syntax and collapsing whitespace, and reproduces neither tables nor nesting.
 const RULES: [RegExp, string][] = [
-  [/```[\s\S]*?```/g, ' '], // 코드 블록은 통째로 — 한 줄 미리보기에 남길 것이 없다
+  [/```[\s\S]*?```/g, ' '], // a code block goes whole — there is nothing to keep in a one-line preview
   [/`([^`]+)`/g, '$1'],
-  [/!\[([^\]]*)\]\([^)]*\)/g, '$1'], // 이미지는 대체 텍스트만
-  [/\[([^\]]+)\]\([^)]*\)/g, '$1'], // 링크는 라벨만
-  [/^\s{0,3}#{1,6}\s+/gm, ''], // 제목 표시
-  [/^\s{0,3}>\s?/gm, ''], // 인용
-  [/^\s{0,3}([-*+]|\d+\.)\s+/gm, ''], // 목록 표시
-  [/^\s{0,3}([-*_]\s?){3,}\s*$/gm, ' '], // 수평선
-  [/(\*\*|__)(.*?)\1/g, '$2'], // 강조
+  [/!\[([^\]]*)\]\([^)]*\)/g, '$1'], // an image keeps only its alt text
+  [/\[([^\]]+)\]\([^)]*\)/g, '$1'], // a link keeps only its label
+  [/^\s{0,3}#{1,6}\s+/gm, ''], // heading markers
+  [/^\s{0,3}>\s?/gm, ''], // block quotes
+  [/^\s{0,3}([-*+]|\d+\.)\s+/gm, ''], // list markers
+  [/^\s{0,3}([-*_]\s?){3,}\s*$/gm, ' '], // horizontal rules
+  [/(\*\*|__)(.*?)\1/g, '$2'], // emphasis
   [/(\*|_)(.*?)\1/g, '$2'],
   [/~~(.*?)~~/g, '$1'],
 ]

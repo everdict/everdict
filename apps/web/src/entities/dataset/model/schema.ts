@@ -66,8 +66,8 @@ export const datasetSummarySchema = z.object({
   updatedAt: z.string().optional(), // timestamp of the most recent version registration (ISO)
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec, distinct from content tags (entity classification), for telling versions apart.
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
-  // version → 그 버전이 어디서 왔는가(찍힌 버전만). 이슈에서 태어났는지, 어떤 에이전트가 어느 대화에서
-  // 만들었는지 — 상세가 리니지를 그리는 근거.
+  // version → where that version came from (stamped versions only). Whether it was born from an issue, and which agent made it in which
+  // conversation — the grounds on which the detail draws lineage.
   versionOrigins: versionOriginsSchema.optional(),
 })
 export const datasetsSchema = z.array(datasetSummarySchema)

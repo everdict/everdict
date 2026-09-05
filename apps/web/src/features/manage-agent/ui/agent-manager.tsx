@@ -14,7 +14,7 @@ import { Input, Label, Textarea } from '@/shared/ui/input'
 
 import { saveAgentAction } from '../api/manage-agent'
 
-// 편집 중인 MCP 서버 행(로컬 상태). 저장 시 name/url 이 빈 행은 걸러진다.
+// An MCP server row being edited (local state). A row with an empty name/url is filtered out on save.
 interface ServerRow {
   name: string
   url: string
@@ -22,9 +22,9 @@ interface ServerRow {
   write: boolean
 }
 
-// Workspace › Agent — 워크스페이스 대화형 에이전트 고도화 폼: instructions(시스템 프롬프트 컨텍스트) + MCP 도구서버(옵트인 쓰기)
-// + model 오버라이드. 하나의 "default" 에이전트를 편집(버전 없는 업서트). 이미 만들어진 에이전트 프레임워크에 워크스페이스별
-// 컨텍스트/도구를 꽂는 표면(클러드코드의 CLAUDE.md + MCP 를 워크스페이스 단위로).
+// Workspace › Agent — the form that develops the workspace conversational agent: instructions (system prompt context) + MCP tool servers (write is
+// opt-in) + a model override. It edits ONE "default" agent (a versionless upsert). The surface that plugs per-workspace context and tools into an
+// agent framework that already exists (Claude Code's CLAUDE.md + MCP, at workspace granularity).
 export function AgentManager({
   agent,
   secretNames,
@@ -51,9 +51,9 @@ export function AgentManager({
       write: s.write,
     }))
   )
-  // 스토어에서 채택한 capabilities(불변버전 pin). 여기선 검토 + 제거만; 새 채택은 스토어에서. 저장 시 반드시 보존해야 한다.
+  // The capabilities adopted from the store (immutable version pins). Reviewed and REMOVED here only; new adoptions happen in the store. They MUST be preserved on save.
   const [capabilities, setCapabilities] = useState<CapabilityRef[]>(agent?.capabilities ?? [])
-  // 워크스페이스가 끈 first-party 기본 도구(id). 기본 도구셋은 채택 없이 붙지만 여기서 끌 수 있다. 저장 시 반드시 보존.
+  // The first-party default tools the workspace turned off (by id). The default toolset attaches with no adoption, and can be turned off here. MUST be preserved on save.
   const [disabledDefaults, setDisabledDefaults] = useState<string[]>(agent?.disabledDefaults ?? [])
   const toggleDefault = (id: string, enabled: boolean) =>
     setDisabledDefaults((ids) =>
@@ -73,7 +73,7 @@ export function AgentManager({
   ]
 
   const save = () => {
-    // 전체 스펙 업서트 — id/version 없이 나머지를 보낸다. name/url 이 있는 서버만 남긴다(빈 행 무시). description/tags 는 보존.
+    // A whole-spec upsert — everything but id/version is sent. Only servers with a name and url survive (empty rows ignored). description/tags are preserved.
     const body = {
       ...(agent?.description ? { description: agent.description } : {}),
       ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
@@ -86,11 +86,11 @@ export function AgentManager({
           ...(s.authSecret ? { authSecret: s.authSecret } : {}),
           write: s.write,
         })),
-      // 채택한 capabilities 는 이 폼에서 안 만들지만(스토어에서 채택) 반드시 보존해야 한다 — 빠뜨리면 저장 시 전부 사라진다.
+      // Adopted capabilities are not created by this form (adoption happens in the store) but MUST be preserved — omitted, every one of them disappears on save.
       capabilities,
-      // 기본 도구 opt-out — 빠뜨리면 저장 시 꺼둔 기본 도구가 되살아난다(capabilities 와 동일 보존 규칙).
+      // The default-tool opt-outs — omitted, a default tool that was turned off comes back on save (the same preservation rule as capabilities).
       disabledDefaults,
-      // 도구 상세에서 이어 둔 시크릿 리매핑(기본 제공·미채택 발행물) — 빠뜨리면 저장 시 전부 풀린다(동일 보존 규칙).
+      // The secret remapping wired on a tool detail (built-in defaults, unadopted publications) — omitted, every one is unbound on save (the same rule).
       toolSecretBindings: agent?.toolSecretBindings ?? {},
       tags: agent?.tags ?? [],
     }
@@ -239,7 +239,7 @@ export function AgentManager({
         )}
       </section>
 
-      {/* Adopted capabilities — 스토어에서 채택한 도구/스킬(불변버전 pin). 새 채택은 스토어에서, 여기선 검토 + 제거. */}
+      {/* Adopted capabilities — the tools and skills adopted from the store (immutable version pins). New adoptions happen in the store; here they are reviewed and removed. */}
       <section className="space-y-3">
         <div>
           <div className="flex items-center gap-1.5 text-sm font-medium">

@@ -2,7 +2,7 @@ import { ProjectListView } from '@/widgets/project-list'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스 전체의 프로젝트 — 워크스페이스가 유일한 경계이므로 주소도 하나다.
+// Every project in the workspace — the workspace is the only boundary, so there is only one address.
 export default async function ProjectsPage({
   params,
   searchParams,

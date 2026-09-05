@@ -21,7 +21,7 @@ import { stampSkillVersionAction } from '../api/skill-versions'
 import { ShareSkillToStoreDialog } from './share-skill-to-store-dialog'
 import { SkillEditorDialog } from './skills-manager'
 
-// 다음 버전 미리보기 — 서버(도메인 bumpVersion)와 같은 규칙. 실제 값은 서버가 정하고, 여기선 "무엇이 찍힐지"만 보여준다.
+// The next-version preview — the same rule as the server (the domain's bumpVersion). The server decides the real value; this only shows what WOULD be stamped.
 function nextVersion(base: string, bump: 'major' | 'minor' | 'patch'): string {
   const m = /^(\d+)\.(\d+)\.(\d+)/.exec(base)
   if (!m) return '1.0.0'
@@ -31,10 +31,11 @@ function nextVersion(base: string, bump: 'major' | 'minor' | 'patch'): string {
   return `${major}.${minor}.${patch + 1}`
 }
 
-// 스킬 상세 뷰어 — SKILL.md 본문 + 부속 파일을 탭으로 열람(클러드코드 스킬 디렉토리의 재해석: 본문은 문서, 파일은 온디맨드
-// 참조자료). 편집은 두 갈래: "대화로 편집하기"(페이지가 우측 대화 패널을 열고 이 스킬 @참조를 떨어뜨린다 — 주 편집 경로)와
-// 수동 편집 다이얼로그(메타/본문 직접 수정). 스토어 발행(capability 화)은 여기서 바로. actions(대화 패널 버튼)는 앱
-// 레이어가 구성해 내려준다(FSD: feature 는 widgets 를 모른다).
+// The skill detail viewer — the SKILL.md body plus attached files opened as tabs (a reinterpretation of the Claude Code skill directory: the
+// body is the document, the files are on-demand reference material). Editing has two branches: "edit by conversation" (the page opens the right
+// conversation panel and drops an @-reference to this skill — the MAIN editing path) and the manual edit dialog (editing the meta and body
+// directly). Publishing to the store (becoming a capability) happens right here. `actions` (the conversation panel button) is assembled and
+// passed down by the app layer (FSD: a feature does not know widgets).
 export function SkillDetail({
   skill,
   author,
@@ -47,11 +48,11 @@ export function SkillDetail({
 }: {
   skill: Skill
   author: { name: string; avatarUrl?: string }
-  // 찍힌 버전들(최신 우선). 비어 있으면 버전 섹션은 그리지 않는다(빈 섹션 숨김 관례).
+  // The stamped versions (newest first). Empty, the version section is not drawn (the empty-section convention).
   versions?: SkillVersion[]
   canManage: boolean
   canPublish: boolean
-  canPublishPublic: boolean // 스토어 발행 시 public 리치 허용 여부(admin 또는 인스턴스 정책)
+  canPublishPublic: boolean // whether public reach is allowed when publishing to the store (an admin, or the instance policy)
   modelIds: string[]
   actions?: React.ReactNode
 }) {
@@ -60,13 +61,13 @@ export function SkillDetail({
   const [editing, setEditing] = useState(false)
   const [sharing, setSharing] = useState(false)
   const [stamping, setStamping] = useState(false)
-  // 마지막 스탬프 이후 본문이 바뀌었나 — 스탬프는 편집이 아니라서(updatedAt 불변) 이 비교가 성립한다.
+  // Has the body changed since the last stamp — a stamp is not an edit (updatedAt is unchanged), which is what makes this comparison valid.
   const latest = versions[0]
   const changedSinceStamp = latest !== undefined && latest.stampedAt < skill.updatedAt
 
   return (
     <div className="space-y-4">
-      {/* 메타 스트립 — 공개범위 · 버전 · 출처 · 작성자 · 파일 수. 액션(대화로 편집/버전 찍기/발행/편집)은 오른쪽. */}
+      {/* The meta strip — visibility · version · provenance · author · file count. The actions (edit by conversation / stamp a version / publish / edit) are on the right. */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-muted-foreground">
           <Badge tone={skill.visibility === 'workspace' ? 'info' : 'outline'} className="gap-1">
@@ -125,10 +126,10 @@ export function SkillDetail({
         </div>
       </div>
 
-      {/* 멀티문서 스킬 뷰어(SKILL.md + 부속 파일 탭) — 스토어 상세와 공용 뷰어를 공유해 표현이 갈리지 않게 한다. */}
+      {/* The multi-document skill viewer (SKILL.md plus attached-file tabs) — sharing the viewer with the store detail so the two presentations cannot diverge. */}
       <SkillDocs instructions={skill.instructions} files={skill.files} />
 
-      {/* 버전 라인 — 찍힌 지점들. 행 자체는 작업본이고, 여기 있는 것들은 불변이라 "그때 이 절차가 뭐라고 했나"가 남는다. */}
+      {/* The version line — the points that were stamped. The ROW is the working copy, and these are immutable, so "what did this procedure say back then" survives. */}
       {versions.length > 0 && (
         <section className="space-y-2">
           <h2 className="text-[13.5px] font-[510] text-foreground">{t('versionsTitle')}</h2>
@@ -156,7 +157,7 @@ export function SkillDetail({
           author={author}
           onClose={() => {
             setEditing(false)
-            refresh() // 편집 결과를 서버 데이터로 다시 읽는다(상세는 서버 컴포넌트 fetch).
+            refresh() // re-read the edit result from the server data (the detail is a server-component fetch).
           }}
         />
       )}
@@ -182,7 +183,7 @@ export function SkillDetail({
   )
 }
 
-// "새 버전 찍기" — 지금 내용을 한 지점으로 고정한다. 무엇이 찍힐지(다음 버전)를 미리 보여주고, 변경 이유 한 줄을 받는다.
+// "Stamp a new version" — fix the current content as one point. It previews WHAT would be stamped (the next version) and takes a one-line reason for the change.
 function StampVersionDialog({ skill, onClose }: { skill: Skill; onClose: () => void }) {
   const t = useTranslations('skillsManager')
   const [bump, setBump] = useState<'major' | 'minor' | 'patch'>('patch')

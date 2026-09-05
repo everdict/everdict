@@ -20,12 +20,12 @@ import { Combobox } from '@/shared/ui/combobox'
 import { Input } from '@/shared/ui/input'
 import { Markdown } from '@/shared/ui/markdown'
 
-// 대화형 에이전트 크래프팅 스튜디오(agent-automation B2/B3 — analysis-studio 패턴의 크래프팅판).
-// 왼쪽 = 만들어지는 에이전트(이 캔버스), 오른쪽 = 챗 패널. 연결은 같은 창 CustomEvent 버스:
-//  · 패널 → 캔버스: SSE `agent_draft` → 'everdict:agent-draft' → 여기서 적용(라이브 반영)
-//  · 캔버스 → 패널: 전송 직전 'everdict:agent-draft-request' → 'everdict:agent-draft-state' 로 현 draft 회신
-//    (멀티턴 개선이 수동 편집을 포함한 라이브 상태에 근거하게 — canvas-state 피드백과 동일 계약)
-// 크래프트되는 에이전트는 공유 에이전틱 루프 위의 선언(AgentSpec)일 뿐 — 코드/별도 런타임이 아니다.
+// The conversational agent crafting studio (agent-automation B2/B3 — the crafting counterpart of the analysis-studio pattern).
+// Left = the agent being made (this canvas), right = the chat panel. They are joined by a same-window CustomEvent bus:
+//  · panel → canvas: SSE `agent_draft` → 'everdict:agent-draft' → applied here (live)
+//  · canvas → panel: just before a send, 'everdict:agent-draft-request' → the current draft is returned as 'everdict:agent-draft-state'
+//    (so multi-turn refinement rests on the LIVE state, manual edits included — the same contract as the canvas-state feedback)
+// The agent being crafted is only a DECLARATION (an AgentSpec) over the shared agentic loop — not code and not a separate runtime.
 
 const tryResultSchema = z.object({
   messages: z.array(
@@ -72,7 +72,7 @@ export function AgentCraftStudio({
   const draftRef = useRef(draft)
   draftRef.current = draft
 
-  // 캔버스 ↔ 챗 패널 버스 — 현 draft 를 회신(announce)하고, 패널이 중계한 SSE 패치를 적용한다.
+  // The canvas ↔ chat panel bus — it announces the current draft and applies the SSE patches the panel relays.
   useEffect(() => {
     const announce = () => {
       window.dispatchEvent(
@@ -94,7 +94,7 @@ export function AgentCraftStudio({
       window.dispatchEvent(new CustomEvent('everdict:agent-draft-state', { detail: null }))
     }
   }, [agentId])
-  // draft 가 바뀔 때마다 재告知 — 패널의 "draft linked" 상태와 다음 턴 캡처가 항상 최신을 본다.
+  // Re-announced on every draft change — so the panel's "draft linked" state and the next turn's capture always see the newest.
   useEffect(() => {
     window.dispatchEvent(
       new CustomEvent('everdict:agent-draft-state', {
@@ -113,7 +113,7 @@ export function AgentCraftStudio({
       setSaveState({ error: t('idRequired') })
       return
     }
-    // 기존 스펙의 도구 채널(mcpServers/capabilities/disabledDefaults/tags)은 보존하고 draft 를 얹는다.
+    // The existing spec's tool channels (mcpServers/capabilities/disabledDefaults/tags) are PRESERVED and the draft is laid on top.
     const body = {
       ...(draft.description !== undefined ? { description: draft.description } : {}),
       ...(draft.instructions !== undefined ? { instructions: draft.instructions } : {}),
@@ -278,8 +278,8 @@ function Field({
   )
 }
 
-// 리플레이 try 패널(B3) — 실제 과거 이벤트를 골라 현 draft 를 섀도 실행한다. 대화의 try_agent_draft 와
-// 같은 백엔드(/agent/agents/try); 캔버스에서도 원클릭으로 검증할 수 있게 하는 수동 경로.
+// The replay try panel (B3) — pick a real past event and shadow-run the current draft against it. The same backend as the conversation's
+// try_agent_draft (/agent/agents/try); a manual path so it can also be verified from the canvas in one click.
 function TryPanel({ draft }: { draft: AgentDraft }) {
   const t = useTranslations('craftAgent')
   const [events, setEvents] = useState<PlatformEvent[]>([])
@@ -294,7 +294,7 @@ function TryPanel({ draft }: { draft: AgentDraft }) {
         if (!res.ok) return
         setEvents(platformEventListSchema.parse(await res.json()).events)
       } catch {
-        // 이벤트 로그 없음(빈 워크스페이스) — 패널은 빈 목록으로 남는다
+        // No event log (an empty workspace) — the panel stays as an empty list
       }
     })()
   }, [])

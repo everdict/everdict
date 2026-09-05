@@ -18,7 +18,7 @@ import { Input } from '@/shared/ui/input'
 
 import { toggleLabelId, withCreatedLabels } from '../lib/label-selection'
 
-// 뗄 수 있는 라벨 칩. 라벨을 붙이는 자리와 떼는 자리가 같아야 한다 — 목록을 다시 열어 체크를 풀게 하지 않는다.
+// A removable label chip. Where a label is attached and where it is removed have to be the same place — people are not made to reopen the list and untick.
 export function RemovableLabelChip({
   label,
   onRemove,
@@ -50,12 +50,12 @@ export function RemovableLabelChip({
   )
 }
 
-// 고를 것들 — 검색 · 목록 · (없는 이름이면) 그 자리에서 정의. 자유 텍스트가 아니라 워크스페이스 레지스트리에서
-// 고르는 것이 요점이다(라벨은 이제 레코드다). 다만 "없는 이름을 방금 떠올린" 흐름을 막지 않으려고 검색어와
-// 일치하는 라벨이 없으면 그 자리에서 만들 수 있게 한다 — Linear 와 같은 동선.
+// The choices — search · the list · (for a name that does not exist) define it on the spot. The point is that it is PICKED from the workspace
+// registry rather than free text (a label is a record now). Still, so as not to block the "I just thought of a name that does not exist yet"
+// flow, a search term matching no label can be created right there — the same path as Linear.
 //
-// 레지스트리는 부모가 들고 있다: 방금 만든 라벨은 칩으로도 그려져야 하는데, 그 목록이 여기에만 있으면 두 벌이
-// 어긋난다. 그래서 만든 라벨은 `onCreated` 로 올려 보내고, 부모가 등록과 선택을 함께 한다.
+// The registry is held by the PARENT: a label just created has to be drawn as a chip too, and with that list living only here the two copies
+// diverge. So a created label is raised through `onCreated` and the parent registers and selects it together.
 export function IssueLabelOptions({
   labels,
   selected,
@@ -68,14 +68,14 @@ export function IssueLabelOptions({
   selected: string[]
   onToggle: (id: string) => void
   onCreated: (label: IssueLabel) => void
-  // 라벨 정의는 issues:write 다 — 못 쓰는 사람에게는 만들기 줄을 아예 내지 않는다.
+  // Defining a label is issues:write — for someone without it the create row is not drawn at all.
   canCreate: boolean
   autoFocus?: boolean
 }) {
   const t = useTranslations('issuesPage')
   const [query, setQuery] = useState('')
-  // 고른 색이 없으면 이름에서 제안한 색을 쓴다 — 고르지 않은 것과 회색을 고른 것은 다르다(전자는 이름을
-  // 고쳐 쓰는 동안 색도 따라 바뀌고, 후자는 그대로 있어야 한다).
+  // With no colour picked, the colour suggested from the name is used — not picking and picking grey are different (the former keeps following
+  // the name as it is retyped, the latter has to stay put).
   const [picked, setPicked] = useState<IssueLabelColor | undefined>()
   const [pending, setPending] = useState(false)
 
@@ -84,7 +84,7 @@ export function IssueLabelOptions({
     (l) =>
       !selected.includes(l.id) && (needle === '' || l.name.toLocaleLowerCase().includes(needle))
   )
-  // 정확히 같은 이름이 이미 있으면 만들기 줄을 내지 않는다 — 서버가 409 로 거절할 것을 권하지 않는다.
+  // With an exactly matching name already present the create row is not drawn — nothing is suggested that the server would refuse with a 409.
   const exact = labels.some((l) => l.name.trim().toLocaleLowerCase() === needle)
   const offerCreate = canCreate && needle.length > 0 && !exact
   const color = picked ?? suggestLabelColor(query)
@@ -117,7 +117,7 @@ export function IssueLabelOptions({
         onChange={(e) => setQuery(e.target.value)}
         placeholder={t('labelSearchPlaceholder')}
         onKeyDown={(e) => {
-          // Enter 가 폼을 제출해 버리면 라벨을 고르다 이슈가 저장된다.
+          // An Enter that submits the form would save the issue mid-label-selection.
           if (e.key === 'Enter') {
             e.preventDefault()
             if (offerCreate) create()
@@ -138,8 +138,8 @@ export function IssueLabelOptions({
           </button>
         ))}
         {offerCreate && (
-          // 만들기 줄은 색까지 정하는 자리다 — 색을 나중에 설정 화면에서 고치게 하면 새 라벨은 전부 한 색으로
-          // 태어난다. 점은 지금 만들어질 색을 그대로 보여 준다.
+          // The create row is where the COLOUR is decided too — leaving colour to a later settings screen makes every new label born the same
+          // colour. The dot shows exactly the colour it would be created with.
           <div className="space-y-1.5 rounded-md border border-border/70 p-1.5">
             <button
               type="button"
@@ -170,8 +170,8 @@ export function IssueLabelOptions({
   )
 }
 
-// Linear st. 라벨 선택기 — 선택된 것은 칩으로 위에, 고를 것은 아래 목록에. 폼 필드용(저장은 폼이 한다);
-// 상세 화면의 속성 열에서 바로 붙였다 떼는 쪽은 `IssueLabelControl` 이다.
+// A Linear-style label selector — what is selected sits above as chips, what can be chosen in the list below. For a form field (the FORM saves);
+// attaching and detaching directly from the detail screen's attribute column is `IssueLabelControl`.
 export function IssueLabelPicker({
   labels,
   selected,

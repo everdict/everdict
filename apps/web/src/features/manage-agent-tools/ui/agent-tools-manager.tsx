@@ -16,16 +16,16 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { setAgentToolAction } from '../api/set-agent-tool'
 
-// Settings › Agent › Tools — 이 워크스페이스의 어시스턴트가 쓸 수 있는 도구 목록 + 내 on/off.
-// 발행·카탈로그·채택 같은 스토어 크롬은 여기 없다(사용자 결정): 사용 가능한 도구를 나열하고 켜고 끄는 화면.
-// 토글은 "나"에게만 적용된다 — 워크스페이스 기본값(AgentSpec)은 그대로이고, 같은 워크스페이스의 두 멤버가
-// 서로 다른 도구셋으로 에이전트를 쓴다.
+// Settings › Agent › Tools — the list of tools this workspace's assistant can use, plus MY on/off.
+// The store chrome (publishing, the catalog, adoption) is deliberately absent (a user decision): this screen lists the available tools and turns them on and off.
+// A toggle applies to ME alone — the workspace default (AgentSpec) is untouched, and two members of the same workspace use the agent with
+// different toolsets.
 
 const SCOPE_ORDER: AgentToolScope[] = ['personal', 'workspace', 'builtin']
 
 export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
   const t = useTranslations('agentTools')
-  // 상세는 라우트다(다이얼로그 아님) — 우측 대화 패널에서 이 도구를 두고 실험/편집해야 하므로.
+  // The detail is a ROUTE (not a dialog) — you have to experiment on and edit this tool with the conversation panel on the right.
   const workspace = String(useParams().workspace ?? '')
   const [state, setState] = useState(tools)
   const [pendingKey, setPendingKey] = useState<string | undefined>(undefined)
@@ -37,7 +37,7 @@ export function AgentToolsManager({ tools }: { tools: AgentToolEntry[] }) {
     [state]
   )
 
-  // 낙관적 반영 후 서버 액션 — 실패하면 이전 목록으로 되돌리고 사유를 알린다.
+  // Applied optimistically, then the server action — on failure it rolls back to the previous list and states the reason.
   const apply = (tool: AgentToolEntry, enabled: boolean | null) => {
     const previous = state
     const next = enabled === null ? tool.baseline : enabled
@@ -107,7 +107,7 @@ function ToolRow({
   return (
     <SettingsRow
       label={
-        // 이름이 상세로 가는 링크 — 행의 오른쪽은 토글이 차지하므로, 드릴인은 이름 자체가 맡는다.
+        // The NAME is the link to the detail — the right of the row is taken by the toggle, so the name itself carries the drill-in.
         <Link href={href} className="group flex flex-wrap items-center gap-1.5">
           <span className="font-mono text-[13px] underline-offset-2 group-hover:underline">
             {tool.name}

@@ -226,8 +226,8 @@ export function IssueGithubPanel({
                     {t('viewOnGithub')}
                   </a>
                 </div>
-                {/* 코멘트도 원격이 쓴 마크다운이다 — 설명과 같은 뷰어로 그려야 스크린샷·코드블록·표가 살아난다.
-                    첨부 이미지는 설명과 똑같이 우리 프록시를 거친다(직접 받아올 수 없는 주소다). */}
+                {/* A comment is markdown the remote wrote too — it has to use the same viewer as the description for screenshots, code blocks and
+                    tables to survive. Its attachment images go through our proxy exactly as the description's do (they are addresses the browser cannot fetch). */}
                 <Markdown
                   content={comment.body}
                   mermaid

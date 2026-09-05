@@ -447,7 +447,7 @@ describe("RunService", () => {
       logTail: "panic: boom",
     });
     expect(done?.result?.trace).toEqual([
-      // 인프라 플레인이 먼저 — the placement events as infra evidence, then the log tail, then the error.
+      // The INFRA plane first — the placement events as infra evidence, then the log tail, then the error.
       {
         t: 0,
         kind: "infra",

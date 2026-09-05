@@ -1,10 +1,10 @@
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. 토글 — 설정 한 줄의 켬/끔은 스위치다. 「켜짐」이라 적힌 버튼은 그것이 *지금 상태*인지 *누르면
-// 될 일*인지 말해 주지 않아서, 한 화면에 여럿 놓이는 순간 전부 다시 읽어야 한다. 스위치는 위치가 곧 상태다.
+// A Linear-style toggle — on/off on a settings row is a SWITCH. A button reading "on" does not say whether that is its *current state* or *what
+// pressing it will do*, so the moment several sit on one screen they all have to be read again. On a switch, the POSITION is the state.
 //
-// 스위치는 즉시 적용되는 컨트롤이다 — 저장 버튼을 기다리는 스위치는 이미 켜진 것처럼 보이면서 켜지지 않은
-// 상태를 만든다. 호출부는 `onCheckedChange` 에서 바로 서버 액션을 부르고, 실패를 토스트로 알린다.
+// A switch is a control applied IMMEDIATELY — a switch waiting for a save button creates a state that looks on while not being on.
+// The caller calls the server action straight from `onCheckedChange` and reports a failure as a toast.
 export function Switch({
   checked,
   onCheckedChange,

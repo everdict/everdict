@@ -176,7 +176,7 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     },
   );
 
-  // Full re-run — a NEW scorecard that re-runs a terminal batch's ENTIRE case set (전체 재실행), reproducing the
+  // Full re-run — a NEW scorecard that re-runs a terminal batch's ENTIRE case set, reproducing the
   // original submit config and optionally overriding the run-config knobs from the body: WHO runs it (judges/runtime)
   // and HOW it is dispatched (concurrency/retries/subset). Scoring is reproduced verbatim (never overridden). Distinct
   // from /retry (which recovers only the failed cases and carries the passing ones over). Same gate as submit

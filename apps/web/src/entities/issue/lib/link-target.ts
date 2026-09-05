@@ -1,7 +1,7 @@
 import type { IssueLinkType } from '../model/schema'
 
-// 링크가 가리키는 곳. 링크는 검증하지 않는 포인터라 대상이 404 일 수 있다 — 그게 "존재하기 전(또는 후)의
-// 자산도 참조할 수 있다"의 대가다. 링크를 그리는 화면(속성 패널·이력)이 같은 주소를 쓰도록 한 곳에 둔다.
+// Where a link points. A link is an UNVALIDATED pointer, so its target may 404 — that is the price of "an asset can be referenced before
+// (or after) it exists". Kept in one place so every screen that draws a link (the attribute panel, the history) uses the same address.
 // Each entry addresses ONE thing, so each is the singular segment — the collection's plural (`/harnesses`) is a
 // different address holding a different screen.
 const ROUTE: Record<IssueLinkType, string> = {
@@ -11,8 +11,8 @@ const ROUTE: Record<IssueLinkType, string> = {
   scorecard: 'scorecard',
   run: 'run',
   view: 'view',
-  // 한 이슈가 다른 이슈를 언급했을 때 — 링크가 들고 있는 건 UUID 이고, 상세 라우트가 그걸 정규 식별자
-  // 주소로 넘겨 준다. 제목까지 아는 화면은 `issueHref` 로 슬러그 붙은 주소를 만든다.
+  // When one issue mentioned another — the link holds a UUID, and the detail route resolves it to the canonical identifier address.
+  // A screen that knows the title too builds the slugged address with `issueHref`.
   issue: 'issue',
   // The product timeline — a link points at one product or one release (singular detail routes).
   product: 'product',
@@ -21,31 +21,31 @@ const ROUTE: Record<IssueLinkType, string> = {
   case: 'dataset',
 }
 
-// 이슈 상세가 "연결된 자산"으로 보여주고 걸 수 있는 종류 — 이슈를 **검증하는 능력** 셋뿐이다.
-// 링크 모델 자체는 6종을 그대로 유지한다(제어 평면·MCP 는 계속 전부 받는다). 화면만 좁히는 이유:
-//  - `scorecard` 는 능력이 아니라 증거다. 이슈에 고정된 스코어카드는 이미 "평가 이력" 섹션이 소유하고
-//    (고정 배지 + 기준선 배지) 해결 기록이 기준선을 보여주므로, 여기에 또 칩으로 두면 같은 것이 한 화면에
-//    두 번 나오고 둘 중 어느 쪽이 정본인지 흐려진다.
-//  - `run`·`view` 는 이슈가 "무엇으로 검증되는가"에 답하지 않는다.
+// The kinds the issue detail shows and can attach as a "linked asset" — the three **capabilities that VERIFY** the issue, and nothing else.
+// The link model itself keeps all six kinds (the control plane and MCP still accept every one). Only the SCREEN narrows, because:
+//  - `scorecard` is EVIDENCE rather than a capability. A scorecard pinned to an issue is already owned by the "evaluation history" section
+//    (the pinned badge plus the baseline badge) and the resolution record shows the baseline, so a chip here too puts the same thing on one
+//    screen twice and blurs which of them is canonical.
+//  - `run` and `view` do not answer "what is this issue verified BY".
 export const ISSUE_CAPABILITY_LINK_TYPES = [
   'harness',
   'dataset',
   'judge',
 ] as const satisfies readonly IssueLinkType[]
 
-// 속성 열이 골라 붙일 수 있는 종류. 링크 어휘의 부분집합이라 위 배열에서 파생한다 — 두 벌로 적어 두면
-// 화면이 그리는 것과 고를 수 있는 것이 갈라진다.
+// The kinds the attribute column can pick and attach. A subset of the link vocabulary, so it is DERIVED from the array above — written
+// twice, what the screen draws and what can be picked would diverge.
 export type IssueCapabilityLinkType = (typeof ISSUE_CAPABILITY_LINK_TYPES)[number]
 
-// 능력이 아닌 **언급**. 능력 세 줄은 "이 이슈를 무엇으로 검증하는가"라는 고정된 질문이라 종류마다 자기 줄을
-// 갖지만, 언급은 그런 질문이 아니라 자유로운 교차참조다 — 그래서 한 줄이 종류를 파라미터로 받는다.
-// 지금은 `issue` 하나(사용자 결정: 이슈↔이슈부터). run·view 를 켜는 것은 이 배열에 한 줄 + 그 종류의
-// 후보를 읽는 코드 한 곳이고, `scorecard` 는 여기 들어오지 않는다 — 스코어카드는 증거이고 "평가 이력"
-// 섹션이 이미 소유한다(같은 것을 한 화면에 두 번 그리지 않는다).
+// A **mention** rather than a capability. The three capability rows answer a fixed question ("what verifies this issue"), so each kind gets
+// its own row; a mention is not that question but a free cross-reference — so ONE row takes the kind as a parameter.
+// Today that is `issue` alone (a user decision: issue↔issue first). Turning on run or view is one line in this array plus one place that
+// reads that kind's candidates, and `scorecard` does not come in here — a scorecard is evidence and the "evaluation history"
+// section already owns it (the same thing is never drawn twice on one screen).
 export const ISSUE_MENTION_LINK_TYPES = ['issue'] as const satisfies readonly IssueLinkType[]
 export type IssueMentionLinkType = (typeof ISSUE_MENTION_LINK_TYPES)[number]
 
-// EntityRef 는 버전이 있는 세 종류만 색으로 구분한다 — 나머지는 평범한 id@version 참조로 렌더된다.
+// EntityRef distinguishes by colour only the three kinds that HAVE versions — the rest render as an ordinary id@version reference.
 export const ISSUE_LINK_REF_KIND: Partial<Record<IssueLinkType, 'dataset' | 'harness' | 'judge'>> =
   {
     dataset: 'dataset',

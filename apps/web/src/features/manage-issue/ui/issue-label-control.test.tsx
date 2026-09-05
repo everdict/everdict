@@ -6,8 +6,8 @@ import type { IssueLabel } from '@/entities/issue-label'
 
 import en from '../../../../messages/en.json'
 
-// 서버 액션과 라우터는 이 테스트의 대상이 아니다 — 이 파일이 잠그는 것은 "속성 열에서 라벨을 붙이고 뗄 수
-// 있는가" 하나다(예전 상세 화면은 칩만 그렸고, 편집은 ⋯ 메뉴의 다이얼로그 안에만 있었다).
+// The server action and the router are not this test's subject — what this file locks down is one thing, "can labels be attached and detached in
+// the attribute column" (the old detail screen drew the chips only, with editing inside the ⋯ menu's dialog).
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 vi.mock('../api/issues', () => ({ updateIssueAction: async () => ({ ok: true }) }))
 vi.mock('@/features/manage-issue-labels', () => ({
@@ -42,7 +42,7 @@ describe('issue label control', () => {
     const out = render([], true)
 
     expect(out).toContain('Add label')
-    // 목록은 열어야 그려진다 — 여기서 잠그는 것은 "열 수 있는 것이 붙어 있는가"다.
+    // The list is only drawn once opened — what is locked down here is "is something openable attached".
     expect(out).toContain('aria-expanded="false"')
   })
 

@@ -9,27 +9,27 @@ import { adoptedEnvironmentsResponseSchema } from '@/entities/environment-adopti
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 스토어의 environment(평가환경 이미지) 자산 — 하네스 저작 "from store" 피커가 소비한다. 내 스토어 + 공개 카탈로그를
-// 합치고 (tenant,id) 중복은 내 스토어 우선. 핀에는 이미지 ref 를 그대로(verbatim) 삽입하고(no-rewrite 불변), 삽입
-// 출처는 pinSources 주석으로 기록한다. preset 은 템플릿 서비스행 프리필용. docs/architecture/environment-image-store.md.
+// The store's environment assets (evaluation environment images) — consumed by the harness authoring "from store" picker. It merges my store
+// with the public catalog, and a duplicate (tenant,id) prefers mine. The image ref is inserted into the pin VERBATIM (the no-rewrite invariant),
+// and where it came from is recorded as a pinSources annotation. A preset prefills the template service rows. docs/architecture/environment-image-store.md.
 export type StoreEnvironmentPreset = NonNullable<
   Extract<CapabilitySpec, { type: 'environment' }>['preset']
 >
 
 export interface StoreEnvironment {
-  key: string // tenant/id — 리스트 key
-  tenant: string // 발행 워크스페이스 — pinSources.source
+  key: string // tenant/id — the list key
+  tenant: string // the publishing workspace — pinSources.source
   id: string
   name: string
   description: string
   version: string
   image: string
-  imageClass?: CapabilityImageClass // 뷰어 워크스페이스 기준 분류(컨트롤플레인 계산)
+  imageClass?: CapabilityImageClass // the classification against the VIEWER's workspace (computed by the control plane)
   benchmark?: string
-  preset?: StoreEnvironmentPreset // 구성 프리셋(서비스 조각·의존 스토어·프런트도어) — 저작 프리필 소스
-  instructions: string // 환경 구성 설명(md) — 프리필 시 참고 표시용
-  adopted?: boolean // 내 워크스페이스가 이미 가져온(import) 환경인가 — 피커에 "가져옴" 표시
-  pullable?: boolean // 가져온 것의 pull 검증 결과(false=이 워크스페이스가 이미지를 못 당김); undefined=미가져옴/미검증
+  preset?: StoreEnvironmentPreset // the composition preset (service fragments, dependency stores, front door) — the source for authoring prefill
+  instructions: string // the environment composition description (md) — shown for reference while prefilling
+  adopted?: boolean // has my workspace already imported this environment — shown as "imported" in the picker
+  pullable?: boolean // the pull verification result of an imported one (false = this workspace cannot pull the image); undefined = not imported / not verified
 }
 
 export interface ListStoreEnvironmentsResult {
@@ -46,7 +46,7 @@ export async function listStoreEnvironmentsAction(): Promise<ListStoreEnvironmen
       controlPlane.listPublicCapabilities<unknown>(ctx),
       controlPlane.listAdoptedEnvironments<unknown>(ctx).catch(() => ({ environments: [] })),
     ])
-    // 내 워크스페이스 인벤토리 — source/id 로 "가져옴 + pull 검증" 상태를 각 항목에 표시.
+    // My workspace inventory — marks each entry's "imported + pull verified" state by source/id.
     const adopted = new Map(
       adoptedEnvironmentsResponseSchema
         .parse(adoptedRaw)

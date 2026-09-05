@@ -1,11 +1,11 @@
-// 화면별로 하나씩 기억하는 사용자 취향의 저장 계층 — "이 목록을 어떻게 그리나"처럼 **목록마다 다른** 값을
-// 쿠키 하나에 담는다. 이슈 목록의 표시 설정과 평가 목록들의 그것이 같은 기계를 쓰게 하려고 여기 있다.
+// The storage layer for a user preference remembered ONE PER SCREEN — it holds values that differ **per list** ("how do I draw this list")
+// in a single cookie. It exists so the issue list's display settings and the evaluation lists' use the same machinery.
 //
-// 담는 그릇이 URLSearchParams 인 이유가 둘이다: 뷰 키에 들어가는 `:` 를 알아서 이스케이프하고, 같은 키가
-// 두 번 적힌 손상된 쿠키에 대해 **마지막 하나**라는 한 가지 답을 준다(두 답이 있는 취향은 취향이 아니다).
+// The container is URLSearchParams for two reasons: it escapes the `:` inside a view key by itself, and it gives ONE answer — **the last one**
+// — for a corrupted cookie where the same key is written twice (a preference with two answers is not a preference).
 //
-// 쿠키인 이유는 localStorage 가 아니어야 하기 때문이다: 목록은 서버 컴포넌트가 첫 화면을 그리므로, 그리기
-// 전에 이 값을 알아야 한다. localStorage 는 그 시점에 읽을 수 없어서 고른 보기가 깜빡임으로 도착한다.
+// It is a cookie rather than localStorage because it has to be: a list's first screen is drawn by a server component, so this value has to be
+// known BEFORE drawing. localStorage cannot be read at that point, so the chosen view arrives as a flicker.
 
 export function decodeKeyedPreference(cookie: string | undefined): Map<string, string> {
   const entries = new Map<string, string>()
@@ -20,9 +20,9 @@ export function encodeKeyedPreference(entries: Map<string, string>): string {
   return params.toString()
 }
 
-// 한 화면의 선택을 써 넣는다. 바뀐 화면이 맨 앞으로 오는 것이 요점이다 — 쿠키는 모든 요청에 실려 가므로
-// 무한히 자랄 수 없고, 상한을 넘으면 **가장 오래 손대지 않은** 화면이 밀려나야 한다(아무거나가 아니라).
-// 밀려난 화면은 다음에 열 때 기본값으로 돌아갈 뿐이다.
+// Write one screen's choice. The point is that the CHANGED screen moves to the front — a cookie rides on every request so it cannot grow
+// without bound, and past the cap the **least recently touched** screen has to be the one pushed out (not an arbitrary one).
+// A pushed-out screen simply returns to its defaults the next time it is opened.
 export function withKeyedPreference(
   cookie: string | undefined,
   key: string,
@@ -39,9 +39,9 @@ export function withKeyedPreference(
   return encodeKeyedPreference(next)
 }
 
-// 브라우저에서 직접 읽고 쓴다. 취향 쿠키는 httpOnly 가 아니고 데이터가 아니므로, 서버 액션 왕복을 한 번
-// 거칠 이유가 없다 — 그리고 그 왕복이 바로 "그룹 바꿨는데 왜 이렇게 오래 걸리지"의 한 조각이었다.
-// 인증·인가에 쓰이는 쿠키는 절대 이 문을 쓰지 않는다(그건 서버만 쓴다).
+// Read and written straight from the browser. A preference cookie is not httpOnly and is not DATA, so there is no reason to make a server-action
+// round trip for it — and that round trip was one piece of "why does changing the grouping take so long".
+// A cookie used for authentication or authorization NEVER uses this door (those are the server's alone).
 const PREFERENCE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365
 
 export function readPreferenceCookie(name: string): string | undefined {

@@ -36,7 +36,7 @@ export async function CommentsSection({
     .catch(() => [])
   const isAdmin = can(principal?.roles, 'settings:write') // admin-only action → proxy for the admin determination
   const canComment = can(principal?.roles, 'comments:write')
-  // 첨부는 워크스페이스 파일시스템에 쓰는 일이다 — 코멘트 권한과 같은 등급(member+)이지만 판정은 따로 한다.
+  // An attachment is a WRITE to the workspace filesystem — the same grade as comment permission (member+) but judged separately.
   const canAttach = can(principal?.roles, 'files:write')
 
   return (

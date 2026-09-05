@@ -40,11 +40,11 @@ import {
 import { setAgentSkillAction } from '../api/set-agent-skill'
 import { TestSkillPanel } from './test-skill-panel'
 
-// subject → 표시 이름 + 아바타(있으면). 스킬 카드/편집화면의 "작성자" 표시에 쓰인다(멤버 프로필, 없으면 fmtSubject 폴백).
+// subject → a display name plus an avatar when there is one. Used for the "author" line on a skill card or edit screen (the member profile, falling back to fmtSubject).
 type Author = { name: string; avatarUrl?: string }
 
-// Workspace › Skills — 멤버가 함께 만들어가는 SKILL.md식 스킬 라이브러리. 목록 + AI 생성 위저드(설명→초안→편집→저장) +
-// 편집 + 비공개↔워크스페이스 공유 토글 + 삭제. 에이전트는 이 스킬들을 use_skill 로 발견·사용한다(웹은 저작 표면).
+// Workspace › Skills — the SKILL.md-style skill library members build together. The list, the AI generation wizard (describe → draft → edit → save),
+// editing, the private ↔ workspace sharing toggle, and deletion. Agents DISCOVER and use these skills through use_skill (the web is the authoring surface).
 export function SkillsManager({
   skills,
   agentSkills = [],
@@ -56,25 +56,25 @@ export function SkillsManager({
   header,
 }: {
   skills: Skill[]
-  // 내 에이전트가 실제로 따르는 스킬 — 워크스페이스 라이브러리가 "지원하는 절차"라면 이건 "내가 켠 절차".
-  // 행마다 스위치를 달아 준다. 비면 스위치 없이 라이브러리로만 읽힌다(권한/서비스 미구성).
+  // The skills MY agent actually follows — where the workspace library is "the procedures we support", this is "the procedures I turned on".
+  // It puts a switch on every row. Empty, it reads as the library alone with no switches (no permission, or the service is not configured).
   agentSkills?: AgentSkillEntry[]
   modelIds: string[]
   authors: Record<string, Author>
   canWrite: boolean
   currentSubject?: string
   isAdmin: boolean
-  // 전용 페이지(설정 › 스킬)에선 매니저가 페이지 헤더까지 그린다 — "새 스킬" 버튼이 제목과 같은 줄(actions)에 앉도록.
-  // 섹션 임베드(계정 › 개인 능력)에선 생략하면 기존 우측 버튼 행으로 폴백.
+  // On the dedicated page (Settings › Skills) the manager draws the page header too — so the "new skill" button sits on the same line as the title (actions).
+  // Embedded as a section (Account › Personal capabilities) it is omitted and falls back to the existing right-hand button row.
   header?: { title: string; description: string }
 }) {
   const t = useTranslations('skillsManager')
   const { workspace } = useParams<{ workspace: string }>()
-  // null = 닫힘, 'new' = 새 스킬(생성 위저드 포함), Skill = 편집.
+  // null = closed, 'new' = a new skill (including the creation wizard), a Skill = editing.
   const [editing, setEditing] = useState<Skill | 'new' | null>(null)
   const [confirming, setConfirming] = useState<Skill | null>(null)
   const [pending, setPending] = useState(false)
-  // 내 스킬셋(서버가 해석해 준 최종 상태) — 토글은 낙관적으로 반영하고 실패 시 되돌린다.
+  // My skill set (the final state the server resolved) — a toggle is applied optimistically and rolled back on failure.
   const [mySkills, setMySkills] = useState(agentSkills)
   const [switching, setSwitching] = useState<string | undefined>(undefined)
   const myEntry = (key: string): AgentSkillEntry | undefined => mySkills.find((e) => e.key === key)
@@ -99,7 +99,7 @@ export function SkillsManager({
   }
 
   const canManage = (s: Skill) => s.createdBy === currentSubject || isAdmin
-  // 작성자 표시 정보 — 멤버 프로필(이름+아바타), 없으면 축약된 subject.
+  // The author display information — the member profile (name + avatar), else the abbreviated subject.
   const authorOf = (createdBy: string): Author => {
     const a = authors[createdBy]
     return {
@@ -145,9 +145,9 @@ export function SkillsManager({
     </Button>
   ) : undefined
 
-  // 라이브러리는 공개범위로 갈린다 — 내 비공개 초안 · 워크스페이스가 함께 쓰는 스킬. 두 섹션이 전부다:
-  // "기본 제공"이나 "공유받음" 같은 티어는 없다(스토어 발행물은 **가져오면 워크스페이스 스킬 사본이 되므로**
-  // 이 목록에 서는 순간 이미 우리 것이다). 빈 섹션은 그리지 않는다.
+  // The library is split by VISIBILITY — my private drafts, and the skills the workspace shares. Those two sections are all there is:
+  // there is no "built in" or "shared with me" tier (a store publication **becomes a copy of a workspace skill when imported**, so by the
+  // time it stands in this list it is already ours). An empty section is not drawn.
   const sections = (
     [
       { key: 'private', title: t('personalSection') },
@@ -181,7 +181,7 @@ export function SkillsManager({
         <div className="space-y-5">
           {sections.map((section) => (
             <div key={section.key} className="space-y-2">
-              {/* 개인 초안 / 워크스페이스 공유 — 공개범위로 섹션을 나눈다(클러드코드 user/project 스킬 구분의 재해석) */}
+              {/* Personal drafts / workspace-shared — the sections split by visibility (a reinterpretation of Claude Code's user/project skill split) */}
               <div className="text-[11.5px] font-medium uppercase tracking-wide text-faint">
                 {section.title}
               </div>
@@ -246,8 +246,8 @@ export function SkillsManager({
   )
 }
 
-// "내 에이전트가 이 스킬을 따를까" 스위치 — 라이브러리의 존재(워크스페이스가 지원함)와 내 운용(내가 켬)을 가르는 컨트롤.
-// 워크스페이스 기본값과 다르면 배지 + 되돌리기를 함께 보여 준다. 서버가 이 스킬을 모르면(권한/미구성) 아무것도 그리지 않는다.
+// The "will my agent follow this skill" switch — the control that separates the library's EXISTENCE (the workspace supports it) from my
+// OPERATION of it (I turned it on). When it differs from the workspace default it shows a badge plus a revert. If the server does not know this skill (no permission, not configured), nothing is drawn.
 function UseSkillSwitch({
   entry,
   busy,
@@ -287,7 +287,7 @@ function UseSkillSwitch({
   )
 }
 
-// 이 워크스페이스에서 저작하는 Skill 레코드 한 장 — 이름(상세로 링크) + 공개범위/파일수 배지 + 관리 메뉴(공유·편집·삭제).
+// One Skill record authored in this workspace — the name (linking to the detail) plus visibility/file-count badges and the management menu (share, edit, delete).
 function SkillCard({
   skill,
   author,
@@ -307,12 +307,12 @@ function SkillCard({
   onShare: (skill: Skill, visibility: SkillVisibility) => void
   onEdit: (skill: Skill) => void
   onDelete: (skill: Skill) => void
-  use?: ReactNode // 이 멤버의 에이전트가 따를지 여부 스위치(라이브러리 관리와 별개의 축)
+  use?: ReactNode // the switch for whether THIS member's agent follows it (an axis separate from library management)
 }) {
   const t = useTranslations('skillsManager')
   return (
     <div className="rounded-lg border border-border bg-card p-4">
-      {/* 헤더 — 이름(상세로 링크) + 공개범위 배지 + 파일 수(왼쪽) · 관리 액션(오른쪽, 관리 권한 있을 때만) */}
+      {/* Header — the name (linking to the detail) plus the visibility badge and file count on the left · management actions on the right (only with permission) */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Sparkles className="size-4 shrink-0 text-primary" />
@@ -378,7 +378,7 @@ function SkillCard({
 
       <p className="mt-1.5 line-clamp-2 text-[13px] text-muted-foreground">{skill.description}</p>
 
-      {/* 하단 메타 — 이 스킬을 누가 만들었는지(아바타 + 이름) */}
+      {/* Footer meta — who made this skill (avatar + name) */}
       <div className="mt-3 flex items-center gap-1.5 text-[11.5px] text-faint">
         <Avatar name={author.name} url={author.avatarUrl} size="sm" className="rounded-full" />
         <span>{t('createdBy', { name: author.name })}</span>
@@ -387,7 +387,7 @@ function SkillCard({
   )
 }
 
-// 생성/편집 다이얼로그. 새 스킬이면 상단에 AI 생성 위저드(설명 + 모델 → 초안이 필드를 채움). 상세 페이지에서도 재사용(export).
+// The create/edit dialog. For a new skill, the AI generation wizard sits at the top (a description + a model → a draft fills the fields). Reused by the detail page too (exported).
 export function SkillEditorDialog({
   skill,
   modelIds,
@@ -396,7 +396,7 @@ export function SkillEditorDialog({
 }: {
   skill: Skill | null
   modelIds: string[]
-  author?: Author // 편집 시 작성자(새 스킬이면 없음)
+  author?: Author // the author when editing (a new skill has none yet)
   onClose: () => void
 }) {
   const t = useTranslations('skillsManager')
@@ -404,12 +404,12 @@ export function SkillEditorDialog({
   const [name, setName] = useState(skill?.name ?? '')
   const [description, setDescription] = useState(skill?.description ?? '')
   const [instructions, setInstructions] = useState(skill?.instructions ?? '')
-  // 부속 파일 — 다이얼로그에선 목록/제거만(내용 저작은 상세 페이지의 에이전트 편집 흐름). AI 초안이 파일을 내면 여기 실린다.
+  // Attached files — the dialog only lists and removes them (content authoring is the detail page's agent editing flow). Files an AI draft produces arrive here.
   const [files, setFiles] = useState<SkillFile[]>(skill?.files ?? [])
   const [visibility, setVisibility] = useState<SkillVisibility>(skill?.visibility ?? 'private')
   const [pending, setPending] = useState(false)
 
-  // 생성 위저드 상태(새 스킬만).
+  // Creation wizard state (new skills only).
   const [genPrompt, setGenPrompt] = useState('')
   const [genModel, setGenModel] = useState(modelIds[0] ?? '')
   const [generating, startGenerating] = useTransition()
@@ -460,7 +460,7 @@ export function SkillEditorDialog({
       <div className="max-h-[85vh] space-y-5 overflow-y-auto p-6">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-medium">{isNew ? t('newSkill') : t('editSkill')}</h3>
-          {/* 이 스킬을 누가 만들었는지 — 편집 시에만(새 스킬은 아직 작성자 없음) */}
+          {/* Who made this skill — only while editing (a new skill has no author yet) */}
           {!isNew && author && (
             <div className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
               <Avatar
@@ -544,7 +544,7 @@ export function SkillEditorDialog({
           />
         </div>
 
-        {/* 부속 참조파일 — 본문은 슬림하게, 긴 자료는 파일로(에이전트가 read_skill_file 로 온디맨드 로드). 여기선 목록/제거만. */}
+        {/* Attached reference files — keep the body slim and put long material in files (the agent loads them on demand with read_skill_file). Listed and removed only here. */}
         {files.length > 0 && (
           <div className="space-y-1.5">
             <Label>{t('files')}</Label>
@@ -572,7 +572,7 @@ export function SkillEditorDialog({
           </div>
         )}
 
-        {/* 저장 전에 이 스킬이 실제로 잘 도는지 검증 — 미저장 상태로도 현재 필드 값으로 테스트. */}
+        {/* Verify the skill actually works BEFORE saving — tested against the current field values even while unsaved. */}
         <TestSkillPanel skill={{ name, description, instructions, files }} />
 
         <label className="flex items-center gap-2 text-[13px]">

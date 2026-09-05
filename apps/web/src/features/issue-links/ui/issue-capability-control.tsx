@@ -20,21 +20,21 @@ import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
-// 고를 것이 이만큼 넘어가면 검색 줄을 낸다 — 프로젝트 피커와 같은 문턱값(스크롤로만 찾게 두지 않는다).
+// Past this many choices a search line appears — the same threshold as the project picker (people are not left to find things by scrolling alone).
 const SEARCH_FROM = 7
 
-// 고를 수 있는 능력 하나 — 워크스페이스 레지스트리가 실제로 갖고 있는 것들이다.
+// One selectable capability — the things the workspace registry actually holds.
 export interface CapabilityOption {
   id: string
-  // 이름만으로 구별되지 않을 때 옆에 붙는 한 줄(하네스는 모델·명령 요약, 데이터셋은 설명).
+  // The line beside it when a name alone does not distinguish (a model/command summary for a harness, the description for a dataset).
   hint?: string
 }
 
 interface CapabilityRef {
   id: string
-  // 예전에(또는 에이전트가 MCP 로) 버전까지 박아 둔 링크는 그대로 보여 준다. 새로 거는 링크는 버전을 달지
-  // 않는다 — 이슈가 뜻하는 것은 "이 저지"이지 "1.2.0 의 저지"가 아니고, 회귀 감시도 id 로 맞춘다
-  // (docs/tracker.md). 화면이 버전을 물어보면 링크가 버전에 묶인 것처럼 읽힌다.
+  // A link that pinned a version too (historically, or by an agent over MCP) is shown as it is. A NEW link carries no version —
+  // what an issue means is "this judge", not "the judge at 1.2.0", and regression watching matches by id as well
+  // (docs/tracker.md). A screen that asks for a version makes the link read as though it were bound to one.
   version?: string
 }
 
@@ -47,13 +47,13 @@ const refsOf = (links: IssueLink[]): CapabilityRef[] =>
 const keyOf = (links: IssueLink[]): string =>
   links.map((link) => `${link.id}@${link.version ?? ''}`).join(' ')
 
-// 이 이슈를 검증하는 능력 한 종류(하네스·데이터셋·저지) — 상태·프로젝트·라벨과 같은 자리(속성 열)에서 바로
-// 붙였다 뗀다. 예전에는 종류 콤보 + id 자유 입력 + 버전 자유 입력의 작은 폼이었는데, 그건 레지스트리에 무엇이
-// 있는지 외우고 있는 사람만 쓸 수 있는 폼이었다 — 오타 하나면 아무 데도 가리키지 않는 링크가 생겼다(링크는
-// 포인터라 제어 평면이 검증하지 않는다). 그래서 고르는 것은 워크스페이스에 등록된 것들뿐이다.
+// One kind of capability that verifies this issue (harness, dataset, judge) — attached and detached right where status, project and labels
+// are (the attribute column). This used to be a small form of a kind combo plus a free-text id plus a free-text version, which only
+// somebody who had memorised what the registry held could use — one typo produced a link pointing nowhere (a link is a POINTER and the
+// control plane does not validate it). So the only things selectable are what is registered in the workspace.
 //
-// 붙이기·떼기는 즉시 저장한다(폼이 아니라 컨트롤이다). 저장을 기다리는 동안에도 칩은 바뀐 대로 보이고,
-// 거절당하면 되돌린 뒤 제어 평면의 사유를 그대로 보여 준다.
+// Attaching and detaching save immediately (this is a control, not a form). The chip shows as changed while the save is in flight, and on a
+// refusal it rolls back and shows the control plane's reason verbatim.
 export function IssueCapabilityControl({
   workspace,
   issueId,
@@ -65,9 +65,9 @@ export function IssueCapabilityControl({
   workspace: string
   issueId: string
   type: IssueCapabilityLinkType
-  // 이 종류로 이미 걸려 있는 링크들.
+  // The links already attached for this kind.
   links: IssueLink[]
-  // 이 워크스페이스에 등록된 같은 종류의 능력들 — 골라 붙일 수 있는 전부.
+  // The capabilities of the same kind registered in this workspace — everything that can be picked and attached.
   options: CapabilityOption[]
   canWrite: boolean
 }) {
@@ -79,8 +79,8 @@ export function IssueCapabilityControl({
   const [selected, setSelected] = useState<CapabilityRef[]>(() => refsOf(links))
   const [seen, setSeen] = useState(() => keyOf(links))
 
-  // 서버가 실어 온 값이 진실이다 — 저장이 끝나 페이지가 새로 그려졌거나 다른 화면이 고쳤으면 거기에 맞춘다.
-  // 저장 중에는 맞추지 않는다: 연달아 두 번 토글하면 첫 응답이 두 번째 선택을 되돌려 깜빡인다.
+  // What the SERVER carried is the truth — once a save finishes and the page re-renders, or another screen edits it, this follows.
+  // It does not follow while a save is in flight: toggling twice in a row would make the first response undo the second choice and flicker.
   const fromServer = keyOf(links)
   if (!pending && fromServer !== seen) {
     setSeen(fromServer)
@@ -104,7 +104,7 @@ export function IssueCapabilityControl({
           toast.error(r.error ?? t(linked ? 'removeError' : 'addError'))
           return
         }
-        // 나머지 화면(이력·평가 이력)은 뒤따라 온다. 이 줄은 그걸 기다리지 않는다.
+        // The rest of the screen (history, evaluation history) follows behind. This row does not wait for it.
         refresh()
       } finally {
         setPending(false)
@@ -175,7 +175,7 @@ export function IssueCapabilityControl({
             ) : (
               <ChevronDown className="size-3" />
             )}
-            {/* 아직 아무것도 안 걸린 줄에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다. */}
+            {/* On a row with nothing attached yet, this button is the only affordance — that is the only time it wears a label. */}
             {chips.length === 0 && <span>{t('add')}</span>}
           </button>
         )}
@@ -187,7 +187,7 @@ export function IssueCapabilityControl({
               autoFocus
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('searchPlaceholder')}
-              // 이 컨트롤이 폼 안에 놓이는 날을 대비한다 — Enter 가 폼을 제출해 버리면 고르다 말고 저장된다.
+              // Guarding against the day this control sits inside a form — an Enter that submits the form would save mid-selection.
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault()
               }}

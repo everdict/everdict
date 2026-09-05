@@ -17,31 +17,10 @@ except ImportError:
     print("openpyxl not installed — cannot score", file=sys.stderr)
     sys.exit(2)
 
-_RANGE_RE = re.compile(r"^(?:'([^']+)'!|([^'!]+)!)?(.+)$")
-
-
-def parse_answer_position(spec):
-    # Split on commas but ignore commas inside quotes. Each piece → (sheet|None, a1range).
-    parts, buf, in_q = [], [], False
-    for ch in spec:
-        if ch == "'":
-            in_q = not in_q
-            buf.append(ch)
-        elif ch == "," and not in_q:
-            parts.append("".join(buf).strip())
-            buf = []
-        else:
-            buf.append(ch)
-    if buf:
-        parts.append("".join(buf).strip())
-    out = []
-    for p in parts:
-        if not p:
-            continue
-        m = _RANGE_RE.match(p)
-        sheet = m.group(1) or m.group(2)
-        out.append((sheet.strip() if sheet else None, m.group(3).strip()))
-    return out
+# `answer_position` is read by ONE function for every scorer in this bundle — this file's own regex
+# version returned `Sheet1'!A1:M237` as a RANGE (the published data omits the opening quote), which then
+# raised inside `ws[a1]`. See sbench_position.py.
+from sbench_position import parse_answer_position  # noqa: E402
 
 
 def find_sheet(wb, name):

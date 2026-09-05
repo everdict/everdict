@@ -16,8 +16,8 @@ import { MultiSelect } from '@/shared/ui/multi-select'
 
 import { deleteReleaseAction, updateReleaseAction } from '../api/products'
 
-// 릴리즈 헤더의 ⋯ 메뉴 — 수정(이름·목표일·지켜볼 시리즈)은 다이얼로그로, 삭제는 확인을 거쳐 프로덕트로
-// 돌아간다. 시리즈 선택을 비우면 "전체 시리즈"로 되돌아간다(null 클리어).
+// The ⋯ menu in the release header — editing (name, target date, the series to watch) opens a dialog, and deleting goes through a confirmation
+// and returns to the product. Clearing the series selection returns it to "every series" (a null clear).
 export function ReleaseActionsMenu({
   workspace,
   release,

@@ -21,8 +21,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { JudgeList } from './judge-list'
 
-// Agent Judges (model | harness) — workspace-owned + shared defaults. 하네스·데이터셋과 같은 규칙이다:
-// 워크스페이스 하나의 주소이고, 소유 팀은 필터 한 축이며, 거르기·묶기는 브라우저에서 일어난다.
+// Agent Judges (model | harness) — workspace-owned plus the shared defaults. The same rules as harnesses and datasets:
+// one address per workspace, the owning team as one filter axis, and filtering and grouping happening in the browser.
 export async function JudgeListView({
   workspace,
   params,
@@ -41,7 +41,7 @@ export async function JudgeListView({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 만든 사람 · 팀 이름은 축의 이름표를 위한 보조 읽기다 — 실패하면 그 축만 조용히 사라진다.
+  // The creator and team NAMES are a supporting read for the axes' name plates — on a failure only that axis quietly disappears.
   const members = await controlPlane
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))

@@ -10,9 +10,9 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // GitHub import + manual sync server actions (docs/tracker.md). Everdict is the CLIENT: nothing here polls and
 // nothing subscribes to a webhook, so every refresh below is something a member asked for by pressing a button.
 //
-// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
-// (무효화할 캐시가 없는데 Next 16 은 선언만으로 prefetch 캐시를 통째로 버려 화면의 모든 `<Link>` 가
-// 다시 prefetch 되고, 변이의 트랜지션이 그 큐에 묶인다). 근거는 `docs/web.md`.
+// ⚠️ Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here
+// (there is no cache to invalidate, and Next 16 throws the whole prefetch cache away on the DECLARATION alone, so every `<Link>` on
+// screen re-prefetches and the mutation's transition is bound behind that queue). The grounds are in `docs/web.md`.
 //
 // These three shapes are served straight from the control plane's own service types and have NO
 // @everdict/contracts wire DTO, so — unlike the entity schemas — they carry no drift guard. The local zod IS the

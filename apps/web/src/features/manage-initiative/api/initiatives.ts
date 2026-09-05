@@ -11,9 +11,9 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // Tracker initiative server actions. Completing an initiative is a GATE: refused with a 409 while any issue
 // under any of its projects is open. `force` closes it with known gaps and is recorded on the fact.
 //
-// ⚠️ 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
-// (무효화할 캐시가 없는데 Next 16 은 선언만으로 prefetch 캐시를 통째로 버려 화면의 모든 `<Link>` 가
-// 다시 prefetch 되고, 변이의 트랜지션이 그 큐에 묶인다). 근거는 `docs/web.md`.
+// ⚠️ Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here
+// (there is no cache to invalidate, and Next 16 throws the whole prefetch cache away on the DECLARATION alone, so every `<Link>` on screen
+// re-prefetches and the mutation's transition is bound behind that queue). The grounds are in `docs/web.md`.
 
 export interface InitiativeActionResult {
   ok: boolean
@@ -32,7 +32,7 @@ const errorEnvelopeSchema = z.object({
 export async function createInitiativeAction(input: {
   name: string
   description?: string
-  // 상위 이니셔티브 — 진척은 하위까지 훑어 올라오므로, 쪼개도 답은 하나로 남는다.
+  // The parent initiative — progress sweeps up from below, so splitting still leaves ONE answer.
   parentId?: string
   lead?: string
   icon?: string
@@ -102,11 +102,11 @@ export async function updateInitiativeAction(
   patch: {
     name?: string
     description?: string | null
-    // null 은 상위에서 떼어내 최상위로 되돌린다.
+    // null detaches it from its parent and returns it to the top level.
     parentId?: string | null
-    // null 은 책임자를 비운다 — 아직 아무도 맡지 않았다는 건 실제 상태다.
+    // null clears the lead — that nobody has taken it on yet is a real state.
     lead?: string | null
-    // 목록은 통째로 대체된다 — 편집기가 결과 집합을 보내므로, 병합하면 제거를 표현할 수 없다.
+    // The lists are replaced WHOLE — the editor sends the result set, and merging could not express a removal.
     memberIds?: string[]
     icon?: string | null
     resources?: { label: string; url: string }[]
@@ -150,7 +150,7 @@ export async function setInitiativeStatusAction(
   }
 }
 
-// 업데이트 올리기 — 판정과 그 이유를 함께. 본문 없는 판정은 서버가 400 으로 거절한다.
+// Post an update — the verdict together with its reason. A verdict with no body is refused by the server with a 400.
 export async function postInitiativeUpdateAction(
   id: string,
   input: { health: TrackerHealth; body: string }

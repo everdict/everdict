@@ -94,7 +94,7 @@ export const traceEventSchema = z.discriminatedUnion('kind', [
     // durationMs lives in `structure` now — it was this kind's field first, and every kind needs it.
     ...structure,
   }),
-  // 인프라 플레인 기록(배치/서비스) — 백엔드가 오케스트레이터의 계정을 트레이스에 봉인한 것
+  // An infra-plane record (placement/service) — the backend sealing the orchestrator's account into the trace
   z.object({
     t: z.number(),
     kind: z.literal('infra'),

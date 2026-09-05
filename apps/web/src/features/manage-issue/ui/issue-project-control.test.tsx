@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import en from '../../../../messages/en.json'
 import type { IssueProjectOption } from './issue-project-control'
 
-// 서버 액션과 라우터는 이 테스트의 대상이 아니다 — 이 파일이 잠그는 것은 "속성 열에서 이슈를 프로젝트에
-// 넣고 뺄 수 있는가" 하나다(예전 상세 화면은 붙어 있을 때만 링크를 그렸고, 넣는 길은 ⋯ 메뉴의 편집
-// 다이얼로그 안에만 있었다).
+// The server action and the router are not this test's subject — what this file locks down is one thing, "can an issue be added to and removed
+// from a project in the attribute column" (the old detail screen drew a link only when it was attached, and the route to adding lived inside the
+// ⋯ menu's edit dialog).
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 vi.mock('../api/issues', () => ({ updateIssueAction: async () => ({ ok: true }) }))
 
@@ -33,7 +33,7 @@ describe('issue project control', () => {
     const out = render(undefined, true)
 
     expect(out).toContain('Add to project')
-    // 목록은 열어야 그려진다 — 여기서 잠그는 것은 "열 수 있는 것이 붙어 있는가"다.
+    // The list is only drawn once opened — what is locked down here is "is something openable attached".
     expect(out).toContain('aria-expanded="false"')
   })
 
@@ -42,7 +42,7 @@ describe('issue project control', () => {
 
     expect(out).toContain('href="/acme/project/p1"')
     expect(out).toContain('Apollo')
-    // 프로젝트로 가는 길(링크)은 그대로 두고, 바꾸는 자리는 그 옆에 따로 선다.
+    // The route to the project (the link) is left as it is, and the place that CHANGES it stands separately beside it.
     expect(out).toContain('aria-expanded="false"')
   })
 

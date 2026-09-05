@@ -27,12 +27,12 @@ export const harnessSchema = z.object({
   latestVersion: z.string().optional(),
   versionCount: z.number().optional(),
   category: z.string().optional(), // template category of the latest instance (cli-agent, etc.)
-  // 최신 인스턴스가 올라탄 형상(템플릿). 같은 템플릿의 변형끼리 목록에서 묶는 근거 — 이게 없으면
-  // env 하나만 다른 변형도 서로 무관한 하네스로 읽힌다.
+  // The shape (template) the newest instance sits on. The grounds for grouping variations of one template in the list — without it, a
+  // variation differing in a single env value reads as an unrelated harness.
   templateId: z.string().optional(),
   templateVersion: z.string().optional(),
-  // 최신 인스턴스가 그 형상에서 무엇을 바꿨는가 — 한 템플릿에 하네스가 여럿일 때 "이건 어느 쪽인가"에 답한다.
-  // 제어 평면이 델타에서 파생하므로 손으로 쓴 설명처럼 낡지 않는다.
+  // What the newest instance CHANGED on that shape — the answer to "which one is this" when a template carries several harnesses.
+  // The control plane derives it from the delta, so it cannot go stale the way a hand-written description does.
   variation: z.array(z.object({ scope: z.string().optional(), label: z.string() })).optional(),
   kind: z.string().optional(), // command | service | process
   subtitle: z.string().optional(), // model/command/service summary (a harness has no free-text description, so used as a subtitle)
@@ -42,15 +42,15 @@ export const harnessSchema = z.object({
   updatedAt: z.string().optional(),
   // version → free-form labels (only versions that have tags) — mutable meta outside the spec. Attached when versions are hard to tell apart by number alone.
   versionTags: z.record(z.string(), z.array(z.string())).optional(),
-  // version → 그 버전이 어디서 왔는가(찍힌 버전만). 이슈에서 태어났는지, 어떤 에이전트가 어느 대화에서
-  // 만들었는지 — 상세가 리니지를 그리는 근거.
+  // version → where that version came from (stamped versions only). Whether it was born from an issue, and which agent made it in which
+  // conversation — the grounds on which the detail draws lineage.
   versionOrigins: versionOriginsSchema.optional(),
 })
 
 export const harnessesSchema = z.array(harnessSchema)
 
-// GET /harness-templates: 이 워크스페이스가 고를 수 있는 형상 목록(+ _shared). 인스턴스 폼의 템플릿 피커와
-// 형상 카탈로그가 읽는다. 아직 아무 하네스도 올라타지 않은 형상은 이 목록에만 나오므로, 무엇인지도 여기 실려야 한다.
+// GET /harness-templates: the shapes this workspace can choose from (+ _shared). Read by the instance form's template picker and by the
+// shape catalog. A shape no harness sits on yet appears ONLY in this list, so what it is has to travel here too.
 export const harnessTemplateSchema = z.object({
   id: z.string(),
   versions: z.array(z.string()),
@@ -109,7 +109,7 @@ type _versionsBack = AssertAssignable<HarnessVersionsResponse, WebHarnessVersion
 // HarnessSpecDiff is identical-shape to the wire diff DTO — guarded bidirectionally.
 type _diffFwd = AssertAssignable<WebHarnessSpecDiff, HarnessSpecDiffResponse>
 type _diffBack = AssertAssignable<HarnessSpecDiffResponse, WebHarnessSpecDiff>
-// 템플릿 목록 엔트리는 동일 형태 — 양방향으로 묶는다.
+// A template list entry has the same shape — bound in both directions.
 type WebHarnessTemplate = z.infer<typeof harnessTemplateSchema>
 type _tplFwd = AssertAssignable<WebHarnessTemplate, HarnessTemplateListEntry>
 type _tplBack = AssertAssignable<HarnessTemplateListEntry, WebHarnessTemplate>
@@ -139,7 +139,7 @@ export type EnvValue = z.infer<typeof envValueSchema>
 
 // env value display text — a literal as-is, a secret reference as "name · secret" (the value is never exposed).
 // secretLabel = the secret suffix (localized — the caller passes t('secretLabel'); the default is Korean).
-export const envValueText = (v: EnvValue, secretLabel: string = '시크릿'): string =>
+export const envValueText = (v: EnvValue, secretLabel: string = 'secret'): string =>
   typeof v === 'string' ? v : `${v.secretRef} · ${secretLabel}`
 
 // One evidence selector — an attr key + an optional dot/bracket path INTO its JSON value. A bare string = { key }.
@@ -197,8 +197,8 @@ export const serviceReadinessSchema = z.object({
 })
 export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>
 
-// service resource request — cpu (1000 = 1 vCPU, k8s millicore convention) · memoryMb · gpu. 인스턴스가 덮어쓸 수 있는
-// 값이라 템플릿 쪽에서도 읽어야 한다(상속값 표시의 근거) — 미러에서 빠져 있으면 "상속됨"이 빈칸으로 보인다.
+// service resource request — cpu (1000 = 1 vCPU, k8s millicore convention) · memoryMb · gpu. An instance can override it, so the TEMPLATE
+// side has to read it too (the grounds for showing an inherited value) — missing from the mirror, "inherited" renders as a blank.
 export const serviceResourcesSchema = z.object({
   cpu: z.number().optional(),
   memoryMb: z.number().optional(),
@@ -296,8 +296,8 @@ export const topologyTargetSchema = z.object({
 })
 export type TopologyTarget = z.infer<typeof topologyTargetSchema>
 
-// front door — the entry point where the eval driver submits a case. 제출 바디와 완료 대기 시간은 인스턴스가
-// 덮어쓰는 칸이라 상속값 표시에 필요하다(나머지 필드는 passthrough — 표시용 느슨한 미러).
+// front door — the entry point where the eval driver submits a case. The submit body and the completion wait are fields an instance
+// overrides, so they are needed for showing inherited values (the remaining fields are passthrough — a loose mirror, for display).
 export const frontDoorSchema = z
   .object({
     service: z.string(),
@@ -321,13 +321,13 @@ export type FrontDoor = z.infer<typeof frontDoorSchema>
 
 // trace extraction for a command harness: none (result only) | file (the command writes its OWN TraceEvent
 // stream into the sandbox) | a pull from one of the four observability platforms.
-// ⚠️ 이 목록은 계약(`CommandTraceSpecSchema`)의 7종을 그대로 따라야 한다 — 여기 없는 kind 하나가 오면
-// `.parse()` 가 스펙 전체를 거절해서 그 하네스의 상세 화면이 "불러오지 못했습니다" 한 줄로 죽는다
-// (드리프트 가드는 타입만 잡고 enum 값은 못 잡는다 — 그래서 `file` 하네스가 전부 열리지 않았다).
+// ⚠️ This list must follow the contract's (`CommandTraceSpecSchema`) seven kinds exactly — one kind arriving that is not here makes
+// `.parse()` reject the WHOLE spec, and that harness's detail screen dies as a one-line "could not load"
+// (the drift guard catches types and not enum VALUES — which is why every `file` harness failed to open).
 export const commandTraceSchema = z.object({
   kind: z.enum(['none', 'file', 'otel', 'mlflow', 'langfuse', 'langsmith', 'phoenix']),
-  endpoint: z.string().optional(), // 플랫폼에서 끌어오는 kind 만 갖는다
-  path: z.string().optional(), // file 만 갖는다 — 샌드박스 workDir 기준 상대 경로
+  endpoint: z.string().optional(), // only the kinds pulled from a platform have it
+  path: z.string().optional(), // only `file` has it — a path relative to the sandbox workDir
 })
 export type CommandTrace = z.infer<typeof commandTraceSchema>
 
@@ -432,9 +432,9 @@ export const harnessTemplateSpecSchema = z
     command: z.string().optional(),
     env: z.record(z.string(), envValueSchema).optional(),
     model: z.string().optional(),
-    // command 의 {{var}} 기본값 — 인스턴스가 덮어쓰는 칸이라 상속값 표시에 필요하다.
+    // The {{var}} defaults of `command` — a field an instance overrides, so it is needed for showing inherited values.
     params: z.record(z.string(), z.string()).optional(),
-    resources: serviceResourcesSchema.optional(), // job 단위 자원 요청(command)
+    resources: serviceResourcesSchema.optional(), // the job-level resource request (command)
     trace: commandTraceSchema.optional(),
   })
   .passthrough()

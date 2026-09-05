@@ -6,14 +6,14 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { mediaKindForContentType, mediaKindForUrl } from '@/shared/lib/media'
 
-// 붙여넣거나 끌어다 놓은 파일을 워크스페이스 파일시스템에 올리고, 본문이 가리킬 주소를 돌려준다.
+// Uploads a pasted or dropped file to the workspace filesystem and returns the address the body will point at.
 //
-// 서버 액션이 아니라 라우트인 이유는 바이트 때문이다: 액션의 본문은 JSON 이라 파일을 base64 로 부풀려야 하고
-// (5 MiB 파일이 ≈7 MB 가 되어 8 MB 한도에 남는 여유가 없다), 브라우저가 이미 multipart 로 보낼 수 있는 것을
-// 두 번 인코딩하게 된다. 쓰기 권한(files:write)은 제어 평면이 판정한다.
+// It is a route rather than a server action because of the BYTES: an action's body is JSON, so a file has to be inflated into base64
+// (a 5 MiB file becomes ≈7 MB, leaving no headroom under the 8 MB limit), encoding twice what the browser can already send as multipart.
+// Write permission (files:write) is judged by the control plane.
 
-// 제어 평면의 FS_FILE_MAX_BYTES 거울. 웹은 contracts 의 값을 실행 시점에 가져올 수 없어(런타임 분리) 여기에
-// 적어 두고, 넘는 파일은 올리기 전에 돌려보낸다 — 6 MB 를 보내 놓고 400 을 받는 것보다 낫다.
+// A mirror of the control plane's FS_FILE_MAX_BYTES. The web cannot pull the contracts value at runtime (runtime decoupling), so it is written
+// here and an oversized file is turned back before uploading — better than sending 6 MB and receiving a 400.
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 export async function POST(request: Request): Promise<Response> {
@@ -39,7 +39,7 @@ export async function POST(request: Request): Promise<Response> {
       content,
       encoding: 'base64',
       ...(file.type === '' ? {} : { contentType: file.type }),
-      // 새 파일로만 쓴다 — 식별자가 겹쳐 남의 첨부 위에 올라타는 일이 없도록 제어 평면이 409 로 거절하게 둔다.
+      // It only ever writes a NEW file — the control plane is left to refuse with a 409, so a colliding identifier cannot land on top of somebody else's attachment.
       baseRevision: 0,
       message: 'attached from a discussion',
     })

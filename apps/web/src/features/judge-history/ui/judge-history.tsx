@@ -10,15 +10,15 @@ import { EntityRef, MetricChip } from '@/shared/ui/chip'
 import { Link } from '@/shared/ui/link'
 import { StatusIcon } from '@/shared/ui/status-pill'
 
-// 한 페이지에 노출할 개수 — 초기 대량 렌더를 막고 "더보기"로 10개씩 점진 노출.
+// How many to show per page — it stops a large initial render and reveals ten at a time through "show more".
 const PAGE_SIZE = 10
 
-// 평가 이력 한 행에 필요한 최소 데이터(서버에서 조립해 전달 — 직렬화 가능한 평면 형태).
+// The minimum data one evaluation-history row needs (assembled on the server and passed down — a serializable flat shape).
 export interface JudgeHistoryEntry {
   id: string
   dataset: { id: string; version?: string }
   harness: { id: string; version?: string }
-  // 이 저지의 메트릭만(overall + 기준) — 칩은 compact 형(저지 id 생략)으로 렌더.
+  // Only this judge's metrics (overall plus its criteria) — the chips render in the compact form (with the judge id omitted).
   // mean is ABSENT when the metric had zero measurements (the judge crashed on every case) — the chip then
   // shows the unmeasured marker instead of a fabricated 0.00 on the judge's own health screen.
   metrics: { metric: string; mean?: number; passRate?: number | null; unmeasured?: number }[]
@@ -27,9 +27,9 @@ export interface JudgeHistoryEntry {
   status: ScorecardStatus
 }
 
-// 저지 상세의 평가 이력 리스트.
-// - 페이지네이션: 10개만 보이고 "더보기"로 이어서 노출.
-// - 레이아웃 우선순위: 데이터셋·하네스는 축소되지 않고(우선 폭), judge 메트릭 칩이 먼저 축약/클립된다.
+// The judge detail's evaluation history list.
+// - Pagination: ten are shown and "show more" continues.
+// - Layout priority: the dataset and harness do NOT shrink (priority width), and the judge metric chips are abbreviated or clipped first.
 export function JudgeHistory({
   workspace,
   entries,
@@ -54,7 +54,7 @@ export function JudgeHistory({
             href={`/${workspace}/scorecard/${encodeURIComponent(s.id)}`}
             className="group flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
           >
-            {/* 데이터셋 · 하네스 — 우선 폭(내용 폭 유지). flex-basis 0 이라 여백을 흡수하고, 극단적으로 긴 id 에서만 truncate. */}
+            {/* Dataset · harness — priority width (content width preserved). flex-basis 0 absorbs the slack, and only an extremely long id truncates. */}
             <div className="flex min-w-0 flex-1 items-center gap-1.5 whitespace-nowrap text-[13px] font-[510]">
               <span className="truncate">
                 <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
@@ -64,8 +64,8 @@ export function JudgeHistory({
                 <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
               </span>
             </div>
-            {/* judge 메트릭 — 저지 페이지에선 'judge <id>' 가 중복이라 compact 로 축약. 공간이 부족하면
-                (shrink + overflow-hidden) 데이터셋·하네스보다 먼저 이 칼럼이 클립된다. */}
+            {/* Judge metrics — 'judge <id>' is redundant on a judge page, so it is abbreviated to compact. When space runs short
+                (shrink + overflow-hidden) this column is clipped before the dataset and harness. */}
             <div className="hidden min-w-0 shrink items-center justify-end gap-1 overflow-hidden sm:flex">
               {s.metrics.slice(0, 2).map((m) => (
                 <span key={m.metric} className="shrink-0">
@@ -83,7 +83,7 @@ export function JudgeHistory({
                 <span className="shrink-0 text-[11px] text-faint">+{s.metrics.length - 2}</span>
               )}
             </div>
-            {/* 실행자 · 시각 · 상태 — 고정 폭 */}
+            {/* Who ran it · when · status — fixed width */}
             <div className="flex shrink-0 items-center gap-2.5">
               <span className="flex w-6 justify-center">
                 {s.runner && (

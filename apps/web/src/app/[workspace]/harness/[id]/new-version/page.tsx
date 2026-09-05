@@ -61,7 +61,7 @@ export default async function NewHarnessVersionPage({
 
   let initialInstance: InstanceState | undefined
   let initialTemplate: TemplateState | undefined
-  // 템플릿이 정한 유효값 — 폼이 상속값을 그리고 저장 시 바뀐 것만 델타로 내보내는 근거.
+  // The effective values the template set — the grounds on which the form draws the inherited values and exports only what changed as a delta on save.
   let baseline: OverrideBaseline | undefined
   let startTab: 'instance' | 'template' = tab === 'template' ? 'template' : 'instance'
   let notice: string | undefined

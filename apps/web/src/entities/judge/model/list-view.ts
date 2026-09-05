@@ -2,15 +2,15 @@ import type { ListDisplay, ListViewSpec } from '@/shared/lib/list-view'
 
 import type { JudgeSummary } from './schema'
 
-// 저지 목록의 어휘. 「출처」(owner)가 축인 이유는 이 목록이 워크스페이스가 만든 것과 기본 제공(`_shared`)을
-// 함께 보여 주는 유일한 평가 자원 목록이기 때문이다 — 하네스·데이터셋은 자기 워크스페이스 것만 남긴다.
+// The judge list's vocabulary. "Source" (owner) is an axis because this is the only evaluation resource list that shows what the workspace made
+// TOGETHER with the built-in defaults (`_shared`) — the harness and dataset lists keep only their own workspace's.
 export const JUDGE_FACETS = ['owner', 'creator'] as const
 export const JUDGE_GROUPINGS = ['none', 'owner', 'creator'] as const
 export const JUDGE_ORDERS = ['name', 'updated', 'created', 'versions'] as const
 
 export const DEFAULT_JUDGE_DISPLAY: ListDisplay = { grouping: 'none', order: 'name' }
 
-// `_shared` 는 제어 평면이 정한 이름이다 — 워크스페이스 이름이 무엇이든 이것만 기본 제공을 뜻한다.
+// `_shared` is a name the control plane decided — whatever the workspace is called, only this means "built in".
 export const SHARED_OWNER = '_shared'
 
 export const judgeListSpec: ListViewSpec<JudgeSummary> = {

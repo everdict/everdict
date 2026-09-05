@@ -12,7 +12,7 @@ import { Input } from '@/shared/ui/input'
 
 import { createKnowledgeEntryAction, updateKnowledgeEntryAction } from '../api/manage-knowledge'
 
-// 앵커/근거 ref 의 type 후보 — 닫힌 NodeType vocabulary 의 웹측 부분집합(자유입력 대신 흔한 것만 제시).
+// The type candidates for an anchor/evidence ref — the web-side subset of the closed NodeType vocabulary (offering the common ones rather than free input).
 const REF_TYPES = [
   'harness',
   'dataset',
@@ -28,7 +28,7 @@ const REF_TYPES = [
   'skill',
 ] as const
 
-// 버전핀 NodeRef 행 편집기 — refs(앵커)와 evidence(근거)가 공유. 행 = type 콤보 + key + version(선택).
+// The version-pinned NodeRef row editor — shared by refs (anchors) and evidence (grounds). A row = a type combo + key + an optional version.
 function RefRows({
   label,
   hint,
@@ -47,7 +47,7 @@ function RefRows({
     <fieldset className="space-y-1.5">
       <legend className="text-xs font-medium text-muted-foreground">{label}</legend>
       {rows.map((r, i) => (
-        // NodeRef 행은 안정 키가 없음(내용 자체가 편집 대상) — 인덱스 키 사용
+        // A NodeRef row has no stable key (its CONTENT is what is being edited) — an index key is used
         <div key={i} className="flex items-center gap-1.5">
           <Combobox
             options={REF_TYPES.map((v) => ({ value: v, label: v }))}
@@ -96,7 +96,7 @@ function RefRows({
   )
 }
 
-// 지식 엔트리 작성/편집 다이얼로그 — create(initial 없음) / edit(initial 있음) 겸용. 저장 성공 시 onSaved(엔트리)로 알림.
+// The knowledge entry create/edit dialog — it serves both create (no `initial`) and edit (with `initial`). On a successful save it reports through onSaved(entry).
 export function EntryFormDialog({
   open,
   onClose,
@@ -119,7 +119,7 @@ export function EntryFormDialog({
   const [error, setError] = useState<string | undefined>(undefined)
   const [pending, setPending] = useState(false)
 
-  // 열릴 때마다 initial 로 리셋 — edit 재진입/다른 엔트리 편집 시 이전 폼 상태가 남지 않게.
+  // Reset to `initial` every time it opens — so no previous form state survives re-entering an edit or editing a different entry.
   useEffect(() => {
     if (!open) return
     setKind(initial?.kind ?? 'finding')
@@ -160,7 +160,7 @@ export function EntryFormDialog({
       }
     })()
 
-  // 상세와 같은 규약 — 패널은 뷰포트에 묶고(85vh) 필드만 스크롤, 제목과 저장/취소는 고정.
+  // The same convention as the detail — the panel is bound to the viewport (85vh) and only the fields scroll, with the title and save/cancel pinned.
   return (
     <Dialog
       open={open}

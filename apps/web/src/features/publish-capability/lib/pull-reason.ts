@@ -1,5 +1,5 @@
-// pull 불가 사유 라벨 — 실 pull 검증(GET /workspace/image-registries/verify)의 reason 을 사용자 문구로.
-// 저작 화면(환경 에디터)과 인벤토리 화면(워크벤치)이 같은 사유 어휘를 써야 해서 한 곳에 둔다.
+// The labels for why a pull is impossible — turning the real pull verification's (GET /workspace/image-registries/verify) `reason` into user wording.
+// The authoring screen (the environment editor) and the inventory screen (the workbench) have to use the same reason vocabulary, so it lives in one place.
 export function pullReasonLabel(
   t: (key: string) => string,
   reason: 'ok' | 'auth' | 'not-found' | 'unreachable' | 'unregistered-host' | undefined

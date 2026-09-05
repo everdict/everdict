@@ -1,8 +1,8 @@
 import { cn } from '@/shared/lib/utils'
 
-// 범주형(tier/string) 메트릭의 라벨 분포를 한 줄 세그먼트 바 + 범례로 보여주는 원자. 각 세그먼트 폭은 빈도에 비례하고,
-// 최빈값(mode)은 진하게 강조한다. 순수 표현 컴포넌트 — 엔티티에 의존하지 않도록 원시 세그먼트만 받는다(FSD shared 계층).
-// 색은 고정 팔레트를 라벨 순서대로 순환 배정(라벨→색 안정적, 스코어카드 간 동일 라벨은 위치가 같아 대체로 일관).
+// The atom that shows a categorical (tier/string) metric's label distribution as a one-line segmented bar plus a legend. Each segment's width is
+// proportional to its frequency, and the mode is emphasised. A pure presentation component — it takes raw segments so it depends on no entity (the FSD shared layer).
+// Colours cycle through a fixed palette in label order (label → colour is stable, so the same label sits in the same position across scorecards and reads consistently).
 const PALETTE = [
   'var(--color-success)',
   'var(--color-primary)',

@@ -1,14 +1,14 @@
-// 본문에 박힌 주소가 "무슨 매체인가" — 확장자 하나로 답한다. 마크다운 뷰어는 `![](x.mp4)` 를 재생기로 바꿀지,
-// 첨부 업로드는 삽입할 문법을 고를지를 이 판정에 건다.
+// What KIND of media an address embedded in a body is — answered from the extension alone. The markdown viewer hangs "should `![](x.mp4)`
+// become a player" on this judgement, and an attachment upload hangs "which syntax do I insert" on it.
 //
-// 콘텐츠 타입을 보지 않고 확장자만 보는 이유: 본문의 주소는 남의 서버 것이라 그릴 시점에 타입을 알 방법이 없다
-// (HEAD 를 던지는 건 렌더링 경로가 할 일이 아니다). 워크스페이스 파일의 판정은 제어 평면이 정한 콘텐츠 타입을
-// 쓰는 `features/browse-files/lib/file-kind.ts` 가 따로 갖고 있다 — 그쪽은 바이트를 이미 손에 쥔 뒤의 이야기다.
+// Why the extension rather than the content type: an address in a body belongs to somebody else's server, so there is no way to know its type
+// at draw time (throwing a HEAD is not the rendering path's job). The judgement for a WORKSPACE file lives separately in
+// `features/browse-files/lib/file-kind.ts`, which uses the content type the control plane decided — that is the story after the bytes are already in hand.
 
 export type MediaKind = 'image' | 'video' | 'audio'
 
-// 브라우저가 <img>/<video>/<audio> 로 직접 그릴 수 있는 것만 싣는다. mkv 처럼 컨테이너는 흔하지만 재생 지원이
-// 갈리는 것도 재생기로 보낸다 — 재생기가 "못 튼다"고 말해 주는 편이, 링크로 남아 아무것도 안 보이는 것보다 낫다.
+// Only what a browser can draw directly as <img>/<video>/<audio> is listed. A container like mkv, common but unevenly supported, is sent to
+// the player anyway — a player SAYING it cannot play beats leaving a link that shows nothing.
 const MEDIA_BY_EXTENSION: Record<string, MediaKind> = {
   apng: 'image',
   avif: 'image',
@@ -44,8 +44,8 @@ const MEDIA_BY_EXTENSION: Record<string, MediaKind> = {
   weba: 'audio',
 }
 
-// 확장자는 "마지막 경로 조각"에서만 찾는다 — 질의문자열·프래그먼트에 다른 파일 이름이 실려 있어도(우리 프록시
-// 주소가 그렇다) 그건 이 주소가 가리키는 매체가 아니다.
+// The extension is looked for only in the LAST path segment — another file name carried in a query string or fragment (as our proxy addresses
+// do) is not the media this address points at.
 export function mediaKindForUrl(url: string | undefined): MediaKind | undefined {
   if (url === undefined || url === '') return undefined
   const path = (url.split('#')[0] ?? '').split('?')[0] ?? ''
@@ -55,8 +55,8 @@ export function mediaKindForUrl(url: string | undefined): MediaKind | undefined 
   return MEDIA_BY_EXTENSION[name.slice(dot + 1).toLowerCase()]
 }
 
-// 브라우저가 파일을 건네면서 알려 준 타입으로 판정한다 — 확장자보다 이쪽이 정확하다(붙여넣은 스크린샷처럼
-// 이름이 없다시피 한 경우도 타입은 온다). 타입이 비어 있으면 부르는 쪽이 확장자 판정으로 되돌아간다.
+// Judged from the type the browser reported when it handed the file over — more accurate than the extension (a pasted screenshot has hardly any
+// name and still has a type). With an empty type the caller falls back to the extension judgement.
 export function mediaKindForContentType(contentType: string | undefined): MediaKind | undefined {
   const base = (contentType ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
   if (base.startsWith('image/')) return 'image'
@@ -65,7 +65,7 @@ export function mediaKindForContentType(contentType: string | undefined): MediaK
   return undefined
 }
 
-// 다운로드 버튼이 파일에 붙일 이름. 주소에서 이름을 못 읽어내면 부르는 쪽이 정한 기본값을 쓴다.
+// The name the download button attaches to the file. With no name readable from the address, the caller's default is used.
 export function fileNameForUrl(url: string, fallback: string): string {
   const path = (url.split('#')[0] ?? '').split('?')[0] ?? ''
   const name = path.split('/').at(-1) ?? ''

@@ -1,10 +1,10 @@
 import { z } from 'zod'
 
-// 업로드 라우트(`POST /api/fs/uploads`)의 답. 우리 BFF 가 주는 것이지만 경계는 경계라 파싱해서 받는다.
+// The upload route's answer (`POST /api/fs/uploads`). It comes from our own BFF, but a boundary is a boundary, so it is parsed.
 export const uploadedMediaSchema = z.object({
   path: z.string(),
   url: z.string(),
   name: z.string(),
-  kind: z.enum(['image', 'video', 'audio']).optional(), // 매체가 아닌 파일은 종류 없이 링크로 붙는다
+  kind: z.enum(['image', 'video', 'audio']).optional(), // a file that is not media attaches as a plain link, with no kind
 })
 export type UploadedMedia = z.infer<typeof uploadedMediaSchema>

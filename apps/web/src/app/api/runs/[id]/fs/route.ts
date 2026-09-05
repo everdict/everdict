@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 런 워크벤치 BFF 프록시 — 러닝 케이스 샌드박스의 라이브 리포 파일 트리(RunFileWorkbench가 폴링).
+// The run workbench BFF proxy — the live repo file tree of a running case's sandbox (polled by RunFileWorkbench).
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }

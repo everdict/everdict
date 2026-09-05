@@ -23,13 +23,13 @@ import { loadInitiative } from './load-initiative'
 
 export const dynamic = 'force-dynamic'
 
-// 하나의 목표(Initiative) — "무엇을 이루려 하는가, 지금 어디쯤인가". 배포 단위가 아니다: 완료가 게이트인
-// 이유는 열린 일이 남은 목표가 아직 이뤄지지 않았기 때문이지, 무언가를 내보내기 때문이 아니다.
+// One goal (an Initiative) — "what are we trying to reach, and where are we now". It is not a release unit: completion is a gate because a
+// goal with open work left has not been reached, not because anything is being shipped.
 //
-// 골격은 형제 화면인 프로젝트 상세의 것이고, 그 위에 리니어의 탭을 얹었다. ① 브레드크럼(목표 목록 → 상위
-// 목표)과 이 목표에 할 수 있는 일(링크 복사·⋯), ② 이름은 크게 혼자, ③ 탭(개요·프로젝트·업데이트),
-// ④ 속성과 진척은 오른쪽 한 열 — 탭을 옮겨도 이 셋은 그대로 남는다. 그래서 "이 목표가 무엇인지"를 잃지
-// 않은 채 안을 돌아다닐 수 있다.
+// The skeleton is its sibling screen's, the project detail, with Linear's tabs on top. ① The breadcrumb (goal list → parent goal) and the
+// actions on this goal (copy link, ⋯), ② the name alone and large, ③ the tabs (overview · projects · updates),
+// ④ attributes and progress as one right column — those three stay put as tabs change. So you can move around inside without losing
+// "what this goal IS".
 export default async function InitiativeDetailLayout({
   children,
   params,
@@ -61,20 +61,20 @@ export default async function InitiativeDetailLayout({
   const { readiness } = current
   const canWrite = can(roles, 'issues:write')
   const parent = current.parentId ? initiatives.find((i) => i.id === current.parentId) : undefined
-  // 계획 단계라고 안 늦는 건 아니다 — 끝났거나 접힌 목표만 기한 판정에서 빠진다.
+  // Being in the planning stage does not make you not late — only a finished or abandoned goal drops out of the due-date judgement.
   const overdue =
     current.status !== 'completed' &&
     current.status !== 'cancelled' &&
     isPastDue(current.targetDate, timeZone)
   const actors = memberDirectoryOf(members)
-  // 이룬 만큼 — 취소된 일은 분모에서 빠진다(하지 않기로 한 일은 미룬 일이 아니다).
+  // How much has been reached — cancelled work drops out of the denominator (work decided against is not work deferred).
   const scope = readiness.totalIssues
   const done = Math.max(scope - readiness.openIssues, 0)
   const percent = scope === 0 ? 0 : Math.round((done / scope) * 100)
 
   return (
     <div className="@container">
-      {/* ① 이 목표가 어디에 걸려 있는지, 그리고 이 목표에 할 수 있는 일. */}
+      {/* ① What this goal hangs from, and what can be done to it. */}
       <div className="flex items-center gap-1 border-b border-border pb-2.5">
         <nav
           aria-label={t('breadcrumbLabel')}
@@ -112,20 +112,20 @@ export default async function InitiativeDetailLayout({
         )}
       </div>
 
-      {/* ② 이름은 사람이 지은 자유 텍스트다 — 자르지 않고 줄바꿈한다. */}
+      {/* ② The name is free text a person wrote — it wraps rather than truncates. */}
       <h1 className="flex items-start gap-2 break-words pt-5 text-[22px] font-[560] leading-[1.3] tracking-[-0.01em] text-foreground">
-        {/* 아이콘은 이름의 일부가 아니라 표식이다 — 읽히는 건 이름이므로 스크린리더에서는 감춘다. */}
+        {/* The icon is a MARK rather than part of the name — the name is what is read, so it is hidden from screen readers. */}
         {current.icon && <span aria-hidden>{current.icon}</span>}
         <span className="min-w-0">{current.name}</span>
       </h1>
 
-      {/* ③ 같은 목표의 세 가지 물음 — 무엇이고 어디쯤인가 / 그 아래 일들은 어느 단계인가 / 책임자는 뭐라 했나. */}
+      {/* ③ Three questions about the same goal — what is it and where is it / what stage is the work beneath it at / what did the lead say. */}
       <div className="pt-4">
         <InitiativeTabs workspace={workspace} id={current.id} />
       </div>
 
       <div className="grid gap-x-8 gap-y-6 pt-5 @3xl:grid-cols-[minmax(0,1fr)_17rem]">
-        {/* ④ 속성과 진척. 좁을 때는 탭 바로 아래로 접히므로 아래쪽 경계선으로 본문과 갈라 준다. */}
+        {/* ④ Attributes and progress. When narrow it folds directly under the tabs, so a bottom border separates it from the body. */}
         <aside className="min-w-0 space-y-3.5 border-b border-border pb-6 @3xl:col-start-2 @3xl:row-start-1 @3xl:self-start @3xl:border-b-0 @3xl:pb-0">
           <PropertyList>
             <PropertyRow label={t('fieldStatus')}>
@@ -200,8 +200,8 @@ export default async function InitiativeDetailLayout({
             </PropertyRow>
           </PropertyList>
 
-          {/* 진척은 속성이 아니라 판정이라 구분선 아래로 내린다. 한 줄 막대가 "얼마나 왔나"에 답하고,
-              그 아래 숫자가 무엇이 남았는지를 말한다. */}
+          {/* Progress is a JUDGEMENT rather than an attribute, so it drops below a divider. A single bar answers "how far along", and
+              the numbers beneath it say what is left. */}
           <div className="space-y-2.5 border-t border-border pt-3.5">
             <div className="flex items-center justify-between gap-2">
               <p className="inline-flex items-center gap-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -236,7 +236,7 @@ export default async function InitiativeDetailLayout({
           </div>
         </aside>
 
-        {/* 탭이 그리는 본문. */}
+        {/* The body the tabs draw. */}
         <div className="min-w-0 @3xl:col-start-1 @3xl:row-start-1">{children}</div>
       </div>
     </div>

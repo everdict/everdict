@@ -6,14 +6,14 @@ import { cn } from '@/shared/lib/utils'
 
 import { TRACKER_HEALTH, type TrackerHealth } from '../model/schema'
 
-// 판정 고르기. 색은 이탈/위험에만 준다: 세 단계를 다 물들이면 "정상"이 초록 소음이 된다.
+// Picking a verdict. Colour is given to off-track and at-risk alone: colouring all three turns "on track" into green noise.
 const TONE: Record<TrackerHealth, string> = {
   on_track: 'border-border text-muted-foreground',
   at_risk: 'border-[var(--color-warning)]/40 text-[var(--color-warning)]',
   off_track: 'border-destructive/40 text-destructive',
 }
 
-// 프로젝트 업데이트와 이니셔티브 업데이트가 같은 줄을 쓴다 — 같은 어휘를 두 번 그리면 언젠가 달라진다.
+// A project update and an initiative update use the SAME row — draw one vocabulary twice and the two eventually differ.
 export function HealthPicker({
   value,
   onChange,

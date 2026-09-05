@@ -6,7 +6,7 @@ import { Badge } from '@/shared/ui/badge'
 import type { InitiativeStatus } from '../model/schema'
 
 const TONE: Record<InitiativeStatus, 'neutral' | 'success' | 'info' | 'outline'> = {
-  // 계획됨은 "아직 아무 일도 시작 안 함" — 진행 중과 같은 색을 주면 구상이 일처럼 보인다.
+  // `planned` is "nothing has started yet" — given the same colour as in-progress, an idea looks like work.
   planned: 'outline',
   active: 'info',
   completed: 'success',

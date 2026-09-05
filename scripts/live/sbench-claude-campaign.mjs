@@ -146,7 +146,7 @@ const caseFor = (t) => ({
     {
       id: "reward-file",
       config: {
-        cmd: `bash -lc 'mkdir -p /tmp/everdict-reward; for f in *_output.xlsx; do [ -f "$f" ] && /opt/recalc.sh "$f" >/dev/null 2>&1; done; python3 /opt/sbench_digest.py --id ${t.id} --range ${JSON.stringify(t.answer_position)} --sheet ${JSON.stringify(t.answer_sheet ?? "")} --salt ${t.salt} --digests ${t.digests.join(",")} && echo 1.0 > /tmp/everdict-reward/reward.txt || echo 0.0 > /tmp/everdict-reward/reward.txt'`,
+        cmd: `bash -lc 'mkdir -p /tmp/everdict-reward; for f in *_output.xlsx; do [ -f "$f" ] && /opt/recalc.sh "$f" >/dev/null 2>&1; done; python3 /opt/sbench_digest.py --id ${t.id} --range ${JSON.stringify(t.answer_position)} --sheet ${JSON.stringify(t.answer_sheet ?? "")} --salt ${t.salt} --digests ${t.digests.join(",")}; rc=$?; case $rc in 0) echo 1.0 > /tmp/everdict-reward/reward.txt;; 1) echo 0.0 > /tmp/everdict-reward/reward.txt;; *) echo "sbench_digest could not run (exit $rc): publishing NO reward, so this case is unmeasured rather than failed" >&2;; esac'`,
         rewardDir: "/tmp/everdict-reward",
         // WHERE THE HARNESS WORKED. `CommandHarness` runs in "work" (the repo env seeds there) and this
         // grader defaults to the image's own WORKDIR — so without this the checker looks in an empty

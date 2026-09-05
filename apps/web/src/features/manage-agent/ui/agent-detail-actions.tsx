@@ -11,9 +11,9 @@ import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { saveAgentAction } from '../api/manage-agent'
 
-// 등록 에이전트 상세의 액션 아일랜드 — 활성 토글(상태 컨트롤=아이콘+드롭다운 관례) · 템플릿 채택.
-// 저장은 기존 PUT /agents 업서트(saveAgentAction): 스펙 전체를 body 로 보내되 enabled 만 바꾼다.
-// 템플릿(_shared) 채택 = 같은 body 를 내 워크스페이스로 저장 → 사본에 creator 가 찍혀 활성화가 의미를 갖는다.
+// The action island on a registered agent's detail — the enabled toggle (the status control convention: an icon plus a dropdown) · adopting a template.
+// Saving uses the existing PUT /agents upsert (saveAgentAction): the whole spec goes in the body and only `enabled` changes.
+// Adopting a template (_shared) = saving that same body into MY workspace → the copy carries a creator, which is what makes enabling it mean something.
 function bodyFrom(spec: AgentSpec, enabled: boolean): Record<string, unknown> {
   const { id: _id, version: _version, ...rest } = spec
   return { ...rest, enabled }

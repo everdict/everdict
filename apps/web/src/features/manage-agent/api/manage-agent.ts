@@ -13,8 +13,8 @@ export interface SaveAgentActionResult {
   error?: string
 }
 
-// 워크스페이스 에이전트 저장(PUT /agents/:id) — 버전 없는 업서트. 새 id → 1.0.0, 스펙 변경 → patch 자동 증가(새 불변 버전),
-// 동일 → 멱등 no-op. authZ(agents:write)/버전 배정은 컨트롤플레인이 담당. body = AgentSpec 에서 id/version 뺀 것.
+// Saving the workspace agent (PUT /agents/:id) — a versionless upsert. A new id → 1.0.0, a changed spec → an automatic patch bump (a new immutable version),
+// identical → an idempotent no-op. AuthZ (agents:write) and version assignment are the control plane's. The body = the AgentSpec minus id/version.
 export async function saveAgentAction(id: string, body: unknown): Promise<SaveAgentActionResult> {
   const ctx = await authContext()
   try {

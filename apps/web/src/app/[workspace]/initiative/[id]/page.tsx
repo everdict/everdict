@@ -22,9 +22,9 @@ import { loadInitiative } from './load-initiative'
 
 export const dynamic = 'force-dynamic'
 
-// 개요 — 이 목표가 무엇이고, 지금 어디쯤인가. 리니어의 이니셔티브 개요와 같은 자리: 설명이 맨 위에 오고,
-// 그 아래에서 **프로젝트들이 어느 단계에 있는지**(상태 사이클)와 이슈 단위 진척이 한 줄씩 답한다. 무엇이
-// 남았는지는 그다음, 이력과 논의가 마지막이다.
+// Overview — what this goal is, and where it is now. The same place as Linear's initiative overview: the description comes first, and
+// beneath it **what stage the projects are at** (the status cycle) and issue-level progress answer one row each. What is LEFT comes next,
+// and history and discussion last.
 export default async function InitiativeOverviewPage({
   params,
 }: {
@@ -34,7 +34,7 @@ export default async function InitiativeOverviewPage({
   const t = await getTranslations('initiativesPage')
   const tracker = await getTranslations('tracker')
   const { initiative, initiatives, members } = await loadInitiative(id)
-  // 레이아웃이 이미 실패를 그렸다 — 여기서 두 번 말하지 않는다.
+  // The layout already drew the failure — it is not said twice here.
   if (!initiative) return null
 
   const current = initiative
@@ -42,8 +42,8 @@ export default async function InitiativeOverviewPage({
   const children = initiatives.filter((i) => i.parentId === current.id)
   const actors = memberDirectoryOf(members)
 
-  // 프로젝트들이 어느 단계에 있는가 — 목표 아래 일의 "지금". 상태 순서는 어휘의 순서(백로그 → 취소)대로
-  // 두어, 막대를 왼쪽에서 오른쪽으로 읽으면 그대로 진행 순서가 된다.
+  // What stage the projects are at — the "now" of the work under this goal. The status order follows the vocabulary's order (backlog →
+  // cancelled), so reading the bar left to right IS the order of progress.
   const projectsByStatus = new Map<ProjectStatus, InitiativeProjectSummary[]>()
   for (const project of readiness.projects) {
     projectsByStatus.set(project.status, [...(projectsByStatus.get(project.status) ?? []), project])
@@ -53,7 +53,7 @@ export default async function InitiativeOverviewPage({
     count: projectsByStatus.get(status)?.length ?? 0,
   })).filter((segment) => segment.count > 0)
 
-  // 이슈 단위 진척 — 각 프로젝트의 롤업을 합친 것. 서버가 모든 상태 키를 채워 보내므로 빈 값 분기가 없다.
+  // Issue-level progress — the sum of each project's rollup. The server fills every status key, so there is no empty-value branch.
   const issueSegments = ISSUE_STATUSES.map((status) => ({
     label: tracker(`issueStatus.${status}`),
     count: readiness.projects.reduce((sum, p) => sum + (p.rollup.byStatus[status] ?? 0), 0),
@@ -61,10 +61,10 @@ export default async function InitiativeOverviewPage({
 
   return (
     <div className="space-y-7">
-      {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 목표 그 자체다. 이슈 본문과
-          같은 마크다운 표면을 쓴다: 목표를 정의하는 글에는 링크와 목록이 들어가고, 그걸 평문으로 두면
-          "무엇이 참이면 이룬 것인가"가 한 덩어리 문단이 된다. ```mermaid 펜스가 다이어그램이 되는 것도
-          이슈 본문과 같다 — 목표를 그림으로 세우는 글이 여기서만 소스로 떨어질 이유가 없다. */}
+      {/* The description starts directly under the name (with no section heading) — the body of this screen IS the goal. It uses the same
+          markdown surface as an issue body: writing that DEFINES a goal contains links and lists, and left as plain text "what has to be
+          true for this to be reached" becomes one solid paragraph. A ```mermaid fence becoming a diagram is the same as an issue body too —
+          there is no reason for writing that sets a goal out as a picture to fall to source only here. */}
       {current.description && <Markdown content={current.description} mermaid />}
 
       {(projectSegments.length > 0 || issueSegments.length > 0) && (
@@ -101,10 +101,10 @@ export default async function InitiativeOverviewPage({
         </section>
       )}
 
-      {/* 목표 아래 프로젝트가 하나도 없으면 진척은 셀 것이 없다 — 왜 비어 있는지는 여기서 말한다. */}
+      {/* With no project under the goal there is nothing for progress to count — why it is empty is said here. */}
       {readiness.projects.length === 0 && <Callout tone="info">{t('noProjectsHint')}</Callout>}
 
-      {/* 남은 일 — 회귀가 먼저다(서버가 그렇게 정렬해 보낸다). 무너진 해결은 새 일보다 먼저 봐야 한다. */}
+      {/* What is left — regressions first (the server sorts it that way). A resolution that broke has to be looked at before new work. */}
       {readiness.blockers.length > 0 && (
         <section className="space-y-3">
           <SectionHeader
@@ -138,7 +138,7 @@ export default async function InitiativeOverviewPage({
         </section>
       )}
 
-      {/* 리소스 — 목표가 적히고, 측정되고, 논쟁된 곳. 빈 섹션은 내지 않는다(하우스 규칙). */}
+      {/* Resources — where the goal is written down, measured and argued about. An empty section is not drawn (house rule). */}
       {current.resources.length > 0 && (
         <section className="space-y-3">
           <SectionHeader title={t('resourcesTitle')} />
@@ -164,7 +164,7 @@ export default async function InitiativeOverviewPage({
         </section>
       )}
 
-      {/* 하위 목표 — 큰 목표는 쪼개진다. 상위는 속성 열이 이고 있으므로 여기서는 아래만 센다. */}
+      {/* Sub-goals — a large goal gets split. The parent is carried by the attribute column, so only what is BELOW is counted here. */}
       {children.length > 0 && (
         <section className="space-y-3">
           <SectionHeader title={t('subInitiativesTitle', { count: children.length })} />

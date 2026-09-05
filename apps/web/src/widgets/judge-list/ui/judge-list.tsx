@@ -25,8 +25,8 @@ import { facetOptionsOf, ListSection, ListToolbar, type FacetSpec } from '@/shar
 
 type Author = { name: string; avatarUrl?: string }
 
-// 저지 목록의 행들과 그 위의 툴바. 하네스·데이터셋 목록과 같은 문법이고, 같은 이유로 클라이언트에 있다 —
-// 컬렉션 전체가 손에 있으니 거르고 묶는 데 서버에 다녀올 이유가 없다.
+// The judge list's rows and the toolbar above them. The same grammar as the harness and dataset lists, and on the client for the same reason —
+// the whole collection is in hand, so there is no reason to visit the server to filter and group.
 export function JudgeList({
   workspace,
   judges,
@@ -37,7 +37,7 @@ export function JudgeList({
 }: {
   workspace: string
   judges: JudgeSummary[]
-  // 「출처」축의 이름표를 고르는 기준 — 이 워크스페이스가 만든 것인가, 기본 제공인가.
+  // The basis for choosing the "source" axis' name plate — was it made by this workspace, or is it built in.
   currentWorkspace: string
   authors: Record<string, Author>
   scope: ListViewScope
@@ -67,8 +67,8 @@ export function JudgeList({
       label: list(`facet.${facet}`),
       options: facetOptionsOf(judges, (j) => judgeListSpec.facetValues(j, facet), labelOf, unset),
     })
-    // 축이 제시할 값이 하나도 없으면 세우지 않는다. 「출처」는 값이 **하나뿐**일 때도 세우지 않는다 —
-    // 전부 워크스페이스 것(또는 전부 기본 제공)인 목록에서 그 축은 아무것도 걸러 주지 못한다.
+    // An axis with no value to offer is not stood up. "Source" is not stood up when it has only **one** value either —
+    // on a list that is all workspace-owned (or all built-in) that axis filters nothing.
     const minimum = (facet: string): number => (facet === 'owner' ? 2 : 1)
     return [
       of('owner', ownerName),

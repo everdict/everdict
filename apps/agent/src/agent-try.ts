@@ -186,7 +186,7 @@ export function tryMessagesToTrace(event: AgentTryEvent, messages: AgentTryMessa
         try {
           args = JSON.parse(call.arguments);
         } catch {
-          // 원문 문자열 그대로 둔다 — 모델이 비 JSON arguments를 낸 경우
+          // Left as the raw string — the case where the model emitted non-JSON arguments
         }
         trace.push({ t: t++, kind: "tool_call", id, name: call.name, args });
       }

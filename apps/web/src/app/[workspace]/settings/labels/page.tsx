@@ -11,9 +11,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Workspace › Labels — 이슈를 분류하는 워크스페이스 어휘(docs/tracker.md).
-// 트래커의 액션 쌍을 그대로 쓴다: 읽기 issues:read(viewer+) / 정의·수정·삭제 issues:write(member+).
-// 라벨은 별도의 권한 표면이 아니라 이슈를 분류하는 일의 일부다.
+// Workspace › Labels — the workspace vocabulary that classifies issues (docs/tracker.md).
+// It uses the tracker's action pair verbatim: reading is issues:read (viewer+), defining/editing/deleting is issues:write (member+).
+// A label is not a separate permission surface but part of the work of classifying issues.
 export default async function LabelsPage() {
   const t = await getTranslations('settingsNav')
   const s = await getTranslations('settingsPage')

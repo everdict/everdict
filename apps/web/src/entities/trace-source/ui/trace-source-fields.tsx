@@ -47,7 +47,7 @@ export function TraceSourceFields({
 }) {
   const t = useTranslations('traceSourceFields')
   return (
-    // 자기 자신이 @container — 하네스/런타임 위자드 어느 쪽에 박히든 호스트 폭이 아니라 이 서브폼의 실제 폭으로 열 수가 정해진다.
+    // It is its OWN @container — embedded in either the harness or the runtime wizard, the column count follows this subform's real width rather than the host's.
     <div className="@container space-y-4">
       <div className="grid gap-4 @sm:grid-cols-2">
         <div className="space-y-1.5">

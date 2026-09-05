@@ -11,15 +11,15 @@ import { Input } from '@/shared/ui/input'
 import { issueStatusSchema, type IssueStatus } from '../model/schema'
 import { IssueStatusIcon } from './issue-status-badge'
 
-// 이슈를 이름으로 찾아 하나 고르는 목록 — 트리거는 호스트가 그린다(라벨 피커가 `IssueLabelOptions` 와
-// `IssueLabelControl` 로 갈라지는 것과 같은 이유: 같은 목록을 이슈 상세의 속성 행도, 하네스 상세의
-// 「이슈 연결」 버튼도 쓴다).
+// A list for finding an issue by name and picking one — the trigger is drawn by the HOST (the same reason the label picker splits into
+// `IssueLabelOptions` and `IssueLabelControl`: the same list is used by the issue detail's attribute row and by the harness detail's
+// "link an issue" button).
 //
-// 좁히는 일은 서버가 한다 — 타이핑마다 `/api/issues/search?q=` 를 다시 부른다. 창 하나를 받아 여기서
-// 거르면 워크스페이스가 그 창보다 커지는 순간 조용히 못 찾기 시작한다.
+// The NARROWING is the server's — every keystroke calls `/api/issues/search?q=` again. Taking one page and filtering here starts silently
+// failing to find things the moment the workspace outgrows that page.
 
-// 타이핑이 멎기를 기다리는 시간(ms). 한 글자마다 한 번씩 서버를 부르지 않되, 사람이 "안 뜨네"라고 느끼기
-// 전에는 결과가 와야 한다.
+// How long (ms) to wait for typing to stop. So the server is not called once per character, while the result still arrives before a person
+// feels "nothing is coming up".
 const DEBOUNCE_MS = 200
 
 export interface IssueOption {
@@ -45,14 +45,14 @@ export function IssueSearchOptions({
   onSelect,
   autoFocus,
 }: {
-  // 후보에서 뺄 이슈들 — 이미 언급한 것, 그리고 (이슈 상세에서는) 자기 자신.
+  // The issues to exclude from the candidates — those already mentioned, and (on an issue detail) the issue itself.
   exclude?: string[]
   onSelect: (issue: IssueOption) => void
   autoFocus?: boolean
 }) {
   const t = useTranslations('issueLinks')
-  // 팝오버 안에서 열렸으면 고른 뒤 닫는다 — 하나를 고르는 목록이라 열어 둘 이유가 없다. 팝오버 밖에서
-  // 쓰이면 아무 일도 하지 않는다(컨텍스트가 없을 때 no-op 인 훅).
+  // Opened inside a popover, it closes after a pick — it is a list that picks ONE, so there is no reason to stay open. Used outside a
+  // popover it does nothing (a hook that no-ops with no context).
   const close = useDropdownClose()
   const [query, setQuery] = useState('')
   const [items, setItems] = useState<IssueOption[]>([])
@@ -60,8 +60,8 @@ export function IssueSearchOptions({
 
   const excluded = exclude?.join(' ') ?? ''
   useEffect(() => {
-    // 취소는 두 겹이다: 아직 안 나간 요청은 타이머로, 이미 나간 요청은 AbortController 로 접는다.
-    // 늦게 도착한 예전 검색어의 응답이 지금 화면을 덮어쓰면 목록이 타이핑을 거슬러 올라간다.
+    // Cancellation has two layers: a request not yet sent is folded by the timer, one already in flight by the AbortController.
+    // A late response for an older search term overwriting the current screen would make the list walk backwards through the typing.
     const controller = new AbortController()
     const timer = setTimeout(() => {
       const params = new URLSearchParams()
@@ -71,7 +71,7 @@ export function IssueSearchOptions({
       fetch(`/api/issues/search?${params.toString()}`, { signal: controller.signal })
         .then((r) => r.json())
         .then((body) => setItems(issueOptionsSchema.parse(body).items))
-        // 검색이 실패하면 고를 것이 없는 것과 같다 — 목록 자리에 오류를 쌓지 않는다(빈 목록 문구가 답한다).
+        // A failed search is the same as having nothing to pick — errors are not piled into the list slot (the empty-list message answers).
         .catch(() => undefined)
         .finally(() => setLoading(false))
     }, DEBOUNCE_MS)
@@ -88,7 +88,7 @@ export function IssueSearchOptions({
         autoFocus={autoFocus}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={t('searchIssuePlaceholder')}
-        // 이 컨트롤이 폼 안에 놓이는 날을 대비한다 — Enter 가 폼을 제출해 버리면 고르다 말고 저장된다.
+        // Guarding against the day this control sits inside a form — an Enter that submits the form would save mid-selection.
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.preventDefault()
         }}

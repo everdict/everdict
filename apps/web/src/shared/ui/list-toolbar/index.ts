@@ -1,5 +1,5 @@
-// 목록 화면의 툴바 문법 — 리니어의 「필터」/「표시」와 그 아래 그룹. 이슈 목록과 평가 자원 목록들이 같은
-// 컴포넌트를 쓰므로, 한쪽에만 생긴 필터 UI 라는 것이 있을 수 없다.
+// The toolbar grammar of a list screen — Linear's "filter"/"display" and the groups beneath them. The issue list and the evaluation resource
+// lists use the same components, so a filter UI that exists on only one of them cannot happen.
 export { FacetFilterMenu, type FacetOption, type FacetSpec } from './facet-filter-menu'
 export { facetOptionsOf } from './facet-options'
 export {

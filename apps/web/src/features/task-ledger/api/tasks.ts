@@ -6,8 +6,8 @@ import { agentTaskListSchema, agentTaskSchema, type AgentTask } from '@/entities
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 태스크 원장 서버 액션 — 컨트롤플레인 /tasks 의 순수 HTTP 클라이언트(authZ 는 컨트롤플레인이 담당:
-// 읽기 agents:read · 쓰기 agents:write · 삭제 creator/admin). 상태 전이 팩트(task.claimed 등)는 서버가 방출.
+// The task ledger server actions — a pure HTTP client of the control plane's /tasks (authZ is the control plane's:
+// reading agents:read · writing agents:write · deleting creator/admin). The state-transition facts (task.claimed, etc.) are emitted by the server.
 
 export interface TaskActionResult {
   ok: boolean

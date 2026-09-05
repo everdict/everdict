@@ -3,8 +3,8 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 멀티플렉스 라이브 SSE 프록시(④) — 컨트롤 플레인의 /runs/:id/live/stream 을 무버퍼로 그대로 흘린다
-// (agent 세션 stream 프록시와 같은 패턴). 위젯별 폴링은 이 스트림이 붙지 못할 때의 폴백으로 남는다.
+// The multiplexed live SSE proxy (④) — it streams the control plane's /runs/:id/live/stream through UNBUFFERED, verbatim
+// (the same pattern as the agent session stream proxy). The per-widget polling remains as the fallback for when this stream cannot attach.
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }

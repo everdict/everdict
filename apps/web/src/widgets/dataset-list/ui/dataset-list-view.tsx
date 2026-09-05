@@ -24,8 +24,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { DatasetList } from './dataset-list'
 
-// 평가 케이스 묶음 목록 — 하네스 목록과 같은 규칙이다. 워크스페이스 하나의 주소이고, 소유 팀은 필터 한 축이며,
-// 거르기·묶기·정렬은 전부 브라우저에서 일어난다.
+// The list of evaluation case bundles — the same rules as the harness list. One address per workspace, the owning team as one filter axis, and
+// filtering, grouping and ordering all happening in the browser.
 export async function DatasetListView({
   workspace,
   params,

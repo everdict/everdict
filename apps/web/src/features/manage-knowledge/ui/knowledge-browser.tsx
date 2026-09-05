@@ -30,7 +30,7 @@ import {
 import { EntryFormDialog } from './entry-form-dialog'
 import { ExtractKnowledgeButton } from '@/features/extract-knowledge'
 
-// kind 별 톤 — 목록/상세에서 한눈에 구분되는 얇은 칩 색.
+// The tone per kind — a thin chip colour distinguishing them at a glance in the list and the detail.
 const KIND_TONE: Record<KnowledgeEntry['kind'], string> = {
   finding: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
   decision: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400',
@@ -47,8 +47,8 @@ function KindChip({ kind }: { kind: KnowledgeEntry['kind'] }) {
   )
 }
 
-// 커버리지 배지 — current 는 무표시(신호 없음=조용). behind 는 "as-of 이전 버전"(틀림이 아니라 좌표),
-// unverified 는 wall-clock 미확인 — 톤도 경보(빨강)가 아닌 중립(앰버 계열)로.
+// The coverage badge — `current` is UNMARKED (no signal = quiet). `behind` means "as of an earlier version" (a coordinate, not a wrongness),
+// and `unverified` means unconfirmed against the wall clock — so its tone is neutral (amber-ish) rather than an alarm (red).
 function CoverageBadge({ coverage }: { coverage?: KnowledgeCoverage }) {
   const t = useTranslations('knowledge')
   if (!coverage || coverage.state === 'current') return null
@@ -71,7 +71,7 @@ function CoverageBadge({ coverage }: { coverage?: KnowledgeCoverage }) {
 const refLabel = (r: NodeRefView) => `${r.type}:${r.key}${r.version ? `@${r.version}` : ''}`
 
 function RefChips({ label, refs }: { label: string; refs: NodeRefView[] }) {
-  if (refs.length === 0) return null // 빈 섹션은 통째로 숨김(detail-view 관례)
+  if (refs.length === 0) return null // an empty section is hidden entirely (the detail-view convention)
   return (
     <div className="space-y-1">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
@@ -86,7 +86,7 @@ function RefChips({ label, refs }: { label: string; refs: NodeRefView[] }) {
   )
 }
 
-// 상세 다이얼로그 — 마크다운 본문 + 메타 스트립 + refs/evidence 칩 + (관리 가능 시) verify/edit/deprecate/delete.
+// The detail dialog — the markdown body plus the meta strip plus refs/evidence chips plus (when manageable) verify/edit/deprecate/delete.
 function EntryDetailDialog({
   entry,
   manageable,
@@ -126,7 +126,7 @@ function EntryDetailDialog({
 
   const behind = entry.coverage?.state === 'behind'
 
-  // 구간 표기: "documented @2.1.0 · verified through 2.2.0 · current 2.3.0" — as-of 좌표를 그대로 보여준다.
+  // The interval notation: "documented @2.1.0 · verified through 2.2.0 · current 2.3.0" — the as-of coordinates shown as they are.
   const gapLabel = (g: { ref: KnowledgePinView; latest: string }) => {
     const asOf = g.ref.version ? `@${g.ref.version}` : t('detail.unpinned')
     const through = g.ref.verifiedVersion ? ` → ${g.ref.verifiedVersion}` : ''
@@ -135,8 +135,8 @@ function EntryDetailDialog({
 
   const reviewable = entry.status === 'proposed' && canReview
 
-  // 패널 높이는 뷰포트에 묶고(85vh) 본문만 스크롤 — 긴 마크다운 엔트리가 화면 밖으로 자라 Dialog 의
-  // overflow-hidden 에 잘려나가던 것을 막는다. 제목/메타는 위, 액션은 아래에 고정.
+  // The panel height is bound to the viewport (85vh) and only the BODY scrolls — stopping a long markdown entry from growing off screen and
+  // being clipped by the Dialog's overflow-hidden. The title and meta are pinned at the top, the actions at the bottom.
   return (
     <Dialog open onClose={onClose} className="flex max-h-[85vh] max-w-2xl flex-col">
       <div className="shrink-0 space-y-2 border-b border-border px-5 py-4">
@@ -275,8 +275,8 @@ function EntryDetailDialog({
   )
 }
 
-// 워크스페이스 지식 브라우저 — kind 필터 + 목록 + 작성/상세 다이얼로그. 목록은 서버 컴포넌트가 내려준 props 가 SSOT
-// (액션 후 refresh() 로 재조회 — 상세는 id 로 props 를 다시 읽으므로 자동 갱신).
+// The workspace knowledge browser — a kind filter plus the list plus the create/detail dialogs. The list's SSOT is the props the server component
+// passed down (re-queried with refresh() after an action — the detail re-reads its props by id, so it updates automatically).
 export function KnowledgeBrowser({
   entries,
   canWrite,

@@ -11,10 +11,10 @@ import {
   type ListFilters,
 } from './list-view'
 
-// 목록 화면 하나가 서버에서 조립되는 방식 — 네 평가 자원 목록이 똑같이 하는 일이라 한 곳에 둔다.
+// How one list screen is assembled on the server — the four evaluation resource lists do exactly this, so it lives in one place.
 //
-// 필터는 주소에서, 표시 설정은 읽는 사람의 쿠키에서. 쿠키를 서버에서 읽는 것이 요점이다: 그래야 첫 페인트가
-// 이미 그 사람이 고른 묶기로 그려지고, 나중에 클라이언트가 고쳐 그리는 깜빡임이 없다.
+// The filters come from the address and the display settings from the READER's cookie. Reading the cookie ON THE SERVER is the point: it makes
+// the first paint already use that person's chosen grouping, with no flicker from the client correcting it afterwards.
 export interface ListViewScope {
   basePath: string
   viewKey: string

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 런 워크벤치 BFF 프록시 — 라이브 리포의 파일 1개(내용 + 워킹트리 diff).
+// The run workbench BFF proxy — one file of the live repo (its content plus the working-tree diff).
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }

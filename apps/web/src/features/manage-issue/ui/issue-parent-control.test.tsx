@@ -5,9 +5,9 @@ import { describe, expect, it, vi } from 'vitest'
 import en from '../../../../messages/en.json'
 import type { IssueParentOption } from './issue-parent-control'
 
-// 서버 액션과 라우터는 이 테스트의 대상이 아니다 — 이 파일이 잠그는 것은 "하위 이슈를 열었을 때 무엇의
-// 하위인지 알 수 있는가, 그리고 그 소속을 여기서 바꿀 수 있는가" 둘이다(예전에는 브레드크럼의 `ENG-11`
-// 한 조각뿐이었고, 붙이거나 떼는 길은 화면 어디에도 없었다).
+// The server action and the router are not this test's subject — what this file locks down is two things: "when a sub-issue is opened, can you
+// tell WHAT it is a sub-issue of, and can that belonging be changed here" (it used to be the single `ENG-11` fragment in the breadcrumb,
+// with nowhere on screen to attach or detach).
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 vi.mock('../api/issues', () => ({ updateIssueAction: async () => ({ ok: true }) }))
 
@@ -39,7 +39,7 @@ describe('issue parent control', () => {
 
     expect(out).toContain('ENG-11')
     expect(out).toContain('the judge drops cost scores')
-    // 부모로 가는 길은 링크로 남는다(속성 열에서 상위 이슈로 가는 유일한 길이다).
+    // The route to the parent stays a LINK (it is the only way from the attribute column to the parent issue).
     expect(out).toContain('href="/acme/issue/ENG-11/the-judge-drops-cost-scores"')
   })
 
@@ -47,7 +47,7 @@ describe('issue parent control', () => {
     const out = render(undefined, true)
 
     expect(out).toContain('Set parent')
-    // 목록은 열어야 그려진다 — 여기서 잠그는 것은 "열 수 있는 것이 붙어 있는가"다.
+    // The list is only drawn once opened — what is locked down here is "is something openable attached".
     expect(out).toContain('aria-expanded="false"')
   })
 

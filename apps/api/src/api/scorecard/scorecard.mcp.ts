@@ -283,7 +283,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
       {
         annotations: { readOnlyHint: false },
         description:
-          "Re-run a finished batch's ENTIRE case set as a new scorecard (전체 재실행), faithfully reproducing the original submit (dataset+version, harness+pins, grading plan, trials) so the two compare directly — while optionally overriding the run-config knobs: WHO runs it (judges, runtime) and HOW it is dispatched (concurrency, retries, subset via cases). Each unset field inherits the original; scoring is reproduced verbatim (never overridden). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
+          "Re-run a finished batch's ENTIRE case set as a new scorecard faithfully reproducing the original submit (dataset+version, harness+pins, grading plan, trials) so the two compare directly — while optionally overriding the run-config knobs: WHO runs it (judges, runtime) and HOW it is dispatched (concurrency, retries, subset via cases). Each unset field inherits the original; scoring is reproduced verbatim (never overridden). Async (poll with get_scorecard). Multi-trial IS supported here. Lineage via origin.retryOf; the source record is never mutated. For recovering only the FAILED cases (carry the passing ones over) use retry_scorecard instead.",
         inputSchema: {
           id: z.string().describe("source scorecard id (must be succeeded/failed)"),
           judges: z

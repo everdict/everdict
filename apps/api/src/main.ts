@@ -1379,6 +1379,9 @@ async function main(): Promise<void> {
       scorecards: scorecardStore,
     }),
     diffs: scorecardService,
+    // The frame's positive control: what a named scorecard PROVES about this exam, derived at open
+    // (`exam-proof.ts`). The same store the seed-provenance reader uses.
+    scorecards: scorecardStore,
     // The authorization an adopted close writes, readable through the campaign's own surface — without it
     // the operation was durable and unreachable from every transport (arch-review 73).
     operations: adoptionOperationStore,

@@ -7,9 +7,9 @@ import { cn } from '@/shared/lib/utils'
 import { ISSUE_LABEL_COLORS, type IssueLabelColor } from '../model/schema'
 import { LabelDot } from './label-chip'
 
-// 색은 닫힌 팔레트에서만 고른다 — hex 입력을 주면 다크에서 안 보이는 라벨을 누구나 만들 수 있다(차트와 같은
-// 규칙: 지어낸 색은 없다). 라벨을 만드는 표면이 둘이라(설정의 라벨 관리자, 이슈 화면의 선택기) 고르는 물건도
-// 하나여야 한다 — 좁은 팝오버용은 `size="sm"`.
+// A colour is picked only from a CLOSED palette — allow hex input and anyone can make a label invisible in dark mode (the same rule as the
+// charts: no invented colours). There are two surfaces that create labels (the settings label manager, the picker on the issue screens), so what
+// they pick FROM has to be one thing too — `size="sm"` is for a narrow popover.
 export function LabelColorPicker({
   value,
   onChange,

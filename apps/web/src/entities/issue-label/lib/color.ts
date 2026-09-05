@@ -1,11 +1,11 @@
 import { ISSUE_LABEL_COLORS, type IssueLabelColor } from '../model/schema'
 
-// 이름에서 색을 하나 고른다 — 새 라벨이 전부 회색으로 태어나면 팔레트는 있으나 마나다(색은 목록을 훑을 때
-// 이름보다 먼저 읽히는 신호다). 무작위가 아니라 이름에서 결정론적으로 뽑는 이유는 둘이다: 서버와 클라이언트가
-// 같은 값을 그려야 하고(하이드레이션), 같은 이름을 두 번 만들려던 사람이 다른 색을 보면 고른 적 없는 색이
-// 바뀐 것처럼 읽힌다.
+// Pick a colour from the name — with every new label born grey the palette might as well not exist (colour is the signal read BEFORE the name
+// when sweeping a list). It is derived deterministically from the name rather than randomly for two reasons: the server and the client have to
+// draw the same value (hydration), and someone who tried to create the same name twice seeing a different colour reads it as a colour they
+// never picked having changed.
 //
-// 회색은 제안하지 않는다 — 고를 수는 있지만 그건 "색을 안 쓰겠다"는 선택이지 추천이 아니다.
+// Grey is never SUGGESTED — it can be chosen, but that is a decision to use no colour rather than a recommendation.
 const SUGGESTABLE: IssueLabelColor[] = ISSUE_LABEL_COLORS.filter((color) => color !== 'gray')
 
 export function suggestLabelColor(name: string): IssueLabelColor {

@@ -3,7 +3,7 @@
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — revalidatePath 금지 (docs/web.md §"A mutation refreshes").
+// Refreshing the screen is the CALLER's `refresh()` — no revalidatePath (docs/web.md §"A mutation refreshes").
 export interface RescoreScorecardResult {
   ok: boolean
   rescoredJudges?: string[]

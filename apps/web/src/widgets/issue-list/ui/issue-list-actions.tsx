@@ -14,15 +14,15 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Link } from '@/shared/ui/link'
 import { Skeleton } from '@/shared/ui/skeleton'
 
-// 동기화 저장소 목록을 만들기 위한 상한. 저장소 이름을 세는 게 목적이라 한 장이면 충분하다.
+// The cap for building the synced-repository list. The aim is to COUNT repository names, so one page is enough.
 const MAX_SYNCED_ROSTER = 200
 
-// 목록 헤더의 쓰기 버튼들 — 「가져오기」·「불러오기」·「이슈 만들기」.
+// The list header's write buttons — "import", "pull" and "new issue".
 //
-// 이 셋이 자기 컴포넌트로 나와 있는 이유는 렌더가 아니라 **대기** 때문이다. 버튼 세 개를 그리자고 읽어야 하는
-// 것이 GitHub App 설치 상태 + 동기화 저장소 목록(이슈 200행) + 팀 목록인데, 예전에는 그 셋이 목록과 같은
-// `Promise.all` 에 묶여 있었다: 이슈 50행은 벌써 도착했는데 툴바가 못 와서 화면 전체가 서 있었다. 이제 이
-// 컴포넌트는 Suspense 경계 뒤에서 스트리밍되고, 목록은 자기 데이터만 기다린다.
+// These three are their own component because of **waiting** rather than rendering. Drawing three buttons requires the GitHub App installation
+// state plus the synced-repository list (200 issue rows) plus the team list, and those three used to be bound into the same `Promise.all` as
+// the list: fifty issue rows had already arrived and the whole screen stood still because the toolbar had not. Now this component streams
+// behind a Suspense boundary and the list waits only for its own data.
 export async function IssueListActions({
   workspace,
   projects,
@@ -46,9 +46,9 @@ export async function IssueListActions({
       .getGithubAppRepos(ctx)
       .then((r) => z.array(githubAppRepoSchema).parse(r).length > 0)
       .catch(() => false),
-    // 대량 불러오기는 저장소 단위라, 버튼은 새로고칠 것이 있는 저장소만 내민다. 좁히기는 SERVER 가 한다
-    // (`syncPull`) — 예전에는 필터 없는 이슈 목록을 통째로 다시 읽어 여기서 걸렀고, 저장소 이름 몇 개를
-    // 부르자고 전체 테이블을 한 번 더 읽는 꼴이었다.
+    // A bulk pull is per repository, so the button offers only repositories with something to refresh. The narrowing is the SERVER's
+    // (`syncPull`) — this used to re-read the entire unfiltered issue list and filter here, reading the whole table again just to name a few
+    // repositories.
     controlPlane
       .listIssues(ctx, {
         syncPull: true,
@@ -74,8 +74,8 @@ export async function IssueListActions({
       })
   }
 
-  // 새 이슈가 처음 앉을 팀: 팀 목록 안에서 열었으면 그 팀, 아니면 워크스페이스의 기본 팀. 지금 보고 있는
-  // 목록에 나타나지 않을 곳에 이슈를 만드는 일이 없도록 한다.
+  // The team a new issue first lands in: the team whose list it was opened from, else the workspace's default team. So an issue is never
+  // created somewhere it will not appear in the list being looked at.
 
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -102,7 +102,7 @@ export async function IssueListActions({
   )
 }
 
-// 툴바가 도착하기 전의 자리. 버튼이 늦게 튀어나와 제목 줄을 밀어내지 않도록 같은 높이를 미리 잡아 둔다.
+// The placeholder before the toolbar arrives. It reserves the same height so buttons appearing late do not push the title line.
 export function IssueListActionsSkeleton() {
   return (
     <div className="flex flex-wrap items-center gap-2">

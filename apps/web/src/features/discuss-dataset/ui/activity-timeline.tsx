@@ -36,7 +36,7 @@ export type ActivityItem =
 const INITIAL = 10
 const STEP = 20
 
-// 스코어카드 결과의 톤 — 배지 색이 곧 결과다. 모르는 상태는 중립 윤곽으로 떨어진다.
+// The tone of a scorecard result — the badge colour IS the result. An unknown status falls back to a neutral outline.
 const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'neutral' | 'outline'> = {
   succeeded: 'success',
   failed: 'danger',
@@ -47,9 +47,9 @@ const STATUS_TONE: Record<string, 'success' | 'danger' | 'warning' | 'neutral' |
 }
 const STATUS_KEYS = ['succeeded', 'failed', 'running', 'queued', 'superseded', 'cancelled']
 
-// 데이터셋 활동 이력 — 트래커의 History 와 같은 피드 뼈대(shared/ui/activity-feed)를 쓴다:
-// "이 데이터셋에 무슨 일이 있었나"가 이슈 이력과 다른 문법으로 읽히면 안 된다.
-// 최근 10개만 펼치고 나머지는 "이전 이력 더 보기"로 — 논의(코멘트)는 별도 스레드다.
+// The dataset activity history — it uses the same feed skeleton as the tracker's History (shared/ui/activity-feed):
+// "what happened to this dataset" must not read in a different grammar from an issue's history.
+// Only the newest ten are expanded and the rest arrive through "show earlier history" — discussion (comments) is a separate thread.
 export function ActivityTimeline({
   workspace,
   items,
@@ -80,7 +80,7 @@ export function ActivityTimeline({
       <ActivityFeed>
         {visible.map((item, i) => {
           const { icon, tone } = shapeOf(item)
-          // 워크스페이스 멤버가 아닌 주체(스케줄·에이전트)는 얼굴 대신 사건 아이콘이 노드가 된다.
+          // A subject that is not a workspace member (a schedule, an agent) gets the event icon as the node instead of a face.
           const actor: ActivityActor | undefined = item.actor.known
             ? {
                 name: item.actor.name,
@@ -129,7 +129,7 @@ function EventText({ workspace, item }: { workspace: string; item: ActivityItem 
   const statusLabel = STATUS_KEYS.includes(item.status) ? t(`status.${item.status}`) : item.status
   return (
     <>
-      {/* 문장 한 덩어리 — 조각을 flex 자식으로 흩으면 조사가 앞말과 떨어진다("스코어카드 를"). */}
+      {/* The sentence as ONE block — scattering the fragments as flex children separates a Korean particle from the word it attaches to. */}
       <span>
         {t.rich('scorecardRan', {
           actor: item.actor.name,

@@ -16,8 +16,8 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 
 import { updateIssueAction } from '../api/issues'
 
-// 상태·팀과 같은 하우스 문법(아이콘 + 드롭다운). 우선순위는 워크플로 전이가 아니라 내용 편집이라
-// `updateIssueAction` 으로 간다 — 이력에는 `updated{changed:[priority]}` 한 줄로 남는다.
+// The same house grammar as status and team (an icon plus a dropdown). Priority is a CONTENT EDIT rather than a workflow transition, so it goes
+// through `updateIssueAction` — leaving one `updated{changed:[priority]}` line in the history.
 export function IssuePriorityControl({
   id,
   priority,
@@ -27,7 +27,7 @@ export function IssuePriorityControl({
   id: string
   priority: IssuePriority
   canWrite: boolean
-  // 상태 컨트롤과 같은 두 밀도 — 목록 행에서는 아이콘만 선다.
+  // The same two densities as the status control — the icon alone stands on a list row.
   variant?: 'default' | 'icon'
 }) {
   const t = useTranslations('issuesPage')

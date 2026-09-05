@@ -4,9 +4,9 @@ import en from '../../../../messages/en.json'
 import ko from '../../../../messages/ko.json'
 import { AGENT_CHAT_MISSIONS, AGENT_REFERENCE_TYPES } from './schema'
 
-// 대화 진입의 어휘(임무 · 참조 타입)는 두 로케일의 카탈로그와 1:1 이어야 한다. 하나를 늘리고 문구를 빼먹으면
-// 화면에는 키 경로가 그대로 찍히는데 — `issue` 참조 타입이 실제로 라벨 없이 @-피커에 올라와 있었다 — 그건
-// 타입이 잡아 주지 않는다(카탈로그는 JSON 이다). 그래서 어휘 쪽에서 카탈로그를 검사한다.
+// The conversation entry vocabulary (missions · reference types) has to be 1:1 with both locales' catalogs. Add one and forget the wording and
+// the screen prints the key PATH verbatim — the `issue` reference type was actually standing in the @-picker with no label — and the type system
+// does not catch it (a catalog is JSON). So the catalog is checked from the vocabulary side.
 const CATALOGS: Record<string, Record<string, unknown>> = { ko: ko.agentChat, en: en.agentChat }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -12,8 +12,8 @@ import { Label } from '@/shared/ui/input'
 
 import { setCapabilityVisibilityAction } from '../api/manage-capabilities'
 
-// capability 공개범위(reach) 컨트롤 — 스토어(전 kind)와 환경 워크벤치가 공유하는 피커/다이얼로그.
-// (capability-store.tsx 내부에서 추출 — 동작 불변.)
+// The capability visibility (reach) controls — the picker and dialog shared by the store (every kind) and the environment workbench.
+// (Extracted from capability-store.tsx — behaviour unchanged.)
 
 export function VisibilityPicker({
   value,
@@ -48,7 +48,7 @@ export function VisibilityPicker({
   )
 }
 
-// subset 공유 대상 피커 — 내가 속한 워크스페이스 중 오너를 제외한 나머지를 토글.
+// The subset sharing-target picker — it toggles the workspaces I belong to, excluding the owner.
 export function WorkspacePicker({
   workspaces,
   ownerId,
@@ -90,7 +90,7 @@ export function WorkspacePicker({
   )
 }
 
-// 공개범위 변경 다이얼로그 — 전 라이브 버전 관통(PATCH visibility). owner-or-admin, public 은 admin.
+// The visibility change dialog — it cuts through every live version (PATCH visibility). Owner-or-admin, and public is admin.
 export function ReachDialog({
   capability,
   canPublishPublic,

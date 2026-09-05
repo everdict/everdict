@@ -69,8 +69,8 @@ export default async function SkillsPage() {
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
 
-  // 내 스킬셋 — 워크스페이스 라이브러리가 "지원하는 절차"라면 이건 "내 에이전트가 따르는 절차"(멤버별 오버레이).
-  // 실패해도 라이브러리는 그대로 뜬다: 스위치만 빠진다.
+  // My skill set — where the workspace library is "the procedures we support", this is "the procedures MY agent follows" (a per-member overlay).
+  // The library still renders on failure: only the switches are missing.
   let agentSkills: AgentSkillEntry[] = []
   try {
     agentSkills = agentSkillListSchema.parse(await controlPlane.listAgentSkills(ctx)).skills

@@ -17,9 +17,9 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     } catch (err) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
-    // 결과의 소유 팀 — 스코어카드와 같은 규칙.
+    // The owning team of the RESULT — the same rule as a scorecard.
     try {
-      // 팀 ref 해석(id 또는 key)이 여기서 일어난다 — 없는 팀은 404 이고, 그 답도 게이트와 같은 자리에서 나가야 한다.
+      // Resolving the team ref (an id or a key) happens here — a team that does not exist is a 404, and that answer has to leave from the same place as the gate.
       gate(principal, "runs:submit");
       // submittedBy=subject → clone a private-repo seed with the submitter's personal connection ("clone with my connection").
       return reply.code(202).send(

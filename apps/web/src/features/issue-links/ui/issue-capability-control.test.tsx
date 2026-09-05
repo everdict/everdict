@@ -6,9 +6,9 @@ import type { IssueLink } from '@/entities/issue'
 
 import en from '../../../../messages/en.json'
 
-// 서버 액션과 라우터는 이 테스트의 대상이 아니다 — 이 파일이 잠그는 것은 "이슈를 검증하는 능력을 속성 열에서
-// 골라 붙일 수 있는가, 그리고 붙은 것에서 그 능력으로 건너갈 수 있는가" 둘이다(예전에는 id 를 손으로 적는
-// 자유 입력 폼이었고, 오타 하나면 아무 데도 가리키지 않는 링크가 만들어졌다).
+// The server action and the router are not this test's subject — what this file locks down is two things: "can a capability that verifies the
+// issue be picked and attached from the attribute column, and can you cross from an attached one to that capability" (it used to be a free-input
+// form where the id was typed by hand, and one typo made a link pointing nowhere).
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }))
 vi.mock('../api/links', () => ({
   addIssueLinkAction: async () => ({ ok: true }),
@@ -43,7 +43,7 @@ describe('issue capability control', () => {
     const out = render([], true)
 
     expect(out).toContain('Add')
-    // 목록은 열어야 그려진다 — 여기서 잠그는 것은 "열 수 있는 것이 붙어 있는가"다.
+    // The list is only drawn once opened — what is locked down here is "is something openable attached".
     expect(out).toContain('aria-expanded="false"')
     expect(out).toContain('aria-label="Harness links on this issue"')
   })

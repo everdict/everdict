@@ -12,8 +12,8 @@ import { Textarea } from '@/shared/ui/input'
 
 import { postProjectUpdateAction } from '../api/projects'
 
-// 업데이트 올리기. 판정(health)과 그 문장을 한 폼에 둔 이유는 둘이 한 진술이기 때문이다 — 본문 없는 판정은
-// 서버도 거절한다. 판정 줄 자체는 이니셔티브 업데이트와 공유한다(entities/tracker-health).
+// Posting an update. The verdict (health) and its sentence are in one form because they are ONE statement — the server refuses a verdict with no
+// body too. The verdict row itself is shared with the initiative update (entities/tracker-health).
 export function ProjectUpdatePanel({ id }: { id: string }) {
   const t = useTranslations('projectsPage')
   const refresh = useRefresh()

@@ -4,7 +4,7 @@ import { navGroupOpen } from './nav-group-open'
 
 describe('nav group open state', () => {
   it('closes a group the user closed, even while it holds the current page', () => {
-    // 이 파일이 잠그는 것 하나 — 활성 항목을 품었다는 이유로 토글이 죽으면 안 된다.
+    // The one thing this file locks down — the toggle must not die just because the group holds the active item.
     expect(navGroupOpen({ recorded: false, holdsActive: true })).toBe(false)
   })
 

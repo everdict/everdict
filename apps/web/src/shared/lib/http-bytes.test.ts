@@ -27,7 +27,7 @@ describe('parseByteRange', () => {
     expect(parseByteRange('bytes=-0', 100)).toBe('unsatisfiable')
   })
 
-  // 여러 구간 요청과 알아볼 수 없는 표기는 거절이 아니라 전체 응답이다 — 규격이 허용하는 답이라 재생이 멈추지 않는다.
+  // A multi-range request and an unrecognisable notation get the WHOLE response rather than a refusal — an answer the spec allows, so playback does not stop.
   it('serves the whole file for a multi-range or malformed header', () => {
     expect(parseByteRange('bytes=0-9,20-29', 100)).toBe(undefined)
     expect(parseByteRange('items=0-9', 100)).toBe(undefined)
@@ -46,7 +46,7 @@ describe('bytesResponse', () => {
     expect(res.headers.get('cache-control')).toContain('private')
   })
 
-  // Safari 는 206 을 못 받으면 <video> 를 아예 틀지 않는다 — 이 한 줄이 "영상이 안 나온다"의 경계다.
+  // Safari will not play a <video> at all without a 206 — this one line is the boundary of "the video does not appear".
   it('serves 206 with just the asked-for slice', async () => {
     const res = bytesResponse(bytes, { contentType: 'video/mp4', rangeHeader: 'bytes=2-4' })
 

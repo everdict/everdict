@@ -1,7 +1,7 @@
 import { getTranslations } from 'next-intl/server'
 
 import { CapabilityStore } from '@/features/publish-capability'
-// server-only 로더(controlPlane)라 클라이언트가 쓰는 배럴을 통하지 않고 직접 임포트한다(download-desktop/api 선례).
+// A server-only loader (controlPlane), so it is imported directly rather than through the barrel the client uses (following download-desktop/api).
 import { loadStoreContext } from '@/features/publish-capability/api/store-context'
 import { capabilitiesSchema, type Capability } from '@/entities/capability'
 import { can } from '@/shared/auth/can'
@@ -13,15 +13,15 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Store — 공개 카탈로그만 브라우즈한다(공개 + 매니지드/첫당사자). 이미 워크스페이스에 데려온 것(채택/가져옴)은 행에
-// 배지 + 상태 필터로 구분한다. 발행/편집·내 항목 관리는 별도 페이지(store/mine). capabilities:read 로 보기.
+// Store — it browses the public catalog only (public plus managed/first-party). What has already been brought into the workspace (adopted or
+// imported) is distinguished by a row badge and the state filter. Publishing, editing and managing my own entries live on a separate page (store/mine). Viewing is capabilities:read.
 export default async function StorePage() {
   const t = await getTranslations('capabilityStore')
   const { principal, ctx } = await currentPrincipal()
   const canRead = can(principal?.roles, 'capabilities:read')
   const canWrite = can(principal?.roles, 'capabilities:write')
   const isAdmin = (principal?.roles ?? []).includes('admin')
-  // 인스턴스 정책(operator env) — 멤버도 public 발행 가능? admin 은 항상 가능. UX 게이팅용(서버가 최종 강제).
+  // The instance policy (operator env) — may a member publish public? An admin always can. UX gating only (the server enforces finally).
   const allowMemberPublicPublish = principal?.config?.allowMemberPublicPublish === true
   const header = <PageHeader title={t('title')} description={t('description')} />
   if (!canRead) {

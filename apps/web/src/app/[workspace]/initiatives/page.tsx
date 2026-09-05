@@ -24,9 +24,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Initiatives — 여러 프로젝트가 함께 향하는 목표들. 한 줄이 그 목표가 무엇이고, 언제까지이고, 책임자가
-// 뭐라고 말했고(health), **얼마나 왔는지**까지 답한다. 진척은 상세의 팬아웃이 아니라 서버가 집계 한 번으로
-// 내려 준 숫자다(초기에는 목록에 없었고, 그래서 목록이 이름의 나열이었다).
+// Initiatives — the goals several projects work toward. One row answers what the goal is, by when, what the lead SAID (health), and
+// **how far along it is**. The progress is a number the server sent down from ONE aggregate rather than a fan-out from the detail
+// (it was absent from the list at first, which is what made the list a recitation of names).
 export default async function InitiativesPage({
   params,
   searchParams,
@@ -99,7 +99,7 @@ export default async function InitiativesPage({
           icon={<Target strokeWidth={1.75} />}
           title={t('emptyTitle')}
           hint={t('emptyHint')}
-          // 빈 목록은 시작하는 사람이 가장 오래 보는 화면이다 — 만드는 길을 여기서 바로 내준다(헤더 버튼과 같은 표면).
+          // An empty list is the screen someone starting out looks at longest — the route to creating one is offered right here (the same surface as the header button).
           action={
             canWrite ? (
               <CreateInitiativeButton
@@ -113,7 +113,7 @@ export default async function InitiativesPage({
       ) : (
         <div className="space-y-2">
           {initiatives.map((i) => {
-            // 아직 끝나지도 접히지도 않은 목표라면 기한은 지날 수 있다 — 계획 단계라고 안 늦는 건 아니다.
+            // A goal neither finished nor abandoned can still be overdue — being in the planning stage does not make you not late.
             const overdue =
               i.status !== 'completed' &&
               i.status !== 'cancelled' &&
@@ -130,14 +130,14 @@ export default async function InitiativesPage({
                     <span className="truncate">{i.name}</span>
                   </p>
                   {i.description && (
-                    // 설명은 마크다운이다 — 한 줄 미리보기에는 문법을 벗겨 낸 텍스트만 넣는다.
+                    // The description is markdown — only text with the syntax stripped goes into a one-line preview.
                     <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
                       {markdownPreview(i.description)}
                     </p>
                   )}
                 </div>
-                {/* 얼마나 왔나 — 목록에서 목표를 훑는 이유가 이것이다. 일이 하나도 걸려 있지 않은 목표는
-                    막대를 그리지 않는다: 0%는 "시작 안 함"으로 읽히지만, 실제로는 셀 것이 없다는 뜻이다. */}
+                {/* How far along — this is why goals are swept in a list. A goal with no work attached draws NO bar:
+                    0% reads as "not started", when what it actually means is that there is nothing to count. */}
                 {i.progress.total > 0 && (
                   <span className="hidden shrink-0 items-center gap-2 @md:flex">
                     <span

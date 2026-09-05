@@ -43,9 +43,9 @@ export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 // (the member reviews and sends; nothing auto-sends). Buffered here because the AgentChatPanel mounts the 'agent'
 // tab lazily — the panel consumes this on mount, then clears it via consumePendingMention so a later tab re-mount
 // does not re-inject the same prefill.
-// `mission` marks a DOMAIN-SPECIFIC entry (Settings › Skills 상세의 "대화로 편집하기" 같은 전용 버튼): 패널 구조는
-// 그대로지만 빈 화면의 라이팅·제안이 그 작업에 맞춰 갈린다. 범용 "대화에서 분석" 진입은 mission 없이 기본 문구를 쓴다.
-// `fresh` marks a CREATION entry ("새 분석" → the blank analysis canvas): the thing being made IS the
+// `mission` marks a DOMAIN-SPECIFIC entry (a dedicated button such as "edit by conversation" on a Settings › Skills detail): the panel
+// STRUCTURE is unchanged and only the empty screen's writing and suggestions are framed for that work. The generic "analyze in conversation" entry carries no mission and uses the default wording.
+// `fresh` marks a CREATION entry ("new analysis" → the blank analysis canvas): the thing being made IS the
 // conversation, so the panel starts a new one instead of appending to whatever thread was open. Edit-intent
 // missions already do this by their intent; fresh is for entries whose mission is analyze/ask.
 export type PendingMention = {
@@ -75,8 +75,8 @@ export const OPEN_PLAYGROUND_MESSAGE = 'everdict:open-playground'
 // A request to prefill the playground's boot form with a specific harness (a detail page's "test this harness").
 // Buffered exactly like PendingMention because the playground tab mounts lazily — and deliberately a PREFILL, not
 // a boot: spending a container is the member's call, so the panel never boots on arrival.
-// 플레이그라운드 탭에 무엇을 들고 갈지. 하네스 참조는 부팅 폼 PREFILL(부팅은 멤버가 누른다 — 컨테이너를 쓴다);
-// 세션 id 는 ATTACH 다(이미 살아 있는 세션을 그냥 붙는다). 대화 패널의 위임 카드가 "여기서 마저 보기"로 쓰는 문.
+// What to carry into the playground tab. A harness reference PREFILLS the boot form (a MEMBER presses boot — it costs a container);
+// a session id is an ATTACH (simply joining a session that is already alive). The door the conversation panel's delegation card uses for "continue watching here".
 export type PendingPlaygroundTarget =
   | { harnessId: string; version?: string }
   | { sessionId: string }
@@ -275,7 +275,7 @@ export function InfraPanelProvider({
   const openSchedule = useCallback((_id: string) => request('schedules', '/schedules'), [request])
 
   // Reveal the agent chat with this entity pre-mentioned. Buffer the reference (the panel consumes it on mount)
-  // and open on the 'agent' tab. A mission (전용 진입) rides along so the panel can frame the task, and `fresh`
+  // and open on the 'agent' tab. A mission (a dedicated entry) rides along so the panel can frame the task, and `fresh`
   // asks for that framing in a new conversation (an entry whose subject is ONE record, not the open thread's).
   const mentionInChat = useCallback(
     (ref: AgentReference, mission?: AgentChatMission, fresh?: boolean) => {

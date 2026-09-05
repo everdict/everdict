@@ -3,7 +3,7 @@ import { ArrowLeft } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
 import { CapabilityDetailView, capKey } from '@/features/publish-capability'
-// server-only 로더(controlPlane)라 클라이언트가 쓰는 배럴을 통하지 않고 직접 임포트한다(스토어 목록 페이지 선례).
+// A server-only loader (controlPlane), so it is imported directly rather than through the barrel the client uses (following the store list page).
 import { loadStoreContext } from '@/features/publish-capability/api/store-context'
 import { capabilitySchema, type Capability } from '@/entities/capability'
 import { can } from '@/shared/auth/can'
@@ -16,10 +16,10 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Store › 상세 — 발행 워크스페이스(source, 매니지드는 `_shared`)와 id 로 주소가 정해지는 한 항목의 전부.
-// 상세는 언제나 라우트이지 다이얼로그가 아니다: 화면 절반을 덮는 모달이면 오른쪽 인프라/대화 패널에서 이 항목을 두고
-// 실험할 수 없고, 링크로 공유할 수도 없다. `?from=mine` 은 내 발행 목록에서 들어온 진입 — 뒤로가기가 그리로 돌아가고
-// 공개범위 배지를 함께 보여 준다(공개 카탈로그에서는 공개범위가 볼 것도 없이 전체공개다).
+// Store › detail — everything about one entry, addressed by its publishing workspace (source, `_shared` for managed ones) and its id.
+// A detail is always a route and never a dialog: a modal covering half the screen makes it impossible to experiment on this entry with the
+// infra/conversation panel on the right, and impossible to share as a link. `?from=mine` marks an entry from MY publications list — the back
+// link returns there and the visibility badge is shown alongside (in the public catalog the visibility is public with nothing to see).
 export default async function StoreCapabilityPage({
   params,
   searchParams,
@@ -43,7 +43,7 @@ export default async function StoreCapabilityPage({
       await controlPlane.getCapability(ctx, id, undefined, source)
     )
   } catch {
-    notFound() // 없거나 나에게 보이지 않는 발행물 — 존재 누설 없이 404(컨트롤플레인이 판정한다).
+    notFound() // absent, or a publication not visible to me — a 404 that leaks no existence (the control plane judges).
   }
 
   const store = await loadStoreContext(ctx)
@@ -51,7 +51,7 @@ export default async function StoreCapabilityPage({
   const variant = from === 'mine' ? 'mine' : 'catalog'
   const key = capKey(capability)
   const adoptedEnv = store.adoptedEnvironments.find((e) => `${e.source}/${e.id}` === key)
-  // 이미 워크스페이스에 있는가 — 환경은 인벤토리, 스킬은 라이브러리 사본, 그 외는 에이전트 채택(목록의 판정과 동일).
+  // Is it already in the workspace — an environment is the inventory, a skill is a library copy, everything else an agent adoption (the same judgement as the list).
   const inWorkspace =
     capability.spec.type === 'environment'
       ? adoptedEnv !== undefined
@@ -82,9 +82,9 @@ export default async function StoreCapabilityPage({
         isAdmin={(principal?.roles ?? []).includes('admin')}
         inWorkspace={inWorkspace}
         {...(adoptedEnv ? { adoptedEnv } : {})}
-        canAdopt={can(principal?.roles, 'agents:write')} // 채택 = 내 에이전트 설정 편집
-        canImportEnvironment={can(principal?.roles, 'settings:write')} // 환경 = 워크스페이스 인벤토리
-        canImportSkill={can(principal?.roles, 'skills:write')} // 스킬 = 라이브러리에 사본을 만드는 일
+        canAdopt={can(principal?.roles, 'agents:write')} // adopting = editing MY agent configuration
+        canImportEnvironment={can(principal?.roles, 'settings:write')} // an environment = the workspace inventory
+        canImportSkill={can(principal?.roles, 'skills:write')} // a skill = making a COPY in the library
         secretNames={store.secretNames}
         {...(principal?.subject !== undefined ? { currentSubject: principal.subject } : {})}
       />

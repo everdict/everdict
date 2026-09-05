@@ -5,10 +5,10 @@ import { useState } from 'react'
 import { cn } from '@/shared/lib/utils'
 import { Markdown } from '@/shared/ui/markdown'
 
-// 스킬 문서 뷰어(읽기 전용) — SKILL.md 본문 + 부속 파일을 탭으로 열람한다(클로드코드 스킬 디렉토리의 재해석: 본문은
-// 문서, 파일은 온디맨드 참조자료). 스킬은 더 이상 단일 문서가 아니라 여러 파일로 구성되므로, 스토어 상세와 스킬 관리
-// 상세가 이 하나의 뷰어를 공유해 표현이 갈리지 않게 한다. .md 파일은 마크다운 렌더(```mermaid 펜스는 다이어그램으로),
-// 그 외는 mono raw.
+// The skill document viewer (read-only) — the SKILL.md body plus attached files opened as tabs (a reinterpretation of the Claude Code skill
+// directory: the body is the document, the files are on-demand reference material). A skill is no longer a single document but several files,
+// so the store detail and the skill management detail share this ONE viewer and cannot diverge in presentation. A .md file renders as markdown
+// (a ```mermaid fence becomes a diagram); anything else is raw mono.
 export function SkillDocs({
   instructions,
   files,
@@ -18,12 +18,12 @@ export function SkillDocs({
   files: { path: string; content: string }[]
   className?: string
 }) {
-  // '' = SKILL.md 본문 탭, 그 외 = 해당 path 의 부속 파일 탭.
+  // '' = the SKILL.md body tab; anything else = the attached-file tab at that path.
   const [tab, setTab] = useState('')
   const activeFile = files.find((f) => f.path === tab)
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border bg-card', className)}>
-      {/* 문서 탭 — SKILL.md + 파일별 탭. 파일이 없으면 탭 줄 자체를 숨긴다(빈 섹션 숨김 관례). */}
+      {/* The document tabs — SKILL.md plus one per file. With no files the tab row itself hides (the empty-section convention). */}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-0.5 border-b border-border bg-muted/30 px-2 pt-1.5">
           {['', ...files.map((f) => f.path)].map((p) => (

@@ -7,11 +7,11 @@ import type {
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// 에이전트 도구 — "이 워크스페이스의 어시스턴트가 쓸 수 있는 도구"를 로그인한 멤버 기준으로 본 행.
-// 워크스페이스 AgentSpec 이 공통 기준선(baseline)이고, 각 멤버가 그 위에 자기 on/off 를 얹는다(enabled).
-// 경계 검증은 여기 zod v4 에서만, EXPORT 타입은 @everdict/contracts 고정(P4). `import type` 만.
+// An agent tool — one row of "the tools this workspace's assistant can use", seen from the signed-in member's point of view.
+// The workspace AgentSpec is the shared baseline, and each member lays their own on/off over it (enabled).
+// Boundary validation lives only in this zod v4, and the EXPORTED types are pinned to @everdict/contracts (P4). `import type` only.
 
-// 도구가 어디서 왔는지 — 목록의 3개 섹션과 1:1.
+// Where the tool came from — one-to-one with the list's three sections.
 export const agentToolScopeSchema = z.enum(['builtin', 'workspace', 'personal'])
 export type AgentToolScope = z.infer<typeof agentToolScopeSchema>
 
@@ -21,8 +21,8 @@ export const agentToolEntrySchema = z.object({
   description: z.string(),
   type: z.enum(['mcp', 'code']),
   scope: agentToolScopeSchema,
-  enabled: z.boolean(), // 나에게 적용되는 최종 상태
-  baseline: z.boolean(), // 워크스페이스 기본값 — enabled 와 다르면 "내가 바꾼 것"
+  enabled: z.boolean(), // the final state as it applies to ME
+  baseline: z.boolean(), // the workspace default — differing from `enabled` means "I changed it"
   writes: z.boolean(),
   requiredSecrets: z.array(z.string()),
   missingSecrets: z.array(z.string()),
@@ -35,12 +35,12 @@ export type AgentToolEntry = z.infer<typeof agentToolEntrySchema>
 export const agentToolListSchema = z.object({ tools: z.array(agentToolEntrySchema) })
 export type AgentToolList = z.infer<typeof agentToolListSchema>
 
-// ── 상세 ─────────────────────────────────────────────────────────────────────────────────────────
-// 목록 행이 "켤까 말까"라면 상세는 "이게 뭔가"다: 어떻게 도달하고, 모델 앞에 어떤 function 을 놓고, 모델이 읽는
-// description 이 뭐고, 어떤 시크릿을 필요로 하며 그게 나에게 풀리는가.
+// ── Detail ───────────────────────────────────────────────────────────────────────────────────────
+// Where a list row is "should I turn it on", the detail is "what IS it": how it is reached, what function it puts in front of the model,
+// what description the model reads, which secrets it needs, and whether those resolve for me.
 
-// 모델이 실제로 부르는 이름은 네임스페이스된 bridgedName 이다(스토어 이름이 아니라) — 두 서버가 이름으로 충돌하지
-// 않게 런타임이 붙인다.
+// The name the model actually calls is the NAMESPACED bridgedName (not the store name) — the runtime prefixes it so two servers cannot
+// collide on a name.
 export const agentToolFunctionSchema = z.object({
   name: z.string(),
   bridgedName: z.string(),
@@ -50,7 +50,7 @@ export const agentToolFunctionSchema = z.object({
 })
 export type AgentToolFunction = z.infer<typeof agentToolFunctionSchema>
 
-// 런타임이 이 도구에 도달하는 방식 — 원격 MCP 세션 / stdio 컨테이너 / 코드 스크립트.
+// How the runtime reaches this tool — a remote MCP session, a stdio container, or a code script.
 export const agentToolTransportSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('http'), url: z.string() }),
   z.object({ kind: z.literal('stdio'), image: z.string(), args: z.array(z.string()) }),
@@ -63,7 +63,7 @@ export const agentToolTransportSchema = z.discriminatedUnion('kind', [
 ])
 export type AgentToolTransport = z.infer<typeof agentToolTransportSchema>
 
-// 선언된 시크릿 하나를 "나" 기준으로 본 것 — 도구가 부르는 논리 이름, 실제로 읽는 시크릿 이름, 내가 가진 것인지.
+// One declared secret seen from MY point of view — the logical name the tool calls it, the secret name actually read, and whether I have it.
 export const agentToolSecretSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -83,14 +83,14 @@ export const agentToolDetailSchema = agentToolEntrySchema.extend({
   transport: agentToolTransportSchema,
   functions: z.array(agentToolFunctionSchema),
   secrets: z.array(agentToolSecretSchema),
-  code: z.string().optional(), // code 도구의 고정된 소스 — 무엇이 실행되는지 감사 가능
+  code: z.string().optional(), // a code tool's pinned source — so what executes can be audited
   parametersSchema: z.record(z.string(), z.unknown()).optional(),
   examples: z.array(agentToolExampleSchema),
   capability: z.object({ source: z.string(), id: z.string(), version: z.string() }).optional(),
   tags: z.array(z.string()),
-  bindable: z.boolean(), // 시크릿 바인딩을 여기서 바꿀 수 있는가(채택된 capability · 직접 배선한 MCP 서버)
-  editable: z.boolean(), // 대화로 편집 + 버전업 가능한가(이 워크스페이스가 소유한 capability만)
-  probeable: z.boolean(), // 연결 테스트가 의미 있는가(원격 HTTP MCP 만)
+  bindable: z.boolean(), // can the secret binding be changed here (an adopted capability · a hand-wired MCP server)
+  editable: z.boolean(), // can it be edited by conversation and version-stamped (only a capability THIS workspace owns)
+  probeable: z.boolean(), // is a connection test meaningful (remote HTTP MCP only)
 })
 export type AgentToolDetail = z.infer<typeof agentToolDetailSchema>
 
@@ -103,17 +103,17 @@ export const agentToolProbeSchema = z.object({
 })
 export type AgentToolProbe = z.infer<typeof agentToolProbeSchema>
 
-// ── 내 기본 모델 ──────────────────────────────────────────────────────────────────────────────────
-// 같은 오버레이의 세 번째 채널. 도구/스킬이 "내 에이전트가 무엇을 쓰는가"라면 이건 "무엇으로 생각하는가"다.
-// model=null 은 워크스페이스 기준선(AgentSpec.model → 서버 기본값)을 따르겠다는 뜻이고, 그래서 읽기가 기준선을
-// 함께 실어 준다 — 기본값은 대신하는 값 옆에서만 의미가 있다.
+// ── My default model ─────────────────────────────────────────────────────────────────────────────
+// The third channel of the same overlay. Where tools and skills are "what my agent USES", this is "what it THINKS with".
+// model=null means following the workspace baseline (AgentSpec.model → the server default), which is why the read carries that baseline
+// along — a default only means something beside the value it stands in for.
 export const agentModelPreferenceSchema = z.object({
   model: z.string().nullable(),
   workspaceDefault: z.string().nullable(),
 })
 export type AgentModelPreference = z.infer<typeof agentModelPreferenceSchema>
 
-// 드리프트 가드 — 계약 wire 타입이 바뀌면 웹 타입체크가 깨진다(양방향).
+// The drift guard — a change to the contract wire type breaks the web typecheck (in both directions).
 type AssertAssignable<A extends B, B> = A
 type _Fwd = AssertAssignable<AgentToolEntry, ContractAgentToolEntry>
 type _Back = AssertAssignable<ContractAgentToolEntry, AgentToolEntry>

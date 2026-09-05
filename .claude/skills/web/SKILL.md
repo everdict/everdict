@@ -82,7 +82,7 @@ the canonical spelling — the same normalization the issue detail does for a lo
 
 **Every collection has ONE workspace address.** Some were scoped under a team for a while — the team axis is
 gone (migrations `0211`/`0212`), so there is no second boundary for a path to name and no ownership facet on a
-list. The evaluation collections sit in the sidebar's `평가` group beside the agent group; the tracker's live at
+list. The evaluation collections sit in the sidebar's Evaluation group (`평가` in ko) beside the agent group; the tracker's live at
 `/{workspace}/{issues,projects,initiatives}`. Every old team spelling 307s to the workspace list in
 `next.config.ts`. Status, priority, project and the page cursor stay query parameters, because those really are
 filters over the one list the path names.
@@ -244,8 +244,8 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   third-party skill in the store is an EXAMPLE, and taking it (`POST /skills/import`) copies it into the library as
   an ordinary workspace skill, editable and versionable from `settings/skills/[id]` like anything a member wrote
   (`origin` on the record is provenance only). Never re-introduce a read-only skill row that the agent follows but
-  nobody can edit. The detail's primary edit path stays "대화로 편집하기" (mission `skillEdit`), paired with
-  **"새 버전 찍기"** — the row is the working copy and a stamp freezes it (`skill.version` vs the newest stamp's
+  nobody can edit. The detail's primary edit path stays "edit by conversation" (`대화로 편집하기` in ko; mission `skillEdit`), paired with
+  **"stamp a new version"** (`새 버전 찍기` in ko) — the row is the working copy and a stamp freezes it (`skill.version` vs the newest stamp's
   `stampedAt` is what renders the "edited since" badge; a stamp deliberately does not touch `updatedAt`).
   **A settings LIST whose rows are entities links each row to that detail** — the row's name is the drill-in (the
   right side belongs to its switch). `settings/tools/[key]` is the reference: a routed detail that EXPLAINS the thing
@@ -269,13 +269,13 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   dataset's activity — which now renders through the same atom. Actor identity comes from ONE lookup
   (`entities/member` `memberDirectoryOf` server-side / `useMemberDirectory` client-side), never a per-page
   `members.find`. A new event = one enum value + one `case` + one message in BOTH locales (`tracker.history.*`).
-- **Domain-specific chat entries carry a MISSION**: a specialized entry like a skill detail's "대화로 편집하기"
+- **Domain-specific chat entries carry a MISSION**: a specialized entry like a skill detail's "edit by conversation"
   passes `mission` to `MentionInChatButton`/`AskAgentButton`/`AgentChatOpener` → `PendingMention.mission` →
   `AgentChatPanel`. The chat surface is UNCHANGED; only the empty-state icon/title/body/suggestions swap to that
   task's catalog block (`agentChat.missions.<kind>`, vocabulary in `entities/agent-session`), and the empty state
   names the target from the reference chip that arrived with it. Every mission has an INTENT
   (`AGENT_CHAT_MISSION_INTENTS`): `edit` (skill/tool/harness/dataset/judge/runtime/environment/agentCraft) lands on
-  a FRESH DRAFT when a persisted conversation is open and defaults the button caption to "대화로 편집하기";
+  a FRESH DRAFT when a persisted conversation is open and defaults the button caption to "edit by conversation";
   `analyze`/`ask` (view/scorecard/run/issue · knowledge) keep the open thread — comparing two scorecards in one
   conversation must survive the entry — and only frame the chat when it is empty. **Framing only shows on an empty
   chat, so whether an entry starts fresh IS whether its framing is ever seen** — one rule decides it,

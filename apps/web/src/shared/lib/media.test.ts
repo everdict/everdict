@@ -13,8 +13,8 @@ describe('mediaKindForUrl', () => {
     expect(mediaKindForUrl('https://x.test/clip.mp4?token=abc#t=10')).toBe('video')
   })
 
-  // 우리 첨부 프록시 주소는 원본 주소를 질의문자열에 싣는다 — 그 안의 확장자를 읽으면 프록시 경로 자체를
-  // 매체로 오인한다. 판정은 마지막 경로 조각에서만 한다.
+  // Our attachment proxy address carries the ORIGINAL address in its query string — reading the extension in there mistakes the proxy path
+  // itself for the media. The judgement is made from the last path segment alone.
   it('does not read an extension out of a query parameter', () => {
     expect(mediaKindForUrl('/api/issues/i1/attachment?url=https%3A%2F%2Fx.test%2Fa.png')).toBe(
       undefined

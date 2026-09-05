@@ -6,8 +6,8 @@ import type {
 } from '@everdict/contracts/wire'
 import { z } from 'zod'
 
-// 관리형 이미지 스토어(everdict 자체 레지스트리)의 웹 미러. 런타임 검증은 여기 zod가 전담하고,
-// 아래 드리프트 가드가 컨트롤 플레인의 wire 타입과 양방향으로 묶어 둔다.
+// The web mirror of the managed image store (everdict's own registry). Runtime validation is owned entirely by the zod here, and
+// the drift guard below binds it to the control plane's wire types in both directions.
 export const workspaceImageRepoSchema = z.object({
   name: z.string(),
   repository: z.string(),
@@ -37,8 +37,8 @@ export const workspaceImageRemoveSchema = z.object({
   removed: z.number().int().nonnegative(),
 })
 
-// GET /workspace/images/manifest — 상세 화면의 알맹이. digest 는 핀 값이고, 그 아래(빌드 히스토리·런타임 구성·크기)는
-// 레지스트리가 OCI config blob 을 내줄 때만 채워지는 best-effort 필드다.
+// GET /workspace/images/manifest — the substance of the detail screen. The digest is the pin value, and everything below it (build history,
+// runtime configuration, size) are best-effort fields filled only when the registry serves the OCI config blob.
 export const workspaceImageBuildStepSchema = z.object({
   createdBy: z.string(),
   created: z.string().optional(),
@@ -70,7 +70,7 @@ export const workspaceImageInspectSchema = z.object({
   config: workspaceImageRuntimeConfigSchema.optional(),
 })
 
-// 양방향 가드 — 어느 쪽에 필드가 추가/개명돼도 웹 타입체크가 깨진다.
+// A bidirectional guard — a field added or renamed on either side breaks the web typecheck.
 type AssertAssignable<A extends B, B> = A
 type WebCatalog = z.infer<typeof workspaceImageCatalogSchema>
 type WebTags = z.infer<typeof workspaceImageTagsSchema>

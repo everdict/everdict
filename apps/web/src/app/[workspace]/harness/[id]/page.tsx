@@ -170,8 +170,8 @@ export default async function HarnessDetailPage({
     }
   })()
 
-  // 이 하네스를 지켜보는 이슈들 + (보고 있는 버전이 스탬프되지 않았으면 가장 오래된 스탬프 = 태어난 자리).
-  // 보조 정보라 실패해도 상세는 그대로 그린다.
+  // The issues watching this harness, plus (when the version being viewed carries no stamp) the OLDEST stamp = where it was born.
+  // Supporting information, so the detail still renders on failure.
   const linkedIssues = await loadLinkedIssues(ctx, 'harness', id)
   const harnessOrigin = pickOrigin(entry?.versionOrigins, active ?? '', entry?.versions ?? [])
 
@@ -316,8 +316,8 @@ export default async function HarnessDetailPage({
                 {t('newVersion')}
               </Link>
               {config && (
-                // 같은 형상 위의 **다른 하네스**. 이 길이 없으면 env 만 다른 변형이 같은 id 의 새 버전으로
-                // 들어가고, 버전 목록이 "새것"과 "다른 것"의 뒤범벅이 된다.
+                // A **different harness** on the same shape. Without this route, a variation differing only in env goes in as a new version of
+                // the same id and the version list becomes a mixture of "newer" and "different".
                 <Link
                   href={`/${workspace}/harnesses/new?tab=instance&template=${encodeURIComponent(
                     config.template.id
@@ -457,7 +457,7 @@ export default async function HarnessDetailPage({
         )}
       </Card>
 
-      {/* 만들어진 배경 — 이 하네스가 어느 이슈에서 태어났고 어떤 이슈들이 그것을 지켜보는지. */}
+      {/* The background it was made against — which issue this harness was born from and which issues watch it. */}
       <CapabilityLineage
         workspace={workspace}
         kind="harness"

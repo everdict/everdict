@@ -148,9 +148,9 @@ export function withIssueDisplay(
   )
 }
 
-// 브라우저에서 바로 써 넣는다 — 서버 액션 왕복 없이. 표시 설정은 데이터가 아니라 취향이고, 이 쿠키는
-// httpOnly 가 아니다(서버가 첫 화면을 그릴 때 읽는 것이 유일한 용도다). 액션을 한 번 다녀오는 동안 화면이
-// 기다릴 이유가 없어서, 지금 화면은 클라이언트 상태로 즉시 바뀌고 쿠키는 다음 방문을 위해 남는다.
+// Written straight from the browser — with no server-action round trip. A display setting is a PREFERENCE rather than data, and this cookie is
+// not httpOnly (its only purpose is being read when the server draws the first screen). There is no reason for the screen to wait out a round
+// trip to an action, so the current screen changes immediately through client state and the cookie is left for the next visit.
 export function saveIssueDisplay(viewKey: string, display: IssueDisplay): void {
   writePreferenceCookie(
     ISSUE_DISPLAY_COOKIE,

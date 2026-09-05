@@ -15,9 +15,9 @@ import { ListDisplayMenu, type LayoutOption } from '@/shared/ui/list-toolbar'
 // it answers "how do I want to look at these", never "which of these", and that is why none of it goes in the
 // URL: a link you send someone must not rearrange their screen.
 //
-// 이 메뉴는 자기 상태를 갖지 않는다 — 고른 것을 위로 올리고, 목록이 그 자리에서 다시 그려진다. 예전에는
-// 서버 액션으로 쿠키를 쓰고 `refresh()` 로 라우트를 통째로 다시 그렸는데, 그동안 화면이 스켈레톤이 되고
-// 목록과 무관한 읽기가 전부 다시 돌았다. 쿠키는 이제 브라우저가 직접 쓴다(다음 방문을 위해서만).
+// This menu holds no state of its own — it raises the choice upward and the list is redrawn in place. It used to write the cookie through a
+// server action and redraw the whole route with `refresh()`, during which the screen became a skeleton and every read unrelated to the list ran
+// again. The cookie is now written by the browser directly (for the NEXT visit only).
 export function IssueDisplayMenu({
   display,
   onChange,

@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { harnessListSpec, harnessTags } from './list-view'
 import type { Harness } from './schema'
 
-// 하네스의 이름표 = 버전 태그의 합집합. 목록이 "각각이 무엇인지"를 태그로 답하려면 어느 버전에 붙었든
-// 라벨이 살아남아야 하고(합집합), 지금을 말하는 라벨이 앞서야 한다(최신 버전 우선).
+// A harness's name plate = the UNION of its version tags. For the list to answer "what is each of these" with tags, a label has to survive
+// whichever version it was attached to (the union), and the label speaking about NOW has to come first (newest version first).
 function harnessOf(overrides: Partial<Harness>): Harness {
   return { id: 'h', owner: 'acme', versions: ['1.0.0', '1.1.0'], ...overrides }
 }

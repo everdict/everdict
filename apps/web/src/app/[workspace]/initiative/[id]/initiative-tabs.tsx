@@ -7,11 +7,11 @@ import { INITIATIVE_SECTIONS, initiativeHref, type InitiativeSection } from '@/e
 import { cn } from '@/shared/lib/utils'
 import { Link } from '@/shared/ui/link'
 
-// 목표 상세의 탭. 리니어처럼 개요 / 프로젝트 / 업데이트 세 자리로 나뉘고, 헤더와 속성 열은 레이아웃이
-// 이고 있으므로 탭을 옮겨도 "어느 목표를 보고 있는지"는 화면에서 사라지지 않는다.
+// The goal detail's tabs. Split into three places as Linear does — overview / projects / updates — with the header and attribute column carried
+// by the LAYOUT, so moving between tabs never removes "which goal am I looking at" from the screen.
 //
-// 활성 판정은 세그먼트로 한다 — 경로 문자열 비교는 워크스페이스 슬러그나 인코딩된 id 때문에 어긋나기 쉽다.
-// 개요는 자식 세그먼트가 없는 자리(null)다.
+// Active state is decided by SEGMENT — comparing path strings goes wrong easily over a workspace slug or an encoded id.
+// The overview is the place with no child segment (null).
 export function InitiativeTabs({ workspace, id }: { workspace: string; id: string }) {
   const t = useTranslations('initiativesPage')
   const segment = useSelectedLayoutSegment()

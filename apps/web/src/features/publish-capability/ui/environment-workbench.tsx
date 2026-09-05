@@ -39,8 +39,8 @@ import { pullReasonLabel } from '../lib/pull-reason'
 import { EnvironmentEditor } from './environment-editor'
 import { ReachDialog } from './reach-controls'
 
-// 하나의 행 = 하나의 환경 정체성(source/id) — 이 워크스페이스가 저작한 것과 스토어에서 가져온 것을
-// 한 목록·한 어휘로 합친다(멘탈 모델 = "우리 워크스페이스가 쓸 수 있는 환경들").
+// One row = one environment IDENTITY (source/id) — what this workspace authored and what it imported from the store are merged into
+// one list and one vocabulary (the mental model is "the environments our workspace can use").
 type EnvironmentRow = {
   key: string
   capability?: Capability
@@ -49,8 +49,8 @@ type EnvironmentRow = {
 
 type Scope = 'all' | 'authored' | 'imported'
 
-// Settings › Environments 의 환경 전용 표면 — 스토어 크롬(채택 통계·kind 필터·발행 어휘) 없이
-// 등록/공유/검증/소비 준비 상태를 환경의 언어로 관리한다. 발견·가져오기는 스토어가 담당(우상단 링크).
+// The environment-specific surface of Settings › Environments — managing registration, sharing, verification and consumption readiness in the
+// environment's own language, without the store chrome (adoption stats, kind filters, publishing vocabulary). Discovery and import are the store's (the link, top right).
 export function EnvironmentWorkbench({
   authored,
   imported,
@@ -77,8 +77,8 @@ export function EnvironmentWorkbench({
   canPublishPublic: boolean
   myWorkspaces: { id: string; name: string }[]
   imageRegistries: { name: string; host: string }[]
-  // 대화 진입점 — 우측 대화 패널은 위젯 레이어라 피처가 직접 못 쓴다(FSD 상향 임포트 금지). 페이지 레벨 클라이언트
-  // 컴포넌트가 훅을 소유하고 이 콜백으로 내려준다(SettingsFilesExplorer/SettingsKnowledgeMap 선례).
+  // The conversation entry point — the right conversation panel is the widget layer, so a feature cannot use it directly (FSD forbids importing
+  // upward). A page-level client component owns the hook and passes it down through this callback (following SettingsFilesExplorer/SettingsKnowledgeMap).
   onMention?: (reference: AgentReference) => void
   onAskAgent?: (prompt: string, reference?: AgentReference) => void
 }) {
@@ -207,7 +207,7 @@ export function EnvironmentWorkbench({
           <ArrowUpRight className="size-3.5" />
         </Link>
         {canWrite && onAskAgent !== undefined && (
-          // 이미지를 만든 사람이 바로 등록까지 가는 경로 — 에이전트가 push 명령을 안내하고 등록(save_capability)까지 한다.
+          // The path from making an image straight through to registering it — the agent walks through the push command and registers it (save_capability) too.
           <Button
             variant="outline"
             size="sm"
@@ -349,12 +349,12 @@ function EnvironmentRowCard({
   const spec = c?.spec.type === 'environment' ? c.spec : undefined
   const inv = row.inventory
   const image = spec?.image ?? inv?.image
-  // 출처 분류는 컨트롤 플레인이 뷰어 기준으로 계산해 내려준다(웹에는 classifyImageRef 미러가 없다).
+  // The provenance classification is computed by the control plane against the VIEWER and sent down (the web has no classifyImageRef mirror).
   const imageClass = c?.imageClass ?? inv?.imageClass
   const benchmark = spec?.contents?.benchmark ?? inv?.benchmark
   const version = c?.version ?? inv?.version
   const author = c !== undefined ? authors[c.createdBy] : undefined
-  // pull 자격 실패(auth)만 인라인 해결 경로를 붙인다 — 해법이 이 화면 밖(통합 설정의 레지스트리 등록)에 있기 때문.
+  // Only a pull-credential failure (auth) gets an inline resolution path — because its fix lives outside this screen (registering a registry in integration settings).
   const needsRegistryFix = inv?.verify?.pullable === false && inv.verify.reason === 'auth'
 
   return (
@@ -414,8 +414,8 @@ function EnvironmentRowCard({
                   {pullReasonLabel(t, inv.verify.reason)}
                 </Badge>
               ))}
-            {/* 이미지 출처 — 관리형 스토어(우리가 grant를 발급하는 것)만 표시한다. external은 기본값이라
-                배지를 달면 목록 전체가 배지밭이 되고, 정작 구분이 필요한 "우리 것"이 묻힌다. */}
+            {/* Image provenance — only the managed store (the one we issue grants for) is marked. `external` is the DEFAULT, so badging it
+                turns the whole list into a field of badges and buries the one distinction that matters, "ours". */}
             {imageClass === 'managed' && (
               <Badge tone="success" className="shrink-0">
                 {t('imgClass_managed')}
@@ -428,7 +428,7 @@ function EnvironmentRowCard({
           </div>
         </div>
 
-        {/* 우측 액션 — 행 클릭(펼침)으로 버블링되지 않게 막는다. */}
+        {/* The right-hand actions — stopped from bubbling into the row click (which expands it). */}
         <div className="flex shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
           {needsRegistryFix && (
             <Tooltip content={t('envRegistryFixTip')} side="top" align="end">
@@ -442,7 +442,7 @@ function EnvironmentRowCard({
             </Tooltip>
           )}
           {c !== undefined && onMention !== undefined && (
-            // 이 환경을 대화 컨텍스트로 — 하네스에 배선하거나 instructions 를 손보는 일은 대화가 더 빠르다.
+            // This environment as conversation context — wiring it into a harness or reworking its instructions is faster in conversation.
             <Tooltip content={t('envMentionTip')} side="top" align="end">
               <button
                 type="button"

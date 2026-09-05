@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// 회귀 테스트 — 프로젝트 변이도 `revalidatePath` 를 부르면 안 된다. 이유는 이슈 쪽과 같다
-// (`features/manage-issue/api/issues.test.ts`): 무효화할 캐시는 없는데 Next 16 은 선언만으로 클라이언트
-// prefetch 캐시를 통째로 버려, 이름 한 번 바꾸는 데 화면의 모든 `<Link>` 가 다시 prefetch 되고 그 큐가
-// 드레인될 때까지 제목이 옛 이름으로 남아 있었다.
+// A regression test — a project mutation must not call `revalidatePath` either. The reason is the issue side's
+// (`features/manage-issue/api/issues.test.ts`): there is no cache to invalidate, and Next 16 throws away the whole client
+// prefetch cache on the declaration alone, so one rename made every `<Link>` on screen re-prefetch and the title stayed at the
+// old name until that queue drained.
 const revalidatePath = vi.fn()
 vi.mock('next/cache', () => ({ revalidatePath, revalidateTag: vi.fn() }))
 vi.mock('@/shared/auth/principal', () => ({ authContext: async () => ({ devTenant: 'acme' }) }))

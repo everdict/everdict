@@ -11,8 +11,8 @@ import {
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 스토어 상세 드릴인의 버전 패널 서버 액션 — 버전 목록·특정 버전 레코드·구조 diff. 드릴인은 라우트가 아니라 클라이언트
-// 상태라 페이지 props 로 못 받으므로 상세를 열 때 온디맨드로 로드한다. source=크로스테넌트 public/subset 오너(내 것이면 생략).
+// The server actions of the store detail drill-in's version panel — the version list, one version's record, and the structural diff. The drill-in is
+// CLIENT state rather than a route so it cannot arrive as a page prop, and it is loaded on demand when the detail opens. source = the cross-tenant public/subset owner (omitted for mine).
 type VersionActionResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
 export async function loadCapabilityVersionsAction(

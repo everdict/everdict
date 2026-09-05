@@ -106,7 +106,7 @@ export const agentPlane = {
       auth,
       `/agent/sessions/${encodeURIComponent(id)}/messages${since !== undefined ? `?since=${since}` : ''}`
     ),
-  // 백그라운드(논의) 턴이 대기 중인 쓰기도구 승인 목록 — 워치 모드 패널이 폴링해 승인 프롬프트를 띄운다.
+  // The write-tool approvals a background (discussion) turn is waiting on — the watch-mode panel polls it and raises the approval prompt.
   listPending: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/agent/sessions/${encodeURIComponent(id)}/pending`),
   chat: <T>(auth: AuthContext, id: string, body: unknown) =>

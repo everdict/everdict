@@ -21,7 +21,7 @@ export interface SkillActionResult {
   error?: string
 }
 
-// 스킬 저작(POST /skills). visibility 기본 private. files=부속 참조파일(본문은 슬림하게). authZ(skills:write)는 컨트롤플레인이 강제.
+// Authoring a skill (POST /skills). visibility defaults to private. files = the attached reference files (the body stays slim). AuthZ (skills:write) is enforced by the control plane.
 export async function createSkillAction(body: {
   name: string
   description: string
@@ -39,8 +39,8 @@ export async function createSkillAction(body: {
   }
 }
 
-// 스킬 편집/공유(PATCH /skills/:id). visibility-만 보내면 공유 토글. files 는 주면 통째 교체, 생략하면 유지.
-// 관리는 작성자-or-admin(컨트롤플레인).
+// Editing or sharing a skill (PATCH /skills/:id). Sending visibility ALONE toggles sharing. files is replaced whole when given and kept when omitted.
+// Management is author-or-admin (the control plane).
 export async function updateSkillAction(
   id: string,
   patch: {
@@ -61,7 +61,7 @@ export async function updateSkillAction(
   }
 }
 
-// 스킬 삭제(DELETE /skills/:id). 작성자-or-admin(컨트롤플레인).
+// Deleting a skill (DELETE /skills/:id). Author-or-admin (the control plane).
 export async function deleteSkillAction(id: string): Promise<{ ok: boolean; error?: string }> {
   const ctx = await authContext()
   try {
@@ -79,7 +79,7 @@ export interface GenerateSkillActionResult {
   error?: string
 }
 
-// skill-generate — 설명 + 등록 모델 id 로 초안 작성(POST /skills/generate). 영속 안 됨. 실패(모델없음/키없음/업스트림)는 error.
+// skill-generate — a draft written from a description plus a registered model id (POST /skills/generate). Not persisted. A failure (no model, no key, upstream) comes back as `error`.
 export async function generateSkillAction(description: string, model: string): Promise<GenerateSkillActionResult> {
   const ctx = await authContext()
   try {
@@ -96,8 +96,8 @@ export interface TrySkillActionResult {
   error?: string
 }
 
-// 스킬 테스트 드라이브 — (미저장일 수도 있는) 스킬 + 샘플 요청으로 에이전트를 실제 1턴 실행(POST /agent/skills/try, 무상태),
-// 트랜스크립트 반환. 저장 전에 "이 스킬이 실제로 잘 도는지" 검증. 실패(모델/키/업스트림)는 error.
+// The skill test drive — one real agent turn run against the skill (possibly unsaved) plus a sample request (POST /agent/skills/try, stateless),
+// returning the transcript. It verifies "does this skill actually work" BEFORE saving. A failure (model, key, upstream) comes back as `error`.
 export async function trySkillAction(
   skill: { name: string; description: string; instructions: string; files?: SkillFile[] },
   message: string

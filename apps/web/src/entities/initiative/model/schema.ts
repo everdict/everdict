@@ -18,19 +18,19 @@ import { issueStatusSchema, trackerHistoryEntrySchema } from '@/entities/issue'
 import { projectRollupSchema, projectStatusSchema } from '@/entities/project'
 import { trackerHealthSchema } from '@/entities/tracker-health'
 
-// The eval tracker's Initiative — 여러 프로젝트가 함께 향하는 **목표**(docs/tracker.md). 배포 단위가 아니다:
-// 진척은 그 아래 전부를 훑은 산수이고, 완료가 게이트인 이유도 "열린 일이 남은 목표는 아직 이룬 게 아니다"
-// 하나뿐이다. Runtime boundary validation stays here (zod v4); the EXPORTED types come from
+// The eval tracker's Initiative — a **goal** several projects work toward (docs/tracker.md). It is not a release unit:
+// progress is arithmetic that sweeps everything beneath it, and completion is a gate for one reason only — "a goal with open work
+// left is not one that has been reached". Runtime boundary validation stays here (zod v4); the EXPORTED types come from
 // @everdict/contracts (`import type` only).
 
-// `planned` 는 목표가 시작하는 자리 — 무엇을 뜻하는지, 어떤 프로젝트가 그걸 섬기는지 아직 정하는 중이다.
-// 그걸 active 라 부르면 모든 구상이 진행 중인 일처럼 보인다.
+// `planned` is where a goal STARTS — what it means and which projects serve it are still being decided.
+// Calling that active makes every idea look like work in progress.
 export const INITIATIVE_STATUSES = ['planned', 'active', 'completed', 'cancelled'] as const
 export const initiativeStatusSchema = z.enum(INITIATIVE_STATUSES)
 
 const calendarDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/)
 
-// 목표가 적히고, 측정되고, 논쟁되는 곳으로 나가는 링크.
+// The links out to where the goal is written down, measured and argued about.
 export const initiativeResourceSchema = z.object({
   label: z.string(),
   url: z.string(),
@@ -41,15 +41,15 @@ export const initiativeSchema = z.object({
   tenant: z.string(),
   name: z.string(),
   description: z.string().optional(),
-  // 이모지 하나 — 목록에서 이름을 읽기 전에 목표를 알아보게 한다.
+  // One emoji — so a goal is recognised in a list before its name is read.
   icon: z.string().optional(),
   status: initiativeStatusSchema,
-  // 상위 이니셔티브 — 진척은 하위까지 훑어 올라오므로, 큰 목표를 쪼개도 답은 하나로 남는다.
+  // The parent initiative — progress sweeps up from below, so splitting a large goal still leaves ONE answer.
   parentId: z.string().optional(),
-  // 이 목표를 책임지는 사람과, 그 사람이 마지막으로 올린 판정(health). 없음 = 아직 아무도 보고하지 않았다는
-  // 뜻이고, 그건 "정상"과 다른 주장이다.
+  // Who is responsible for this goal, and the verdict (health) they last posted. Absent means nobody has reported yet,
+  // which is a different claim from "fine".
   lead: z.string().optional(),
-  // 이 목표에 함께 있는 사람들, 그리고 목표가 적힌 곳들.
+  // The people who are on this goal, and the places it is written down.
   memberIds: z.array(z.string()).default([]),
   resources: z.array(initiativeResourceSchema).default([]),
   health: trackerHealthSchema.optional(),
@@ -60,9 +60,9 @@ export const initiativeSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 })
-// 목록 한 줄이 이고 오는 진척 — 상세의 `readiness` 와 같은 세 숫자를, 이슈를 한 건도 읽지 않고 집계로만
-// 낸 것이다(목표 20개짜리 목록이 팬아웃 20번일 수는 없다). 규칙은 상세와 같아야 한다: 취소된 프로젝트의
-// 일은 목표에서 빠지고, 하위 목표의 프로젝트는 상위로 올라온다.
+// The progress one list row carries — the same three numbers as the detail's `readiness`, produced by aggregation alone without reading a
+// single issue (a list of twenty goals cannot be twenty fan-outs). The rules must match the detail's: work in a cancelled project drops out
+// of the goal, and a sub-goal's projects roll up into the parent.
 export const initiativeProgressSchema = z.object({
   open: z.number(),
   total: z.number(),
@@ -74,7 +74,7 @@ export const initiativeListItemSchema = initiativeSchema.extend({
 })
 export const initiativesSchema = z.array(initiativeListItemSchema)
 
-// 목표에 올라온 업데이트 한 건 — 추가만 되고 고쳐지지 않는다.
+// One update posted on a goal — append-only, never edited.
 export const initiativeUpdateSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -89,7 +89,7 @@ export const initiativeUpdatesSchema = z.array(initiativeUpdateSchema)
 export const initiativeBlockerSchema = z.object({
   projectId: z.string().optional(),
   issueId: z.string(),
-  // 이슈를 부르는 이름(`ENG-12`) — 남은 일 목록이 이슈를 다시 읽지 않고도 슬러그로 링크한다.
+  // The name an issue is called by (`ENG-12`) — so the remaining-work list links by slug without re-reading the issue.
   identifier: z.string(),
   title: z.string(),
   status: issueStatusSchema,
@@ -98,10 +98,10 @@ export const initiativeBlockerSchema = z.object({
 export const initiativeProjectSummarySchema = z.object({
   id: z.string(),
   name: z.string(),
-  // 이 프로젝트를 실제로 품은 이니셔티브 — 없으면 이 이니셔티브 직속, 있으면 그 하위를 거쳐 올라온 것.
+  // The initiative that actually HOLDS this project — absent means directly under this initiative, present means it rolled up through a sub-goal.
   viaInitiativeId: z.string().optional(),
   status: projectStatusSchema,
-  // 목표 화면의 프로젝트 행이 프로젝트 목록과 같은 것을 말하도록 함께 실려 온다.
+  // Carried along so a project row on the goal screen says the same thing as the project list does.
   health: trackerHealthSchema.optional(),
   lead: z.string().optional(),
   targetDate: calendarDateSchema.optional(),
@@ -109,8 +109,8 @@ export const initiativeProjectSummarySchema = z.object({
   rollup: projectRollupSchema,
 })
 
-// 목표가 얼마나 진행됐는지: `ready` 는 취소되지 않은 **모든** 프로젝트의 열린 이슈를 그 프로젝트 상태와
-// 무관하게 센다 — 완료로 표시된 프로젝트라도 그 이슈가 나중에 회귀했다면 목표 아래에는 아직 일이 남아 있다.
+// How far along the goal is: `ready` counts the open issues of **every** non-cancelled project regardless of that project's status —
+// even a project marked complete still leaves work under the goal if its issues later regressed.
 export const initiativeReadinessSchema = z.object({
   ready: z.boolean(),
   openIssues: z.number(),

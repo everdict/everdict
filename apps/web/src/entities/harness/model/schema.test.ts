@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { harnessSpecSchema } from './schema'
 
-// 하네스 상세는 스펙을 `.parse()` 한 뒤에야 그려진다 — 계약이 보내는 kind 하나가 이 미러에 없으면 화면 전체가
-// "불러오지 못했습니다" 한 줄로 죽는다. 라이브에서 `trace.kind: "file"` 하네스가 정확히 그렇게 열리지 않았다.
+// A harness detail is drawn only after `.parse()`ing the spec — one kind the contract sends that is missing from this mirror kills the whole
+// screen as a one-line "could not load". In production a `trace.kind: "file"` harness failed to open in exactly that way.
 const spec = (trace: Record<string, unknown>) => ({
   kind: 'command' as const,
   id: 'hermes-index-full-traced',

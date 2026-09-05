@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-// 회귀 테스트 — 이슈 변이는 `revalidatePath` 를 부르면 안 된다.
+// A regression test — an issue mutation must not call `revalidatePath`.
 //
-// 이 앱에는 그것이 무효화할 캐시가 없다(페이지는 `force-dynamic`, 제어 평면 호출은 `no-store`,
-// `staleTimes.dynamic` 은 0). 그런데 Next 16 은 액션이 무효화를 선언했다는 사실만으로 클라이언트 prefetch
-// 캐시를 통째로 버리고(`invalidateEntirePrefetchCache`) 300ms 쿨다운을 걸어, 화면에 걸린 모든 `<Link>` 가
-// 한꺼번에 다시 prefetch 된다. 이슈 상세는 링크가 23개라 그 큐가 드레인될 때까지 변이의 트랜지션이 묶이고,
-// 실측으로 프로젝트 배정 한 번이 4~12초 동안 스피너만 돌았다(네트워크는 0.7초에 끝나 있었다).
-// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 그쪽은 현재 라우트만 무효화하므로 폭풍이 없다.
+// This app has no cache for it to invalidate (pages are `force-dynamic`, control-plane calls are `no-store` and
+// `staleTimes.dynamic` is 0). Yet Next 16 throws away the whole client prefetch cache on the mere FACT that an action declared an
+// invalidation (`invalidateEntirePrefetchCache`) and imposes a 300ms cooldown, so every `<Link>` on screen re-prefetches at once.
+// An issue detail has 23 links, so the mutation's transition is bound until that queue drains, and one measured project assignment spun a
+// spinner for 4–12 seconds (with the network finished in 0.7).
+// Refreshing the screen is the CALLER's `refresh()` — that invalidates the current route only, so there is no storm.
 const revalidatePath = vi.fn()
 vi.mock('next/cache', () => ({ revalidatePath, revalidateTag: vi.fn() }))
 vi.mock('@/shared/auth/principal', () => ({ authContext: async () => ({ devTenant: 'acme' }) }))

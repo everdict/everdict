@@ -10,8 +10,8 @@ export interface SetAgentToolResult {
   error?: string
 }
 
-// 내 에이전트 도구 on/off — 워크스페이스 AgentSpec 은 건드리지 않고 "나"의 오버레이만 바꾼다.
-// enabled=null 은 오버라이드 해제(워크스페이스 기본값 따르기). 컨트롤플레인이 셀프 스코프를 강제한다.
+// My agent's tool on/off — it leaves the workspace AgentSpec untouched and changes only MY overlay.
+// enabled=null clears the override (following the workspace default). The control plane enforces the self scope.
 export async function setAgentToolAction(
   key: string,
   enabled: boolean | null

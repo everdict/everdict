@@ -45,8 +45,8 @@ export type RunRowData = Pick<
 
 // One run row (self-contained: pulls its own i18n/locale). isChild = a scorecard case row (indented under its batch
 // header, caseId in place of the source badge). Shared by the dashboard runs-table and the activity console.
-// childKind: 같은 들여쓰기 자식이라도 컬럼의 의미가 다르다 — 스코어카드 자식의 caseId 는 케이스지만, 대화 턴의
-// caseId 는 깨어난 원인(chat / 이벤트 kind)이라 "케이스 chat" 으로 읽히면 거짓말이 된다(run 상세와 같은 규칙).
+// childKind: even among identically indented children the columns MEAN different things — a scorecard child's caseId is a case, while a chat
+// turn's caseId is what woke it (chat / an event kind), so reading it as "case chat" would be a lie (the same rule as the run detail).
 export function RunRow({
   run,
   workspace,
@@ -65,8 +65,8 @@ export function RunRow({
   const kind = runKindOf(run)
   const KindIcon = RUN_KIND_META[kind].icon
   const kindLabel = t(RUN_KIND_META[kind].labelKey)
-  // 애드혹 샌드박스의 실행 대상은 이미지 ref 그 자체("adhoc" 버전 표식) — 컨벤션대로 displayImageRef 로
-  // 읽고 원문은 title 로. 그 외 패밀리는 도메인 팩토리가 채운 스펙 참조(id@version)를 그대로 읽는다.
+  // An ad-hoc sandbox's execution subject IS the image ref (with an "adhoc" version marker) — read through displayImageRef by convention, with
+  // the raw value in `title`. Every other family reads the spec reference (id@version) the domain factory filled in, verbatim.
   const adhocImage = kind === 'sandbox' && run.harness.version === 'adhoc'
   return (
     <TR className="group">
@@ -80,7 +80,7 @@ export function RunRow({
       </TD>
       <TD>
         <span className="inline-flex items-center gap-1.5">
-          {/* 실행 패밀리 아이콘 — 자식 행은 그룹 헤더(스코어카드/대화)가 이미 종류를 말하므로 생략. */}
+          {/* The execution family icon — omitted on a child row, since the group header (a scorecard or a conversation) already states the kind. */}
           {!isChild && (
             <span title={kindLabel} className="flex shrink-0">
               <KindIcon className="size-3.5 text-muted-foreground" aria-label={kindLabel} />

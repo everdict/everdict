@@ -26,10 +26,10 @@ import {
   updateIssueLabelAction,
 } from '../api/manage-issue-labels'
 
-// Settings › Labels — 워크스페이스의 분류 어휘. 이슈는 이 목록의 id 를 가리키므로 여기서의 이름/색 변경은
-// 그 라벨을 단 모든 이슈에 한 번에 반영된다(문자열 시절에는 불가능했던 성질).
+// Settings › Labels — the workspace's classification vocabulary. Issues point at ids in this list, so a name or colour change here reaches every
+// issue wearing that label at once (a property that was impossible when they were strings).
 //
-// 색 고르개는 `entities/issue-label` 의 것을 쓴다 — 이슈 화면의 선택기도 같은 물건으로 고른다.
+// The colour picker is `entities/issue-label`'s — the picker on the issue screens chooses from the same thing.
 export function IssueLabelsManager({
   labels,
   canWrite,
@@ -41,7 +41,7 @@ export function IssueLabelsManager({
   const refresh = useRefresh()
   const formId = useId()
   const [error, setError] = useState<string>()
-  // 편집 중인 라벨(undefined = 새로 만들기). 다이얼로그 하나가 두 흐름을 다 맡는다 — 필드가 같기 때문이다.
+  // The label being edited (undefined = creating). ONE dialog carries both flows, because the fields are the same.
   const [editing, setEditing] = useState<IssueLabel | undefined>()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -79,7 +79,7 @@ export function IssueLabelsManager({
           ? await updateIssueLabelAction(current.id, {
               ...(trimmed !== current.name ? { name: trimmed } : {}),
               ...(color !== current.color ? { color } : {}),
-              // PATCH semantics: 비운 설명은 명시적 null 로 가야 지워진다.
+              // PATCH semantics: a description that was cleared has to go as an explicit null to be removed.
               ...(description.trim() !== (current.description ?? '')
                 ? { description: description.trim() === '' ? null : description.trim() }
                 : {}),
@@ -101,7 +101,7 @@ export function IssueLabelsManager({
     })()
   }
 
-  // 삭제는 되돌릴 수 없고 이슈에서 라벨을 떼어낸다 — 몇 개인지 먼저 읽어 보여준 다음 확인받는다.
+  // Deletion is irreversible and detaches the label from issues — how many is read and shown BEFORE the confirmation.
   function askRemove(label: IssueLabel): void {
     setRemoving({ label, issues: undefined })
     void (async () => {
@@ -264,7 +264,7 @@ export function IssueLabelsManager({
             {t('deleteTitle')}
           </h2>
           <p className="text-[13px] leading-relaxed text-muted-foreground">
-            {/* 아직 세는 중이면 개수를 약속하지 않는다 — 틀린 숫자보다 없는 숫자가 낫다. */}
+            {/* While still counting, no count is promised — no number beats a wrong one. */}
             {removing?.issues === undefined
               ? t('deleteBody', { name: removing?.label.name ?? '' })
               : t('deleteBodyCounted', {

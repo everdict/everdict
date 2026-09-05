@@ -120,6 +120,9 @@ function makeDeps(
     candidate: { record: { ...winning.candidate.record, manifest: { harness: { specDigest } } } },
   };
   const campaignService = new CampaignService({
+    // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
+    // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
+    scorecards: { get: async () => undefined },
     store,
     operations: store,
     changes: noChanges,

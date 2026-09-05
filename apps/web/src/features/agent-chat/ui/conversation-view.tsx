@@ -228,8 +228,8 @@ export const TranscriptList = memo(function TranscriptList({
   )
 })
 
-// 보냈지만 아직 서버 레코드로 돌아오지 않은 내 메시지. `queued` = 실행 중인 턴에 끼워 넣은 것(리다이렉트)이라
-// 진행 중인 답변보다 뒤에 놓인다 — 자기보다 앞선 답변 위에 뜨면 대화 순서가 거짓이 된다.
+// My message that was sent and has not come back as a server record. `queued` = slipped into a RUNNING turn (a redirect), so it sits BELOW the
+// answer in progress — appearing above an answer that preceded it would make the conversation order a lie.
 export interface PendingUserMessage {
   text: string
   queued: boolean
@@ -296,8 +296,8 @@ export function ConversationView({
   mission,
 }: {
   title: string
-  // 활성 워크스페이스 — 위임 카드 안의 턴이 자기 run 상세로 링크하는 데 쓴다. 위젯에서 prop 으로
-  // 내려온다(위로 import 하지 않는다 — FSD 방향은 아래로만).
+  // The active workspace — used by a turn inside a delegation card to link to its own run detail. It comes down as a prop from the widget
+  // (nothing is imported upward — the FSD direction is downward only).
   workspace: string
   user?: ChatUser
   models: string[]
@@ -320,7 +320,7 @@ export function ConversationView({
   sending: boolean
   streamingText: string
   streamingReasoning: string
-  // 일시 장애 안내: 재시도 대기(retry — 조용한 턴의 이유) 또는 예비 모델 전환(fallback). null → 없음.
+  // The transient-trouble notice: waiting to retry (retry — the reason for a quiet turn) or a switch to the fallback model. null → none.
   streamNotice?:
     | { kind: 'retry'; attempt: number; delayMs: number; persistent?: boolean }
     | { kind: 'fallback'; to: string }
@@ -341,7 +341,7 @@ export function ConversationView({
   // An analysis canvas is open in the left half (analyze dashboard / saved View) — the composer shows a
   // "canvas linked" chip so the member knows the agent sees it. null/undefined → no canvas, no chip.
   canvasLink?: { viewName?: string } | null
-  // The member arrived from a domain-specific entry ("대화로 편집하기" on a skill, …) rather than the generic
+  // The member arrived from a domain-specific entry ("edit by conversation" on a skill, …) rather than the generic
   // chat rail. Same surface, different framing: the empty chat names the task, points at the entity it was
   // opened on (target), and offers suggestions for THAT job instead of the generic workspace prompts.
   mission?: { kind: AgentChatMission; target?: string } | null
@@ -376,8 +376,8 @@ export function ConversationView({
   const items = useMemo(() => buildTranscript(messages, artifacts), [messages, artifacts])
 
   const isEmpty = messages.length === 0 && pendingUsers.length === 0 && !sending
-  // 임무로 진입했으면 그 임무의 카탈로그 블록(agentChat.missions.<kind>)이 빈 화면의 제목·설명·제안을 대신한다 —
-  // 구조는 그대로, 라이팅만 그 작업의 것으로. 임무가 없으면 기존 범용 문구.
+  // Entered with a mission, that mission's catalog block (agentChat.missions.<kind>) stands in for the empty screen's title, description and
+  // suggestions — the STRUCTURE unchanged and only the writing made that work's. With no mission, the existing generic wording.
   const emptyTitle = mission ? t(`missions.${mission.kind}.title`) : t('emptyMessagesTitle')
   const emptyBody = mission ? t(`missions.${mission.kind}.body`) : t('emptyMessages')
   const suggestions = (
@@ -410,7 +410,7 @@ export function ConversationView({
           {isEmpty ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-5 text-center">
               <div className="grid size-11 place-items-center rounded-2xl bg-primary/12 text-primary">
-                {/* 임무의 성격이 아이콘을 고른다 — 고치는 진입(연필) / 파고드는 진입(차트) / 묻는 진입(말풍선). */}
+                {/* The mission's NATURE picks the icon — an editing entry (pencil) / a digging-in entry (chart) / an asking entry (speech bubble). */}
                 {mission === null || mission === undefined ? (
                   <Sparkles className="size-5" strokeWidth={1.75} />
                 ) : AGENT_CHAT_MISSION_INTENTS[mission.kind] === 'edit' ? (
@@ -423,7 +423,7 @@ export function ConversationView({
               </div>
               <div className="space-y-1">
                 <p className="text-[14px] font-[560] text-foreground">{emptyTitle}</p>
-                {/* 임무의 대상 — 무엇을 두고 대화하는 중인지 못 박는다(진입한 상세가 떨군 참조 칩의 이름). */}
+                {/* The mission's SUBJECT — pinning down what is being talked about (the name on the reference chip the entering detail dropped). */}
                 {mission?.target !== undefined && (
                   <p className="font-mono text-[12px] text-primary">{mission.target}</p>
                 )}
@@ -492,7 +492,7 @@ export function ConversationView({
                   </span>
                 </div>
               ) : null}
-              {/* 리다이렉트로 끼워 넣은 메시지는 지금 흐르는 답변 아래에 — 그 답변을 끊으려고 보낸 것이니까. */}
+              {/* A message slipped in by a redirect goes BELOW the answer currently streaming — it was sent to interrupt that answer. */}
               {pendingUsers
                 .filter((p) => p.queued)
                 .map((p, i) => (

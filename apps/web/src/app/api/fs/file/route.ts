@@ -3,15 +3,14 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 파일 트리의 업로드 문 — 로컬 파일 하나를 워크스페이스 파일시스템의 지정된 경로에 새 파일로 올린다.
-// 첨부 문(`/api/fs/uploads`)과 달리 목적지를 호출자가 정한다: 트리에서 고른 폴더에 원래 이름 그대로 놓인다.
+// The file tree's upload door — it puts one local file into the workspace filesystem at a given path, as a NEW file.
+// Unlike the attachment door (`/api/fs/uploads`), the CALLER decides the destination: it lands in the folder picked in the tree under its original name.
 //
-// 서버 액션이 아니라 라우트인 이유도 첨부 쪽과 같다 — 액션의 본문은 JSON 이라 파일을 base64 로 부풀려야 하고,
-// 브라우저가 이미 multipart 로 보낼 수 있는 것을 두 번 인코딩하게 된다. 쓰기 권한(files:write)은 제어 평면이
-// 판정한다.
+// It is a route rather than a server action for the same reason as the attachment side — an action's body is JSON, so a file has to be inflated
+// into base64, encoding twice what the browser can already send as multipart. Write permission (files:write) is judged by the control plane.
 
-// 제어 평면의 FS_FILE_MAX_BYTES 거울. 웹은 contracts 의 값을 실행 시점에 가져올 수 없어(런타임 분리) 여기에
-// 적어 두고, 넘는 파일은 올리기 전에 돌려보낸다.
+// A mirror of the control plane's FS_FILE_MAX_BYTES. The web cannot pull the contracts value at runtime (runtime decoupling), so it is written
+// here and an oversized file is turned back before it is uploaded.
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 export async function POST(request: Request): Promise<Response> {
@@ -32,8 +31,8 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const content = Buffer.from(await file.arrayBuffer()).toString('base64')
-  // 새 파일로만 쓴다(baseRevision 0) — 같은 경로가 이미 있으면 제어 평면이 409 로 거절하고, 트리는 그걸 이름
-  // 충돌로 보여 준다. 상태를 그대로 통과시키는 이유: 409(이름 충돌)와 413(한도 초과)은 업로더가 다르게 고친다.
+  // It only ever writes a NEW file (baseRevision 0) — an existing path is refused by the control plane with a 409, which the tree shows as a name
+  // collision. The status is passed through as-is because an uploader fixes a 409 (a name collision) differently from a 413 (over the limit).
   const res = await controlPlane.writeFsFileChecked(ctx, {
     path,
     content,

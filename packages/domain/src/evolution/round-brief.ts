@@ -48,6 +48,17 @@ export interface CampaignRoundBriefInput {
   // What earlier rounds established about the MECHANISM (each round's `learned`, oldest first). Driver-authored
   // advice by contract; it shapes the proposal and decides nothing, which is exactly what a brief is for.
   learned?: readonly string[];
+  // ── …AND WHAT EARLIER WALKS ESTABLISHED (the `continues` chain, and the campaigns a round named) ──
+  //
+  // `continues` exists so a walk can keep going after an adoption, and the brief was built from THIS
+  // campaign's rounds alone — so everything a five-round predecessor learned was dropped at the campaign
+  // boundary, and the delegate was handed the search to redo. `informedBy` had the same hole from the other
+  // side: a round names the campaigns whose findings shaped it, and nothing anywhere read the field.
+  //
+  // The POINTERS are the driver's and the FINDINGS are the platform's read of what those walks recorded
+  // (rule `protocol` L3). Kept labelled by source, because a delegate must be able to tell what this walk
+  // established from what it was told.
+  inherited?: ReadonlyArray<{ campaignId: string; findings: readonly string[] }>;
   // Why there is no `evidence` even though rounds have run — a legacy round that sealed none, a store that
   // could not serve it. Stated in the brief rather than swallowed: a delegate handed no traces reads that as
   // "there is nothing to look at", and "we could not find out" is not "there is nothing" (rule `protocol` L2).
@@ -63,6 +74,32 @@ export interface CampaignRoundBriefInput {
 //
 // The exclusion is therefore computed from the SCENARIOS, which carry the flag, and a disagreement resolves
 // toward silence: a case that is held-out anywhere is briefable nowhere.
+// ── A FINDING IS PROSE, AND PROSE CAN NAME A HELD-OUT CASE ───────────────────────────────────────────
+//
+// Every structured field in this brief excludes the held-out set by construction — `briefableTargets`
+// filters the targets, and the evidence read filters `unflipped`. `learned` is the one FREE-TEXT channel,
+// authored by a driver who was looking at the whole round, and it went to the delegate verbatim. So the
+// exclusion held everywhere except the field most likely to say "case 30930 fails because…".
+//
+// It matters more now than it did: inherited findings are a SECOND free-text channel, carrying prose a
+// DIFFERENT campaign's driver wrote, under a frame whose held-out set that driver never saw.
+//
+// Word-boundary, because case ids are short (`s2`, `15380`) and substring matching would redact the middle
+// of ordinary words. The marker is visible on purpose: a delegate reading `[held-out]` knows something was
+// withheld, where a silently deleted id reads as a finding about nothing.
+function redactHeldOut(text: string, heldOut: readonly string[]): string {
+  let out = text;
+  for (const id of heldOut) {
+    const escaped = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    out = out.replace(new RegExp(`(^|[^\\w-])${escaped}(?![\\w-])`, "g"), "$1[held-out]");
+  }
+  return out;
+}
+
+function heldOutIds(frame: CampaignRoundBriefInput["frame"]): string[] {
+  return frame.scenarios.filter((sc) => sc.heldOut === true).map((sc) => sc.id);
+}
+
 function briefableTargets(frame: CampaignRoundBriefInput["frame"]): string[] {
   const heldOut = new Set(frame.scenarios.filter((sc) => sc.heldOut === true).map((sc) => sc.id));
   return frame.targets.filter((id) => !heldOut.has(id));
@@ -114,13 +151,29 @@ export function campaignRoundBrief(input: CampaignRoundBriefInput): DelegationBr
       ? `Round 1 of campaign '${input.campaignId}'. Nothing has been tried yet.`
       : `Round ${input.seq} of campaign '${input.campaignId}'. ${input.seq - 1} round(s) have run.`,
   ];
-  const learned = (input.learned ?? []).filter((l) => l.trim() !== "");
+  const withheld = heldOutIds(frame);
+  const learned = (input.learned ?? []).filter((l) => l.trim() !== "").map((l) => redactHeldOut(l.trim(), withheld));
   if (learned.length > 0)
     context.push(
       "",
       "What earlier rounds established about the mechanism (findings, not scores — they may be wrong):",
-      ...learned.map((l, i) => `${i + 1}. ${l.trim()}`),
+      ...learned.map((l, i) => `${i + 1}. ${l}`),
     );
+  // Inherited findings come AFTER this walk's own: the delegate reads what this campaign established first,
+  // and what it was told second. Every line goes through the same held-out redaction as the rest of the
+  // brief — inheritance is a new path to the subject, and the oracle rule is about what reaches the subject,
+  // not about which function put it there.
+  const inherited = (input.inherited ?? [])
+    .map((source) => ({
+      campaignId: source.campaignId,
+      findings: source.findings.filter((f) => f.trim() !== "").map((f) => redactHeldOut(f.trim(), withheld)),
+    }))
+    .filter((source) => source.findings.length > 0);
+  if (inherited.length > 0) {
+    context.push("", "What EARLIER WALKS established (inherited — a different campaign's findings, not this one's):");
+    for (const source of inherited)
+      for (const finding of source.findings) context.push(`· [${source.campaignId}] ${finding}`);
+  }
   if (evidence !== undefined && targets.length > 0) {
     const briefable = new Set(targets);
     const unflipped = (evidence.aggregate.targets?.unflipped ?? []).filter((id) => briefable.has(id));

@@ -58,9 +58,9 @@ function batchCount(sc: ScorecardRecord): number | undefined {
 }
 
 // The feed assembly, pure: standalone runs + scorecard batches + agent conversations, recency-ordered.
-// 에이전트 채팅 턴은 원장에선 턴마다 한 run(증거 단위)이지만, 피드의 사고 단위는 대화다 — 같은 대화의
-// 턴들을 세션 블록 하나로 접는다(스코어카드 배치와 같은 문법). group.role 'turn' 만: 플레이그라운드
-// 케이스('case')는 세션 run 이 이미 자기 행을 갖고, 일반 자식('child')은 인과 간선이지 묶음이 아니다.
+// An agent chat turn is one run per turn in the ledger (the unit of evidence), but the unit of THOUGHT in the feed is the conversation — so the
+// turns of one conversation are folded into a single session block (the same grammar as a scorecard batch). group.role 'turn' only:
+// a playground case ('case') already has its own row from the session run, and an ordinary child ('child') is a causal edge rather than a grouping.
 export function buildActivityBlocks(standalone: Run[], scorecards: ScorecardRecord[]): ActivityBlock[] {
   const isTurn = (r: Run): boolean => r.kind === 'agent' && r.group?.role === 'turn'
   const bySession = new Map<string, Run[]>()

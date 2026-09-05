@@ -50,12 +50,12 @@ function osUseShotSrc(snapshot?: {
   return undefined
 }
 
-// 스냅샷에 실제로 보여줄 내용이 있는지 — 없으면 상세에서 스냅샷 섹션을 통째로 숨긴다(빈 섹션 규칙). prompt(환경-없는 QA)는
-// 최종 답변(output)이 대개 비어 있어(주 신호는 trace) 예전엔 `{kind:"prompt",output:""}` 원시 JSON만 떠서 "매번 빈 스냅샷"으로
-// 보였다. 이 게이트가 그 문제를 없앤다. docs/web.md — 빈 섹션은 통째로 숨긴다("none" 플레이스홀더 금지).
+// Whether a snapshot actually has anything to show — otherwise the detail hides the snapshot section entirely (the empty-section rule). A prompt run (environment-less QA)
+// usually has an empty final answer (its main signal is the trace), so it used to render raw `{kind:"prompt",output:""}` JSON and read as "an empty snapshot every time".
+// This gate removes that. docs/web.md — an empty section is hidden whole (no "none" placeholder).
 function snapshotHasContent(s: NonNullable<Run['result']>['snapshot']): boolean {
   if (!s) return false
-  if (osUseShotSrc(s)) return true // 어떤 kind든 캡처된 화면이 있으면 표시할 게 있다
+  if (osUseShotSrc(s)) return true // any kind with a captured screen has something to show
   switch (s.kind) {
     case 'prompt':
       return Boolean(s.output?.trim())
@@ -171,8 +171,8 @@ export default async function RunDetailPage({
 
   let run: Run | undefined
   let error: string | undefined
-  // caseSpec 은 같은 응답을 좁은 렌즈로 한 번 더 읽는다(runCaseSpecSchema 주석 참고 — 전체 EvalCase 를
-  // 미러링하면 드리프트 가드가 깨진다). 실패해도 상세는 그대로 뜬다: 요청 섹션만 빠진다.
+  // caseSpec reads the same response once more through a narrower lens (see the runCaseSpecSchema comment — mirroring the whole
+  // EvalCase breaks the drift guard). A failure still renders the detail: only the request section is missing.
   let caseSpec: RunCaseSpec | undefined
   try {
     const raw = await controlPlane.getRun(ctx, id)
@@ -234,9 +234,9 @@ export default async function RunDetailPage({
               // The execution segment omits its events on the wire (never shipped twice) — rehydrate it here.
               events: toEvidence(segment.events ?? runScoped.events),
             }))
-          : // 세그먼트를 아직 안 보내는 봉인 기록(다중 평면 등급 이전에 봉인된 것들 — 오늘 살아 있는 에이전트
-            // 턴이 전부 여기 해당한다)은 실행 자신의 스트림이 곧 궤적 전체다. 이 폴백이 없으면 이벤트가 있는데도
-            // 증거 섹션이 통째로 사라진다. browse-trajectories 액션이 같은 폴백을 갖고 있다.
+          : // Sealed records that do not send segments yet (anything sealed before multi-plane grading — every live agent turn
+            // today is one of these) have the execution's own stream as the whole trajectory. Without this fallback the evidence
+            // section disappears entirely despite there being events. The browse-trajectories action carries the same fallback.
             asSingleSegment(toEvidence(runScoped.events), 'run')
     } catch {
       // 404 = nothing sealed (and no embed) — the page just omits the trace sections.
@@ -247,12 +247,12 @@ export default async function RunDetailPage({
 
   // Replay is available for any settled run that produced an agent trace (EVERY harness does) or a recording —
   // not only ones with environment frames. The agent trace is the universal replay spine; frames are a per-kind
-  // addition. A still-RUNNING run mounts the player too: 라이브는 "아직 안 끝난 리플레이"라 녹화 tail + 라이브
-  // 궤적을 폴링해 진행 중에도 과거로 스크럽한다(플레이어가 데이터 없으면 self-null). docs/architecture/replay.md.
+  // addition. A still-RUNNING run mounts the player too: live is "a replay that has not finished", so it polls the recording tail plus the
+  // live trajectory and scrubs into the past while still in progress (the player self-nulls with no data). docs/architecture/replay.md.
   const isTerminal = run.status === 'succeeded' || run.status === 'failed'
   const hasReplay = isTerminal && (trace.length > 0 || run.result?.recordingRef != null)
-  // sandbox(브라우저) 세션은 record에 trace/recordingRef가 없어도 세션 동안 CDP 환경 plane이 녹화됐을 수
-  // 있다 — 닫힌 뒤에도 플레이어를 마운트해 두면 봉인 녹화를 스스로 찾아 그리고, 없으면 self-null.
+  // A sandbox (browser) session can have had its CDP environment plane recorded during the session even when the record carries no
+  // trace/recordingRef — mounting the player after it closes lets it find the sealed recording itself, and self-null when there is none.
   const mountsReplay = hasReplay || !isTerminal || runKindOf(run) === 'sandbox'
 
   // Source label — reuse the runs-table's shared source vocabulary (web/mcp/api/scorecard/schedule/front-door).
@@ -282,26 +282,26 @@ export default async function RunDetailPage({
   const runtime = run.runtime
   const runtimeIsSelfHosted = runtime === 'self' || (runtime?.startsWith('self:') ?? false)
 
-  // 메타 카드의 두 축은 컬럼이 같고 의미가 kind 마다 다르다 — 도메인의 팩토리가 그렇게 채운다(하네스 컬럼에
-  // 에이전트 스펙/환경 capability 가 들어가고, caseId 에 깨운 원인/이미지가 들어간다). 라벨을 harness/case 로
-  // 고정해 두면 챗 턴이 "case chat", 샌드박스가 "case ubuntu:24.04" 로 읽히는 거짓말이 남는다.
+  // The meta card's two axes share their columns and mean different things per kind — the domain's factory fills them that way (an agent
+  // spec or an environment capability goes in the harness column, and what woke it or its image goes in caseId). Pinning the labels to
+  // harness/case leaves the lie that a chat turn reads as "case chat" and a sandbox as "case ubuntu:24.04".
   const subjectLabel =
     run.kind === 'agent' ? 'agent' : run.kind === 'sandbox' ? 'environment' : 'harness'
   const objectLabel = run.kind === 'agent' ? 'cause' : run.kind === 'sandbox' ? 'image' : 'case'
 
-  // 라이브 패널은 run 이 선언한 채널만 연다. 예전에는 여기서 kind 로 "컨테이너 기반이겠지"를 추측했는데,
-  // 그러면 클러스터에서 돈 실행과 남의 노트북(self-hosted)에서 돈 실행에 같은 약속을 하고 다른 걸 준다.
-  // 이제 판단은 컨트롤 플레인 한 곳(domain 의 attachChannelsFor)에 있고 — 선언이 없던 옛 run 도 읽을 때
-  // 같은 규칙으로 채워져 온다 — 여기서는 선언을 읽기만 한다.
+  // The live panels open only the channels the run DECLARED. This used to guess "probably container-based" from the kind here, which
+  // makes the same promise to a run that executed in the cluster and one that executed on somebody's laptop (self-hosted) and then
+  // delivers something else. The judgement now lives in one place in the control plane (domain's attachChannelsFor) — and an old run
+  // that declared nothing is filled by the same rule on read — so here it is only READ.
   const attach = run.attach ?? []
   const showLiveLogs = attach.includes('logs')
   const showTerminal = attach.includes('exec') || attach.includes('terminal')
-  // 파일 워크벤치는 터미널 채널(관리형 exec) 또는 self-hosted 레인에서 열린다 — self:* 는 exec는 못 하지만
-  // 러너의 in-case 서빙 루프가 파킹된 fs 읽기에 응답한다(runnerCaseFs). 리포 없는 샌드박스면 위젯이 self-null.
+  // The file workbench opens on the terminal channel (managed exec) or on the self-hosted lane — self:* cannot exec, but the runner's
+  // in-case serving loop answers parked fs reads (runnerCaseFs). With no repo in the sandbox the widget self-nulls.
   const showFileWorkbench = showTerminal || (run.runtime?.startsWith('self:') ?? false)
 
-  // 이 run 을 일으킨 run — 수요 그래프의 간선(에이전트가 제출한 실행이 대표적). 부모 그룹은 스코어카드면
-  // 메타 카드가 이미 링크하므로, 여기서는 그 밖의 그룹(플레이그라운드 세션의 케이스)만 세운다.
+  // The run that CAUSED this run — an edge of the demand graph (an execution submitted by an agent is the common one). When the parent
+  // group is a scorecard the meta card already links it, so only other groups (a playground session's case) are surfaced here.
   const causedByRunId = run.origin?.causedByRunId
   const sessionRunId =
     run.group?.role === 'case' && !run.parentScorecardId ? run.group.id : undefined
@@ -324,20 +324,20 @@ export default async function RunDetailPage({
                 reference={{ type: 'run', id: run.id, label: run.id.slice(0, 8) }}
                 mission="runAnalyze"
               />
-              {/* 실행 패밀리 — eval 이 아닌 run 만 배지를 단다(활동 콘솔의 행과 같은 규칙). 이게 없으면
-                  에이전트 턴과 샌드박스 세션이 하네스 eval 처럼 읽힌다: 컬럼은 같고 의미가 다르다. */}
+              {/* The execution family — only a non-eval run wears the badge (the same rule as the activity console's rows). Without it,
+                  an agent turn and a sandbox session read like a harness eval: the columns are the same and the meaning is not. */}
               {runKindOf(run) !== 'eval' && (
                 <Badge tone="info">{tTable(RUN_KIND_META[runKindOf(run)].labelKey)}</Badge>
               )}
-              {/* 재생 가능한 run이면 "리플레이" 배지 → 아래 #replay 섹션으로 점프(발견성). agent trace만 있어도
-                  재생되므로(하네스 무관) recordingRef 없이 trace만으로도 노출한다. */}
+              {/* A replayable run gets a "replay" badge → jumps to the #replay section below (discoverability). An agent trace alone
+                  replays (harness-independent), so it is surfaced from the trace even with no recordingRef. */}
               {hasReplay && (
                 <a href="#replay" className="no-underline">
                   <Badge tone="info">{t('replay')}</Badge>
                 </a>
               )}
-              {/* 세션 run 은 `running` 이 "진행 중"이 아니라 "살아 있음"이고, `succeeded` 는 "회수됨"이다 —
-                  상태 옆에 그 사실을 세워 두지 않으면 ops 뷰가 건강한 세션을 멈춘 배치로 읽는다. */}
+              {/* On a session run `running` means "alive" rather than "in progress", and `succeeded` means "reclaimed" — without that fact
+                  standing beside the status, an ops view reads a healthy session as a stalled batch. */}
               {run.lifetime === 'session' && (
                 <Badge tone="neutral">
                   {run.status === 'running' ? t('sessionAlive') : t('sessionClosed')}
@@ -393,8 +393,8 @@ export default async function RunDetailPage({
             </Link>
           </MetaItem>
         )}
-        {/* 이 run 을 일으킨 run — 클릭 가능한 인과 간선. 에이전트가 제출한 실행이면 여기서 그 에이전트 턴으로
-            거슬러 올라갈 수 있다(수요 그래프이자 감사 추적). */}
+        {/* The run that caused this one — a clickable causal edge. For an execution an agent submitted, this is how you walk back to that
+            agent turn (a demand graph, and an audit trail). */}
         {causedByRunId && (
           <MetaItem label={t('metaCausedBy')}>
             <Link
@@ -405,7 +405,7 @@ export default async function RunDetailPage({
             </Link>
           </MetaItem>
         )}
-        {/* 세션 안에서 제출된 케이스(플레이그라운드) → 그 세션 run 으로. 스코어카드 자식은 위 셀이 맡는다. */}
+        {/* A case submitted inside a session (a playground) → to that session run. A scorecard child is handled by the cell above. */}
         {sessionRunId && (
           <MetaItem label={t('metaSessionRun')}>
             <Link
@@ -418,8 +418,8 @@ export default async function RunDetailPage({
         )}
       </Card>
 
-      {/* 요청 — 무엇을 시켰나. 케이스 본문을 persist 하는 run(단독 제출·플레이그라운드 케이스)만 가지며,
-          이게 없어서 "이 run 이 무슨 과제를 받았는지"를 상세에서 전혀 볼 수 없었다. 없으면 섹션도 없다. */}
+      {/* Request — what it was asked to do. Only runs that persist the case body have it (a standalone submit, a playground case), and
+          without it the detail could not show "what task did this run receive" at all. No body, no section. */}
       {caseSpec && caseSpec.task.trim() !== '' && (
         <section className="space-y-2.5">
           <SectionHeader
@@ -463,8 +463,8 @@ export default async function RunDetailPage({
             })}
           />
           <UsageStat label={t('usageCalls')} value={String(usage.calls)} />
-          {/* 위임받은 예산의 캡 — 이 run 이 어느 봉투에서 끌어 쓰는지(에이전트가 위임한 슬라이스가 대표적).
-              캡이 없으면 셀 자체가 없다. */}
+          {/* The cap of the budget it was delegated — which envelope this run draws from (a slice delegated by an agent is the common one).
+              With no cap there is no cell at all. */}
           {run.envelope?.capUsd !== undefined && (
             <UsageStat label={t('usageBudget')} value={fmtUsd(run.envelope.capUsd)} />
           )}
@@ -493,18 +493,18 @@ export default async function RunDetailPage({
               </a>
             </Callout>
           )}
-          {/* 케이스 배치(런타임 디버깅) — 클러스터가 케이스를 어디까지 받아들였는지(blocked 용량 판정·노드·
-              오케스트레이터 이벤트 피드)를 폴링; 배치 정보가 없는 run이면 위젯이 self-null (빈 섹션 없음) */}
+          {/* Case placement (runtime debugging) — polls how far the cluster accepted the case (blocked-capacity verdict, node,
+              orchestrator event feed); on a run with no placement information the widget self-nulls (no empty section) */}
           <RunPlacement runId={run.id} initialStatus={run.status} />
-          {/* 토폴로지 헬스(서비스 하네스) — 웜 토폴로지의 서비스별 상태(재시작·OOM·최근 이벤트)+행별 로그 펼침;
-              서비스 하네스가 아니면 위젯이 self-null */}
+          {/* Topology health (service harnesses) — per-service state of a warm topology (restarts, OOM, recent events) plus per-row log expansion;
+              on anything that is not a service harness the widget self-nulls */}
           <RunTopology runId={run.id} initialStatus={run.status} />
-          {/* 라이브 워크벤치 — 넓으면 「환경 메인 패널 + 관측 레일」 2컬럼(좁으면 세로 폴백; 인프라 패널이
-              화면을 쪼개는 순간을 위해 뷰포트가 아닌 컨테이너 기준). 메인 = 환경 kind가 결정: browser/os-use는
-              라이브 화면, repo는 파일 워크벤치 — 둘 다 self-null이라 해당 없는 쪽은 그려지지 않는다.
-              레일 = 트레이스·로그·터미널(관측 축). 위젯 전부가 클라이언트에서 self-null 이라 컬럼이 통째로
-              빌 수 있다 — 빈 컬럼은 empty:hidden 으로 접고, 2컬럼 분할은 양쪽 모두 내용이 있을 때만 건다
-              (:has). 안 그러면 화면 없는 run 에서 왼쪽 3fr 이 빈 채 트레이스가 레일 폭에 갇힌다. */}
+          {/* The live workbench — when wide, two columns of "environment main panel + observation rail" (a vertical fallback when narrow;
+              measured against the CONTAINER rather than the viewport, for the moment an infra panel splits the screen). The main column is
+              decided by the environment kind: browser/os-use get the live screen, repo gets the file workbench — both self-null, so whichever
+              does not apply is not drawn. The rail is trace, logs and terminal (the observation axis). Every widget self-nulls on the client,
+              so a whole column can end up empty — an empty column folds with empty:hidden, and the two-column split is applied only when BOTH
+              sides have content (:has). Otherwise a screenless run leaves the left 3fr empty and traps the trace at rail width. */}
           <RunLiveStreamProvider
             runId={run.id}
             lanes={showFileWorkbench ? 'screen,fs' : 'screen'}
@@ -512,22 +512,22 @@ export default async function RunDetailPage({
           >
             <div className="grid gap-4 @5xl:[&:has([data-live-main]>*):has([data-live-rail]>*)]:grid-cols-[minmax(0,3fr)_minmax(20rem,2fr)]">
               <div data-live-main className="min-w-0 space-y-4 empty:hidden">
-                {/* 라이브 화면 — browser(browser-use 등)/os-use 케이스면 실행 중 화면을 CDP/scrot/러너-푸시
-                  프레임으로 2초마다 폴링 */}
+                {/* The live screen — on a browser (browser-use etc.) or os-use case, polls the running screen every 2s as CDP/scrot/runner-pushed
+                  frames */}
                 <LiveScreen runId={run.id} initialStatus={run.status} />
-                {/* 라이브 리포 워크벤치 — repo 케이스면 샌드박스 워킹트리를 파일 탐색기(M/A/D 배지)+읽기전용
-                  에디터/diff로 4초마다 폴링, "따라가기"로 에이전트가 방금 바꾼 파일을 자동으로 연다. exec 채널이
-                  선언된 run에서만 시도하고, 리포가 없는 샌드박스면 위젯이 self-null */}
+                {/* The live repo workbench — on a repo case, polls the sandbox working tree every 4s as a file explorer (M/A/D badges) plus a
+                  read-only editor/diff, and "follow" opens whatever file the agent just changed. Attempted only on a run that declared the exec
+                  channel, and with no repo in the sandbox the widget self-nulls */}
                 {showFileWorkbench && (
                   <RunFileWorkbench runId={run.id} initialStatus={run.status} />
                 )}
               </div>
               <div data-live-rail className="min-w-0 space-y-4 empty:hidden">
-                {/* 라이브 트레이스(observability ⑨) — 실행 중 쌓이는 궤적(디스패치 마크 + 러너 푸시 + 매니지드
-                  이벤트 센티널)을 3초마다 폴링해 봉인 전 미리보기로 그린다 */}
+                {/* The live trace (observability ⑨) — polls the trajectory accumulating during the run (dispatch marks + runner pushes + managed
+                  event sentinels) every 3s and draws it as a pre-seal preview */}
                 <LiveTrace runId={run.id} initialStatus={run.status} />
-                {/* 로그·터미널은 run 이 선언한 채널(attach)일 때만 — 붙을 곳 없는 run 에서 영원히 비어 있는
-                  패널을 띄우지 않는다. 선언이 없는 예전 eval/command run 은 종전대로 둘 다 연다. */}
+                {/* Logs and terminal only when the run DECLARED the channel (attach) — a run with nowhere to attach does not get a panel that
+                  stays empty forever. An older eval/command run that declared nothing keeps opening both, as before. */}
                 {showLiveLogs && (
                   <div className="space-y-2.5">
                     <SectionHeader title={t('liveLogs')} />
@@ -536,8 +536,8 @@ export default async function RunDetailPage({
                     </Card>
                   </div>
                 )}
-                {/* 샌드박스 터미널 — 실행 중인 케이스 컨테이너로 들어가는 대화형 셸(cd·env 유지). 셸은 샌드박스의
-                  실제 프로세스라 "셸 열기"를 눌렀을 때만 붙는다 (creator/admin, 컨트롤플레인이 강제) */}
+                {/* The sandbox terminal — an interactive shell into the running case container (cd and env persist). The shell is a REAL process in
+                  the sandbox, so it attaches only when "open a shell" is pressed (creator/admin, enforced by the control plane) */}
                 {showTerminal && (
                   <div className="space-y-2.5">
                     <SectionHeader title={t('sandbox')} />
@@ -552,19 +552,19 @@ export default async function RunDetailPage({
         </section>
       )}
 
-      {/* 리플레이 — 종료된 run의 앵커 섹션. agent trace(모든 하네스 공통)를 벽시계로 스크럽하고, 녹화 프레임이
-          있으면 그 시점 화면을 오버레이한다. 헤더 "리플레이" 배지가 여기로 점프한다. docs/architecture/replay.md */}
+      {/* Replay — the anchor section of a finished run. It scrubs the agent trace (common to every harness) on the wall clock and overlays the
+          screen at that moment when there are recorded frames. The header's "replay" badge jumps here. docs/architecture/replay.md */}
       {mountsReplay && (
         <div id="replay" className="scroll-mt-6">
           <ReplayPlayer runId={run.id} initialStatus={run.status} trace={trace} />
         </div>
       )}
 
-      {/* 결과 — kind 마다 갈아끼우는 단 하나의 슬롯. eval 이면 판정 한 줄 + 지표 표(근거는 행 확장), 에이전트
-          턴이면 그 대화로 건너가기, 샌드박스면 세션 요약. 점수는 eval 의 결과일 뿐 보편 결과가 아니므로,
-          점수가 없는 패밀리에서 "아직 점수가 없어요"를 띄우던 영구 빈 섹션은 사라졌다.
-          스코어카드의 케이스 run 은 점수를 여기서 반복하지 않는다 — 점수의 권위 표면은 스코어카드 상세(케이스별
-          판정·지표 표를 이미 소유)이고, run 상세는 실행 기록(리플레이·라이브·궤적·논의)이다. */}
+      {/* Result — the single slot that is swapped per kind. An eval gets a one-line verdict plus the metric table (grounds on row expansion), an
+          agent turn gets a jump to that conversation, a sandbox gets the session summary. A score is the RESULT OF AN EVAL rather than a universal
+          result, so the permanently empty section that said "no scores yet" on families that have none is gone.
+          A scorecard's case run does not repeat its scores here — the authoritative surface for scores is the scorecard detail (which already owns
+          the per-case verdict and metric table), and the run detail is the EXECUTION record (replay, live, trajectory, discussion). */}
       {!run.parentScorecardId && (
         <RunOutcome
           run={run}
@@ -636,8 +636,8 @@ export default async function RunDetailPage({
                 className="max-h-[480px] w-auto max-w-full rounded-lg border"
               />
             )}
-            {/* prompt (환경-없는 QA) — 최종 답변 텍스트. 주 신호는 trace라 비어 있는 경우가 흔해, 값이 있을 때만 이 섹션이 뜬다
-                (snapshotHasContent 게이트). 예전엔 `{kind:"prompt",output:""}` 원시 JSON만 떠서 "매번 빈 스냅샷"으로 보였다. */}
+            {/* prompt (environment-less QA) — the final answer text. Its main signal is the trace so it is often empty, and this section appears
+                only when there is a value (the snapshotHasContent gate). It used to render raw `{kind:"prompt",output:""}` JSON and read as "an empty snapshot every time". */}
             {snapshot.kind === 'prompt' && snapshot.output && (
               <div>
                 <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">

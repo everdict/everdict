@@ -14,11 +14,11 @@ import {
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { DropdownMenu } from '@/shared/ui/dropdown-menu'
 
-// 능력 쪽에서 이슈를 건다 — "이 하네스를 지켜보는 이슈"를 하네스 화면에서 추가하는 자리.
+// Attaching an issue from the CAPABILITY side — the place where "the issues watching this harness" is added from the harness screen.
 //
-// 링크는 여전히 **이슈** 레코드에 저장된다(제어 평면에 능력→이슈 쓰기는 없고, 있어서도 안 된다: 같은 사실을
-// 두 곳에 적으면 둘이 어긋난다). 그래서 여기서 하는 일은 "고른 이슈에 이 능력을 건다"이고, 결과는 양쪽
-// 화면에서 같은 한 줄로 읽힌다. 이슈 상세의 능력 행에서 거는 것과 완전히 같은 쓰기다.
+// The link is still stored on the **issue** record (the control plane has no capability→issue write, and must not: writing the same fact in two
+// places lets the two diverge). So what happens here is "attach this capability to the chosen issue", and the result reads as the same one row
+// on both screens. It is exactly the same write as attaching from the issue detail's capability row.
 export function LinkIssueButton({
   type,
   capabilityId,
@@ -27,9 +27,9 @@ export function LinkIssueButton({
 }: {
   type: IssueCapabilityLinkType
   capabilityId: string
-  // issues:write — 링크를 만드는 것은 이슈를 고치는 일이다(능력의 권한이 아니라).
+  // issues:write — making a link is EDITING AN ISSUE (not a permission on the capability).
   canWrite: boolean
-  // 이미 이 능력을 건 이슈들 — 후보에서 뺀다(다시 걸어도 제어 평면은 받아 주지만, 아무 일도 안 일어난다).
+  // The issues that already attached this capability — excluded from the candidates (re-attaching is accepted by the control plane and does nothing).
   linkedIssueIds: string[]
 }) {
   const t = useTranslations('capabilityLineage')

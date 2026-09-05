@@ -44,8 +44,8 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
 
-// 상태별 보드에 그릴 이슈 상한. 프로젝트의 진짜 총계는 서버가 파생하는 rollup 이 답하므로, 보드는
-// 최근 활동순 한 장이면 된다 — 목록 전체를 끌어와야 하는 화면이 아니다.
+// The cap on issues drawn on the per-status board. A project's real totals are answered by the rollup the server derives, so one page in
+// most-recent-activity order is enough for the board — this is not a screen that has to pull the whole list.
 const PROJECT_ISSUE_ROWS = 200
 
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
@@ -63,11 +63,11 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
 // One project — "did we finish the evaluation in time". The rollup is derived on this read (never stored), so
 // the counts are always live; `evaluated` is the stricter claim than `done`: closed WITH a scorecard.
 //
-// 레이아웃은 형제 화면인 이슈 상세(app/[workspace]/issues/[id])의 것을 그대로 쓴다 — Linear 프로젝트 뷰와 같은
-// 골격이다. ① 상단 브레드크럼(프로젝트 → 이니셔티브)이 "이 프로젝트가 어느 목표에 매달려 있는지"에 답하고
-// 그 옆에 이 프로젝트에 대한 작업(링크 복사·⋯)이 붙는다. ② 이름은 크게 혼자 선다. ③ 본문(설명·이슈·이력·논의)은
-// 왼쪽 열, ④ 속성과 진행도는 전부 오른쪽 한 열. 종전 레이아웃이 낭비하던 자리가 여기서 사라진다: 메타 한 줄을
-// 담던 전폭 카드와, 한 자리 숫자 넷을 1100px 에 늘어놓던 StatCard 그리드가 모두 오른쪽 속성 열로 접힌다.
+// The layout is taken straight from its sibling screen, the issue detail (app/[workspace]/issues/[id]) — the same skeleton as Linear's project
+// view. ① The top breadcrumb (project → initiative) answers "which goal is this project hanging from", with the actions on this project
+// (copy link, ⋯) beside it. ② The name stands alone, large. ③ The body (description, issues, history, discussion) is the left column and
+// ④ every attribute and the progress are one right column. The space the previous layout wasted disappears here: the full-width card that
+// held one meta line and the StatCard grid that spread four single-digit numbers across 1100px both fold into the right attribute column.
 export default async function ProjectDetailPage({
   params,
 }: {
@@ -102,8 +102,8 @@ export default async function ProjectDetailPage({
   // degrades only its own slot.
   const [issues, initiatives, members, updates] = await Promise.all([
     controlPlane
-      // 프로젝트 상세의 상태별 보드 — 한 프로젝트의 이슈는 한 장에 들어가는 규모이고, 롤업 숫자는 서버가
-      // 따로 파생한다(rollup). 여기서 필요한 건 그릴 행뿐이다.
+      // The project detail's per-status board — one project's issues fit in a single page, and the rollup numbers are derived separately by
+      // the server (rollup). All that is needed here is the rows to draw.
       .listIssues(ctx, { project: [id], limit: PROJECT_ISSUE_ROWS })
       .then((r) => issuePageSchema.parse(r).items)
       .catch((): IssueSummary[] => []),
@@ -115,7 +115,7 @@ export default async function ProjectDetailPage({
       .listMembers(ctx)
       .then((r) => membersSchema.parse(r))
       .catch(() => []),
-    // 올라온 업데이트 — health 색이 바뀐 이유가 여기 있다.
+    // The updates posted — the reason the health colour changed is in here.
     controlPlane
       .listProjectUpdates(ctx, id)
       .then((r) => projectUpdatesSchema.parse(r))
@@ -123,8 +123,8 @@ export default async function ProjectDetailPage({
   ])
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
-  // 프로젝트는 여러 우산 아래 놓일 수 있다. 브레드크럼은 첫 번째만 이고 가고(경로는 하나여야 한다), 나머지는
-  // 오른쪽 속성 열이 전부 보여 준다.
+  // A project can sit under several umbrellas. The breadcrumb carries only the FIRST (a path has to be one), and the right attribute column
+  // shows all of them.
   const projectInitiatives = current.initiativeIds
     .map((initiativeId) => initiatives.find((i) => i.id === initiativeId))
     .filter((i): i is Initiative => i !== undefined)
@@ -147,7 +147,7 @@ export default async function ProjectDetailPage({
 
   return (
     <div className="@container">
-      {/* ① 이 프로젝트가 어디에 걸려 있는지, 그리고 이 프로젝트에 할 수 있는 일. */}
+      {/* ① What this project hangs from, and what can be done to it. */}
       <div className="flex items-center gap-1 border-b border-border pb-2.5">
         <nav
           aria-label={t('breadcrumbLabel')}
@@ -181,20 +181,20 @@ export default async function ProjectDetailPage({
         )}
       </div>
 
-      {/* ② 이름은 사람이 지은 자유 텍스트다 — 자르지 않고 줄바꿈한다. */}
+      {/* ② The name is free text a person wrote — it wraps rather than truncates. */}
       <h1 className="break-words pt-5 text-[22px] font-[560] leading-[1.3] tracking-[-0.01em] text-foreground">
         {current.name}
       </h1>
 
       <div className="grid gap-x-8 gap-y-6 pt-5 @3xl:grid-cols-[minmax(0,1fr)_17rem]">
-        {/* ④ 속성과 진행도. 좁을 때는 이름 바로 아래로 접히므로 아래쪽 경계선으로 본문과 갈라 준다. */}
+        {/* ④ Attributes and progress. When narrow it folds directly under the name, so a bottom border separates it from the body. */}
         <aside className="min-w-0 space-y-3.5 border-b border-border pb-6 @3xl:col-start-2 @3xl:row-start-1 @3xl:self-start @3xl:border-b-0 @3xl:pb-0">
           <PropertyList>
             <PropertyRow label={t('fieldStatus')}>
               <ProjectStatusControl id={current.id} status={current.status} canWrite={canWrite} />
             </PropertyRow>
-            {/* 목표는 비어 있어도 줄을 남긴다 — 쓸 수 있는 사람에게는 이 줄이 배정하는 유일한 자리다.
-                읽기만 하는 사람에게는 컨트롤이 null 을 돌려주므로 빈 줄 숨김 관습이 그대로 지켜진다. */}
+            {/* The goal row stays even when empty — for someone who can write, this row is the only place to assign one.
+                For a read-only viewer the control returns null, so the empty-row hiding convention still holds. */}
             {(canWrite || projectInitiatives.length > 0) && (
               <PropertyRow label={t('fieldInitiative')}>
                 <ProjectInitiativeControl
@@ -260,8 +260,8 @@ export default async function ProjectDetailPage({
             </PropertyRow>
           </PropertyList>
 
-          {/* 진행도는 속성이 아니라 판정이라 구분선 아래로 내린다. 분포 바가 상태별 개수(범례)를 이미 말하므로
-              여기 남는 숫자는 그 위의 집계뿐이다 — 특히 `evaluated` 는 "닫혔다"보다 강한 주장이라 따로 세운다. */}
+          {/* Progress is a JUDGEMENT rather than an attribute, so it drops below a divider. The distribution bar already states the per-status
+              counts (the legend), so the only numbers left here are the aggregates above it — `evaluated` especially, which is a stronger claim than "closed", stands on its own. */}
           <div className="space-y-2.5 border-t border-border pt-3.5">
             <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -293,11 +293,11 @@ export default async function ProjectDetailPage({
           </div>
         </aside>
 
-        {/* ③ 프로젝트가 무엇이고, 그 아래에서 무슨 일이 벌어지고 있는지. */}
+        {/* ③ What the project is, and what is happening underneath it. */}
         <div className="min-w-0 space-y-7 @3xl:col-start-1 @3xl:row-start-1">
-          {/* 설명은 이름 바로 아래에서 시작한다(섹션 제목 없이) — 이 화면의 본문은 프로젝트 그 자체다. */}
-          {/* 목표(이니셔티브)의 설명과 같은 마크다운 표면 — 한 층 아래라고 다르게 읽힐 이유가 없다.
-              ```mermaid 펜스가 다이어그램이 되는 것까지 같다. */}
+          {/* The description starts directly under the name (with no section heading) — the body of this screen IS the project. */}
+          {/* The same markdown surface as a goal's (an initiative's) description — there is no reason for one layer down to read differently.
+              Right down to a ```mermaid fence becoming a diagram. */}
           {current.description && <Markdown content={current.description} mermaid />}
 
           {grouped.length > 0 && (
@@ -331,7 +331,7 @@ export default async function ProjectDetailPage({
             </section>
           )}
 
-          {/* 마일스톤 — 프로젝트 안의 체크포인트. 순서가 곧 의미라 sortOrder 대로 세운다. */}
+          {/* Milestones — the checkpoints inside a project. Their ORDER is the meaning, so they stand in sortOrder. */}
           {current.milestones.length > 0 && (
             <section className="space-y-3">
               <SectionHeader title={t('milestonesTitle', { count: current.milestones.length })} />
@@ -364,7 +364,7 @@ export default async function ProjectDetailPage({
             </section>
           )}
 
-          {/* 업데이트 — 트래커가 기록하는 유일한 판단. 색이 왜 바뀌었는지가 여기 문장으로 남는다. */}
+          {/* Updates — the only judgement the tracker records. Why the colour changed is left here as a sentence. */}
           <section className="space-y-3">
             <SectionHeader title={t('updatesTitle')} />
             {canWrite && <ProjectUpdatePanel id={current.id} />}

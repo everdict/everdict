@@ -886,7 +886,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // original submit inputs (dataset+version, harness+ephemeral pins, grading plan, concurrency/retries/trials, subset)
   // so the two are directly comparable — while letting the caller adjust the two run-config choices that were made at
   // submit time: the selected Agent Judges and the execution runtime. The source record is never mutated. This is the
-  // "전체 재실행" scope (the recovery-only "실패만 재실행" stays retryFailed, which carries passing results over). Cloning
+  // The "full re-run" scope (the recovery-only "retry failures only" stays retryFailed, which carries passing results over). Cloning
   // through submit gets faithfulness for free (pins/judge-model/trials/temporal dispatch); the ONE thing we deliberately
   // drop is the CI provenance (repo/sha/prNumber) — a manual re-run is a new trigger, and inheriting prNumber would
   // wrongly supersede other in-flight batches of that PR. Lineage is kept via origin.retryOf. Workspace-scoped:
@@ -938,7 +938,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       ...((input.retries ?? orch?.retries) !== undefined ? { retries: input.retries ?? orch?.retries } : {}),
       ...(orch?.trials !== undefined ? { trials: orch.trials } : {}),
       ...(orch?.oomAutoBoost ? { oomAutoBoost: true } : {}),
-      // Subset: an explicit override → else re-run the SAME subset the original ran ("전체" = every case of THIS
+      // Subset: an explicit override → else re-run the SAME subset the original ran ("all" = every case of THIS
       // scorecard, not the whole dataset). An override lets a re-run narrow to specific cases.
       ...(input.cases
         ? { cases: input.cases }

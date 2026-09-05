@@ -19,20 +19,20 @@ import { Input } from '@/shared/ui/input'
 
 import { updateIssueAction } from '../api/issues'
 
-// 고를 것이 이만큼 넘어가면 검색 줄을 낸다 — 프로젝트·상위 이슈 선택기와 같은 문턱값. 사람은 목록 중에서도
-// 가장 빨리 길어지는 축이라(멤버가 늘면 계속 는다) 스크롤로만 찾게 두지 않는다.
+// Past this many choices a search line appears — the same threshold as the project and parent-issue pickers. People are the axis that grows
+// fastest of any list (it keeps growing as members join), so nobody is left to find one by scrolling.
 const SEARCH_FROM = 7
 
-// 담당자 — 상태·우선순위와 같은 하우스 문법(아이콘 + 드롭다운)이고, 같은 이유로 목록 행과 상세의 속성 열
-// 양쪽에 산다: 담당자를 바꾸려고 이슈를 열었다 닫는 왕복도, 이슈를 열어 놓고 담당자만은 목록으로 돌아가
-// 바꾸는 왕복도 리니어에는 없다. 워크플로 전이가 아니라 내용 편집이라 `updateIssue` 로 가고, 이력에는
-// `updated{changed:[assignee]}` 한 줄로 남는다.
+// The assignee — the same house grammar as status and priority (an icon plus a dropdown), and for the same reason it lives BOTH on the list row
+// and in the detail's attribute column: Linear has neither the round trip of opening and closing an issue just to change its assignee, nor the
+// round trip of going back to the list to change the assignee of an issue you already have open. It is a content edit rather than a workflow
+// transition, so it goes through `updateIssue` and leaves one `updated{changed:[assignee]}` line in the history.
 export function IssueAssigneeControl({
   id,
   assignee,
   actors,
-  // 고를 수 있는 사람들 — 워크스페이스 멤버 목록. 디렉터리는 이미 나간 사람의 이름까지 알지만, 고를 수
-  // 있는 건 지금 멤버인 사람뿐이다.
+  // Who can be picked — the workspace member list. The directory knows the names of people who have left too, but only current members can be
+  // assigned.
   members,
   canWrite,
   variant = 'default',
@@ -43,8 +43,8 @@ export function IssueAssigneeControl({
   actors: MemberDirectory
   members: { subject: string; name: string; avatarUrl?: string }[]
   canWrite: boolean
-  // 상태·우선순위 컨트롤과 같은 두 밀도 — 목록 행에서는 얼굴만, 속성 열에서는 이름까지 선다(속성 열은
-  // 훑는 자리가 아니라 읽는 자리라, 얼굴만으로 누구인지 맞히게 하지 않는다).
+  // The same two densities as the status and priority controls — a face alone on a list row, the name too in the attribute column (the
+  // attribute column is a place you READ rather than sweep, so nobody is made to guess who it is from a face).
   variant?: 'default' | 'icon'
   className?: string
 }) {
@@ -53,7 +53,7 @@ export function IssueAssigneeControl({
   const [query, setQuery] = useState('')
   const [pending, setPending] = useState(false)
 
-  // `null` 은 비운다 — 담당자를 뗀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
+  // `null` CLEARS it — it means unassign, and it must never be conflated with `undefined` (untouched).
   function set(next: string | null): void {
     if (next === (assignee ?? null)) return
     void (async () => {
@@ -74,7 +74,7 @@ export function IssueAssigneeControl({
   const name = assignee === undefined ? t('fieldAssigneeNone') : memberNameOf(actors, assignee)
   const face =
     assignee === undefined ? (
-      // 담당자 없음도 그려야 하는 답이다 — 빈 자리는 "아직 아무도"라고 말하지 못한다.
+      // Unassigned is an answer that has to be drawn too — an empty slot cannot say "nobody yet".
       <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-dashed border-border text-faint">
         <UserRound className="size-3" strokeWidth={1.75} aria-hidden />
       </span>
@@ -145,7 +145,7 @@ export function IssueAssigneeControl({
             autoFocus
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t('assigneeSearchPlaceholder')}
-            // 이 컨트롤이 폼 안에 놓이는 날을 대비한다 — Enter 가 폼을 제출해 버리면 고르다 말고 저장된다.
+            // Guarding against the day this control sits inside a form — an Enter that submits the form would save mid-selection.
             onKeyDown={(e) => {
               if (e.key === 'Enter') e.preventDefault()
             }}

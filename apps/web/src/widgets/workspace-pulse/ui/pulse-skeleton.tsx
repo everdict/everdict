@@ -1,7 +1,7 @@
 import { Skeleton } from '@/shared/ui/skeleton'
 
-// 펄스가 도착하기 전의 자리 — 타일 여덟 개와 차트 세 개. 진짜 화면과 같은 격자·같은 높이로 잡는 이유는
-// 하나다: 숫자가 도착하는 순간 아래의 활동 피드가 밀려 내려가면 안 된다.
+// The placeholder before the pulse arrives — eight tiles and three charts. It uses the real screen's grid and heights for one reason:
+// the activity feed below must not be pushed down the moment the numbers arrive.
 export function PulseSkeleton() {
   return (
     <div className="space-y-7">
@@ -21,7 +21,7 @@ export function PulseSkeleton() {
   )
 }
 
-// 활동 피드의 자리 — 얼굴 + 한 줄이 열네 번.
+// The activity feed's placeholder — a face plus one line, fourteen times.
 export function ActivitySkeleton() {
   return (
     <div className="space-y-2.5">

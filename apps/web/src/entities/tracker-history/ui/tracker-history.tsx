@@ -51,13 +51,13 @@ import { Link } from '@/shared/ui/link'
 import { detailFlag, detailNumber, detailString, detailStrings } from '../lib/history-detail'
 import { TrackerStatusMove, type TrackerKind } from './tracker-status'
 
-// 처음 보여줄 개수 — 나머지는 "이전 이력 더 보기"로. 도메인이 이력을 200개까지 들고 있어서
-// (TRACKER_HISTORY_LIMIT) GitHub 동기화가 잦은 이슈는 그대로 펼치면 화면이 이력으로 덮인다.
+// How many to show at first — the rest arrive through "show earlier history". The domain holds up to 200 entries
+// (TRACKER_HISTORY_LIMIT), so an issue with frequent GitHub syncing would bury the screen in history if expanded whole.
 const INITIAL = 10
 const STEP = 20
 
-// `updated` 가 싣는 변경 필드 이름 — 카탈로그에 있는 것만 번역하고 모르는 키는 원문 그대로 보여준다
-// (제어 평면이 새 필드를 추가해도 이력이 깨지지 않는다).
+// The names of the changed fields an `updated` carries — only what is in the catalog is translated, and an unknown key is shown
+// verbatim (so history does not break when the control plane adds a field).
 const KNOWN_FIELDS = [
   'title',
   'description',
@@ -71,15 +71,15 @@ const KNOWN_FIELDS = [
   'github',
 ] as const
 
-// 상태 전이를 일으킨 원인 — 사람이 옮긴 게 아닐 때만(회귀 감시·GitHub 동기화) 칩으로 밝힌다.
+// What CAUSED a status transition — stated as a chip only when it was not a person who moved it (regression watching, GitHub sync).
 const NAMED_CAUSES = ['github_sync', 'regression'] as const
 
 function isNamedCause(cause: string | undefined): cause is (typeof NAMED_CAUSES)[number] {
   return NAMED_CAUSES.some((c) => c === cause)
 }
 
-// 트래커 이력 — Linear 의 활동 피드처럼 "아이콘 · 누가 · 무엇을 · 값" 한 줄로 읽힌다. 저장 순서(오래된 것
-// 먼저)를 그대로 두고 최근 것만 보여주므로, 위로 갈수록 과거다.
+// The tracker history — read as one line of "icon · who · what · value", like Linear's activity feed. Storage order (oldest first) is
+// left alone and only the most recent are shown, so further UP is further into the past.
 export function TrackerHistory({
   kind,
   subject,
@@ -88,7 +88,7 @@ export function TrackerHistory({
   workspace,
 }: {
   kind: TrackerKind
-  // 문장에 들어갈 종류 이름("이슈"/"issue") — 호출한 화면의 카탈로그에서 온다.
+  // The kind noun that goes in the sentence ("issue") — it comes from the calling screen's catalog.
   subject: string
   entries: readonly TrackerHistoryEntry[]
   actors: MemberDirectory
@@ -154,7 +154,7 @@ function HistoryRow({
   const detail = entry.detail
   const profile = actors[entry.by]
   const name = memberNameOf(actors, entry.by)
-  // 워크스페이스 멤버면 얼굴이 노드가 되고, 아니면(시스템 주체) 사건 아이콘이 노드가 된다.
+  // A workspace member's face becomes the node; anyone else (a system subject) gets the event icon as the node.
   const actor: ActivityActor | undefined = profile
     ? {
         name: profile.name,
@@ -199,8 +199,8 @@ function HistoryRow({
     </ActivityRow>
   )
 
-  // 사건 하나를 "아이콘 · 문장 · 값 칩"으로 옮긴다. 문장은 항상 짧게 두고(무엇을 했는가), 달라진 값은
-  // 전부 칩으로 뺀다 — 값이 문장 안에 박히면 한국어/영어의 어순과 조사에 끌려다니게 된다.
+  // One event rendered as "icon · sentence · value chips". The sentence is always kept short (what was done) and every changed value
+  // is pulled out as a chip — a value embedded in the sentence drags it into Korean/English word order and particles.
   function describe(): { icon: LucideIcon; tone: ActivityTone; text: string; values: ReactNode } {
     switch (entry.event) {
       case 'created':
@@ -220,7 +220,7 @@ function HistoryRow({
             fields.length > 0
               ? t('history.updated', { fields: fields.join(', ') })
               : t('history.updatedUnknown'),
-          // 연결을 끊은 항목도 출처를 그대로 들고 있다 — 끊긴 건 동기화지 유래가 아니다.
+          // An unlinked entry still carries its provenance — what was severed is the SYNC, not where it came from.
           values: detached ? <RepoChip detail={detail} fallback={detached} /> : null,
         }
       }
@@ -267,7 +267,7 @@ function HistoryRow({
         }
       }
       case 'completed': {
-        // 열린 이슈를 남긴 채 닫은 완료는 "기한을 지켰다"가 아니라 "강행했다"로 읽혀야 한다.
+        // A completion closed while open issues remain must read as "forced", not as "met the deadline".
         const forced = detailFlag(detail, 'forced')
         const openIssues = detailNumber(detail, 'openIssues')
         const late = detail?.['onTime'] === false
@@ -286,8 +286,8 @@ function HistoryRow({
           ),
         }
       }
-      // 릴리즈가 나갔다(records/product.ts) — 강행 출하는 "깨끗이 나갔다"가 아니라 "알고도 나갔다"로 읽혀야
-      // 하므로, 프로젝트 완료와 같은 문법으로 forced/openIssues/회귀 시리즈를 칩으로 남긴다.
+      // A release shipped (records/product.ts) — a forced ship must read as "shipped knowingly", not as "shipped clean", so it leaves
+      // forced/openIssues/regressed series as chips in the same grammar a project completion uses.
       case 'released': {
         const forced = detailFlag(detail, 'forced')
         const openIssues = detailNumber(detail, 'openIssues')
@@ -382,7 +382,7 @@ function HistoryRow({
         }
       }
       case 'update_posted': {
-        // 프로젝트/이니셔티브가 어떤 상태라고 말했는지 — 판정은 배지로, 문장은 업데이트 타임라인이 갖는다.
+        // What state a project or initiative SAID it was in — the verdict is the badge, and the sentence belongs to the update timeline.
         const health = detailString(detail, 'health')
         return {
           icon: Megaphone,
@@ -392,7 +392,7 @@ function HistoryRow({
         }
       }
       case 'moved': {
-        // 팀 이동은 이름이 바뀌는 유일한 사건이다 — 어느 이름에서 어느 이름으로 갔는지가 이 줄의 전부다.
+        // A team move is the only event where the NAME changes — which name it went from and to is the whole of this row.
         const from = detailString(detail, 'fromIdentifier')
         const to = detailString(detail, 'toIdentifier')
         return {
@@ -419,7 +419,7 @@ function HistoryRow({
         }
       }
       default:
-        // 제어 평면이 이 웹보다 먼저 새 사건을 쓰기 시작한 경우 — 줄을 빠뜨리느니 원문 그대로 남긴다.
+        // The control plane started writing a new event before this web did — better to leave it verbatim than to drop the row.
         return { icon: History, tone: 'neutral', text: entry.event, values: null }
     }
   }
@@ -450,7 +450,7 @@ function statusTone(kind: TrackerKind, value: string | undefined): ActivityTone 
   return tone
 }
 
-// 배지 톤(outline 포함)을 피드 톤으로 옮긴다 — outline 은 색 없는 중립이다.
+// Map a badge tone (outline included) onto a feed tone — outline is the colourless neutral.
 function toTone<T>(
   parsed: { success: true; data: T } | { success: false },
   toneOf: (value: T) => 'neutral' | 'success' | 'danger' | 'warning' | 'info' | 'outline'
@@ -460,7 +460,7 @@ function toTone<T>(
   return tone === 'outline' ? 'neutral' : tone
 }
 
-// 링크 대상 — 자산 종류(faint)와 id@version. 대상 화면으로 그대로 걸어 들어갈 수 있다.
+// A link target — the asset kind (faint) plus id@version. You can walk straight into the target screen from it.
 function LinkTarget({
   workspace,
   detail,
@@ -487,7 +487,7 @@ function LinkTarget({
       />
     </Badge>
   )
-  // 끊긴 링크는 더 이상 갈 곳이 아니다 — 칩만 남기고 주소는 걸지 않는다.
+  // A severed link is no longer somewhere to go — only the chip is kept, with no address attached.
   if (!linked) return chip
   return (
     <Link
@@ -499,15 +499,15 @@ function LinkTarget({
   )
 }
 
-// GitHub 원본 — owner/repo#12. 도메인이 이력 detail 에 주소(url)까지 자족적으로 남기므로, 라이브 연결을
-// 끊은 뒤에도 "어디서 가져왔는지"를 여기서 바로 열 수 있다. url 이 없는 예전 항목은 텍스트로만 남는다
-// (github.com 이라 가정하고 주소를 지어내지 않는다 — GHE 사본이면 틀린 곳으로 보낸다).
+// The GitHub original — owner/repo#12. The domain leaves the address (url) on the history detail self-sufficiently, so "where was this
+// imported from" opens directly from here even after the live connection is severed. An older entry with no url stays as text only
+// (no address is invented by assuming github.com — on a GHE copy that sends you somewhere wrong).
 function RepoChip({
   detail,
   fallback,
 }: {
   detail: Record<string, unknown> | undefined
-  // 구조화된 출처가 없는 예전 항목이 들고 있는 문자열(`owner/repo#42`) — 있으면 텍스트로라도 보여준다.
+  // The string an older entry with no structured provenance carries (`owner/repo#42`) — shown as text when present.
   fallback?: string
 }) {
   const repository = detailString(detail, 'repository')

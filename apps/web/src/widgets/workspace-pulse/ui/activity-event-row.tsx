@@ -17,27 +17,27 @@ import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
 import { Link } from '@/shared/ui/link'
 
-// 이벤트 kind 는 `<주체>.<동사>` 문법이다(agent.run.started 처럼 주체가 두 마디인 경우가 있어 **마지막 점**
-// 에서 자른다). 문장을 kind 마다 한 벌씩 번역하는 대신 주체와 동사를 각각 번역해 칩으로 세우는 이유:
-//   ① 60개가 넘는 kind 마다 두 로케일의 문장을 유지하는 일은 새 kind 가 추가될 때마다 조용히 밀린다,
-//   ② 한국어는 값을 문장에 끼워 넣는 순간 조사가 값에 따라 달라진다 — 그래서 값은 언제나 칩이다
-//      (`shared/ui/activity-feed` 가 이미 그렇게 정한 규칙).
-// 모르는 토큰은 원문 그대로 둔다: 새 배포가 기록한 사실을 옛 리더가 감추는 것보다 낫다.
+// An event kind has the grammar `<subject>.<verb>` (a subject can be two words, as in agent.run.started, so it is split at the
+// LAST dot). Subject and verb are translated separately and stood up as chips, rather than translating one sentence per kind:
+//   ① maintaining two locales' sentences for more than sixty kinds falls quietly behind every time a kind is added,
+//   ② in Korean, the moment a value is embedded in a sentence its particle changes with the value — so a value is always a chip
+//      (the rule `shared/ui/activity-feed` already settled).
+// An unknown token is left verbatim: better than an old reader hiding a fact a new deployment recorded.
 function splitKind(kind: string): { subject: string; verb: string } {
   const at = kind.lastIndexOf('.')
   if (at < 0) return { subject: catalogKey(kind), verb: '' }
   return { subject: catalogKey(kind.slice(0, at)), verb: catalogKey(kind.slice(at + 1)) }
 }
 
-// 카탈로그 키로 쓸 수 있는 토큰. next-intl 은 키의 점을 **중첩 경로**로 읽으므로 `agent.run` 을 그대로
-// 조회하면 `activitySubject → agent → run` 을 찾다가 언제나 실패한다(라이브에서 이 줄만 영문 원문
-// "agent.run" 으로 나왔다). 두 마디짜리 주체는 밑줄로 눕혀서 한 칸짜리 키로 만든다.
+// The token usable as a catalog key. next-intl reads a dot in a key as a NESTED PATH, so looking up `agent.run` as-is searches
+// `activitySubject → agent → run` and always fails (in production this one row rendered as the raw English "agent.run").
+// A two-word subject is flattened with an underscore into a single-segment key.
 function catalogKey(token: string): string {
   return token.replaceAll('.', '_')
 }
 
-// 어느 축의 사실인가 — 아이콘 하나로 "이건 일 얘기 / 평가 얘기"가 구분된다. 서버가 계약에 박아 둔 축 분류와
-// 같은 갈래(@everdict/contracts `activityAxisOf`)지만, 여기서는 아이콘을 고르는 데만 쓰므로 접두사로 판단한다.
+// Which axis the fact belongs to — one icon separates "this is about work" from "this is about evaluation". The same split the
+// server pins in the contract (@everdict/contracts `activityAxisOf`), but here it only picks an icon, so the prefix decides.
 function iconOf(kind: string): LucideIcon {
   if (kind.startsWith('agent.') || kind.startsWith('approval.') || kind.startsWith('checkpoint.'))
     return Bot
@@ -58,7 +58,7 @@ function iconOf(kind: string): LucideIcon {
   return CircleDot
 }
 
-// 색은 사실의 성격에만 쓴다 — 무너진 것/끝난 것/그 외. 판단은 하지 않는다(계약이 사실만 기록하는 것과 같은 이유).
+// Colour is used only for the NATURE of the fact — broken, finished, everything else. It does not judge (the same reason the contract records only facts).
 function toneOf(kind: string): ActivityTone {
   if (kind.endsWith('.failed') || kind.endsWith('.exceeded') || kind.endsWith('.circuit_opened'))
     return 'danger'
@@ -67,8 +67,8 @@ function toneOf(kind: string): ActivityTone {
   return 'neutral'
 }
 
-// 주체 타입 → 그 하나가 사는 주소. 여기 없는 타입(파일·지식·태스크·승인·대화)은 링크하지 않는다: 갈 곳이
-// 없는 링크는 없는 것만 못하고, 그 화면들은 id 하나로 열리지 않는다.
+// Subject type → the address that one thing lives at. A type not here is not linked: a link with nowhere to go is worse than none,
+// and those screens do not open from an id alone.
 const DETAIL_ROUTE: Record<string, string> = {
   issue: 'issue',
   project: 'project',
@@ -91,14 +91,14 @@ function hrefOf(workspace: string, event: PlatformEvent): string | undefined {
     : `/${workspace}/${segment}/${encodeURIComponent(event.subject.id)}`
 }
 
-// 그 사실이 가리키는 것을 사람이 **부르는 손잡이**(식별자·이름·경로) — 짧고 인용 가능한 값만. 페이로드는
-// 검증되지 않은 가방이라(트래커 이력의 `history-detail` 과 같은 규칙) 문자열이 아닌 값은 없는 것으로 친다.
-// 손잡이가 없으면 아무것도 그리지 않는다 — 예전에는 `subject.id` 를 그렸는데, 그건 36자짜리 uuid 라서
-// 줄마다 읽을 수 없는 문자열이 붙었다.
+// The HANDLE a person calls the thing by (identifier, name, path) — short, quotable values only. A payload is an unvalidated bag
+// (the same rule as the tracker history's `history-detail`), so a non-string value counts as absent.
+// With no handle nothing is drawn — this used to draw `subject.id`, which is a 36-character uuid, so every row carried an
+// unreadable string.
 const CITE_KEYS = ['identifier', 'name', 'key', 'path', 'agentId'] as const
 
-// 손잡이가 아니라 **문장**인 값 — 이슈 제목, 업데이트/코멘트 발췌, 태스크 제목, 배치 거절 사유. 손잡이는
-// mono 로, 문장은 본문 서체로: 두 부류를 한 칸에 섞으면 어느 쪽도 읽히지 않는다.
+// Values that are SENTENCES rather than handles — an issue title, an update/comment excerpt, a task title, a batch refusal reason.
+// Handles are mono and sentences are body type: mixed into one slot, neither is readable.
 const QUOTE_KEYS = ['title', 'excerpt', 'subject', 'reason'] as const
 
 function firstString(
@@ -112,14 +112,14 @@ function firstString(
   return undefined
 }
 
-// `.status_changed` 의 from→to 를 목록과 같은 상태 배지로 그릴 수 있는 주체들.
+// The subjects whose `.status_changed` from→to can be drawn as the same status badges the lists use.
 function trackerKindOf(subjectType: string): TrackerKind | undefined {
   return subjectType === 'issue' || subjectType === 'project' || subjectType === 'initiative'
     ? subjectType
     : undefined
 }
 
-// `id@version` 문자열(run/scorecard 페이로드의 harness·dataset 표기) 또는 맨 id → EntityRef 칩.
+// An `id@version` string (the harness/dataset spelling in a run/scorecard payload) or a bare id → an EntityRef chip.
 function RefChip({
   value,
   kind,
@@ -142,7 +142,7 @@ function RefChip({
   )
 }
 
-// 짧은 기계 손잡이(케이스 id·도구 이름·경로) — 인용 칸과 같은 mono 처리.
+// A short machine handle (a case id, a tool name, a path) — the same mono treatment as the quote slot.
 function MonoChip({ value }: { value: string | undefined }) {
   if (value === undefined) return null
   return (
@@ -150,7 +150,7 @@ function MonoChip({ value }: { value: string | undefined }) {
   )
 }
 
-// 자유 배지 두 개로 그리는 from → to (상태 어휘 밖의 이동 — 이슈의 팀 이동 식별자 등).
+// from → to drawn as two free badges (a move outside the status vocabulary — an issue's team-move identifier, say).
 function MoveChips({ from, to }: { from: string | undefined; to: string | undefined }) {
   if (from === undefined && to === undefined) return null
   return (
@@ -166,10 +166,10 @@ function MoveChips({ from, to }: { from: string | undefined; to: string | undefi
 
 const DECISION_TONE = { approved: 'success', denied: 'danger', expired: 'outline' } as const
 
-// 홈 활동 피드의 한 줄 — "누가 · 무엇을 · 어떻게 됐다"가 payload 의 재료로 읽히게 한다. 문장은 여전히
-// 주체·동사 어휘의 조합이지만(위 splitKind 의 이유), 사실의 **내용**은 값 칩으로 선다: 상태는 from→to
-// 배지, 배치는 합격률, 파일은 경로, 승인은 결정. 재료가 하나도 없는 이벤트만 서버가 지은 영문 한 줄
-// (`message`)로 눕는다 — 아무것도 안 보이는 줄보다는 원문이 낫다.
+// One row of the home activity feed — "who · what · what happened" read out of the payload's materials. The sentence is still a
+// composition of the subject and verb vocabularies (see splitKind above), but the CONTENT of the fact stands as value chips: a
+// status is a from→to badge, a batch is its pass rate, a file is its path, an approval is its decision. Only an event with no
+// materials at all falls back to the server-built English line (`message`) — the raw sentence beats a row showing nothing.
 export function ActivityEventRow({
   event,
   more = 0,
@@ -179,8 +179,8 @@ export function ActivityEventRow({
   timeZone,
 }: {
   event: PlatformEvent
-  // 이 줄이 대신 서는 같은 행위자의 연속 같은-종류 사건 수(자기 자신 제외). 홈 피드가 버스트를 접을 때
-  // 넘긴다 — 한 턴에 파일 열댓 개를 발행한 에이전트가 피드 전체를 먹지 않게 하는 장치의 반쪽.
+  // How many consecutive same-kind events by the same actor this row stands in for (excluding itself). The home feed passes it when
+  // it folds a burst — half of the mechanism that stops an agent publishing a dozen files in one turn from eating the whole feed.
   more?: number
   workspace: string
   directory: MemberDirectory
@@ -196,7 +196,7 @@ export function ActivityEventRow({
   const cited = firstString(payload, CITE_KEYS)
   const noun = t.has(`activitySubject.${subject}`) ? t(`activitySubject.${subject}`) : subject
   const values = chips()
-  // 인용도 칩도 없는 줄만 message 로 폴백 — 있는 줄에 원문까지 겹치면 같은 말이 두 번 선다.
+  // Only a row with neither a quote nor a chip falls back to `message` — laying the raw sentence over a row that has them says the same thing twice.
   const quote =
     firstString(payload, QUOTE_KEYS) ??
     (values === null && cited === undefined ? event.message : undefined)
@@ -213,8 +213,8 @@ export function ActivityEventRow({
       {event.actor !== undefined && profile !== undefined && (
         <ActivityActorName name={memberNameOf(directory, event.actor)} />
       )}
-      {/* 사실의 한 줄 원문(서버가 만든 영문 데이터)은 title 로 — 화면의 문장은 언제나 번역된
-          어휘이고, 원문은 정확히 무엇이 기록됐는지 확인하고 싶을 때만 필요하다. */}
+      {/* The fact's raw one-line form (English data the server built) goes in `title` — the sentence on screen is always translated
+          vocabulary, and the raw form is needed only when you want to confirm exactly what was recorded. */}
       {href === undefined ? (
         <span className="font-[560] text-foreground" title={event.message}>
           {noun}
@@ -242,12 +242,12 @@ export function ActivityEventRow({
     </ActivityRow>
   )
 
-  // kind 별 값 칩 — payload 가 실은 재료를 사람이 읽는 모양으로. 트래커 이력의 describe() 와 같은 원칙:
-  // 문장은 짧게, 달라진 값은 전부 칩으로. 모양이 어긋난 payload 는 그 칩만 조용히 사라진다.
+  // Per-kind value chips — the materials the payload carries, in a shape a person reads. The same principle as the tracker history's
+  // describe(): keep the sentence short and put every changed value in a chip. A malformed payload silently loses just that chip.
   function chips(): ReactNode | null {
     const kind = event.kind
 
-    // 상태 전이 — 트래커 세 종은 목록과 같은 상태 배지로, 그 밖의 주체는 자유 배지로 from→to 를 그린다.
+    // A status transition — the three tracker kinds use the same status badges as their lists, every other subject uses free badges for from→to.
     if (kind.endsWith('.status_changed')) {
       const trackerKind = trackerKindOf(event.subject.type)
       const from = detailString(payload, 'from')
@@ -267,7 +267,7 @@ export function ActivityEventRow({
         </>
       )
     }
-    // 팀 이동은 식별자가 바뀌는 사건이다 — 어느 이름에서 어느 이름으로 갔는지가 이 줄의 전부다.
+    // A team move is an event where the IDENTIFIER changes — which name it went from and to is the whole of this row.
     if (kind === 'issue.moved') {
       return (
         <MoveChips
@@ -319,8 +319,8 @@ export function ActivityEventRow({
         </>
       )
     }
-    // 등록·이관된 능력 — id(@version)를 그 종류의 아이콘으로. 종류 밖 주체(scorecard.moved 의 팀 uuid)는
-    // 그리지 않는다: 읽을 수 없는 값은 없는 것만 못하다.
+    // A registered or transferred capability — its id(@version) with that kind's icon. A subject outside the kinds (scorecard.moved's
+    // team uuid) is not drawn: an unreadable value is worse than none.
     if (kind.endsWith('.registered') || kind.endsWith('.moved')) {
       const capabilityKind =
         event.subject.type === 'harness' ||

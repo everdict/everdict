@@ -14,13 +14,13 @@ import { updateIssueAction } from '../api/issues'
 export interface IssueMilestoneOption {
   id: string
   name: string
-  // 목표일이 있으면 함께 보여 준다 — 체크포인트를 고르는 판단은 "언제까지"가 절반이다.
+  // The target date is shown alongside when there is one — half of deciding which checkpoint is "by when".
   targetDate?: string
 }
 
-// 이슈가 걸린 프로젝트 체크포인트 — 프로젝트 바로 아래 줄에서 붙이고 뗀다. 마일스톤은 프로젝트 안에서만
-// 의미가 있어(제어 평면이 "이 이슈 프로젝트의 것인가"를 판정한다) 프로젝트가 없는 이슈에는 이 줄이 아예
-// 나오지 않는다. 이름은 링크가 아니다 — 체크포인트는 자기 주소가 없고 프로젝트 상세 안에서만 산다.
+// The project checkpoint an issue is attached to — attached and detached on the row directly under the project. A milestone means something
+// only inside a project (the control plane judges "is this one of this issue's project's"), so this row does not appear at all on an issue
+// with no project. The name is NOT a link — a checkpoint has no address of its own and lives only inside the project detail.
 export function IssueMilestoneControl({
   id,
   milestone,
@@ -29,7 +29,7 @@ export function IssueMilestoneControl({
 }: {
   id: string
   milestone: IssueMilestoneOption | undefined
-  // 이 이슈가 들어가 있는 프로젝트의 체크포인트들 — 다른 프로젝트 것은 제어 평면이 거절하므로 여기 오지 않는다.
+  // The checkpoints of the project this issue is in — another project's are refused by the control plane, so they never arrive here.
   milestones: IssueMilestoneOption[]
   canWrite: boolean
 }) {
@@ -37,7 +37,7 @@ export function IssueMilestoneControl({
   const refresh = useRefresh()
   const [saving, setSaving] = useState(false)
 
-  // 서버가 받아들인 값이 곧 이 줄의 새 진실이다 — 프로젝트 컨트롤과 같은 규칙(`use-refresh` 주석 참고).
+  // What the SERVER accepted is this row's new truth — the same rule as the project control (see the `use-refresh` comment).
   const serverId = milestone?.id ?? null
   const [chosenId, setChosenId] = useState<string | null | undefined>(undefined)
   if (chosenId !== undefined && chosenId === serverId) setChosenId(undefined)
@@ -45,7 +45,7 @@ export function IssueMilestoneControl({
   const shown =
     shownId === null ? undefined : (milestones.find((m) => m.id === shownId) ?? milestone)
 
-  // `null` 은 비운다 — 체크포인트에서 뗀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
+  // `null` CLEARS it — it means detach from the checkpoint, and it must never be conflated with `undefined` (untouched).
   async function assign(milestoneId: string | null): Promise<void> {
     if (milestoneId === shownId) return
     setSaving(true)
@@ -90,7 +90,7 @@ export function IssueMilestoneControl({
               'shrink-0 transition-colors disabled:opacity-50',
               shown
                 ? 'inline-flex size-5 items-center justify-center rounded text-faint hover:bg-accent hover:text-foreground'
-                : // 아직 아무 체크포인트에도 없는 이슈에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다.
+                : // On an issue not on any checkpoint yet, this button is the only affordance — that is the only time it wears a label.
                   'inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground'
             )}
           >

@@ -25,8 +25,8 @@ export const dynamic = 'force-dynamic'
 
 const AGENT_CONFIG_ID = 'default'
 
-// Settings › Agent › 상세 — default(기본 대화 에이전트)는 기존 편집기(AgentManager) 그대로, 나머지 등록
-// 에이전트/템플릿은 스펙 읽기 뷰 + 액션(활성 토글 · 템플릿 채택 · 크래프트에서 열기). 빈 섹션은 숨긴다(관례).
+// Settings › Agent › detail — `default` (the main conversational agent) keeps the existing editor (AgentManager), and every other registered
+// agent or template gets a spec READ view plus actions (the enabled toggle · adopt as template · open in craft). Empty sections hide (the convention).
 export default async function AgentDetailSettingsPage({
   params,
 }: {
@@ -48,25 +48,25 @@ export default async function AgentDetailSettingsPage({
     )
   }
 
-  // 기본 대화 에이전트 — 기존 커스터마이즈 편집기(instructions/MCP/모델/기본도구 토글) 그대로.
+  // The main conversational agent — the existing customization editor unchanged (instructions/MCP/model/default-tool toggles).
   if (id === AGENT_CONFIG_ID) {
     let agent: AgentSpec | undefined
     try {
       agent = agentSpecSchema.parse(await controlPlane.getAgent(ctx, AGENT_CONFIG_ID, 'latest'))
     } catch {
-      // 미등록 — 빈 커스터마이즈 폼에서 시작.
+      // Not registered — start from an empty customization form.
     }
     let modelIds: string[] = []
     try {
       modelIds = modelsSchema.parse(await controlPlane.listModels(ctx)).map((m) => m.id)
     } catch {
-      // 모델 레지스트리 없음 — 피커는 "서버 기본"만 제공.
+      // No model registry — the picker offers only "the server default".
     }
     let defaults: AgentDefault[] = []
     try {
       defaults = agentDefaultsSchema.parse(await controlPlane.listAgentDefaults(ctx)).defaults
     } catch {
-      // 기본도구 목록 없음 — 토글 섹션 숨김.
+      // No default-tool list — the toggle section hides.
     }
     let secretNames: string[] = []
     try {
@@ -75,7 +75,7 @@ export default async function AgentDetailSettingsPage({
         .filter((secret) => secret.scope === 'workspace')
         .map((secret) => secret.name)
     } catch {
-      // 시크릿은 admin-read — 비관리자는 이름 목록 없이 직접 입력.
+      // Secrets are admin-read — a non-admin types the name directly, with no name list.
     }
     return (
       <div className="space-y-6">
@@ -96,7 +96,7 @@ export default async function AgentDetailSettingsPage({
     )
   }
 
-  // 등록 에이전트/템플릿 상세 — latest 스펙 + 소유 정보(owner/버전들).
+  // A registered agent or template detail — the latest spec plus ownership information (owner, versions).
   let spec: AgentSpec | null = null
   try {
     spec = agentSpecSchema.parse(await controlPlane.getAgent(ctx, id, 'latest'))
@@ -131,7 +131,7 @@ export default async function AgentDetailSettingsPage({
         actions={<BackToList workspace={workspace} label={a('backToList')} />}
       />
 
-      {/* 메타 스트립 — 상태·버전·모드·모델·소유를 한 줄로 (빈 값은 생략) */}
+      {/* The meta strip — state, version, mode, model and ownership on one line (empty values omitted) */}
       <div className="flex flex-wrap items-center gap-2 text-sm">
         {spec.enabled ? (
           <Badge tone="success">{a('enabled')}</Badge>

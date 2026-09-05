@@ -10,16 +10,16 @@ import { membersSchema, type Member } from '@/entities/member'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 상세는 탭 셋이 한 레이아웃(헤더·속성 열)을 공유하고, 레이아웃과 그 안의 탭이 **같은** 읽기를 필요로 한다.
-// React 의 `cache` 로 한 요청 안에서 한 번만 부르게 묶어 두는 이유가 이것이다 — 목표 상세는 프로젝트마다
-// 이슈를 훑는 팬아웃이라, 레이아웃과 페이지가 각자 부르면 한 화면에 두 번 돈다. 인자는 문자열 하나뿐이라
-// 캐시 키가 참조 동일성에 걸리지 않는다.
+// The detail has three tabs sharing one layout (the header and the attribute column), and the layout and the tab inside it need the **same** read.
+// That is why it is wrapped in React's `cache` so it is called once per request — a goal detail is a fan-out that sweeps issues per project, so
+// with the layout and the page each calling it, it would run twice on one screen. Its argument is a single string, so the
+// cache key does not hinge on reference identity.
 
 export interface InitiativeLoad {
   initiative: InitiativeDetail | undefined
   error: string | undefined
   roles: string[]
-  // 다른 이니셔티브들 — 상위/하위 관계를 그리고, 편집 다이얼로그의 상위 후보가 된다.
+  // The other initiatives — used to draw the parent/child relations and as the edit dialog's parent candidates.
   initiatives: Initiative[]
   members: Member[]
 }
@@ -33,7 +33,7 @@ export const loadInitiative = cache(async (id: string): Promise<InitiativeLoad> 
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
-  // 보조 읽기 — 하나가 실패해도 상세는 계속 그려진다(그 칸만 비어 있게 된다).
+  // Supporting reads — the detail keeps rendering when one fails (only that slot ends up empty).
   const [initiatives, members] = await Promise.all([
     controlPlane
       .listInitiatives(ctx)

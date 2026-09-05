@@ -17,11 +17,11 @@ import { updateIssueAction } from '../api/issues'
 export interface IssueProjectOption {
   id: string
   name: string
-  // 상태 아이콘까지 들고 온다 — 끝난 프로젝트에 이슈를 넣는 것과 진행 중인 곳에 넣는 것은 다른 결정이다.
+  // The status icon comes along too — putting an issue into a FINISHED project and into one in progress are different decisions.
   status: ProjectStatus
 }
 
-// 고를 것이 이만큼 넘어가면 검색 줄을 낸다 — Combobox 와 같은 문턱값(스크롤로만 찾게 두지 않는다).
+// Past this many choices a search line appears — the same threshold as Combobox (people are not left to find things by scrolling alone).
 const SEARCH_FROM = 7
 
 function ProjectName({ project }: { project: IssueProjectOption }) {
@@ -34,12 +34,12 @@ function ProjectName({ project }: { project: IssueProjectOption }) {
   )
 }
 
-// 이슈가 속한 프로젝트 — 상태·우선순위·팀·라벨과 같은 자리(속성 열)에서 바로 바꾼다. 예전에는 붙어 있을 때만
-// 링크 한 줄로 보였고, 넣고 빼는 길은 ⋯ 메뉴의 편집 다이얼로그 안에만 있었다 — 이슈를 프로젝트에 넣으려고
-// 이슈 전체 폼을 여는 건 Linear 의 동선이 아니다.
+// The project an issue belongs to — changed right where status, priority, team and labels are (the attribute column). It used to appear as a
+// single link line only when attached, and the way to add or remove was inside the ⋯ menu's edit dialog — opening a whole issue form to put
+// an issue into a project is not Linear's path.
 //
-// 이미 붙어 있는 프로젝트는 계속 링크로 남는다(속성 열에서 프로젝트로 가는 유일한 길이다). 바꾸는 것은 그
-// 옆의 작은 트리거가 맡아, 읽는 자리와 바꾸는 자리를 겹치지 않게 한다.
+// A project already attached stays a LINK (it is the only route from the attribute column to the project). Changing it is handled by the
+// small trigger beside it, so where you read and where you change do not overlap.
 export function IssueProjectControl({
   workspace,
   id,
@@ -50,9 +50,9 @@ export function IssueProjectControl({
   workspace: string
   id: string
   project: IssueProjectOption | undefined
-  // 이 이슈의 팀이 올라 있는 프로젝트들(호출한 화면이 `?team=` 으로 걸러 온다). 프로젝트는 여러 팀이 함께
-  // 하지만 아무 팀이나 넣을 수 있는 건 아니다 — 이슈는 자기 팀이 올라 있는 프로젝트에만 들어가고, 그건
-  // 제어 평면이 강제한다. 그래서 여기 있는 것은 전부 실제로 고를 수 있는 것들이다.
+  // The projects this issue's team is on (the calling screen filters with `?team=`). A project is worked by several teams, but not any team
+  // can be put on one — an issue can only enter a project its OWN team is on, and the control plane enforces that. So everything here is
+  // genuinely selectable.
   projects: IssueProjectOption[]
   canWrite: boolean
 }) {
@@ -61,17 +61,17 @@ export function IssueProjectControl({
   const [query, setQuery] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // 서버가 받아들인 값이 곧 이 줄의 새 진실이다. 페이지 새로고침이 커밋될 때까지 기다리지 않는 이유는
-  // 그 시점을 아무도 약속해 주지 않기 때문이다 — 서버 액션의 라우터 작업은 관계없는 다른 업데이트가
-  // 일어날 때 함께 커밋되어서, 같은 클릭이 어떤 때는 26ms, 어떤 때는 14.8초 뒤에 반영됐다(`use-refresh`).
-  // `undefined` 는 "서버 값을 그대로 따른다"이고, 서버가 따라잡으면 그 상태로 돌아간다.
+  // What the SERVER accepted is this row's new truth. It does not wait for the page refresh to commit, because nobody promises WHEN that is —
+  // a server action's router work commits together with whatever unrelated update happens next, so the same click landed after 26ms one time
+  // and 14.8 seconds another (`use-refresh`).
+  // `undefined` means "follow the server value", and it returns to that state once the server catches up.
   const serverId = project?.id ?? null
   const [chosenId, setChosenId] = useState<string | null | undefined>(undefined)
   if (chosenId !== undefined && chosenId === serverId) setChosenId(undefined)
   const shownId = chosenId === undefined ? serverId : chosenId
   const shown = shownId === null ? undefined : (projects.find((p) => p.id === shownId) ?? project)
 
-  // `null` 은 비운다 — 프로젝트에서 뺀다는 뜻이고, `undefined`(손대지 않음)와 절대 섞이면 안 된다.
+  // `null` CLEARS it — it means remove from the project, and it must never be conflated with `undefined` (untouched).
   async function assign(projectId: string | null): Promise<void> {
     if (projectId === shownId) return
     setSaving(true)
@@ -82,7 +82,7 @@ export function IssueProjectControl({
       return
     }
     setChosenId(projectId)
-    // 나머지 화면(이력·롤업)은 뒤따라 온다. 이 줄은 그걸 기다리지 않는다.
+    // The rest of the screen (history, rollups) follows behind. This row does not wait for it.
     refresh()
   }
 
@@ -120,7 +120,7 @@ export function IssueProjectControl({
               'shrink-0 transition-colors disabled:opacity-50',
               shown
                 ? 'inline-flex size-5 items-center justify-center rounded text-faint hover:bg-accent hover:text-foreground'
-                : // 아직 아무 프로젝트에도 없는 이슈에서는 이 버튼이 유일한 안내다 — 그때만 글자를 단다.
+                : // On an issue not in any project yet, this button is the only affordance — that is the only time it wears a label.
                   'inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11.5px] text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground'
             )}
           >
@@ -144,7 +144,7 @@ export function IssueProjectControl({
               autoFocus
               onChange={(e) => setQuery(e.target.value)}
               placeholder={t('projectSearchPlaceholder')}
-              // 이 컨트롤이 폼 안에 놓이는 날을 대비한다 — Enter 가 폼을 제출해 버리면 고르다 말고 저장된다.
+              // Guarding against the day this control sits inside a form — an Enter that submits the form would save mid-selection.
               onKeyDown={(e) => {
                 if (e.key === 'Enter') e.preventDefault()
               }}

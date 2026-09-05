@@ -6,11 +6,11 @@ import { Check, Copy } from 'lucide-react'
 import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 
-// 복사 가능한 커맨드/코드 블록 — mono `pre` + 우상단 복사 버튼. 커맨드는 코드이므로 번역하지 않고 그대로 노출한다.
-// (copyText은 http 컨텍스트 폴백까지 처리; message=null → 토스트 없이 인라인 "copied" 상태만 사용)
+// A copyable command/code block — a mono `pre` plus a copy button at the top right. A command is CODE, so it is shown untranslated.
+// (copyText handles the http-context fallback too; message=null → no toast, only the inline "copied" state)
 export function CodeBlock({
   code,
-  copyLabel, // 복사 버튼 aria-label (스크린리더용 — 번역 문자열 주입)
+  copyLabel, // the copy button's aria-label (for screen readers — a translated string is injected)
   className,
 }: {
   code: string

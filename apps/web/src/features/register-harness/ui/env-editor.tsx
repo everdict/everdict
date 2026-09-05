@@ -33,9 +33,9 @@ export function EnvEditor({
   secrets: ScopedSecretNames
   label: string
   tip: React.ReactNode
-  // 템플릿이 정한 env(상속). 주면 각 행이 상속/재정의로 표시되고, 상속 키는 이름만 잠긴다(키를 바꾸면 그건
-  // 다른 변수다). 지우기는 열려 있다 — 유효 설정 편집기이므로 "행을 지웠다"는 곧 "이 변형에는 없다"이고,
-  // 저장할 때 unsetEnv 로 나간다.
+  // The env the template set (inherited). Given it, each row is marked inherited or overridden and an inherited key's NAME is locked (changing
+  // the key makes it a different variable). Deleting stays open — this is an effective-configuration editor, so "I deleted the row" means
+  // "this variation does not have it", and it goes out as unsetEnv on save.
   baseRows?: EnvRow[]
 }) {
   const t = useTranslations('registerHarness')
@@ -110,7 +110,7 @@ export function EnvEditor({
                     onChange={(secret) => set(i, { secret, value: '', scope: 'workspace' })}
                   />
                   {overridden && base !== undefined && (
-                    // 되돌리기 — 값을 바꾼 뒤에는 템플릿 값이 화면에서 사라지므로, 되찾는 길이 있어야 한다.
+                    // Revert — once a value is changed the template's value disappears from the screen, so there has to be a way back to it.
                     <button
                       type="button"
                       aria-label={t('revertToInherited')}

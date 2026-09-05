@@ -38,7 +38,7 @@ export function EditIssueDialog({
   open: boolean
   onClose: () => void
   projects: { id: string; name: string }[]
-  // 워크스페이스 라벨 레지스트리 — 고를 대상이자 칩을 그리는 근거. 라벨은 이제 자유 문자열이 아니라 레코드다.
+  // The workspace label registry — both what can be picked and the basis for drawing the chips. A label is a RECORD now, not a free string.
   labels: IssueLabel[]
   canWrite: boolean
   canAttach?: boolean
@@ -57,8 +57,8 @@ export function EditIssueDialog({
   const [pending, setPending] = useState(false)
   const descriptionRef = useRef<HTMLTextAreaElement>(null)
 
-  // 올라간 첨부는 커서 자리에 들어간다. 현재 값은 상태가 아니라 텍스트영역에서 읽는다 — 파일을 여러 개 놓으면
-  // 업로드가 하나씩 이어져, 그 사이 렌더에서 닫힌 상태 값은 이미 지난 값이기 때문이다.
+  // An uploaded attachment goes in at the caret. The current value is read from the TEXTAREA rather than from state — dropping several files
+  // chains the uploads one after another, and the state value closed over in between renders is already stale.
   function insertAttachment(snippet: string) {
     const ta = descriptionRef.current
     const current = ta?.value ?? description
@@ -84,10 +84,10 @@ export function EditIssueDialog({
       ...(projectId !== (issue.projectId ?? '')
         ? { projectId: projectId === '' ? null : projectId }
         : {}),
-      // 순서까지 포함해 비교한다 — 같은 집합이면 PATCH 를 보내지 않는다. 구분자는 이슈 id 에 나올 수 없는
-      // 공백이면 충분하다(예전 코드는 여기에 리터럴 NUL 바이트를 넣어 파일 전체를 grep 에 안 잡히게 만들었다).
+      // Compared INCLUDING order — an identical set sends no PATCH. A separator only has to be something that cannot appear in an issue id, and a
+      // space is enough (the old code put a literal NUL byte here, which made the whole file invisible to grep).
       ...(labelIds.join(' ') !== issue.labelIds.join(' ') ? { labelIds } : {}),
-      // 빈 칸은 "비우기"(null)다 — 숫자 입력에서 지운 것과 손대지 않은 것을 구분해야 한다.
+      // An empty box means "clear" (null) — cleared and untouched have to be distinguishable on a number input.
       ...(estimate !== (issue.estimate === undefined ? '' : String(issue.estimate))
         ? { estimate: estimate === '' ? null : Number(estimate) }
         : {}),
@@ -129,7 +129,7 @@ export function EditIssueDialog({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="edit-issue-description">{t('fieldDescription')}</Label>
-          {/* 재현 화면은 설명의 일부다 — 붙여넣거나 끌어다 놓으면 커서 자리에 첨부 문법이 들어간다. */}
+          {/* A reproduction screenshot is part of the description — pasted or dropped, the attachment syntax goes in at the caret. */}
           <MediaDropZone onInsert={insertAttachment} disabled={!canAttach}>
             <Textarea
               id="edit-issue-description"

@@ -26,9 +26,9 @@ import { loadInitiative } from '../load-initiative'
 
 export const dynamic = 'force-dynamic'
 
-// 프로젝트 탭 — 목표 아래의 일들이 **어느 단계에 있는지**. 리니어처럼 상태별로 묶고, 묶음의 순서는 상태
-// 어휘의 순서(백로그 → 계획됨 → 진행 중 → 멈춤 → 완료 → 취소)를 그대로 따른다: 위에서 아래로 읽으면 그게
-// 곧 일이 지나온 길이다. 상태별 개수는 각 묶음 머리에 붙어, 어디에 일이 몰려 있는지가 세지 않아도 보인다.
+// The projects tab — **what stage** the work under this goal is at. Grouped by status as Linear does, with the group order following the
+// status vocabulary (backlog → planned → in progress → paused → done → cancelled): read top to bottom, that IS the path work travels.
+// The per-status counts sit on each group header, so where work has piled up is visible without counting.
 export default async function InitiativeProjectsPage({
   params,
 }: {
@@ -38,17 +38,17 @@ export default async function InitiativeProjectsPage({
   const t = await getTranslations('initiativesPage')
   const tracker = await getTranslations('tracker')
   const { initiative, initiatives, members, roles } = await loadInitiative(id)
-  if (!initiative) return null // 레이아웃이 이미 실패를 그렸다
+  if (!initiative) return null // the layout already drew the failure
 
-  // 목표에 넣을 수 있는 후보 — 이 목표를 아직 이름에 담지 않은 워크스페이스 프로젝트들. 링크는 프로젝트 쪽
-  // 필드라 실패해도 목록은 그대로 그린다(추가 버튼만 비활성으로 선다).
+  // The candidates that can be added to the goal — the workspace projects that do not already name it. The link is a field on the PROJECT side,
+  // so the list still renders on failure (only the add button stands disabled).
   const ctx = await authContext()
   const allProjects: Project[] = await controlPlane
     .listProjects(ctx)
     .then((r) => projectsSchema.parse(r))
     .catch((): Project[] => [])
   const candidates = projectCandidatesFor(id, allProjects)
-  // 프로젝트를 목표에 넣고 빼는 것은 프로젝트를 고치는 일이다 — 트래커 쓰기 권한과 같은 판정.
+  // Adding a project to and removing it from a goal is EDITING THE PROJECT — the same judgement as tracker write permission.
   const canEdit = can(roles, 'issues:write')
 
   const { readiness } = initiative
@@ -102,8 +102,8 @@ export default async function InitiativeProjectsPage({
                 >
                   <span className="min-w-0 flex-1 truncate text-[13px] font-[510] text-foreground">
                     {project.name}
-                    {/* 하위 목표를 거쳐 올라온 프로젝트는 어디에 걸려 있는지까지 말해야, 남은 일이 우산이
-                      아니라 실제 지점을 가리킨다. */}
+                    {/* A project that rolled up through a sub-goal has to say what it hangs from, so the remaining work points at the actual
+                      place rather than at the umbrella. */}
                     {project.viaInitiativeId !== undefined && (
                       <span className="ml-2 text-[11.5px] font-normal text-muted-foreground">
                         {initiativeName.get(project.viaInitiativeId) ?? project.viaInitiativeId}
@@ -131,8 +131,8 @@ export default async function InitiativeProjectsPage({
                   {project.health !== undefined && <HealthBadge health={project.health} />}
                   <ProjectStatusBadge status={project.status} />
                 </Link>
-                {/* 하위 목표를 거쳐 올라온 프로젝트는 여기 걸린 게 아니라 그 목표에 걸려 있다 — 여기서 뺄 수
-                  있는 척하지 않는다. */}
+                {/* A project that rolled up through a sub-goal hangs from THAT goal rather than here — no pretence that it can be removed
+                  from here. */}
                 {canEdit && project.viaInitiativeId === undefined && (
                   <RemoveInitiativeProjectButton
                     initiativeId={id}

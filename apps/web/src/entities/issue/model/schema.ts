@@ -46,14 +46,14 @@ export function isOpenIssueStatus(status: WireIssueStatus): boolean {
 
 // What kind of everdict object an issue points at. Links are POINTERS — unvalidated by design, resolved
 // through the normal RBAC-gated reads at render time.
-// 우선순위 — Linear 의 다섯 단계. 정수(0~4)가 아니라 문자열 어휘인 건 컨트롤 플레인과 같은 이유다:
-// 0 이 마지막으로 정렬되는 매직 넘버는 읽을 수 없다.
+// Priority — Linear's five levels. It is a string vocabulary rather than an integer (0–4) for the same reason as in the control
+// plane: a magic number where 0 sorts last cannot be read.
 export const ISSUE_PRIORITIES = ['none', 'urgent', 'high', 'medium', 'low'] as const
 export const issuePrioritySchema = z.enum(ISSUE_PRIORITIES)
 
-// `issue` 는 GitHub 이 `#123` 으로 적는 교차참조다 — 한 이슈가 다른 이슈를 언급한다. 저장은 다른 링크와
-// 똑같이 **언급하는 쪽** 레코드에 한 방향으로만 하고, 언급당한 이슈는 하네스와 같은 역방향 질의로 읽는다.
-// id 는 대상의 UUID 다(식별자가 아니다): 팀을 옮기면 `ENG-12` 가 `PLT-3` 로 다시 찍히므로.
+// `issue` is the cross-reference GitHub writes as `#123` — one issue mentioning another. It is stored exactly like every other link,
+// one-directionally on the **mentioning** record, and the mentioned issue is read by the same reverse query a harness uses.
+// The id is the target's UUID (not its identifier): moving team re-stamps `ENG-12` as `PLT-3`.
 export const ISSUE_LINK_TYPES = [
   'harness',
   'dataset',
@@ -101,9 +101,9 @@ export const trackerHistoryEventSchema = z.enum([
   // A release went out (records/product.ts) — its own word, because "released" is what a reader scans a
   // product's history for, and a forced release must read as shipped-with-overrides, not done.
   'released',
-  // 팀 이동 — 식별자를 다시 찍는 유일한 전이라 별도 이벤트다.
+  // A team move — its own event, because it is the only transition that RE-STAMPS the identifier.
   'moved',
-  // 프로젝트 업데이트가 올라왔다 — 타임라인을 훑는 사람이 찾는 건 그 사이의 편집이 아니라 이것들이다.
+  // A project update was posted — what someone sweeping the timeline is looking for is these, not the edits between them.
   'update_posted',
   'member_added',
   'member_removed',
@@ -151,26 +151,26 @@ export const issueGithubSchema = z.object({
 export const issueSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // 이슈는 정확히 한 팀에 속하고, 그 팀이 찍은 이름(`ENG-12`)을 들고 다닌다.
+  // An issue belongs to exactly one team and carries the name that team stamped (`ENG-12`).
   number: z.number(),
   identifier: z.string(),
-  // 팀을 옮기면 식별자를 다시 찍는다 — 예전 이름도 계속 해석되므로, 이미 붙여넣은 링크는 살아 있고
-  // 상세 페이지는 정규 슬러그로 리다이렉트한다.
+  // Moving team re-stamps the identifier — an old name still resolves, so links already pasted stay alive and the detail page
+  // redirects to the canonical slug.
   formerIdentifiers: z.array(z.string()).default([]),
   title: z.string(),
   description: z.string().optional(),
   status: issueStatusSchema,
-  // 상태(워크플로 위치)와 독립적인 긴급도. 기본값이 있는 이유는 "우선순위 없음"도 목록이 그려야 하는
-  // 진짜 답이기 때문 — optional 이면 소비자마다 같은 폴백을 새로 발명한다.
+  // Urgency, independent of status (the workflow position). It has a DEFAULT because "no priority" is a real answer a list has to
+  // draw — left optional, every consumer invents the same fallback again.
   priority: issuePrioritySchema.default('none'),
   estimate: z.number().optional(),
   dueDate: z.string().optional(),
   parentId: z.string().optional(),
-  // 이 이슈가 끌려 들어간 팀 이터레이션.
-  // 이슈가 속한 프로젝트 체크포인트 — 자기 프로젝트의 것만 가리킬 수 있다.
+  // The team iteration this issue was pulled into.
+  // The project checkpoint the issue belongs to — it can only point at one of its OWN project's.
   milestoneId: z.string().optional(),
-  // 트리아지 — 팀 워크플로 바깥(임포트·에이전트·요청)에서 들어와 아직 받아들여지지 않은 상태. 상태가 아니라
-  // 플래그인 이유는 상태 어휘가 곧 워크플로이고, 워크플로에 들어오기 전인 것은 그 어휘로 말할 수 없기 때문.
+  // Triage — arrived from outside the team workflow (an import, an agent, a request) and not yet accepted. It is a FLAG rather than a
+  // status because the status vocabulary IS the workflow, and something not yet in the workflow cannot be said in that vocabulary.
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   // Registry ids (entities/issue-label), not names — join against listIssueLabels to draw a chip.
@@ -188,9 +188,9 @@ export const issueSchema = z.object({
 })
 export const issuesSchema = z.array(issueSchema)
 
-// 목록 행이 받는 축약본 — `GET /issues` 는 전체 레코드가 아니라 이 투영을 페이지 단위로 준다.
-// 행이 그리지 않는 것(본문·이력·former identifiers·origin)은 아예 내려오지 않고, links 는 개수만,
-// GitHub 사본은 "어느 저장소, 당겨오는가" 두 가지로 줄어든다. 전체 레코드는 상세(`getIssue`)에 있다.
+// The summary a list row receives — `GET /issues` serves this projection a page at a time, not the whole record.
+// What a row does not draw (the body, history, former identifiers, origin) never comes down at all; `links` shrinks to a count and
+// the GitHub copy to two facts ("which repository" and "is it syncing"). The whole record is on the detail (`getIssue`).
 export const issueSummaryGithubSchema = z.object({
   host: z.string().optional(),
   repository: z.string(),
@@ -208,16 +208,16 @@ export const issueSummarySchema = z.object({
   estimate: z.number().optional(),
   dueDate: z.string().optional(),
   parentId: z.string().optional(),
-  // 이 이슈가 끌려 들어간 팀 이터레이션.
+  // The team iteration this issue was pulled into.
   milestoneId: z.string().optional(),
-  // 트리아지 — 팀 워크플로 바깥(임포트·에이전트·요청)에서 들어와 아직 받아들여지지 않은 상태. 상태가 아니라
-  // 플래그인 이유는 상태 어휘가 곧 워크플로이고, 워크플로에 들어오기 전인 것은 그 어휘로 말할 수 없기 때문.
+  // Triage — arrived from outside the team workflow (an import, an agent, a request) and not yet accepted. It is a FLAG rather than a
+  // status because the status vocabulary IS the workflow, and something not yet in the workflow cannot be said in that vocabulary.
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   labelIds: z.array(z.string()).default([]),
   linkCount: z.number(),
-  // 이 이슈에 달린 대화의 양(답글 포함). 이슈 테이블이 아니라 댓글 저장소가 아는 값이라 서버가 페이지마다
-  // 집계 한 번으로 채운다. 없음(undefined) = 아무도 세지 않았다, 0 = 세었고 없다 — 둘은 다른 사실이다.
+  // How much conversation this issue carries (replies included). The comment store knows it, not the issue table, so the server fills it
+  // with one aggregate per page. Absent (undefined) = nobody counted; 0 = counted and there are none — two different facts.
   commentCount: z.number().optional(),
   resolution: issueResolutionSchema.optional(),
   github: issueSummaryGithubSchema.optional(),
@@ -226,7 +226,7 @@ export const issueSummarySchema = z.object({
   updatedAt: z.string(),
 })
 
-// 한 페이지 — `nextCursor` 가 없으면 마지막 장이다(하우스 페이지네이션 모양).
+// One page — no `nextCursor` means this is the last (the house pagination shape).
 export const issuePageSchema = z.object({
   items: z.array(issueSummarySchema),
   nextCursor: z.string().optional(),
@@ -281,7 +281,7 @@ type _priorityFwd = AssertAssignable<z.infer<typeof issuePrioritySchema>, WireIs
 type _priorityBack = AssertAssignable<WireIssuePriority, z.infer<typeof issuePrioritySchema>>
 
 export type Issue = WireIssueRecord
-// 목록 행의 타입 — 상세(`Issue`)와 다른 타입인 게 요점이다. 행이 본문이나 이력을 읽으려 하면 컴파일이 막는다.
+// The list row's type — the POINT is that it differs from the detail (`Issue`). A row trying to read the body or the history fails to compile.
 export type IssueSummary = WireIssueSummary
 export type IssuePage = WireIssuePage
 export type IssuePriority = WireIssuePriority

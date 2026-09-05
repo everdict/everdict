@@ -20,8 +20,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Products — "무엇을 배포하는가"의 축(docs/architecture/product-timeline.md). 한 줄이 제품 하나:
-// 어떤 서비스들로 구성되고, 몇 개의 추이를 지켜보는지. 추이 자체는 상세의 타임라인이 그린다.
+// Products — the "what do we ship" axis (docs/architecture/product-timeline.md). One row is one product:
+// which services it is composed of, and how many trends it watches. The trends themselves are drawn by the detail's timeline.
 export default async function ProductsPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('productsPage')

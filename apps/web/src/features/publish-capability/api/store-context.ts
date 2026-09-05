@@ -11,25 +11,25 @@ import { workspacesSchema } from '@/entities/workspace'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
 
 export interface StoreContext {
-  // 작성자 표시 — subject → 이름 + 아바타(멤버 프로필).
+  // The author display — subject → name plus avatar (the member profile).
   authors: Record<string, { name: string; avatarUrl?: string }>
-  // 이미 채택한 capability 키(source/id) — 행에 "채택됨" 표시.
+  // The keys (source/id) of capabilities already adopted — marks a row as "adopted".
   adoptedKeys: string[]
-  // 이미 **가져온** 스킬 발행물의 출처 키(source/id) — 스킬은 채택 참조가 아니라 워크스페이스 스킬 **사본**이 되므로
-  // "이미 있는가"는 라이브러리의 origin 으로 판정한다(카탈로그가 가져간 예제를 감추는 기준).
+  // The source keys (source/id) of skill publications already **imported** — a skill becomes a **copy** of a workspace skill rather than an
+  // adoption reference, so "is it already here" is judged from the library's origin (the basis on which the catalog hides imported examples).
   importedSkillKeys: string[]
-  // 워크스페이스가 가져온(import) 환경 이미지 인벤토리 — environment 의 "가져옴/사용가능" 표시용.
+  // The inventory of environment images the workspace imported — for environment's "imported / usable" marks.
   adoptedEnvironments: AdoptedEnvironment[]
-  // 채택 시 필요 시크릿을 바인딩할 후보(워크스페이스 시크릿 이름).
+  // The candidates for binding required secrets at adoption (workspace secret names).
   secretNames: string[]
-  // subset 공유 대상 피커용 — 내가 속한 워크스페이스(id + 이름).
+  // For the subset sharing-target picker — the workspaces I belong to (id + name).
   myWorkspaces: { id: string; name: string }[]
-  // environment 이미지 태그 피커용 — 워크스페이스 레지스트리(이름 + host).
+  // For the environment image tag picker — the workspace registries (name + host).
   imageRegistries: { name: string; host: string }[]
 }
 
-// 스토어(공개 카탈로그)·내 발행 페이지가 공통으로 쓰는 보조 데이터. 모두 소프트(실패해도 빈 값) — capability 목록만
-// 있으면 페이지는 뜬다. 권한/주 목록은 각 페이지가 principal + 자기 소스로 로드하고, 여기서는 표시·채택 보조 데이터만 모은다.
+// The supporting data shared by the store (public catalog) and my-publications pages. All of it is SOFT (empty on failure) — the page renders as
+// long as the capability list is there. Permissions and the main list are loaded by each page from the principal and its own source; only display and adoption support data is gathered here.
 export async function loadStoreContext(ctx: AuthContext): Promise<StoreContext> {
   const members = await controlPlane
     .listMembers(ctx)

@@ -9,7 +9,7 @@ import { Switch } from '@/shared/ui/switch'
 
 import { updateProductAction } from '../api/products'
 
-// 자동 평가 스위치 — 즉시 적용(설정 규칙): 실패하면 로컬 상태를 되돌리고 이유를 토스트로 말한다.
+// The automatic-evaluation switch — applied immediately (the settings rule): on failure it rolls the local state back and states the reason as a toast.
 export function AutoEvalToggle({
   productId,
   enabled,

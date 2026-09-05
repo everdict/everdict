@@ -10,8 +10,8 @@ import { Button } from '@/shared/ui/button'
 
 import { syncProductAction } from '../api/products'
 
-// 지금 GitHub 을 당긴다 — everdict 는 클라이언트라 웹훅이 없고, 이 버튼이 타임라인의 새로고침이다.
-// 결과는 서비스별로 요약해 토스트로: 몇 개가 들어왔고, 어느 레포가 닿지 않았는지.
+// Pull GitHub now — everdict is a CLIENT and has no webhook, so this button IS the timeline's refresh.
+// The result is summarized per service as a toast: how many came in, and which repo could not be reached.
 export function SyncProductButton({ productId }: { productId: string }) {
   const t = useTranslations('productsPage')
   const refresh = useRefresh()

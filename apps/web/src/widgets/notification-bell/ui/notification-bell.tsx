@@ -66,10 +66,10 @@ const KIND_META: Record<NotificationKind, { Icon: LucideIcon; tone: KindTone }> 
   schedule_failed: { Icon: CalendarX, tone: 'danger' },
   report_completed: { Icon: ClipboardCheck, tone: 'info' }, // scheduled analysis report pinned to a view
   comment_mention: { Icon: AtSign, tone: 'info' },
-  issue_regressed: { Icon: TriangleAlert, tone: 'danger' }, // 닫힌 이슈가 다시 열렸다 — 경보로 읽혀야 한다
-  // 사람이 올린 판정 — 성패가 아니라 보고다. 색으로 결론을 내지 않고(제목이 health 를 말한다) 정보 톤을 쓴다.
+  issue_regressed: { Icon: TriangleAlert, tone: 'danger' }, // a closed issue reopened — it has to read as an alarm
+  // A verdict a PERSON posted — a report rather than a success or failure. It draws no conclusion with colour (the title states the health) and uses the info tone.
   tracker_update_posted: { Icon: Megaphone, tone: 'info' },
-  // 에이전트가 내 결정을 기다리며 파킹됐다(HITL, N8) — 실패는 아니지만 내가 풀어줘야 진행되는 상태.
+  // An agent parked waiting on my decision (HITL, N8) — not a failure, but a state that only moves once I release it.
   agent_approval_requested: { Icon: ShieldQuestion, tone: 'info' },
 }
 const TONE_CHIP: Record<KindTone, string> = {
@@ -215,7 +215,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
 
   return (
     <div className="relative">
-      {/* 아이콘 전용 트리거(오른쪽 상단 클러스터용) — 미읽음 개수는 코너 배지로. */}
+      {/* The icon-only trigger (for the top-right cluster) — the unread count goes in a corner badge. */}
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

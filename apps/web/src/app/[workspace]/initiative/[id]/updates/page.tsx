@@ -15,9 +15,9 @@ import { loadInitiative } from '../load-initiative'
 
 export const dynamic = 'force-dynamic'
 
-// 업데이트 탭 — 산수 옆에 있는 유일한 **판단**. 진척은 서버가 세지만 "그래서 괜찮은가"는 사람이 말하는
-// 것이고, 색이 바뀐 이유는 그 문장에만 있다. 최신이 위(서버 정렬 그대로)인 이유는 이 화면에 오는 사람이
-// 묻는 게 "지금 어떤가"이기 때문이다.
+// The updates tab — the only **judgement** standing beside the arithmetic. The server counts the progress, but "so is it all right" is what a
+// PERSON says, and the reason a colour changed lives only in that sentence. Newest first (the server order verbatim) because what someone
+// coming to this screen asks is "how is it now".
 export default async function InitiativeUpdatesPage({
   params,
 }: {
@@ -27,7 +27,7 @@ export default async function InitiativeUpdatesPage({
   const t = await getTranslations('initiativesPage')
   const timeZone = await getTimeZone()
   const { initiative, roles, members } = await loadInitiative(id)
-  if (!initiative) return null // 레이아웃이 이미 실패를 그렸다
+  if (!initiative) return null // the layout already drew the failure
 
   const ctx = await authContext()
   const updates = await controlPlane

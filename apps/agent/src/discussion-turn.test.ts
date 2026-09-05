@@ -190,7 +190,7 @@ describe("POST /internal/discussion-turn — detached thread answer", () => {
       headers: { "x-internal-token": "shhh" },
       payload: TRIGGER,
     });
-    // the park lands on the comment first (all viewers see 승인 대기)…
+    // the park lands on the comment first (all viewers see "awaiting approval")…
     await vi.waitFor(() => {
       expect(reports.some((r) => r.status === "awaiting_approval")).toBe(true);
     });

@@ -116,7 +116,7 @@ export default async function DatasetDetailPage({
     .listHarnesses(ctx)
     .then((r) => new Set(harnessesSchema.parse(r).map((h) => h.id)))
     .catch(() => undefined)
-  // 이 데이터셋을 지켜보는 이슈들 + 태어난 자리 — 보조 정보라 실패해도 상세는 그대로 그린다.
+  // The issues watching this dataset plus where it was born — supporting information, so the detail still renders on failure.
   const linkedIssues = await loadLinkedIssues(ctx, 'dataset', id)
   const relation = buildDatasetRelations(scorecards, liveHarnessIds)[id]
   const currentWorkspace = principal?.workspace ?? workspace
@@ -169,7 +169,7 @@ export default async function DatasetDetailPage({
 
   // This version's tags (free-form labels) — mutable meta for distinguishing versions, separate from content tags (classification). Unrelated to version immutability.
   const versionTags = summary?.versionTags?.[dataset.version] ?? []
-  // 이 버전이 어디서 왔는가 — 이 버전에 스탬프가 없으면 가장 오래된 스탬프(태어난 자리)로 물러난다.
+  // Where this version came from — with no stamp on this version it falls back to the oldest stamp (where it was born).
   const datasetOrigin = pickOrigin(
     summary?.versionOrigins,
     dataset.version,
@@ -384,8 +384,8 @@ export default async function DatasetDetailPage({
         )}
       </Card>
 
-      {/* 만들어진 배경 — 이 데이터셋이 어느 이슈에서 태어났고 어떤 이슈들이 그것을 지켜보는지. 아래의
-          "출처 · 리니지"가 데이터가 어디서 왔는지(행의 출처)라면, 이쪽은 왜 존재하는지(의도의 출처)다. */}
+      {/* The background it was made against — which issue this dataset was born from and which issues watch it. Where the
+          "provenance · lineage" below is where the DATA came from (the rows' origin), this is why it EXISTS (the intent's origin). */}
       <CapabilityLineage
         workspace={workspace}
         kind="dataset"

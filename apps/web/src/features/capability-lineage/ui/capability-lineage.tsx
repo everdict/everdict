@@ -16,16 +16,16 @@ import { SectionHeader } from '@/shared/ui/section-header'
 
 import { LinkIssueButton } from './link-issue-button'
 
-// 능력의 리니지 — "이건 왜 있나, 어디서 나왔나". 이슈에서 태어난 저지·데이터셋·하네스가 자기 출처를 말하고,
-// 그 능력을 지켜보는 이슈들을 한자리에 모은다.
+// A capability's lineage — "why does this exist, where did it come from". A judge, dataset or harness born from an issue states its own
+// provenance, and the issues watching that capability are gathered in the same place.
 //
-// 왜 한 섹션인가: 이슈에서 태어난 능력은 그 이슈에 자동으로 링크된다. 출처와 연결된 이슈를 따로 그리면
-// 같은 이슈가 화면에 두 번 나오고 어느 쪽이 정본인지 답이 없다 — 그래서 출처 이슈는 목록의 첫 줄이 되고
-// "여기서 만들어짐" 배지로 구별된다(이슈 상세가 스코어카드를 한 번만 그리는 것과 같은 규칙).
+// Why ONE section: a capability born from an issue is automatically linked to that issue. Drawing provenance and linked issues separately
+// puts the same issue on screen twice with no answer for which is canonical — so the origin issue becomes the FIRST row of the list,
+// distinguished by a "born here" badge (the same rule by which the issue detail draws a scorecard only once).
 //
-// 그릴 게 없으면 섹션 자체가 없다(빈 섹션은 숨긴다).
-// `conversationAction` 은 슬롯이다 — "그 대화로 돌아가기" 버튼은 오른쪽 패널(widgets)의 것이고,
-// 피처가 위젯을 가져오면 레이어를 거슬러 올라간다. 그래서 위젯을 아는 페이지(app)가 노드를 넘긴다.
+// With nothing to draw the section itself is absent (empty sections are hidden).
+// `conversationAction` is a SLOT — the "back to that conversation" button belongs to the right panel (widgets), and a feature importing a
+// widget would climb back up a layer. So the page (app), which knows the widgets, passes the node down.
 export async function CapabilityLineage({
   workspace,
   kind,
@@ -39,7 +39,7 @@ export async function CapabilityLineage({
   conversationAction,
 }: {
   workspace: string
-  // 이 능력이 무엇이고 무엇으로 불리는가 — 여기서 이슈를 걸 때 그대로 링크가 된다.
+  // What this capability is and what it is called — it becomes the link verbatim when an issue is attached from here.
   kind: IssueCapabilityLinkType
   id: string
   origin?: CapabilityOrigin
@@ -47,18 +47,18 @@ export async function CapabilityLineage({
   createdByLabel?: string
   createdAt?: string
   timeZone: string
-  // issues:write — 링크를 만드는 것은 이슈를 고치는 일이다.
+  // issues:write — making a link is EDITING AN ISSUE.
   canLinkIssues: boolean
   conversationAction?: ReactNode
 }) {
   const t = await getTranslations('capabilityLineage')
-  // 아직 아무 이슈도 걸리지 않은 능력에서는 이 섹션이 이슈를 걸 수 있는 유일한 자리다 — 쓸 수 있는 사람에게는
-  // 비어 있어도 낸다(빈 섹션 숨김의 예외는 "여기가 유일한 진입"일 때뿐이다).
+  // On a capability with no issue attached yet, this section is the only place to attach one — for someone who can write it is drawn even
+  // when empty (the sole exception to empty-section hiding is "this is the only entry point").
   if (!hasLineage(origin) && issues.length === 0 && !canLinkIssues) return null
 
   const from = origin?.from
   const fromHref = from ? originRefHref(workspace, from) : undefined
-  // 출처 이슈는 아래 목록에서 뺀다 — 같은 것을 두 줄로 그리지 않는다.
+  // The origin issue is excluded from the list below — the same thing is never drawn as two rows.
   const originIssueId = from?.type === 'issue' ? from.id : undefined
   const linked = issues.filter((i) => i.id !== originIssueId)
   const actor = origin?.agentName ?? origin?.agentId
@@ -82,7 +82,7 @@ export async function CapabilityLineage({
           </div>
         )}
 
-        {/* 누가 만들었나 — 에이전트가 회원을 대신해 만들었으면 에이전트가 저자이고, 그 대화로 돌아갈 수 있다. */}
+        {/* Who made it — when an agent made it on a member's behalf the AGENT is the author, and that conversation can be returned to. */}
         {(actor !== undefined || createdByLabel !== undefined) && (
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 px-3.5 py-2.5 text-[13px]">
             {actor !== undefined ? (
@@ -117,9 +117,9 @@ export async function CapabilityLineage({
           </p>
         )}
 
-        {/* 이 능력을 건 이슈들. 출처 한 줄과 섞이면 "여기서 태어났다"와 "여기서 쓰인다"가 같은 말로 읽히므로
-            제목을 하나 세운다 — 이 목록이 이슈로 건너가는 유일한 길이고, 그 길이 있다는 걸 먼저 말해야 한다.
-            거는 자리도 같은 줄이다: 읽는 곳과 더하는 곳이 떨어져 있으면 "여기서도 걸 수 있다"를 아무도 모른다. */}
+        {/* The issues that attached this capability. Mixed with the single origin row, "born here" and "used here" read as the same sentence,
+            so a heading stands between them — this list is the only route across to an issue, and its existence has to be stated first.
+            Attaching happens on the same row: with reading and adding apart, nobody learns that attaching is possible here too. */}
         {(linked.length > 0 || canLinkIssues) && (
           <div className="flex items-center justify-between gap-2 px-3.5 py-2">
             <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">

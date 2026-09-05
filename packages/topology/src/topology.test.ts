@@ -953,7 +953,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
         };
       },
       async serviceLogs(_spec, service) {
-        return service === "agent-server" ? longLog : ""; // 빈 로그 유닛은 이벤트를 만들지 않아야 한다
+        return service === "agent-server" ? longLog : ""; // an empty log unit must not produce an event
       },
     };
     const backend = new ServiceTopologyBackend({
@@ -1002,7 +1002,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     if (tail?.kind !== "infra") throw new Error("expected an infra event");
     expect(tail.service).toBe("agent-server");
     expect(tail.message.length).toBeLessThanOrEqual(8_000);
-    expect(tail.message.endsWith("tail-marker")).toBe(true); // 캡은 머리가 아니라 꼬리를 남긴다
+    expect(tail.message.endsWith("tail-marker")).toBe(true); // the cap keeps the TAIL, not the head
 
     // The declared clock anchor: the agent plane's relative `t` counts from the drive's start. Without it an
     // inline trace with no per-event `at` could never join the placement plane's wall-clock axis — the agent's

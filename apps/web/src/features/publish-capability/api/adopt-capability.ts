@@ -4,18 +4,18 @@ import { agentSpecSchema, type AgentSpec, type CapabilityRef } from '@/entities/
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
 
-// 워크스페이스 기본 에이전트 id — apps/agent 의 AGENT_CONFIG_ID('default') 및 Settings › Agent 페이지와 동일.
+// The workspace's default agent id — the same as apps/agent's AGENT_CONFIG_ID ('default') and the Settings › Agent page.
 const AGENT_CONFIG_ID = 'default'
 
 async function loadAgent(ctx: AuthContext): Promise<AgentSpec | undefined> {
   try {
     return agentSpecSchema.parse(await controlPlane.getAgent(ctx, AGENT_CONFIG_ID, 'latest'))
   } catch {
-    return undefined // 아직 등록된 에이전트 없음 → 빈 커스터마이즈에서 시작.
+    return undefined // no agent registered yet → start from an empty customization.
   }
 }
 
-// AgentSpec → 저장 바디(id/version 제외). capabilities 만 교체하고 나머지 커스터마이즈는 보존.
+// AgentSpec → the save body (id/version excluded). Only `capabilities` is replaced; every other customization is preserved.
 function toSaveBody(agent: AgentSpec | undefined, capabilities: CapabilityRef[]) {
   return {
     ...(agent?.instructions !== undefined ? { instructions: agent.instructions } : {}),
@@ -27,16 +27,16 @@ function toSaveBody(agent: AgentSpec | undefined, capabilities: CapabilityRef[])
   }
 }
 
-// 화면 갱신은 부른 쪽의 `refresh()` 가 한다 — 여기서 `revalidatePath` 를 부르면 안 된다
-// (무효화할 캐시가 없는데, Next 16 은 선언만으로 클라이언트 prefetch 캐시를 통째로 버리고 300ms 쿨다운을
-// 건다). 근거는 `docs/web.md` §"A mutation refreshes; it must not revalidate".
+// Refreshing the screen is the CALLER's `refresh()` — `revalidatePath` must not be called here
+// (there is no cache to invalidate, and Next 16 throws away the whole client prefetch cache and imposes a 300ms cooldown on the DECLARATION
+// alone). The grounds are in `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface AdoptActionResult {
   ok: boolean
   error?: string
 }
 
-// 채택 — 스토어 capability 를 내 에이전트에 추가(불변버전 pin). 같은 (source,id)는 교체(재-pin/바인딩 갱신), 없으면 추가.
-// AgentSpec.capabilities 를 read-modify-write 로 갱신(PUT /agents/:id 버전 없는 업서트). authZ(agents:write)는 컨트롤플레인.
+// Adopt — add a store capability to my agent (an immutable version pin). The same (source,id) is REPLACED (a re-pin or a binding update), and added when absent.
+// AgentSpec.capabilities is updated read-modify-write (PUT /agents/:id, a versionless upsert). AuthZ (agents:write) is the control plane's.
 export async function adoptCapabilityAction(ref: CapabilityRef): Promise<AdoptActionResult> {
   const ctx = await authContext()
   try {
@@ -50,7 +50,7 @@ export async function adoptCapabilityAction(ref: CapabilityRef): Promise<AdoptAc
   }
 }
 
-// 채택 해제 — 내 에이전트에서 이 capability 참조를 제거.
+// Un-adopt — remove this capability reference from my agent.
 export async function unadoptCapabilityAction(
   source: string,
   id: string

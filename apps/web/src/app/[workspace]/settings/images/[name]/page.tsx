@@ -21,8 +21,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 버전 정렬 — JFrog 문법: latest 가 먼저, 그 다음 semver 내림차순, 나머지는 사전順 내림차순. 레지스트리는
-// 오름차순 사전순으로만 답하므로 "가장 최신일 것"이 위로 오게 여기서 정렬한다.
+// Version ordering — the JFrog grammar: latest first, then semver descending, then the rest lexicographically descending. The registry only
+// answers in ascending lexicographic order, so "the most likely newest" is sorted to the top here.
 function orderTags(tags: string[]): string[] {
   const latest = tags.filter((t) => t === 'latest')
   const semver = sortSemverDesc(tags.filter((t) => t !== 'latest' && isSemver(t.replace(/^v/, ''))))
@@ -32,9 +32,9 @@ function orderTags(tags: string[]): string[] {
   return [...latest, ...semver, ...rest]
 }
 
-// Settings › Images › [name] — 리포지토리 하나의 상세: 버전(태그) → 고른 버전의 다이제스트/크기/플랫폼 →
-// 빌드 히스토리(OCI config) → 런타임 계약 → 이 이미지를 선언한 환경(everdict 컨텍스트). 상세는 라우트이지
-// 다이얼로그가 아니다(우측 대화 패널과 나란히 쓰는 화면).
+// Settings › Images › [name] — one repository's detail: versions (tags) → the chosen version's digest/size/platform → the build history
+// (OCI config) → the runtime contract → the environment that declared this image (the everdict context). The detail is a ROUTE and not a
+// dialog (a screen used beside the conversation panel on the right).
 export default async function WorkspaceImageDetailPage({
   params,
 }: {
@@ -49,7 +49,7 @@ export default async function WorkspaceImageDetailPage({
   try {
     catalog = workspaceImageCatalogSchema.parse(await controlPlane.listWorkspaceImages(ctx))
   } catch {
-    notFound() // 관리형 스토어가 없는 배포 — 목록과 같은 404 판정
+    notFound() // a deployment with no managed store — the same 404 judgement as the list
   }
   const repo = catalog.repositories.find((r) => r.name === name)
   if (!repo) notFound()
@@ -60,10 +60,10 @@ export default async function WorkspaceImageDetailPage({
       workspaceImageTagsSchema.parse(await controlPlane.listWorkspaceImageTags(ctx, name)).tags
     )
   } catch {
-    // 태그를 못 읽어도 상세는 뜬다 — 빈 목록이 "없다"가 아니라 "못 읽었다"로 보이는 건 콜아웃 몫.
+    // The detail still renders when the tags cannot be read — making an empty list read as "there are none" rather than "it could not be read" is the callout's job.
   }
 
-  // 첫 버전은 서버에서 미리 열어 둔다 — 상세에 들어왔는데 아무것도 선택 안 된 화면은 빈 껍데기다.
+  // The first version is opened on the SERVER — arriving at a detail with nothing selected is an empty shell.
   const initialReference = tags[0] ?? null
   let initialInspect: WorkspaceImageInspect | null = null
   if (initialReference) {
@@ -72,11 +72,11 @@ export default async function WorkspaceImageDetailPage({
         await controlPlane.inspectWorkspaceImage(ctx, name, initialReference)
       )
     } catch {
-      // inspect 실패는 요약 없는 상세로 강등 — 클라이언트 콜아웃이 안내한다.
+      // An inspect failure degrades to a detail with no summary — the client callout explains.
     }
   }
 
-  // everdict 컨텍스트 — 이 리포지토리를 선언한 환경 capability(태그/다이제스트 무관 매칭). 실패는 섹션 생략.
+  // The everdict context — the environment capability that declared this repository (matched regardless of tag or digest). A failure omits the section.
   let environments: ImageEnvironmentLink[] = []
   try {
     environments = capabilitiesSchema
@@ -99,7 +99,7 @@ export default async function WorkspaceImageDetailPage({
         ]
       })
   } catch {
-    // capability 스토어를 못 읽으면 컨텍스트 섹션만 사라진다 — 레지스트리 상세는 그대로 선다.
+    // With the capability store unreadable only the context section disappears — the registry detail still stands.
   }
 
   return (

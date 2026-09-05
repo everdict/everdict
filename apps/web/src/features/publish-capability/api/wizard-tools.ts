@@ -16,8 +16,8 @@ import { authContext } from '@/shared/auth/principal'
 import { agentPlane } from '@/shared/lib/agent-plane'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 위자드 저작 보조 서버액션 — 저장 전 검증(validate)·mcp 연결 테스트(probe)·environment 이미지 태그 조회. 실패는 결과로
-// 되돌린다(throw 아님) — 폼이 인라인 피드백을 렌더한다.
+// The wizard's authoring-support server actions — pre-save validation, the mcp connection test (probe), and environment image tag lookup. A failure arrives as a RESULT
+// (rather than throwing) — the form renders inline feedback.
 
 export interface ValidateResult {
   ok: boolean
@@ -25,7 +25,7 @@ export interface ValidateResult {
   error?: string
 }
 
-// save 의 dry-run — 새 capability/새 버전 여부 + 예측 버전 + (environment) 이미지 경고. 스펙 파싱 실패는 result.ok=false.
+// The save dry-run — new capability or new version, the predicted version, plus (environment) image warnings. A spec parse failure is result.ok=false.
 export async function validateCapabilityAction(
   id: string,
   name: string,
@@ -49,7 +49,7 @@ export interface ProbeResult {
   error?: string
 }
 
-// mcp URL 연결 테스트 + 도구 발견. token 은 테스트 전용 임시 베어러(저장 안 됨).
+// The mcp URL connection test plus tool discovery. The token is a temporary test-only bearer (never stored).
 export async function probeCapabilityMcpAction(url: string, token?: string): Promise<ProbeResult> {
   const ctx = await authContext()
   try {
@@ -68,9 +68,9 @@ export interface TryCodeToolActionResult {
   error?: string
 }
 
-// code 도구 검증(POST /agent/code-tools/try) — check=구문만(파스, 실행 없음) · run=예제 입력으로 실제 1회 실행(에이전트와
-// 동일 실행계약; 타 워크스페이스 코드는 격리 런타임에서만 — 게이트는 서버가 소유권으로 판정). 위저드는 draft spec 을,
-// 스토어 상세는 발행본 ref 를 보낸다. 무상태.
+// Code tool verification (POST /agent/code-tools/try) — check = syntax only (a parse, no execution) · run = one real execution against the example input
+// (the same execution contract as the agent; another workspace's code only in an isolated runtime — the gate is judged by the server from ownership).
+// The wizard sends a draft spec and the store detail a published ref. Stateless.
 export async function tryCodeToolAction(body: {
   mode: 'check' | 'run'
   name?: string
@@ -93,7 +93,7 @@ export interface ImageTagsResult {
   error?: string
 }
 
-// environment 이미지 피커 — 워크스페이스 레지스트리의 repository 태그 목록(등록이 여럿이면 registry 이름 필요).
+// The environment image picker — the repository tag list from the workspace registry (with several registered, the registry name is required).
 export async function listImageTagsAction(
   repository: string,
   registry?: string
@@ -115,8 +115,8 @@ export interface ImageVerifyResult {
   error?: string
 }
 
-// 저작 시점 실 pull 검증 — 정적 분류 경고(imageWarnings)는 "레지스트리 등록 여부"만 보는데, 이건 레지스트리에 실제로
-// 물어본다(내가 방금 push 한 이미지를 정말 당길 수 있는가). digest 가 오면 그것이 재현 가능한 핀.
+// A real pull verification at authoring time — the static classification warnings (imageWarnings) only ask "is it a registered registry", while
+// this ASKS the registry (can the image I just pushed really be pulled). A digest that comes back is the reproducible pin.
 export async function verifyImageAction(image: string): Promise<ImageVerifyResult> {
   const ctx = await authContext()
   try {

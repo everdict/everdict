@@ -46,7 +46,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         exact: true,
       },
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
-      // 트래커 어휘 — 팀 바로 아래. 권한은 이슈와 같은 쌍을 쓴다(별도 표면이 아니다).
+      // The tracker vocabulary — directly under teams. Its permissions use the same pair as issues (it is not a separate surface).
       { href: '/labels', labelKey: 'labels', icon: Tag, requiredAction: 'issues:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },
@@ -70,8 +70,8 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         icon: Container,
         requiredAction: 'capabilities:read',
       },
-      // 관리형 이미지 스토어의 워크스페이스 네임스페이스 — 우리가 저장하고 grant를 발급하는 이미지들.
-      // BYO 레지스트리(Integrations)와 다른 화면인 이유는 소유 관계가 다르기 때문이다.
+      // The managed image store's workspace namespace — the images we store and issue grants for.
+      // It is a different screen from the BYO registries (Integrations) because the OWNERSHIP differs.
       { href: '/images', labelKey: 'images', icon: Boxes, requiredAction: 'harnesses:read' },
       // The workspace filesystem's governance view (usage + cleanup) — in-service, never the object-storage console.
       { href: '/files', labelKey: 'files', icon: HardDrive, requiredAction: 'files:read' },

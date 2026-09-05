@@ -5,9 +5,9 @@ import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
-// 긴 텍스트(에러 메시지·진행 과정 스텝 등)를 기본 몇 줄로 접어 두고, 실제로 넘칠 때만 "더 보기 / 접기"
-// 토글로 사용자가 전체를 펼치게 하는 원자. 데이터에는 전체 텍스트가 담겨 있으므로 잘리지 않고,
-// UI 로만 접어 두어 타임라인이 한 케이스의 긴 에러로 폭주하지 않는다. 짧은 텍스트엔 토글이 없다.
+// The atom that folds long text (an error message, the steps of a process) to a few lines by default and offers a "show more / show less"
+// toggle only when it ACTUALLY overflows, so a user can expand the whole thing. The data holds the full text, so nothing is truncated —
+// the folding is UI only, which stops one case's long error from flooding the timeline. Short text gets no toggle.
 export function ExpandableText({
   text,
   prefix,
@@ -15,7 +15,7 @@ export function ExpandableText({
   clampLines = 3,
 }: {
   text: string
-  prefix?: ReactNode // 접힘 영역 안에서 텍스트 앞에 인라인으로 붙는 라벨(예: "error ·")
+  prefix?: ReactNode // an inline label placed before the text inside the folded region (e.g. "error ·")
   className?: string
   clampLines?: number
 }) {
@@ -26,8 +26,8 @@ export function ExpandableText({
 
   useEffect(() => {
     const el = ref.current
-    if (el === null || expanded) return // 펼친 상태는 측정하지 않음(넘침 여부는 접혀 있을 때만 의미가 있다)
-    // 접힌 상태에서 실제로 잘리는지 측정 — 넘칠 때만 토글을 노출한다. 뷰포트 폭이 바뀌면 다시 잰다.
+    if (el === null || expanded) return // an expanded state is not measured (overflow only means something while folded)
+    // Measure whether it is actually clipped while folded — the toggle appears only when it overflows. Re-measured when the viewport width changes.
     const measure = () => setOverflows(el.scrollHeight - el.clientHeight > 1)
     measure()
     window.addEventListener('resize', measure)

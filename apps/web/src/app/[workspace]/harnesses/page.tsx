@@ -2,8 +2,8 @@ import { HarnessListView } from '@/widgets/harness-list'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스의 하네스 목록 — 유일한 주소다. 소유 팀으로 좁히는 것은 이 목록의 필터이므로, 팀 축이 경로였던
-// 시절의 `?team=` 링크도 그대로 열린다: 같은 이름의 쿼리 파라미터가 이제 그 필터의 철자다.
+// The workspace's harness list — the only address. Narrowing by owning team is a FILTER on this list, so a `?team=` link from the days when the
+// team axis was a path still opens: a query parameter of the same name is now that filter's spelling.
 export default async function HarnessesPage({
   params,
   searchParams,
