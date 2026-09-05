@@ -3,11 +3,13 @@ import type {
   CampaignFrameFromIssue,
   CampaignRound,
   CandidateSource,
+  CaseResult,
   DelegationBrief,
   DomainFact,
   EvolutionCampaignRecord,
   ReadResult,
   RoundEvidence,
+  VerdictPolicy,
 } from "@everdict/contracts";
 import {
   type AdoptionOperation,
@@ -244,10 +246,20 @@ export interface CampaignServiceDeps {
     // The port's own shape: `get(id)` returns the record, and the per-case rows are the heavy `scorecard`
     // detail that only `get` carries (`list` omits them). Tenant scoping is the caller's, as everywhere else
     // on this store — `verifyExamControl` checks it before reading anything out.
-    get(
-      id: string,
-    ): Promise<
-      { tenant: string; scorecard?: { results: ReadonlyArray<{ caseId?: string; scores: Score[] }> } } | undefined
+    //
+    // `manifest.verdictPolicy` and the rows' `failure` are here because `examProofOf` asks the PLATFORM's
+    // pass question (`caseVerdict`) rather than its own: that decision reads the batch's stamped policy, and
+    // a case killed before it produced an outcome has no verdict to prove anything with. A port narrowed to
+    // `{caseId, scores}` is what made the second opinion the convenient one to write.
+    get(id: string): Promise<
+      | {
+          tenant: string;
+          manifest?: { verdictPolicy?: VerdictPolicy };
+          scorecard?: {
+            results: ReadonlyArray<{ caseId?: string; scores: Score[]; failure?: CaseResult["failure"] }>;
+          };
+        }
+      | undefined
     >;
   };
   // THE diff predicate (the ScorecardService facade's diffSnapshot) — policy-resolved transitions, trial
@@ -798,6 +810,10 @@ export class CampaignService {
     const proof = examProofOf(
       frame.scenarios.map((sc) => sc.id),
       card.scorecard,
+      // The batch's OWN stamped policy, not the built-in ladder. A composed policy lives nowhere else, and
+      // reading the proof under different rules than the batch was judged under is a second opinion wearing
+      // the record's name.
+      card.manifest?.verdictPolicy,
     );
     if (proof.proven.length === 0)
       throw new BadRequestError(
