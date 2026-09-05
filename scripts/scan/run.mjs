@@ -228,12 +228,28 @@ try {
 const text = String(envelope?.result ?? "");
 const json = /\{[\s\S]*\}/.exec(text);
 let report;
+let structured = true;
 try {
   report = JSON.parse(json?.[0] ?? "");
 } catch {
-  console.error("✖ scan: the scanner did not answer with the findings envelope, so nothing is recorded.\n");
-  console.error(text.slice(0, 1200));
-  process.exit(1);
+  // ⚠️ AN UNSTRUCTURED ANSWER IS STILL A READING. The first version exited here and recorded nothing, and the
+  // pass it discarded that way had found `PgWorkspaceStore.delete()`'s 18-table allowlist against 60 more
+  // tenant-scoped tables — a real defect thrown away because the model answered in prose. The sink one
+  // directory over already had this right: it records an undecodable payload as a fact about the exporter
+  // rather than dropping it.
+  //
+  // Recorded, and marked: `structured: false` keeps it out of the findings band, because a prose answer has no
+  // countable finding total and averaging a guess into a series is worse than a gap in it.
+  structured = false;
+  report = {
+    unstructured: true,
+    text,
+    findings: [],
+    summary: "(the scanner answered in prose; the text is in this file)",
+  };
+  console.error(
+    "! scan: the answer was not the findings envelope. Recording the prose — a reading nobody can count is still a reading.\n",
+  );
 }
 
 const findings = Array.isArray(report.findings) ? report.findings : [];
@@ -256,7 +272,8 @@ appendFileSync(
     head,
     model: opts.model,
     files: files.length,
-    findings: findings.length,
+    structured,
+    findings: structured ? findings.length : null,
     cost: Number((envelope.total_cost_usd ?? 0).toFixed(4)),
   })}\n`,
 );
@@ -269,7 +286,7 @@ for (const f of findings) {
 }
 console.log(`\n${report.summary ?? "(no summary)"}`);
 console.log(
-  `\n${findings.length} finding(s) in ${scope} at ${head.slice(0, 9)} under ${opts.model} · .git/everdict-scan-${scope}.json · $${(envelope.total_cost_usd ?? 0).toFixed(4)}`,
+  `\n${structured ? `${findings.length} finding(s)` : "an unstructured reading"} in ${scope} at ${head.slice(0, 9)} under ${opts.model} · .git/everdict-scan-${scope}.json · $${(envelope.total_cost_usd ?? 0).toFixed(4)}`,
 );
 console.log(
   "· confidences are the scanner's own rating, not a calibration. Nothing here is applied; findings enter the tree through the gates.",

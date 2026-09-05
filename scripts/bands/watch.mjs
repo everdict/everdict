@@ -116,7 +116,9 @@ const SERIES = {
   "scan-log": () => {
     const rows = readJsonl(path.join(gitDir, "everdict-scan-log.jsonl"));
     if (rows === null) return null;
-    return rows.map((r) => Number(r.findings ?? 0));
+    // An unstructured reading has no countable total; `findings: null` is not zero, and averaging a guess into
+    // the series is worse than a gap in it.
+    return rows.filter((r) => r.structured !== false && typeof r.findings === "number").map((r) => r.findings);
   },
   "review-reports": () => {
     let files;
