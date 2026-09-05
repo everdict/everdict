@@ -627,7 +627,13 @@ export class CampaignService {
       try {
         source = await this.deps.store.get(tenant, id);
       } catch {
-        unreadable.push(id);
+        // ⚠️ THIS ID NEVER MET THE STORE, SO NOTHING HAS VOUCHED FOR IT. `informedBy` is
+        // `z.string().min(1).max(200)` × 50 — ten thousand characters of caller-authored free text — and the
+        // success path above is only safe because a string that RESOLVED is one the store had. An unreadable
+        // id has no such constraint, and it renders into prose an agent acts on. So it is bounded and
+        // flattened here: whitespace collapsed so it cannot become its own paragraph, and short enough to
+        // read as a label rather than as an instruction.
+        unreadable.push(id.replace(/\s+/g, " ").trim().slice(0, 60));
         continue;
       }
       if (source === undefined) continue;
@@ -639,13 +645,18 @@ export class CampaignService {
         .slice(0, budget);
       if (findings.length === 0) continue;
       budget -= findings.length;
-      inherited.push({ campaignId: id, findings });
+      // The label is the RECORD's id, never the caller's string. They are equal whenever the read succeeded,
+      // and equality is not the point: `informedBy` is caller-authored free text and this line renders into
+      // a brief a delegate reads, so the id that identifies a source is born at the source (L3).
+      inherited.push({ campaignId: source.id, findings });
     }
     return {
       ...(inherited.length > 0 ? { inherited } : {}),
       ...(unreadable.length > 0
         ? {
-            inheritedUnavailable: `${unreadable.length} earlier walk(s) could not be read (${unreadable.join(", ")})`,
+            inheritedUnavailable: `${unreadable.length} earlier walk(s) could not be read (${unreadable
+              .slice(0, 5)
+              .join(", ")}${unreadable.length > 5 ? ", …" : ""})`,
           }
         : {}),
     };
