@@ -58,7 +58,7 @@ const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 // ── options, refused when unrecognised ───────────────────────────────────────────────────────────
 // A plausible misspelling accepted in silence turns one case into the whole suite, or a drill into a no-op.
 // `scripts/trust/protocol-mutations.mjs` learned that expensively; there is no reason to learn it twice.
-const KNOWN = new Set(["--only", "--drill", "--model", "--timeout", "--list"]);
+const KNOWN = new Set(["--only", "--drill", "--model", "--timeout", "--list", "--fresh"]);
 const argv = process.argv.slice(2);
 const opts = { timeout: 120, model: "sonnet" };
 for (let i = 0; i < argv.length; i++) {
@@ -67,8 +67,8 @@ for (let i = 0; i < argv.length; i++) {
     console.error(`✖ agent-evals: unknown option "${flag}". Known: ${[...KNOWN].join(" ")}`);
     process.exit(1);
   }
-  if (flag === "--list") {
-    opts.list = true;
+  if (flag === "--list" || flag === "--fresh") {
+    opts[flag.slice(2)] = true;
     continue;
   }
   const value = argv[++i];
@@ -137,6 +137,7 @@ if (spawnSync("claude", ["--version"], { encoding: "utf8" }).status !== 0) {
 }
 
 // ── the throwaway worktree ───────────────────────────────────────────────────────────────────────
+const headSha = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
 const wt = path.join(tmpdir(), `everdict-agent-evals-${process.pid}`);
 const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
 const porcelain = () =>
@@ -209,17 +210,42 @@ const judge = (c, text) => {
   return misses;
 };
 
+// ⚠️ A SUITE THAT CANNOT FINISH IS A SUITE THAT NEVER STAMPS. Twenty cases is eleven or twelve minutes, and an
+// interruption at minute ten threw away the nineteen that had already passed — twice, on the same long case.
+// A PASSING result is cached under the head and model it was produced for, so a re-run does only what is left;
+// a different head or model never reuses one, because the configuration is exactly what the case is about.
+// `--fresh` ignores the cache. Third tool this week to need this; the review caches parts for the same reason.
+const cachedPass = (c) => {
+  try {
+    const prior = JSON.parse(readFileSync(path.join(resultDir, `${c.id}.json`), "utf8"));
+    return prior.head === headSha && prior.model === opts.model && prior.pass === true ? prior : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const record = (c, fields) => {
+  mkdirSync(resultDir, { recursive: true });
+  writeFileSync(
+    path.join(resultDir, `${c.id}.json`),
+    JSON.stringify({ id: c.id, head: headSha, model: opts.model, ...fields }, null, 2),
+  );
+};
+
 const runCase = (c) => {
+  if (!opts.fresh) {
+    const prior = cachedPass(c);
+    if (prior !== undefined) return { pass: true, misses: [], seconds: prior.seconds, cost: 0, reused: true };
+  }
   process.stdout.write(`· ${c.id} …\r`);
   const before = porcelain();
   const started = Date.now();
   const answer = ask(c);
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
-  mkdirSync(resultDir, { recursive: true });
-  writeFileSync(path.join(resultDir, `${c.id}.json`), JSON.stringify({ id: c.id, ...answer, seconds }, null, 2));
   // The deny flag is a request until something observes it refusing. This is that observation.
   const wrote = [...porcelain()].filter((p) => !before.has(p));
   if (wrote.length > 0) {
+    record(c, { pass: false, ...answer, seconds });
     return {
       pass: false,
       misses: [
@@ -229,8 +255,12 @@ const runCase = (c) => {
       cost: answer.cost ?? 0,
     };
   }
-  if (!answer.ok) return { pass: false, misses: [answer.note], seconds, cost: 0 };
+  if (!answer.ok) {
+    record(c, { pass: false, ...answer, seconds });
+    return { pass: false, misses: [answer.note], seconds, cost: 0 };
+  }
   const misses = judge(c, answer.text);
+  record(c, { pass: misses.length === 0, misses, ...answer, seconds });
   return { pass: misses.length === 0, misses, seconds, cost: answer.cost ?? 0 };
 };
 
@@ -309,7 +339,7 @@ try {
     spend += out.cost;
     outcomes.push({ id: c.id, pass: out.pass, seconds: Number(out.seconds) });
     if (out.pass) {
-      console.log(`✓ ${c.id.padEnd(32)} ${out.seconds}s`);
+      console.log(`✓ ${c.id.padEnd(32)} ${out.seconds}s${out.reused ? " — reused" : ""}`);
       continue;
     }
     failed++;
