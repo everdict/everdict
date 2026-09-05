@@ -30,7 +30,12 @@ function run(label, command, args, opts = {}) {
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   if (res.status !== 0) {
     console.error(`\n✖ CI-PARITY RED — "${label}" failed after ${seconds}s. Fix it, then re-run pnpm ci:local.`);
-    const gate = /^pnpm ([a-z-]+)$/.exec(label)?.[1];
+    // ⚠️ The pnpm label is not the script name. `pnpm cone` runs check-job-runner-cone.mjs and `pnpm docs-check`
+    // runs check-docs.mjs, so deriving `check-${label}.mjs` silently never fired for either — narrower than the
+    // rule advertises, and invisible because `existsSync` returning false reads as "not a bespoke gate".
+    const SCRIPT_FOR = { cone: "job-runner-cone", "docs-check": "docs" };
+    const named = /^pnpm ([a-z-]+)$/.exec(label)?.[1];
+    const gate = named === undefined ? undefined : (SCRIPT_FOR[named] ?? named);
     if (
       !triaged &&
       gate !== undefined &&

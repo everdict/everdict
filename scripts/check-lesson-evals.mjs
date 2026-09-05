@@ -71,9 +71,12 @@ for (const file of lessons) {
     continue;
   }
   // Produced something else, produced nothing, or said in so many words that it produced no eval. All fine.
-  if (!CLAIMS_EVAL.test(section) || DENIES_EVAL.test(section)) continue;
+  // A denial only counts when the section names no case at all. "There was no eval case before; now there is:
+  // `x`" is a CLAIM wearing a negation, and reading it as a denial would skip the check that matters.
+  const namedIds = [...section.matchAll(BACKTICKED)].map((m) => m[1]).filter((id) => id !== "evals");
+  if (!CLAIMS_EVAL.test(section) || (DENIES_EVAL.test(section) && namedIds.length === 0)) continue;
   checked++;
-  const named = [...section.matchAll(BACKTICKED)].map((m) => m[1]).filter((id) => id !== "evals");
+  const named = namedIds;
   const hits = named.filter((id) => cases.has(id));
   if (named.length === 0) {
     fail(

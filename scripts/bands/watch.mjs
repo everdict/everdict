@@ -54,6 +54,7 @@ const parseConfig = (text) => {
   const metrics = [];
   let inMetrics = false;
   let current = null;
+  let folding;
   for (const raw of text.split("\n")) {
     const line = raw.replace(/#.*$/, "").trimEnd();
     if (line.trim() === "") continue;
@@ -69,8 +70,20 @@ const parseConfig = (text) => {
     const kv = /^\s*(?:-\s*)?([a-zA-Z]+):\s*(.*)$/.exec(line);
     if (kv && current) {
       const [, key, value] = kv;
-      if (value === ">" || value === "") continue; // folded block: prose, not a threshold
+      // ⚠️ A folded block used to be SKIPPED, so `why` was always undefined and every diagnosis prompt and
+      // filed intent rendered an empty string where the metric's reason belongs. Editing the prose in
+      // bands.yaml had no effect on anything, which is the quietest way for a config field to be decorative.
+      if (value === ">" || value === "") {
+        folding = key;
+        continue;
+      }
+      folding = undefined;
       current[key] = /^\d+$/.test(value) ? Number(value) : value;
+      continue;
+    }
+    // A continuation line of the folded block above: deeper-indented prose, joined into one sentence.
+    if (folding !== undefined && current && /^\s{4,}\S/.test(line)) {
+      current[folding] = `${current[folding] ?? ""}${current[folding] ? " " : ""}${line.trim()}`;
     }
   }
   if (current) metrics.push(current);

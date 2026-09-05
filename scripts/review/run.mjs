@@ -63,6 +63,7 @@ if (files.length === 0) {
 const MAX_CHUNK = 320_000;
 const MAX_CHUNKS = 8;
 const chunks = [];
+const truncatedFiles = [];
 let current = { files: [], diff: "" };
 for (const file of files) {
   const fileDiff = git("diff", "--unified=3", range, "--", file).stdout;
@@ -73,12 +74,22 @@ for (const file of files) {
     chunks.push(current);
     current = { files: [], diff: "" };
   }
+  // ⚠️ Reported, not absorbed. The comment above claimed this and the code did it silently: a single file
+  // bigger than a chunk was cut and the stamp still said the range was reviewed — the same false certificate
+  // this file's header says it eliminated, reproduced one level down, per file.
+  if (fileDiff.length > MAX_CHUNK) truncatedFiles.push(`${file} (${Math.round(fileDiff.length / 1000)}KB)`);
   current.files.push(file);
   current.diff += fileDiff.slice(0, MAX_CHUNK);
 }
 if (current.files.length > 0) chunks.push(current);
 if (chunks.length === 0) {
   console.error(`✖ review: ${range} produced an empty diff.`);
+  process.exit(1);
+}
+if (truncatedFiles.length > 0) {
+  console.error(
+    `✖ review: ${truncatedFiles.length} file(s) have a diff larger than one chunk and would be reviewed only in part:\n${truncatedFiles.map((f) => `    ${f}`).join("\n")}\n  A stamp over a truncated file is the false certificate this runner exists to refuse. Skip them in REVIEW.md's "do not report" list, or split the change.`,
+  );
   process.exit(1);
 }
 if (chunks.length > MAX_CHUNKS) {
@@ -149,11 +160,15 @@ try {
   console.log(`▶ review · ${range} · ${files.length} file(s) in ${chunks.length} part(s) · model ${opts.model}\n`);
   for (const [index, chunk] of chunks.entries()) {
     process.stdout.write(`· part ${index + 1}/${chunks.length} (${chunk.files.length} files) …\r`);
+    // ⚠️ THE PROMPT GOES ON STDIN, NOT IN ARGV. Passing it as a positional argument worked for every small
+    // range and died on the first real one: Linux caps a SINGLE argument at MAX_ARG_STRLEN (128 KiB) whatever
+    // ARG_MAX says, and a 320 KiB chunk is over it. `spawnSync` reported `exited null` — a signal, with no
+    // message — so the failure looked like a crash rather than a limit. This runner had never been exercised
+    // on a range big enough to chunk, which is the only size it exists for.
     const res = spawnSync(
       "claude",
       [
         "-p",
-        buildPrompt(chunk, index),
         "--output-format",
         "json",
         "--model",
@@ -163,14 +178,21 @@ try {
         "--allowedTools",
         "Read,Grep,Glob",
       ],
-      { cwd: wt, encoding: "utf8", timeout: opts.timeout * 1000, maxBuffer: 64 * 1024 * 1024 },
+      {
+        cwd: wt,
+        encoding: "utf8",
+        input: buildPrompt(chunk, index),
+        timeout: opts.timeout * 1000,
+        maxBuffer: 64 * 1024 * 1024,
+      },
     );
     if (res.error?.code === "ETIMEDOUT") {
       console.error(`\n✖ review: part ${index + 1} timed out after ${opts.timeout}s — no stamp.`);
       process.exit(1);
     }
     if (res.status !== 0) {
-      console.error(`\n✖ review: part ${index + 1}: claude exited ${res.status}. ${(res.stderr ?? "").slice(0, 400)}`);
+      const how = res.signal ? `was killed by ${res.signal}` : `exited ${res.status}`;
+      console.error(`\n✖ review: part ${index + 1}: claude ${how}. ${(res.stderr ?? "").slice(0, 400)}`);
       process.exit(1);
     }
     const envelope = JSON.parse(res.stdout);

@@ -321,8 +321,12 @@ appendFileSync(
 );
 
 for (const f of findings) {
+  // ⚠️ The dismissed set was built and never consulted, so a dismissed finding came back looking brand new —
+  // contradicting the guarantee rule `ci` states in so many words. A record nothing reads is a record that
+  // exists to be pointed at.
+  const seen = dismissed.has(`${scope}:${f.file}`);
   console.log(
-    `${f.confidence === "high" ? "‼" : f.confidence === "medium" ? "!" : "·"} [${f.class}] ${f.file}${f.line ? `:${f.line}` : ""}`,
+    `${seen ? "◦" : f.confidence === "high" ? "‼" : f.confidence === "medium" ? "!" : "·"} [${f.class}] ${f.file}${f.line ? `:${f.line}` : ""}${seen ? "  (previously dismissed)" : ""}`,
   );
   console.log(`    ${f.summary}\n    ${f.failure ?? ""}`);
 }

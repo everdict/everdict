@@ -72,15 +72,6 @@ export function decideGate({
   productChanged,
   releaseTags = [],
 }) {
-  if (ciLedger === null) {
-    return {
-      allow: false,
-      arm: ARMS.CI_LEDGER_UNREADABLE,
-      reason:
-        "push blocked: no CI-parity ledger (.git/everdict-ci-ok) — nothing in this checkout has ever been gated. Run `pnpm ci:local`.",
-    };
-  }
-
   // ── the release, first, because it is the one act with no undo ─────────────────────────────────
   //
   // A tag push publishes binaries and images to the public. Before this arm nothing was required first: no
@@ -93,6 +84,15 @@ export function decideGate({
       allow: false,
       arm: ARMS.RELEASE_UNAUTHORIZED,
       reason: `push blocked: HEAD carries release tag(s) ${unauthorized.join(", ")} with no authorization committed at releases/<tag>.md. A release is the one act here with no undo; write what ships, what verified it, and who authorizes.`,
+    };
+  }
+
+  if (ciLedger === null) {
+    return {
+      allow: false,
+      arm: ARMS.CI_LEDGER_UNREADABLE,
+      reason:
+        "push blocked: no CI-parity ledger (.git/everdict-ci-ok) — nothing in this checkout has ever been gated. Run `pnpm ci:local`.",
     };
   }
 
