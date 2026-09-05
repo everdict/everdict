@@ -156,6 +156,10 @@ const findings = [];
 const summaries = [];
 let nitsOmitted = 0;
 let spend = 0;
+// ⚠️ NOTHING EXITS INSIDE THIS TRY. `process.exit()` skips the `finally` that removes the throwaway worktree —
+// the same defect `evals/run.mjs`'s drill had, and the one that leaked a worktree here when a killed run took
+// the child with it. Failures set `failure` and break; the exit happens after teardown.
+let failure;
 try {
   console.log(`▶ review · ${range} · ${files.length} file(s) in ${chunks.length} part(s) · model ${opts.model}\n`);
   for (const [index, chunk] of chunks.entries()) {
@@ -187,13 +191,13 @@ try {
       },
     );
     if (res.error?.code === "ETIMEDOUT") {
-      console.error(`\n✖ review: part ${index + 1} timed out after ${opts.timeout}s — no stamp.`);
-      process.exit(1);
+      failure = `part ${index + 1} timed out after ${opts.timeout}s — no stamp.`;
+      break;
     }
     if (res.status !== 0) {
       const how = res.signal ? `was killed by ${res.signal}` : `exited ${res.status}`;
-      console.error(`\n✖ review: part ${index + 1}: claude ${how}. ${(res.stderr ?? "").slice(0, 400)}`);
-      process.exit(1);
+      failure = `part ${index + 1}: claude ${how}. ${(res.stderr ?? "").slice(0, 400)}`;
+      break;
     }
     const envelope = JSON.parse(res.stdout);
     spend += envelope.total_cost_usd ?? 0;
@@ -203,11 +207,8 @@ try {
     try {
       part = JSON.parse(json?.[0] ?? "");
     } catch {
-      console.error(
-        `\n✖ review: part ${index + 1} did not answer with the findings envelope, so there is nothing to record.\n`,
-      );
-      console.error(text.slice(0, 1200));
-      process.exit(1);
+      failure = `part ${index + 1} did not answer with the findings envelope, so there is nothing to record.\n${text.slice(0, 800)}`;
+      break;
     }
     for (const f of part.findings ?? []) findings.push(f);
     nitsOmitted += Number(part.nitsOmitted ?? 0);
@@ -215,6 +216,10 @@ try {
   }
 } finally {
   teardown();
+}
+if (failure !== undefined) {
+  console.error(`\n✖ review: ${failure}`);
+  process.exit(1);
 }
 
 const report = { findings, nitsOmitted, summary: summaries.join(" ") };
