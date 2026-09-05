@@ -93,7 +93,7 @@ for (const file of lessons) {
   // the fix. Both rounds are why this comment is here.
   if (ghosts.length > 0) {
     fail(
-      `lessons/${file}: names ${named.map((n) => `\`${n}\``).join(", ")} as its eval case(s), and evals/cases/ has none of them. Either the case was never written, or it was renamed and this record now points at nothing.`,
+      `lessons/${file}: names ${ghosts.map((n) => `\`${n}\``).join(", ")} as an eval case, and evals/cases/ has no such case. Either it was never written, or it was renamed and this record now points at nothing.`,
     );
   }
 }
