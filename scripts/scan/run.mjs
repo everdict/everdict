@@ -48,7 +48,7 @@ const SCOPES = {
   agent: ["apps/agent/src"],
 };
 
-const KNOWN = new Set(["--status", "--next", "--scope", "--model", "--timeout"]);
+const KNOWN = new Set(["--status", "--next", "--scope", "--model", "--timeout", "--dismiss", "--file", "--reason"]);
 const argv = process.argv.slice(2);
 const opts = { model: "sonnet", timeout: 900 };
 for (let i = 0; i < argv.length; i++) {
@@ -56,7 +56,7 @@ for (let i = 0; i < argv.length; i++) {
     console.error(`✖ scan: unknown option "${argv[i]}". Known: ${[...KNOWN].join(" ")}`);
     process.exit(1);
   }
-  if (argv[i] === "--status" || argv[i] === "--next") {
+  if (argv[i] === "--status" || argv[i] === "--next" || argv[i] === "--dismiss") {
     opts[argv[i].slice(2)] = true;
     continue;
   }
@@ -101,6 +101,48 @@ if (opts.status) {
     );
   }
   process.exit(0);
+}
+
+// ── --dismiss ────────────────────────────────────────────────────────────────────────────────────
+//
+// A dismissal is a DECISION, so it is committed. `.git/` does not travel with a clone, and a dismissal nobody
+// else can read is a dismissal the next person redoes. The reason is required for the reason the article
+// gives: without it the findings-per-scan trend is a number anybody can lower by clicking.
+const DISMISSED = path.join(root, "scans", "DISMISSED.md");
+if (opts.dismiss) {
+  if (opts.scope === undefined || opts.file === undefined || opts.reason === undefined) {
+    console.error(
+      "✖ scan: --dismiss needs --scope, --file and --reason. A dismissal without a reason is the trend nobody can trust.",
+    );
+    process.exit(1);
+  }
+  if (String(opts.reason).trim().length < 12) {
+    console.error("✖ scan: that reason is too short to be one. Say what makes this not a defect, or what accepts it.");
+    process.exit(1);
+  }
+  if (SCOPES[opts.scope] === undefined) {
+    console.error(`✖ scan: no scope "${opts.scope}". Scopes: ${Object.keys(SCOPES).join(" ")}`);
+    process.exit(1);
+  }
+  appendFileSync(
+    DISMISSED,
+    `\n- \`${new Date().toISOString().slice(0, 10)}\` · **${opts.scope}** · \`${opts.file}\` — ${opts.reason}\n`,
+  );
+  console.log(
+    `· dismissed ${opts.scope} · ${opts.file}\n· recorded in ${path.relative(root, DISMISSED)} — commit it, or the dismissal did not happen.`,
+  );
+  process.exit(0);
+}
+
+// What has already been dismissed, so a finding comes back marked rather than as new.
+const dismissed = new Set();
+try {
+  for (const line of readFileSync(DISMISSED, "utf8").split("\n")) {
+    const m = /^-\s+`[\d-]+`\s+·\s+\*\*([^*]+)\*\*\s+·\s+`([^`]+)`/.exec(line);
+    if (m) dismissed.add(`${m[1]}:${m[2]}`);
+  }
+} catch {
+  // no record yet is not the same as an unreadable one, but for a display marker the two are the same answer
 }
 
 // ── which scope ──────────────────────────────────────────────────────────────────────────────────

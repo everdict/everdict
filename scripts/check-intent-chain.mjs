@@ -98,6 +98,14 @@ for (const name of changes) {
   if (!status || !STATUSES.includes(status)) {
     fail(`${label}/intent.md: \`Status:\` must be one of ${STATUSES.join(" | ")} (found ${status ?? "nothing"}).`);
   }
+  // The accept/reject decision IS the Plan-stage gate, and half of it left nothing behind: a rejected idea in
+  // the tree with no reason is the same as a deleted one, except it also looks like a decision.
+  if (status === "rejected" && !/^Rejected:\s*\S/m.test(intent)) {
+    fail(
+      `${label}/intent.md: \`Status: rejected\` with no \`Rejected: <why>\` line. A turned-down idea is a record only if it says what turned it down.`,
+    );
+  }
+
   const intentHeadings = headingsOf(intent);
   for (const section of INTENT_SECTIONS) {
     if (!intentHeadings.includes(section))
@@ -147,6 +155,25 @@ for (const name of changes) {
       fail(`${label}/spec.md: no \`Policies: <sha>\` line naming the \`.claude/\` tree it was written under.`);
     } else if (!gitOk("cat-file", "-e", policy)) {
       fail(`${label}/spec.md: \`Policies:\` names ${short(policy)}, which is not an object in this history.`);
+    }
+
+    // "Areas of concern" is the point of the design pass — the spec prompt says an empty one is suspicious —
+    // and nothing read it, so a plan could be written against a spec whose concerns were all open. That is the
+    // exact sequence the article puts a gate in front of: the owner resolves each one with its policy owner
+    // BEFORE engineering sees the spec.
+    //
+    // A status line rather than parsed prose, deliberately: the section's shape is whatever the design pass
+    // produced, and a check that guesses at bullets refuses specs for the wrong reason. `carried` is a legal
+    // answer — the article carries open questions forward into the plan.
+    const concerns = /^Concerns:\s*(open|resolved|carried)\b/m.exec(spec)?.[1];
+    if (!concerns) {
+      fail(
+        `${label}/spec.md: no \`Concerns: open|resolved|carried\` line. The design pass flags concerns so a person settles them; a spec that does not say whether they were settled cannot be planned against.`,
+      );
+    } else if (concerns === "open" && existsSync(path.join(dir, "plan.md"))) {
+      fail(
+        `${label}: plan.md exists while spec.md still says \`Concerns: open\`. Settle them (\`resolved\`) or carry them forward with a reason (\`carried\`) — planning against open concerns is the sequence the design pass exists to prevent.`,
+      );
     }
 
     const specSha = introducedBy(specFile);

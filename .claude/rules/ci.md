@@ -114,7 +114,31 @@ See skill `ci`.
   .claude/>` beside the `From:` line and `pnpm intent-chain` requires it. Without it a spec that predates a
   rule change cannot be told from one that followed it, and a plan then gets written against constraints that
   have since moved.
-- **Five L4 clauses cannot be satisfied by this deployment and are DECLARED, not silently missing** —
+- **The Plan stage's remaining halves, closed.** A `Status: rejected` intent needs a `Rejected: <why>` line —
+  the accept/reject decision IS the gate, and half of it used to leave nothing behind, so a turned-down idea
+  read as a deleted one that also looked like a decision. And a `spec.md` carries `Concerns: open|resolved|
+  carried`; `pnpm intent-chain` refuses a `plan.md` while the spec still says `open`. "Areas of concern" is the
+  point of the design pass — its own prompt says an empty one is suspicious — and nothing read it, so a plan
+  could be written against a spec whose concerns were all open, which is the exact sequence the article puts a
+  gate in front of. A status line rather than parsed prose, because the section's shape is whatever the design
+  pass produced and a check that guesses at bullets refuses specs for the wrong reason. **`carried` is legal**:
+  the article carries open questions forward.
+- **The permission surface has a deny half now.** Every session here could read `.env`, `~/.ssh` and
+  `~/.aws/credentials` through the file tools and reach any host through `curl`; the allow list pre-approved
+  the safe inner loop and was never paired with the half that refuses. ⚠️ Verified before writing rather than
+  after: `ci:local` reaches `curl` through `spawnSync("bash", …)` from inside the script, not through the
+  agent's tool surface, so `Bash(curl *)` refuses the agent and not the gate.
+- **`pnpm scan --dismiss --scope <s> --file <p> --reason <why>`**, and the record is COMMITTED
+  (`scans/DISMISSED.md`). A dismissal is a decision; `.git/` does not travel, and a dismissal nobody else can
+  read is one the next person redoes. The reason is required and a twelve-character floor refuses "not a bug",
+  because without it the findings-per-scan trend is a number anybody can lower by clicking. A dismissed
+  finding comes back MARKED rather than hidden, so a scope dismissed into silence still reads as one full of
+  dismissals.
+- **One clause is DECLINED rather than blocked** — an implementation with no `plan.md` is not refused, because
+  `intent/README.md` says a one-line fix does not need one and a gate demanding otherwise gets a plan that
+  says nothing. `docs/architecture/harness-declared-limits.md` keeps chosen limits in their own section with
+  their own rule: an entry there needs an argument and a falsifier, not a blocker.
+- **Five L4 clauses cannot be satisfied by this deployment, and one is DECLINED — all DECLARED, not silently missing** —
   `docs/architecture/harness-declared-limits.md`. Branch protection needs a second person; managed settings
   need a device fleet; per-environment tiers and a rehearsed rollback need something deployed; four of the
   eight containment-drill rows need managed settings; and "gate violations reaching production" has no

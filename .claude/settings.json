@@ -10,6 +10,16 @@
       "Edit(apps/**)",
       "Edit(.claude/skills/**)",
       "Edit(docs/**)"
+    ],
+    "deny": [
+      "Read(.env*)",
+      "Read(**/.env*)",
+      "Read(./secrets/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.claude/.credentials.json)",
+      "Bash(curl *)",
+      "Bash(wget *)"
     ]
   },
   "hooks": {

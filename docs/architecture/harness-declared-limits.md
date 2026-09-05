@@ -1,14 +1,15 @@
 ---
 kind: decision
-title: "Declared limits — the harness clauses this deployment cannot satisfy"
+title: "Declared limits — harness clauses this deployment cannot satisfy, and one it declines"
 status: accepted
 updated: 2026-09-05
 ---
-# Declared limits — the harness clauses this deployment cannot satisfy
+# Declared limits — clauses this deployment cannot satisfy, and one it declines
 
 The AI-native SDLC audit scores each play on a ladder whose top two rungs are *enforced* and *measured*. Five
-clauses cannot be satisfied here, and the reason is never that they are hard. Each is blocked by something
-this deployment does not have: a second person, a managed device fleet, or a running production system.
+clauses cannot be satisfied here and the reason is never that they are hard: each is blocked by something this
+deployment does not have — a second person, a managed device fleet, or a running production system. A sixth is
+different in kind and has its own section at the bottom: nothing is missing, and the project declines it.
 
 This page exists because those five had been mentioned in passing across three commit messages and recorded
 nowhere a reader could find them. **A limit that lives in prose somebody wrote once is a limit the next reader
@@ -116,6 +117,40 @@ production to reach, the question has an answer rather than a project.
 **Reopens when** — 3 reopens.
 
 ---
+
+# Chosen limits — clauses this project declines
+
+The five above are blocked: a person, a fleet or a deployment is missing, and each reopens when that fact
+changes. This one is different in kind and must not be filed with them. **Nothing is missing; the project
+declines the clause**, and it reopens only if the project changes its mind.
+
+Keeping the two apart is the whole point of this section. A blocked limit is a fact about the world; a chosen
+one is a position, and a position that hides among facts stops being arguable.
+
+## C1 · An implementation with no `plan.md` is not refused
+
+**Clause** — play `Claude Code plan mode as the default starting point`, L4: *an implementation PR with no
+`plan.md` is blocked.*
+
+**Declined because** — `intent/README.md` says it in its own words: *"A one-line fix does not need one; the
+test is whether the reason survives in the commit message alone."* A gate that demands a plan for every change
+would demand one for a typo, and the first repair anybody reaches for is a plan that says nothing — which is
+worse than no plan, because it passes.
+
+**What its absence does not mean** — plan mode is not optional in practice and is not unenforced where it
+matters. Ten of the last eleven changes carry a `plan.md`; every one of them cites the commit that introduced
+its intent, and `pnpm intent-chain` refuses a plan that does not descend from it. What is unenforced is the
+*requirement to have one at all*, and that is the part this project decided belongs to judgement.
+
+**Reopens if** — a change ships without a plan and the missing plan is what let a defect through. That is the
+evidence this position is wrong, and it has not happened yet. Until then the position stands on the article's
+own framing: the gates are for what a person reliably gets wrong, not for what a person reliably decides.
+
+## The rule for this section
+
+An entry here needs an argument, not a blocker. It also needs a falsifier — the observation that would show
+the position wrong — because a declined clause with no falsifier is indistinguishable from a clause nobody
+wanted to build.
 
 ## What is NOT declared here
 
