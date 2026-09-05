@@ -43,11 +43,12 @@ and 30930 are in this bucket and look like data slips on inspection (one literal
 instruction never writes — `A31` is -3039 in the input and -30 in the answer), but "looks like" is not a
 refusal. They are printed with the differing cells so a human can decide, and they are still minted.
 """
-import argparse, hashlib, json, pathlib, sys, itertools
+import argparse, hashlib, json, pathlib, sys
 from openpyxl import load_workbook
 from openpyxl.utils import get_column_letter, range_boundaries
 
 from sbench_digest import canon, digest_of
+from sbench_pairing import classify_pairing
 from sbench_position import cell_count, parse_answer_position
 
 MIN_ANSWER_CELLS = 4
@@ -85,18 +86,22 @@ def context(path, positions, fallback_sheet):
 
 
 def examine(root, task, salt):
-    """-> (kind, detail, digests).
+    """-> (kind, detail, digests, checked).
 
     kind is 'admitted' (the key pairs with its input), 'refused' (provably unwinnable), 'no_evidence' (the
     answer workbooks carry nothing the pairing could be checked against) or 'admitted_with_report' (they
     differ, which a task legitimately can cause). The last two are staged; only 'refused' is dropped.
+
+    `checked` is how many of the three answer workbooks carried discriminating bytes — 0..3. It rides out of
+    here and into `tasks.json` because it is the difference between a key that was verified and one nothing
+    could verify, and a downstream reader that cannot tell those apart is being handed a claim.
     """
     cid = str(task["id"])
     directory = root / cid
     try:
         positions = parse_answer_position(task["answer_position"])
     except Exception as exc:
-        return "refused", f"answer_position {task['answer_position']!r} is unreadable ({exc})", None
+        return "refused", f"answer_position {task['answer_position']!r} is unreadable ({exc})", None, 0
     cells = cell_count(positions)
     if cells < MIN_ANSWER_CELLS:
         # NOT "this case is broken" — it is fine, and this CHECKER cannot hold its answer safely. The
@@ -110,6 +115,7 @@ def examine(root, task, salt):
             f"verifier (the Nomad and K8s backends implement dispatchVerifier), where the answer never enters "
             f"the agent's world at all",
             None,
+            0,
         )
 
     sheet = task.get("answer_sheet") or ""
@@ -117,78 +123,13 @@ def examine(root, task, salt):
         inputs = {n: context(directory / f"{n}_{cid}_input.xlsx", positions, sheet) for n in (1, 2, 3)}
         answers = {n: context(directory / f"{n}_{cid}_answer.xlsx", positions, sheet) for n in (1, 2, 3)}
     except Exception as exc:
-        return "refused", f"a workbook could not be read ({type(exc).__name__}: {exc})", None
+        return "refused", f"a workbook could not be read ({type(exc).__name__}: {exc})", None, 0
 
     def digests_for():
         return [digest_of(directory / f"{n}_{cid}_answer.xlsx", sheet, positions, salt) for n in (1, 2, 3)]
 
-    # AN EMPTY CONTEXT MATCHES AN EMPTY CONTEXT, AND THAT IS NOT EVIDENCE OF ANYTHING. Not every answer
-    # workbook is "the input with the answer filled in": for an extraction task it is a result-only sheet,
-    # so everything outside `answer_position` is absent from it. Case 97-36 is that shape — all 22 of its
-    # values live inside `A1:A22`, every answer file has nothing outside it, and `{} == {}` reported the
-    # key as mispaired against whichever input also happened to have nothing outside. The first version of
-    # this check refused 11 cases and 10 of them were this. So a pairing claim needs discriminating bytes.
-    if not all(answers[n] for n in (1, 2, 3)):
-        return "no_evidence", "the answer workbooks hold nothing outside the answer range", digests_for()
-
-    matches = {n: [m for m in (1, 2, 3) if answers[n] == inputs[m]] for n in (1, 2, 3)}
-
-    # THE IDENTITY IS ASKED FIRST, AND IT ANSWERS THE QUESTION. Two test cases often differ only inside the
-    # answer range, which makes their contexts equal — and then the identity AND a swap of those two are
-    # both bijections. Searching for a non-identity permutation and taking the first hit reported 70 cases
-    # as "answer 2 is input 3's, answer 3 is input 2's" whose keys were perfectly correct; the giveaway was
-    # that all 70 named the same permutation. A key that pairs with its own input is paired, however many
-    # other readings the data also admits.
-    if all(n in matches[n] for n in (1, 2, 3)):
-        return "admitted", "", digests_for()
-
-    # Only now is a bijection evidence: every answer matched to exactly one input, every input claimed
-    # once, and no self-pairing available. That is a permutation, and no task effect produces one.
-    permutation = next(
-        (p for p in itertools.permutations((1, 2, 3))
-         if p != (1, 2, 3) and all(answers[n] == inputs[p[n - 1]] for n in (1, 2, 3))),
-        None,
-    )
-    if permutation is not None:
-        pairs = ", ".join(f"answer {n} is input {permutation[n - 1]}'s" for n in (1, 2, 3)
-                          if permutation[n - 1] != n)
-        return "refused", f"the answer key is mispaired ({pairs})", None
-
-    digests = digests_for()
-    drifted = [n for n in (1, 2, 3) if n not in matches[n]]
-    if drifted:
-        # ── CLASSIFIED, NOT DUMPED ──────────────────────────────────────────────────────────────────
-        #
-        # 220 of the 912 land here and "a human should read these" is not a finding, it is 220 findings
-        # nobody will read. The difference splits three ways and only one of them is worth a human:
-        #
-        #   added    the answer has a value where the input had none — a helper cell the solution wrote,
-        #            which is what most tasks do. Ordinary.
-        #   removed  the input had a value the answer does not — the solution cleared it, or the answer
-        #            workbook is a trimmed result sheet. Ordinary.
-        #   changed  BOTH present and different: the answer's source data is not the input's. Nothing a
-        #            task does to a cell outside `answer_position` produces this, and it is the shape of
-        #            17047 (`A31` is -3039 in the input, -30 in the answer) and 30930 (`A6` is 0, then
-        #            15.44), whose instructions never write those columns.
-        #
-        # Classified from the VALUES, never from the rendered line — parsing this file's own output back
-        # into a decision is the re-derivation rule `protocol` L3 forbids.
-        kinds = {"added": 0, "removed": 0, "changed": 0}
-        detail = []
-        for n in drifted:
-            diff = sorted(k for k in set(answers[n]) | set(inputs[n]) if answers[n].get(k) != inputs[n].get(k))
-            for key in diff:
-                before, after = inputs[n].get(key), answers[n].get(key)
-                kinds["added" if before is None else "removed" if after is None else "changed"] += 1
-            shown = ", ".join(
-                f"{sheet}!{cell}: input={inputs[n].get((sheet, cell))} answer={answers[n].get((sheet, cell))}"
-                for sheet, cell in diff[:4]
-            )
-            detail.append(f"file {n} differs outside the answer range at {len(diff)} cell(s) — {shown}")
-        summary = " ".join(f"{k}={v}" for k, v in kinds.items() if v > 0)
-        head = "SOURCE DATA DIFFERS" if kinds["changed"] > 0 else "helper cells only"
-        return "admitted_with_report", f"[{head}: {summary}] " + "; ".join(detail), digests
-    return "admitted", "", digests
+    kind, detail, checked = classify_pairing(inputs, answers)
+    return kind, detail, (None if kind == "refused" else digests_for()), checked
 
 
 def main():
@@ -208,18 +149,20 @@ def main():
             print(f"no such instruction: {', '.join(sorted(missing))}", file=sys.stderr)
             return 2
 
-    staged, refused, reported, unchecked = [], [], [], []
+    staged, refused, reported, unchecked, partial = [], [], [], [], []
     for task in dataset:
         cid = str(task["id"])
         salt = hashlib.sha256(f"{cid}|everdict-spreadsheetbench".encode()).hexdigest()[:16]
-        kind, detail, digests = examine(root / "spreadsheet", task, salt)
+        kind, detail, digests, checked = examine(root / "spreadsheet", task, salt)
         if kind == "refused":
             refused.append((cid, detail))
             continue
         if kind == "admitted_with_report":
             reported.append((cid, detail))
-        if kind == "no_evidence":
+        if checked == 0:
             unchecked.append(cid)
+        elif checked < 3:
+            partial.append((cid, checked))
         staged.append({
             "id": task["id"],
             "instruction": task["instruction"],
@@ -227,13 +170,34 @@ def main():
             "answer_sheet": task.get("answer_sheet", ""),
             "salt": salt,
             "digests": digests,
+            # ── WHAT THIS KEY WAS ACTUALLY CHECKED AGAINST, IN THE ARTIFACT ─────────────────────────
+            #
+            # The counts below go to a terminal, and a terminal is not a record. A staged case used to be
+            # a staged case: a key verified against three paired workbooks and a key nothing could check
+            # were the same six fields, so no reader downstream — the campaign, the wave driver, a person
+            # opening tasks.json six months later — could tell them apart. That is the shape rule
+            # `protocol` L3 is about: the decision existed and was left where nobody could consume it.
+            #
+            # `verdict` is this file's own kind, `checked` is how many of the three answer workbooks
+            # carried discriminating bytes. `checked: 0` means the pairing was UNVERIFIABLE, not verified.
+            "key_check": {"verdict": kind, "checked": checked, "of": 3},
         })
 
     pathlib.Path(args.out).write_text(json.dumps(staged, indent=2))
     print(f"staged {len(staged)} of {len(dataset)} instructions -> {args.out}")
+    # ⚠️ NAMED, NOT COUNTED. `refused` and `reported` printed their ids from the start; this bucket printed
+    # a number, so the one class of case where the exam is unverifiable was also the one class a person could
+    # not go and look at. A count is a statistic about the run; an id is a case somebody can open.
     if unchecked:
-        print(f"{len(unchecked)} of them could not have their answer key checked at all — the answer "
-              f"workbooks hold nothing outside the answer range, so there is no pairing evidence either way")
+        print(f"\n{len(unchecked)} could not have their answer key checked AT ALL — the answer workbooks hold "
+              f"nothing outside the answer range, so there is no pairing evidence either way. Staged with "
+              f"key_check.checked = 0:", file=sys.stderr)
+        print(f"  {', '.join(unchecked)}", file=sys.stderr)
+    if partial:
+        print(f"\n{len(partial)} had their key checked against SOME of their workbooks — the rest are "
+              f"result-only sheets with nothing outside the answer range:", file=sys.stderr)
+        for cid, checked in partial:
+            print(f"  {cid}: {checked} of 3", file=sys.stderr)
     if reported:
         print(f"\n{len(reported)} admitted with a pairing report (a human should read these):", file=sys.stderr)
         for cid, detail in reported:

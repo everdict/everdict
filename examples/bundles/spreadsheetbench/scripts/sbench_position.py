@@ -112,4 +112,4 @@ if __name__ == "__main__":
     if failures:
         print("\n".join(failures), file=sys.stderr)
         sys.exit(1)
-    print(f"sbench_position: {len(CASES)} published shapes read, {len(REFUSED)} unscoreable refused")
+    print(f"PASS sbench_position: {len(CASES)} published shapes read, {len(REFUSED)} unscoreable refused")
