@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**, **`pnpm swallowed-reads`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**, **`pnpm python`**, **`pnpm swallowed-reads`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -110,6 +110,22 @@ See skill `ci`.
   each published as a confident zero over a workbook the grader never opened. The campaign then consumed a
   comparable round and blamed hypotheses for an instrument. A reward written on the failure arm of `&&`/`||`
   is refused; branch on the exit code and publish NOTHING for the arm meaning "could not run".
+- **`pnpm python` is the gate this repository did not have.** `grep -rn "\.py\b" package.json ci.yml
+  ci-local.mjs` returned NOTHING: no linter, no type checker, no test runner reached `examples/bundles/**`.
+  That was tolerable while the Python there was glue and stopped being tolerable when `sbench_stage.py` — the
+  file deciding WHAT THE EXAM IS, whose mispaired digest scores a correct agent zero — was fixed FIVE TIMES IN
+  TWO DAYS, each fix finding the previous one's defect, every one found by a person running it by hand against
+  the real 912-instruction dataset because there was no other way to run it. It compiles every tracked `.py`
+  and runs every `test_*.py` plus every declared self-test. ⚠️ **A test that cannot run is a FAILURE, not a
+  skip** — the rule `scripts/trust/trust-suite.mjs` applies to a skipped scenario, for the same reason. That
+  constraint is what moved the staging DECISION into `sbench_pairing.py`, standard-library-only, so its
+  eleven counterexamples need nothing but the interpreter. ⚠️ Writing it found **five test suites that had
+  never run at all** — `clients/python/tests/` and `examples/servers/spica-playwright-server/tests/`, 477
+  lines with no `pytest` anywhere in the repository's tooling. They are DECLARED in `NEEDS` with what each
+  is missing rather than silently absent, and the declaration is a ratchet both ways: a new undeclared
+  unrunnable test fails, and a declared entry whose file is gone fails. It replaced a shell loop in `ci.yml`
+  that globbed one file and existed only there, so `ci:local` could not run it — the gate drift skill `ci`
+  warns about, built in from that step's first commit.
 - **`pnpm swallowed-reads` is the L2 ban, enforced instead of stated.** `.claude/rules/protocol.md` names
   `.catch(() => [])`, `.catch(() => undefined)` and `.catch(() => ({}))` in so many words, and
   `grep -l "catch(() =>" scripts/check-*.mjs` returned nothing: twenty-seven bespoke gates, and the law with

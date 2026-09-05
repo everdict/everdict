@@ -104,13 +104,18 @@ jobs:
       # SpreadsheetBench wave's entire score came from `sbench_digest.py`, whose `answer_position` reader
       # raised on 420 of the 912 published positions and had that raise recorded as the agent's wrong answer.
       # Two files owned that parser and both were wrong, which is the divergence rule `protocol` L3 names —
-      # in the one place no gate could see it. Their self-tests run here now.
-      - name: bundle scorer self-tests
+      # in the one place no gate could see it.
+      #
+      # This step used to be a shell loop over a glob naming ONE file, and it lived only here — so
+      # `pnpm ci:local` could not run it and the gate drift the ci skill warns about was built in from the
+      # first commit. `pnpm python` is the gate now: it compiles every tracked `.py`, runs every `test_*.py`
+      # and every declared self-test, and refuses a test that cannot run rather than skipping it. openpyxl is
+      # installed because the two graders import it; the staging DECISION deliberately does not
+      # (`sbench_pairing.py`), so its counterexamples run on the interpreter alone.
+      - name: bundle scorers (pnpm python)
         run: |
           python3 -m pip install --quiet --break-system-packages openpyxl
-          for t in examples/bundles/*/scripts/sbench_position.py; do
-            echo "▶ $t"; python3 "$t"
-          done
+          pnpm python
 
   web:
     name: web (self-contained lint · build)

@@ -33,6 +33,7 @@
     "scan": "node scripts/scan/run.mjs",
     "controls-documented": "node scripts/check-controls-documented.mjs",
     "lesson-evals": "node scripts/check-lesson-evals.mjs",
+    "python": "node scripts/check-python.mjs",
     "swallowed-reads": "node scripts/check-swallowed-reads.mjs",
     "telemetry": "node scripts/telemetry/otlp-sink.mjs",
     "agent-evals": "node evals/run.mjs",
