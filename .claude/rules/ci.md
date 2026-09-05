@@ -132,7 +132,11 @@ See skill `ci`.
   — **an unscanned scope says NEVER, because unscanned is not clean and the two must stop looking alike.**
   ⚠️ A scan is a statement about a scope AT A TIME UNDER A MODEL; all three are in the record or a clean scope
   is indistinguishable from an unread one. ⚠️ The confidence on a finding is the scanner's rating of ITSELF,
-  not a calibration anybody measured. Nothing is auto-applied: findings enter the tree through the gates, and
+  not a calibration anybody measured. ⚠️ **An unstructured answer is still a reading**: when the scanner replies
+  in prose rather than the envelope the run is RECORDED and marked `structured: false`, which keeps it out
+  of the findings band because a prose answer has no countable total. The first version exited and recorded
+  nothing, and the pass it discarded that way had found `PgWorkspaceStore.delete()` sweeping 18 tables
+  while 60 more carry a tenant column — a real defect thrown away for a formatting reason. Nothing is auto-applied: findings enter the tree through the gates, and
   a bounded one becomes a change while a wider one becomes an `intent.md`. The first run over `contracts`
   found two real ones in 291 untouched files — see `intent/2026-09-05-scan-contracts-outbound-credentials/`.
 - **`pnpm watch-bands` is the only thing here that starts work without a person**, and `pnpm triage <gate>` is

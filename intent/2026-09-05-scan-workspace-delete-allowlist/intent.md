@@ -46,6 +46,17 @@ workspace believing its data went with it.
 - Found by a scan whose answer was **discarded** by its own runner for not being valid JSON. That is fixed in
   the same change as this filing, because a reading nobody can count is still a reading.
 
+## The other finding from the same scan, kept so it does not stay in `.git/`
+
+`PgCapabilityStore.register` (`packages/db/src/workspace/capability-store.ts:175`) does a plain
+SELECT-then-INSERT/UPDATE with no `ON CONFLICT` guard, although `(tenant, id, version)` is the table's primary
+key. Two concurrent registrations of the same brand-new version both see "absent" and both insert; one gets a
+constraint violation that surfaces as a raw database error rather than as this repository's own refusal.
+
+**Low confidence, and recorded as such** — it is the scanner's own rating, it was not reproduced, and the
+window is narrow. It is written here rather than left in `.git/everdict-scan-adapters.json` because that file
+does not travel with a clone, and a finding nobody else can read is a finding that has to be found again.
+
 ## Open questions
 
 - Is `delete()` reachable from an API door, or only from an operator path? The blast radius differs, and it
