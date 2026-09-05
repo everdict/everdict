@@ -31,6 +31,7 @@ const rel = (p) => path.relative(root, p);
 
 const violations = [];
 const notes = [];
+let citations = 0;
 const fail = (message) => violations.push(message);
 
 const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
@@ -119,6 +120,8 @@ for (const name of changes) {
     notes.push(`${label}: accepted, and no spec.md. \`pnpm design --next\` takes the oldest of these.`);
   }
 
+  if (/^Shipped:\s*[0-9a-f]{7,40}\s*$/m.test(intent)) citations++;
+
   const intentSha = introducedBy(intentFile);
   if (!intentSha) {
     notes.push(
@@ -136,6 +139,7 @@ for (const name of changes) {
   const specFile = path.join(dir, "spec.md");
   if (existsSync(specFile)) {
     const spec = readFileSync(specFile, "utf8");
+    citations++;
     const citedSpec = /^From:\s*intent\.md\s*@\s*([0-9a-f]{7,40})\s*$/m.exec(spec)?.[1];
     if (!citedSpec) {
       fail(
@@ -195,6 +199,7 @@ for (const name of changes) {
       if (!planHeadings.includes(section))
         fail(`${label}/plan.md: missing section "## ${section}" (intent/PLAN-TEMPLATE.md).`);
     }
+    citations++;
     const cited = /^From:\s*intent\.md\s*@\s*([0-9a-f]{7,40})\s*$/m.exec(plan)?.[1];
     if (!cited) {
       fail(
@@ -244,6 +249,9 @@ if (violations.length > 0) {
   console.error("\n  intent/README.md states the chain; this check is the part of it git can refuse.");
   process.exit(1);
 }
+// The count is the cheap half of a lesson: "the chain holds" says it is intact, and the number of commit
+// references says what a rebase would cost — at the moment somebody is already looking.
+// See lessons/2026-09-05-the-chain-makes-a-rebase-expensive.md.
 console.log(
-  `✓ intent-chain: ${changes.length} change director${changes.length === 1 ? "y" : "ies"} — the chain holds.`,
+  `✓ intent-chain: ${changes.length} change director${changes.length === 1 ? "y" : "ies"}, ${citations} commit reference(s) trusted — the chain holds. A rebase rewrites every one of them.`,
 );

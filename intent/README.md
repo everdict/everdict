@@ -40,6 +40,18 @@ enforced by commit order, not by good intentions:
 
 Each of the three is a claim the git history can refuse. `scripts/check-intent-chain.mjs` asks it.
 
+## The chain has an opinion about history
+
+Every `plan.md` cites the commit that introduced its `intent.md`; every `spec.md` does the same and adds the
+`.claude/` tree it was written under; every shipped intent names the commit that landed it. Across the tree
+that is dozens of commit references, and **a rebase rewrites every one of them** — `pnpm intent-chain` goes
+red in as many places as there are citations, with no automatic repair.
+
+Merging costs nothing. Only rewriting does, and that is the correct incentive: a record that references
+commits is a record that has an opinion about history being immutable, and this one says so here rather than
+discovering it during a `pull --rebase`. The check prints the number of references it is trusting on every
+run, so the price is visible at the moment somebody is already looking.
+
 ## Status
 
 `draft` → `accepted` → `shipped`, or `rejected`. The accept/reject decision is the Plan-stage gate: an

@@ -51,7 +51,14 @@ const lessons = readdirSync(lessonsDir).filter((f) => f.endsWith(".md") && f !==
 // A lesson names a case by its id in backticks, the way every other reference in this tree does.
 const BACKTICKED = /`([a-z0-9][a-z0-9-]{3,})`/g;
 // The claim: the lesson's own closing section says an eval case came out of it.
+//
+// ⚠️ AND A CLAIM OF ABSENCE IS NOT A CLAIM. The first version matched `/eval case/` and read "No eval case:
+// this is not a thing an agent gets wrong" — a lesson explaining why it mechanised NOTHING — as a promise of a
+// case, then failed for the missing name. It was caught by the first lesson written after the check existed,
+// which is the cheapest possible moment and still one commit late. `lessons/README.md` says a lesson may
+// answer "nothing"; a check that cannot read that answer punishes the honest one.
 const CLAIMS_EVAL = /eval case|evals\/cases\//i;
+const DENIES_EVAL = /\b(no|not|without|never|neither)\b[^.\n]{0,24}\beval/i;
 
 let checked = 0;
 for (const file of lessons) {
@@ -63,7 +70,8 @@ for (const file of lessons) {
     );
     continue;
   }
-  if (!CLAIMS_EVAL.test(section)) continue; // the lesson says it produced something else, or nothing. Both fine.
+  // Produced something else, produced nothing, or said in so many words that it produced no eval. All fine.
+  if (!CLAIMS_EVAL.test(section) || DENIES_EVAL.test(section)) continue;
   checked++;
   const named = [...section.matchAll(BACKTICKED)].map((m) => m[1]).filter((id) => id !== "evals");
   const hits = named.filter((id) => cases.has(id));
