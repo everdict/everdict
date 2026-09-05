@@ -207,8 +207,13 @@ for (const metric of selected) {
     continue;
   }
   const series = all.slice(-metric.window);
-  if (series.length < metric.floor) {
-    console.log(`· ${metric.id.padEnd(24)} INSUFFICIENT — ${series.length}/${metric.floor} samples. No band computed.`);
+  // The floor gates the HISTORY the mean and sd are computed over, not the series: the latest sample is the
+  // one being judged, so counting it toward the floor lets a metric band on one fewer historical point than
+  // its floor claims.
+  if (series.length - 1 < metric.floor) {
+    console.log(
+      `· ${metric.id.padEnd(24)} INSUFFICIENT — ${Math.max(0, series.length - 1)}/${metric.floor} historical samples. No band computed.`,
+    );
     continue;
   }
   const history = series.slice(0, -1);

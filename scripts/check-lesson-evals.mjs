@@ -87,7 +87,11 @@ for (const file of lessons) {
     );
     continue;
   }
-  if (ghosts.length > 0 && ghosts.length === named.filter((id) => /-/.test(id)).length) {
+  // ⚠️ ANY ghost, not every ghost. The first repair of this same finding required ALL named ids to be missing,
+  // which is the original defect with an extra condition on it — a lesson naming one real case and one
+  // renamed-away case still passed. The reviewer flagged the bug, the fix was wrong, and the reviewer caught
+  // the fix. Both rounds are why this comment is here.
+  if (ghosts.length > 0) {
     fail(
       `lessons/${file}: names ${named.map((n) => `\`${n}\``).join(", ")} as its eval case(s), and evals/cases/ has none of them. Either the case was never written, or it was renamed and this record now points at nothing.`,
     );

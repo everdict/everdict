@@ -88,9 +88,11 @@ number when that query and the rework rate disagree with it.
 
 ## The gaps, stated rather than implied
 
-- **Telemetry is opt-in.** A session run without the recipe is invisible to the three indicators above, and
-  that gap looks identical to a quiet week. Closing it means putting the variables in `.claude/settings.json`,
-  which turns the export on for everyone and makes a session noisy when no sink is listening.
+- **Telemetry is on but nothing may be listening.** `.claude/settings.json` sets the recipe for every session
+  in this repository, so the gap that used to be "somebody forgot to export it" is closed. What replaces it is
+  narrower and still real: exports are dropped silently when `pnpm telemetry` is not running, so a week with no
+  sink and a quiet week are still the same shape in the data. The sink refuses a busy port rather than
+  appearing to start, which is the one failure it can make visible.
 - **No baseline is old enough to band on.** `evals/history.jsonl` starts on 2026-09-05. A rolling baseline
   needs weeks, and the first control band is blocked on having one — which is the entire reason recording
   started before anything reads it.
