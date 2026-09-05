@@ -25,6 +25,7 @@
 //   node evals/run.mjs --drill <id>
 //   node evals/run.mjs --list
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   appendFileSync,
   cpSync,
@@ -33,6 +34,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,6 +54,39 @@ const resultDir = path.join(root, "evals", ".results");
 const CONFIG = CONFIG_PATHS;
 // The history is what a run WRITES, so it cannot be part of what a run attests — see CONFIG_PATHSPEC.
 const CLEAN_PATHSPEC = CONFIG_PATHSPEC;
+
+// ⚠️ THE CACHE KEY HAS TO NAME WHAT WAS UNDER TEST, AND THE HEAD SHA DOES NOT.
+//
+// The overlay above is the whole point of this runner: a maintainer edits a skill and asks whether the agent
+// still does the work, BEFORE committing — which is when the answer is still cheap to change. That edit does
+// not move HEAD. So a cache keyed on `head + model` answered from a run of the PREVIOUS wording, and the one
+// workflow the overlay exists to serve was the one it silently refused to perform: delete the sentence a case
+// is about, run `--only <case>`, and get a green off a result produced before the deletion.
+//
+// The digest is over the overlaid BYTES, which is what the session actually reads. `--fresh` still ignores
+// the cache entirely; the drill still never touches it.
+const configDigest = (() => {
+  const h = createHash("sha256");
+  const walk = (rel) => {
+    const abs = path.join(root, rel);
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      h.update(`${rel}\u0000<absent>\u0000`); // an overlaid path that is GONE is a different configuration
+      return;
+    }
+    if (st.isDirectory()) {
+      for (const entry of readdirSync(abs).sort()) walk(path.join(rel, entry));
+      return;
+    }
+    h.update(`${rel}\u0000`);
+    h.update(readFileSync(abs));
+    h.update("\u0000");
+  };
+  for (const item of CONFIG) walk(item);
+  return h.digest("hex").slice(0, 16);
+})();
 // Everything that can change the tree or leave the machine. Deny wins over the repo's own allow list.
 const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 
@@ -212,13 +247,16 @@ const judge = (c, text) => {
 
 // ⚠️ A SUITE THAT CANNOT FINISH IS A SUITE THAT NEVER STAMPS. Twenty cases is eleven or twelve minutes, and an
 // interruption at minute ten threw away the nineteen that had already passed — twice, on the same long case.
-// A PASSING result is cached under the head and model it was produced for, so a re-run does only what is left;
-// a different head or model never reuses one, because the configuration is exactly what the case is about.
+// A PASSING result is cached under the head, model AND CONFIG DIGEST it was produced for, so a re-run does
+// only what is left; a different head, model or overlaid configuration never reuses one, because the
+// configuration is exactly what the case is about.
 // `--fresh` ignores the cache. Third tool this week to need this; the review caches parts for the same reason.
 const cachedPass = (c) => {
   try {
     const prior = JSON.parse(readFileSync(path.join(resultDir, `${c.id}.json`), "utf8"));
-    return prior.head === headSha && prior.model === opts.model && prior.pass === true ? prior : undefined;
+    return prior.head === headSha && prior.model === opts.model && prior.config === configDigest && prior.pass === true
+      ? prior
+      : undefined;
   } catch {
     return undefined;
   }
@@ -229,7 +267,7 @@ const record = (c, fields, { cache = true } = {}) => {
   mkdirSync(resultDir, { recursive: true });
   writeFileSync(
     path.join(resultDir, `${c.id}.json`),
-    JSON.stringify({ id: c.id, head: headSha, model: opts.model, ...fields }, null, 2),
+    JSON.stringify({ id: c.id, head: headSha, model: opts.model, config: configDigest, ...fields }, null, 2),
   );
 };
 
