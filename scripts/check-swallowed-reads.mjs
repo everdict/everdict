@@ -31,6 +31,21 @@
 // Erring toward missing one rather than inventing one, deliberately: the 188 unbound occurrences include
 // real defects, and they are found by `pnpm scan` and by review, which can read what the value is for.
 //
+// ⚠️ AND IT READS LOGICAL STATEMENTS, NOT LINES — because its first version did not, and the formatter
+// decides where the lines are. A chain long enough to wrap is exactly the shape this is about:
+//
+//     const members = await controlPlane
+//       .listMembers(ctx)
+//       .then((r) => membersSchema.parse(r))
+//       .catch(() => [])
+//
+// Twenty-seven statements were invisible that way, in a gate whose own comment claimed to cover "the value
+// gets a name". Found by the self-review pass that asks what a REFUSAL wrongly lets through, not by reading
+// the regex. The join is deliberately minimal: a line whose first non-space character is `.` or `?.`
+// belongs to the line above it. Spanning newlines with `[^;]*?` instead would have been shorter and wrong —
+// `apps/web` is written without semicolons, so that pattern runs to the end of the file and matches across
+// unrelated statements.
+//
 // ── A RATCHET, NOT A WALL ────────────────────────────────────────────────────────────────────────
 //
 // 83 exist today. Each is a place the TYPE failed to say it, and L2 says so itself: *"A scanner with an
@@ -71,6 +86,18 @@ if (files.length === 0) {
   process.exit(1);
 }
 
+// A continuation line — one whose first non-space character opens a member access — is part of the statement
+// above it. Nothing else is joined: this is the smallest rule that sees a wrapped chain and cannot run past
+// a statement boundary.
+function logicalLines(src) {
+  const out = [];
+  for (const line of src.split("\n")) {
+    if (/^\s*\??\./.test(line) && out.length > 0) out[out.length - 1] += ` ${line.trim()}`;
+    else out.push(line);
+  }
+  return out;
+}
+
 const found = new Map();
 for (const file of files) {
   let src;
@@ -80,7 +107,7 @@ for (const file of files) {
     continue;
   }
   let n = 0;
-  for (const line of src.split("\n")) {
+  for (const line of logicalLines(src)) {
     if (DECODE.test(line)) continue;
     if (BOUND.test(line)) n++;
   }
