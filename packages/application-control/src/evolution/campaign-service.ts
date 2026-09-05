@@ -599,20 +599,37 @@ export class CampaignService {
     tenant: string,
     record: EvolutionCampaignRecord,
     last: CampaignRound | undefined,
-  ): Promise<{ inherited?: Array<{ campaignId: string; findings: string[] }> }> {
+  ): Promise<{ inherited?: Array<{ campaignId: string; findings: string[] }>; inheritedUnavailable?: string }> {
     const wanted: string[] = [];
     if (record.frame.continues !== undefined) wanted.push(record.frame.continues);
     for (const id of last?.informedBy ?? []) if (!wanted.includes(id)) wanted.push(id);
     if (wanted.length === 0) return {};
 
     const inherited: Array<{ campaignId: string; findings: string[] }> = [];
+    const unreadable: string[] = [];
     let budget = MAX_INHERITED_FINDINGS;
     for (const id of wanted.slice(0, MAX_INHERITED_SOURCES)) {
       if (budget <= 0) break;
-      // A pointer to a campaign this workspace cannot read is not an error here: the brief is advice, and a
-      // handoff that fails because one ancestor is gone is worse than one that carries less. The chain's
-      // HONESTY is enforced at open (`assertChainIsHonest`), which is where a refusal belongs.
-      const source = await this.deps.store.get(tenant, id).catch(() => undefined);
+      // ⚠️ GONE AND UNREADABLE ARE DIFFERENT ANSWERS, AND THIS LINE USED TO SPELL THEM THE SAME.
+      //
+      // A pointer to a campaign that is not there is not an error: the brief is advice, and a handoff that
+      // fails because one ancestor was deleted is worse than one that carries less. The chain's HONESTY is
+      // enforced at open (`assertChainIsHonest`), which is where a refusal belongs. That argument is sound,
+      // and it is an argument about ABSENCE — the port already says so, returning `undefined` for a record
+      // this workspace does not have and THROWING when the read itself did not happen.
+      //
+      // `.catch(() => undefined)` erased that distinction, which rule `protocol` L2 bans by name. A store
+      // outage then produced a brief missing everything the chain established, and the delegate was told
+      // nothing: it reads as "the earlier walks found nothing worth carrying", which is the one reading that
+      // makes it repeat them. The third value is CARRIED, exactly as `evidenceUnavailable` carries it forty
+      // lines above — same brief, same law, and for one release only one of the two obeyed it.
+      let source: EvolutionCampaignRecord | undefined;
+      try {
+        source = await this.deps.store.get(tenant, id);
+      } catch {
+        unreadable.push(id);
+        continue;
+      }
       if (source === undefined) continue;
       const findings = source.rounds
         .slice()
@@ -624,7 +641,14 @@ export class CampaignService {
       budget -= findings.length;
       inherited.push({ campaignId: id, findings });
     }
-    return inherited.length > 0 ? { inherited } : {};
+    return {
+      ...(inherited.length > 0 ? { inherited } : {}),
+      ...(unreadable.length > 0
+        ? {
+            inheritedUnavailable: `${unreadable.length} earlier walk(s) could not be read (${unreadable.join(", ")})`,
+          }
+        : {}),
+    };
   }
 
   // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────

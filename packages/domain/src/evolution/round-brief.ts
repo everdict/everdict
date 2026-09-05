@@ -63,6 +63,11 @@ export interface CampaignRoundBriefInput {
   // could not serve it. Stated in the brief rather than swallowed: a delegate handed no traces reads that as
   // "there is nothing to look at", and "we could not find out" is not "there is nothing" (rule `protocol` L2).
   evidenceUnavailable?: string;
+  // The same third value for the OTHER read this brief makes. `inherited` being empty has two causes a
+  // delegate must not confuse: the earlier walks recorded nothing worth carrying, or they could not be read.
+  // Only one of those means "stop looking"; swallowing the difference is what makes a delegate redo a search
+  // somebody already did (rule `protocol` L2).
+  inheritedUnavailable?: string;
 }
 
 // ── THE BRIEFABLE SET IS DERIVED, NEVER TRUSTED ──────────────────────────────────────────────────
@@ -174,6 +179,11 @@ export function campaignRoundBrief(input: CampaignRoundBriefInput): DelegationBr
     for (const source of inherited)
       for (const finding of source.findings) context.push(`· [${source.campaignId}] ${finding}`);
   }
+  if (input.inheritedUnavailable !== undefined)
+    context.push(
+      "",
+      `⚠️ ${input.inheritedUnavailable}, so what those walks established is missing from this brief. That is a gap in the handoff, not a sign that they established nothing — ask for them before spending this round re-deriving what a previous one already found.`,
+    );
   if (evidence !== undefined && targets.length > 0) {
     const briefable = new Set(targets);
     const unflipped = (evidence.aggregate.targets?.unflipped ?? []).filter((id) => briefable.has(id));
