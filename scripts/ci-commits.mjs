@@ -35,9 +35,13 @@ const git = (args, opts = {}) => spawnSync("git", args, { cwd: root, encoding: "
 // no content.
 git(["read-tree", "HEAD"]);
 git(["update-index", "--refresh", "-q", "--unmerged"]);
+// ⚠️ `evals/history.jsonl` is excluded, exactly as `ci-local.mjs` excludes it and for the same reason: it is a
+// record a RUN produces, not code a run validates. `ci:local` got the exclusion when the loop was found there —
+// append a line, dirty the tree, refuse the stamp, commit the line, move HEAD — and this sibling did not, so
+// the loop simply moved one gate over. That is the shape `pnpm guard-siblings` exists for, one layer up.
 const dirty = [
-  git(["diff", "HEAD", "--name-only"]).stdout.trim(),
-  git(["ls-files", "--others", "--exclude-standard"]).stdout.trim(),
+  git(["diff", "HEAD", "--name-only", "--", ".", ":(exclude)evals/history.jsonl"]).stdout.trim(),
+  git(["ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude)evals/history.jsonl"]).stdout.trim(),
 ]
   .filter(Boolean)
   .join("\n");
