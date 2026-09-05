@@ -99,6 +99,15 @@ installed, which is already known.
 a protected path, a test file during a fix) have all been driven against the real hook, in both directions.
 The drill is partial and reported as partial; a partial drill is not a passed one.
 
+**And what the deny list does not mean.** `.claude/settings.json` grew a `permissions.deny` half —
+`Read(.env*)`, `Read(~/.ssh/**)`, `Bash(curl *)` and five more. It reads like the repair for rows 1 and 2 and
+it is not one: `Read(~/.ssh/**)` denies the `Read` TOOL while `cat ~/.ssh/id_rsa` through `Bash` reaches the
+same bytes, and `Bash(curl *)` denies two literal prefixes while `python3 -c "import urllib.request…"`, `nc`
+and WebFetch reach the same hosts. A bound composed with an unbounded neighbour, which is the class this
+repository names for its own scanners. Enumerating more spellings does not close it — the neighbour is a
+general-purpose shell, and that is exactly why rows 1 and 2 are declared here rather than fixed. The deny
+list stops the accidental read and the absent-minded fetch, which is worth having and is not this clause.
+
 **Reopens when** — 2 reopens.
 
 ---

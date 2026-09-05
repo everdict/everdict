@@ -163,11 +163,20 @@ See skill `ci`.
   gate in front of. A status line rather than parsed prose, because the section's shape is whatever the design
   pass produced and a check that guesses at bullets refuses specs for the wrong reason. **`carried` is legal**:
   the article carries open questions forward.
-- **The permission surface has a deny half now.** Every session here could read `.env`, `~/.ssh` and
-  `~/.aws/credentials` through the file tools and reach any host through `curl`; the allow list pre-approved
-  the safe inner loop and was never paired with the half that refuses. ⚠️ Verified before writing rather than
-  after: `ci:local` reaches `curl` through `spawnSync("bash", …)` from inside the script, not through the
-  agent's tool surface, so `Bash(curl *)` refuses the agent and not the gate.
+- **The permission surface has a deny half now, AND IT IS A SPEED BUMP, NOT A BOUNDARY.** Every session here
+  could read `.env`, `~/.ssh` and `~/.aws/credentials` through the file tools and reach any host through
+  `curl`; the allow list pre-approved the safe inner loop and was never paired with the half that refuses.
+  ⚠️ Verified before writing rather than after: `ci:local` reaches `curl` through `spawnSync("bash", …)` from
+  inside the script, not through the agent's tool surface, so `Bash(curl *)` refuses the agent and not the gate.
+  ⚠️ **WHAT IT DOES NOT STOP, stated here because this bullet is what a reader gets while editing.**
+  `Read(~/.ssh/**)` denies the `Read` TOOL; `cat ~/.ssh/id_rsa` through `Bash` reaches the same bytes.
+  `Bash(curl *)` denies two literal prefixes; `python3 -c "import urllib.request…"`, `nc`, and WebFetch
+  reach the same hosts. That is a bound composed with an unbounded neighbour — the defect class this file
+  names for scanners — and it is NOT closed by enumerating more spellings, because the neighbour is a general
+  shell. `docs/architecture/harness-declared-limits.md` §4 already declares those two containment-drill rows
+  as blocked on managed settings and OS-level sandboxing, and says plainly that they SUCCEED without them.
+  The deny list stops the accidental read and the absent-minded fetch; it is not containment, and the two
+  pages disagreeing about that was the finding.
 - **`pnpm scan --dismiss --scope <s> --file <p> --reason <why>`**, and the record is COMMITTED
   (`scans/DISMISSED.md`). A dismissal is a decision; `.git/` does not travel, and a dismissal nobody else can
   read is one the next person redoes. The reason is required and a twelve-character floor refuses "not a bug",

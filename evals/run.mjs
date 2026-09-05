@@ -392,7 +392,12 @@ try {
   for (const c of selected) {
     const out = runCase(c);
     spend += out.cost;
-    outcomes.push({ id: c.id, pass: out.pass, seconds: Number(out.seconds) });
+    // ⚠️ `reused` RIDES INTO THE HISTORY. `evals/history.jsonl` is the declared input to a control band, and
+    // a run built from cache hits used to look identical there to one where every case was freshly executed
+    // — so "the configuration was re-verified today" and "verified once and reused nineteen times" were the
+    // same record. The suite-wide `cost` hinted at it and a hint is not a field. It matters more now that
+    // the cache key is correct enough to actually hit.
+    outcomes.push({ id: c.id, pass: out.pass, seconds: Number(out.seconds), reused: Boolean(out.reused) });
     if (out.pass) {
       console.log(`✓ ${c.id.padEnd(32)} ${out.seconds}s${out.reused ? " — reused" : ""}`);
       continue;
@@ -427,6 +432,8 @@ appendFileSync(
     partial: Boolean(opts.only),
     passed: selected.length - failed,
     of: selected.length,
+    // How much of that pass was EXECUTED. A band over a run of twenty reused results is a band over nothing.
+    executed: outcomes.filter((o) => !o.reused).length,
     cost: Number(spend.toFixed(4)),
     cases: outcomes,
   })}\n`,
