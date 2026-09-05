@@ -150,9 +150,19 @@ run("bands (dry run)", "pnpm", ["watch-bands", "--dry-run"]);
 // neither touches the worktree.
 spawnSync("git", ["read-tree", "HEAD"], { cwd: root });
 spawnSync("git", ["update-index", "--refresh", "-q", "--unmerged"], { cwd: root });
+// ⚠️ `evals/history.jsonl` is excluded, for the reason it is excluded from the gate's CONFIG_PATHSPEC: it is a
+// record a RUN produces, not code a run validates. Including it closed a loop with no exit — `pnpm agent-evals`
+// appends a line, the line makes the tree dirty, a dirty tree refuses the CI stamp, and committing the line
+// moves HEAD so the eval stamp it just earned no longer names it.
 const dirty = [
-  spawnSync("git", ["diff", "HEAD", "--name-only"], { cwd: root, encoding: "utf8" }).stdout.trim(),
-  spawnSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+  spawnSync("git", ["diff", "HEAD", "--name-only", "--", ".", ":(exclude)evals/history.jsonl"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout.trim(),
+  spawnSync("git", ["ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude)evals/history.jsonl"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout.trim(),
 ]
   .filter(Boolean)
   .join("\n");
