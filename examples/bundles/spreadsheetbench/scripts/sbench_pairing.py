@@ -68,10 +68,20 @@ def classify_pairing(inputs, answers):
     # every input claimed at most once, and the identity unavailable. `permutations(_, k)` is injective by
     # construction, so a k-file answer is held to the same standard the three-file one was — a permutation,
     # and no task effect produces one.
-    permutation = next(
-        (p for p in itertools.permutations((1, 2, 3), len(evident))
-         if p != tuple(evident) and all(answers[n] == inputs[p[i]] for i, n in enumerate(evident))),
-        None,
+    #
+    # ⚠️ TWO FILES AT MINIMUM, AND THAT BOUND IS THE WHOLE ARGUMENT. With ONE evident answer file there is no
+    # bijection to find — "answer 1's context equals input 2's" is a single coincidence, and reading a single
+    # coincidence as a swap is precisely the mistake that refused 70 correct keys before the identity was
+    # asked first. A refusal drops a case from the exam and says nothing downstream, so the file with one
+    # readable answer is REPORTED, not refused: a human decides on evidence, which is what the report is for.
+    permutation = (
+        next(
+            (p for p in itertools.permutations((1, 2, 3), len(evident))
+             if p != tuple(evident) and all(answers[n] == inputs[p[i]] for i, n in enumerate(evident))),
+            None,
+        )
+        if len(evident) >= 2
+        else None
     )
     if permutation is not None:
         pairs = ", ".join(f"answer {n} is input {permutation[i]}'s" for i, n in enumerate(evident)

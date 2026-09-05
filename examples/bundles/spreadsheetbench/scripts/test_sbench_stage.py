@@ -78,6 +78,22 @@ kind, detail, checked = classify_pairing(
 check("partial evidence that pairs is admitted, not refused", (kind, checked), ("admitted", 2))
 check("…and admission still declares what went unchecked", "file(s) 3 could not be checked" in detail, True)
 
+# ── A SINGLE COINCIDENCE IS NOT A SWAP, AND THIS FILE HAS REFUSED 70 CORRECT KEYS ON THAT MISTAKE ───
+# With one evident answer file there is no bijection to find: "answer 1's context equals input 2's" is one
+# coincidence, and a refusal drops the case from the exam and says nothing downstream. It is REPORTED.
+kind, _, checked = classify_pairing(
+    {1: ctx("a"), 2: ctx("b"), 3: ctx("c")},
+    {1: ctx("b"), 2: EMPTY, 3: EMPTY},
+)
+check("one evident file cannot prove a mispairing", (kind, checked), ("admitted_with_report", 1))
+
+# …and two can, which is the bound the rule above turns on.
+kind, _, checked = classify_pairing(
+    {1: ctx("a"), 2: ctx("b"), 3: ctx("c")},
+    {1: ctx("b"), 2: ctx("a"), 3: EMPTY},
+)
+check("two evident files can", (kind, checked), ("refused", 2))
+
 # ── WHAT IT ONLY REPORTS: a task that sorts or fills legitimately changes cells outside the range. ───
 kind, detail, checked = classify_pairing(
     {1: ctx("a"), 2: ctx("b"), 3: ctx("c")},
@@ -98,4 +114,4 @@ if FAILURES:
     for f in FAILURES:
         print(f"  - {f}\n", file=sys.stderr)
     sys.exit(1)
-print("PASS sbench pairing: 11 counterexamples over the staging decision.")
+print("PASS sbench pairing: 13 counterexamples over the staging decision.")
