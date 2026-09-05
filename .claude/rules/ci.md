@@ -21,7 +21,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -102,6 +102,14 @@ See skill `ci`.
   `pnpm triage`, which reads that scanner's own header. Lint, typecheck, test and build are excluded — they
   explain themselves, and a model call restating a compiler error is the shape that teaches people to ignore
   the tool.
+- **`pnpm grader-collapse` refuses a grader that spends "I could not answer" as the agent's wrong answer.**
+  `RewardFileGrader` models the third value correctly — a verifier that publishes no reward makes the case
+  `unmeasured`/`missing_evidence` — and that discipline was defeated one layer below it by a shell fragment:
+  `python3 /opt/sbench_digest.py … && echo 1.0 > reward.txt || echo 0.0 > reward.txt`. `||` fires on EVERY
+  non-zero exit, so the 420 of SpreadsheetBench's 912 tasks whose `answer_position` the parser raised on were
+  each published as a confident zero over a workbook the grader never opened. The campaign then consumed a
+  comparable round and blamed hypotheses for an instrument. A reward written on the failure arm of `&&`/`||`
+  is refused; branch on the exit code and publish NOTHING for the arm meaning "could not run".
 - **`pnpm lesson-evals` verifies the incident-to-eval route instead of trusting it.** The article's rule is
   that each production incident becomes a permanent eval; `lessons/README.md` says where a lesson goes
   afterwards — an eval case, a scan class, a check, or nothing. That route was a paragraph and nothing a
