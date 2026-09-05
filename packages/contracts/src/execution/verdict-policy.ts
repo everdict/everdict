@@ -50,8 +50,11 @@ export const RESERVED_AUTHORITY_METRICS: readonly string[] = [
 // built-in's own name or a runner's forgery. The classes read THIS table (a typo is a compile error, not an
 // empty grant), and `packages/graders` asserts that `makeGraders` agrees with it.
 //
-// `state` has no entry on purpose: nothing built-in emits it, a spec cannot grant it (`isConstitutionalMetric`),
-// and a `command` grader configured with `metric: "state"` is refused at the producer boundary today.
+// Two owners of `tests_pass` on purpose: the command runner and the reward-file reader are both "did the task's
+// own tests pass", and the first version of this table listed only one of them — every Terminal-Bench /
+// Harbor case (reward-file) would have had its verdict refused at the settle. `state` is owned by
+// `state-check`, the command runner whose metric is FIXED to it; a generic `command` grader configured with
+// `metric: "state"` owns nothing and is refused — a spec cannot grant a reserved name (`isConstitutionalMetric`).
 export const BUILTIN_GRADER_OWNED_METRICS = {
   "tests-pass": ["tests_pass"],
   // A container task's own verifier publishes the SAME ground-truth name, and had no entry here: its class
@@ -61,10 +64,16 @@ export const BUILTIN_GRADER_OWNED_METRICS = {
   // other task that ships its own tests) produced a contract violation instead of a score, on every lane,
   // in place and through the private verifier alike.
   "reward-file": ["tests_pass"],
+  "state-check": ["state"],
   "dom-contains": ["dom_contains"],
   "url-matches": ["url_matches"],
   "answer-match": ["answer_match"],
 } as const satisfies Record<string, readonly string[]>;
+
+// The built-in graders that produce the JUDGE family by construction (`Grader.ownsJudgeVerdict` on the class).
+// The inline judge is the one; a code judge runs as a `script` grader whose spec DECLARES `authority: "judge"`
+// (`declaredJudgeAuthority`), and a registered judge's rows are the platform's own (`SettleDeclaration.judges`).
+export const BUILTIN_JUDGE_GRADER_IDS: readonly string[] = ["judge"];
 
 const BUILTIN_OWNED_BY_ID: ReadonlyMap<string, readonly string[]> = new Map(
   Object.entries(BUILTIN_GRADER_OWNED_METRICS),
@@ -87,6 +96,13 @@ export const JUDGE_METRIC_ROOT = "judge";
 // (rule `protocol` L3).
 export function isJudgeFamilyMetric(metric: string): boolean {
   return metric === JUDGE_METRIC_ROOT || metric.startsWith(`${JUDGE_METRIC_ROOT}:`);
+}
+
+// "Is this metric judge <judgeId>'s own" — the verdict (`judge:<id>`) or one of its criteria (`judge:<id>:<c>`),
+// never a different judge whose id merely shares a prefix. Lives here (moved from `@everdict/domain`) because
+// the settle asks it with only declarations in hand, and the domain re-exports it unchanged.
+export function isJudgeMetricOf(metric: string, judgeId: string): boolean {
+  return metric === `${JUDGE_METRIC_ROOT}:${judgeId}` || metric.startsWith(`${JUDGE_METRIC_ROOT}:${judgeId}:`);
 }
 
 // Is this a name the CONSTITUTION already owns? (arch-review 20 P0-1)

@@ -326,7 +326,7 @@ export class RecoveryPlanner {
             const evalCase = dataset.cases.find((dc) => dc.id === c.caseId);
             // What the case declared, for the settle's authority check. A case the dataset no longer holds declared
             // nothing this recovery can vouch for — fail-closed, like every other absent declaration.
-            const declared = evalCase === undefined ? [] : declaredGradersOf(evalCase);
+            const declared = { graders: evalCase === undefined ? [] : declaredGradersOf(evalCase), judges };
             // Called BARE, exactly as `executeCase` calls it. `collectDeferredTrace` is TOTAL on this path —
             // a platform that is down, an auth secret that is not registered, a grader that cannot be
             // reconstructed each come back as a classified, seedable result rather than a throw — so

@@ -42,7 +42,8 @@ a grader that can skip returns the wider `Score`.
 its family needs (`readStore?` = a co-located store reader injected by the topology backend — store-state grading, P2).
 
 ## Families (cite the file)
-- **outcome** — `tests-pass.ts` (`TestsPassGrader`), `command.ts` (`CommandGrader`), `swe-bench.ts`,
+- **outcome** — `tests-pass.ts` (`TestsPassGrader`), `state-check.ts` (`StateCheckGrader` — `command` with the
+  metric fixed to `state`; the only grader that may emit it), `command.ts` (`CommandGrader`), `swe-bench.ts`,
   `script-score.ts` (`ScriptScoreGrader`, continuous score), `script-grader.ts` (`ScriptGrader`, **custom
   grader**: user python/node code gets the full serialized GradeContext as a JSON file arg and prints
   `Score | Score[]` JSON — multi-metric, sandboxed in the case compute; `image` mode instead provisions a

@@ -17,6 +17,7 @@ import {
   modelBindingLabel,
   observationsFromTrace,
   pinnedDocumentMismatch,
+  stripJudgeScores,
 } from "@everdict/domain";
 import { createLimiter } from "../concurrency/limiter.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
@@ -89,6 +90,13 @@ export interface JudgeStream {
   push(result: CaseResult): Promise<void>;
   settle(): Promise<void>;
   stats(): JudgeStreamStats;
+}
+
+// One judge's rows on a result are the platform's own: whatever wore that judge's name before this write goes,
+// and the judgment produced now takes its place (`stripJudgeScores` is the same predicate the re-score uses).
+function replaceJudgeRows(result: CaseResult, judgeId: string, rows: Score[]): void {
+  const kept = stripJudgeScores(result.scores, [{ id: judgeId }]);
+  result.scores.splice(0, result.scores.length, ...kept, ...rows);
 }
 
 const NOOP_STREAM: JudgeStream = {
@@ -362,8 +370,15 @@ export class ScoringService {
         if (score.traceEvents !== undefined && score.traceEvents.length > 0)
           result.trace.push(...score.traceEvents.map((e) => ({ ...e, t: anchor })));
       }
-      result.scores.push(
-        ...scores.map((score) => {
+      // The platform's reading REPLACES anything already wearing this judge's name. A producer's document can
+      // carry `judge:<id>` rows of its own — a runner impersonating the batch's judge — and appending beside them
+      // would leave two verdicts under one metric, indistinguishable by content, with the forged one owning rows
+      // a re-score cannot replace. The settle refuses judge rows no declaration covers; this is the half for
+      // the judges it DOES cover, and it makes the row under a selected judge's name the platform's own.
+      replaceJudgeRows(
+        result,
+        judge.spec.id,
+        scores.map((score) => {
           const { traceEvents: _drained, ...judgment } = score;
           return judgment as typeof score;
         }),
@@ -426,7 +441,12 @@ export class ScoringService {
           return Promise.resolve();
         }
         stats.gradeable++;
-        result.scores.push(...unresolvedScores());
+        for (const sel of unresolved)
+          replaceJudgeRows(
+            result,
+            sel.id,
+            unresolvedScores().filter((u) => u.graderId === sel.id),
+          );
         const runId = runIdOf?.(result.caseId, result.trial);
         const task = limit(() =>
           this.applyJudgesToCase(

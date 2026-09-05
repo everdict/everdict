@@ -101,7 +101,7 @@ describe("BenchmarkAdapter catalog", () => {
     expect(listBenchmarks().find((b) => b.id === "trek")?.source).toBe("jsonl");
   });
 
-  it("imports the osworld multi-task sample (examples/benchmarks) → os-use cases + verify→command grader (dual scoring)", async () => {
+  it("imports the osworld multi-task sample (examples/benchmarks) → os-use cases + verify→state-check grader (dual scoring)", async () => {
     const text = readFileSync(
       fileURLToPath(new URL("../../../examples/benchmarks/osworld-sample.jsonl", import.meta.url)),
       "utf8",
@@ -110,8 +110,11 @@ describe("BenchmarkAdapter catalog", () => {
     expect(ds.cases.map((c) => c.id)).toEqual(["writer-note", "writer-todo", "files-folder"]);
     expect(ds.cases.every((c) => c.env.kind === "os-use")).toBe(true);
     for (const c of ds.cases) {
-      expect(c.graders.map((g) => g.id).sort()).toEqual(["command", "judge"]); // VLM judge + verify (state check)
-      const cmd = c.graders.find((g) => g.id === "command");
+      // VLM judge + verify. `state-check`, never `command` naming `state`: the reserved metric belongs to the grader that
+      // produces it by construction, and the old spec was refused at scoring time for exactly that reason.
+      expect(c.graders.map((g) => g.id).sort()).toEqual(["judge", "state-check"]);
+      const cmd = c.graders.find((g) => g.id === "state-check");
+      expect(cmd?.config?.metric).toBeUndefined();
       expect(cmd?.config?.cwd).toBe("/tmp"); // os-use has no work → absolute path
       expect(String(cmd?.config?.cmd)).toContain("test"); // verify command passed through
     }

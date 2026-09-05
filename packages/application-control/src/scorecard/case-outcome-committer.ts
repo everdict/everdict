@@ -423,7 +423,7 @@ export class CaseOutcomeCommitter {
       input.judges.length > 0
         ? { ...input.result, scores: completeJudgeCoverage(input.result.scores, input.judges) }
         : input.result,
-      input.graders,
+      { graders: input.graders, judges: input.judges },
     );
     const completionFact = (): { message: string; fact: DomainFact & { message: string; recipient?: string } } => {
       const v = caseVerdict(covered, input.announce?.verdictPolicy);
@@ -520,9 +520,13 @@ export class CaseOutcomeCommitter {
                 ? // The failure transition, WITH the frozen failure result — the same bytes the parent counts
                   // and the receipt's digest names (failedCaseResult is pure over (job, err), so runSuite's
                   // copy and this one are identical).
-                  Run.from(cur).fail(failureError, this.now(), covered, input.graders).patch
+                  Run.from(cur).fail(failureError, this.now(), covered, {
+                    graders: input.graders,
+                    judges: input.judges,
+                  }).patch
                 : {
-                    ...Run.from(cur).succeed(covered, this.now(), input.graders).patch,
+                    ...Run.from(cur).succeed(covered, this.now(), { graders: input.graders, judges: input.judges })
+                      .patch,
                     // Provenance: the runtime that ACTUALLY ran the case (differs from the assigned one after a spillover).
                     ...(input.ranOn ? { runtime: input.ranOn } : {}),
                   },

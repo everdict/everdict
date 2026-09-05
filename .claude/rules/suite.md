@@ -28,10 +28,12 @@ The deep domain model (scoring, judges, leaderboard, views) is in skill `evaluat
   first-party graders carry theirs on the CLASS, read from `BUILTIN_GRADER_OWNED_METRICS` so the settle —
   which holds only the case's `GraderSpec`s — reads the same table; `declaredOwnedMetrics` is the one
   spelling of what a spec's `metrics` may grant (never a constitutional name); only a judge may write into
-  the `judge:` family. A trusted builder that constructs a judge-shaped grader (the code-judge wrapper)
-  declares that on the spec. WHICH declaration the settle checks is the run's own `caseSpec` when the row
-  persists one, else the sealed plan's graders the committer hands over (a batch child persists no case by
-  design) — exactly one, never both, and none reads fail-CLOSED. A violation becomes an `invalid` row —
+  the `judge:` family — at the settle that is a judge the platform APPLIED (`SettleDeclaration.judges`, whose
+  rows `applyJudges` REPLACES rather than appends beside a producer's), an inline judge the case declared, or a
+  spec declaring judge authority (`declaredJudgeAuthority` — the code-judge wrapper does, on the spec it builds).
+  WHICH declaration the settle checks is the run's own `caseSpec` when the row persists one, else the sealed
+  plan's graders + selected judges the committer hands over (a batch child persists no case by design) — exactly
+  one, never both, and none reads fail-CLOSED. A violation becomes an `invalid` row —
   visible, aggregated nowhere, unable to decide a case — never a silent rename; and an `invalid` row is
   terminal, so the second seam re-reading the first's output is a no-op and the receipt's digest holds.
 - **Verification belongs at the read that produces the bytes actually used.** A pin checked where a document

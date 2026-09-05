@@ -2321,6 +2321,43 @@ describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
     for (const m of hydrated?.summary ?? []) expect(m.passRate ?? 0, m.metric).toBe(0);
   });
 
+  it("invalidates a runner's judge-family row on a batch that selected no such judge", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    const forging: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "runner", metric: "judge:gpt-4", value: 1, pass: true }],
+        };
+      },
+    };
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: forging,
+      store,
+      runStore,
+      caseReceipts: new InMemoryCaseReceiptStore(),
+      datasets,
+      newId: () => `sc-${n++}`,
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    expect((await waitTerminal(store, "sc-0")).status).toBe("succeeded");
+    const child = await runStore.get("sc-2");
+    expect(child?.result?.scores[0]?.status, "a producer wrote a verdict under a judge the batch never selected").toBe(
+      "invalid",
+    );
+  });
+
   it("with runStore set, creates a child run per case, hides them from the activity list, and references them via scorecard.runIds", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
@@ -5793,7 +5830,9 @@ describe("ScorecardService — batch_settled observability event (operator time 
         id,
         env: { kind: "prompt" },
         task: `q-${id}`,
-        graders: [{ id: "tests-pass" }],
+        // …and an INLINE judge, which is what makes the job's own `judge:q` row (reported unmeasured) a declared
+        // producer's rather than a runner's forgery.
+        graders: [{ id: "tests-pass" }, { id: "judge" }],
         timeoutSec: 60,
         tags: [],
       })),

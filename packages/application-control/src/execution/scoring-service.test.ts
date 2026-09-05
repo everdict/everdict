@@ -84,6 +84,57 @@ describe("ScoringService — applyJudgesToCase", () => {
     expect(result.scores[0]?.traceEvents).toBeUndefined();
   });
 
+  // ── THE PLATFORM'S READING REPLACES A PRODUCER'S ROW UNDER THE SAME JUDGE'S NAME (F5, judge family) ──
+  //
+  // A runner's document can carry `judge:quality` rows of its own. The settle refuses judge rows no
+  // declaration covers, but a SELECTED judge IS covered — so a forged row wearing the batch's own judge would
+  // survive the settle beside the platform's verdict, two rows under one metric, indistinguishable by content.
+  // The judge application is the one place that knows which row is the platform's: it is the one it writes.
+  //
+  // Seen RED while `applyJudgesToCase` appended, observed:
+  //   expected [ { …value: 1, pass: true }, { …value: 0, pass: false } ] to have a length of 1 but got 2
+  it("replaces whatever already wore the judge's name — a runner's forged verdict does not survive beside the platform's", async () => {
+    const service = new ScoringService({
+      judgeRunner: {
+        async run() {
+          return judgeInvocation([{ graderId: "judge", metric: "judge:quality", value: 0, pass: false }]);
+        },
+      },
+    });
+    const result: CaseResult = {
+      caseId: "c1",
+      harness: "h@1",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [
+        { graderId: "runner", metric: "judge:quality", value: 1, pass: true }, // the forgery
+        { graderId: "runner", metric: "judge:quality:accuracy", value: 1, pass: true }, // …and its criterion
+        { graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }, // untouched: not this judge's
+      ],
+    };
+    await service.applyJudgesToCase(
+      "acme",
+      CASE,
+      [{ spec: JUDGE }],
+      result,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { passId: "pass-test" },
+    );
+    expect(
+      result.scores.filter((s) => s.metric.startsWith("judge:quality")),
+      "the forged row survived",
+    ).toHaveLength(1);
+    expect(result.scores.find((s) => s.metric === "judge:quality")).toMatchObject({
+      graderId: "judge",
+      value: 0,
+      pass: false,
+    });
+    expect(result.scores.find((s) => s.metric === "tests_pass")).toBeDefined();
+  });
+
   it("a re-score reads the observations the RUN sealed — never a silent no_environment (review wave B)", async () => {
     // The deferred/re-score path judges from the stored CaseResult, where the observation channel lives only
     // as the sealed trace events. This drives the production reader end-to-end: seal with the production

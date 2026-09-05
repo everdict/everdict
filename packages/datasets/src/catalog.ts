@@ -499,12 +499,13 @@ export const BENCHMARK_CATALOG = {
       tagFields: ["snapshot", "source"],
     },
     // Scoring: VLM judge (screenshot) + optional state check. If row.verify (a shell command, the portable counterpart to the OSWorld evaluator) exists,
-    // a command grader (exit code=pass) verifies the actual system state — by file/state, not pixels (dual scoring). cwd is an absolute /tmp since
-    // os-use does not create a work directory.
+    // a state-check grader (exit code=pass) verifies the actual system state — by file/state, not pixels (dual scoring). cwd is an absolute /tmp since
+    // os-use does not create a work directory. `state-check`, not `command` with `metric: "state"`: the metric name carries ground-truth
+    // authority and only the grader that produces it by construction may emit it — a `command` spec naming it was refused at scoring time.
     graderBuilder: (row) => {
       const graders: GraderSpec[] = [{ id: "judge", config: { useScreenshot: true, rubric: osworldRubric(row) } }];
       const verify = String(row.verify ?? "").trim();
-      if (verify) graders.push({ id: "command", config: { cmd: verify, cwd: "/tmp", metric: "state" } });
+      if (verify) graders.push({ id: "state-check", config: { cmd: verify, cwd: "/tmp" } });
       return graders;
     },
   },

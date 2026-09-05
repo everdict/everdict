@@ -126,7 +126,7 @@ export class RewardFileGrader implements Grader {
   readonly id: string;
   // Its metric name is fixed in this file, not taken from config or from the reward file's keys, so the
   // ladder's ground-truth reading of it is a property of the implementation (arch-review 17 P0-2).
-  readonly ownsMetrics = [PRIMARY_METRIC] as const;
+  readonly ownsMetrics = BUILTIN_GRADER_OWNED_METRICS["reward-file"];
   readonly needsCompute = true; // runs the verifier in the case environment — before compute is released
 
   constructor(private readonly cfg: RewardFileConfig = {}) {

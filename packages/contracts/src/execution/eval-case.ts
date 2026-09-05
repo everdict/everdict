@@ -10,7 +10,13 @@ import { RecordingRefSchema } from "./recording.js";
 import { SessionAcquireSchema } from "./session-acquire.js";
 import { SpanAttrMappingSchema, TraceEvidenceSchema } from "./trace-source.js";
 import { TraceEventSchema, stripPlatformAuthoredFields } from "./trace.js";
-import { MetricAuthoritySchema, builtInOwnedMetrics, isConstitutionalMetric } from "./verdict-policy.js";
+import {
+  BUILTIN_JUDGE_GRADER_IDS,
+  MetricAuthoritySchema,
+  builtInOwnedMetrics,
+  isConstitutionalMetric,
+  isJudgeMetricOf,
+} from "./verdict-policy.js";
 import { VerifierReceiptSchema } from "./verifier-receipt-record.js";
 
 // Grader spec: id + optional config (e.g. tests-pass's { cmd }).
@@ -55,6 +61,28 @@ export type GraderSpec = z.infer<typeof GraderSpecSchema>;
 // which is the wildcard the producer boundary had closed a review earlier.
 export function declaredOwnedMetrics(spec: Pick<GraderSpec, "metrics">): readonly string[] {
   return (spec.metrics ?? []).map((m) => m.id).filter((id) => !isConstitutionalMetric(id));
+}
+
+// The judge half of the same entitlement: a spec may DECLARE judge authority — the code-judge wrapper does, on
+// the `script` grader it builds — and that declaration is what `makeGraders` stamps as `ownsJudgeVerdict`
+// and what the settle reads back. One spelling, for the same reason as `declaredOwnedMetrics`.
+export function declaredJudgeAuthority(spec: Pick<GraderSpec, "authority">): boolean {
+  return spec.authority === "judge";
+}
+
+// The declaration a settle checks a submitted result against: what the case DECLARED (its graders — the
+// sealed plan for a batch child, the row's own `caseSpec` for a standalone run) and which judges the PLATFORM
+// applied to it (the batch's selection; a standalone run has none). Both halves are required: an omitted
+// half is the permissive reading, and a settle may not be handed one by accident.
+export interface SettleDeclaration {
+  graders: readonly GraderSpec[];
+  judges: ReadonlyArray<{ id: string }>;
+}
+
+// Which declared spec produced a score. `id` selects the implementation (`command`, `script`, `judge` …) and
+// `config.id` renames the grader it builds — `makeGraders` reads exactly that — so a row names either.
+function specProducing(graders: readonly GraderSpec[], graderId: string): GraderSpec | undefined {
+  return graders.find((g) => g.id === graderId || (typeof g.config?.id === "string" && g.config.id === graderId));
 }
 
 // The worlds an evaluation can declare. One vocabulary for the case's placement hint, the driver's
@@ -505,21 +533,29 @@ const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier", "judgmentsSeal
 // nothing — the honest answer, not a special case; `Run.newSessionCase` already writes `graders: []` to say
 // exactly that, and it is what makes a runner's `tests-pass` on a case that never asked for one a forgery.
 //
-// ⚠️ SCOPE, STATED. The judge family is left as it is (`ownsJudgeVerdict: true`): its entitlement lives on the
-// runtime `Grader` class, which a `GraderSpec` does not mirror, and inline judge scores come back through this
-// same door. Inventing a correspondence would invalidate legitimate judge rows in the one place where
-// "invalid" decides what passing means. Adding `ownsJudgeVerdict` to the spec is its own change.
-export function sanitizeSubmittedResult(result: CaseResult, graders: readonly GraderSpec[]): CaseResult {
+// The judge family has three legitimate producers, and this seam can name all three from declarations: a judge
+// the PLATFORM applied (`judges` — its rows are `judge:<id>[:<criterion>]`, coverage rows included), an inline
+// judge the case declared (`BUILTIN_JUDGE_GRADER_IDS`), and a spec that declared judge authority (the code-judge
+// wrapper). Everything else writing `judge:*` is a producer forging a verdict — and owning rows a re-score
+// cannot replace, which is why `applyJudges` also REPLACES a selected judge's rows rather than appending.
+export function sanitizeSubmittedResult(result: CaseResult, declaration: SettleDeclaration): CaseResult {
   if (result.scores.length === 0) return result;
   return {
     ...result,
     scores: result.scores.map((score) => {
-      const spec = graders.find((g) => g.id === score.graderId);
+      const spec = specProducing(declaration.graders, score.graderId);
+      const ownsJudgeVerdict =
+        declaration.judges.some((j) => isJudgeMetricOf(score.metric, j.id)) ||
+        (spec !== undefined && (BUILTIN_JUDGE_GRADER_IDS.includes(spec.id) || declaredJudgeAuthority(spec)));
       return sanitizeScore(score, {
         kind: "grader",
         id: score.graderId,
+        // What this producer is entitled to, from the two sources the runtime class would have carried: the
+        // built-in's own name (a table, because a declaration is all this seam holds) and the names the
+        // declaration may grant. Undeclared → nothing, which is what makes a runner's `tests-pass` on a case
+        // that never asked for one a forgery rather than a built-in.
         ownsMetrics: spec === undefined ? [] : [...builtInOwnedMetrics(spec.id), ...declaredOwnedMetrics(spec)],
-        ownsJudgeVerdict: true,
+        ...(ownsJudgeVerdict ? { ownsJudgeVerdict: true } : {}),
       });
     }),
   };

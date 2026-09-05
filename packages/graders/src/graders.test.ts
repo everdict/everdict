@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import {
   BUILTIN_GRADER_OWNED_METRICS,
+  type Grader,
   NO_IMAGE,
   RESERVED_AUTHORITY_METRICS,
   builtInOwnedMetrics,
@@ -400,6 +402,55 @@ describe("makeGraders", () => {
 // now READ it. This pins the two ends together through the production builder: a class switched back to a
 // literal, or a table entry under the wrong id, comes apart here rather than at a runner's first `tests_pass`.
 describe("built-in ownership is the contracts table, and makeGraders hands it out unchanged", () => {
+  // ⚠️ A test that iterates the TABLE cannot see a class the table lacks — and that is the direction the
+  // reward-file defect arrived from: its class claimed `tests_pass` from a local literal, the in-sandbox producer
+  // boundary read the class and let it through, and the settle, holding only `{ id: "reward-file" }`, stamped
+  // every container-task verdict `invalid`. So this iterates from the CLASS side, off `makeGraders`' own switch
+  // (a hand-written id list did the same and is folded in here — a list is one more place to forget an id).
+  // The ids are read off `makeGraders`' own switch rather than off the table, because the table is the thing
+  // under test: its first version listed one owner of `tests_pass` and the class-level `reward-file` owner
+  // stayed invisible to a loop over table keys. A built-in that owns a reserved name outside the table is the
+  // residue this iterates, and a class that stopped reading the table comes apart here too.
+  const builtInIds = [
+    ...readFileSync(new URL("./make-graders.ts", import.meta.url), "utf8").matchAll(/case "([a-z-]+)":/g),
+  ].map((m) => String(m[1]));
+  const construct = (id: string) =>
+    makeGraders([
+      {
+        id,
+        // Every key some case requires, so construction — not configuration — is what a refusal means.
+        config: {
+          cmd: "true",
+          language: "python",
+          code: "print(1)",
+          text: "x",
+          pattern: ".*",
+          expect: "x",
+          expected: "x",
+          path: "r.json",
+          metric: "m",
+        },
+      },
+    ])[0];
+
+  it("reads every built-in the switch knows, and each owns exactly the reserved names the table records for it", () => {
+    expect(builtInIds.length).toBeGreaterThan(10);
+    const unconstructable: string[] = [];
+    for (const id of builtInIds) {
+      let g: Grader | undefined;
+      try {
+        g = construct(id);
+      } catch {
+        unconstructable.push(id);
+        continue;
+      }
+      const reserved = (g?.ownsMetrics ?? []).filter((m) => RESERVED_AUTHORITY_METRICS.includes(m)).sort();
+      expect(reserved, id).toEqual([...builtInOwnedMetrics(id)].sort());
+    }
+    // The inline judge needs a Judge to be built; it owns the judge FAMILY (a class flag), never a reserved name.
+    expect(unconstructable).toEqual(["judge"]);
+  });
+
   it("every table entry is exactly what makeGraders' grader for that id owns", () => {
     for (const [id, owned] of Object.entries(BUILTIN_GRADER_OWNED_METRICS)) {
       const [g] = makeGraders([{ id }]);
@@ -407,43 +458,12 @@ describe("built-in ownership is the contracts table, and makeGraders hands it ou
     }
   });
 
-  // ⚠️ THE TEST ABOVE ITERATES THE TABLE, SO A CLASS MISSING FROM IT IS INVISIBLE TO IT. That is the direction
-  // this defect arrived from: `reward-file` claimed `tests_pass` on its class from a local literal, the
-  // in-sandbox producer boundary read the CLASS and let it through, and the settle — which holds only
-  // `{ id: "reward-file" }` — found no grant and stamped every verdict `invalid`. Every container task that
-  // ships its own tests scored a contract violation instead of a number, on every lane.
-  //
-  // So this iterates from the CLASS side: whatever `makeGraders` can build, if it claims a RESERVED name, the
-  // table the settle reads must grant it that name under that id.
-  it("every built-in that CLAIMS a reserved name is granted it by the table the settle reads", () => {
-    const builtIns = [
-      "tests-pass",
-      "command",
-      "script-score",
-      "script",
-      "reward-file",
-      "swe-bench",
-      "world-state",
-      "steps",
-      "cost",
-      "latency",
-      "dom-contains",
-      "url-matches",
-      "answer-match",
-      "store-state",
-      "text-metric",
-    ];
-    const ungranted: string[] = [];
-    for (const id of builtIns) {
-      // Enough config for every builder to construct; what is asserted is only what the grader CLAIMS.
-      const [g] = makeGraders([
-        { id, config: { cmd: "true", language: "python", code: "pass", expected: "x", pattern: "x", metric: "m" } },
-      ]);
-      for (const metric of g?.ownsMetrics ?? [])
-        if (RESERVED_AUTHORITY_METRICS.includes(metric) && !builtInOwnedMetrics(id).includes(metric))
-          ungranted.push(`${id} claims '${metric}' and the table grants it nothing`);
-    }
-    expect(ungranted, "the sandbox would accept these and the settle would call every one of them invalid").toEqual([]);
+  it("state-check is `command` with the metric fixed to `state` — the only way a state verifier gets ground truth", () => {
+    const [g] = makeGraders([{ id: "state-check", config: { cmd: "test -f /tmp/x", cwd: "/tmp" } }]);
+    expect(g?.id).toBe("state-check");
+    expect(g?.ownsMetrics).toEqual(["state"]);
+    const [generic] = makeGraders([{ id: "command", config: { cmd: "true", metric: "state" } }]);
+    expect(generic?.ownsMetrics ?? []).not.toContain("state");
   });
 
   it("a custom grader declaring a reserved name owns nothing reserved — the sandbox and the settle agree", () => {

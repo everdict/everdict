@@ -2,8 +2,8 @@ import {
   type CaseResult,
   ConflictError,
   type EvalCase,
-  type GraderSpec,
   InternalError,
+  type SettleDeclaration,
   TERMINAL_RUN_STATUSES,
   sanitizeSubmittedResult,
 } from "@everdict/contracts";
@@ -634,19 +634,22 @@ export class Run {
   // is unconditional — no branch skips it — so it is not what a guarded strip leaves behind (rule `protocol`).
   // Rows sealed before `caseSpec` existed are terminal, and `assertNotTerminal` on every writer is why they
   // never reach this.
-  private settled(result: CaseResult, declared: readonly GraderSpec[] | undefined): CaseResult {
-    const own = this.record.caseSpec === undefined ? undefined : (this.record.caseSpec.graders ?? []);
+  private settled(result: CaseResult, declared: SettleDeclaration | undefined): CaseResult {
+    // A persisted case is the whole declaration: its graders, and no platform judge — judges are a batch's
+    // selection, applied to its children, and a standalone run has none.
+    const own: SettleDeclaration | undefined =
+      this.record.caseSpec === undefined ? undefined : { graders: this.record.caseSpec.graders ?? [], judges: [] };
     if (own !== undefined && declared !== undefined)
       throw new InternalError(
         "UPSTREAM_ERROR",
         { run: this.record.id },
         "a run that persists its case is settled against that declaration alone — a caller-supplied one is a second reader",
       );
-    return sanitizeSubmittedResult(result, own ?? declared ?? []);
+    return sanitizeSubmittedResult(result, own ?? declared ?? { graders: [], judges: [] });
   }
 
   // `declared`: the sealed plan's graders, for a row that persists no case of its own (see `settled`).
-  succeed(result: CaseResult, now: string, declared?: readonly GraderSpec[]): RunTransition {
+  succeed(result: CaseResult, now: string, declared?: SettleDeclaration): RunTransition {
     this.assertNotTerminal("succeed");
     return {
       patch: { status: "succeeded", result: this.settled(result, declared), updatedAt: now },
@@ -662,7 +665,7 @@ export class Run {
     error: { code: string; message: string },
     now: string,
     result?: CaseResult,
-    declared?: readonly GraderSpec[],
+    declared?: SettleDeclaration,
   ): RunTransition {
     this.assertNotTerminal("fail");
     return {
@@ -672,7 +675,7 @@ export class Run {
   }
 
   // Boot-recovery adoption: settle with a result harvested from the still-alive job (zero re-run).
-  adopt(result: CaseResult, now: string, declared?: readonly GraderSpec[]): RunTransition {
+  adopt(result: CaseResult, now: string, declared?: SettleDeclaration): RunTransition {
     if (!this.canAdopt())
       throw new ConflictError(
         "CONFLICT",

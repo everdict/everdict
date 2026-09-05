@@ -9,6 +9,7 @@ import {
   type ScorecardSubset,
   caseKeyOf,
   encodeCaseKey,
+  isJudgeMetricOf,
   isMeasured,
   measuredScores,
 } from "@everdict/contracts";
@@ -38,9 +39,9 @@ export function childKey(caseId: string, trial?: number): string {
 // unmeasured placeholder row (the very thing rescore-unmeasured exists to recover) made it skip exactly the
 // cases it was invoked for, and its strip missed the criterion children so stale diagnostics compounded on
 // every pass. Both paths now stand on these three.
-export function isJudgeMetricOf(metric: string, judgeId: string): boolean {
-  return metric === `judge:${judgeId}` || metric.startsWith(`judge:${judgeId}:`);
-}
+// Owned by `@everdict/contracts` now (the settle asks it with only declarations in hand); re-exported so every
+// domain caller keeps its address.
+export { isJudgeMetricOf };
 
 // "Already judged" = a MEASURED top-level verdict exists. An unmeasured/invalid placeholder is a recorded
 // failure to judge, never a verdict — it must leave the case eligible for the pass that replaces it.

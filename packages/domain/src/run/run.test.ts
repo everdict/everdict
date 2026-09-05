@@ -562,7 +562,10 @@ describe("[COUNTEREXAMPLE] a score claims only the authority its declared grader
   });
 
   it("a batch child is settled against the sealed plan's declaration its committer hands over", () => {
-    const done = child().succeed({ ...RESULT, scores: [builtIn] }, "t1", [{ id: "tests-pass" }]);
+    const done = child().succeed({ ...RESULT, scores: [builtIn] }, "t1", {
+      graders: [{ id: "tests-pass" }],
+      judges: [],
+    });
     expect(done.patch.result?.scores[0]).toMatchObject({ metric: "tests_pass", value: 1 });
   });
 
@@ -572,15 +575,18 @@ describe("[COUNTEREXAMPLE] a score claims only the authority its declared grader
   });
 
   it("a run that persists its case refuses a caller-supplied declaration — two readers of one fact", () => {
-    expect(() => withGraders([]).succeed({ ...RESULT, scores: [builtIn] }, "t1", [{ id: "tests-pass" }])).toThrow(
-      /settled against that declaration alone/,
-    );
+    expect(() =>
+      withGraders([]).succeed({ ...RESULT, scores: [builtIn] }, "t1", { graders: [{ id: "tests-pass" }], judges: [] }),
+    ).toThrow(/settled against that declaration alone/);
   });
 
   it("adopt (boot recovery) asks the same question — the lane whose bytes nobody watched", () => {
     const adopted = withGraders([]).adopt({ ...RESULT, scores: [forged] }, "t1");
     expect(adopted.patch.result?.scores[0]?.status, "the recovery lane skipped the authority check").toBe("invalid");
-    const recovered = child().adopt({ ...RESULT, scores: [builtIn] }, "t1", [{ id: "tests-pass" }]);
+    const recovered = child().adopt({ ...RESULT, scores: [builtIn] }, "t1", {
+      graders: [{ id: "tests-pass" }],
+      judges: [],
+    });
     expect(recovered.patch.result?.scores[0]?.status).toBeUndefined();
   });
 

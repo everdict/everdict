@@ -3,6 +3,7 @@ import {
   type Grader,
   type GraderSpec,
   JudgeCriterionSchema,
+  declaredJudgeAuthority,
   declaredOwnedMetrics,
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
@@ -13,6 +14,7 @@ import { type Judge, JudgeGrader } from "./judge.js";
 import { RewardFileGrader } from "./reward-file.js";
 import { ScriptGrader } from "./script-grader.js";
 import { ScriptScoreGrader } from "./script-score.js";
+import { StateCheckGrader } from "./state-check.js";
 import { StoreStateGrader } from "./store-state.js";
 import { SweBenchGrader } from "./swe-bench.js";
 import { TestsPassGrader } from "./tests-pass.js";
@@ -76,7 +78,7 @@ function withDeclaredAuthority(grader: Grader, spec: GraderSpec): Grader {
   const owned = declaredOwnedMetrics(spec);
   const patch = {
     ...(owned.length > 0 ? { ownsMetrics: owned } : {}),
-    ...(spec.authority === "judge" ? { ownsJudgeVerdict: true } : {}),
+    ...(declaredJudgeAuthority(spec) ? { ownsJudgeVerdict: true } : {}),
   };
   if (Object.keys(patch).length === 0) return grader;
   return Object.assign(Object.create(Object.getPrototypeOf(grader)), grader, patch);
@@ -86,6 +88,14 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
   switch (s.id) {
     case "tests-pass":
       return new TestsPassGrader(String(s.config?.cmd ?? "true"));
+    case "state-check":
+      // Ground-truth state verification: `command` with the metric fixed to `state` (see StateCheckGrader).
+      return new StateCheckGrader({
+        cmd: String(s.config?.cmd ?? "true"),
+        ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
+        ...(optStr(s.config?.passPattern) ? { passPattern: optStr(s.config?.passPattern) } : {}),
+        ...(typeof s.config?.timeoutSec === "number" ? { timeoutSec: s.config.timeoutSec } : {}),
+      });
     case "command":
       // Generic test-running grader (benchmark-agnostic, user-configurable): cmd + optional gold patch/output pattern.
       return new CommandGrader({

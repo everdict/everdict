@@ -1001,7 +1001,7 @@ complementary signal, and everdict runs **both** over the same os-use result. (I
 ### OSWorld multi-task scorecard — batch + per-metric aggregate ✅
 One OSWorld task is a run; a *suite* is a scorecard. `examples/benchmarks/osworld-sample.jsonl` is a committed 3-task
 OSWorld suite (two text-file saves + one folder-create), each with a `verify` state check. Imported via the `osworld`
-adapter it becomes a 3-case os-use dataset (each case = VLM judge + state `command` grader); a guard test asserts that
+adapter it becomes a 3-case os-use dataset (each case = VLM judge + `state-check` grader); a guard test asserts that
 mapping. Running it as a scorecard exercises the batch path (`runSuite`) over real desktop tasks and aggregates **per
 metric**.
 
