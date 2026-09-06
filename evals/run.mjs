@@ -194,25 +194,34 @@ for (const c of cases) {
 // EVERY needle carries the lesson, and either becomes a subject (so the drill removes it there too) or is
 // reworded. One needle alone is not a leak — "unsafe" appears in a rule about casts — and the drill itself
 // still catches a partial copy. Declared by the case, not inferred from prose.
-const trackedMarkdown = spawnSync("git", ["ls-files", "--", "*.md"], { cwd: root, encoding: "utf8" })
+//
+// ⚠️ EVERY TRACKED TEXT FILE, NOT ONLY MARKDOWN. The first version scanned `*.md`, and a lesson lives in the
+// CHECK that enforces it as often as in a rule: `ci-local-before-push` and `dont-dodge-the-push-gate` carry
+// their whole fingerprint in `scripts/*.mjs` comments, and `madge-exit-code` in `check-import-cycles.mjs`.
+// The session under test reads those the same way it reads a rule, so a markdown-only pre-filter left the
+// drill certifying nothing there and only `--drill-status` (or a real drill) caught it. Widened to the text
+// extensions a lesson can hide in; a `.mjs` a case names as a subject is drilled there too (removing comment
+// lines is harmless — the worktree copy is read, never executed).
+const TEXT = /\.(md|mjs|cjs|m?ts|tsx|js|json|ya?ml|txt|sh|py)$/;
+const trackedText = spawnSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
   .stdout.split("\n")
   .filter(Boolean)
-  .filter((file) => !file.startsWith("evals/cases/"));
-const markdownLines = new Map();
+  .filter((file) => TEXT.test(file) && !file.startsWith("evals/cases/"));
+const fileLines = new Map();
 const linesOf = (file) => {
-  if (!markdownLines.has(file)) {
+  if (!fileLines.has(file)) {
     try {
-      markdownLines.set(file, readFileSync(path.join(root, file), "utf8").split("\n"));
+      fileLines.set(file, readFileSync(path.join(root, file), "utf8").split("\n"));
     } catch {
-      markdownLines.set(file, []);
+      fileLines.set(file, []);
     }
   }
-  return markdownLines.get(file);
+  return fileLines.get(file);
 };
 const leaking = [];
 for (const c of cases) {
   const named = new Set(c.subject);
-  const leaks = trackedMarkdown.filter(
+  const leaks = trackedText.filter(
     (file) => !named.has(file) && c.neutralize.every((needle) => linesOf(file).some((line) => line.includes(needle))),
   );
   if (leaks.length > 0) leaking.push(`${c.file} → ${leaks.join(", ")}`);

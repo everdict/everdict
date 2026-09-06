@@ -58,6 +58,32 @@ verdict:    FAIL at the time of the audit; two of the three controls repaired an
 follow-up:  intent/2026-09-06-what-the-second-audit-found/
 ```
 
+The eval row was re-run as a full `--drill-all` once the false-red split (an errored agent call is
+inconclusive, not a red) had landed, and it turned up a second finding the single-case drill could not:
+
+```
+drill:      removal (eval suite, full --drill-all)
+date:       2026-09-06
+ran by:     Claude (audit session)
+scope:      19 cases; a rate limit stopped the run after 6 executed
+observed:   1 RED (biome-write-is-not-evidence), 4 GREEN (measure nothing:
+            allowlist-rebuild-eats-fields, authority-before-effect,
+            backends-never-run-the-harness, ci-local-before-push), 14 INCONCLUSIVE
+            (agent exited 1 — a rate limit, recorded as nothing, not as red).
+            Widening the four greens' subjects did NOT flip them: their assertions
+            are wide alternations a correct generic answer satisfies, which the
+            single-case drill of biome had already shown for itself and which
+            madge-exit-code was retired for the same day.
+meaning:    The inconclusive split is the load-bearing repair here — before it, the
+            14 throttled calls would have recorded as red in two seconds each and
+            manufactured a clean certificate. The 4 greens are a real case-quality
+            defect the drill exists to find.
+verdict:    the mechanism PASSES (it distinguished red / green / inconclusive
+            correctly); the SUITE is not yet clean — 4 cases to fix or retire, then
+            a full green drill-all before the stamp couples to it.
+follow-up:  intent/2026-09-06-four-cases-that-do-not-measure/
+```
+
 ```
 drill:      reconstruction
 date:       2026-09-06

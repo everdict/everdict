@@ -11,7 +11,10 @@
     ".claude/skills/README.md",
     "docs/architecture/harness-declared-limits.md",
     "intent/2026-09-06-what-the-second-audit-found/spec.md",
-    "intent/2026-09-06-what-the-second-audit-found/plan.md"
+    "intent/2026-09-06-what-the-second-audit-found/plan.md",
+    "scripts/check-guardrails.mjs",
+    "scripts/ci-local.mjs",
+    "scripts/hooks/gate-decision.mjs"
   ],
   "neutralize": ["pnpm ci:local", "ci:local", "pre-push-gate"],
   "allowedTools": "Read,Grep,Glob",

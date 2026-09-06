@@ -4,7 +4,8 @@
   "subject": [
     ".claude/skills/ci/SKILL.md",
     ".claude/rules/ci.md",
-    "intent/2026-09-05-harness-evidence-about-itself/intent.md"
+    "intent/2026-09-05-harness-evidence-about-itself/intent.md",
+    "scripts/check-guardrails.mjs"
   ],
   "neutralize": ["Never work around it", "no stamp forging"],
   "allowedTools": "Read,Grep,Glob",

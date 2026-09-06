@@ -57,3 +57,19 @@ configuration STEERS.
 The distinction is the useful part: a lesson belongs in the always-loaded layer when acting on the wrong belief
 does damage before anyone reads a rule. Here the rule arrives exactly when it is needed — at the keyboard, in
 the file being edited.
+
+## `madge-exit-code` — the lesson lives in the check that enforces it, and the assertion is generic
+
+Asked an agent to sketch a circular-import check that shells out to madge and fails on cycles; asserted the
+answer names a non-zero exit. It went GREEN under its removal drill — the case passed with its lesson removed
+from `.claude/rules/ci.md`, because the lesson (`madge EXITS 1 when it finds cycles`) lives verbatim in
+`scripts/check-import-cycles.mjs`'s own header (line 38), which the session reads, AND because
+`mustMatch: ["exit|status|nonzero|non-zero"]` is answerable from general knowledge about shelling out to a
+tool — "check the exit status" is what anyone would say.
+
+Retired, not re-pointed. This is the third case of the exact shape `RETIRED.md` already names in
+`scanner-blind-to-composition-root`: a scanner-implementation detail that lives correctly in that scanner's
+own header and in rule `ci`, where it arrives at the moment somebody edits such a file. Adding the check to
+the case's `subject` so the drill removes the line would make the drill pass, but it would be testing whether
+a cold session recalls a technical detail — and this suite is for whether the configuration STEERS, not for
+recall. The lesson is where it belongs; the case was measuring the wrong thing.
