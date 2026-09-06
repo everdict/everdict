@@ -32,6 +32,13 @@ See skill `ci`.
   it fails silently — two were found dead this way (`suite.md`, `workspace-integrations.md`), both holding
   invariants a later review then found broken. Moving or renaming a package re-points its rule in the SAME
   change.
+- ⚠️ **`docs-check` REQUIRED a citation form it then refused to read.** A link out of `docs/` must be an
+  absolute `github.com` URL (the check fails a relative one), and the same loop skipped every `^https?:` href
+  — so the one spelling the gate demands was the one spelling it never verified. The four index entries this
+  harness added for `intent/`, `releases/`, `lessons/` and `evals/` were exactly that class: the directories
+  the work was trying to make discoverable, cited in the form nothing checks. A URL naming a blob in THIS
+  repository is a path assertion and is checked as one now; a link to the internet stays out of scope,
+  because this check knows about files and not about hosts.
 - **`pnpm docs-check` keeps the cited ADDRESSES real** — in `docs/**` and, since arch-review 56, in
   `.claude/rules/**` + `.claude/skills/**` too, from the one predicate rather than a second copy. The push
   layer is injected into context by a glob, so a rule citing a moved file teaches the wrong address at the

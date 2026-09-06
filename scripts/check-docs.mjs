@@ -80,6 +80,22 @@ for (const doc of docs) {
   const text = readFileSync(join(ROOT, doc), "utf8");
   for (const m of text.matchAll(/\]\(([^)\s#]+)(#[^)]*)?\)/g)) {
     const href = m[1];
+    // ⚠️ AN ABSOLUTE URL INTO THIS REPOSITORY IS STILL A CITATION OF A PATH, AND THIS CHECK USED TO SKIP IT.
+    //
+    // Fourteen lines below, this same loop REQUIRES an absolute github.com URL for anything outside `docs/`
+    // — and then the `^https?:` skip above meant every one of those was unchecked. The rule and the skip
+    // together manufacture a class of citation the gate cannot verify while appearing to have verified it,
+    // which is the shape this file exists to refuse. Found by `pnpm review` on the four entries this batch
+    // added for `intent/`, `releases/`, `lessons/` and `evals/` — the four directories it was trying to make
+    // discoverable, cited in the one form nothing reads.
+    //
+    // A URL naming a blob in THIS repository is a path assertion and is checked as one. Anything else is a
+    // link to the internet and stays out of scope: this check knows about files, not about hosts.
+    const inRepo = /^https:\/\/github\.com\/everdict\/everdict\/blob\/[^/]+\/(.+)$/.exec(href)?.[1];
+    if (inRepo !== undefined && !existsSync(join(ROOT, inRepo))) {
+      failures.push(`${doc} links to ${href}, and this repository has no ${inRepo}`);
+      continue;
+    }
     if (/^(https?|mailto):/.test(href)) continue;
     const target = href.startsWith("/") ? href.slice(1) : join(dirname(doc), href);
     if (!existsSync(join(ROOT, target))) {
