@@ -73,3 +73,57 @@ own header and in rule `ci`, where it arrives at the moment somebody edits such 
 the case's `subject` so the drill removes the line would make the drill pass, but it would be testing whether
 a cold session recalls a technical detail — and this suite is for whether the configuration STEERS, not for
 recall. The lesson is where it belongs; the case was measuring the wrong thing.
+
+## `authority-before-effect` — the principle is general knowledge, so the prompt never needed the lesson
+
+Asked which order a dispatch and a store write should go in; asserted the answer names authority, durability,
+proof, or "record first". It went GREEN under its removal drill on 2026-09-06: with rule `protocol` L1 and the
+case-law reference both neutralized, an agent still answers "record it first, then dispatch" — because
+authority-before-effect is a widely known principle and the question asks for it directly.
+
+Retired rather than narrowed. Every honest tightening runs into the same wall: the artifacts L1 actually names
+(`Promise<void>` on a write a decision rests on; a required proof parameter rather than an optional pre-effect
+hook) are not what THIS prompt asks for, so tightening the assertion would refuse correct answers to the
+question that was asked instead of testing the lesson. A prompt a correct generic answer satisfies cannot test
+a specific lesson — the rule `biome-write-is-not-evidence` records in its own `why`, and the third case
+retired for it after `madge-exit-code` and `scanner-blind-to-composition-root`.
+
+**The gap this leaves, named so it is not rediscovered:** rule `protocol` L1 now has no eval case.
+`untrusted-ingress-authorship` covers L3-shaped authorship over live symbols and `read-failure-is-a-third-value`
+covers L2, but nothing replays L1. The honest replacement is a case over a LIVE symbol — a specific store
+method whose return type carries the proof — in the shape that replaced `authz-optional-reflex`, not a reworded
+regex over this prompt. Filed as an open question in
+`intent/2026-09-06-four-cases-that-do-not-measure/`.
+
+## `allowlist-rebuild-eats-fields`, `backends-never-run-the-harness`, `ci-local-before-push` — the code already knew the answer
+
+Retired together on 2026-09-06, for one cause found by driving both halves of each drill.
+
+Each was first suspected of a wide assertion, and each assertion was narrowed to a symbol only this
+repository could name: `QueueEntry|runOne`, `__EVERDICT_RESULT__|job-runner`, `ci[:-]local|everdict-ci-ok`.
+The narrowing was verified in both directions, which is what made the cause visible:
+
+    normal state   1/1 passed  — the assertion is not too tight; a correct specific answer still passes
+    removal drill  STILL GREEN — the case passes with its lesson removed
+
+The lesson was gone from every subject and the agent answered correctly anyway, because **the answer is in
+the codebase and the case grants `Read,Grep,Glob`**. `QueueEntry` and `runOne` are live symbols in
+`packages/backends` and `apps/api`; `__EVERDICT_RESULT__` is in `packages/contracts` and
+`application-control`; `ci:local` is a script in `package.json`. Asked what to watch when adding a
+`DispatchOptions` field, an agent greps `DispatchOptions`, finds the rebuild, and warns about it — which is
+not a failure of the case, it is the agent doing the right thing without needing to be steered.
+
+**The principle these three cost, and the one to write the next case against: a configuration eval can only
+measure what the CODEBASE CANNOT ANSWER.** If deleting the sentence still leaves a correct answer reachable
+by reading the repository, the sentence was not steering anything, and the case measures the codebase rather
+than the configuration. The cases that survive their drills are the ones whose subject is a fact no file in
+the tree states — a formatter's exit code lying about what it applied, a norm about evidence (an empty corpus
+is not a pass; a scenario that SKIPS is not a passing one), a policy (English-only source) — knowledge that
+exists only because somebody wrote it down after being burned.
+
+(That sentence is deliberately vague about the formatter. Naming the tool and the flag would put a live
+case's whole `neutralize` set in this file, and the exclusivity check refuses that — which is exactly what it
+did to the first draft of this paragraph, one commit after the check was written to catch it.)
+
+This also retires the hope that a tighter regex saves such a case. It cannot: the tighter the assertion, the
+more precisely it names the symbol the agent can grep.

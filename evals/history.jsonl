@@ -36,3 +36,9 @@
 {"at":"2026-09-06T04:10:41.639Z","model":"sonnet","drill":"backends-never-run-the-harness","red":false,"seconds":14.9,"subjects":"10388462455d6429"}
 {"at":"2026-09-06T04:10:56.239Z","model":"sonnet","drill":"biome-write-is-not-evidence","red":true,"seconds":13.6,"subjects":"7ae5025952b4f385"}
 {"at":"2026-09-06T04:11:27.300Z","model":"sonnet","drill":"ci-local-before-push","red":false,"seconds":30.2,"subjects":"bd2899f9e94bce7a"}
+{"at":"2026-09-06T07:41:12.027Z","model":"sonnet","models":["claude-sonnet-5"],"partial":true,"passed":1,"of":1,"executed":1,"cost":0.4834,"cases":[{"id":"allowlist-rebuild-eats-fields","pass":true,"seconds":35.2,"reused":false,"models":["claude-sonnet-5"]}]}
+{"at":"2026-09-06T07:41:45.039Z","model":"sonnet","drill":"allowlist-rebuild-eats-fields","red":false,"seconds":29.8,"subjects":"ec6506cbb6976887"}
+{"at":"2026-09-06T07:42:04.163Z","model":"sonnet","models":["claude-sonnet-5"],"partial":true,"passed":1,"of":1,"executed":1,"cost":0.117,"cases":[{"id":"backends-never-run-the-harness","pass":true,"seconds":15.8,"reused":false,"models":["claude-sonnet-5"]}]}
+{"at":"2026-09-06T07:42:23.433Z","model":"sonnet","drill":"backends-never-run-the-harness","red":false,"seconds":16.7,"subjects":"10388462455d6429"}
+{"at":"2026-09-06T07:43:11.958Z","model":"sonnet","models":["claude-sonnet-5"],"partial":true,"passed":1,"of":1,"executed":1,"cost":0.4138,"cases":[{"id":"ci-local-before-push","pass":true,"seconds":45.6,"reused":false,"models":["claude-sonnet-5"]}]}
+{"at":"2026-09-06T07:43:37.261Z","model":"sonnet","drill":"ci-local-before-push","red":false,"seconds":22.6,"subjects":"bd2899f9e94bce7a"}

@@ -44,6 +44,18 @@ article's other question: when a new model is swapped in, does the agent still d
 }
 ```
 
+**Before any of the fields: can the CODEBASE answer this?** A configuration eval can only measure what the
+repository cannot state for itself. Every case grants `Read,Grep,Glob`, so if deleting the sentence still
+leaves a correct answer reachable by reading live source, the sentence was not steering anything and the case
+measures the codebase. Three cases were retired on 2026-09-06 for exactly this — their assertions had been
+narrowed to private symbols (`QueueEntry`, `__EVERDICT_RESULT__`, `ci:local`) on the theory that a generic
+answer could not produce them, which is true and beside the point: those symbols are live source an agent
+greps. Narrowing moved in the wrong direction, and only running the case in BOTH states showed it (normal:
+passes, so the assertion is not too tight; drilled: still passes, so the lesson is not the cause). The cases
+that survive are the ones whose subject is a fact no file in the tree states — a tool's exit code lying about
+what it did, a norm about what counts as evidence, a policy about language. See
+`lessons/2026-09-06-the-code-already-knew-the-answer.md`.
+
 - **`why`** names the incident. Cases come from failures that actually happened here and are already written
   down. An invented case tests an invented convention.
 - **`subject`** is every file that carries the lesson — often more than one, because the good ones are
