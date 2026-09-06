@@ -1,6 +1,8 @@
 # Intent: four eval cases pass a wide assertion, so they measure nothing — found by the first honest drill-all
 
-Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: draft
+Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: shipped
+
+Shipped: ad1b6c97
 
 ## Problem
 
@@ -60,3 +62,23 @@ can finally land, which is the whole reason this matters.
 - Is `authority-before-effect` salvageable at all, given the principle it names is genuinely general
   knowledge? A case over a live symbol (as `untrusted-ingress-authorship` replaced `authz-optional-reflex`)
   may be the honest replacement rather than a tighter regex.
+
+## Shipped — and the answer was not the one this intent expected
+
+Shipped in `ad1b6c97`. This intent guessed the cause was a wide assertion and proposed narrowing. That guess
+was wrong, and the way it was found wrong is the part worth keeping: narrowing each assertion to a private
+symbol, then running the case in BOTH states, showed the case passing normally (so the assertion was not too
+tight) and STILL passing when drilled (so the lesson was not the cause). The answers were reachable by
+grepping live source, which every case is allowed to do.
+
+All four are retired, not repaired: three for the codebase-answers-it reason, `authority-before-effect` for
+the sibling one (the principle it names is general knowledge). The principle they cost is in `evals/README.md`
+and `lessons/2026-09-06-the-code-already-knew-the-answer.md`.
+
+Two threads left open rather than closed:
+- **rule `protocol` L1 has no eval case.** The honest replacement is a case over a live symbol whose return
+  type carries the proof, in the shape that replaced `authz-optional-reflex` — not a reworded regex.
+- **The suite is 15 cases, below the 20–50 baseline**, and eleven of them have never been drilled honestly.
+  The next clean `--drill-all` may retire more, and new cases should be written against the new principle
+  rather than backfilled to reach a number.
+
