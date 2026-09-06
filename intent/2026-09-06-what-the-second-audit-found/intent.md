@@ -15,7 +15,7 @@ control everything else rests on has a hole. In order of what it costs:
   time. This repository's own eval runner, reviewer and commit gate create linked worktrees, so the path is
   ordinary. Declared-limits §2 files "a push from another checkout" under managed settings; this is the same
   tool, the same settings, the same session.
-- **The watcher only rehearses.** `pnpm ci:local` calls `watch-bands --dry-run`, which prints "would file"
+- **The watcher only rehearses.** The local CI-parity gate calls `watch-bands --dry-run`, which prints "would file"
   and exits 0 on a 3σ breach. The detection runs without a person; the filing still needs one to read the
   output and type the command. That is L2 for a gate play whose whole point is L3.
 - **An accepted intent triggers nothing.** `pnpm design --next` is a start button; `intent-chain` emits a
