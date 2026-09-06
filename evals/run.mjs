@@ -686,7 +686,12 @@ if (notCertified.length > 0) {
       )}. \`--drill-status\` explains each; \`--drill-all\` re-certifies. Advisory, not gating (see the code comment).`,
   );
 }
-if (!opts.only && failed === 0) {
+// ⚠️ AND THE STAMP COUNTS THE UNANSWERED TOO. Splitting `inconclusive` out of `failed` fixed the REPORT and
+// left this condition reading `failed === 0`, so a run where the agent never answered two cases would have
+// written a stamp attesting a configuration those two cases never examined. That is the same false
+// certificate this whole split was written to prevent, one line further down — found by `pnpm review` on the
+// very commit that introduced it, which is the argument for the review gate in one example.
+if (!opts.only && failed === 0 && inconclusive === 0) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
   const dirty = spawnSync("git", ["status", "--porcelain", "--", ...CLEAN_PATHSPEC], { cwd: root, encoding: "utf8" })
     .stdout.split("\n")
@@ -707,5 +712,11 @@ if (!opts.only && failed === 0) {
 
 if (failed > 0) {
   console.error("\n✖ agent-evals RED — the configuration stopped carrying a lesson it is supposed to carry.");
+  process.exit(1);
+}
+if (inconclusive > 0) {
+  console.error(
+    `\n✖ agent-evals INCONCLUSIVE — ${inconclusive} case(s) were never answered, so the suite could not ask what it exists to ask.\n  No stamp is written. This is not a statement about the configuration; re-run when the agent is reachable.`,
+  );
   process.exit(1);
 }
