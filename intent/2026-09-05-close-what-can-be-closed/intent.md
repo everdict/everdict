@@ -1,6 +1,8 @@
 # Intent: close what can be closed, and declare what cannot
 
-Author: maintainer (via AI-native SDLC audit). Status: accepted
+Author: maintainer (via AI-native SDLC audit). Status: shipped
+
+Shipped: 766c4be379cbf9795536d3a79b75105e0178c498
 
 ## Problem
 
