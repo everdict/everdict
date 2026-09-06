@@ -570,6 +570,8 @@ if (selected.length === 0) {
 }
 setup();
 let failed = 0;
+// Cases the agent never answered. Not failures: a question that was not asked has no answer to be wrong.
+let inconclusive = 0;
 let spend = 0;
 const outcomes = [];
 try {
@@ -593,6 +595,21 @@ try {
       console.log(`✓ ${c.id.padEnd(32)} ${out.seconds}s${out.reused ? " — reused" : ""}`);
       continue;
     }
+    // ⚠️ THE SAME SPLIT THE DRILL GOT, AND THIS SIBLING DID NOT. `runCase` returns `ok: false` when the agent
+    // never answered — a non-zero exit, a timeout, a killed call. The drill was taught to call that
+    // INCONCLUSIVE rather than a red; the suite was not, so a rate limit that killed the last two calls of a
+    // run reported "the configuration stopped carrying a lesson" over two cases that never executed. A fix
+    // applied to one of two siblings is the shape `pnpm guard-siblings` exists for one layer up, and this is
+    // it inside the eval runner.
+    //
+    // It still fails the run — a suite that could not ask two of its questions has not passed — but it fails
+    // as what it is, and the stamp is refused for the honest reason.
+    if (out.ok === false) {
+      inconclusive++;
+      console.log(`? ${c.id.padEnd(32)} ${out.seconds}s — the agent did not answer`);
+      for (const m of out.misses) console.log(`    ${m}`);
+      continue;
+    }
     failed++;
     console.log(`✖ ${c.id.padEnd(32)} ${out.seconds}s`);
     for (const m of out.misses) console.log(`    ${m}`);
@@ -602,7 +619,10 @@ try {
 } finally {
   teardown();
 }
-console.log(`\n${selected.length - failed}/${selected.length} passed · $${spend.toFixed(4)}`);
+console.log(
+  `\n${selected.length - failed - inconclusive}/${selected.length} passed · $${spend.toFixed(4)}` +
+    `${inconclusive > 0 ? ` · ${inconclusive} INCONCLUSIVE (the agent never answered)` : ""}`,
+);
 
 // ⚠️ AFTER the history, never before. A failing run used to exit here, so `evals/history.jsonl` only ever
 // received SUCCESSES — and `eval-pass-rate`, the band whose entire job is to notice the suite getting worse,
@@ -624,7 +644,11 @@ appendFileSync(
     // under the suite is visible in the ledger rather than assumed away by the word "pinned".
     models: [...new Set(outcomes.flatMap((o) => o.models))].sort(),
     partial: Boolean(opts.only),
-    passed: selected.length - failed,
+    passed: selected.length - failed - inconclusive,
+    // ⚠️ A RUN WITH AN UNANSWERED CASE MAY NOT FEED THE BAND. `eval-pass-rate` divides passed by `of`, so two
+    // killed calls would read as a 13% quality drop and the watcher would file an intent about a rate limit.
+    // The band reader skips any line carrying this, the way it already skips a drill line.
+    inconclusive,
     of: selected.length,
     // How much of that pass was EXECUTED. A band over a run of twenty reused results is a band over nothing.
     executed: outcomes.filter((o) => !o.reused).length,

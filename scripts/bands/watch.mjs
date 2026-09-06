@@ -145,8 +145,12 @@ const SERIES = {
     const file = opts.sourceDir ? path.join(gitDir, "evals-history.jsonl") : path.join(root, "evals", "history.jsonl");
     const rows = readJsonl(file);
     if (rows === null) return null;
-    // A drill line records a NEUTRALIZED run and has no pass rate; a partial run has one over one case.
-    return rows.filter((r) => r.drill === undefined && r.partial !== true && r.of > 0).map((r) => r.passed / r.of);
+    // A drill line records a NEUTRALIZED run and has no pass rate; a partial run has one over one case; and a
+    // run with an unanswered case measured the agent's AVAILABILITY, not the configuration — two calls killed
+    // by a rate limit would read here as a 13% quality drop and file an intent about the wrong thing.
+    return rows
+      .filter((r) => r.drill === undefined && r.partial !== true && !(r.inconclusive > 0) && r.of > 0)
+      .map((r) => r.passed / r.of);
   },
   "gate-log": () => {
     const rows = readJsonl(path.join(gitDir, "everdict-gate-log.jsonl"));
