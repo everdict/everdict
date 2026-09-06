@@ -84,6 +84,36 @@ verdict:    the mechanism PASSES (it distinguished red / green / inconclusive
 follow-up:  intent/2026-09-06-four-cases-that-do-not-measure/
 ```
 
+The four were retired, and the drill-all was then run to completion — no rate limit, every case executed.
+This is the certificate that matters, because it is the first measurement of the suite as a whole:
+
+```
+drill:      removal (eval suite, complete --drill-all)
+date:       2026-09-06
+ran by:     Claude (audit session)
+scope:      all 15 cases, 0 inconclusive — every case actually executed
+observed:   3 RED   biome-write-is-not-evidence, provenance-at-the-source,
+                    skipped-scenario-is-not-passing
+            12 GREEN completion-is-verified-zero, compute-handle-in-a-finally,
+                    docs-first, dont-dodge-the-push-gate, empty-corpus-is-not-a-pass,
+                    english-only-source, mutation-leak-staging,
+                    read-failure-is-a-third-value, route-nobody-opens,
+                    settlement-owns-immutable-bytes, sibling-doors-guard-alike,
+                    untrusted-ingress-authorship
+meaning:    80% of the suite certifies nothing. The earlier finding (the codebase
+            answers it) was scoped to four cases and is not that narrow. Every
+            "the configuration still carries its lessons" claim this harness has
+            made rests on a suite that, measured, mostly does not test that.
+            The 12 do NOT share one cause — the codebase answering it, a lesson
+            restated in other words (the exclusivity check matches exact strings
+            only), and a model good enough without the lesson are all consistent
+            with a green drill and want different repairs.
+verdict:    the MECHANISM is sound and now proven at full scale; the SUITE is not.
+            No bulk action taken: the last round narrowed four assertions on an
+            assumed cause and moved backwards.
+follow-up:  intent/2026-09-06-the-suite-measures-almost-nothing/
+```
+
 ```
 drill:      reconstruction
 date:       2026-09-06
