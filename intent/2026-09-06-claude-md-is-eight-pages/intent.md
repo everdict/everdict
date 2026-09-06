@@ -1,6 +1,11 @@
 # Intent: CLAUDE.md is eight pages, and the playbook's limit is one
 
-Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: draft
+Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: accepted
+
+Design: none — the design question this change would ask ("which layer does each sentence belong in?") is
+already answered by skill `documenting`, and the move is bounded by a fact a design pass cannot improve on:
+the eval suite names the exact sentences that must stay. A spec here would restate `documenting` and the
+case list.
 
 ## Problem
 
