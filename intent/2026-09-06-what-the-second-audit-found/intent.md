@@ -1,6 +1,8 @@
 # Intent: what the second audit found — a side door in the gate, a watcher that only rehearses, and three positions nobody wrote down
 
-Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: accepted
+Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: shipped
+
+Shipped: a57c13da
 
 ## Problem
 
@@ -78,3 +80,19 @@ certificates page, `intent/` templates and README, `lessons/`.
 - Does the fix proof need to rebuild a sibling package's `dist` before running a cross-package test? Answered
   in the plan: yes when the reverted source and the test live in different packages, because tests import
   siblings through `dist`.
+
+## Shipped, with one deviation
+
+Shipped in `a57c13da`. Every mechanism the spec named is built and seen RED-first, with one deliberate
+deviation the spec had settled the other way:
+
+**The eval stamp is NOT coupled to the drill state (spec requirement 10–13's stamp half).** The spec had the
+full suite refuse the push stamp while any case lacked a red drill. Landing that needs one clean `--drill-all`
+to ship alongside it, and two facts made that impossible in the shipping session: a rate limit turned the
+drill-all into false reds (fixed — an inconclusive drill records nothing and fails the run), and the clean
+run then surfaced several cases that stay green on their own (their assertions are generically answerable),
+which must be re-pointed or retired first. Shipping the stamp gate before those fixes is exactly what
+`code-review` forbids. So the drill LEDGER, `--drill-all`, `--drill-status`, the inconclusive split and the
+exclusivity refusal shipped; the stamp coupling waits on a green drill-all. That is the one open thread, and
+it is the next change, not this one.
+
