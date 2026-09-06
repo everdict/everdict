@@ -56,7 +56,9 @@ gitleaks) and stamps `.git/everdict-ci-ok` on a clean green tree; a PreToolUse h
 pushes. `.github/workflows/ci.yml` is the SSOT; see rule `.claude/rules/ci.md` + skill `ci`. **`ci:local` does NOT
 cover `trust-fast`** — a required check needing a real Postgres + object store, where a scenario that SKIPS is
 a FAILED certification, and skipping is the local default without `EVERDICT_TRUST_DATABASE_URL`. Never push
-red; after pushing, confirm the run went green (`gh run watch … --exit-status`).
+red. **Remote CI is OFF** (every workflow `disabled_manually` since 2026-08-21 — declared-limits C3): the local
+gate is the whole pipeline, and `gh run watch … --exit-status` after a push applies only once the workflows
+are enabled again. The hook guards every checkout that shares this `.git`, linked worktrees included.
 
 ## The harness's own directories
 - `intent/`   — where a change starts: `intent.md` → `spec.md` → `plan.md`, one directory per change. `pnpm intent-chain`.
@@ -69,7 +71,8 @@ See rule `.claude/rules/ci.md` for what each refuses and why; `docs/architecture
 
 ## The change chain — `intent/` before code
 A change whose *why* someone else would have to reconstruct starts as `intent/<YYYY-MM-DD>-<slug>/intent.md`,
-gains a `plan.md` **in a later commit**, and closes with `Status: shipped` + `Shipped: <sha>`. `pnpm intent-chain`
+gains a `plan.md` **in a later commit**, and closes with `Status: shipped` + `Shipped: <sha>`. An accepted intent
+has a `spec.md` (`pnpm design`) or one line declining it — `Design: none — <why>` — and the third state is refused. `pnpm intent-chain`
 asks git for that ordering, because a plan written after the diff reads exactly like one written before it —
 the files cannot tell them apart and the commit graph can. See `intent/README.md`. A one-line fix needs none;
 the test is whether the reason survives in the commit message alone.
@@ -181,4 +184,6 @@ question was asked too late.
 
 ## Commits
 Conventional Commits, scoped: `feat(drivers): ...`, `fix(runner): ...`. Body explains the *why*.
-Every `fix:` ships a regression test that fails on the pre-fix code.
+Every `fix:` ships a regression test that fails on the pre-fix code — `pnpm fix-proof` reads the first half (a
+fix under `packages/**`/`apps/**` carries a `*.test.ts`, or declares `Regression-test: none — <why>` in its body)
+and `pnpm ci:commits` proves the second (the test is RED with the source reverted to the parent).

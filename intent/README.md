@@ -14,10 +14,19 @@ intent/<YYYY-MM-DD>-<slug>/
 
 `spec.md` is written by `pnpm design --next`, which takes the oldest **accepted** intent without one, applies
 this repository's rules and skills as constraints, and leaves the result in the working tree **uncommitted** —
-a machine proposes, and the spec meets a person before a plan is written against it. It is optional: not every
-change needs a design pass, and `intent-chain` reports a specless accepted intent as a note rather than a
-failure. When it exists it carries the same `From: intent.md @ <sha>` line a plan does, and the same descent
-rule.
+a machine proposes, and the spec meets a person before a plan is written against it. Not every change needs
+a design pass, so an accepted intent may instead carry one line declining it:
+
+```
+Design: none — <why this change needs no design pass>
+```
+
+What `intent-chain` refuses is the THIRD state — accepted, no spec, no declaration — because it reads
+exactly like "nobody has picked this up yet", and until 2026-09-06 that was reported as a note and the Design
+stage had run once in eighteen changes. `pnpm design --next` skips a declined intent. When a spec exists it
+carries the same `From: intent.md @ <sha>` line a plan does, the same descent rule, a `Policies: <sha>`
+line naming the `.claude/` tree it was written under, and a `Concerns: open|resolved|carried` line a plan
+may not be written against while it says `open`.
 
 ## Why this exists
 

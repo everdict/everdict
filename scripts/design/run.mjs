@@ -17,6 +17,7 @@ import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { designDeclined } from "../intent-declarations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const home = path.join(root, "intent");
@@ -51,11 +52,16 @@ const changes = readdirSync(home)
   .filter((n) => statSync(path.join(home, n)).isDirectory())
   .sort();
 
-/** Accepted, and no spec yet. `shipped` is past this stage; `draft` has not been taken up; `rejected` is over. */
+/**
+ * Accepted, and no spec yet. `shipped` is past this stage; `draft` has not been taken up; `rejected` is over;
+ * `Design: none — <why>` declined the pass in writing, which `pnpm intent-chain` accepts in place of a spec
+ * and this rotation therefore skips — a declined intent picked up by `--next` would overwrite a decision.
+ */
 const waiting = changes.filter((n) => {
   const intentFile = path.join(home, n, "intent.md");
   if (!existsSync(intentFile) || existsSync(path.join(home, n, "spec.md"))) return false;
-  return statusOf(readFileSync(intentFile, "utf8")) === "accepted";
+  const body = readFileSync(intentFile, "utf8");
+  return statusOf(body) === "accepted" && designDeclined(body) === undefined;
 });
 
 if (opts.list) {

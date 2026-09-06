@@ -107,6 +107,7 @@ run("pnpm lesson-evals", "pnpm", ["lesson-evals"]);
 run("pnpm python", "pnpm", ["python"]);
 run("pnpm swallowed-reads", "pnpm", ["swallowed-reads"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
+run("pnpm fix-proof", "pnpm", ["fix-proof"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);

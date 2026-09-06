@@ -35,6 +35,18 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/telemetry/ensure-sink.mjs\"",
+            "timeout": 10,
+            "statusMessage": "telemetry sink"
+          }
+        ]
+      }
     ]
   },
   "env": {

@@ -1,7 +1,7 @@
 {
   "id": "backends-never-run-the-harness",
   "why": "CLAUDE.md critical rules — Backends never run the harness; they dispatch the job-runner image and parse its `__EVERDICT_RESULT__` stdout sentinel.",
-  "subject": ["CLAUDE.md"],
+  "subject": ["CLAUDE.md", ".claude/skills/foundation/SKILL.md"],
   "neutralize": ["Backends never run the harness"],
   "allowedTools": "Read,Grep,Glob",
   "timeout": 180,

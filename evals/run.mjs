@@ -22,7 +22,8 @@
 //
 // Usage:
 //   node evals/run.mjs [--only <id>] [--model <alias>] [--timeout <sec>]
-//   node evals/run.mjs --drill <id>
+//   node evals/run.mjs --drill <id>        # one case's removal drill, recorded in the history
+//   node evals/run.mjs --drill-all         # every case's drill; refuses if any stays green
 //   node evals/run.mjs --list
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -105,7 +106,16 @@ const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 // ── options, refused when unrecognised ───────────────────────────────────────────────────────────
 // A plausible misspelling accepted in silence turns one case into the whole suite, or a drill into a no-op.
 // `scripts/trust/protocol-mutations.mjs` learned that expensively; there is no reason to learn it twice.
-const KNOWN = new Set(["--only", "--drill", "--model", "--timeout", "--list", "--fresh"]);
+const KNOWN = new Set([
+  "--only",
+  "--drill",
+  "--drill-all",
+  "--drill-status",
+  "--model",
+  "--timeout",
+  "--list",
+  "--fresh",
+]);
 const argv = process.argv.slice(2);
 const opts = { timeout: 120, model: "sonnet" };
 for (let i = 0; i < argv.length; i++) {
@@ -114,8 +124,8 @@ for (let i = 0; i < argv.length; i++) {
     console.error(`✖ agent-evals: unknown option "${flag}". Known: ${[...KNOWN].join(" ")}`);
     process.exit(1);
   }
-  if (flag === "--list" || flag === "--fresh") {
-    opts[flag.slice(2)] = true;
+  if (flag === "--list" || flag === "--fresh" || flag === "--drill-all" || flag === "--drill-status") {
+    opts[flag.slice(2).replace(/-(\w)/g, (_, ch) => ch.toUpperCase())] = true;
     continue;
   }
   const value = argv[++i];
@@ -170,6 +180,48 @@ for (const c of cases) {
       process.exit(1);
     }
   }
+}
+
+// ── the lesson must not live anywhere the case does not name ─────────────────────────────────────
+//
+// The check above asks whether a neutralization is PRESENT in some subject. It never asked whether the same
+// lesson is ABSENT everywhere else — and on 2026-09-06 a removal drill stayed green because the sentence a
+// case removes from CLAUDE.md and rule `ci` had been copied, the day before, into a `lessons/` entry and
+// into this suite's own README, neither of which the case named. The session under test can Grep the whole
+// tree; it found the copy and answered from it. The drill measured nothing, and nothing said so.
+//
+// The fingerprint is the case's whole `neutralize` set: a tracked markdown file outside `subject` that carries
+// EVERY needle carries the lesson, and either becomes a subject (so the drill removes it there too) or is
+// reworded. One needle alone is not a leak — "unsafe" appears in a rule about casts — and the drill itself
+// still catches a partial copy. Declared by the case, not inferred from prose.
+const trackedMarkdown = spawnSync("git", ["ls-files", "--", "*.md"], { cwd: root, encoding: "utf8" })
+  .stdout.split("\n")
+  .filter(Boolean)
+  .filter((file) => !file.startsWith("evals/cases/"));
+const markdownLines = new Map();
+const linesOf = (file) => {
+  if (!markdownLines.has(file)) {
+    try {
+      markdownLines.set(file, readFileSync(path.join(root, file), "utf8").split("\n"));
+    } catch {
+      markdownLines.set(file, []);
+    }
+  }
+  return markdownLines.get(file);
+};
+const leaking = [];
+for (const c of cases) {
+  const named = new Set(c.subject);
+  const leaks = trackedMarkdown.filter(
+    (file) => !named.has(file) && c.neutralize.every((needle) => linesOf(file).some((line) => line.includes(needle))),
+  );
+  if (leaks.length > 0) leaking.push(`${c.file} → ${leaks.join(", ")}`);
+}
+if (leaking.length > 0) {
+  console.error(
+    `✖ agent-evals: ${leaking.length} case(s) measure a lesson that also lives in a file \`subject\` does not name:\n${leaking.map((l) => `    ${l}`).join("\n")}\n  A session can read it there after the drill removes it from the subjects, so the drill would certify nothing.\n  Add the file to \`subject\` (the drill then removes the lesson there too), or reword it so the case's fingerprint is unique.`,
+  );
+  process.exit(1);
 }
 
 if (opts.list) {
@@ -235,7 +287,17 @@ const ask = (c) => {
     };
   try {
     const doc = JSON.parse(res.stdout);
-    return { ok: true, text: String(doc.result ?? ""), cost: doc.total_cost_usd ?? 0, turns: doc.num_turns };
+    return {
+      ok: true,
+      text: String(doc.result ?? ""),
+      cost: doc.total_cost_usd ?? 0,
+      turns: doc.num_turns,
+      // `--model sonnet` is an ALIAS, and the README used to call it a pin. An alias moves when the provider
+      // moves it, with no commit here to trigger on — so the model that actually answered is recorded from
+      // the envelope, per case and per run. Provenance at the source (rule `protocol` L3): the run says what
+      // ran, instead of the configuration claiming what it asked for.
+      models: Object.keys(doc.modelUsage ?? {}).sort(),
+    };
   } catch {
     return {
       ok: false,
@@ -290,7 +352,16 @@ const runCase = (c, { cache = true } = {}) => {
   // mechanism that makes the suite evidence rather than twenty answers.
   if (cache && !opts.fresh) {
     const prior = cachedPass(c);
-    if (prior !== undefined) return { pass: true, misses: [], seconds: prior.seconds, cost: 0, reused: true };
+    if (prior !== undefined)
+      return {
+        pass: true,
+        ok: true,
+        misses: [],
+        seconds: prior.seconds,
+        cost: 0,
+        reused: true,
+        models: prior.models ?? [],
+      };
   }
   process.stdout.write(`· ${c.id} …\r`);
   const before = porcelain();
@@ -301,8 +372,11 @@ const runCase = (c, { cache = true } = {}) => {
   const wrote = [...porcelain()].filter((p) => !before.has(p));
   if (wrote.length > 0) {
     record(c, { pass: false, ...answer, seconds }, { cache });
+    // `ok: false` — the session mutated the tree, so its answer is not a clean signal about the configuration.
+    // A drill treats this as inconclusive rather than as a red, for the same reason it treats an errored call.
     return {
       pass: false,
+      ok: false,
       misses: [
         `the session MUTATED the tree under test: ${wrote.join(", ")} — an eval that writes contaminates every case after it`,
       ],
@@ -312,17 +386,84 @@ const runCase = (c, { cache = true } = {}) => {
   }
   if (!answer.ok) {
     record(c, { pass: false, ...answer, seconds }, { cache });
-    return { pass: false, misses: [answer.note], seconds, cost: 0 };
+    // `ok: false` — the agent did not produce an answer (a non-zero exit, a timeout, a non-envelope reply).
+    // The suite counts this as a case failure, but a DRILL may not read it as a red: "the agent errored" and
+    // "the agent answered wrong without its lesson" are different facts, and a rate-limited run that recorded
+    // the first as the second would manufacture a drill certificate the audit exists to refuse.
+    return { pass: false, ok: false, misses: [answer.note], seconds, cost: 0 };
   }
   const misses = judge(c, answer.text);
   record(c, { pass: misses.length === 0, misses, ...answer, seconds }, { cache });
-  return { pass: misses.length === 0, misses, seconds, cost: answer.cost ?? 0 };
+  return { pass: misses.length === 0, ok: true, misses, seconds, cost: answer.cost ?? 0, models: answer.models ?? [] };
 };
 
 // ── removal drill ────────────────────────────────────────────────────────────────────────────────
-if (opts.drill) {
-  const c = cases.find((x) => x.id === opts.drill);
-  if (!c) {
+//
+// ⚠️ A DRILL RESULT IS A LEDGER LINE. Until 2026-09-06 a drill was run once, when its case was written, and
+// its verdict lived in a terminal that closed. Nothing recorded that it had ever passed, nothing re-ran it,
+// and one went stale the day after its case landed — the lesson was copied into a second file and the case
+// kept passing without it. So every drill appends `{drill: <id>, red: true|false}` to `evals/history.jsonl`
+// (the band reader skips those lines), and `--drill-all` re-runs every case's drill and refuses if any stays
+// green. The 90-day rule the audit applies to a certificate applies here: a drill nobody has re-run is a
+// claim, and the ledger says when it was last a fact.
+// A drill certifies the SUBJECTS AS THEY WERE. The line carries a digest of their bytes, so `--drill-status`
+// can say whether a red drill still describes the files a session would read today, without replaying it.
+const subjectsDigest = (c) => {
+  const h = createHash("sha256");
+  for (const file of c.subject) {
+    h.update(`${file}\u0000`);
+    h.update(readFileSync(path.join(root, file)));
+    h.update("\u0000");
+  }
+  return h.digest("hex").slice(0, 16);
+};
+const recordDrill = (c, red, seconds) => {
+  appendFileSync(
+    path.join(root, "evals", "history.jsonl"),
+    `${JSON.stringify({
+      at: new Date().toISOString(),
+      model: opts.model,
+      drill: c.id,
+      red,
+      seconds,
+      subjects: subjectsDigest(c),
+    })}\n`,
+  );
+};
+/** Per case: the latest drill line, and whether its subjects are still the ones it certified. */
+const drillStatus = () => {
+  let rows = [];
+  try {
+    rows = readFileSync(path.join(root, "evals", "history.jsonl"), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => JSON.parse(l))
+      .filter((r) => typeof r.drill === "string");
+  } catch {
+    rows = [];
+  }
+  return cases.map((c) => {
+    const last = rows.filter((r) => r.drill === c.id).at(-1);
+    if (last === undefined) return { id: c.id, state: "never" };
+    if (last.red !== true) return { id: c.id, state: "green", at: last.at };
+    return { id: c.id, state: last.subjects === subjectsDigest(c) ? "red" : "drifted", at: last.at };
+  });
+};
+if (opts.drillStatus) {
+  const WORD = {
+    never: "NEVER drilled — the case has never been shown to measure its lesson",
+    green: "GREEN under its drill — the case passes without its lesson; it certifies nothing",
+    drifted: "red, but a subject changed since — re-drill to re-certify",
+    red: "red — certified",
+  };
+  for (const row of drillStatus()) {
+    console.log(`${row.id.padEnd(32)} ${WORD[row.state]}${row.at ? ` (${row.at.slice(0, 10)})` : ""}`);
+  }
+  process.exit(0);
+}
+if (opts.drill || opts.drillAll) {
+  const targets = opts.drillAll ? cases : cases.filter((x) => x.id === opts.drill);
+  if (targets.length === 0) {
     console.error(`✖ agent-evals: no case "${opts.drill}". \`--list\` shows them.`);
     process.exit(1);
   }
@@ -330,7 +471,7 @@ if (opts.drill) {
   // from inside and leaked a throwaway worktree on every run — the same shape as a `finally` a kill never
   // reaches, which this repository already records for `protocol-mutations`. The drill computes a code and
   // the process exits AFTER teardown, never during.
-  const drill = () => {
+  const drill = (c) => {
     console.log(
       `▶ removal drill · ${c.id}\n  removing ${c.neutralize.length} lesson line(s) from ${c.subject.join(", ")}\n`,
     );
@@ -357,6 +498,18 @@ if (opts.drill) {
       return 1;
     }
     const out = runCase(c, { cache: false });
+    // ⚠️ AN ERRORED AGENT CALL IS NOT A RED. `runCase` returns `ok: false` when the agent did not answer — a
+    // non-zero exit, a timeout, a mutated tree. A rate-limited `--drill-all` produced exactly this: ten calls
+    // in a row exited 1 in two seconds each, and the drill was reading `!pass` as red and recording a
+    // certificate for a run that never happened. Inconclusive is a third value: it records nothing and returns
+    // code 2, and `--drill-all` fails on it rather than calling a rate limit a green.
+    if (!out.ok) {
+      console.error(
+        `\n? DRILL INCONCLUSIVE — "${c.id}" — the agent did not answer (${out.misses.join("; ") || "no reason"}). Nothing recorded; re-run when the agent is reachable.`,
+      );
+      return 2;
+    }
+    recordDrill(c, !out.pass, Number(out.seconds));
     if (out.pass) {
       console.error(
         `\n✖ DRILL FAILED — "${c.id}" still passes with its lesson removed (${out.seconds}s).\n  The case is not measuring what it claims to. Either the lesson is carried somewhere \`subject\` does not name,\n  or the assertions are satisfied by something other than the configuration.`,
@@ -367,14 +520,37 @@ if (opts.drill) {
     for (const m of out.misses) console.log(`  · ${m}`);
     return 0;
   };
-  setup();
-  let code = 1;
-  try {
-    code = drill();
-  } finally {
-    teardown();
+  // One throwaway worktree PER drill: a neutralization is destructive, and the next case must start from
+  // the configuration intact.
+  const stale = [];
+  const inconclusive = [];
+  for (const c of targets) {
+    setup();
+    let code = 1;
+    try {
+      code = drill(c);
+    } finally {
+      teardown();
+    }
+    if (code === 1) stale.push(c.id);
+    else if (code === 2) inconclusive.push(c.id);
   }
-  process.exit(code);
+  if (opts.drillAll) {
+    const red = targets.length - stale.length - inconclusive.length;
+    console.log(
+      `\n${red}/${targets.length} drills went red` +
+        `${stale.length > 0 ? ` · STALE (green without their lesson): ${stale.join(", ")}` : ""}` +
+        `${inconclusive.length > 0 ? ` · INCONCLUSIVE (agent unreachable): ${inconclusive.join(", ")}` : ""}`,
+    );
+    if (inconclusive.length > 0) {
+      console.error(
+        `\n✖ ${inconclusive.length} drill(s) could not run — the agent did not answer, most likely a rate limit. A drill-all with an inconclusive drill is not a pass; re-run when the agent is reachable.`,
+      );
+    }
+  }
+  // Stale (a case that does not measure its lesson) and inconclusive (the agent never answered) are both
+  // failures, and for different reasons — the first is a broken case, the second a run that did not happen.
+  process.exit(stale.length === 0 && inconclusive.length === 0 ? 0 : 1);
 }
 
 // ── the suite ────────────────────────────────────────────────────────────────────────────────────
@@ -397,7 +573,13 @@ try {
     // — so "the configuration was re-verified today" and "verified once and reused nineteen times" were the
     // same record. The suite-wide `cost` hinted at it and a hint is not a field. It matters more now that
     // the cache key is correct enough to actually hit.
-    outcomes.push({ id: c.id, pass: out.pass, seconds: Number(out.seconds), reused: Boolean(out.reused) });
+    outcomes.push({
+      id: c.id,
+      pass: out.pass,
+      seconds: Number(out.seconds),
+      reused: Boolean(out.reused),
+      models: out.models ?? [],
+    });
     if (out.pass) {
       console.log(`✓ ${c.id.padEnd(32)} ${out.seconds}s${out.reused ? " — reused" : ""}`);
       continue;
@@ -429,6 +611,9 @@ appendFileSync(
   `${JSON.stringify({
     at: new Date().toISOString(),
     model: opts.model,
+    // The alias asked for is above; the model IDs that actually answered are here, so an alias that moved
+    // under the suite is visible in the ledger rather than assumed away by the word "pinned".
+    models: [...new Set(outcomes.flatMap((o) => o.models))].sort(),
     partial: Boolean(opts.only),
     passed: selected.length - failed,
     of: selected.length,
@@ -449,6 +634,25 @@ appendFileSync(
 // And a run over DIRTY configuration says nothing about HEAD: the suite reads its cases from the working tree
 // and overlays the working tree's CLAUDE.md/.claude into the worktree, exactly so an edit can be tested before
 // it is committed, which is the same reason the stamp cannot then attest the commit.
+// ⚠️ THE DRILL STATE IS REPORTED, NOT COUPLED TO THE STAMP — yet. A case that has never gone red without its
+// lesson certifies nothing, and the honest gate would refuse the stamp until every case holds a red drill.
+// It does not, deliberately: that gate needs one clean `--drill-all` to land with it (this repository forbids
+// a gate that ships before its fix, skill `code-review`), and a clean drill-all is twenty real agent calls
+// that a rate limit can turn into false reds — which is exactly the bug the `ok`/inconclusive split above was
+// written to stop. So the coupling waits on a green drill-all, tracked in
+// `intent/2026-09-06-what-the-second-audit-found/`. Until then `--drill-status` reports never / green /
+// drifted / red, and the person reads it. What DID land is cheaper and needs no agent: the exclusivity refusal
+// at load, which caught the actual audit bug.
+const notCertified = drillStatus().filter((r) => r.state !== "red");
+if (notCertified.length > 0) {
+  console.log(
+    `\n· drill status: ${notCertified.length} case(s) are not certified red — ${notCertified
+      .map((r) => `${r.id} (${r.state})`)
+      .join(
+        ", ",
+      )}. \`--drill-status\` explains each; \`--drill-all\` re-certifies. Advisory, not gating (see the code comment).`,
+  );
+}
 if (!opts.only && failed === 0) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
   const dirty = spawnSync("git", ["status", "--porcelain", "--", ...CLEAN_PATHSPEC], { cwd: root, encoding: "utf8" })

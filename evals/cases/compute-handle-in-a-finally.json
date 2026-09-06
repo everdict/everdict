@@ -1,7 +1,7 @@
 {
   "id": "compute-handle-in-a-finally",
   "why": "CLAUDE.md critical rules — `ComputeHandle` is always released in a `finally`.",
-  "subject": ["CLAUDE.md"],
+  "subject": ["CLAUDE.md", "docs/guide/concepts/run.md"],
   "neutralize": ["`ComputeHandle` is always released in a `finally`"],
   "allowedTools": "Read,Grep,Glob",
   "timeout": 180,

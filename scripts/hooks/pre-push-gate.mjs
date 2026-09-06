@@ -6,13 +6,23 @@
 //
 // This file GATHERS FACTS; `scripts/hooks/gate-decision.mjs` decides, so `pnpm guardrails` can drive the
 // decision over a truth table without an env var that would make the ledgers forgeable.
+//
+// `--probe` gathers the same facts from the same payload, runs the same decision, and prints them as JSON —
+// WITHOUT recording a ledger line and WITHOUT emitting a permission decision. It exists so `pnpm guardrails`
+// can drive this file against a REAL linked worktree and read what it would have done; the wired hook never
+// passes it, and guardrails refuses a settings file that does.
 import { spawnSync } from "node:child_process";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_PATHSPEC, PRODUCT_PATHS, RELEASE_TAG, decideGate } from "./gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const probe = process.argv.includes("--probe");
+const report = (facts) => {
+  if (probe) process.stdout.write(`${JSON.stringify(facts)}\n`);
+  process.exit(0);
+};
 
 let input;
 try {
@@ -21,7 +31,7 @@ try {
   process.exit(0); // malformed payload — never wedge the session on a broken hook
 }
 const command = input?.tool_input?.command;
-if (typeof command !== "string") process.exit(0);
+if (typeof command !== "string") report({ inScope: false, why: "no command in the payload" });
 
 // A push = any shell segment invoking `git … push`. Segments split on && || ; | and newlines so a compound
 // command — a `cd` and then a push, joined on one line — is still caught.
@@ -36,23 +46,74 @@ if (typeof command !== "string") process.exit(0);
 const segments = command.split(/&&|\|\||[;|\n]/);
 const gitPush = /^(?:command\s+)?git(?:\s+(?:-C\s+(\S+)|--[\w-]+(?:=\S+)?|-\w+))*\s+push\b/;
 const pushSegment = segments.map((s) => s.trim()).find((s) => gitPush.test(s));
-if (!pushSegment) process.exit(0);
+if (!pushSegment) report({ inScope: false, why: "not a push" });
 
-// Only guard THIS repo: a push driven from another cwd (or `git -C <elsewhere>`) is out of scope.
+// ── which checkout is pushing, and is it ours ────────────────────────────────────────────────────
+//
+// ⚠️ THE SCOPE USED TO BE THE TOPLEVEL, AND A LINKED WORKTREE HAS ITS OWN. `git rev-parse --show-toplevel`
+// compared to the repository root let a push from `git worktree add` — which the eval runner, the reviewer,
+// the design pass and the commit gate all create, and which a session can `git -C` into — exit this hook
+// silently, with no ledger line. Two synthetic payloads confirmed it during the 2026-09-06 audit while a
+// linked worktree checked out at `main` was live. What every checkout of this repository SHARES is the
+// common git directory: the ledgers live in it, the refs live in it, and a push from any of them leaves
+// this machine through it. So the scope is the common dir, and every fact below is read from the checkout
+// that is actually pushing — its HEAD, its diff, its tags — not from the root's.
+//
+// The checkout that pushes is the session's cwd, moved by every plain `cd <path>` segment BEFORE the push (a
+// `cd` into a worktree and then a push, on one line, is the ordinary way a session gets there), then by a
+// `git -C <dir>` on the push itself. Only a bare `cd <literal>` is followed; anything cleverer (`cd "$X"`,
+// `pushd`, a subshell) leaves the cwd where it was, which over-gates the ROOT rather than under-gating the
+// worktree — the safe direction for a gate whose failure mode is a false allow.
+let cwd = input?.cwd ?? root;
+for (const raw of segments.map((s) => s.trim())) {
+  if (raw === pushSegment) break;
+  const cd = /^cd\s+([^\s"'$`;&|]+)$/.exec(raw);
+  if (cd) cwd = path.resolve(cwd, cd[1]);
+}
 const cTarget = pushSegment.match(gitPush)?.[1];
-const effectiveCwd = cTarget ? path.resolve(input?.cwd ?? root, cTarget) : (input?.cwd ?? root);
-const toplevel = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd: effectiveCwd, encoding: "utf8" });
-if (toplevel.status !== 0 || toplevel.stdout.trim() !== root) process.exit(0);
+if (cTarget) cwd = path.resolve(cwd, cTarget);
+// The COMMON git directory as a REAL path: a root reached through a symlink and a worktree whose `.git` file
+// records the canonical path would otherwise name the same directory two ways, and a mismatch here is a
+// silent allow.
+const commonOf = (dir) => {
+  const res = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: dir, encoding: "utf8" });
+  if (res.status !== 0) return undefined;
+  try {
+    return realpathSync(path.resolve(dir, res.stdout.trim()));
+  } catch {
+    return undefined;
+  }
+};
+const ownCommonDir = commonOf(root);
+if (ownCommonDir === undefined) {
+  // The gate cannot read ITS OWN repository. That is not "another repository" and it is not a pass: cannot
+  // find out is an escalation (rule `protocol` L2), and a hook that shrugged here would let every push
+  // through on the day git itself is broken.
+  if (probe) report({ inScope: false, why: "own repository unreadable" });
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "push blocked: the push gate could not read its own repository (git rev-parse --git-common-dir failed at the root). Fix git before pushing. See .claude/rules/ci.md.",
+      },
+    }),
+  );
+  process.exit(0);
+}
+const commonDir = commonOf(cwd);
+if (commonDir === undefined || commonDir !== ownCommonDir) {
+  report({ inScope: false, why: "another repository", cwd, commonDir: commonDir ?? null });
+}
 
-const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+const git = (...args) => spawnSync("git", args, { cwd, encoding: "utf8" });
 const head = git("rev-parse", "HEAD").stdout.trim();
 
 /** null means the ledger could not be READ, which is a different answer from "it is empty". */
 const readLedger = (name) => {
   try {
-    return readFileSync(path.join(root, ".git", name), "utf8")
-      .split("\n")
-      .filter(Boolean);
+    return readFileSync(path.join(commonDir, name), "utf8").split("\n").filter(Boolean);
   } catch {
     return null;
   }
@@ -74,7 +135,7 @@ const ciLedger =
 const remote = git("remote").stdout.split("\n").filter(Boolean)[0];
 const base = `${remote}/main`;
 const haveBase =
-  remote !== undefined && spawnSync("git", ["rev-parse", "--verify", "--quiet", base], { cwd: root }).status === 0;
+  remote !== undefined && spawnSync("git", ["rev-parse", "--verify", "--quiet", base], { cwd }).status === 0;
 const pushed = haveBase ? git("rev-list", `${base}..HEAD`).stdout.split("\n").filter(Boolean) : [head];
 
 // Three dots: the diff from the MERGE BASE. Two dots asks "what does HEAD have that base does not", which on a
@@ -131,6 +192,21 @@ const decision = decideGate({
   productChanged,
   releaseTags,
 });
+
+if (probe) {
+  report({
+    inScope: true,
+    cwd,
+    commonDir,
+    head,
+    pushed: pushed.length,
+    configChanged,
+    productChanged,
+    releaseTags: releaseTags.map((t) => t.tag),
+    decision: { allow: decision.allow, arm: decision.arm },
+  });
+}
+
 // ── the gate records what it decided ─────────────────────────────────────────────────────────────
 //
 // `pnpm guardrails` proves this decision is CORRECT over constructed facts; nothing recorded what it actually
@@ -140,11 +216,11 @@ const decision = decideGate({
 //
 // Written AFTER the early exits on purpose: the hook is wired on the Bash matcher, so recording any earlier
 // would produce a shell transcript rather than an audit trail. Wrapped, because a hook that throws while
-// recording is worse than one that records nothing — the decision must survive a failed write. Local to
-// `.git/`, because it describes this checkout's operations rather than the project's history.
+// recording is worse than one that records nothing — the decision must survive a failed write. In the
+// COMMON git directory, because it describes this repository's operations from every checkout that shares it.
 try {
   appendFileSync(
-    path.join(root, ".git", "everdict-gate-log.jsonl"),
+    path.join(commonDir, "everdict-gate-log.jsonl"),
     `${JSON.stringify({
       at: new Date().toISOString(),
       verdict: decision.allow ? "allow" : "deny",
@@ -154,6 +230,7 @@ try {
       configChanged,
       productChanged,
       releaseTags: releaseTags.map((t) => t.tag),
+      cwd: cwd === root ? undefined : cwd,
       reason: decision.allow ? undefined : decision.reason,
     })}\n`,
   );

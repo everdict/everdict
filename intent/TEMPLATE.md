@@ -4,8 +4,12 @@ Author: <name> (<role>). Status: draft
 
 <!--
 Status: draft → accepted → shipped, or rejected.
-  accepted  a maintainer took it into design/build. This is the Plan-stage gate.
-  rejected  keep the file, and say why below — a turned-down idea is a record.
+  accepted  a maintainer took it into design/build. This is the Plan-stage gate. An accepted intent must
+            then EITHER get a spec.md (`pnpm design --change <dir>`) OR carry one line declining the pass:
+              Design: none — <why this change needs no design pass>
+            `pnpm intent-chain` refuses the third state — accepted, no spec, no declaration — because it is
+            indistinguishable from "nobody picked it up".
+  rejected  keep the file, and say why below — a turned-down idea is a record: `Rejected: <why>`.
   shipped   requires a `Shipped: <sha>` line naming the commit that landed it.
 No formal language is required. Say what you cannot do today and what better looks like.
 -->

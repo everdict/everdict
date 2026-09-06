@@ -35,6 +35,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [evals/README.md](https://github.com/everdict/everdict/blob/main/evals/README.md) — the regression suite over the configuration that steers the agent, its removal drill, and what five runs of calibration found
 - [architecture/harness-declared-limits.md](architecture/harness-declared-limits.md) — the five harness clauses this deployment cannot satisfy and the one it declines — why, what their absence does NOT mean, and what reopens each
 - [architecture/harness-observability.md](architecture/harness-observability.md) — what the harness can see about ITSELF: the three ledgers in `.git/`, the eval history, and the session facts only telemetry can answer
+- [architecture/harness-drill-certificates.md](architecture/harness-drill-certificates.md) — what was tried against the controls and what happened: the dated removal / reconstruction / containment certificates the audit reads, expiring at ninety days
 - [dev.md](dev.md) — local development: persistent Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
 
 ## Surfaces

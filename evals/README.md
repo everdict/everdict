@@ -22,8 +22,11 @@ Each case is one `claude -p` run with `cwd` at the repository root, which is the
 rules and the skills are discovered exactly as a real session discovers them. Transcripts land in
 `evals/.results/<id>.json` (gitignored) and are named in every failure line.
 
-**The model is pinned by default**, and that is a deliberate trade. Pinning makes the *configuration* the only
-variable, and it keeps a run affordable — the ambient default here is opus-1M, where a trivial call costs
+**The model is held to one alias by default** (`sonnet`), and that is a deliberate trade. Holding it makes
+the *configuration* the only variable a run changes on purpose — it is not a pin: an alias moves when the
+provider moves it, with no commit here to trigger on, so every result and every history line records the
+model IDs that actually answered (`models`, read from the envelope), and a moved alias is visible in the
+ledger rather than assumed away by the word "pinned". It keeps a run affordable — the ambient default here is opus-1M, where a trivial call costs
 $0.22, and a suite that costs that per case is a suite that gets switched off. `--model <alias>` asks the
 article's other question: when a new model is swapped in, does the agent still do the work?
 
@@ -68,6 +71,31 @@ returned text. `scripts/trust/protocol-mutations.mjs` is the same idea one layer
 protocols — and where that gate costs ninety minutes of real builds and real suites, this one costs a single
 agent call, which is why it can stay.
 
+**A drill result is a ledger line, and a drill has an expiry.** Every drill appends
+`{drill: <id>, red, seconds, subjects}` to `evals/history.jsonl` — `subjects` is a digest of the subject files
+it certified. `--drill-status` reports each case as never / green / drifted (red, but a subject changed since)
+/ red; `--drill-all` re-runs every drill and fails if any stays **green** (a case that does not measure its
+lesson) or comes back **inconclusive** (the agent never answered — a rate limit, not a red; the two are kept
+apart so a throttled run cannot manufacture a certificate). Until 2026-09-06 a drill was run once, when its
+case was written, and its verdict lived in a terminal that closed; one went stale the next day.
+
+The stamp is **not** yet coupled to the drill state, and that is deliberate. The honest gate refuses the stamp
+until every case holds a red drill, but that gate needs one clean `--drill-all` to land alongside it — and
+this repository forbids a gate that ships before its fix. A clean drill-all is twenty real agent calls a rate
+limit can throttle, and it also surfaces the handful of cases that stay green on their own (their assertions
+are generically answerable). Until those are re-pointed or retired and a green drill-all exists, the drill
+state is advisory: `--drill-status` reports it and the person reads it. Tracked in
+`intent/2026-09-06-what-the-second-audit-found/`.
+
+**And the lesson may not live anywhere the case does not name.** At load, every case's `neutralize` set is
+looked for in every tracked markdown file outside its `subject`; a file that carries all of them is refused
+with the repair named — add it to `subject` (the drill then removes the lesson there too) or reword it. The
+session under test can Grep the whole tree, so a copy of the lesson in a `lessons/` entry or in this README
+answers the prompt after the drill has removed it from the subjects, and the drill certifies nothing. The
+first run of that check refused eleven of twenty cases. The fingerprint is the whole set, so one shared word
+is not a leak. There is no allowlist: a file a session can read after the removal makes the drill vacuous
+whether or not somebody signed for it.
+
 A killed drill leaves nothing behind. The neutralization happens inside the throwaway worktree, so the
 repository is never edited and there is nothing to restore — which is why the `.git/everdict-eval-drill-stale`
 marker this section used to describe was removed along with the in-tree neutralization it protected. The
@@ -109,13 +137,14 @@ the push gate's configuration set (`CONFIG_PATHSPEC`, one definition read by bot
 and treating it as configuration closes a loop with no exit — appending dirties `evals/`, a dirty `evals/`
 refuses the stamp, and earning the stamp appends again.
 
-## Owed: the model-swap question
+## Owed: the model-swap question — half paid
 
 *"When a new model is swapped in, does the agent still do the work to the same standard?"* — the article's
 other question, and the reason a scheduled run exists at all, since a model change moves the answer with no
 commit to trigger on. **There is no unattended answer to it here**, because that needs CI credentials and this
-repository chose not to hold them. `pnpm agent-evals --model <alias>` asks it by hand. Removing this section
-is the definition of done for that debt.
+repository chose not to hold them. `pnpm agent-evals --model <alias>` asks it by hand. Half of the debt is
+paid without a schedule: the model that actually answered is in every history line, so the day the alias
+moves under the suite is a query, not a guess. Removing this section is the definition of done for the rest.
 
 ## Growing the suite
 

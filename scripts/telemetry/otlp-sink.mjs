@@ -11,13 +11,22 @@
 // Accepts `http/json` only. That is not a limitation worth removing: protobuf would need a dependency and a
 // schema, and the point of this file is that collecting starts today rather than after someone stands up a
 // collector.
+import { spawnSync } from "node:child_process";
 import { appendFileSync, mkdirSync } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const OUT = path.join(root, ".git", "everdict-telemetry.jsonl");
+// The COMMON git directory, not `<root>/.git`: in a linked worktree `.git` is a file pointing elsewhere, and
+// the SessionStart hook that starts this sink fires inside the throwaway worktrees the eval runner, the
+// reviewer and the design pass create. The ledger belongs with the other ledgers, in the one directory every
+// checkout of this repository shares.
+const commonDir = (() => {
+  const res = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" });
+  return res.status === 0 ? path.resolve(root, res.stdout.trim()) : path.join(root, ".git");
+})();
+const OUT = path.join(commonDir, "everdict-telemetry.jsonl");
 const PORT = Number(process.env.EVERDICT_TELEMETRY_PORT ?? 4318);
 
 const SIGNALS = new Set(["/v1/traces", "/v1/metrics", "/v1/logs"]);

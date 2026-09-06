@@ -141,9 +141,12 @@ const readJsonl = (file) => {
 
 const SERIES = {
   "evals-history": () => {
-    const rows = readJsonl(path.join(root, "evals", "history.jsonl"));
+    // Under `--source-dir` the history is read from there too, so a fixture can stand in for every series.
+    const file = opts.sourceDir ? path.join(gitDir, "evals-history.jsonl") : path.join(root, "evals", "history.jsonl");
+    const rows = readJsonl(file);
     if (rows === null) return null;
-    return rows.filter((r) => r.partial !== true && r.of > 0).map((r) => r.passed / r.of);
+    // A drill line records a NEUTRALIZED run and has no pass rate; a partial run has one over one case.
+    return rows.filter((r) => r.drill === undefined && r.partial !== true && r.of > 0).map((r) => r.passed / r.of);
   },
   "gate-log": () => {
     const rows = readJsonl(path.join(gitDir, "everdict-gate-log.jsonl"));
@@ -193,6 +196,8 @@ if (selected.length === 0) {
 }
 
 const breaches = [];
+/** 3σ breaches a dry run would have filed and did not — the reason a dry run can refuse. */
+const unfiled = [];
 for (const metric of selected) {
   const read = SERIES[metric.source];
   if (read === undefined) {
@@ -245,6 +250,32 @@ const slug = (s) =>
     .replace(/^-|-$/g, "");
 const today = new Date().toISOString().slice(0, 10);
 
+/** The directory of an OPEN intent this watcher filed for `metricSlug` on any date, or undefined. */
+const openBandIntent = (metricSlug) => {
+  const home = path.join(root, "intent");
+  let entries;
+  try {
+    entries = readdirSync(home);
+  } catch {
+    return undefined;
+  }
+  const pattern = new RegExp(`^\\d{4}-\\d{2}-\\d{2}-band-${metricSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  for (const name of entries
+    .filter((n) => pattern.test(n))
+    .sort()
+    .reverse()) {
+    let body;
+    try {
+      body = readFileSync(path.join(home, name, "intent.md"), "utf8");
+    } catch {
+      continue;
+    }
+    const status = /Status:\s*([a-z]+)/.exec(body)?.[1];
+    if (status !== "shipped" && status !== "rejected") return path.join(home, name);
+  }
+  return undefined;
+};
+
 for (const breach of breaches) {
   if (breach.tier === 1) continue; // logged above, which is the whole of the 1σ tier
 
@@ -282,15 +313,22 @@ for (const breach of breaches) {
   }
 
   // 3σ — propose, and only into the queue.
+  //
+  // "Already open" is asked across EVERY date, not only today's: a breach filed yesterday and not yet triaged
+  // is the same breach, and the design pass for this change pointed out that a dedupe keyed on today's date
+  // would either re-refuse every morning or file a twin. Open means not `shipped` and not `rejected` — a
+  // closed intent for an old breach of the same metric does not cover a new one.
   const dir = path.join(root, "intent", `${today}-band-${slug(breach.metric.id)}`);
-  if (existsSync(dir)) {
+  const open = openBandIntent(slug(breach.metric.id));
+  if (open !== undefined) {
     console.log(
-      `  3σ ${breach.metric.id}: an intent for this breach is already open at ${path.relative(root, dir)} — not filing a second.`,
+      `  3σ ${breach.metric.id}: an intent for this breach is already open at ${path.relative(root, open)} — not filing a second.`,
     );
     continue;
   }
   if (opts.dryRun) {
     console.log(`  (dry run) 3σ would file ${path.relative(root, dir)}/intent.md`);
+    unfiled.push(breach);
     continue;
   }
   mkdirSync(dir, { recursive: true });
@@ -332,3 +370,23 @@ not diagnosed anything and its confidence is exactly zero.
 }
 
 if (breaches.length === 0) console.log("\nNo band breached.");
+
+// ── a dry run that finds a 3σ breach REFUSES ─────────────────────────────────────────────────────
+//
+// The gate (`pnpm ci:local`) reads the bands dry-run on every full run, which is the cadence a push already
+// has — and until 2026-09-06 that run printed "would file" and exited 0. So the only automatic path through
+// this file was a rehearsal: detection with no person, filing with one, and the push never waited for the
+// second half. The audit scored that as L2 for the one gate play whose entire point is that work starts
+// without somebody deciding to start it.
+//
+// The refusal is the cheapest shape that closes it. No model call enters the gate (the intent is written from
+// a template), nothing is filed from inside a check (a gate that writes into the tree it is checking is the
+// eval runner's first incident, one layer up), and the person's only decision is gone: the push waits until
+// `pnpm watch-bands` has filed the intent and it is committed. A breach whose intent already exists is not
+// refused — that is the "already open" branch above, and it is the state the refusal is trying to reach.
+if (opts.dryRun && unfiled.length > 0) {
+  console.error(
+    `\n✖ watch-bands: ${unfiled.length} 3σ breach(es) with no intent filed — ${unfiled.map((b) => b.metric.id).join(", ")}.\n  A dry run only rehearses; the push waits until the queue holds the proposal. Run \`pnpm watch-bands\` (no --dry-run),\n  commit the intent/<date>-band-<metric>/intent.md it writes, and re-run the gate.`,
+  );
+  process.exit(1);
+}

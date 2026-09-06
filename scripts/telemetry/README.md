@@ -10,7 +10,10 @@ it gets to `.git/everdict-telemetry.jsonl`.
 
 ## The recipe
 
-Start the sink in one terminal, then run sessions with the export enabled:
+A session starts the sink itself: the `SessionStart` hook in `.claude/settings.json` runs `ensure-sink.mjs`,
+which probes the port and spawns `otlp-sink.mjs` detached when nothing answers, saying so in one line only
+when it did. `pnpm telemetry` still starts one by hand (it refuses a busy port), and is what to run outside
+this repository's settings:
 
 ```sh
 pnpm telemetry
@@ -51,8 +54,10 @@ it rather than in a stream that only exists while a sink happens to be listening
 
 - **Nothing is collected while the sink is not running, and the exporting session is not told.** That is a
   property of the exporter, not a bug here; the sink refuses a busy port rather than appearing to start,
-  which is the one failure it can make visible.
-- It is local (`.git/`), not shared. It describes this checkout's sessions.
+  which is the one failure it can make visible. The SessionStart hook narrows the window to "the sink could
+  not bind" — it does not close it.
+- It is local (the common `.git/`, shared by every linked worktree of this checkout), not shared between
+  machines. It describes this machine's sessions.
 - `http/protobuf` and gRPC are not accepted. Both would need a dependency.
 
 ## No longer owed

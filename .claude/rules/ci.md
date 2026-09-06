@@ -12,6 +12,18 @@ See skill `ci`.
   `.claude/settings.json`) denies `git push` unless every commit the push carries is stamped and HEAD's stamp
   is `full`. Committing after the gate invalidates that commit's stamp — re-run `pnpm ci:local` (turbo cache
   makes it fast). Never work around the hook (no stamp forging, no pushing from outside the tool).
+  ⚠️ **The hook guards every checkout that shares this repository's `.git`** — a linked worktree included,
+  whether the push runs with cwd inside it or through `git -C <worktree>`. Until 2026-09-06 it compared
+  toplevels, and a linked worktree has its own, so a push from one (the eval runner, the reviewer and the
+  commit gate all create them) exited the hook silently with no ledger line. The scope is the common git
+  directory now, every fact is read from the checkout that is pushing, and `pnpm guardrails` drives the hook
+  in `--probe` mode (same facts, same decision, no ledger write, no verdict) against a real linked worktree
+  on every run. A settings file that wires `--probe` as the hook is refused.
+  ⚠️ **Remote CI is OFF, and has been since 2026-08-21.** Every GitHub Actions workflow is `disabled_manually`
+  (declared as C3 on `docs/architecture/harness-declared-limits.md`), so `gh run watch` after a push waits for
+  a run that will not exist and the four "required checks" on `main` never report. The local gate IS the
+  pipeline. Check `gh api repos/{owner}/{repo}/actions/workflows --jq '.workflows[].state'` before expecting
+  a remote run; when they are `active` again, confirm green after every push as the skill says.
 - **EVERY COMMIT IN A PUSH, NOT ONLY ITS TIP.** `pnpm ci:local` validates HEAD, and GitHub also only runs its
   checks on the tip — so a batch of eight commits used to ship seven that had never been built, while the split
   history advertised a bisectability it did not have and nothing downstream contradicted it. `.git/everdict-ci-ok`
@@ -93,8 +105,11 @@ See skill `ci`.
   `--next` takes the oldest accepted intent without a spec (the rotation `pnpm scan --next` uses, applied to a
   stage), runs one read-only session with this repository's rules and skills as constraints, and **writes
   `spec.md` into the working tree committing nothing** — a machine may propose, and the spec meets a person
-  before a plan is written against it. `pnpm intent-chain` reports an accepted intent with no spec as a NOTE,
-  never a violation: not every change needs a design pass, and a gate insisting otherwise gets routed around.
+  before a plan is written against it. Not every change needs a design pass, and a gate insisting otherwise
+  gets routed around — so an accepted intent may decline it in one line, `Design: none — <why>`, and
+  `pnpm intent-chain` REFUSES the third state: accepted, no `spec.md`, no declaration. That state used to be
+  a note, and it read exactly like "nobody has picked this up yet" — which is how the Design stage ran once in
+  eighteen changes. `pnpm design --next` skips a declined intent. (C2 on the declared-limits page.)
   ⚠️ `spec.md` is held to the SAME ordering law as `plan.md` — a `From: intent.md @ <sha>` naming the commit
   that introduced the intent, and descent from it. That rule exists because the design pass was reviewed by
   one of its own specs, which pointed out that a spec could be back-dated exactly the way a plan could before
@@ -212,7 +227,11 @@ See skill `ci`.
   — **an unscanned scope says NEVER, because unscanned is not clean and the two must stop looking alike.**
   ⚠️ A scan is a statement about a scope AT A TIME UNDER A MODEL; all three are in the record or a clean scope
   is indistinguishable from an unread one. ⚠️ The confidence on a finding is the scanner's rating of ITSELF,
-  not a calibration anybody measured. ⚠️ **An unstructured answer is still a reading**: when the scanner replies
+  not a calibration anybody measured. Every finding also carries `validation` — `reproduced` (concrete inputs
+  traced to the wrong output, stated in `failure`), `reasoned`, or `unverified` — and `how`, the one line
+  saying what was done to check it; a finding that says neither is recorded as `unverified`, never as nothing,
+  and the log line counts how many were reproduced. Until 2026-09-06 verification lived only in the intents
+  filed afterwards, so the scan's own record could not tell a traced defect from a hunch. ⚠️ **An unstructured answer is still a reading**: when the scanner replies
   in prose rather than the envelope the run is RECORDED and marked `structured: false`, which keeps it out
   of the findings band because a prose answer has no countable total. The first version exited and recorded
   nothing, and the pass it discarded that way had found `PgWorkspaceStore.delete()` sweeping 18 tables
@@ -226,7 +245,14 @@ See skill `ci`.
   `.git/everdict-gate-log.jsonl`, computes a rolling mean and sd over a window declared in
   `scripts/bands/bands.yaml`, and applies the tiers: 1σ logs, 2σ opens a READ-ONLY diagnosis, 3σ writes an
   `intent.md` into `intent/` and has no other route — `pnpm intent-chain` then applies to it exactly as to a
-  human's, and a second breach of the same metric refuses to file a duplicate. ⚠️ **Detection is deterministic**:
+  human's, and a second breach of the same metric refuses to file a duplicate while an intent for it is OPEN on
+  any date (not `shipped`, not `rejected`). ⚠️ **The gate's dry run REFUSES at 3σ.** `ci:local` reads the
+  bands with `--dry-run`, and until 2026-09-06 a breach there printed "would file" and exited 0 — detection
+  without a person, filing with one, and the push never waited. Now a dry run that would file exits non-zero
+  and names the command: run `pnpm watch-bands`, commit the intent it writes, re-run the gate. It does not
+  file from inside the gate (C4 on the declared-limits page: a gate writing into the tree it checks is the
+  loop this repository already closed once). `pnpm guardrails` drives that refusal over
+  `scripts/bands/fixtures/{breach,quiet}` on every run. ⚠️ **Detection is deterministic**:
   no model decides that something is wrong, or the alarm itself stops being reproducible. ⚠️ **Too few samples
   is not "no breach"** — under a metric's floor it reports INSUFFICIENT and writes nothing, because a band over
   three points is noise wearing a sigma and the first thing it would do is file an intent nobody believes.
@@ -257,15 +283,23 @@ See skill `ci`.
   recording sooner would produce a shell transcript — and is wrapped, because a hook that throws while
   recording is worse than one that records nothing. `pnpm guardrails` refuses a hook that stopped writing it.
   The session-level facts no file can answer (concurrent sessions, steering vs waiting, tool decisions) need
-  `pnpm telemetry` + the recipe in `scripts/telemetry/README.md`; see `docs/architecture/harness-observability.md`.
+  a sink listening on the OTLP port, and **the session starts it**: a SessionStart hook in
+  `.claude/settings.json` runs `scripts/telemetry/ensure-sink.mjs`, which probes 127.0.0.1:4318 and spawns
+  `otlp-sink.mjs` detached when nothing answers. It says something only when it started one or could not;
+  `pnpm guardrails` refuses a settings file without it. Until 2026-09-06 the sink was a second terminal
+  somebody had to remember, and the ledger held two probe lines from the day it was written. Recipe and
+  signal names in `scripts/telemetry/README.md`; see `docs/architecture/harness-observability.md`.
 - **`pnpm guardrails` checks the gate that every other gate is enforced BY.** `pre-push-gate.mjs` holds both
   ledgers, it is wired in `.claude/settings.json` — an editable file in the tree — and NOTHING READ THAT
   WIRING: `grep -l settings.json scripts/check-*.mjs` returned nothing. What stood in for a check was this
   rule's own sentence about never working around the hook, which is prose, in the file that records a dozen
   times what happens to a law kept as prose. Deleting the PreToolUse block is a two-line edit every other gate
-  stays green through. The check has two halves and needs both: the WIRING still exists (textual — the only
-  thing that catches a deletion) and the DECISION still decides (behavioural — `decideGate` driven over seven
-  facts, including that an unreadable ledger denies rather than reads as empty). The decision was split into
+  stays green through. The check has four halves and needs all of them: the WIRING still exists (textual — the
+  only thing that catches a deletion), the DECISION still decides (behavioural — `decideGate` driven over
+  fourteen facts, including that an unreadable ledger denies rather than reads as empty), the SCOPE still
+  reaches a linked worktree (the hook driven in `--probe` mode against a real `--no-checkout` worktree whose
+  HEAD is one commit back, so the probe must report THAT head), and the WATCHER still refuses a fixture breach
+  in dry-run. The decision was split into
   `scripts/hooks/gate-decision.mjs` to make that drivable; the alternative, an env var pointing the ledgers
   somewhere a test can write, would have made the check easy and the GATE FORGEABLE.
   ⚠️ **THE PUSH SEGMENTER MATCHES TEXT, NOT COMMANDS.** It splits on `&&`/`||`/`;`/`|`/newline and looks for a
@@ -427,6 +461,17 @@ See skill `ci`.
   non-zero without writing a decision lets the tool call through. The gate that exists to deny unstamped
   pushes was open on exactly the state meaning "nothing here has ever been gated". Every ledger read is a
   `deny` on failure now: cannot-find-out is an escalation, never a pass.
+- **`pnpm fix-proof` reads the rule CLAUDE.md has carried since the first week — every fix ships a
+  regression test that fails on the pre-fix code — and `pnpm ci:commits` proves it.** Two claims in one
+  sentence and, until 2026-09-06, no reader for either. The rule: a `fix` commit that changes source under
+  `packages/**` or `apps/**` also changes a `*.test.ts` file, or its body declares `Regression-test: none — <why>`.
+  The proof, in the commit gate's throwaway worktree where the commit is already installed and built: source
+  hunks reverted to the parent, the commit's own test files run, RED required, tree restored in its own
+  `finally` and any sibling package rebuilt. A test that is green on the pre-fix code never proved the bug was
+  gone. Applies to commits newer than the check itself (read from git, so history is not rewritten); fixes
+  under `scripts/` and `evals/` are outside it — their proof is a truth table or a drill. Observed on two
+  synthetic commits before it was wired: one proved, one refused. The playbook's alternative — lock test
+  files during a fix — is declined as C-row-6 on the declared-limits page.
 - **`pnpm agent-evals` is the configuration's own regression suite, and it is NOT in this gate.** `docs-check`
   and `convention-harness` guard the SHAPE of `CLAUDE.md`/rules/skills — paths resolve, symbols exist, globs
   match live code, descriptions survive. Neither can ask whether the agent still does the work to the same

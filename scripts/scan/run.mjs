@@ -226,11 +226,16 @@ const prompt = [
   "",
   "Answer with a JSON object and nothing else:",
   '{"findings":[{"file":"...","line":123,"class":"one of the classes above or `other`",',
-  '"confidence":"high|medium|low","summary":"one sentence","failure":"inputs or state -> wrong output"}],',
+  '"confidence":"high|medium|low","validation":"reproduced|reasoned|unverified","how":"one line: what you did to check it",',
+  '"summary":"one sentence","failure":"inputs or state -> wrong output"}],',
   '"read":0,"summary":"two sentences: what this scope is, and the single thing most worth attention"}',
   "",
   "`confidence` is your own rating of whether this is real. Say low when you could not confirm it by reading;",
   "an unconfirmed suspicion recorded as high is worse than not recording it.",
+  "`validation` is what you DID, not what you believe: `reproduced` only if you traced concrete inputs through",
+  "the code to the wrong output and can state them in `failure`; `reasoned` if you read the code and the",
+  "failure follows from it but you did not trace a concrete input; `unverified` otherwise. A finding with no",
+  "validation is a suspicion, and the person triaging it needs to know which of the three they are holding.",
 ].join("\n");
 
 let envelope;
@@ -297,6 +302,12 @@ try {
 const findings = Array.isArray(report.findings) ? report.findings : [];
 const order = { high: 0, medium: 1, low: 2 };
 findings.sort((a, b) => (order[a.confidence] ?? 3) - (order[b.confidence] ?? 3));
+// A finding that does not say what was done to check it is recorded as `unverified`, never as nothing: the
+// 2026-09-06 audit found that verification lived only in the intents filed afterwards, so the scan's own
+// record could not tell a traced defect from a hunch.
+const VALIDATIONS = new Set(["reproduced", "reasoned", "unverified"]);
+for (const f of findings) if (!VALIDATIONS.has(f.validation)) f.validation = "unverified";
+const validated = findings.filter((f) => f.validation === "reproduced").length;
 
 writeFileSync(
   path.join(root, ".git", `everdict-scan-${scope}.json`),
@@ -316,6 +327,7 @@ appendFileSync(
     files: files.length,
     structured,
     findings: structured ? findings.length : null,
+    reproduced: structured ? validated : null,
     cost: Number((envelope.total_cost_usd ?? 0).toFixed(4)),
   })}\n`,
 );
@@ -326,14 +338,14 @@ for (const f of findings) {
   // exists to be pointed at.
   const seen = dismissed.has(`${scope}:${f.file}`);
   console.log(
-    `${seen ? "◦" : f.confidence === "high" ? "‼" : f.confidence === "medium" ? "!" : "·"} [${f.class}] ${f.file}${f.line ? `:${f.line}` : ""}${seen ? "  (previously dismissed)" : ""}`,
+    `${seen ? "◦" : f.confidence === "high" ? "‼" : f.confidence === "medium" ? "!" : "·"} [${f.class}] [${f.validation}] ${f.file}${f.line ? `:${f.line}` : ""}${seen ? "  (previously dismissed)" : ""}`,
   );
-  console.log(`    ${f.summary}\n    ${f.failure ?? ""}`);
+  console.log(`    ${f.summary}\n    ${f.failure ?? ""}${f.how ? `\n    checked by: ${f.how}` : ""}`);
 }
 console.log(`\n${report.summary ?? "(no summary)"}`);
 console.log(
   `\n${structured ? `${findings.length} finding(s)` : "an unstructured reading"} in ${scope} at ${head.slice(0, 9)} under ${opts.model} · .git/everdict-scan-${scope}.json · $${(envelope.total_cost_usd ?? 0).toFixed(4)}`,
 );
 console.log(
-  "· confidences are the scanner's own rating, not a calibration. Nothing here is applied; findings enter the tree through the gates.",
+  `· confidences are the scanner's own rating, not a calibration; ${validated} of ${findings.length} carry a reproduced input. Nothing here is applied; findings enter the tree through the gates.`,
 );

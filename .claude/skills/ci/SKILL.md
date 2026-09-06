@@ -20,7 +20,8 @@ commit first, then re-run — turbo cache makes the re-run fast.
 ## Enforcement — the pre-push hook
 `.claude/settings.json` wires a PreToolUse hook (`scripts/hooks/pre-push-gate.mjs`) that **denies
 `git push`** (compound commands included) unless the stamp matches the current HEAD. Any commit
-after the gate invalidates the stamp by construction. The hook only guards THIS repo — pushes of
+after the gate invalidates the stamp by construction. The hook guards every checkout that shares
+THIS repo's `.git` — linked worktrees included, with cwd inside one or via `git -C` — and pushes of
 other repos pass through. Never work around it (no stamp forging, no pushing outside the tool);
 if it blocks you wrongly, fix the hook, don't dodge it.
 
@@ -67,7 +68,11 @@ EVERDICT_TRUST_DATABASE_URL=postgresql://everdict:everdict@127.0.0.1:55440/everd
    the gate script and this skill in the same PR (skills travel with the code).
 
 ## After pushing — confirm green (the push is not done until this is)
+⚠️ **Only while the workflows are enabled.** Every GitHub Actions workflow here has been `disabled_manually`
+since 2026-08-21 (declared-limits C3): there is no remote run to watch, and the local gate is the whole
+pipeline. Check first, and skip this section while they say `disabled_manually`:
 ```bash
+gh api repos/{owner}/{repo}/actions/workflows --jq '.workflows[] | [.name,.state] | @tsv'
 gh run watch $(gh run list -L1 --json databaseId -q '.[0].databaseId') --exit-status
 ```
 If it fails remotely despite local green, diff the environment (node 22, `pnpm install
@@ -86,8 +91,11 @@ CI; a push that CHANGES `CLAUDE.md`, `.claude/**` or `evals/**` is denied unless
 in `.git/everdict-evals-ok`. Editing a skill therefore costs one ~90s run before you can push it. Ordinary
 pushes never meet the arm. See `evals/README.md`.
 
-**`pnpm guardrails`** checks the push gate itself — that `.claude/settings.json` still wires it, and that
-its decision still denies the seven cases it is supposed to. ⚠️ Its segmenter matches TEXT: writing a file
+**`pnpm guardrails`** checks the push gate itself — that `.claude/settings.json` still wires it (and the
+SessionStart hook that starts the telemetry sink), that its decision still holds over fourteen cases, that
+its scope reaches a real linked worktree (the hook driven in `--probe` mode), and that `watch-bands --dry-run`
+refuses a fixture breach. **`pnpm fix-proof`** reads the rule that every fix ships a regression test (or
+declares `Regression-test: none — <why>`), and `pnpm ci:commits` proves the test was red on the pre-fix code. ⚠️ Its segmenter matches TEXT: writing a file
 whose content contains a compound-command example of a push through a shell heredoc is denied by the gate,
 because the heredoc body is part of the command string. Use an editor for those files.
 

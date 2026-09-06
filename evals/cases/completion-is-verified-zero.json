@@ -1,7 +1,7 @@
 {
   "id": "completion-is-verified-zero",
   "why": "rule `protocol` L5 — accepted ≠ gone. One verifier shared by the request path and the reconciler; \"cannot find out\" is an escalation field, never a terminal state.",
-  "subject": [".claude/rules/protocol.md"],
+  "subject": [".claude/rules/protocol.md", ".claude/skills/protocol/references/case-law.md"],
   "neutralize": ["L5 — Completion is verified zero"],
   "allowedTools": "Read,Grep,Glob",
   "timeout": 180,

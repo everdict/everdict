@@ -17,7 +17,7 @@
 // `ci` must name it. An entry that is deliberately undocumented says why in DECLARED.
 //
 // Reads SOURCE only (no build, no deps), prints every violation, exits 1.
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +30,8 @@ const DECLARED = new Map([
   ["telemetry", "an opt-in collector, not a gate; its contract is scripts/telemetry/README.md"],
   ["triage", "explains a red gate rather than being one; named by the rule's watch-bands bullet"],
 ]);
+
+const SKILLS_INDEX = path.join(root, ".claude", "skills", "README.md");
 
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const rule = readFileSync(RULE, "utf8");
@@ -58,6 +60,52 @@ for (const [name, why] of DECLARED) {
     violations.push(
       `DECLARED names \`${name}\`, which is no longer a control in package.json (${why}). A reason that outlived its subject reads as permission.`,
     );
+  }
+}
+
+// ── the other direction: every must-hold policy names an enforcer that EXISTS ─────────────────────
+//
+// `.claude/skills/README.md` pairs each must-always-hold policy with the gate or hook behind it, because a
+// skill is advisory and the playbook says so. A row whose enforcer is gone is a policy that has quietly gone
+// back to being advisory while the table still says otherwise — the same shape as a control the conventions
+// never named, in the other direction. So the table is read: every `pnpm <x>` it names is a script in
+// package.json, every `scripts/…` path it names is a file, and the table itself is not empty.
+const index = readFileSync(SKILLS_INDEX, "utf8");
+const tableStart = index.indexOf("| Policy | Taught by | Enforced by |");
+if (tableStart < 0) {
+  violations.push(
+    ".claude/skills/README.md has no `| Policy | Taught by | Enforced by |` table — the pairing between policies and their enforcers is unrecorded.",
+  );
+} else {
+  const rows = index
+    .slice(tableStart)
+    .split("\n")
+    .slice(2) // header + separator
+    .filter((line) => line.startsWith("|"))
+    .map((line) => line.split("|").map((c) => c.trim()))
+    .filter((cells) => cells.length >= 4);
+  if (rows.length === 0) {
+    violations.push(
+      ".claude/skills/README.md's enforcement table has no rows. Refusing to report over an empty table.",
+    );
+  }
+  const scripts = new Set(Object.keys(pkg.scripts ?? {}));
+  for (const cells of rows) {
+    const [, policy, , enforcedBy] = cells;
+    for (const m of enforcedBy.matchAll(/`pnpm ([a-z:-]+)`/g)) {
+      if (!scripts.has(m[1])) {
+        violations.push(
+          `.claude/skills/README.md pairs "${policy}" with \`pnpm ${m[1]}\`, which is not a script in package.json. The policy is advisory again and the table says it is not.`,
+        );
+      }
+    }
+    for (const m of enforcedBy.matchAll(/`(scripts\/[^`]+\.mjs)`/g)) {
+      if (!existsSync(path.join(root, m[1]))) {
+        violations.push(
+          `.claude/skills/README.md pairs "${policy}" with \`${m[1]}\`, which does not exist in the tree.`,
+        );
+      }
+    }
   }
 }
 

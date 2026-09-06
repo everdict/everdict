@@ -24,6 +24,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { designDeclined } from "./intent-declarations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const home = path.join(root, "intent");
@@ -113,11 +114,23 @@ for (const name of changes) {
       fail(`${label}/intent.md: missing section "## ${section}" (intent/TEMPLATE.md).`);
   }
 
-  // Reported, never failed. Not every change needs a design pass, and a gate that insists otherwise gets
-  // routed around — but an accepted intent nobody has designed against is invisible without this line, which
-  // is how this repository reached ten change directories and zero specs.
+  // ── the Plan→Design handoff: a spec, or one line saying why not ─────────────────────────────────
+  //
+  // This used to be a NOTE: "accepted, and no spec.md". Not every change needs a design pass, and a gate that
+  // insists otherwise gets routed around — that argument still holds, and it is exactly why the third state
+  // is the one refused. An accepted intent with a spec has been designed against; one with
+  // `Design: none — <why>` has been DECIDED against, in writing, by whoever accepted it; one with neither has
+  // simply not been picked up, and nothing distinguished it from the second until this line. The 2026-09-06
+  // audit scored the Plan and Design stages at L2 for that reason: the artifact existed, and the handoff was
+  // a start button somebody had to press. The declaration is the same form `lessons/` uses for
+  // `Eval case: none — <why>`, and for the same reason — a declaration cannot be misread, and a note can be.
+  // `pnpm design --next` skips a declared intent; `pnpm intent-chain` refuses an undeclared one.
   if (status === "accepted" && !existsSync(path.join(dir, "spec.md"))) {
-    notes.push(`${label}: accepted, and no spec.md. \`pnpm design --next\` takes the oldest of these.`);
+    if (designDeclined(intent) === undefined) {
+      fail(
+        `${label}/intent.md: accepted, with no spec.md and no \`Design: none — <why>\` line. Run \`pnpm design --change ${name}\` to write the spec, or say in one line why this change needs no design pass. An accepted intent nobody has designed against or declined to is the state the Design stage cannot see.`,
+      );
+    }
   }
 
   if (/^Shipped:\s*[0-9a-f]{7,40}\s*$/m.test(intent)) citations++;
