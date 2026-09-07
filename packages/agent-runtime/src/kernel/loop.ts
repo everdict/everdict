@@ -553,6 +553,28 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
   let usingFallback = false;
 
   let messages: ChatMessage[] = normalizeHistory(opts.history);
+  // ── WHICH DEFERRED TOOLS THIS RUN HAS DISCOVERED, HELD RATHER THAN RE-DERIVED ────────────────────────
+  //
+  // `extractDiscoveredToolNames` reads ToolSearch's own tool RESULT out of the transcript, and that result
+  // decides two things every turn: which deferred tools go into the outbound `tools[]`, and which are still
+  // advertised as undiscovered in the system prompt. The transcript is also what compaction EDITS. Rung 1
+  // clears any tool body over 400 chars past the recent window, rung 2 summarises the old span and rung 3
+  // drops it outright — so a `select:`-form search over long MCP tool names crossed that threshold, its
+  // result was elided, `JSON.parse` failed on the marker, and every tool it had loaded silently left the
+  // outbound list mid-procedure while the prompt began offering them again as undiscovered. Compaction knows
+  // nothing about any of this, and the skill carve-out beside it is the same lesson already paid for once.
+  //
+  // Discovery is MONOTONIC — a tool loaded in turn 3 stays loaded for the run — so the set is accumulated
+  // here and the transcript scan becomes an INGEST rather than the record: it still picks up discovery from
+  // an inbound `history` on resume, and it can no longer un-discover anything. Rule `protocol` L3, provenance
+  // born at the source rather than re-derived from rendered output. Found by `pnpm scan`.
+  const discoveredTools = new Set<string>();
+  // Read the transcript into the set. Called at the top of a turn (which is where an inbound `history` is
+  // picked up) AND again once this turn's tool results have been appended — because the compaction check runs
+  // at the END of a turn, so a search performed in turn 1 would otherwise be erased before turn 2 ever looked.
+  const ingestDiscoveredTools = (): void => {
+    for (const name of extractDiscoveredToolNames(messages)) discoveredTools.add(name);
+  };
   // Goal persistence: the loop owns a todo list the model manages via write_todos, re-surfaced each turn as a
   // transient system-reminder so a long task stays on-goal. Seeded from a prior run in the same conversation.
   let todos: TodoItem[] = extractTodosFromHistory(messages);
@@ -919,9 +941,9 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     emit({ type: "turn_start", turn });
 
-    const discovered = extractDiscoveredToolNames(messages);
-    const tools = toLlmTools(registry, discovered);
-    const system = buildSystemPrompt(opts.systemPrompt, registry, discovered);
+    ingestDiscoveredTools();
+    const tools = toLlmTools(registry, discoveredTools);
+    const system = buildSystemPrompt(opts.systemPrompt, registry, discoveredTools);
     // Inject the current todos as a transient reminder (this turn only — never persisted, no history bloat).
     // Marked transient so the transport's rolling prompt-cache breakpoint stays on durable history: this message
     // is re-rendered per call and won't exist at this position next request, so a breakpoint on it is never read.
@@ -1452,6 +1474,8 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
 
     // Hybrid budget: the model's reported usage + an estimate of everything appended since (tool results, image turn).
     budget.consumed = usageTokens + estimateTokens(messages.slice(afterAssistantLen));
+    // BEFORE the ladder edits the transcript this turn's results were just appended to.
+    ingestDiscoveredTools();
     if (thresholdReached(budget)) {
       // Circuit breaker — don't hammer the summariser forever on an irrecoverably-oversized context.
       if (++compactionCount > MAX_COMPACTIONS) return finish("token_budget", turn);
