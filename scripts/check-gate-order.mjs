@@ -85,8 +85,20 @@ for (const file of files) {
   let n = 0;
   for (let k = 0; k < starts.length - 1; k++) {
     const body = lines.slice(starts[k], starts[k + 1]).join("\n");
-    const g = body.indexOf("gate(");
-    const p = body.indexOf("safeParse");
+    // ⚠️ A WORD BOUNDARY, BECAUSE `gate(` IS A SUFFIX OF REAL FUNCTION NAMES. The first version matched the
+    // bare substring, and `resolveHarnessDelegate(` — a live call in `harness.routes.ts` — ends in it. Both
+    // directions are wrong and both are silent: an unrelated `…egate(` BEFORE the parse reads as an
+    // authorization this door never performs, and the same call AFTER it reads as a violation and inflates
+    // the baseline for a door with no ordering problem. A gate wired into CI that certifies something it did
+    // not check is worse than no gate. Found by `pnpm review` on the change that added this file.
+    //
+    // A leading `.` is excluded too, and that is a decision rather than an accident: `gate` here is the bare
+    // function `route-context.ts` exports, never a method on something, so `deps.gate(…)` would be a
+    // different function with the same name. No route spells it that way today — the census is identical
+    // with and without the boundary, 138 doors and 43 deviations — which is the evidence that this repair
+    // changed no verdict, only the reason each one is trustworthy.
+    const g = body.search(/(?<![\w$.])gate\s*\(/);
+    const p = body.search(/(?<![\w$])safeParse\s*\(/);
     // Only a handler that spells BOTH answers this question. One that gates without validating (a read), or
     // validates without gating (an ungated door), is a different subject.
     if (g < 0 || p < 0) continue;

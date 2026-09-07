@@ -91,3 +91,4 @@
 {"at":"2026-09-07T06:39:53.224Z","model":"sonnet","drill":"sibling-doors-guard-alike","red":false,"seconds":60.1,"subjects":"d5dcbde83657f743"}
 {"at":"2026-09-07T06:40:36.420Z","model":"sonnet","drill":"skipped-scenario-is-not-passing","red":true,"seconds":41.8,"subjects":"abc47d960209660c"}
 {"at":"2026-09-07T06:42:27.806Z","model":"sonnet","drill":"sibling-doors-guard-alike","red":false,"seconds":70.7,"subjects":"e2cbc4def60deea3"}
+{"at":"2026-09-07T06:44:53.747Z","model":"sonnet","models":["claude-sonnet-5"],"partial":false,"passed":2,"inconclusive":0,"of":2,"executed":2,"cost":0.3298,"cases":[{"id":"sibling-doors-guard-alike","pass":true,"seconds":44.4,"reused":false,"models":["claude-sonnet-5"]},{"id":"skipped-scenario-is-not-passing","pass":true,"seconds":8.6,"reused":false,"models":["claude-sonnet-5"]}]}
