@@ -1664,6 +1664,20 @@ export class K8sBackend implements Backend, WorkAddressable, ManagedWorkControl,
     // Built ONCE and used by both seams: a reservation authorizes one external object, so the id the
     // activation re-presents has to be the id that was reserved. Two literals here is how those drift.
     const work = { tenant: job.tenant, runId: job.runId, externalJobId: name, namespace: ns };
+    // …AND THE PURE REFUSAL COMES FIRST, exactly as it does on the agent lane and on Nomad. `buildK8sJob`
+    // refuses an unenforceable network world too, and until 2026-09-07 that was the ONLY place this lane
+    // asked — three statements too late. By then the ledger held a reservation naming a container that will
+    // never exist and `ensureNamespace` had created a namespace in the tenant's cluster for it. The agent
+    // lane's own comment says why this belongs here (arch-review 58 W5): it is a pure, total decision, so it
+    // belongs at the first moment it can be made, and a refusal that arrives after an effect is the shape
+    // this series keeps finding. This lane wrote its dispatch out longhand and missed the move — the second
+    // time that has happened here, which is the argument in the comment below about longhand copies. Found
+    // by `pnpm scan` over files nobody had touched.
+    refuseUnenforceableNetwork(
+      spec.evalCase.network,
+      "k8s",
+      this.opts.enforcesNetwork ? { enforces: ["none"] } : undefined,
+    );
     await hooks?.authority.reserve(work);
     return await this.withApi(async (api) => {
       // …AND RE-PRESENTED, immediately before the Job exists. This step was missing here while the shared

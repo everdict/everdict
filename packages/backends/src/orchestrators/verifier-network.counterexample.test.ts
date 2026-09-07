@@ -191,3 +191,71 @@ describe("[R59 COUNTEREXAMPLE] a verifier is placed in the network world its cas
     expect(order.filter((o) => o.startsWith("apply("))).toEqual(["apply(job)"]);
   });
 });
+
+// ── …AND THE REFUSAL COMES BEFORE THE RESERVATION, NOT THREE STATEMENTS AFTER IT ─────────────────────
+//
+// `refuseUnenforceableNetwork` is a pure, total decision, and arch-review 58 W5 moved it to the first moment
+// each lane can make it — ahead of `requireReservation` on the agent lane, ahead of it on Nomad. The K8s
+// VERIFIER lane writes its dispatch out longhand instead of delegating, and it did not get the move: it
+// reserved the work handle, opened the API connection, created the namespace, and only then built the
+// manifest whose first statement is the refusal.
+//
+// So a case declaring an offline world, dispatched to a cluster that cannot enforce one, left a durable
+// reservation naming a container that would never exist and a namespace in the tenant's cluster created for
+// it. `verifierOperation` does settle that row `failed` in its catch, so nothing leaks forever — the cost is
+// the effects, not the ledger. That is the same cost the agent lane already refuses to pay. Found by
+// `pnpm scan` over files nobody had touched, and it is the second time this longhand copy has missed a move
+// the shared dispatch received (the first is recorded at the activation seam in `k8s.ts`).
+//
+// Seen RED against the pre-move source, observed:
+//   a refused verifier still reserved a handle for a container that cannot exist: expected [
+//   'everdict-verify-c1-…' ] to have a length of +0 but got 1
+
+describe("[SCAN COUNTEREXAMPLE] a verifier the lane cannot place spends nothing before refusing", () => {
+  const recordingWorld = (order: string[]) => ({
+    ...world(order),
+    async ensureNamespace() {
+      order.push("ensureNamespace");
+    },
+  });
+
+  const recordingAuthority = (reserved: string[]) => ({
+    reserve: async (work: RuntimeWorkRef) => {
+      reserved.push(work.externalJobId);
+      return { attemptId: "a1", work, persistedAt: new Date(0).toISOString() };
+    },
+    activate: async () => ({ kind: "activate" as const }),
+  });
+
+  it("refuses an unenforceable world before the ledger write and before the namespace", async () => {
+    const order: string[] = [];
+    const reserved: string[] = [];
+    // No `enforcesNetwork`: this cluster cannot hold the case's declared world, which is the whole premise.
+    const backend = new K8sBackend({ image: "runner:1", api: recordingWorld(order) } as never);
+
+    await expect(backend.dispatchVerifier(JOB("none"), { authority: recordingAuthority(reserved) })).rejects.toThrow(
+      /network/i,
+    );
+
+    expect(reserved, "a refused verifier still reserved a handle for a container that cannot exist").toHaveLength(0);
+    expect(order, "a refused verifier still created a namespace in the tenant's cluster").toEqual([]);
+  });
+
+  it("still reserves when the lane CAN enforce the world the case declared", async () => {
+    // The admitted class. The refusal is a predicate, and a predicate tested only from the refusing side has
+    // an unmeasured false-positive rate — a verifier this lane can legitimately place must still reach its
+    // reservation and its cluster.
+    const order: string[] = [];
+    const reserved: string[] = [];
+    const backend = new K8sBackend({
+      image: "runner:1",
+      api: recordingWorld(order),
+      enforcesNetwork: true,
+    } as never);
+
+    await backend.dispatchVerifier(JOB("none"), { authority: recordingAuthority(reserved) }).catch(() => undefined);
+
+    expect(reserved, "an enforceable world stopped reaching the ledger").toHaveLength(1);
+    expect(order, "an enforceable world stopped reaching the cluster").toContain("ensureNamespace");
+  });
+});
