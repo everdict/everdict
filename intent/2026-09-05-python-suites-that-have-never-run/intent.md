@@ -1,6 +1,10 @@
 # Intent: five Python test suites have never been run, by anything, ever
 
-Author: Claude (agent, at the maintainer's request during a review of main). Status: draft
+Author: Claude (agent, at the maintainer's request during a review of main). Status: shipped
+
+Shipped: 06fee6c2
+
+Design: none — five named files, each decided by reading what it imports.
 
 ## Problem
 
@@ -69,3 +73,51 @@ Each of the five is in one of two states, and the state is visible:
 4. Is a Python **linter** the same decision or a different one? `pnpm python` compiles and runs; it does not
    lint, because the linter needs a dependency and the compile step does not. If a dependency is being
    installed anyway, that argument changes.
+
+## Shipped — and the premise was half wrong
+
+The intent's framing was "wire it (install a dependency) or delete it". Reading what each file actually
+IMPORTS, rather than what the project's `pyproject` declares, found a third answer for three of the five:
+they needed nothing.
+
+| file | what it needed | outcome |
+|---|---|---|
+| `clients/python/tests/test_client.py` | `pytest`, for `pytest.raises` and nothing else | **runs** — 7 tests, green |
+| `.../tests/test_registry.py` | declared `pytest`; imports only stdlib-reachable modules | **runs** — 6 tests, green |
+| `.../tests/test_launch.py` | declared an editable install; a path insert is enough for 4 of 5 | **runs** — 4 tests, green |
+| `.../tests/test_launch_process_ownership.py` | `psutil`, genuinely — the 5th launch claim, split out | declared |
+| `.../tests/test_api.py` | `httpx` + `fastapi`, genuinely | declared |
+| `.../tests/test_service.py` | `pytest` + `fastapi` + `psutil`, genuinely | declared |
+
+`pnpm python` went from **1 of 6** test files running to **5 of 8**. Each wired file collects and runs its own
+`test_*` functions under `__main__` — the gate EXECUTES a test file rather than collecting it — and prints a
+`PASS` line, because a test that runs and says nothing is indistinguishable from one that asserted nothing.
+`pytest.raises` is eight lines of `contextlib`, which is the whole dependency that kept the published client's
+suite unobserved.
+
+## The open questions, answered
+
+1. **Is `clients/python` still the shape its test was written against?** Yes — 7 tests, green on the first
+   execution anyone has ever given them. "Wire it" and "fix it" turned out to be the same task, and it was
+   the smaller one.
+2. **Is a Python venv in CI worth ~20 seconds for one client suite?** The question dissolved. The client's
+   suite needs no venv, so it costs the interpreter's start-up on a gate that already runs `py_compile` over
+   every tracked `.py`.
+3. **Does `spica-playwright-server` want tests at all?** Half of it already has them running. The remaining
+   half is the part that needs the server's real dependencies, and it stays declared rather than deleted —
+   deleting a green example's tests to tidy a list would be the wrong direction.
+4. **Is a Python linter the same decision?** Still a different one, and still open. The argument in
+   `check-python.mjs` was "a linter needs a dependency and the compile step does not"; nothing installed here,
+   so that argument stands unchanged.
+
+## What is still owed, and why it is not "left declared"
+
+Three files remain in `NEEDS`, and the intent's rule was that declared is not a third state. It stays a
+declaration because the decision it is waiting on is genuinely somebody else's: installing `fastapi`, `httpx`
+and `psutil` is a call about CI minutes and about a maintainer's machine, and `ci:local` must stay runnable on
+a clean checkout. What CHANGED is that the declaration is now precise — one file, one module, one reason —
+rather than 477 lines behind five vague entries, one of which ("needs an editable install") was not even true.
+
+The narrower question left for a person: **install the example server's declared dependencies in CI and
+locally, or delete its fastapi-dependent half.** That is three files, not five, and it is the only Python
+surface here that still looks like coverage without being it.
