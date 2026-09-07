@@ -1,6 +1,13 @@
 # Intent: the first complete drill-all says twelve of fifteen cases measure nothing
 
-Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: draft
+Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: shipped
+
+Shipped: 31d380a9
+
+Design: none — the design question ("what separates a case that measures from one that does not?") could not
+be answered on paper. It was answered by running the experiment this intent asked for: rewrite each case
+against the property the survivors share, then drill both states. The answer came from the drill, not from a
+pass over the intent.
 
 ## Problem
 
@@ -75,3 +82,33 @@ stamp coupling in `intent/2026-09-06-what-the-second-audit-found/`.
   question says the other thing.
 - How much of the harness's "the configuration is regression-tested" claim has to be restated, in
   `docs/architecture/harness-declared-limits.md` and in the audit's own scoring, until this is fixed?
+
+## Shipped, and the cause was a third one
+
+Shipped in `31d380a9`. This intent named three candidate causes and said the twelve did not share one. That
+was right, and the split was not the one it guessed.
+
+**(a) the codebase answers it** — four cases, retired 2026-09-06.
+**(c) the model is good enough without it** — SEVEN cases, and this is where the intent's caution paid.
+Each was first REWRITTEN as a counter-intuitive yes/no where the intuitive answer is wrong, which is the
+shape the survivors share. All eleven then passed in the normal state (so no assertion was too tight) and all
+seven still passed drilled. A capable model declines to trust a 202, guards an empty corpus and refuses a
+client-supplied scope without being told to.
+**(b) a lesson restated in other words** — no case turned out to need it. The exclusivity check, widened to
+every tracked text file, had already closed that route.
+
+**And the instrument itself moved.** `provenance-at-the-source` drilled RED in one run and GREEN in the next,
+untouched. Every retirement here therefore rests on TWO green drills rather than one, and the case that
+flipped was kept. `lessons/2026-09-07-the-drill-is-not-deterministic.md` records it, and it re-reads this
+intent's own opening claim: "12 of 15 measure nothing" was a single sample.
+
+The suite is four cases, stated in `evals/README.md` as the measured size rather than the intended one.
+
+## What this leaves open
+
+The stamp coupling this intent hoped to unlock stays deferred, and now for a sharper reason than "the suite is
+dirty": with a per-case verdict that can flip, a gate keyed to one drill would refuse pushes on a coin toss.
+How many samples make a verdict is unsettled, and the honest options — more samples per drill, or a verdict
+that reports the rate — both cost real agent calls per certification. Carried in
+`lessons/2026-09-07-the-drill-is-not-deterministic.md`.
+

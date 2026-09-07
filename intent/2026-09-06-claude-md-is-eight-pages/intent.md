@@ -1,6 +1,8 @@
 # Intent: CLAUDE.md is eight pages, and the playbook's limit is one
 
-Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: accepted
+Author: maintainer (via AI-native SDLC audit, 2026-09-06). Status: shipped
+
+Shipped: 6aa61248
 
 Design: none — the design question this change would ask ("which layer does each sentence belong in?") is
 already answered by skill `documenting`, and the move is bounded by a fact a design pass cannot improve on:
@@ -48,3 +50,23 @@ as a subject, `scripts/check-docs.mjs` and `scripts/check-convention-harness.mjs
   read? Those stay. `evals/RETIRED.md` records one such judgement already (`scanner-blind-to-composition-root`).
 - Is one page the right number for a monorepo with nineteen packages, or is the right number "what the eval
   suite proves is load-bearing"?
+
+## Shipped
+
+Shipped in `6aa61248`: 189 lines / 4,224 words → 165 lines / 2,124 words, just under half. The block moved was
+the 56-line `## Architecture` section, chosen by measurement rather than taste — not one of its lines is a
+sentence an eval case holds as a subject, which was verified before the edit and re-verified after.
+
+The order the plan fixed held: the eight packages CLAUDE.md documented and the foundation reference did not
+(`llm`, `datasets`, `images`, `agent-runtime`, `sdk`, `otel`, `apps/agent`, `apps/desktop`) were written into
+`.claude/skills/foundation/references/architecture.md` FIRST, so nothing was deleted before it existed in the
+other layer.
+
+What stayed is what a session must not get wrong before it looks anything up: the spine diagram, the
+layer-spine sentence, "reverse imports are bugs", the intra-package layout rule, the Backend-vs-Driver
+distinction, and the deliberate-interfaces deviation. The map itself is pulled now — by skill `foundation`,
+and by the per-package rule a `paths:` glob injects while you edit that package.
+
+**The falsifier stands and has not fired.** If a later review finds a layering violation whose cause is the
+missing map, this change is the suspect. Nothing of that shape has appeared in the two reviews since.
+
