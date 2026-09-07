@@ -12,7 +12,7 @@ import type {
   WorkspaceImages,
 } from "@everdict/application-control";
 import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
-import { BadRequestError, NotFoundError, type RegistryAuth } from "@everdict/contracts";
+import { BadRequestError, type HarnessSpec, NotFoundError, type RegistryAuth } from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import {
   assertHardenedIsolation,
@@ -93,6 +93,31 @@ export function buildSandboxSessions(opts: {
   console.log(`▶ sandbox sessions: ${driver.id} (POST /sandboxes + create_sandbox)`);
   const capabilities = opts.capabilities;
   const { harnesses, models, scopedSecretsFor } = opts;
+  // A registry read has THREE answers and both resolvers below need two of them (rule `protocol` L2).
+  // `HarnessInstanceRegistry.get` throws `NotFoundError` for a harness this workspace does not have — a
+  // permanent answer, and the one both lanes act on — while every other throw means the read did not happen.
+  //
+  // ⚠️ UNTIL 2026-09-07 BOTH SITES SPELLED THAT `.catch(() => undefined)`, so a Postgres failover arrived
+  // here as "not registered". The service-conversation lane then answered a registered service harness with
+  // the process resolver's 404, which is merely wrong; the session lane is worse. It carries on with no spec,
+  // and `makeHarness` does not refuse that — a `spec?.kind === "command"` miss falls into a switch on the id,
+  // where `claude-code` returns a `ClaudeCodeHarness` built from nothing. So a workspace whose registered
+  // instance pins a model, an env and a version booted the bare built-in, provisioned a container for it and
+  // billed the session, with no record anywhere that the registry had not been read. Found by `pnpm scan`.
+  const registeredHarnessSpec = async (
+    registry: HarnessInstanceRegistry,
+    tenant: string,
+    ref: { id: string; version?: string },
+  ): Promise<HarnessSpec | undefined> => {
+    try {
+      return await registry.get(tenant, ref.id, ref.version ?? "latest");
+    } catch (err) {
+      // Absent is an answer; unreadable is not. A built-in id with no registered instance is the legitimate
+      // undefined here — that is what lets `claude-code` be booted by a workspace that registered nothing.
+      if (err instanceof NotFoundError) return undefined;
+      throw err;
+    }
+  };
   // harness ref → a session-ready harness: registry spec (a built-in like claude-code has none — undefined
   // is fine), {secretRef} env resolved from the tenant tiers, the model binding's connection env injected
   // (the same normalization as dispatch), then the concrete EvaluableHarness via makeHarness with
@@ -105,9 +130,7 @@ export function buildSandboxSessions(opts: {
           subject: string,
           ref: { id: string; version?: string },
         ): Promise<ResolvedSessionHarness | undefined> => {
-          const spec = harnesses
-            ? await harnesses.get(tenant, ref.id, ref.version ?? "latest").catch(() => undefined)
-            : undefined;
+          const spec = harnesses ? await registeredHarnessSpec(harnesses, tenant, ref) : undefined;
           const secrets = await scopedSecretsFor(tenant, subject);
           let resolved = spec ? resolveHarnessSecrets(spec, secrets) : undefined;
           if (resolved && models)
@@ -212,9 +235,7 @@ export function buildSandboxSessions(opts: {
           ref: { id: string; version?: string },
           o: { runtime?: string },
         ): Promise<ResolvedServiceConversation | undefined> => {
-          const spec = harnesses
-            ? await harnesses.get(tenant, ref.id, ref.version ?? "latest").catch(() => undefined)
-            : undefined;
+          const spec = harnesses ? await registeredHarnessSpec(harnesses, tenant, ref) : undefined;
           if (!spec || spec.kind !== "service") return undefined;
           if (o.runtime === undefined)
             throw new BadRequestError(
