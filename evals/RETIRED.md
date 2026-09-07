@@ -3,6 +3,32 @@
 A case is retired here, with its reason, rather than deleted quietly. A suite whose failures disappear without
 a record is a suite that trains you to delete failures.
 
+## `biome-write-is-not-evidence` — the answer is the tool's documented behaviour, not this repository's
+
+Asked how a formatter can exit 0 while lint still fails; asserted `unsafe`. That word is the name of a public
+distinction in the tool itself — its own documentation separates the fixes it applies from the ones it will
+not apply without being asked twice — so a model that has read that documentation answers correctly with no
+configuration at all, and a model reasoning from first principles about formatting versus linting does not.
+The case measured which of those two answers came back.
+
+Four drills say so, and the sequence is the evidence: RED, RED in the morning; GREEN, GREEN in the evening
+after the exam-paper leak below was closed. The leak can only push a drill toward GREEN, so it explains
+neither pair — what is left is model variance, which is the one thing a configuration eval must not be
+measuring. Retired on the two greens the rule asks for.
+
+⚠️ **It is the case CLAUDE.md cites**, and that citation stays true: the suite really did find that trap, by
+asking the question before anything was edited and watching the answer never reach the rule. Finding something
+once and measuring it now are different claims, which is the whole argument this file exists to make.
+
+**What a replacement would have to assert.** Not `unsafe` — the tool owns that word — but this repository's own
+conclusion from it: *running the formatter is not evidence; `pnpm lint` afterwards is.* That sentence is not
+derivable from the tool's documentation, and it is what the rule actually contributes. Whether an assertion can
+be written for it that a capable model does not satisfy by ordinary caution is the open question, and it is a
+new case rather than a repair of this one.
+
+**The suite is two cases now.** That is a coverage problem and it is stated as one: the answer is writing cases
+that measure, never keeping ones that do not.
+
 ## `provenance-at-the-source` — the assertion was satisfied by ordinary judgement, and the drill said so twice
 
 Asked whether a judge can be worked out by parsing a `judge:foo` metric name at read time; asserted

@@ -195,20 +195,34 @@ follow-up:  reopens with §3.
 ## 2026-09-07 — the suite, after the retirements
 
 ```
-drill:      removal (eval suite, --drill-all)
+drill:      removal (eval suite, --drill-all, then two re-drills)
 date:       2026-09-07
 ran by:     Claude (session closing the scan intents)
-scope:      all 3 cases, 0 inconclusive — every case actually executed
+scope:      3 cases at --drill-all, 0 inconclusive; one of them re-drilled twice
 observed:   3 RED  biome-write-is-not-evidence, sibling-doors-guard-alike,
                    skipped-scenario-is-not-passing
-            0 GREEN
-meaning:    every case in the suite now goes red without its lesson, and each
-            refusal names the artifact the answer stopped reaching for: /unsafe/,
-            /guard-siblings|baseline/, /EVERDICT_TRUST_DATABASE_URL/. That is
-            what the 2026-09-06 certificate could not say about any of its twelve.
-            It is a statement about THREE cases: the suite is small now, and a
-            suite that measures three things honestly is a different artifact
-            from one that appeared to measure fifteen.
+            then, hours later on an unrelated edit to one of its subjects,
+            biome-write-is-not-evidence drilled GREEN — twice, including after
+            the exam-paper leak below was closed. RED RED GREEN GREEN over one
+            case in one day. It is retired; the surviving two stand at RED.
+            0 GREEN among the survivors
+meaning:    every SURVIVING case goes red without its lesson, and each refusal
+            names the artifact the answer stopped reaching for:
+            /guard-siblings|baseline/ and /EVERDICT_TRUST_DATABASE_URL/ — both
+            names this repository invented. That is what the 2026-09-06
+            certificate could not say about any of its twelve. It is a statement
+            about TWO cases: the suite is small, and a suite that measures two
+            things honestly is a different artifact from one that appeared to
+            measure fifteen.
+            ⚠️ AND THE INSTRUMENT WAS LEAKING. The throwaway worktree is
+            `git worktree add HEAD`, so it carried `evals/cases/*.json` — each
+            naming its own assertion — into the tree the session under test can
+            Grep, while every case grants Read/Grep/Glob. The exclusivity check
+            exempts that directory from its LEAK SCAN, correctly, and the
+            exemption was silently doing a second job nobody argued for. The
+            worktree drops the case files now. It did not change this case's
+            verdict, which is what made the retirement decidable rather than a
+            guess about the leak.
 verdict:    the suite measures what it claims. Its COVERAGE is the open question,
             not its validity — the opposite of where this started.
 context:    eight cases were retired to get here. Seven on two green drills each

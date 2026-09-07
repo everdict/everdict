@@ -58,6 +58,29 @@ samples support is narrower and still damning enough: **seven cases went green t
 deliberately changed the question**, and those are gone. With the eighth retired for the reasons above the
 suite is three cases, and every remaining one has at least one red drill on record.
 
+## ⚠️ Part of it was not noise, and the mechanism was found the same day
+
+The throwaway worktree is `git worktree add --detach HEAD`, so it carried every tracked file — including
+`evals/cases/*.json`, each of which names its own `mustMatch` string and its own `neutralize` needles. Every
+case grants `Read,Grep,Glob`. So a session asked one of these questions could grep a word from the question,
+land on the case file that asks it, and read the assertion it was about to be graded against: the exam paper,
+in the room, in a file the drill does not touch because it is not a `subject`.
+
+The exclusivity check exempts `evals/cases/` from its leak scan and is right to — a case naming its own needles
+is not a copy of the lesson. That exemption was silently doing a SECOND job nobody argued for. The worktree
+drops the directory now.
+
+⚠️ **It did not explain the flips.** A leak can only push a drill toward GREEN, and the observed sequences —
+`provenance-at-the-source` RED then GREEN, `biome-write-is-not-evidence` RED RED then GREEN GREEN after the
+leak was closed — have reds the leak cannot account for and greens that survived closing it. Both cases were
+retired on what reading them showed instead: an assertion satisfied by any competent answer, and an assertion
+naming a distinction the TOOL documents rather than this repository. The flip was the symptom that made
+somebody look at each of them; neither retirement rests on it.
+
+The honest summary is narrower than "the drill is not deterministic" and more useful: **a drill's verdict
+varies when the case sits where the lesson and a capable model's default answer agree**, and the way to find
+that is to read the assertion and ask who owns the word it demands.
+
 ## The question this leaves open
 
 How many samples make a verdict? Two greens retired a case here, which is a judgement rather than a

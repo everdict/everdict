@@ -34,25 +34,33 @@ article's other question: when a new model is swapped in, does the agent still d
 
 ```json
 {
-  "id": "biome-write-is-not-evidence",
+  "id": "an-invented-example",
   "why": "the incident this comes from, in one line",
-  "subject": [".claude/rules/ci.md"],
-  "neutralize": ["biome check --write", "unsafe"],
+  "subject": [".claude/rules/<the rule that carries it>.md"],
+  "neutralize": ["<a phrase that appears only in that lesson>"],
   "allowedTools": "Read,Grep,Glob",
   "prompt": "what a person would actually say",
-  "expect": { "mustMatch": ["pnpm lint", "unsafe"], "mustNotMatch": [] }
+  "expect": { "mustMatch": ["<the artifact a lesson-carrying answer must name>"] }
 }
 ```
 
-**The suite is three cases, and that is the measured size rather than the intended one.** Two complete
+⚠️ **The example is INVENTED, and it has to be.** It named a real case twice — first one that had been
+retired, so a reader copied the shape of a case the suite no longer had, and then a live one, which
+`pnpm agent-evals` refused on the spot: this page carried both of that case's `neutralize` needles, so it
+became a file the drill does not remove the lesson from and the case would have certified nothing. A document
+about the cases is inside the tree the cases are asked in. The real ones are in `evals/cases/`.
+
+**The suite is two cases, and that is the measured size rather than the intended one.** Two complete
 drill-alls in one session retired eleven: four because the answer sat in live source, seven because a capable
 model answers them cold — including after each was rewritten as a counter-intuitive yes/no where the intuitive
-answer is wrong. A twelfth, `provenance-at-the-source`, went on 2026-09-07 for a reason no drill could have
-produced: its assertion matched any competent answer to its own question, and its `neutralize` named a HEADING
-while the sentence that answers the prompt stayed in the file — so neither of its two contradictory verdicts
-meant what it said. What survives shares one property: the correct answer names something **this repository
+answer is wrong. Two more went on 2026-09-07 for reasons no single drill could have
+produced. `provenance-at-the-source`: its assertion matched any competent answer to its own question, and its
+`neutralize` named a HEADING while the sentence that answers the prompt stayed in the file, so neither of its
+two contradictory verdicts meant what it said. `biome-write-is-not-evidence`: its assertion was the name of a
+public distinction in the tool itself, so its four drills — RED, RED, then GREEN, GREEN — were measuring which
+model answer came back rather than what the configuration carries. What survives shares one property: the correct answer names something **this repository
 invented and a model cannot derive** — an external tool's counter-intuitive exit behaviour, a private gate's
-name, a private environment variable. All three are certified RED under their own drills
+name, a private environment variable. Both are certified RED under their own drills
 (`docs/architecture/harness-drill-certificates.md`, 2026-09-07), which is a sentence the fifteen-case version
 could not say about twelve of them. The article's 20–50 baseline is a target for cases that MEASURE, and
 backfilling toward the number with cases that do not is how the suite got here — COVERAGE is the open question

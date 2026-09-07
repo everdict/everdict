@@ -268,6 +268,23 @@ const setup = () => {
   }
   for (const item of CONFIG.filter((i) => i !== "evals"))
     cpSync(path.join(root, item), path.join(wt, item), { recursive: true, force: true });
+  // ── THE CASE FILES CANNOT BE IN THE TREE THE CASE IS ASKED IN ──────────────────────────────────
+  //
+  // A worktree is `git worktree add HEAD`, so it carries every tracked file — `evals/cases/*.json` included.
+  // Each of those names its own `mustMatch` and its own `neutralize` needles, and every case grants
+  // `Read,Grep,Glob`. So a session asked one of these questions can grep a word from the question, land on
+  // the case file that asks it, and read the assertion string it is being graded against — the answer,
+  // handed over by the exam paper, from a file the drill does not touch because it is not a subject.
+  //
+  // That is the mechanism behind what `lessons/2026-09-07-the-drill-is-not-deterministic.md` recorded as
+  // noise: a drill whose verdict depends on whether the session happened to grep `evals/` flips between runs
+  // with nothing changed, which is exactly what was observed twice.
+  //
+  // The exclusivity check above deliberately exempts `evals/cases/` from the LEAK SCAN, and is right to —
+  // a case naming its own needles is not a copy of the lesson. The exemption was silently doing a second
+  // job it was never argued for: leaving those files where the session under test can read them. The runner
+  // reads its cases from the working tree (see CONFIG above), so nothing here needs them.
+  rmSync(path.join(wt, "evals", "cases"), { recursive: true, force: true });
 };
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
