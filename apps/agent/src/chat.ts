@@ -1413,9 +1413,17 @@ export async function runChat(
         // mid-run (a server connected later) is outside the scope this task was authorized under, not
         // silently inside it. The split states what the runtime actually enforces: reads "all" (the
         // executor posture — reads are the agent's senses), writes = the WRITE-capable tools present at
-        // start. The kernel adds its own control tools (todo, read_result, plan, wait) on top and those are
-        // all read-only, so they ride the reads posture; a future write-capable kernel tool would need
-        // listing in `writes` deliberately, and the test says so. Narrowing writes below "everything
+        // start.
+        //
+        // ⚠️ THE KERNEL'S OWN ADDITIONS ARE NOT IN THIS LIST, and this comment used to enumerate them wrongly:
+        // "todo, read_result, plan, wait … all read-only, so they ride the reads posture". The kernel also
+        // adds the spawn family, and it marks its cognition tools INTRINSIC rather than read-only — a
+        // stronger exemption that skips the object gate too. Which of them wear it is decided per tool in
+        // `loop.ts` (`spawnTools`), because `spawn_teammate` and `list_teammates` reach the host's session
+        // fleet and are governed like any other capability; `intrinsic-reach.counterexample.test.ts` pins
+        // that set, which is the test the old sentence claimed and did not have. A write-capable HOST tool
+        // added later still needs listing in `writes`, and it gets there by being in the registry at start.
+        // Narrowing writes below "everything
         // granted" is a product decision (teammate bounding) deferred with it. The domain guard runs at
         // this compose point — the only place the FULL envelope exists — so an unbudgeted envelope never
         // reaches the kernel.

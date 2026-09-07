@@ -668,15 +668,35 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
     if (opts.sendMessage) return await opts.sendMessage(to, message);
     return { ok: false, error: `No running background sub-agent "${to}" to message.` };
   };
+  // Kernel cognition tools are INTRINSIC: exempt from the envelope's reads/writes scope (an evidence-only
+  // verifier still keeps a todo list and spawns its sub-checks), still refusable via `forbidden`.
+  const intrinsic = (t: ToolDefinition): ToolDefinition => ({ ...t, intrinsic: true });
+  // ⚠️ INTRINSIC IS A CLAIM ABOUT REACH, AND IT IS DECIDED PER TOOL. It exempts a tool from BOTH envelope
+  // guards — `authorizeToolInvocation` returns allowed, and the object gate skips it entirely — so it may
+  // only be worn by a tool that addresses nothing outside this task. Until 2026-09-07 the whole array was
+  // wrapped with `.map(intrinsic)`, which handed that exemption to the two HOST-SEAM tools as well:
+  // `spawn_teammate` creates another agent session in the workspace's fleet and `list_teammates` enumerates
+  // one, neither of which is this agent thinking. No lane wires those hooks together with an envelope today,
+  // so nothing escaped — what existed was a capability that would have been ungoverned the moment one did,
+  // and a comment at the compose point in `chat.ts` that enumerated the kernel's tools as "todo, read_result,
+  // plan, wait … all read-only". Found by `pnpm scan` over files nobody had touched.
   const spawnTools: ToolDefinition[] =
     depth < MAX_AGENT_DEPTH
       ? [
-          buildSpawnAgentTool(
-            runNestedSubagent,
-            launchBackground,
-            opts.subagentTypes?.map((t) => ({ name: t.name, description: t.description })),
+          // Cognition: a nested sub-agent inherits this task's envelope (see `runNestedSubagent`), so a
+          // scoped parent cannot spawn an unscoped child.
+          intrinsic(
+            buildSpawnAgentTool(
+              runNestedSubagent,
+              launchBackground,
+              opts.subagentTypes?.map((t) => ({ name: t.name, description: t.description })),
+            ),
           ),
-          buildSendMessageTool(deliverMessage),
+          // …and cognition only while it can reach nothing but THIS run's own background sub-agents, which
+          // carry the same envelope. With the host seam wired it also delivers to a teammate or another
+          // session — an effect outside the task — so it stops being intrinsic and rides the envelope's read
+          // list like any other capability. One tool, two reaches; the exemption follows the reach.
+          opts.sendMessage ? buildSendMessageTool(deliverMessage) : intrinsic(buildSendMessageTool(deliverMessage)),
           ...(opts.spawnTeammate ? [buildSpawnTeammateTool(opts.spawnTeammate)] : []),
           ...(opts.listTeammates ? [buildListTeammatesTool(opts.listTeammates)] : []),
         ]
@@ -742,9 +762,6 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           }),
         ]
       : [];
-  // Kernel cognition tools are INTRINSIC: exempt from the envelope's reads/writes scope (an evidence-only
-  // verifier still keeps a todo list and spawns its sub-checks), still refusable via `forbidden`.
-  const intrinsic = (t: ToolDefinition): ToolDefinition => ({ ...t, intrinsic: true });
   const registry = new ToolRegistry([
     ...opts.registry.list(),
     intrinsic(
@@ -770,7 +787,7 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
       ),
     ),
     intrinsic(buildReadResultTool(resultStore)),
-    ...spawnTools.map(intrinsic),
+    ...spawnTools,
     ...planTools.map(intrinsic),
     ...structuredTools.map(intrinsic),
     ...waitTools.map(intrinsic),
