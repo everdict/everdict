@@ -289,6 +289,19 @@ See skill `ci`.
   `pnpm guardrails` refuses a settings file without it. Until 2026-09-06 the sink was a second terminal
   somebody had to remember, and the ledger held two probe lines from the day it was written. Recipe and
   signal names in `scripts/telemetry/README.md`; see `docs/architecture/harness-observability.md`.
+- **`pnpm telemetry-report` reads the sink back, and `pnpm findings` grades what the reviewer found.** Two
+  measurements this harness collected and never queried. The sink filled with a thousand payloads while
+  nothing asked it anything — a number nobody can produce is not instrumented — so the reader answers the
+  three session indicators (peak concurrent sessions, active seconds against wall clock, tool decisions by
+  verdict) in one command, refuses an empty ledger, and prints NO identity: the payloads carry an email, a
+  user id and an org id, and none of the three needs them. ⚠️ **Zero tool denials there is not "nothing is
+  guarded"** — that stream sees the tool layer where the allow list pre-approves the inner loop; the refusals
+  that matter are the push gate's, with an arm, in `.git/everdict-gate-log.jsonl`.
+  `pnpm findings` closes the other gap: every control here could show what it refused EXCEPT the reviewer,
+  whose findings nobody graded. `findings/DISPOSITIONS.md` is COMMITTED (the reports are this checkout's
+  operations; the judgement on them is the project's) and holds one line per finding — `real`,
+  `false-positive`, or `carried` (real, deliberately deferred to an intent, and it counts toward precision
+  because carrying is not disagreeing). An ungraded corpus reports UNKNOWN, never 100%.
 - **`pnpm guardrails` checks the gate that every other gate is enforced BY.** `pre-push-gate.mjs` holds both
   ledgers, it is wired in `.claude/settings.json` — an editable file in the tree — and NOTHING READ THAT
   WIRING: `grep -l settings.json scripts/check-*.mjs` returned nothing. What stood in for a check was this

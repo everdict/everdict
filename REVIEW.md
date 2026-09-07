@@ -48,6 +48,21 @@ produce the wrong output. "This looks fragile" is not a finding. If a counterexa
 and rank it lower — an unstated counterexample is a suspicion, and suspicions belong in the summary rather
 than in the list.
 
+## A finding is graded after it is read
+
+Findings rank and inform, and the gate never asks whether one was clean — but an ungraded finding leaves the
+reviewer's precision unmeasured, and the article names that as this play's counter-metric. So after a review
+is triaged, each Important finding gets one line in `findings/DISPOSITIONS.md`:
+
+```sh
+pnpm findings --record --source review --key <head12> --file <path> \
+  --verdict real|false-positive|carried --why "<what made it so>"
+```
+
+`carried` means real and deliberately not fixed here — an intent holds it — and it counts toward precision,
+because carrying a finding is not disagreeing with it. `pnpm findings` reports the precision and lists what is
+still ungraded; an ungraded corpus reads **UNKNOWN**, never 100%.
+
 ## Reading the diff is the last pass, not the first
 
 The four passes above are questions about the change's surroundings. Answer them before reading the diff

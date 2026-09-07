@@ -36,6 +36,25 @@ Deliberately **not** set: `OTEL_LOG_USER_PROMPTS`, `OTEL_LOG_ASSISTANT_RESPONSES
 This is a public repository and the sink writes to a plain file; the indicators below need none of that
 content, and turning it on would put conversation text on disk for a measurement that does not use it.
 
+## Reading it back
+
+```sh
+pnpm telemetry-report          # the three indicators, for a person
+pnpm telemetry-report --json   # one object, for a control band
+pnpm telemetry-report --since 2026-09-01
+```
+
+Collecting without reading is where this sat for a day: over a thousand payloads accumulated and nothing
+queried them, which is the same as not being instrumented — the article's test is that someone who did not
+build the harness produces the number in one command. The reader answers all three indicators below, refuses
+an empty ledger, and prints **no identity**: the payloads carry `user.email`, `user.id`, `user.account_uuid`
+and an organization id because the exporter puts them there, and none of the three indicators needs any of it.
+
+⚠️ **Zero tool denials here does not mean nothing is guarded.** This stream sees the TOOL layer, where the
+repository's allow list pre-approves the inner loop, so `decision=accept` is the expected shape. The refusals
+that matter are the push gate's, recorded with an arm in `.git/everdict-gate-log.jsonl`. The report says so
+where it would otherwise mislead.
+
 ## What each indicator reads
 
 | Indicator | Signal |

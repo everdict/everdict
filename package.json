@@ -37,6 +37,8 @@
     "python": "node scripts/check-python.mjs",
     "swallowed-reads": "node scripts/check-swallowed-reads.mjs",
     "telemetry": "node scripts/telemetry/otlp-sink.mjs",
+    "telemetry-report": "node scripts/telemetry/report.mjs",
+    "findings": "node scripts/findings.mjs",
     "agent-evals": "node evals/run.mjs",
     "constructed-casts": "node scripts/check-constructed-casts.mjs",
     "grader-collapse": "node scripts/check-grader-collapse.mjs",
