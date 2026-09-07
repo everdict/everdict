@@ -39,7 +39,7 @@ export class RepoEnvironment implements Environment<RepoSnapshot> {
       await compute.exec(`git init -q && git add -A && ${GIT_ID} commit -q -m seed --allow-empty`, { cwd: WORK });
     } else {
       // remote git. If private, authenticate with gitToken (resolved from Connected accounts) — http.extraheader is only needed for clone/fetch.
-      const auth = this.gitToken ? { env: gitAuthEnv(this.gitToken) } : {};
+      const auth = this.gitToken ? { env: gitAuthEnv(this.gitToken, src.git) } : {};
       await compute.exec(`git clone --depth 1 ${shq(src.git)} ${WORK}`, auth);
       await compute.exec(`git checkout ${shq(src.ref)}`, { cwd: WORK });
     }

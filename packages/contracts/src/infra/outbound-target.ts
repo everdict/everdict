@@ -22,14 +22,41 @@ const PRIVATE_HOST = /^(localhost|.*\.local|.*\.internal)$/i;
 const PRIVATE_IPV4 =
   /^(10\.|127\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/;
 
+/**
+ * An IPv4-mapped IPv6 address carries a v4 address inside a v6 spelling, in either of two forms:
+ * `::ffff:169.254.169.254` and `::ffff:a9fe:a9fe` are the same host. Returns the dotted v4 it carries, or
+ * undefined when this is not that shape.
+ *
+ * ⚠️ WITHOUT THIS THE GUARD ADMITTED THE METADATA SERVICE. `isPrivateAddress` tested dotted-decimal v4 plus
+ * the literal prefixes `::1`, `fc`, `fd`, `fe80`, and `::ffff:169.254.169.254` is none of them — it does not
+ * start dotted-decimal and does not begin with those prefixes — so the predicate returned false and the
+ * address read as PUBLIC. Both `refuseUnsafeOutboundUrl` and `assertPublicOutboundTarget` consult this one
+ * predicate, so a destination spelled that way passed both checks. Found by `pnpm scan` over files nobody had
+ * touched, and it is the reason every v4 rule below must see the unwrapped address rather than the spelling.
+ */
+function mappedIpv4(bare: string): string | undefined {
+  const dotted = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(bare)?.[1];
+  if (dotted !== undefined) return dotted;
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(bare);
+  const highGroup = hex?.[1];
+  const lowGroup = hex?.[2];
+  if (highGroup === undefined || lowGroup === undefined) return undefined;
+  const high = Number.parseInt(highGroup, 16);
+  const low = Number.parseInt(lowGroup, 16);
+  return `${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`;
+}
+
 // Is this ADDRESS one we refuse to dial? The literal-hostname check and the resolved-address check ask the
 // same question of different answers, which is the point: a name is not a destination.
 export function isPrivateAddress(host: string): boolean {
   const bare = host.replace(/^\[|\]$/g, "").toLowerCase();
+  // The v4 rules are asked of the address, not of its spelling.
+  const candidate = mappedIpv4(bare) ?? bare;
   return (
-    PRIVATE_HOST.test(bare) ||
-    PRIVATE_IPV4.test(bare) ||
+    PRIVATE_HOST.test(candidate) ||
+    PRIVATE_IPV4.test(candidate) ||
     bare === "::1" ||
+    bare === "::" ||
     bare.startsWith("fc") ||
     bare.startsWith("fd") ||
     bare.startsWith("fe80")

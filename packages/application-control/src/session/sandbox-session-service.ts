@@ -1002,7 +1002,7 @@ export class SandboxSessionService {
     const token = await git.writeToken(actor.tenant, remoteUrl);
     const push = await handle.exec(`git push ${shq(remote)} HEAD:refs/heads/${shq(branch)}`, {
       cwd: dir,
-      env: gitAuthEnv(token),
+      env: gitAuthEnv(token, remoteUrl),
       timeoutSec: GIT_TIMEOUT_SEC,
     });
     if (push.exitCode !== 0)
@@ -1510,7 +1510,7 @@ export class SandboxSessionService {
   ): Promise<{ git: string; ref?: string; dir: string }> {
     const dir = repo.dir ?? DEFAULT_REPO_DIR;
     const token = await this.deps.git?.readToken(tenant, repo.git).catch(() => undefined);
-    const env = token !== undefined ? gitAuthEnv(token) : {};
+    const env = token !== undefined ? gitAuthEnv(token, repo.git) : {};
     const fail = (step: string, result: { stdout: string; stderr: string }): never => {
       throw new UpstreamError(
         "UPSTREAM_ERROR",

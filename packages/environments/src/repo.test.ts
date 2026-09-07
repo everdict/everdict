@@ -33,7 +33,7 @@ describe("RepoEnvironment", () => {
     expect(clone?.opts?.env).toBeUndefined(); // no auth header
   });
 
-  it("private git (gitToken): injects http.extraheader via env and the token never lands in argv", async () => {
+  it("private git (gitToken): scopes http.extraheader to the remote and the token never lands in argv", async () => {
     const { calls, compute } = recorder();
     await new RepoEnvironment({ gitToken: "gho_secret_tok" }).seed(compute, {
       kind: "repo",
@@ -42,9 +42,15 @@ describe("RepoEnvironment", () => {
     const clone = calls.find((c) => c.cmd.includes("git clone"));
     // the token is never exposed on the command line (argv) (ps/log safe).
     expect(clone?.cmd).not.toContain("gho_secret_tok");
-    // auth goes via env (GIT_CONFIG_* → http.extraheader).
+    // auth goes via env (GIT_CONFIG_* → http.<url>.extraheader).
     expect(clone?.opts?.env?.GIT_CONFIG_VALUE_0).toBe("Authorization: Bearer gho_secret_tok");
-    expect(clone?.opts?.env?.GIT_CONFIG_KEY_0).toBe("http.extraheader");
+    // ⚠️ SCOPED, and this assertion used to read `http.extraheader` with no URL — the spelling git applies to
+    // EVERY host the process talks to. A clone whose tree carries a `.gitmodules` pointing elsewhere, or a
+    // host answering with a cross-host 30x, therefore received a live installation token for somebody else's
+    // repositories. `gitAuthEnv` was scoped in `a175f871` and this sibling kept asserting the broadcast form,
+    // which is the one-lane-only law: the change fixed the writer and left a reader still certifying the old
+    // behaviour. The trailing `.git` is normalised away so the same repository written either way is one scope.
+    expect(clone?.opts?.env?.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/private.extraheader");
     expect(clone?.opts?.env?.GIT_TERMINAL_PROMPT).toBe("0");
   });
 

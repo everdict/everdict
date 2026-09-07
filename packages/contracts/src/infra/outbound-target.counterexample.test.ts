@@ -32,6 +32,43 @@ describe("an outbound destination is judged before it is dialled", () => {
     expect(() => refuseUnsafeOutboundUrl("https://10.0.0.5/hook", "run webhook")).toThrow(/private address/);
   });
 
+  // ⚠️ THE SPELLING THIS TEST'S OWN NAME PROMISED AND DID NOT COVER. `isPrivateAddress` lowercased, stripped
+  // brackets and then tested dotted-decimal IPv4 plus the literal prefixes `::1`, `fc`, `fd`, `fe80`. An
+  // IPv4-mapped IPv6 address is none of those: `::ffff:169.254.169.254` does not start dotted-decimal and does
+  // not begin with those prefixes, so the predicate returned false and the metadata service read as PUBLIC.
+  // Both `refuseUnsafeOutboundUrl` (the literal check) and `assertPublicOutboundTarget` (the resolved-address
+  // check) consult that one predicate, so a destination spelled this way passed both. Found by `pnpm scan`
+  // over 291 files nobody had touched.
+  //
+  // Both spellings are here because they are the same address: the dotted form and the hex form
+  // (`a9fe:a9fe` is `169.254.169.254`), and a guard that catches one and not the other is the same hole in a
+  // narrower coat.
+  it("refuses an IPv4-mapped IPv6 address, in either spelling", async () => {
+    expect(isPrivateAddress("::ffff:169.254.169.254")).toBe(true);
+    expect(isPrivateAddress("::ffff:a9fe:a9fe")).toBe(true);
+    expect(isPrivateAddress("::ffff:10.0.0.5")).toBe(true);
+    expect(isPrivateAddress("::ffff:127.0.0.1")).toBe(true);
+    // The URL parser normalises the dotted form to the hex one, so the literal check meets `::ffff:a9fe:a9fe`
+    // whatever the caller wrote — which is exactly why both spellings have to be refused.
+    expect(() => refuseUnsafeOutboundUrl("https://[::ffff:169.254.169.254]/latest/meta-data/", "run webhook")).toThrow(
+      /private address/,
+    );
+    // A resolver answering with the mapped form is the same reach by another route.
+    await expect(
+      assertPublicOutboundTarget(new URL("https://example.test/hook"), "run webhook", async () => [
+        "::ffff:169.254.169.254",
+      ]),
+    ).rejects.toThrow(/private address/);
+    // And a genuine public address stays public in the same spelling — the repair must not swallow the lane.
+    expect(isPrivateAddress("::ffff:93.184.216.34")).toBe(false);
+    expect(isPrivateAddress("93.184.216.34")).toBe(false);
+    await expect(
+      assertPublicOutboundTarget(new URL("https://example.test/hook"), "run webhook", async () => [
+        "::ffff:93.184.216.34",
+      ]),
+    ).resolves.toBeInstanceOf(URL);
+  });
+
   it("lets an ordinary public destination through, and names the lane when it does not", () => {
     expect(refuseUnsafeOutboundUrl("https://hooks.example.com/cb", "run webhook").hostname).toBe("hooks.example.com");
     try {
