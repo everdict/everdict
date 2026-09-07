@@ -145,10 +145,19 @@ if (reports.length === 0) {
 }
 
 // ── match dispositions to findings ───────────────────────────────────────────────────────────────
+//
+// ⚠️ THE LEDGER'S UNIT IS (source, key, FILE), AND SO IS THIS COUNT. Two findings a reviewer raised about the
+// same file in the same run are ONE judgement — there is no way to grade them apart, because the disposition
+// line names a file. Counting the reports instead made the header read "64 reported · 63 graded" with an
+// EMPTY ungraded list: a reader goes looking for the one nobody weighed and there isn't one. A measurement
+// whose two numbers are in different units is a measurement that will be re-derived by hand, which is the
+// state this reader exists to end.
 const graded = readLedger();
 const keyOf = (x) => `${x.source}@${x.key}:${x.file}`;
 const gradedSet = new Map(graded.map((g) => [keyOf(g), g]));
-const ungraded = reports.filter((r) => !gradedSet.has(keyOf(r)));
+const weighable = [...new Map(reports.map((r) => [keyOf(r), r])).values()];
+const collapsed = reports.length - weighable.length;
+const ungraded = weighable.filter((r) => !gradedSet.has(keyOf(r)));
 const real = graded.filter((g) => g.verdict === "real").length;
 const carried = graded.filter((g) => g.verdict === "carried").length;
 const wrong = graded.filter((g) => g.verdict === "false-positive").length;
@@ -158,7 +167,8 @@ if (opts.json) {
   console.log(
     JSON.stringify({
       at: new Date().toISOString(),
-      reported: reports.length,
+      reported: weighable.length,
+      findings: reports.length,
       graded: graded.length,
       ungraded: ungraded.length,
       real,
@@ -170,7 +180,9 @@ if (opts.json) {
   process.exit(0);
 }
 
-console.log(`▶ findings · ${reports.length} weighable finding(s) reported · ${graded.length} graded`);
+console.log(
+  `▶ findings · ${weighable.length} weighable finding(s) reported · ${graded.length} graded${collapsed > 0 ? ` (${reports.length} raised; ${collapsed} share a file with another and are one judgement)` : ""}`,
+);
 console.log(`  ledger: ${path.relative(root, LEDGER)}${existsSync(LEDGER) ? "" : " (not started)"}`);
 console.log("");
 if (precision === undefined) {

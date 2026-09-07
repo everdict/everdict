@@ -138,7 +138,8 @@ export const envValueSchema = z.union([z.string(), z.object({ secretRef: z.strin
 export type EnvValue = z.infer<typeof envValueSchema>
 
 // env value display text — a literal as-is, a secret reference as "name · secret" (the value is never exposed).
-// secretLabel = the secret suffix (localized — the caller passes t('secretLabel'); the default is Korean).
+// secretLabel = the secret suffix (localized — the caller passes t('secretLabel'); the default is the English
+// fallback for a caller that has no translator, which is what the parameter below actually says).
 export const envValueText = (v: EnvValue, secretLabel: string = 'secret'): string =>
   typeof v === 'string' ? v : `${v.secretRef} · ${secretLabel}`
 

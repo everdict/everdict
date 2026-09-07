@@ -2,7 +2,7 @@
 
 Author: pnpm scan (scope `adapters`, sonnet) — verified by hand before filing. Status: shipped
 
-Shipped: d7077903
+Shipped: 08e473a8
 
 Design: none — two named defects in one adapter, both with the source read and the failing input reproduced
 against a real Postgres.
@@ -90,7 +90,7 @@ without anybody remembering that file exists, and a table dropped yesterday cann
 derived set REFUSES rather than removing the workspace row: an enumeration that answered nothing is not a
 workspace with no data (rule `protocol` L5).
 
-**The second finding was real** (`d7077903`). `PgCapabilityStore.register`'s SELECT-then-INSERT let two
+**The second finding was real** (`08e473a8`). `PgCapabilityStore.register`'s SELECT-then-INSERT let two
 concurrent registrations of one new version both insert; the loser's unique violation escaped as a raw driver
 error, so an idempotent re-register became a 500 and a genuine content conflict arrived as a driver error
 rather than this store's 409. `ON CONFLICT … DO NOTHING RETURNING 1` moves the decision to the statement the

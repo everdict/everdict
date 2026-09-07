@@ -2,7 +2,7 @@
 
 Author: Claude (agent, at the maintainer's request during a review of main). Status: shipped
 
-Shipped: 06fee6c2
+Shipped: 8444238f
 
 Design: none — five named files, each decided by reading what it imports.
 
