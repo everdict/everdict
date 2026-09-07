@@ -1,6 +1,10 @@
 # Intent: a producer's span attribute mints a platform-plane record
 
-Author: pnpm scan (scope `domain`, sonnet, 78c483f3) — verified by hand before filing. Status: draft
+Author: pnpm scan (scope `domain`, sonnet, 78c483f3) — verified by hand before filing. Status: shipped
+
+Shipped: 2c15f8d4
+
+Design: none — one named defect with the source read and the failing input stated.
 
 ## Problem
 
@@ -55,3 +59,21 @@ count llm_calls and cost, and the trajectory store.
 - Should `pnpm untrusted-ingress` grow a second question, or is "an attribute that selects a projection" a
   different check? The first three instances were schema choices at doors; this one is not, and a check that
   tries to be both may be neither.
+
+## Shipped
+
+Shipped in `2c15f8d4`, stripped at the pull boundary rather than validated: for a pulled trace the platform said
+nothing about placement, so silence is the honest answer.
+
+**Narrower than "strip everything the platform authors", and the reason is in the code.** Only the plane
+goes. `everdict.cost.usd` is the other candidate — its definition leaves cost to the platform and the graders
+read it — but on the pull path a tenant's own observability platform is a plausible author of a price, which
+is not true of a placement plane the platform alone assigns. Asserting either way there would freeze a guess,
+so the test says so and leaves it.
+
+**And the first counterexample was wrong in an instructive way.** It asserted the producer's `k8s.node.name`
+was absent from the events entirely — which the repair does not do and should not: a producer keeping its own
+attributes on its own span is ordinary, and stripping them would be editing the trace we were asked to read.
+The defect was PROMOTION, those values being lifted into the platform's `unit`/`node` fields on a record the
+platform authors. The assertion now names that, which is also the honest description of what was fixed.
+
