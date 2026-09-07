@@ -16,6 +16,17 @@
 // So: a raw producer-document schema may not be referenced outside its own declaration and the allowlist
 // below. Every entry states WHY that site is not an ingress — the honest reasons are "it decodes bytes WE
 // wrote" and "it is the declaration itself"; anything else is a door.
+// The schema names this check pairs. Both halves must be live: a producer-document schema whose
+// untrusted variant was deleted would leave every door reading the trusted one again.
+export const WATCHES = [
+  "TraceEventSchema",
+  "TraceSpanSchema",
+  "CaseResultSchema",
+  "UntrustedTraceEventSchema",
+  "UntrustedTraceSpanSchema",
+  "UntrustedCaseResultSchema",
+];
+
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";

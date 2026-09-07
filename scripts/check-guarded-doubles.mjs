@@ -24,6 +24,7 @@
 // decides from its inputs) is fine and is what this guard is asking for.
 //
 // Reads SOURCE only (no build, no deps), prints every violation, exits 1.
+// watches: nothing — matches the shape of a hand-written double.
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";

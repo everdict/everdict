@@ -3,11 +3,13 @@ import type {
   CampaignFrameFromIssue,
   CampaignRound,
   CandidateSource,
+  CaseResult,
   DelegationBrief,
   DomainFact,
   EvolutionCampaignRecord,
   ReadResult,
   RoundEvidence,
+  VerdictPolicy,
 } from "@everdict/contracts";
 import {
   type AdoptionOperation,
@@ -244,10 +246,20 @@ export interface CampaignServiceDeps {
     // The port's own shape: `get(id)` returns the record, and the per-case rows are the heavy `scorecard`
     // detail that only `get` carries (`list` omits them). Tenant scoping is the caller's, as everywhere else
     // on this store — `verifyExamControl` checks it before reading anything out.
-    get(
-      id: string,
-    ): Promise<
-      { tenant: string; scorecard?: { results: ReadonlyArray<{ caseId?: string; scores: Score[] }> } } | undefined
+    //
+    // `manifest.verdictPolicy` and the rows' `failure` are here because `examProofOf` asks the PLATFORM's
+    // pass question (`caseVerdict`) rather than its own: that decision reads the batch's stamped policy, and
+    // a case killed before it produced an outcome has no verdict to prove anything with. A port narrowed to
+    // `{caseId, scores}` is what made the second opinion the convenient one to write.
+    get(id: string): Promise<
+      | {
+          tenant: string;
+          manifest?: { verdictPolicy?: VerdictPolicy };
+          scorecard?: {
+            results: ReadonlyArray<{ caseId?: string; scores: Score[]; failure?: CaseResult["failure"] }>;
+          };
+        }
+      | undefined
     >;
   };
   // THE diff predicate (the ScorecardService facade's diffSnapshot) — policy-resolved transitions, trial
@@ -587,20 +599,43 @@ export class CampaignService {
     tenant: string,
     record: EvolutionCampaignRecord,
     last: CampaignRound | undefined,
-  ): Promise<{ inherited?: Array<{ campaignId: string; findings: string[] }> }> {
+  ): Promise<{ inherited?: Array<{ campaignId: string; findings: string[] }>; inheritedUnavailable?: string }> {
     const wanted: string[] = [];
     if (record.frame.continues !== undefined) wanted.push(record.frame.continues);
     for (const id of last?.informedBy ?? []) if (!wanted.includes(id)) wanted.push(id);
     if (wanted.length === 0) return {};
 
     const inherited: Array<{ campaignId: string; findings: string[] }> = [];
+    const unreadable: string[] = [];
     let budget = MAX_INHERITED_FINDINGS;
     for (const id of wanted.slice(0, MAX_INHERITED_SOURCES)) {
       if (budget <= 0) break;
-      // A pointer to a campaign this workspace cannot read is not an error here: the brief is advice, and a
-      // handoff that fails because one ancestor is gone is worse than one that carries less. The chain's
-      // HONESTY is enforced at open (`assertChainIsHonest`), which is where a refusal belongs.
-      const source = await this.deps.store.get(tenant, id).catch(() => undefined);
+      // ⚠️ GONE AND UNREADABLE ARE DIFFERENT ANSWERS, AND THIS LINE USED TO SPELL THEM THE SAME.
+      //
+      // A pointer to a campaign that is not there is not an error: the brief is advice, and a handoff that
+      // fails because one ancestor was deleted is worse than one that carries less. The chain's HONESTY is
+      // enforced at open (`assertChainIsHonest`), which is where a refusal belongs. That argument is sound,
+      // and it is an argument about ABSENCE — the port already says so, returning `undefined` for a record
+      // this workspace does not have and THROWING when the read itself did not happen.
+      //
+      // `.catch(() => undefined)` erased that distinction, which rule `protocol` L2 bans by name. A store
+      // outage then produced a brief missing everything the chain established, and the delegate was told
+      // nothing: it reads as "the earlier walks found nothing worth carrying", which is the one reading that
+      // makes it repeat them. The third value is CARRIED, exactly as `evidenceUnavailable` carries it forty
+      // lines above — same brief, same law, and for one release only one of the two obeyed it.
+      let source: EvolutionCampaignRecord | undefined;
+      try {
+        source = await this.deps.store.get(tenant, id);
+      } catch {
+        // ⚠️ THIS ID NEVER MET THE STORE, SO NOTHING HAS VOUCHED FOR IT. `informedBy` is
+        // `z.string().min(1).max(200)` × 50 — ten thousand characters of caller-authored free text — and the
+        // success path above is only safe because a string that RESOLVED is one the store had. An unreadable
+        // id has no such constraint, and it renders into prose an agent acts on. So it is bounded and
+        // flattened here: whitespace collapsed so it cannot become its own paragraph, and short enough to
+        // read as a label rather than as an instruction.
+        unreadable.push(id.replace(/\s+/g, " ").trim().slice(0, 60));
+        continue;
+      }
       if (source === undefined) continue;
       const findings = source.rounds
         .slice()
@@ -610,9 +645,21 @@ export class CampaignService {
         .slice(0, budget);
       if (findings.length === 0) continue;
       budget -= findings.length;
-      inherited.push({ campaignId: id, findings });
+      // The label is the RECORD's id, never the caller's string. They are equal whenever the read succeeded,
+      // and equality is not the point: `informedBy` is caller-authored free text and this line renders into
+      // a brief a delegate reads, so the id that identifies a source is born at the source (L3).
+      inherited.push({ campaignId: source.id, findings });
     }
-    return inherited.length > 0 ? { inherited } : {};
+    return {
+      ...(inherited.length > 0 ? { inherited } : {}),
+      ...(unreadable.length > 0
+        ? {
+            inheritedUnavailable: `${unreadable.length} earlier walk(s) could not be read (${unreadable
+              .slice(0, 5)
+              .join(", ")}${unreadable.length > 5 ? ", …" : ""})`,
+          }
+        : {}),
+    };
   }
 
   // ── A CHAIN IS ONE EXAM SPENT ACROSS SEVERAL CAMPAIGNS ──────────────────────────────────────────
@@ -798,6 +845,10 @@ export class CampaignService {
     const proof = examProofOf(
       frame.scenarios.map((sc) => sc.id),
       card.scorecard,
+      // The batch's OWN stamped policy, not the built-in ladder. A composed policy lives nowhere else, and
+      // reading the proof under different rules than the batch was judged under is a second opinion wearing
+      // the record's name.
+      card.manifest?.verdictPolicy,
     );
     if (proof.proven.length === 0)
       throw new BadRequestError(

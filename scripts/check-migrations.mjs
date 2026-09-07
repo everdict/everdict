@@ -9,6 +9,7 @@
 // So: numbers must be unique from here on. Pairs that ALREADY shipped are grandfathered by name — they are
 // applied everywhere and an applied migration is never edited (see .claude/rules/db.md), so the only honest
 // treatment is to record them and refuse any NEW one.
+// watches: nothing — reads migration filenames and their preflight documents.
 import { readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

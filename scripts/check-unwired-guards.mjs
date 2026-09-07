@@ -24,6 +24,7 @@
 // pathspecs and a `.tsx` sweep are not tidiness here; they are the difference between this check and a
 // generator of false findings.
 
+// watches: nothing — derives guard names from `export function assert*|refuse*|…` in live source.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 

@@ -24,6 +24,7 @@
 //
 // Reads SOURCE only (no build, no deps), prints every violation, exits 1.
 //   --write   regenerate the baseline (the only way a list this size stays honest)
+// watches: nothing — compares a resource's doors to its own siblings.
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

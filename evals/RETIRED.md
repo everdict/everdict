@@ -1,0 +1,129 @@
+# Retired cases
+
+A case is retired here, with its reason, rather than deleted quietly. A suite whose failures disappear without
+a record is a suite that trains you to delete failures.
+
+## `authz-optional-reflex` — the shape it tested no longer exists
+
+Asked the agent to pass a resource-derived `teamId` to `gate(principal, action, teamId)`. The agent refused
+the premise and was right: `0212_drop_team_axis.sql` removed the team ownership axis, `gate` takes two
+arguments, and `teamId` appears nowhere in live `packages/`/`apps/` source outside an unrelated Mattermost
+client. The case was written from the `authz-optional` bullet in `.claude/rules/ci.md`, which still teaches
+the law entirely through that deleted vocabulary.
+
+Replaced by `untrusted-ingress-authorship`, which tests a live law over live symbols.
+
+**It left a finding worth keeping:** `scripts/check-authz-optional.mjs` watches four names —
+`gate`, `authorize`, `assertTeamVisible`, `assertEntityVisible`. The last two have **zero live call sites**
+(`assertEntityVisible`'s only occurrence is inside a comment). The check is not dead — `gate`/`authorize` have
+425 call sites — but half its watch list names functions nothing calls, and its stated rationale describes a
+call this repository can no longer make. That is the shape `convention-harness` exists to catch one layer up.
+
+## `review-first` — already guarded structurally, and the drill said so
+
+Asked how a review is approached here; asserted the answer names skill `code-review`. It passed, and then
+**failed its removal drill twice**: with the CLAUDE.md paragraph removed it still passed, and with the skill's
+frontmatter `description` removed as well it still passed. The reason is that a skill *directory named*
+`code-review` is enough — the assertion was satisfied by the skill's existence, not by anything the
+configuration says.
+
+Making it drill-clean would have meant asserting on content only the skill body carries, and neutralizing that
+body wholesale — which proves only that an empty file steers nothing. The behaviour is real, but what carries
+it is structural, and `pnpm convention-harness` already refuses a skill that loses the description the model
+matches on.
+
+**The lesson, which cost two drills:** not every convention needs an eval. A convention a structural check
+already guards should stay with the structural check, and tuning assertions until a drill goes green
+manufactures exactly the certificate this suite exists to refuse.
+
+## `scanner-blind-to-composition-root` — recall, not steering
+
+Asked whether `apps/*/src/**/*.ts` sweeps every TypeScript source file under the apps. The recorded lesson is
+that it does **not** match a file directly under `src/`, so `main.ts`, `server.ts` and `mcp.ts` — the
+composition roots where wiring lives — were invisible to a scanner's first draft, and a correctly-wired guard
+was reported unwired.
+
+The answer was substantively good and about something else: it caught the missing `.tsx` files and the config
+files outside `src/`, and stated that the glob covers "every `.ts` file under each app's `src/`" — which is the
+exact misconception. So the case did detect a real gap in what the agent reaches for.
+
+Retired anyway. The lesson is a **scanner-implementation detail** that lives correctly in that scanner's own
+header and in rule `ci`, where it is injected at the moment somebody edits such a file. Moving it into
+`CLAUDE.md` to make the case pass would be the third such move in one session, and the first two were
+disciplines (a false-green lint gate, a skipped certification) while this is a fact about one glob. An eval
+that asserts a cold session recalls a technical detail is testing recall; this suite is for whether the
+configuration STEERS.
+
+The distinction is the useful part: a lesson belongs in the always-loaded layer when acting on the wrong belief
+does damage before anyone reads a rule. Here the rule arrives exactly when it is needed — at the keyboard, in
+the file being edited.
+
+## `madge-exit-code` — the lesson lives in the check that enforces it, and the assertion is generic
+
+Asked an agent to sketch a circular-import check that shells out to madge and fails on cycles; asserted the
+answer names a non-zero exit. It went GREEN under its removal drill — the case passed with its lesson removed
+from `.claude/rules/ci.md`, because the lesson (`madge EXITS 1 when it finds cycles`) lives verbatim in
+`scripts/check-import-cycles.mjs`'s own header (line 38), which the session reads, AND because
+`mustMatch: ["exit|status|nonzero|non-zero"]` is answerable from general knowledge about shelling out to a
+tool — "check the exit status" is what anyone would say.
+
+Retired, not re-pointed. This is the third case of the exact shape `RETIRED.md` already names in
+`scanner-blind-to-composition-root`: a scanner-implementation detail that lives correctly in that scanner's
+own header and in rule `ci`, where it arrives at the moment somebody edits such a file. Adding the check to
+the case's `subject` so the drill removes the line would make the drill pass, but it would be testing whether
+a cold session recalls a technical detail — and this suite is for whether the configuration STEERS, not for
+recall. The lesson is where it belongs; the case was measuring the wrong thing.
+
+## `authority-before-effect` — the principle is general knowledge, so the prompt never needed the lesson
+
+Asked which order a dispatch and a store write should go in; asserted the answer names authority, durability,
+proof, or "record first". It went GREEN under its removal drill on 2026-09-06: with rule `protocol` L1 and the
+case-law reference both neutralized, an agent still answers "record it first, then dispatch" — because
+authority-before-effect is a widely known principle and the question asks for it directly.
+
+Retired rather than narrowed. Every honest tightening runs into the same wall: the artifacts L1 actually names
+(`Promise<void>` on a write a decision rests on; a required proof parameter rather than an optional pre-effect
+hook) are not what THIS prompt asks for, so tightening the assertion would refuse correct answers to the
+question that was asked instead of testing the lesson. A prompt a correct generic answer satisfies cannot test
+a specific lesson — the rule `biome-write-is-not-evidence` records in its own `why`, and the third case
+retired for it after `madge-exit-code` and `scanner-blind-to-composition-root`.
+
+**The gap this leaves, named so it is not rediscovered:** rule `protocol` L1 now has no eval case.
+`untrusted-ingress-authorship` covers L3-shaped authorship over live symbols and `read-failure-is-a-third-value`
+covers L2, but nothing replays L1. The honest replacement is a case over a LIVE symbol — a specific store
+method whose return type carries the proof — in the shape that replaced `authz-optional-reflex`, not a reworded
+regex over this prompt. Filed as an open question in
+`intent/2026-09-06-four-cases-that-do-not-measure/`.
+
+## `allowlist-rebuild-eats-fields`, `backends-never-run-the-harness`, `ci-local-before-push` — the code already knew the answer
+
+Retired together on 2026-09-06, for one cause found by driving both halves of each drill.
+
+Each was first suspected of a wide assertion, and each assertion was narrowed to a symbol only this
+repository could name: `QueueEntry|runOne`, `__EVERDICT_RESULT__|job-runner`, `ci[:-]local|everdict-ci-ok`.
+The narrowing was verified in both directions, which is what made the cause visible:
+
+    normal state   1/1 passed  — the assertion is not too tight; a correct specific answer still passes
+    removal drill  STILL GREEN — the case passes with its lesson removed
+
+The lesson was gone from every subject and the agent answered correctly anyway, because **the answer is in
+the codebase and the case grants `Read,Grep,Glob`**. `QueueEntry` and `runOne` are live symbols in
+`packages/backends` and `apps/api`; `__EVERDICT_RESULT__` is in `packages/contracts` and
+`application-control`; `ci:local` is a script in `package.json`. Asked what to watch when adding a
+`DispatchOptions` field, an agent greps `DispatchOptions`, finds the rebuild, and warns about it — which is
+not a failure of the case, it is the agent doing the right thing without needing to be steered.
+
+**The principle these three cost, and the one to write the next case against: a configuration eval can only
+measure what the CODEBASE CANNOT ANSWER.** If deleting the sentence still leaves a correct answer reachable
+by reading the repository, the sentence was not steering anything, and the case measures the codebase rather
+than the configuration. The cases that survive their drills are the ones whose subject is a fact no file in
+the tree states — a formatter's exit code lying about what it applied, a norm about evidence (an empty corpus
+is not a pass; a scenario that SKIPS is not a passing one), a policy (English-only source) — knowledge that
+exists only because somebody wrote it down after being burned.
+
+(That sentence is deliberately vague about the formatter. Naming the tool and the flag would put a live
+case's whole `neutralize` set in this file, and the exclusivity check refuses that — which is exactly what it
+did to the first draft of this paragraph, one commit after the check was written to catch it.)
+
+This also retires the hope that a tighter regex saves such a case. It cannot: the tighter the assertion, the
+more precisely it names the symbol the agent can grep.

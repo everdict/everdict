@@ -9,6 +9,7 @@ import {
   supersedeAttempts,
 } from "@everdict/domain";
 import { type ExecutionPassAuthority, executionPassAuthority } from "../ports/case-receipt-store.js";
+import { ExecutionPlan } from "./execution-plan.js";
 import type { ScorecardBatchDeps } from "./scorecard-deps.js";
 
 // How long a claim's lease runs before another caller may take the marker over. Staleness is a LEASE
@@ -90,7 +91,12 @@ export class RetryCasesInPlace {
     // failure is permitted and never silent. Refused as a whole rather than per case — a partial refusal
     // would leave the caller guessing which half ran.
     if (input.reason === undefined || input.reason.trim() === "") {
-      const owed = keysRequiringReason(plane, input.cases, record.manifest?.verdictPolicy);
+      // ⚠️ THROUGH THE PLAN, NOT OFF THE MANIFEST. TRUST-120 asks that any sealed manifest facet be read in
+      // ONE place — `ExecutionPlan` — and this line read `record.manifest?.verdictPolicy` directly, which is
+      // how the scenario went red the day this file landed. Its sibling one directory over
+      // (`scorecard-analytics-service.ts`) already asks the plan for exactly this facet; this is the reader
+      // that was never taught, which is the shape rule `protocol`'s one-lane law is about.
+      const owed = keysRequiringReason(plane, input.cases, ExecutionPlan.of(record).verdictPolicy);
       if (owed.length > 0)
         throw new BadRequestError(
           "BAD_REQUEST",

@@ -8,6 +8,7 @@
 //   (2) every @everdict/contracts import must be `import type` — a value/schema import would pull the
 //       contracts' zod v3 runtime into the web bundle and break the web's zod-v4 isolation.
 // On violation it prints the offending import (file:line) and exits 1. Plain Node, no external deps.
+// watches: nothing — matches import specifiers.
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";

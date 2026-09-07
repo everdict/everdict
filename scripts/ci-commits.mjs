@@ -21,6 +21,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { predatesRule, proveInWorktree, ruleSince, verdictFor } from "./fix-proof.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const git = (args, opts = {}) => spawnSync("git", args, { cwd: root, encoding: "utf8", ...opts });
@@ -35,9 +36,13 @@ const git = (args, opts = {}) => spawnSync("git", args, { cwd: root, encoding: "
 // no content.
 git(["read-tree", "HEAD"]);
 git(["update-index", "--refresh", "-q", "--unmerged"]);
+// ⚠️ `evals/history.jsonl` is excluded, exactly as `ci-local.mjs` excludes it and for the same reason: it is a
+// record a RUN produces, not code a run validates. `ci:local` got the exclusion when the loop was found there —
+// append a line, dirty the tree, refuse the stamp, commit the line, move HEAD — and this sibling did not, so
+// the loop simply moved one gate over. That is the shape `pnpm guard-siblings` exists for, one layer up.
 const dirty = [
-  git(["diff", "HEAD", "--name-only"]).stdout.trim(),
-  git(["ls-files", "--others", "--exclude-standard"]).stdout.trim(),
+  git(["diff", "HEAD", "--name-only", "--", ".", ":(exclude)evals/history.jsonl"]).stdout.trim(),
+  git(["ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude)evals/history.jsonl"]).stdout.trim(),
 ]
   .filter(Boolean)
   .join("\n");
@@ -88,6 +93,7 @@ const wt = path.join(tmpdir(), `everdict-commit-gate-${path.basename(root)}`);
 if (existsSync(wt)) git(["worktree", "remove", "--force", wt]);
 git(["worktree", "add", "--detach", "--quiet", wt, "HEAD"]);
 
+const fixRuleSince = ruleSince(root);
 const FAST = [
   ["pnpm lint", ["lint"]],
   ["pnpm typecheck", ["typecheck"]],
@@ -129,6 +135,30 @@ try {
       failed = `${short} — ${broke[0]}`;
       failedArgs = broke[1];
       break;
+    }
+    // ── a fix's test was red on the pre-fix code, or it proved nothing ──────────────────────────
+    //
+    // `pnpm fix-proof` reads the rule (a fix carries a test, or says why not); this is the proof, done here
+    // because this is the one place the commit is already checked out with its dependencies installed and
+    // its siblings built. Source hunks reverted to the parent, the commit's own test files run, RED required,
+    // tree restored. Only for a fix that touches both a test and a source file under packages/** or apps/**,
+    // so an ordinary push pays nothing for it.
+    const proof = verdictFor({
+      subject: git(["log", "-1", "--format=%s", sha]).stdout.trim(),
+      body: git(["log", "-1", "--format=%b", sha]).stdout,
+      files: git(["show", "--name-only", "--format=", sha]).stdout.split("\n").filter(Boolean),
+    });
+    // Same boundary as `pnpm fix-proof`: a fix older than the rule is outside it, so a fresh checkout walking
+    // the whole branch does not prove commits that were never asked to carry a test.
+    if (proof.kind === "proof-owed" && !predatesRule(root, sha, fixRuleSince)) {
+      console.log("  ▶ fix proof — the commit's tests on its pre-fix source");
+      const proved = proveInWorktree({ wt, sha, source: proof.source, tests: proof.tests, log: console.log });
+      if (!proved.ok) {
+        failed = `${short} — fix proof: ${proved.why}`;
+        failedArgs = ["fix-proof"];
+        break;
+      }
+      console.log(`    ✓ red on the pre-fix code: ${proved.ran.join(", ")}`);
     }
     stamped.push(sha);
   }

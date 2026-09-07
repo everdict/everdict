@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+// watches: nothing — it matches the SHAPE of a shell fragment (`||` + a reward write), not a source symbol,
+// so there is no name here that could die. Declared because `pnpm scanner-watches` requires the answer to be
+// COMPLETE rather than opt-in, and this file shipped without it: `main` has been red on that gate since
+// `e3340474`, which is what a required check looks like when a push does not run it.
+//
 // A GRADER MAY NOT SPEND "I COULD NOT ANSWER" AS THE AGENT'S WRONG ANSWER.
 //
 // `RewardFileGrader` models the third value correctly: a verifier that publishes no reward makes the case

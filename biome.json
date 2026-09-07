@@ -10,7 +10,8 @@
       ".next",
       "apps/cli/bundle",
       "apps/desktop/bundle",
-      "apps/desktop/release"
+      "apps/desktop/release",
+      "evals/.results"
     ]
   },
   "formatter": {
@@ -52,7 +53,7 @@
       }
     },
     {
-      "include": ["scripts/**/*.mjs", "scripts/**/*.js"],
+      "include": ["scripts/**/*.mjs", "scripts/**/*.js", "evals/**/*.mjs"],
       "linter": {
         "rules": {
           "correctness": {

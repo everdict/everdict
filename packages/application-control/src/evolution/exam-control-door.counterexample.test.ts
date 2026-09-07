@@ -15,7 +15,11 @@ import { CampaignService } from "./campaign-service.js";
 //
 // RED before `verifyExamControl` was wired: the open succeeded and `record.examProof` was undefined.
 
-const score = (value: number): Score => ({ graderId: "reward-file", metric: "reward", value });
+// ⚠️ `pass` IS PART OF THE PRODUCER'S SHAPE. Every correctness grader this repository ships sets it, and
+// `examProofOf` asks the platform's own `caseVerdict`, which ignores a score that does not carry one. A
+// fixture that omits it is testing a laxer question than production asks — which is exactly how a
+// `value > 0` reading of "did it pass" stayed certified for a release.
+const score = (value: number): Score => ({ graderId: "reward-file", metric: "reward", value, pass: value > 0 });
 
 const scorecards = (rows: Record<string, ReadonlyArray<{ caseId: string; scores: Score[] }>>) => ({
   get: async (id: string) =>

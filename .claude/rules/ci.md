@@ -12,6 +12,18 @@ See skill `ci`.
   `.claude/settings.json`) denies `git push` unless every commit the push carries is stamped and HEAD's stamp
   is `full`. Committing after the gate invalidates that commit's stamp — re-run `pnpm ci:local` (turbo cache
   makes it fast). Never work around the hook (no stamp forging, no pushing from outside the tool).
+  ⚠️ **The hook guards every checkout that shares this repository's `.git`** — a linked worktree included,
+  whether the push runs with cwd inside it or through `git -C <worktree>`. Until 2026-09-06 it compared
+  toplevels, and a linked worktree has its own, so a push from one (the eval runner, the reviewer and the
+  commit gate all create them) exited the hook silently with no ledger line. The scope is the common git
+  directory now, every fact is read from the checkout that is pushing, and `pnpm guardrails` drives the hook
+  in `--probe` mode (same facts, same decision, no ledger write, no verdict) against a real linked worktree
+  on every run. A settings file that wires `--probe` as the hook is refused.
+  ⚠️ **Remote CI is OFF, and has been since 2026-08-21.** Every GitHub Actions workflow is `disabled_manually`
+  (declared as C3 on `docs/architecture/harness-declared-limits.md`), so `gh run watch` after a push waits for
+  a run that will not exist and the four "required checks" on `main` never report. The local gate IS the
+  pipeline. Check `gh api repos/{owner}/{repo}/actions/workflows --jq '.workflows[].state'` before expecting
+  a remote run; when they are `active` again, confirm green after every push as the skill says.
 - **EVERY COMMIT IN A PUSH, NOT ONLY ITS TIP.** `pnpm ci:local` validates HEAD, and GitHub also only runs its
   checks on the tip — so a batch of eight commits used to ship seven that had never been built, while the split
   history advertised a bisectability it did not have and nothing downstream contradicted it. `.git/everdict-ci-ok`
@@ -21,7 +33,7 @@ See skill `ci`.
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
-  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**,
+  `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**, **`pnpm python`**, **`pnpm swallowed-reads`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
   **`pnpm language-policy`**, **`pnpm guard-siblings`**, **`pnpm source-bytes`**, **`pnpm untrusted-ingress`**, **`pnpm gated-doors`**, **`pnpm mutation-leak`**,
   `node scripts/live/empty-env-boot.mjs`, the self-contained web job (contracts build +
@@ -32,6 +44,13 @@ See skill `ci`.
   it fails silently — two were found dead this way (`suite.md`, `workspace-integrations.md`), both holding
   invariants a later review then found broken. Moving or renaming a package re-points its rule in the SAME
   change.
+- ⚠️ **`docs-check` REQUIRED a citation form it then refused to read.** A link out of `docs/` must be an
+  absolute `github.com` URL (the check fails a relative one), and the same loop skipped every `^https?:` href
+  — so the one spelling the gate demands was the one spelling it never verified. The four index entries this
+  harness added for `intent/`, `releases/`, `lessons/` and `evals/` were exactly that class: the directories
+  the work was trying to make discoverable, cited in the form nothing checks. A URL naming a blob in THIS
+  repository is a path assertion and is checked as one now; a link to the internet stays out of scope,
+  because this check knows about files and not about hosts.
 - **`pnpm docs-check` keeps the cited ADDRESSES real** — in `docs/**` and, since arch-review 56, in
   `.claude/rules/**` + `.claude/skills/**` too, from the one predicate rather than a second copy. The push
   layer is injected into context by a glob, so a rule citing a moved file teaches the wrong address at the
@@ -50,6 +69,251 @@ See skill `ci`.
   Live means non-test `packages/`+`apps/`: tests are excluded because a ratchet keeps naming what it forbids,
   and `scripts/` because this check's own prose named its example and that alone made it pass. A name that is
   gone may still be WRITTEN — without backticks, as the deletion bullet in rule `backends` does.
+- **`pnpm scanner-watches` refuses a scanner whose vocabulary died.** `check-authz-optional.mjs` watched four
+  names and two of them — `assertTeamVisible`, `assertEntityVisible` — had ZERO live call sites after
+  `0212_drop_team_axis.sql` removed the axis they belonged to. It reported `PASS … 1998 files` throughout,
+  which is worse than a dead check: it runs, it passes, it prints a count, and its header goes on teaching a
+  call the codebase can no longer compile. Nothing here could see it — `docs-check` verifies the symbols
+  `.claude/**` BACKTICKS, and a name inside a scanner's own array is source code. It was found by accident,
+  when an eval case written from that header tested a shape this codebase does not have and the agent under
+  test refused the premise. Every scanner now declares an exported WATCHES array (backtick-free here on purpose: it lives in
+  `scripts/`, which `docs-check` deliberately excludes from live source) or the one-line marker
+  `// watches: nothing — <why>`, so the answer is COMPLETE rather than opt-in; "the ones somebody remembered
+  to annotate" is the coverage this check exists to stop believing in. ⚠️ It PARSES the scanners and never
+  imports them — importing a script runs it, which this file already records for `protocol-mutations`.
+- **`pnpm controls-documented` asks the question no other gate asks: does every control that exists get NAMED
+  by anything?** `convention-harness` asks whether a rule still reaches live paths; `docs-check` asks whether
+  the paths and symbols a rule names exist. Neither runs the arrow the other way. It cost a commit to notice:
+  the round that fixed "the conventions do not know about the harness" shipped, and the very next control —
+  `pnpm scan` — went out with this file, `CLAUDE.md` and the docs index untouched, by the same author, in the
+  same session, because an edit script asserted `'pnpm scan' not in s` and `pnpm scanner-watches` contains that
+  substring. That round repaired every instance by hand and shipped no way to detect the next one, which is the
+  exact criticism it made of prose laws. On its FIRST run this check found two more that had been undocumented
+  for far longer: `pnpm migrations` and `pnpm plugin-manifests`. See
+  `lessons/2026-09-05-a-control-shipped-and-the-conventions-did-not-know.md`.
+- **`pnpm migrations` is the migration NUMBERING guard.** `migrate()` tracks applied migrations by filename and
+  applies them in filename order, so two files sharing a number both run — in an order decided by whatever
+  follows the digits. That is fine until the two touch the same table, and then which one wins is alphabetical
+  accident rather than intent. It happens when two branches each take "the next number" without seeing the
+  other, which is what a shared repository does. Pairs that already shipped are grandfathered by name.
+- **`pnpm plugin-manifests`** keeps this repository usable as a marketplace for two clients: only Claude Code
+  expands `${VAR}` inside a plugin's `.mcp.json`, so Codex must be pointed at a manifest of its own or every
+  session dies on a literal `${EVERDICT_MCP_URL}` — invisible until it reaches a user's machine, and readable
+  by no compiler or test because these are data files.
+- **`pnpm design` is the stage that had never run**, and the four triggers around it. Ten change directories,
+  nine plans, ZERO specs — the requirements-and-design pass was not skipped on purpose, nothing asked for it.
+  `--next` takes the oldest accepted intent without a spec (the rotation `pnpm scan --next` uses, applied to a
+  stage), runs one read-only session with this repository's rules and skills as constraints, and **writes
+  `spec.md` into the working tree committing nothing** — a machine may propose, and the spec meets a person
+  before a plan is written against it. Not every change needs a design pass, and a gate insisting otherwise
+  gets routed around — so an accepted intent may decline it in one line, `Design: none — <why>`, and
+  `pnpm intent-chain` REFUSES the third state: accepted, no `spec.md`, no declaration. That state used to be
+  a note, and it read exactly like "nobody has picked this up yet" — which is how the Design stage ran once in
+  eighteen changes. `pnpm design --next` skips a declined intent. (C2 on the declared-limits page.)
+  ⚠️ `spec.md` is held to the SAME ordering law as `plan.md` — a `From: intent.md @ <sha>` naming the commit
+  that introduced the intent, and descent from it. That rule exists because the design pass was reviewed by
+  one of its own specs, which pointed out that a spec could be back-dated exactly the way a plan could before
+  `intent-chain` existed. Descent only, not spec-before-plan: this very change is the counterexample, and a
+  rule with a permanent exception is worse than a narrower one that holds.
+  Three more triggers came with it. **Session telemetry is on by default** in `.claude/settings.json` —
+  measured first, not assumed: a session with the full recipe and nothing on the port produced 157 bytes of
+  unrelated stderr, so it costs nothing when no sink listens. Conversation content stays off. **`ci:local`
+  reads the bands every run** (`watch-bands --dry-run` — file reads and arithmetic, no model, no cost on green),
+  so the one thing that notices drift is read at the cadence a push already has instead of waiting to be typed.
+  And **a red bespoke gate triages itself**: the first failing `scripts/check-*.mjs` per run is handed to
+  `pnpm triage`, which reads that scanner's own header. Lint, typecheck, test and build are excluded — they
+  explain themselves, and a model call restating a compiler error is the shape that teaches people to ignore
+  the tool.
+- **`pnpm grader-collapse` refuses a grader that spends "I could not answer" as the agent's wrong answer.**
+  `RewardFileGrader` models the third value correctly — a verifier that publishes no reward makes the case
+  `unmeasured`/`missing_evidence` — and that discipline was defeated one layer below it by a shell fragment:
+  `python3 /opt/sbench_digest.py … && echo 1.0 > reward.txt || echo 0.0 > reward.txt`. `||` fires on EVERY
+  non-zero exit, so the 420 of SpreadsheetBench's 912 tasks whose `answer_position` the parser raised on were
+  each published as a confident zero over a workbook the grader never opened. The campaign then consumed a
+  comparable round and blamed hypotheses for an instrument. A reward written on the failure arm of `&&`/`||`
+  is refused; branch on the exit code and publish NOTHING for the arm meaning "could not run".
+- **`pnpm python` is the gate this repository did not have.** `grep -rn "\.py\b" package.json ci.yml
+  ci-local.mjs` returned NOTHING: no linter, no type checker, no test runner reached `examples/bundles/**`.
+  That was tolerable while the Python there was glue and stopped being tolerable when `sbench_stage.py` — the
+  file deciding WHAT THE EXAM IS, whose mispaired digest scores a correct agent zero — was fixed FIVE TIMES IN
+  TWO DAYS, each fix finding the previous one's defect, every one found by a person running it by hand against
+  the real 912-instruction dataset because there was no other way to run it. It compiles every tracked `.py`
+  and runs every `test_*.py` plus every declared self-test. ⚠️ **A test that cannot run is a FAILURE, not a
+  skip** — the rule `scripts/trust/trust-suite.mjs` applies to a skipped scenario, for the same reason. That
+  constraint is what moved the staging DECISION into `sbench_pairing.py`, standard-library-only, so its
+  eleven counterexamples need nothing but the interpreter. ⚠️ Writing it found **five test suites that had
+  never run at all** — `clients/python/tests/` and `examples/servers/spica-playwright-server/tests/`, 477
+  lines with no `pytest` anywhere in the repository's tooling. They are DECLARED in `NEEDS` with what each
+  is missing rather than silently absent, and the declaration is a ratchet both ways: a new undeclared
+  unrunnable test fails, and a declared entry whose file is gone fails. It replaced a shell loop in `ci.yml`
+  that globbed one file and existed only there, so `ci:local` could not run it — the gate drift skill `ci`
+  warns about, built in from that step's first commit.
+- **`pnpm swallowed-reads` is the L2 ban, enforced instead of stated.** `.claude/rules/protocol.md` names
+  `.catch(() => [])`, `.catch(() => undefined)` and `.catch(() => ({}))` in so many words, and
+  `grep -l "catch(() =>" scripts/check-*.mjs` returned nothing: twenty-seven bespoke gates, and the law with
+  the most case law behind it was enforced by prose. It came back —
+  `CampaignService.inheritedFindings` shipped `await this.deps.store.get(tenant, id).catch(() => undefined)`,
+  and that port returns `undefined` for a record the workspace does not have and THROWS when the read did not
+  happen, so the line spelled a store outage exactly like a deleted ancestor. The remedy already existed forty
+  lines above it in the same method (`evidenceUnavailable`), by the same author, in the same brief.
+  ⚠️ It matches ONE structural fact, deliberately: **the value gets a name**. `const x = await …catch(…)` is
+  flagged; `void notify(…).catch(…)` is not (fire-and-forget is its own hatch in L2 and needs a different
+  repair) and neither is `res.json().catch(…)` (decoding a body is not a failed read). The tree holds 331
+  occurrences of the spellings and 83 of that shape; wiring a gate over all 331 is how a check teaches people
+  to skip its output. A RATCHET over `scripts/swallowed-reads-baseline.txt`, because L2 says it itself — *"a
+  scanner with an allowlist is a design admission"* — and the baseline is that admission, counted. A file
+  whose count DROPPED must update the baseline in the same change: a debt that quietly stops shrinking on
+  paper stops being a debt anybody pays.
+- **`pnpm lesson-evals` verifies the incident-to-eval route instead of trusting it.** The article's rule is
+  that each production incident becomes a permanent eval; `lessons/README.md` says where a lesson goes
+  afterwards — an eval case, a scan class, a check, or nothing. That route was a paragraph and nothing a
+  machine read. ⚠️ **It never demands an eval for every lesson.** Not everything is mechanisable, and recording
+  the decision NOT to mechanise is the documented answer — demanding a case for every lesson would turn that
+  honest answer into a violation, and the first repair anybody reached for would be to stop writing lessons.
+  It asks only what the lesson itself claims: when "What was done about it" names an eval case, the case
+  exists.
+- **A spec carries the policy version it was written under.** `pnpm design` stamps `Policies: <tree sha of
+  .claude/>` beside the `From:` line and `pnpm intent-chain` requires it. Without it a spec that predates a
+  rule change cannot be told from one that followed it, and a plan then gets written against constraints that
+  have since moved.
+- **The Plan stage's remaining halves, closed.** A `Status: rejected` intent needs a `Rejected: <why>` line —
+  the accept/reject decision IS the gate, and half of it used to leave nothing behind, so a turned-down idea
+  read as a deleted one that also looked like a decision. And a `spec.md` carries `Concerns: open|resolved|
+  carried`; `pnpm intent-chain` refuses a `plan.md` while the spec still says `open`. "Areas of concern" is the
+  point of the design pass — its own prompt says an empty one is suspicious — and nothing read it, so a plan
+  could be written against a spec whose concerns were all open, which is the exact sequence the article puts a
+  gate in front of. A status line rather than parsed prose, because the section's shape is whatever the design
+  pass produced and a check that guesses at bullets refuses specs for the wrong reason. **`carried` is legal**:
+  the article carries open questions forward.
+- **The permission surface has a deny half now, AND IT IS A SPEED BUMP, NOT A BOUNDARY.** Every session here
+  could read `.env`, `~/.ssh` and `~/.aws/credentials` through the file tools and reach any host through
+  `curl`; the allow list pre-approved the safe inner loop and was never paired with the half that refuses.
+  ⚠️ Verified before writing rather than after: `ci:local` reaches `curl` through `spawnSync("bash", …)` from
+  inside the script, not through the agent's tool surface, so `Bash(curl *)` refuses the agent and not the gate.
+  ⚠️ **WHAT IT DOES NOT STOP, stated here because this bullet is what a reader gets while editing.**
+  `Read(~/.ssh/**)` denies the `Read` TOOL; `cat ~/.ssh/id_rsa` through `Bash` reaches the same bytes.
+  `Bash(curl *)` denies two literal prefixes; `python3 -c "import urllib.request…"`, `nc`, and WebFetch
+  reach the same hosts. That is a bound composed with an unbounded neighbour — the defect class this file
+  names for scanners — and it is NOT closed by enumerating more spellings, because the neighbour is a general
+  shell. `docs/architecture/harness-declared-limits.md` §4 already declares those two containment-drill rows
+  as blocked on managed settings and OS-level sandboxing, and says plainly that they SUCCEED without them.
+  The deny list stops the accidental read and the absent-minded fetch; it is not containment, and the two
+  pages disagreeing about that was the finding.
+- **`pnpm scan --dismiss --scope <s> --file <p> --reason <why>`**, and the record is COMMITTED
+  (`scans/DISMISSED.md`). A dismissal is a decision; `.git/` does not travel, and a dismissal nobody else can
+  read is one the next person redoes. The reason is required and a twelve-character floor refuses "not a bug",
+  because without it the findings-per-scan trend is a number anybody can lower by clicking. A dismissed
+  finding comes back MARKED rather than hidden, so a scope dismissed into silence still reads as one full of
+  dismissals.
+- **One clause is DECLINED rather than blocked** — an implementation with no `plan.md` is not refused, because
+  `intent/README.md` says a one-line fix does not need one and a gate demanding otherwise gets a plan that
+  says nothing. `docs/architecture/harness-declared-limits.md` keeps chosen limits in their own section with
+  their own rule: an entry there needs an argument and a falsifier, not a blocker.
+- **Five L4 clauses cannot be satisfied by this deployment, and one is DECLINED — all DECLARED, not silently missing** —
+  `docs/architecture/harness-declared-limits.md`. Branch protection needs a second person; managed settings
+  need a device fleet; per-environment tiers and a rehearsed rollback need something deployed; four of the
+  eight containment-drill rows need managed settings; and "gate violations reaching production" has no
+  denominator. Each entry names what its absence does NOT mean and what would reopen it. **A blocked clause is
+  not a satisfied clause**: the play is scored at the rung it reaches and the grade says so.
+- **`pnpm scan` is the only control here that is NOT change-scoped**, and `lessons/` is where an incident's
+  reasoning goes. Everything else reads a diff — review reads the range, the gates read what a commit touched,
+  the evals fire on configuration that changed — so all of them are blind to code nobody has touched. A file
+  written eleven months ago is never looked at again, and both halves go stale: the code around it changed and
+  the reader got better. `gitleaks` covers secrets deterministically over all history; the context-dependent
+  classes (a bound composed with an unbounded neighbour, a platform field on a producer document, a guard
+  nothing calls) are what this scan is pointed at, with the classes taken from rule `protocol` and this file.
+  Scopes are cut by dependency cone (`scripts/scan/SCOPES.md`), `--next` takes the least-recently-read one so
+  running it needs no decision about where, and `--status` answers "when did anyone last read this" per scope
+  — **an unscanned scope says NEVER, because unscanned is not clean and the two must stop looking alike.**
+  ⚠️ A scan is a statement about a scope AT A TIME UNDER A MODEL; all three are in the record or a clean scope
+  is indistinguishable from an unread one. ⚠️ The confidence on a finding is the scanner's rating of ITSELF,
+  not a calibration anybody measured. Every finding also carries `validation` — `reproduced` (concrete inputs
+  traced to the wrong output, stated in `failure`), `reasoned`, or `unverified` — and `how`, the one line
+  saying what was done to check it; a finding that says neither is recorded as `unverified`, never as nothing,
+  and the log line counts how many were reproduced. Until 2026-09-06 verification lived only in the intents
+  filed afterwards, so the scan's own record could not tell a traced defect from a hunch. ⚠️ **An unstructured answer is still a reading**: when the scanner replies
+  in prose rather than the envelope the run is RECORDED and marked `structured: false`, which keeps it out
+  of the findings band because a prose answer has no countable total. The first version exited and recorded
+  nothing, and the pass it discarded that way had found `PgWorkspaceStore.delete()` sweeping 18 tables
+  while 60 more carry a tenant column — a real defect thrown away for a formatting reason. Nothing is auto-applied: findings enter the tree through the gates, and
+  a bounded one becomes a change while a wider one becomes an `intent.md`. The first run over `contracts`
+  found two real ones in 291 untouched files — see `intent/2026-09-05-scan-contracts-outbound-credentials/`.
+- **`pnpm watch-bands` is the only thing here that starts work without a person**, and `pnpm triage <gate>` is
+  the judgement step that was being done by hand for twenty-three gates. Five stages of this harness refuse
+  things; the sixth was never made to NOTICE, so every `intent.md` existed because a human wrote one and the
+  chain never returned to the queue on its own. The watcher reads `evals/history.jsonl` and
+  `.git/everdict-gate-log.jsonl`, computes a rolling mean and sd over a window declared in
+  `scripts/bands/bands.yaml`, and applies the tiers: 1σ logs, 2σ opens a READ-ONLY diagnosis, 3σ writes an
+  `intent.md` into `intent/` and has no other route — `pnpm intent-chain` then applies to it exactly as to a
+  human's, and a second breach of the same metric refuses to file a duplicate while an intent for it is OPEN on
+  any date (not `shipped`, not `rejected`). ⚠️ **The gate's dry run REFUSES at 3σ.** `ci:local` reads the
+  bands with `--dry-run`, and until 2026-09-06 a breach there printed "would file" and exited 0 — detection
+  without a person, filing with one, and the push never waited. Now a dry run that would file exits non-zero
+  and names the command: run `pnpm watch-bands`, commit the intent it writes, re-run the gate. It does not
+  file from inside the gate (C4 on the declared-limits page: a gate writing into the tree it checks is the
+  loop this repository already closed once). `pnpm guardrails` drives that refusal over
+  `scripts/bands/fixtures/{breach,quiet}` on every run. ⚠️ **Detection is deterministic**:
+  no model decides that something is wrong, or the alarm itself stops being reproducible. ⚠️ **Too few samples
+  is not "no breach"** — under a metric's floor it reports INSUFFICIENT and writes nothing, because a band over
+  three points is noise wearing a sigma and the first thing it would do is file an intent nobody believes.
+  `pnpm triage` runs the named gate, refuses to answer when it is GREEN, reads that script's own header — where
+  every scanner here records its incident and the two repairs it accepts — and REPORTS; it never applies, and
+  it is told never to suggest widening an allowlist.
+- **`pnpm review` is the review that had no moment, and `releases/<tag>.md` is the release that had no gate.**
+  Both were written down and neither was enforced. CLAUDE.md opens with "Review-first … No exceptions" and
+  skill `code-review` records that it has FAILED TWICE — what fired it was somebody remembering, and with two
+  merge commits in 2,710 there was no pull request for a review to attach to. A tag push publishes binaries
+  and images to the public and required nothing first. So: a push carrying `packages/**` or `apps/**` is
+  denied unless a review has run for HEAD (`.git/everdict-review-ok`), and a push whose HEAD carries a release
+  tag is denied unless `releases/<tag>.md` is COMMITTED — committed, because an authorization living in a
+  working tree did not travel with the tag. ⚠️ **The stamp is written on COMPLETION, never on cleanliness.**
+  Findings rank and inform; the person decides. A reviewer that blocks on its own findings is not the control
+  the article describes and would be routed around in a week. The release arm is checked FIRST so a refused
+  release says release, not whichever cheaper gate was also unsatisfied. ⚠️ The reviewer chunks: one truncated
+  blob over a 1.8 MB range would have stamped for about a fifth of what it claimed, so the diff is grouped per
+  file, every group is reviewed, and a range needing more than eight groups is REFUSED — a 541-file push is
+  the problem, not the reviewer. `--range` never stamps, for the reason `--only` never stamps an eval run.
+- **The gate RECORDS what it decided** (`.git/everdict-gate-log.jsonl`, one JSON line per push decision).
+  `pnpm guardrails` proves the decision is CORRECT over constructed facts; nothing recorded what it actually
+  decided, so the gate's own leading indicator (wait per gate) had no data and its lagging one (violations
+  reaching the far side) had no denominator — and the refusals, the half that shows a control was load-bearing,
+  were discarded at process exit. Each line carries an **arm** (`tip-unstamped`, `eval-stamp-mismatch`, …)
+  declared in `gate-decision.mjs`, not just the prose: a reason is for one person reading one denial, an arm is
+  for a query over a thousand. The write sits AFTER the early exits — the hook is on the `Bash` matcher, so
+  recording sooner would produce a shell transcript — and is wrapped, because a hook that throws while
+  recording is worse than one that records nothing. `pnpm guardrails` refuses a hook that stopped writing it.
+  The session-level facts no file can answer (concurrent sessions, steering vs waiting, tool decisions) need
+  a sink listening on the OTLP port, and **the session starts it**: a SessionStart hook in
+  `.claude/settings.json` runs `scripts/telemetry/ensure-sink.mjs`, which probes 127.0.0.1:4318 and spawns
+  `otlp-sink.mjs` detached when nothing answers. It says something only when it started one or could not;
+  `pnpm guardrails` refuses a settings file without it. Until 2026-09-06 the sink was a second terminal
+  somebody had to remember, and the ledger held two probe lines from the day it was written. Recipe and
+  signal names in `scripts/telemetry/README.md`; see `docs/architecture/harness-observability.md`.
+- **`pnpm guardrails` checks the gate that every other gate is enforced BY.** `pre-push-gate.mjs` holds both
+  ledgers, it is wired in `.claude/settings.json` — an editable file in the tree — and NOTHING READ THAT
+  WIRING: `grep -l settings.json scripts/check-*.mjs` returned nothing. What stood in for a check was this
+  rule's own sentence about never working around the hook, which is prose, in the file that records a dozen
+  times what happens to a law kept as prose. Deleting the PreToolUse block is a two-line edit every other gate
+  stays green through. The check has four halves and needs all of them: the WIRING still exists (textual — the
+  only thing that catches a deletion), the DECISION still decides (behavioural — `decideGate` driven over
+  fourteen facts, including that an unreadable ledger denies rather than reads as empty), the SCOPE still
+  reaches a linked worktree (the hook driven in `--probe` mode against a real `--no-checkout` worktree whose
+  HEAD is one commit back, so the probe must report THAT head), and the WATCHER still refuses a fixture breach
+  in dry-run. The decision was split into
+  `scripts/hooks/gate-decision.mjs` to make that drivable; the alternative, an env var pointing the ledgers
+  somewhere a test can write, would have made the check easy and the GATE FORGEABLE.
+  ⚠️ **THE PUSH SEGMENTER MATCHES TEXT, NOT COMMANDS.** It splits on `&&`/`||`/`;`/`|`/newline and looks for a
+  segment beginning with the two words. A file whose CONTENT contains such a segment is therefore refused when
+  written through a shell heredoc — which is how this very hook's own comment (an example of the compound form
+  it catches) denied the command that was writing it. Anything quoting a push after a separator — a doc, a
+  commit message, a grep — is refused the same way. Left as is on purpose: the failure mode of this gate is a
+  false ALLOW, so it errs toward denying. Write such a file with an editor, not a heredoc.
+- **`pnpm intent-chain` is the Plan→Build handoff, enforced instead of stated.** A plan written after the
+  diff is a description that agrees with itself, and no reader can tell the two apart: both are markdown that
+  matches the code. The witness is the commit graph, so the check asks it — a `plan.md` cites the commit that
+  introduced its `intent.md` (`From: intent.md @ <sha>`) and must DESCEND from it, and `Status: shipped` names
+  a commit strictly later than the plan. It refuses to run on a SHALLOW checkout instead of passing over
+  questions it could not ask, which is why the `core` job now checks out with `fetch-depth: 0`.
 - **`pnpm language-policy` keeps the repo English** (CLAUDE.md's language policy), as a RATCHET: the 550
   files that already carry Korean are recorded in `scripts/language-policy-baseline.txt` and pass, a file NOT
   in that list may not introduce it, and a baselined file that has been cleaned must leave the list in the
@@ -94,6 +358,11 @@ See skill `ci`.
   shortest path from that compile error is `?.` rather than a refusal — the optional type makes the unsafe
   spelling the one that builds. Two fixes are allowed at a flagged site and no third: refuse when the
   capability is absent, or narrow the value first and pass it plainly.
+  ⚠️ **THOSE THREE INCIDENTS ARE HISTORY, NOT INSTRUCTION.** All of them were about a TEAM axis that no longer
+  exists: `0212_drop_team_axis.sql` removed it, `gate` takes `(principal, action)` and no resource-derived
+  argument, and the two `assert*Visible` names are gone. The scanner watched them for months anyway, passing
+  the whole time. The LAW did not narrow when the axis went — only its worked example did — and re-adding a
+  resource-scoped authorization argument means re-adding its name to that scanner's WATCHES in the same change.
 - **`pnpm import-cycles` is a RATCHET over circular imports** (arch-review 84). ESM tolerates a cycle only
   while every use is deferred to call time; one module-scope use — a `const` derived at import, a decorator,
   a registry populated on load — and one side sees a half-initialized namespace, which surfaces as a runtime
@@ -187,6 +456,40 @@ See skill `ci`.
   ⚠️ **NEVER `import()` THIS SCRIPT TO SEE IF IT PARSES.** It is a script, not a module: importing it RUNS it,
   in whatever tree you are standing in. `node -e "import('./scripts/trust/protocol-mutations.mjs')"` started a
   full mutation run in a shared worktree. `node --check <file>` is the syntax check — it never executes.
+- ⚠️ **The push gate itself used to fail OPEN.** `pre-push-gate.mjs` read `.git/everdict-ci-ok` with no
+  guard, so on a checkout that had never been gated `readFileSync` threw — and a PreToolUse hook that exits
+  non-zero without writing a decision lets the tool call through. The gate that exists to deny unstamped
+  pushes was open on exactly the state meaning "nothing here has ever been gated". Every ledger read is a
+  `deny` on failure now: cannot-find-out is an escalation, never a pass.
+- **`pnpm fix-proof` reads the rule CLAUDE.md has carried since the first week — every fix ships a
+  regression test that fails on the pre-fix code — and `pnpm ci:commits` proves it.** Two claims in one
+  sentence and, until 2026-09-06, no reader for either. The rule: a `fix` commit that changes source under
+  `packages/**` or `apps/**` also changes a `*.test.ts` file, or its body declares `Regression-test: none — <why>`.
+  The proof, in the commit gate's throwaway worktree where the commit is already installed and built: source
+  hunks reverted to the parent, the commit's own test files run, RED required, tree restored in its own
+  `finally` and any sibling package rebuilt. A test that is green on the pre-fix code never proved the bug was
+  gone. Applies to commits newer than the check itself (read from git, so history is not rewritten); fixes
+  under `scripts/` and `evals/` are outside it — their proof is a truth table or a drill. Observed on two
+  synthetic commits before it was wired: one proved, one refused. The playbook's alternative — lock test
+  files during a fix — is declined as C-row-6 on the declared-limits page.
+- **`pnpm agent-evals` is the configuration's own regression suite, and it is NOT in this gate.** `docs-check`
+  and `convention-harness` guard the SHAPE of `CLAUDE.md`/rules/skills — paths resolve, symbols exist, globs
+  match live code, descriptions survive. Neither can ask whether the agent still does the work to the same
+  standard after that configuration changes, and until now nothing did: the product has been mutation-tested
+  since arch-review 53 while the thing that steers the agent had no behavioural test at all. Each case is an
+  incident this repo already recorded, replayed as a prompt; each declares the `subject` files that carry the
+  lesson and the `neutralize` sentences that carry it, and **`--drill <id>` removes those sentences and
+  requires the case to go RED**. A `neutralize` string that matches no line FAILS AT LOAD, for the same reason
+  a `protocol-mutations` rung whose target line is gone fails: a declaration whose target was reworded still
+  reads as a claim about what the case measures. It is enforced at the PUSH GATE, not in CI: the suite never needed an API key (local runs use the
+  machine's existing login, the same principle this repo states for LocalDriver), a GitHub runner has none,
+  and the secret that would give it one is a cost of the delivery choice. So `pre-push-gate.mjs` denies a push
+  that CHANGES `CLAUDE.md`/`.claude/**`/`evals/**` unless `.git/everdict-evals-ok` stamps HEAD — tip-only,
+  because nobody bisects a skill's wording. A push that leaves the configuration alone never meets the arm.
+  ⚠️ The model-swap question has NO unattended answer here (`--model <alias>` by hand); that debt is named in
+  `evals/README.md`. ⚠️ Its first assertion was the literal `ci:local` and it went red
+  against an answer that had RUN the gate and written "CI-local": assertions name artifacts the agent must
+  reach for, never phrasing. See `evals/README.md`.
 - **`pnpm guard-siblings` refuses a door whose neighbours guard something it does not** (arch-review 119).
   One wave found the same shape three times: `PUT /agents/:id` gained a team gate and `PUT /models/:id` kept a
   bare `models:write`; `create_judge` files a capability under a team and `create_rubric`/`create_model`/

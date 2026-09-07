@@ -5,6 +5,23 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Foundation
 
+## The gates a change meets, in order
+
+Reading order is this skill; ENFORCEMENT order is the push gate. A change here passes through, in sequence:
+
+1. `intent/<date>-<slug>/intent.md` → `plan.md` in a LATER commit — `pnpm intent-chain` asks the commit graph,
+   because a plan written after the diff reads exactly like one written before it.
+2. the five essential commands, then the twenty-odd checks under `scripts/` — `pnpm ci:local` is all of them.
+3. `pnpm agent-evals` if the change touches `CLAUDE.md`, `.claude/**` or `evals/**`.
+4. `pnpm review` if it touches `packages/**` or `apps/**` — the policy is `REVIEW.md`, and the gate asks
+   whether the review happened, not whether it was clean.
+5. `releases/<tag>.md`, committed, if HEAD carries a release tag.
+
+`scripts/hooks/pre-push-gate.mjs` refuses a push that skipped any of them, records every decision with the arm
+that fired, and `pnpm guardrails` refuses a tree where that hook has been unwired. Rule `ci` is the record of
+why each one exists; `pnpm triage <gate>` explains a red one.
+
+
 Everdict is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eval-first.
 
 ## Checklist before coding

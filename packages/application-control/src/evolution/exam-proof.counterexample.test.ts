@@ -19,10 +19,31 @@ import { examProofOf } from "./exam-proof.js";
 // RED before `exam-proof.ts` existed:
 //   Error: Failed to resolve import "./exam-proof.js"
 
-// The production shapes: a measured score carries `status: "measured"` (or omits it, which means the same —
-// `isMeasured`), and an unmeasured one names why it could not be scored.
-const passing = (caseId: string) => ({ caseId, scores: [{ graderId: "reward-file", metric: "reward", value: 1 }] });
-const failing = (caseId: string) => ({ caseId, scores: [{ graderId: "reward-file", metric: "reward", value: 0 }] });
+// The production shapes. ⚠️ EVERY CORRECTNESS GRADER THIS REPOSITORY SHIPS EMITS `pass`, AND THESE FIXTURES
+// USED NOT TO — `reward-file`, `swe-bench`, `command`, `script-score` and `world-state` all set it, and
+// omitting it here is what let the suite certify a `some((s) => s.value > 0)` reading of "did it pass" for a
+// release. A fixture that is easier to write than the producer's real output is a fixture that can only test
+// the easier question.
+const passing = (caseId: string) => ({
+  caseId,
+  scores: [{ graderId: "reward-file", metric: "reward", value: 1, pass: true }],
+});
+const failing = (caseId: string) => ({
+  caseId,
+  scores: [{ graderId: "reward-file", metric: "reward", value: 0, pass: false }],
+});
+// The three trace graders, verbatim from `packages/graders/src/trace-graders.ts`. Positive on every run that
+// happened at all, no `pass`, no claim about correctness — and routinely attached, because a harness that
+// wants cost or step accounting declares them.
+const withTraceGraders = (caseId: string) => ({
+  caseId,
+  scores: [
+    { graderId: "reward-file", metric: "reward", value: 0, pass: false },
+    { graderId: "steps", metric: "tool_calls", value: 12 },
+    { graderId: "cost", metric: "usd", value: 0.0431 },
+    { graderId: "latency", metric: "span", value: 8123 },
+  ],
+});
 const unmeasured = (caseId: string) => ({
   caseId,
   scores: [
@@ -78,5 +99,86 @@ describe("examProofOf — what a named scorecard actually proves about a frame",
 
   it("an empty scorecard proves nothing, and says so rather than throwing", () => {
     expect(examProofOf(["a", "b"], { results: [] })).toEqual({ proven: [], unproven: ["a", "b"], of: 2 });
+  });
+
+  // ── THE DEFECT THIS CHECK WAS BUILT TO CATCH, WEARING THE CHECK'S OWN CLOTHES ──────────────────────
+  //
+  // RED on the pre-fix code, which asked `row.scores.filter(isMeasured).some((s) => s.value > 0)`:
+  //   AssertionError: expected [ 'a' ] to deeply equal []
+  //
+  // The case FAILED its correctness grader and cost $0.0431 to do it. `value > 0` cannot tell a magnitude
+  // from a verdict, so the positive control certified the exam most reliably on precisely the wave that
+  // motivated it — a SpreadsheetBench run scoring every case zero, while measuring cost.
+  it("A COST IS NOT A PASS: a magnitude from an observational grader may not prove the exam", () => {
+    const proof = examProofOf(["a"], { results: [withTraceGraders("a")] });
+    expect(proof.proven).toEqual([]);
+    expect(proof.unproven).toEqual(["a"]);
+  });
+
+  it("and the trace graders do not suppress a real pass either — they simply do not decide", () => {
+    const proof = examProofOf(["a"], {
+      results: [
+        {
+          caseId: "a",
+          scores: [
+            { graderId: "reward-file", metric: "reward", value: 1, pass: true },
+            { graderId: "cost", metric: "usd", value: 0.0431 },
+          ],
+        },
+      ],
+    });
+    expect(proof.proven).toEqual(["a"]);
+  });
+
+  // A categorical metric reaches the same wrong end without any auxiliary grader: `value` is documented as
+  // the ordinal key (bronze<silver<gold ⇒ 1<2<3), so the WORST tier is 1 and `value > 0` read it as proof.
+  it("THE WORST TIER IS NOT A PASS: a categorical ordinal key is an ordering, not a verdict", () => {
+    const proof = examProofOf(["a"], {
+      results: [
+        { caseId: "a", scores: [{ graderId: "judge", metric: "judge", value: 1, label: "bronze", pass: false }] },
+      ],
+    });
+    expect(proof.proven).toEqual([]);
+  });
+
+  // A case killed before it produced an outcome has no verdict, so it proves nothing — the same third value
+  // an unmeasured row gets, arriving by the other door. `caseVerdict` reads `failure`; a port narrowed to
+  // `{caseId, scores}` could not have passed it, which is why the port carries it now.
+  it("A CANCELLED CASE PROVES NOTHING: partial work under a kill is not an outcome", () => {
+    const proof = examProofOf(["a"], {
+      results: [
+        {
+          caseId: "a",
+          scores: [{ graderId: "reward-file", metric: "reward", value: 1, pass: true }],
+          failure: {
+            code: "CANCELLED",
+            stage: "grade" as const,
+            message: "stopped",
+            class: "infra" as const,
+            retryable: false,
+          },
+        },
+      ],
+    });
+    expect(proof.proven).toEqual([]);
+    expect(proof.unproven).toEqual(["a"]);
+  });
+
+  // The batch's OWN stamped policy decides, not the built-in ladder. A composed policy that declares the
+  // correctness metric EXCLUDED has nothing left to decide with, and "nothing decided" is unproven — not a
+  // silent fallback to whatever the default ladder would have said.
+  it("the batch's stamped policy is what decides — a second opinion is not the record's", () => {
+    const excluded = examProofOf(
+      ["a"],
+      { results: [passing("a")] },
+      {
+        id: "test",
+        version: "1.0.0",
+        metrics: [{ match: { metric: "reward" }, authority: "objective" as const, verdictRole: "excluded" as const }],
+        rungs: { ground_truth: "all" as const, objective: "all" as const, judge: "all" as const },
+        fallback: "none" as const,
+      },
+    );
+    expect(excluded.proven).toEqual([]);
   });
 });

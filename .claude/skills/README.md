@@ -117,6 +117,39 @@ two reviews after it was deleted). A name that is gone may still be written — 
 
 ---
 
+## Must-hold policies, and what enforces each
+
+A skill is advisory: nothing forces a session to comply, and the AI-native SDLC playbook says so outright.
+Every policy that must ALWAYS hold therefore has a pair — the skill or rule that teaches it, and the gate or
+hook that refuses its absence. This table is that pairing, and `pnpm controls-documented` reads it: a row
+whose enforcer is not a script in `package.json` (or a hook file in the tree) fails the gate, because a
+policy whose named enforcer is gone is back to being advisory with a table that says otherwise.
+
+| Policy | Taught by | Enforced by |
+|---|---|---|
+| never push before the full local gate is green, every commit in the push | skill `ci`, rule `ci` | `scripts/hooks/pre-push-gate.mjs` · `pnpm guardrails` |
+| the configuration that steers the agent is regression-tested before it ships | skill `ci`, `evals/README.md` | `pnpm agent-evals` (stamp) · the eval arm of the push hook |
+| product code gets the same review every time | skill `code-review`, `REVIEW.md` | `pnpm review` (stamp) · the review arm of the push hook |
+| a release tag needs a committed authorization | `releases/README.md` | the release arm of the push hook |
+| a change starts as an intent, and a plan descends from it | `intent/README.md`, skill `documenting` | `pnpm intent-chain` |
+| an accepted intent is designed or declines the pass in one line | `intent/README.md` | `pnpm intent-chain` · `pnpm design` |
+| every fix ships a test that was red on the pre-fix code | skill `testing`, CLAUDE.md | `pnpm fix-proof` · the proof in `pnpm ci:commits` |
+| a failed read is a third value, never an empty result | skill `protocol`, rule `protocol` | `pnpm swallowed-reads` · `pnpm gated-doors` · `pnpm scan` |
+| a field the platform authors is not read off a producer's document | skill `protocol`, rule `protocol` | `pnpm untrusted-ingress` · `pnpm authz-optional` · `pnpm scan` |
+| a scanner states the vocabulary it watches, and it must be live | rule `ci` | `pnpm scanner-watches` · `pnpm convention-harness` |
+| every control that exists is named by the conventions | rule `ci`, this file | `pnpm controls-documented` |
+| a lesson that says it produced an eval case has one | `lessons/README.md` | `pnpm lesson-evals` |
+| a rule reaches live paths and a skill has a description to match on | this file | `pnpm convention-harness` · `pnpm docs-check` |
+| the web app imports nothing from the runtime | rule `web`, skill `web` | `pnpm web-imports` · `pnpm web-reach` |
+| the job runner's dependency cone is closed | rule `job-runner` | `pnpm cone` · `pnpm import-cycles` |
+| the source is English; Korean is product data under test | CLAUDE.md | `pnpm language-policy` |
+| a breach of a control band files an intent before the push proceeds | rule `ci` | `pnpm watch-bands` (dry-run in `pnpm ci:local`) |
+
+Not paired, and said so: the protocol laws' mutation gate (`pnpm protocol-mutations`) is author-run since
+2026-08-29 — ninety minutes of real builds per push was the cost that switched it off — so L1/L4/L5 are
+taught by the skill and read only by `pnpm scan` on its rotation. That is coverage, not a gate, and the row
+is absent from the table on purpose.
+
 ## Working rules for this map
 
 - **Skills travel with the code.** A PR that changes a convention or an invariant updates the matching rule or

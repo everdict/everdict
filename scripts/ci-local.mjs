@@ -16,6 +16,14 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GITLEAKS_VERSION = "8.24.3"; // keep in sync with ci.yml
 const gitleaksCache = path.join(homedir(), ".cache", "everdict", `gitleaks-${GITLEAKS_VERSION}`, "gitleaks");
 
+// The judgement step on a red gate used to be manual, and the person who could most use it is the one who has
+// to remember it exists at the moment something just went red. Bounded to the FIRST bespoke failure per run:
+// lint and typecheck explain themselves, and a model call restating a compiler error is the shape that teaches
+// people to ignore the tool.
+// `run()` exits on the first failure, so a second bespoke failure is unreachable in one invocation: the flag
+// that used to bound this to "the first" was dead code describing a limit the control flow already imposed.
+const SELF_EXPLANATORY = new Set(["pnpm lint", "pnpm typecheck", "pnpm test", "pnpm build", "web lint", "web build"]);
+
 function run(label, command, args, opts = {}) {
   const startedAt = Date.now();
   process.stdout.write(`\n▶ ${label}\n`);
@@ -23,6 +31,20 @@ function run(label, command, args, opts = {}) {
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   if (res.status !== 0) {
     console.error(`\n✖ CI-PARITY RED — "${label}" failed after ${seconds}s. Fix it, then re-run pnpm ci:local.`);
+    // ⚠️ The pnpm label is not the script name. `pnpm cone` runs check-job-runner-cone.mjs and `pnpm docs-check`
+    // runs check-docs.mjs, so deriving `check-${label}.mjs` silently never fired for either — narrower than the
+    // rule advertises, and invisible because `existsSync` returning false reads as "not a bespoke gate".
+    const SCRIPT_FOR = { cone: "job-runner-cone", "docs-check": "docs" };
+    const named = /^pnpm ([a-z-]+)$/.exec(label)?.[1];
+    const gate = named === undefined ? undefined : (SCRIPT_FOR[named] ?? named);
+    if (
+      gate !== undefined &&
+      !SELF_EXPLANATORY.has(label) &&
+      existsSync(path.join(root, "scripts", `check-${gate}.mjs`))
+    ) {
+      process.stdout.write("\n▶ triaging it — the failing scanner's own header records the repairs it accepts\n");
+      spawnSync("node", [path.join(root, "scripts", "triage.mjs"), gate], { cwd: root, stdio: "inherit" });
+    }
     process.exit(1);
   }
   process.stdout.write(`✓ ${label} (${seconds}s)\n`);
@@ -71,6 +93,21 @@ run("pnpm convention-harness", "pnpm", ["convention-harness"]);
 // in this gate precisely because the script still exists: a manual run that is killed mid-rung can leave a
 // neutralized production file in the tree, and a commit must never carry one.
 run("pnpm plugin-manifests", "pnpm", ["plugin-manifests"]);
+// The Plan→Build handoff. A plan reads exactly the same whether it was written before the work or after it;
+// the commit order is the only witness, so this one asks git rather than the files.
+// The push gate guards every other gate, and its own wiring lives in an editable settings file that
+// nothing read until this check.
+run("pnpm guardrails", "pnpm", ["guardrails"]);
+// A scanner whose watch list died keeps passing over a file count. Found by accident once; checked now.
+run("pnpm scanner-watches", "pnpm", ["scanner-watches"]);
+// A round that repairs every instance and ships no way to detect the next one bought a repair, not a rule.
+run("pnpm controls-documented", "pnpm", ["controls-documented"]);
+// The incident-to-eval route, verified rather than promised. A lesson may say nothing was mechanised.
+run("pnpm lesson-evals", "pnpm", ["lesson-evals"]);
+run("pnpm python", "pnpm", ["python"]);
+run("pnpm swallowed-reads", "pnpm", ["swallowed-reads"]);
+run("pnpm intent-chain", "pnpm", ["intent-chain"]);
+run("pnpm fix-proof", "pnpm", ["fix-proof"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);
@@ -108,6 +145,10 @@ run("gitleaks (full history)", resolveGitleaks(), [
   "--no-banner",
 ]);
 
+// The bands, every full run. File reads and arithmetic — no model, no cost on a green run — so the one thing
+// here that notices drift is read at the cadence a push already has, rather than waiting to be typed.
+run("bands (dry run)", "pnpm", ["watch-bands", "--dry-run"]);
+
 // Stamp — only a clean tree proves HEAD is what we just validated.
 //
 // `git diff HEAD` + untracked, not `status --porcelain`: the latter also compares the worktree to the INDEX,
@@ -120,9 +161,19 @@ run("gitleaks (full history)", resolveGitleaks(), [
 // neither touches the worktree.
 spawnSync("git", ["read-tree", "HEAD"], { cwd: root });
 spawnSync("git", ["update-index", "--refresh", "-q", "--unmerged"], { cwd: root });
+// ⚠️ `evals/history.jsonl` is excluded, for the reason it is excluded from the gate's CONFIG_PATHSPEC: it is a
+// record a RUN produces, not code a run validates. Including it closed a loop with no exit — `pnpm agent-evals`
+// appends a line, the line makes the tree dirty, a dirty tree refuses the CI stamp, and committing the line
+// moves HEAD so the eval stamp it just earned no longer names it.
 const dirty = [
-  spawnSync("git", ["diff", "HEAD", "--name-only"], { cwd: root, encoding: "utf8" }).stdout.trim(),
-  spawnSync("git", ["ls-files", "--others", "--exclude-standard"], { cwd: root, encoding: "utf8" }).stdout.trim(),
+  spawnSync("git", ["diff", "HEAD", "--name-only", "--", ".", ":(exclude)evals/history.jsonl"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout.trim(),
+  spawnSync("git", ["ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude)evals/history.jsonl"], {
+    cwd: root,
+    encoding: "utf8",
+  }).stdout.trim(),
 ]
   .filter(Boolean)
   .join("\n");
