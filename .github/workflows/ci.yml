@@ -74,6 +74,7 @@ jobs:
       # A lesson that SAYS it produced an eval case must have one. It never demands a case for every lesson.
       - run: pnpm lesson-evals
       - run: pnpm swallowed-reads
+      - run: pnpm gate-order
       - run: pnpm intent-chain
       - run: pnpm fix-proof
       - run: pnpm docs-check

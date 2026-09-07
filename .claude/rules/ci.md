@@ -171,6 +171,23 @@ See skill `ci`.
   scanner with an allowlist is a design admission"* — and the baseline is that admission, counted. A file
   whose count DROPPED must update the baseline in the same change: a debt that quietly stops shrinking on
   paper stops being a debt anybody pays.
+- **`pnpm gate-order` is the handler shape's own order, enforced instead of stated.** This file has said since
+  the layer existed that a route runs feature-gate → authenticate → **authorize** → **validate** → delegate,
+  and rule `api-layer` spells it out in five numbered steps. Nothing read it. A census found **45 of the 138
+  doors that spell both `gate` and `safeParse` take those two in the other order**, across 21 resource slices —
+  so `pnpm scan` reporting `POST /harnesses` for it, and calling that door unlike every other, was wrong about
+  the population and right about the door. ⚠️ **It is not an authorization bypass and is not filed as one**:
+  `gate` still runs before the service, so nothing effects on the wrong side. What the reversed order costs is
+  that a caller who will be refused is first handed the schema's opinion of their body, that the door works
+  for a caller it will not serve, and — the part that matters — that when a third of the doors disagree,
+  nobody can see an anomaly. Same argument as `guard-siblings`, same remedy: a RATCHET over
+  `scripts/gate-order-baseline.txt` (43 today, down from 45 with the two harness doors repaired), refusing a
+  NEW one, with a repaired file leaving the list in the same change. ⚠️ **Nothing needs the body parsed
+  first** — `gate(principal, action)` takes no resource-derived argument since `0212_drop_team_axis.sql`
+  removed the axis that used to supply one, so the reason parse-first ever existed is gone and 45 doors kept
+  the shape. ⚠️ It reads the text between one `app.<verb>(` and the next: a handler whose gate lives in a
+  helper, or whose validation happens in the service, carries neither name and is not counted — it measures
+  the doors that spell both, and says nothing about the rest.
 - **`pnpm lesson-evals` verifies the incident-to-eval route instead of trusting it.** The article's rule is
   that each production incident becomes a permanent eval; `lessons/README.md` says where a lesson goes
   afterwards — an eval case, a scan class, a check, or nothing. That route was a paragraph and nothing a

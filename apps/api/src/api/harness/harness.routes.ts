@@ -31,12 +31,17 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // AUTHORIZE, THEN VALIDATE — the order rule `api-layer` states, and the order the sibling
+    // `POST /harnesses/validate` twenty lines below already used. `gate` takes nothing from the body, so a
+    // caller who may not register was being handed this schema's opinion of their request before the refusal.
+    try {
+      gate(principal, "harnesses:register");
+    } catch (err) {
+      return sendError(reply, err);
+    }
     const parsed = HarnessInstanceSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      // The owning team of a new asset is decided FIRST and the gate is applied against that team — registering means "make this the team's",
-      // so registering under a team I do not belong to is the same grounds for refusal as editing another team's asset.
-      gate(principal, "harnesses:register");
       // Structural portability errors are hard-blocked inside the registry's register (the single chokepoint every path
       // — route/bundle/MCP — flows through). Host-literal warnings do NOT block; surface them so the author can migrate.
       // docs/architecture/topology-portability.md.
@@ -386,10 +391,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: ServerDeps): v
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:register"); // same gate as instance register (ungated viewer+; CI too)
+    } catch (err) {
+      return sendError(reply, err);
+    }
     const parsed = RepinBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      gate(principal, "harnesses:register"); // same gate as instance register (ungated viewer+; CI too)
       // The channel is the route's contribution to the origin; the merge base is the service's — only it
       // knows the base at the write (docs/architecture/evolution-lineage.md, Track A). The keyless GitHub
       // Actions federation authenticates as the `ci` role, which is what tells a headless re-pin apart here.

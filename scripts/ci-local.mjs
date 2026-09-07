@@ -107,6 +107,7 @@ run("pnpm controls-documented", "pnpm", ["controls-documented"]);
 run("pnpm lesson-evals", "pnpm", ["lesson-evals"]);
 run("pnpm python", "pnpm", ["python"]);
 run("pnpm swallowed-reads", "pnpm", ["swallowed-reads"]);
+run("pnpm gate-order", "pnpm", ["gate-order"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm fix-proof", "pnpm", ["fix-proof"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);

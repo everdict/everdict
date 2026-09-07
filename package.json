@@ -36,6 +36,7 @@
     "lesson-evals": "node scripts/check-lesson-evals.mjs",
     "python": "node scripts/check-python.mjs",
     "swallowed-reads": "node scripts/check-swallowed-reads.mjs",
+    "gate-order": "node scripts/check-gate-order.mjs",
     "telemetry": "node scripts/telemetry/otlp-sink.mjs",
     "telemetry-report": "node scripts/telemetry/report.mjs",
     "findings": "node scripts/findings.mjs",
