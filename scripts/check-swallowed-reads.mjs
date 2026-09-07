@@ -48,10 +48,19 @@
 //
 // ── A RATCHET, NOT A WALL ────────────────────────────────────────────────────────────────────────
 //
-// 105 exist today across 61 files — the sum of `scripts/swallowed-reads-baseline.txt`, which is the number a
-// reader can check rather than the 83 this line used to claim (a running total somebody stopped counting
-// partway down the file; found by `pnpm review`, and the reason this repository asks for the number and not
-// the adjective). Each is a place the TYPE failed to say it, and L2 says so itself: *"A scanner with an
+// 132 exist today across 78 files — the sum of `scripts/swallowed-reads-baseline.txt`, which is the number a
+// reader can check rather than an adjective. It has moved twice and both moves are recorded, because a
+// baseline that grows without an explanation is indistinguishable from one that was quietly re-based:
+//
+//     83  → 105   a correction, not a change: the line claimed 83 while the file summed to 105 across 61
+//                 files (a running total somebody stopped counting partway down). Nothing was scanned that
+//                 had not been scanned before.
+//     105 → 132   a WIDENING: the glob gained `.tsx`, which it had never matched, and `apps/web` is almost
+//                 entirely `.tsx`. That added 27 occurrences across 17 files — all of them pre-existing and
+//                 none of them new debt, but none of them previously visible either. The ratchet had been
+//                 reporting PASS over a region it could not read.
+//
+// Each is a place the TYPE failed to say it, and L2 says so itself: *"A scanner with an
 // allowlist is a design admission, not a solution."* The baseline is that admission, written down and
 // counted. What is refused is a NEW one — and a file whose count has DROPPED must update the baseline in the
 // same change, because a debt that quietly stops shrinking on paper stops being a debt anybody pays.
@@ -77,7 +86,20 @@ const DECODE = /\b\w*(?:res|response|reply|body)\s*\.\s*(?:json|text|arrayBuffer
 
 const files = execFileSync(
   "git",
-  ["ls-files", "packages/*/src/**/*.ts", "apps/*/src/**/*.ts", "packages/*/src/*.ts", "apps/*/src/*.ts"],
+  [
+    "ls-files",
+    "packages/*/src/**/*.ts",
+    "apps/*/src/**/*.ts",
+    "packages/*/src/*.ts",
+    "apps/*/src/*.ts",
+    // ⚠️ `.tsx` WAS MISSING, AND apps/web IS ALMOST ENTIRELY `.tsx`. The ratchet reported PASS over a region
+    // it never read — the empty-corpus failure one directory in, where the corpus is not empty but a whole
+    // file extension is absent from it. Found by `pnpm review`, which counted what the glob could not see.
+    "packages/*/src/**/*.tsx",
+    "apps/*/src/**/*.tsx",
+    "packages/*/src/*.tsx",
+    "apps/*/src/*.tsx",
+  ],
   { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
 )
   .split("\n")

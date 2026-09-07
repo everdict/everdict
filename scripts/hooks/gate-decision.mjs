@@ -18,10 +18,17 @@ export const CONFIG_PATHS = ["CLAUDE.md", ".claude", "evals"];
  *
  * `evals/history.jsonl` is the record a run PRODUCES, not configuration a run tests, and treating it as the
  * latter closes a loop with no exit: appending a line dirties `evals/`, a dirty `evals/` refuses the stamp,
- * and earning the stamp appends another line. It is excluded in both places that ask the question — here for
- * the push, and in `evals/run.mjs` for the stamp — from this one definition, so the two cannot drift.
+ * and earning the stamp appends another line.
+ *
+ * ⚠️ THIS COMMENT USED TO PROMISE SOMETHING THE CODE DID NOT DO. It said the exclusion came "from this one
+ * definition, so the two cannot drift" — and `scripts/ci-local.mjs` and `scripts/ci-commits.mjs`, the two
+ * gates that actually ask whether the tree is dirty, each carried the literal twice. Four hard-coded copies
+ * under a sentence claiming one definition, which is the comment-is-a-claim law in rule `protocol` failing on
+ * the file that states the rule. Found by `pnpm review`. The constant below is the definition now, and every
+ * caller imports it.
  */
-export const CONFIG_PATHSPEC = [...CONFIG_PATHS, ":(exclude)evals/history.jsonl"];
+export const RUN_OUTPUT_EXCLUDE = ":(exclude)evals/history.jsonl";
+export const CONFIG_PATHSPEC = [...CONFIG_PATHS, RUN_OUTPUT_EXCLUDE];
 
 /**
  * Code a review should see. A docs-only or intent-only push carries no risk a review would find, and pays

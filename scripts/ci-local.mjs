@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { RUN_OUTPUT_EXCLUDE } from "./hooks/gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -166,11 +167,11 @@ spawnSync("git", ["update-index", "--refresh", "-q", "--unmerged"], { cwd: root 
 // appends a line, the line makes the tree dirty, a dirty tree refuses the CI stamp, and committing the line
 // moves HEAD so the eval stamp it just earned no longer names it.
 const dirty = [
-  spawnSync("git", ["diff", "HEAD", "--name-only", "--", ".", ":(exclude)evals/history.jsonl"], {
+  spawnSync("git", ["diff", "HEAD", "--name-only", "--", ".", RUN_OUTPUT_EXCLUDE], {
     cwd: root,
     encoding: "utf8",
   }).stdout.trim(),
-  spawnSync("git", ["ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude)evals/history.jsonl"], {
+  spawnSync("git", ["ls-files", "--others", "--exclude-standard", "--", ".", RUN_OUTPUT_EXCLUDE], {
     cwd: root,
     encoding: "utf8",
   }).stdout.trim(),

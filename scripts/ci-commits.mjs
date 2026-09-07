@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { predatesRule, proveInWorktree, ruleSince, verdictFor } from "./fix-proof.mjs";
+import { RUN_OUTPUT_EXCLUDE } from "./hooks/gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const git = (args, opts = {}) => spawnSync("git", args, { cwd: root, encoding: "utf8", ...opts });
@@ -41,8 +42,8 @@ git(["update-index", "--refresh", "-q", "--unmerged"]);
 // append a line, dirty the tree, refuse the stamp, commit the line, move HEAD — and this sibling did not, so
 // the loop simply moved one gate over. That is the shape `pnpm guard-siblings` exists for, one layer up.
 const dirty = [
-  git(["diff", "HEAD", "--name-only", "--", ".", ":(exclude)evals/history.jsonl"]).stdout.trim(),
-  git(["ls-files", "--others", "--exclude-standard", "--", ".", ":(exclude)evals/history.jsonl"]).stdout.trim(),
+  git(["diff", "HEAD", "--name-only", "--", ".", RUN_OUTPUT_EXCLUDE]).stdout.trim(),
+  git(["ls-files", "--others", "--exclude-standard", "--", ".", RUN_OUTPUT_EXCLUDE]).stdout.trim(),
 ]
   .filter(Boolean)
   .join("\n");

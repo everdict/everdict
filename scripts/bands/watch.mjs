@@ -115,6 +115,39 @@ if (metrics.length === 0) {
   console.error("✖ watch-bands: the config declares no metrics. Refusing to report over an empty set.");
   process.exit(1);
 }
+
+// ── a threshold that cannot be read is a band that cannot fire ───────────────────────────────────
+//
+// The reader above coerces a value to a number only when it matches `^\d+$`, and hands back a STRING
+// otherwise. Nothing downstream noticed: `slice(-"20 ")` is `slice(NaN)`, which returns the whole array, so a
+// trailing space on `window` silently widens the band to every sample ever recorded — and the run still
+// prints a sigma, which is the shape that makes it dangerous. Found by `pnpm review`.
+//
+// The repair is not a looser regex. This config is versioned precisely so an alarm is REPRODUCIBLE, and
+// "cannot find out" is an escalation rather than a default (rule `protocol` L2). So each field is checked for
+// the type it is used at, and an unreadable one stops the run instead of being guessed at.
+const DIRECTIONS = new Set(["up", "down"]);
+for (const metric of metrics) {
+  for (const key of ["window", "floor"]) {
+    const value = metric[key];
+    if (!Number.isInteger(value) || value <= 0) {
+      console.error(
+        `✖ watch-bands: metric "${metric.id}" declares ${key}=${JSON.stringify(value)}, which is not a positive integer.\n  A band computed over an unreadable window is a sigma over the wrong samples. Fix scripts/bands/bands.yaml.`,
+      );
+      process.exit(1);
+    }
+  }
+  if (!DIRECTIONS.has(metric.direction)) {
+    console.error(
+      `✖ watch-bands: metric "${metric.id}" declares direction=${JSON.stringify(metric.direction)}; it must be up or down.\n  The direction decides which tail is a breach, so a wrong one inverts the alarm.`,
+    );
+    process.exit(1);
+  }
+  if (typeof metric.source !== "string" || metric.source === "") {
+    console.error(`✖ watch-bands: metric "${metric.id}" declares no source.`);
+    process.exit(1);
+  }
+}
 // A tier the file claims and the code invents is a threshold nobody can reproduce, which is the one thing a
 // versioned band config exists to prevent.
 for (const sigma of ["1", "2", "3"]) {
