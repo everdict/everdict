@@ -1,3 +1,4 @@
+import { EVERDICT_ATTR } from "@everdict/contracts";
 import {
   type EvidenceSelector,
   type EvidenceSlot,
@@ -326,8 +327,35 @@ export function toTraceSpans(spans: Span[], traceId: string): TraceSpan[] {
     endedAt: new Date(s.endMs >= s.startMs ? s.endMs : s.startMs).toISOString(),
     // A pulled span has already had its resource merged into its attributes by the adapter (that is what the
     // per-platform parsers produce); keeping the merge here is honest about what we actually received.
-    attributes: s.attrs,
+    //
+    // ⚠️ MINUS THE ATTRIBUTES THE PLATFORM AUTHORS. "What we actually received" came from whatever wrote
+    // spans to the tenant's observability platform, which for `POST /scorecards/ingest/pull` includes the
+    // harness under test — and `spansToEvents` reads `everdict.plane` to decide whether to mint a
+    // `kind: "infra"` event, the platform's own record of WHERE a run was placed, taking `unit` and `node`
+    // from the same bag. So a producer could author the platform's placement record by naming an attribute.
+    // Nothing in between stripped it: `stripPlatformAuthoredFields` covers artifact refs and size fields,
+    // and `pnpm untrusted-ingress` asks which SCHEMA a door parses with while the danger is in a VALUE.
+    // Found by `pnpm scan`. For a pulled trace the platform said nothing about placement, and silence is the
+    // honest answer.
+    attributes: stripPlatformAuthoredAttributes(s.attrs),
   }));
+}
+
+/**
+ * The span attributes only the platform may author, removed from anything a producer's platform gave us.
+ *
+ * Deliberately narrow. `everdict.cost.usd` is the other candidate — its definition leaves cost to the
+ * platform and the graders read it — but on the pull path a tenant's own observability platform is a
+ * plausible author of a price, which is not true of a placement plane the platform alone assigns. Widening
+ * this set is a decision with its own argument, not a tidy-up.
+ */
+const PRODUCER_MAY_NOT_AUTHOR = [EVERDICT_ATTR.plane] as const;
+
+function stripPlatformAuthoredAttributes(attrs: Record<string, unknown>): Record<string, unknown> {
+  if (!PRODUCER_MAY_NOT_AUTHOR.some((key) => key in attrs)) return attrs;
+  const kept: Record<string, unknown> = { ...attrs };
+  for (const key of PRODUCER_MAY_NOT_AUTHOR) delete kept[key];
+  return kept;
 }
 
 export function spansToTraceEvents(spans: Span[], mapping?: SpanAttrMapping): TraceEvent[] {
