@@ -1,6 +1,10 @@
 # Intent: two outbound-credential defects the first unscoped scan found
 
-Author: pnpm scan (scope `contracts`, sonnet, ba700d60) — verified by hand before filing. Status: draft
+Author: pnpm scan (scope `contracts`, sonnet, ba700d60) — verified by hand before filing. Status: shipped
+
+Shipped: a175f871
+
+Design: none — the scan wrote the design: two named defects, each with the source read and the failing input stated. A design pass would restate the finding.
 
 ## Problem
 
@@ -62,3 +66,30 @@ caller-named URL — webhooks, trace artifacts, OAuth.
   dot)? The two found here were found by reading; the class deserves a table.
 - Does any lane legitimately need the unscoped header — a mirror, a proxy — or is the scoped form strictly
   better here?
+
+## Shipped
+
+Both, in `a175f871`, each with its counterexample seen RED for the stated reason before the repair.
+
+**The credential scope.** `gitAuthEnv(token, remoteUrl)` now scopes to
+`http.<scheme>//<host>[:port]/<path>.extraheader`, normalising a trailing `.git` and dropping credentials,
+query and fragment so one repository written either way yields one scope. All three call sites already held
+the URL, so nothing had to be threaded. The case the intent did not name: a remote that is NOT http(s) — an
+ssh remote, or a string that will not parse. Attaching an HTTP credential there is what produced the bare key
+in the first place, so no header is attached at all and the clone fails as an ordinary auth failure. Visible
+and local beats succeeding while broadcasting.
+
+**The address predicate.** Every v4 rule is asked of the unwrapped address, in both spellings — the dotted
+`::ffff:169.254.169.254` and the hex `::ffff:a9fe:a9fe`, which are the same host. The URL parser normalises
+the dotted form to the hex one, so the literal check meets the hex spelling whatever the caller wrote; a
+guard that caught only the dotted form would have been the same hole in a narrower coat. `::` was added
+alongside `::1` while the shape was open. The tests assert the PUBLIC cases too, because a repair that
+swallowed the lane is the other way this fails.
+
+## What this leaves for the record
+
+`pnpm scan` found both, in a package no change had touched, and no change-scoped control could have. That is
+the argument for the unscoped scan stated as an outcome rather than a hope — and the delay between the
+finding and this repair (two days, filed and visible) is the argument for the finding LEDGER: both were
+graded `carried` in `findings/DISPOSITIONS.md` while they waited, so the precision number counted them.
+
