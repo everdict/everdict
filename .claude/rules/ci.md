@@ -143,9 +143,18 @@ See skill `ci`.
   constraint is what moved the staging DECISION into `sbench_pairing.py`, standard-library-only, so its
   eleven counterexamples need nothing but the interpreter. ⚠️ Writing it found **five test suites that had
   never run at all** — `clients/python/tests/` and `examples/servers/spica-playwright-server/tests/`, 477
-  lines with no `pytest` anywhere in the repository's tooling. They are DECLARED in `NEEDS` with what each
-  is missing rather than silently absent, and the declaration is a ratchet both ways: a new undeclared
-  unrunnable test fails, and a declared entry whose file is gone fails. It replaced a shell loop in `ci.yml`
+  lines with no `pytest` anywhere in the repository's tooling. **Three of them needed nothing**, which is what
+  reading their imports rather than their `pyproject` showed: the published client used pytest for one thing
+  (`pytest.raises`, eight lines of `contextlib`), the registry suite imports only stdlib-reachable modules,
+  and four of the launch suite's five claims need no dependency at all. Those RUN now, on every gate, with
+  nothing but the interpreter — the same move `sbench_pairing.py` made, and the reason `ci:local` still works
+  on a clean checkout. Each file collects and runs its own `test_*` functions under `__main__`, because this
+  gate executes a test file rather than collecting it, and prints a `PASS` line, because a test that runs and
+  says nothing is indistinguishable from one that asserted nothing. What remains genuinely needs the example
+  server's declared dependencies (fastapi · httpx · psutil), and it is DECLARED in `NEEDS` — precisely: the
+  one launch claim that needs `psutil` is its own file, because leaving it beside four that need nothing made
+  all five unrunnable, which was the accounting error the intent named. The declaration is a ratchet both
+  ways: a new undeclared unrunnable test fails, and a declared entry whose file is gone fails. It replaced a shell loop in `ci.yml`
   that globbed one file and existed only there, so `ci:local` could not run it — the gate drift skill `ci`
   warns about, built in from that step's first commit.
 - **`pnpm swallowed-reads` is the L2 ban, enforced instead of stated.** `.claude/rules/protocol.md` names

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+
+# Executed as a script by `pnpm python`, not collected by a runner that would have arranged the path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from spica_playwright_server.infrastructure.browser_launcher import (
     OFFSCREEN_POSITION,
@@ -10,6 +14,7 @@ from spica_playwright_server.infrastructure.browser_launcher import (
     chromium_args,
 )
 from spica_playwright_server.infrastructure.extension import unpacked_extension_id
+
 
 
 def spec(**overrides) -> LaunchSpec:
@@ -51,15 +56,20 @@ def test_the_derived_extension_id_is_a_stable_32_char_id_in_chromes_alphabet() -
     assert derived != unpacked_extension_id(Path("/srv/ext"))
 
 
-def test_only_a_profile_owning_process_counts_as_a_browser() -> None:
-    from spica_playwright_server.infrastructure.processes import _role_of
 
-    main = ["chrome", "--user-data-dir=/tmp/profile-1", "--load-extension=/ext"]
-    renderer = ["chrome", "--type=renderer", "--user-data-dir=/tmp/profile-1"]
-    crashpad = ["chrome_crashpad_handler", "--monitor-self", "--database=/root/.config/chromium"]
-
-    assert _role_of(main, "/tmp/profile-1") == "browser"
-    assert _role_of(renderer, "/tmp/profile-1") == "renderer"
-    # A crashpad handler owns no profile: counting it as a browser turns 3 sessions into 9 in the
-    # process view, which is the one read an operator uses to trust the registry.
-    assert _role_of(crashpad, None) == "helper"
+if __name__ == "__main__":
+    # Collect and run every test in this module. A failure exits non-zero, which is what `pnpm python`
+    # reads; names are printed so a red run says WHICH claim broke.
+    failures = 0
+    for _name, _fn in sorted(dict(globals()).items()):
+        if not _name.startswith("test_") or not callable(_fn):
+            continue
+        try:
+            _fn()
+            print(f"  ok   {_name}")
+        except Exception as _err:  # noqa: BLE001 — a test runner reports, it does not re-raise
+            failures += 1
+            print(f"  FAIL {_name}: {type(_err).__name__}: {_err}")
+    _ran = sum(1 for _n, _f in globals().items() if _n.startswith("test_") and callable(_f))
+    print(f"{'FAIL' if failures else 'PASS'} {Path(__file__).name}: {_ran} test(s), {failures} failure(s)")
+    sys.exit(1 if failures else 0)

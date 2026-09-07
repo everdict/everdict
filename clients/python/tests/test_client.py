@@ -1,8 +1,36 @@
+"""Tests for the published `everdict` client.
+
+⚠️ RUN BY `pnpm python`, WITH NOTHING BUT THE INTERPRETER. This suite was 117 lines that no process had ever
+executed: there is no `pytest` anywhere in this repository's tooling, so a green test and a red test here were
+the same artifact — and a reader opening `clients/python/` saw a `tests/` directory and concluded the client
+was tested. `pnpm python` runs each `test_*.py` by EXECUTING it, so the file collects and runs its own
+functions at the bottom, and the only thing pytest was ever used for (`pytest.raises`) is eight lines of
+`contextlib` here. That is the same move `sbench_pairing.py` made for the staging decision: standard-library
+only, so the counterexamples need nothing but python3 and `pnpm ci:local` stays runnable on a clean checkout.
+"""
+
+import contextlib
 import json
+import sys
+from pathlib import Path
 
-import pytest
+# The package under test sits beside `tests/`, and this file is executed as a script rather than collected by
+# a runner that would have arranged the path.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from everdict import EverdictClient, EverdictError
+from everdict import EverdictClient, EverdictError  # noqa: E402
+
+
+@contextlib.contextmanager
+def raises(exc_type):
+    """`pytest.raises`, in the standard library. Yields a holder whose `.value` is the caught exception."""
+    holder = type("Raised", (), {"value": None})()
+    try:
+        yield holder
+    except exc_type as err:  # noqa: PERF203 — one guarded block, not a loop
+        holder.value = err
+        return
+    raise AssertionError(f"expected {exc_type.__name__} and nothing was raised")
 
 
 def fake_transport(responses):
@@ -82,7 +110,7 @@ def test_evaluate_threads_trials_and_reads_trial_summary():
 
 def test_error_body_maps_to_everdict_error():
     transport, _ = fake_transport([(400, {"code": "BAD_REQUEST", "message": "no runtime"})])
-    with pytest.raises(EverdictError) as exc:
+    with raises(EverdictError) as exc:
         client(transport).evaluate("h@1", "d@1")
     assert exc.value.status == 400 and exc.value.code == "BAD_REQUEST"
 
@@ -111,7 +139,25 @@ def test_diff_and_leaderboard_build_queries():
 
 
 def test_constructor_requires_base_url_and_api_key():
-    with pytest.raises(ValueError):
+    with raises(ValueError):
         EverdictClient("", "k")
-    with pytest.raises(ValueError):
+    with raises(ValueError):
         EverdictClient("http://x", "")
+
+
+if __name__ == "__main__":
+    # Collect and run every test in this module. A failure is an AssertionError, which exits non-zero — which
+    # is what `pnpm python` reads. Names are printed so a red run says WHICH claim broke.
+    failures = 0
+    for name, fn in sorted(dict(globals()).items()):
+        if not name.startswith("test_") or not callable(fn):
+            continue
+        try:
+            fn()
+            print(f"  ok   {name}")
+        except Exception as err:  # noqa: BLE001 — a test runner reports, it does not re-raise
+            failures += 1
+            print(f"  FAIL {name}: {type(err).__name__}: {err}")
+    _ran = sum(1 for _n, _f in globals().items() if _n.startswith("test_") and callable(_f))
+    print(f"{'FAIL' if failures else 'PASS'} {Path(__file__).name}: {_ran} test(s), {failures} failure(s)")
+    sys.exit(1 if failures else 0)
