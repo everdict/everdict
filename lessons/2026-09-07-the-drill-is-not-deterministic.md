@@ -81,6 +81,12 @@ The honest summary is narrower than "the drill is not deterministic" and more us
 varies when the case sits where the lesson and a capable model's default answer agree**, and the way to find
 that is to read the assertion and ask who owns the word it demands.
 
+By the end of the same evening three cases had been read that way and all three died of one thing — an
+assertion alternative reachable from the tree the drill leaves standing (`source`, a live `package.json`
+script name, five files called `*-baseline.txt`) or from what a model already knows (a distinction the TOOL's
+own documentation makes). That is a defect in how cases are WRITTEN, not in how they are drilled, and it is
+mechanisable at load time: `intent/2026-09-07-assertions-reachable-without-the-lesson/`.
+
 ## The question this leaves open
 
 How many samples make a verdict? Two greens retired a case here, which is a judgement rather than a
