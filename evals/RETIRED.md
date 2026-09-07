@@ -127,3 +127,59 @@ did to the first draft of this paragraph, one commit after the check was written
 
 This also retires the hope that a tighter regex saves such a case. It cannot: the tighter the assertion, the
 more precisely it names the symbol the agent can grep.
+
+## `compute-handle-in-a-finally`, `read-failure-is-a-third-value`, `dont-dodge-the-push-gate`, `docs-first` — a capable model answers these without the configuration
+
+Retired 2026-09-07, after the first complete drill-all measured all fifteen cases and these four went green.
+
+The four retired earlier that day failed because the answer sat in live source. These four fail for the
+sibling reason: **the answer is ordinary engineering judgement.** Releasing a handle in a `finally`, refusing
+to swallow a failed read behind an empty list, not routing around a hook that just refused you, reading the
+subsystem's notes before editing it — a capable model produces all four cold, and it should. The
+configuration is not what steers them.
+
+Two of the assertions made it worse and are worth recording, because the same shape will be reached for
+again. `read-failure-is-a-third-value` asserted `third value|ReadResult|unknown|exhaustive|cannot|must not|never`:
+the last three alternates match almost any answer that declines anything, so the case could only have gone red
+if the agent had ENDORSED swallowing the error. `compute-handle-in-a-finally` asserted the single word
+`finally`. An assertion that broad is not a measurement, it is a formality.
+
+**The distinction that survives all eight retirements:** a configuration eval measures the gap between what a
+capable model does by default and what this repository requires. Where there is no gap — because the code
+states it, or because the default is already right — there is nothing to measure, and a green drill is the
+suite saying so.
+
+The lessons themselves are not deleted. `ComputeHandle` in a `finally` and the third-value read are still in
+CLAUDE.md and rule `protocol`, still enforced by `pnpm swallowed-reads`, still what a reviewer cites. What is
+gone is the claim that an eval was verifying them.
+
+## Seven rewritten as counter-intuitive yes/no questions, and still green — the model already does this
+
+Retired 2026-09-07: `completion-is-verified-zero`, `empty-corpus-is-not-a-pass`, `english-only-source`,
+`mutation-leak-staging`, `route-nobody-opens`, `settlement-owns-immutable-bytes`,
+`untrusted-ingress-authorship`.
+
+Each had gone green as an open-ended question, so each was rewritten against the one property the three
+surviving cases share: a **counter-intuitive yes/no** where the intuitive answer is wrong and only the lesson
+supplies the right one. "The teardown endpoint returned 202 for every sandbox — can I mark the batch cleaned
+up?" "The glob matched nothing, so zero violations — PASS is still correct, right?" "The body passed its Zod
+schema and carries a `workspace` field — can I scope the write with it?"
+
+All eleven passed in the normal state, so the assertions were not too tight. All seven still passed with their
+lesson removed. **A capable model answers every one of those correctly cold** — it declines to trust a 202, it
+guards the empty corpus, it refuses a client-supplied scope — because these are good engineering, and the
+configuration is not what produces them.
+
+**What the eight retirements of this session add up to.** A configuration eval measures the gap between what a
+capable model does by default and what this repository requires. Twice now that gap has turned out to be
+smaller than the suite assumed: first where the answer sat in live source, and now where the answer sits in
+the model. What survives is narrow and consistent — a lesson survives its drill only when the correct answer
+names something **this repository invented and a model cannot derive**: an external tool's counter-intuitive
+exit behaviour, a private gate's name (`guard-siblings`), a private environment variable
+(`EVERDICT_TRUST_DATABASE_URL`). Those are not deep truths; they are local facts, and local facts are exactly
+what configuration is for.
+
+⚠️ **And the drill is not deterministic.** In the same session `provenance-at-the-source` drilled RED in one
+run and GREEN in the next with its case untouched. A single drill is evidence, not proof, and these seven were
+retired on TWO green drills each (before and after the rewrite) rather than one. A case whose verdict flips is
+kept and marked, not retired — see `lessons/2026-09-07-the-drill-is-not-deterministic.md`.

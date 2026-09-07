@@ -44,6 +44,15 @@ article's other question: when a new model is swapped in, does the agent still d
 }
 ```
 
+**The suite is four cases, and that is the measured size rather than the intended one.** Two complete
+drill-alls in one session retired eleven: four because the answer sat in live source, seven because a capable
+model answers them cold — including after each was rewritten as a counter-intuitive yes/no where the intuitive
+answer is wrong. What survives shares one property: the correct answer names something **this repository
+invented and a model cannot derive** — an external tool's counter-intuitive exit behaviour, a private gate's
+name, a private environment variable. The article's 20–50 baseline is a target for cases that MEASURE, and
+backfilling toward the number with cases that do not is how the suite got here. See `RETIRED.md`, and
+`lessons/2026-09-07-the-drill-is-not-deterministic.md` for why a retirement now needs two green drills.
+
 **Before any of the fields: can the CODEBASE answer this?** A configuration eval can only measure what the
 repository cannot state for itself. Every case grants `Read,Grep,Glob`, so if deleting the sentence still
 leaves a correct answer reachable by reading live source, the sentence was not steering anything and the case

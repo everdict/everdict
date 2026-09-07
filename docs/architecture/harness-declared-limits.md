@@ -2,7 +2,7 @@
 kind: decision
 title: "Declared limits — harness clauses this deployment cannot satisfy, and the ones it declines"
 status: accepted
-updated: 2026-09-06
+updated: 2026-09-07
 ---
 # Declared limits — clauses this deployment cannot satisfy, and the ones it declines
 
@@ -288,7 +288,13 @@ entries with real history), each declaring the eval case it produced or why it p
 Things that look similar and are not blocked, only unfinished. They belong in the backlog, not on this page,
 and putting them here would be exactly the abuse this page's own rule warns about:
 
-- **The eval suite's case count** — twenty against a stated baseline of twenty to fifty. Work, not a wall.
+- **The eval suite's case count** — four against a stated baseline of twenty to fifty, and this entry is the
+  one that changed character. It was filed as "work, not a wall" when the suite held twenty cases nobody had
+  drilled. Two complete drill-alls later, eleven are retired: the gap between what a capable model does by
+  default and what this repository requires is simply narrower than twenty cases wide. That is a measured
+  fact, not a backlog item — but it is still not a declared limit, because the honest response is to find
+  more places where the gap is real (each incident is a candidate) rather than to accept four. What would be
+  a limit, and is not claimed yet: that this repository has fewer than twenty such places at all.
 - **The second scan rotation** — every scope read once; the trend needs a second pass. Work.
 - **Baselines old enough to band on** — three of four bands compute now; L5 needs two quarters of movement,
   so no play can claim it before 2027-03. Time.
