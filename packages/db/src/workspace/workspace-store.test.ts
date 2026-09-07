@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryWorkspaceStore } from "./workspace-store.js";
+import { InMemoryWorkspaceStore, PgWorkspaceStore } from "./workspace-store.js";
 
 describe("InMemoryWorkspaceStore — membership", () => {
   it("create makes the creator an admin member, and an id collision returns undefined", async () => {
@@ -104,5 +104,58 @@ describe("InMemoryWorkspaceStore — membership", () => {
     expect(await store.listForSubject("alice")).toEqual([]);
     expect(await store.roleFor("acme", "bob")).toBeUndefined();
     await store.delete("acme"); // idempotent — fine to call again
+  });
+});
+
+// ── THE SWEEP IS DERIVED FROM THE SCHEMA, AND THIS IS THE SHAPE HALF ─────────────────────────────
+//
+// `PgWorkspaceStore.delete()` used to walk a hand-maintained list of 18 `[table, column]` pairs against a
+// schema with 86 live tables, 55 of them tenant-scoped and unnamed — and one entry, `everdict_connections`,
+// naming a table `0046_drop_connections.sql` removed, which made the whole delete REJECT on any migrated
+// database. What actually happens is decided by an engine, so the real certification is TRUST-194 in
+// `apps/api/src/trust/workspace-delete-sweep.trust.test.ts` against a live Postgres; rule `testing` says an
+// adapter's decision is certified there or nowhere, and that the in-memory test proves only the shape.
+//
+// This is that shape, and it is worth having because the trust suite is env-gated: without it `pnpm test`
+// says nothing at all about this store, which is exactly the state the defect lived in for 166 migrations.
+describe("PgWorkspaceStore delete", () => {
+  const fakeClient = (scoped: { table_name: string; column_name: string }[]) => {
+    const statements: string[] = [];
+    return {
+      statements,
+      client: {
+        query: async <R>(text: string, _params?: unknown[]) => {
+          statements.push(text.replace(/\s+/g, " ").trim());
+          if (text.includes("information_schema")) return { rows: scoped as R[] };
+          return { rows: [] as R[] };
+        },
+      },
+    };
+  };
+
+  it("deletes every table the schema reported, and the workspace row last", async () => {
+    const { client, statements } = fakeClient([
+      { table_name: "everdict_agents", column_name: "tenant" },
+      { table_name: "everdict_notifications", column_name: "workspace" },
+    ]);
+    await new PgWorkspaceStore(client).delete("acme");
+
+    const deletes = statements.filter((s) => s.startsWith("DELETE FROM"));
+    // Both derived tables, on the column the SCHEMA reported rather than on a spelling this file remembers.
+    expect(deletes).toContain("DELETE FROM everdict_agents WHERE tenant = $1");
+    expect(deletes).toContain("DELETE FROM everdict_notifications WHERE workspace = $1");
+    // …and the row that makes the workspace exist goes last, so a partial failure is retryable.
+    expect(deletes.at(-1)).toBe("DELETE FROM everdict_workspaces WHERE id = $1");
+  });
+
+  it("refuses when the schema resolved no tenant-scoped tables at all", async () => {
+    // An empty derived set is a read that answered nothing, not a workspace with no data — and removing the
+    // workspace row on top of it would report success over data nobody looked for.
+    const { client, statements } = fakeClient([]);
+    await expect(new PgWorkspaceStore(client).delete("acme")).rejects.toThrow(/no tenant-scoped tables/);
+    expect(
+      statements.some((s) => s.startsWith("DELETE FROM")),
+      "a delete ran over an enumeration that came back empty",
+    ).toBe(false);
   });
 });

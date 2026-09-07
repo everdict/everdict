@@ -148,29 +148,43 @@ function toRecord(row: WorkspaceRow): WorkspaceRecord {
   };
 }
 
-// The (table, scope-column) list used to delete a workspace + all its scoped data. everdict_workspaces is done separately, last.
-// All migrations are owned by @everdict/db, so knowing table names is not a layer violation. _shared is never equal to a real id.
-const WORKSPACE_SCOPED_TABLES: ReadonlyArray<readonly [table: string, column: string]> = [
-  ["everdict_oauth_states", "workspace"],
-  ["everdict_workspace_invites", "workspace"],
-  ["everdict_connections", "workspace"],
-  ["everdict_secrets", "workspace"],
-  ["everdict_runs", "tenant"],
-  ["everdict_scorecards", "tenant"],
-  ["everdict_harnesses", "tenant"],
-  ["everdict_datasets", "tenant"],
-  ["everdict_judges", "tenant"],
-  ["everdict_rubrics", "tenant"],
-  ["everdict_runtimes", "tenant"],
-  ["everdict_benchmarks", "tenant"],
-  ["everdict_models", "tenant"],
-  ["everdict_harness_templates", "tenant"],
-  ["everdict_harness_instances", "tenant"],
-  ["everdict_tenant_keys", "tenant"],
-  ["everdict_workspace_settings", "workspace"],
-  ["everdict_workspace_members", "workspace"],
-];
+// ── WHAT A WORKSPACE DELETE OWES, ASKED OF THE SCHEMA RATHER THAN REMEMBERED ─────────────────────
+//
+// This was a hand-maintained list of 18 `[table, column]` pairs. The migrations create 86 live tables and
+// **55 of them carry a `workspace` or `tenant` column that the list never named** — agents and their
+// sessions, messages and tasks; approvals; comments; budgets and usage; capabilities; environments; created
+// worlds; execution attempts; fs revisions; the whole eval tracker; evolution campaigns, rounds, evidence
+// and adoptions; envelopes; trajectories; skills; knowledge; subscriptions; schedules; notifications.
+// The list predates most of the schema, every feature since has added tenant-scoped tables, and none of them
+// added a line here because nothing asked.
+//
+// ⚠️ AND IT WAS NOT MERELY INCOMPLETE — IT WAS BROKEN. `everdict_connections` was dropped in migration
+// `0046_drop_connections.sql` and stayed in this list, third from the top. On any database migrated past
+// 0046 the third statement raises `relation "everdict_connections" does not exist`, so `delete()` REJECTS:
+// `DELETE /workspace` answers 500, the workspace row is never removed, and the two tables above the dead
+// entry have already had their rows deleted. Verified against a real Postgres migrated to head — the
+// workspace, its members and an agent row all survived a delete that threw.
+//
+// So the set is DERIVED. `everdict_%` base tables in the current schema carrying a `workspace` or `tenant`
+// column ARE the workspace's data, by construction; a table added tomorrow is swept without anybody
+// remembering this file exists, and a table dropped yesterday cannot break the delete. It is the same repair
+// `pnpm option-forwarding` demands one layer up — a rebuild that is an allowlist silently eats whatever was
+// added after it was written, so the field names are read off the thing that owns them.
+//
+// A table that must NOT be swept says so HERE, once, with its reason. It is empty on purpose: retaining
+// billing or audit rows past a workspace delete is a product decision nobody has made, and inventing one
+// while fixing a sweep would be the wrong place to make it. An entry is `[table, why]`, and "why" means the
+// reason the rows outlive the workspace, not the reason somebody was nervous.
+const RETAINED_AFTER_DELETE: ReadonlyArray<readonly [table: string, why: string]> = [];
 
+// The scope columns a tenant's rows are addressed by. Both spellings exist and no table carries both
+// (checked across all 219 migrations), so one column per table is the whole answer.
+const SCOPE_COLUMNS = ["workspace", "tenant"] as const;
+
+interface ScopedTable {
+  table: string;
+  column: string;
+}
 export class PgWorkspaceStore implements WorkspaceStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -222,10 +236,76 @@ export class PgWorkspaceStore implements WorkspaceStore {
     return res.rows[0] ? toRecord(res.rows[0]) : undefined;
   }
 
+  // Every `everdict_%` base table in the current schema that addresses rows by workspace or tenant, ordered
+  // so a table referenced by another comes AFTER its children. Only four foreign keys exist among these today
+  // and all four are `ON DELETE CASCADE`, so the order is currently redundant — it is here because the next
+  // one might not be, and a sweep that depends on nobody adding a plain reference is the same kind of promise
+  // this file just stopped making.
+  private async scopedTables(): Promise<ScopedTable[]> {
+    const columns = await this.client.query<{ table_name: string; column_name: string }>(
+      `SELECT c.table_name, c.column_name
+         FROM information_schema.columns c
+         JOIN information_schema.tables t
+           ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+        WHERE c.table_schema = current_schema()
+          AND t.table_type = 'BASE TABLE'
+          AND c.table_name LIKE 'everdict\\_%'
+          AND c.column_name = ANY($1)`,
+      [[...SCOPE_COLUMNS]],
+    );
+    const retained = new Set(RETAINED_AFTER_DELETE.map(([table]) => table));
+    const scoped = new Map<string, ScopedTable>();
+    for (const row of columns.rows) {
+      if (retained.has(row.table_name)) continue;
+      // The workspace row itself is deleted last, by id, after everything it owns.
+      if (row.table_name === "everdict_workspaces") continue;
+      scoped.set(row.table_name, { table: row.table_name, column: row.column_name });
+    }
+    // parent → the tables that reference it, so a referenced table is swept after the ones pointing at it.
+    const refs = await this.client.query<{ child: string; parent: string }>(
+      `SELECT child.relname AS child, parent.relname AS parent
+         FROM pg_constraint con
+         JOIN pg_class child ON child.oid = con.conrelid
+         JOIN pg_class parent ON parent.oid = con.confrelid
+        WHERE con.contype = 'f'`,
+    );
+    const after = new Map<string, Set<string>>();
+    for (const { child, parent } of refs.rows) {
+      if (child === parent || !scoped.has(child) || !scoped.has(parent)) continue;
+      const set = after.get(parent) ?? new Set<string>();
+      set.add(child);
+      after.set(parent, set);
+    }
+    const ordered: ScopedTable[] = [];
+    const placed = new Set<string>();
+    const visit = (name: string, seen: Set<string>): void => {
+      if (placed.has(name) || seen.has(name)) return; // a reference cycle keeps whatever order it had
+      seen.add(name);
+      for (const child of after.get(name) ?? []) visit(child, seen);
+      const entry = scoped.get(name);
+      if (entry !== undefined && !placed.has(name)) {
+        placed.add(name);
+        ordered.push(entry);
+      }
+    };
+    for (const name of [...scoped.keys()].sort()) visit(name, new Set());
+    return ordered;
+  }
+
   // Sequential, idempotent cascade. Delete everdict_workspaces last (retryable up to then), so it's safe even on partial failure.
   // SqlClient has no transaction abstraction and can't guarantee a single BEGIN/COMMIT, so this uses idempotent DELETEs.
   async delete(id: string): Promise<void> {
-    for (const [table, column] of WORKSPACE_SCOPED_TABLES) {
+    const tables = await this.scopedTables();
+    // ⚠️ AN EMPTY SET IS NOT "NOTHING TO DELETE". This repository's own rule for a check — refuse to report
+    // over an empty corpus — is a rule about a DECISION here: a schema query that came back with no
+    // tenant-scoped tables means we could not enumerate what this delete owes, and deleting the workspace row
+    // on top of that would report success over data nobody looked for (rule `protocol` L5 — a teardown that
+    // could not enumerate what it owes has not enumerated zero).
+    if (tables.length === 0)
+      throw new Error(
+        "workspace delete: no tenant-scoped tables resolved from the schema, so what this delete owes is unknown — refusing to remove the workspace row.",
+      );
+    for (const { table, column } of tables) {
       await this.client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [id]);
     }
     await this.client.query("DELETE FROM everdict_workspaces WHERE id = $1", [id]);
