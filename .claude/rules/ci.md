@@ -514,7 +514,17 @@ See skill `ci`.
   The proof, in the commit gate's throwaway worktree where the commit is already installed and built: source
   hunks reverted to the parent, the commit's own test files run, RED required, tree restored in its own
   `finally` and any sibling package rebuilt. A test that is green on the pre-fix code never proved the bug was
-  gone. Applies to commits newer than the check itself (read from git, so history is not rewritten); fixes
+  gone.
+  ⚠️ **A GREEN EXIT WITH NOTHING RUN IS NOT A GREEN.** Every `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE=1`
+  plus its infrastructure, so in that worktree it SKIPS and exits 0 — and reading that as "already passing"
+  condemned exactly the commit that had done the most work: a fix certified against a real Postgres, whose
+  in-process shape test went red as designed, refused because its SIBLING could not run. A file that ran
+  nothing is INCONCLUSIVE and some other file the commit changed carries the proof; when none can, the refusal
+  says that instead, because "no test here could run" and "your test was already green" have different
+  repairs. Same distinction `scripts/trust/trust-suite.mjs` makes pointed the other way — a skipped
+  CERTIFICATION is a failure, because a certification is a claim, and a proof that ran nothing has simply said
+  nothing. Read from vitest's summary line, never from the exit code, which cannot tell a pass from a skip.
+  Applies to commits newer than the check itself (read from git, so history is not rewritten); fixes
   under `scripts/` and `evals/` are outside it — their proof is a truth table or a drill. Observed on two
   synthetic commits before it was wired: one proved, one refused. The playbook's alternative — lock test
   files during a fix — is declined as C-row-6 on the declared-limits page.

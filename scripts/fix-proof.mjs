@@ -100,6 +100,8 @@ export function proveInWorktree({ wt, sha, source, tests, log = () => {} }) {
   };
 
   const redOn = [];
+  // Files that exited 0 having run no test at all — see the note at the exit-0 arm below.
+  const inconclusive = [];
   try {
     // Revert the source to the parent. A file the commit ADDED has no parent version: it is removed.
     for (const file of source) {
@@ -132,6 +134,23 @@ export function proveInWorktree({ wt, sha, source, tests, log = () => {} }) {
       log(`  ▶ ${name}: vitest run ${files.join(" ")} — on the pre-fix source, expecting RED`);
       const res = pnpm(["-F", name, "exec", "vitest", "run", ...files], path.join(wt, pkgDir));
       if (res.status === 0) {
+        // ⚠️ A GREEN EXIT WITH NOTHING RUN IS NOT A GREEN. An env-gated suite — every `*.trust.test.ts` here
+        // gates on `EVERDICT_TRUST_SUITE=1` plus its infrastructure — skips in this worktree and exits 0, and
+        // reading that as "passed on the pre-fix code" condemns exactly the commits that did the most work:
+        // a fix certified against a real engine, whose in-process shape test DOES go red, refused because its
+        // sibling could not run. Found by this gate on `fix(db): deleting a workspace threw`, whose trust
+        // scenario needs a Postgres and whose unit test went red as designed.
+        //
+        // The distinction the repository already makes elsewhere, pointed the other way: `trust-suite.mjs`
+        // treats a skipped scenario as a FAILED certification, because a certification is a claim. A PROOF is
+        // not a claim — a file that ran nothing has said nothing, so it is inconclusive here and some OTHER
+        // file the commit changed has to carry the proof. If none can, the commit is refused below with that
+        // as the reason, which is a different sentence from "your test was already green".
+        if (ranNothing(res.stdout ?? "")) {
+          log("    (inconclusive: nothing ran — an env-gated suite proves nothing without its infrastructure)");
+          inconclusive.push(...files.map((f) => `${pkgDir}/${f}`));
+          continue;
+        }
         return {
           ok: false,
           why: `${files.join(", ")} PASSED on the pre-fix code. A test that is green before the fix never proved the bug was gone; it proves only that it runs.`,
@@ -156,5 +175,23 @@ export function proveInWorktree({ wt, sha, source, tests, log = () => {} }) {
       };
     }
   }
-  return { ok: true, ran: redOn.flatMap((r) => r.files.map((f) => `${r.pkgDir}/${f}`)) };
+  // Every file the commit touched ran nothing, so the fix has no proof here — a different refusal from
+  // "already green", and one whose repair is to add a test that can run rather than to change the one that could not.
+  if (redOn.length === 0)
+    return {
+      ok: false,
+      why: `no test this commit changed could run on the pre-fix code (${inconclusive.join(", ")} ran nothing — an env-gated suite without its infrastructure). A fix is proved by a test that executes here; certify the gated one with its own suite and ship a test this gate can drive.`,
+    };
+  return {
+    ok: true,
+    ran: redOn.flatMap((r) => r.files.map((f) => `${r.pkgDir}/${f}`)),
+    ...(inconclusive.length > 0 ? { inconclusive } : {}),
+  };
+}
+
+// Did vitest run anything? An all-skipped file exits 0 and reports only skips; a real pass reports a nonzero
+// `passed` count. Read from the summary line rather than from the exit code, which cannot tell them apart.
+function ranNothing(stdout) {
+  const passed = /Tests\s[^\n]*?(\d+)\s+passed/.exec(stdout);
+  return passed === null || Number(passed[1]) === 0;
 }
