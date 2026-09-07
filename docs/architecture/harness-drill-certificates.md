@@ -192,6 +192,34 @@ verdict:    NOT RUN. G4 is unreachable here and the page says so.
 follow-up:  reopens with §3.
 ```
 
+## 2026-09-07 — the suite, after the retirements
+
+```
+drill:      removal (eval suite, --drill-all)
+date:       2026-09-07
+ran by:     Claude (session closing the scan intents)
+scope:      all 3 cases, 0 inconclusive — every case actually executed
+observed:   3 RED  biome-write-is-not-evidence, sibling-doors-guard-alike,
+                   skipped-scenario-is-not-passing
+            0 GREEN
+meaning:    every case in the suite now goes red without its lesson, and each
+            refusal names the artifact the answer stopped reaching for: /unsafe/,
+            /guard-siblings|baseline/, /EVERDICT_TRUST_DATABASE_URL/. That is
+            what the 2026-09-06 certificate could not say about any of its twelve.
+            It is a statement about THREE cases: the suite is small now, and a
+            suite that measures three things honestly is a different artifact
+            from one that appeared to measure fifteen.
+verdict:    the suite measures what it claims. Its COVERAGE is the open question,
+            not its validity — the opposite of where this started.
+context:    eight cases were retired to get here. Seven on two green drills each
+            (2026-09-06), and `provenance-at-the-source` on 2026-09-07 for a
+            reason a drill could not have produced: its assertion matched any
+            competent answer and its `neutralize` named a heading while the
+            sentence that answers the prompt stayed in the file. Both defects are
+            in `evals/RETIRED.md`; the flip that made somebody look is in
+            `lessons/2026-09-07-the-drill-is-not-deterministic.md`.
+```
+
 ## Reading these next time
 
 - A block older than ninety days is expired; run the drill again before citing the score it supported.
