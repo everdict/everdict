@@ -172,13 +172,36 @@ function rowToRecord(row: CapabilityRow): CapabilityRecord {
 export class PgCapabilityStore implements CapabilityStore {
   constructor(private readonly client: SqlClient) {}
 
+  // ── THE INSERT IS THE ARBITER, NOT THE SELECT ABOVE IT ─────────────────────────────────────────
+  //
+  // This read the row, decided "absent", and INSERTed. `(tenant, id, version)` is the primary key, so two
+  // concurrent registrations of the same brand-new version both saw absent and both inserted — one of them
+  // met a unique violation that left this store as a RAW database error, which the error model forbids
+  // ("external failures are remapped to our AppError so monitoring blames us, not the user"). Both outcomes
+  // were wrong in a way the caller could not act on: an idempotent re-register of identical content became a
+  // 500, and a genuine content conflict arrived as a driver error instead of this store's own 409.
+  //
+  // `ON CONFLICT DO NOTHING RETURNING 1` moves the decision to the statement the engine arbitrates. Zero rows
+  // back means somebody else holds the key — which is the SAME situation the SELECT above found, so it is
+  // answered by the same code rather than by a second policy. Reported by `pnpm scan` over `adapters` at low
+  // confidence, and confidence is the scanner rating itself: the window is narrow and the shape is real.
   async register(record: CapabilityRecord): Promise<void> {
-    const { rows } = await this.client.query<CapabilityRow>(
-      "SELECT * FROM everdict_capabilities WHERE tenant=$1 AND id=$2 AND version=$3",
-      [record.tenant, record.id, record.version],
-    );
-    const existing = rows[0];
-    if (existing) {
+    // The existing-row decision, spent by both the pre-read and the lost-race arm. One reading of "this
+    // version is already here", or the two drift and only one of them is tested.
+    const settleAgainstExisting = async (): Promise<void> => {
+      const { rows } = await this.client.query<CapabilityRow>(
+        "SELECT * FROM everdict_capabilities WHERE tenant=$1 AND id=$2 AND version=$3",
+        [record.tenant, record.id, record.version],
+      );
+      const existing = rows[0];
+      // Nothing there after the insert reported a conflict is not a state this store can explain: the key was
+      // taken a moment ago. Refuse rather than fall through to a second insert that would race the same way.
+      if (!existing)
+        throw new ConflictError(
+          "CONFLICT",
+          { tenant: record.tenant, id: record.id, version: record.version },
+          `Capability ${record.id}@${record.version} could not be registered and could not be read back — retry.`,
+        );
       if (!specsEqual(contentOf(rowToRecord(existing)), contentOf(record))) {
         throw new ConflictError(
           "CONFLICT",
@@ -186,16 +209,19 @@ export class PgCapabilityStore implements CapabilityStore {
           `Capability ${record.id}@${record.version} is already registered with different content (versions are immutable).`,
         );
       }
+      // Identical content re-registered: revive the tombstone, which is what makes this idempotent.
       await this.client.query(
         "UPDATE everdict_capabilities SET deleted_at=NULL WHERE tenant=$1 AND id=$2 AND version=$3",
         [record.tenant, record.id, record.version],
       );
-      return;
-    }
-    await this.client.query(
+    };
+
+    const inserted = await this.client.query<{ ok: number }>(
       `INSERT INTO everdict_capabilities
        (tenant, id, version, type, name, description, spec, visibility, shared_with, tags, created_by, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       ON CONFLICT (tenant, id, version) DO NOTHING
+       RETURNING 1 AS ok`,
       [
         record.tenant,
         record.id,
@@ -211,6 +237,8 @@ export class PgCapabilityStore implements CapabilityStore {
         record.createdAt,
       ],
     );
+    if (inserted.rows.length > 0) return;
+    await settleAgainstExisting();
   }
 
   private async liveRows(tenant: string, id: string): Promise<CapabilityRow[]> {

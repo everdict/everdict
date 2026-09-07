@@ -1,7 +1,7 @@
 import { type CapabilityRecord, ConflictError } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 
-import { InMemoryCapabilityStore } from "./capability-store.js";
+import { InMemoryCapabilityStore, PgCapabilityStore } from "./capability-store.js";
 
 const cap = (over: Partial<CapabilityRecord> = {}): CapabilityRecord => ({
   id: "triage",
@@ -148,5 +148,88 @@ describe("InMemoryCapabilityStore", () => {
     if (read?.spec.type !== "environment") throw new Error("expected environment");
     expect(read.spec.image).toBe("ghcr.io/acme/officeqa-env@sha256:ab12");
     expect(read.spec.preset?.dependencies[0]?.store).toBe("redis");
+  });
+});
+
+// ── THE INSERT IS THE ARBITER, AND THIS IS THE SHAPE HALF ────────────────────────────────────────
+//
+// `PgCapabilityStore.register` read the row, decided "absent", and inserted — and `(tenant, id, version)` is
+// the primary key, so two concurrent registrations of one new version both inserted and the loser met a
+// unique violation that escaped as a raw driver error. What actually happens under that race is decided by
+// an engine, so the certification is TRUST-195 against a live Postgres.
+//
+// This is the shape, and it is here because that suite is env-gated: without it `pnpm test` and the commit
+// gate's fix proof say nothing at all about this store, which is the state the defect lived in.
+describe("PgCapabilityStore register", () => {
+  const ROW = (instructions: string) => ({
+    tenant: "acme",
+    id: "triage",
+    version: "1.0.0",
+    name: "triage",
+    description: "when to triage",
+    spec: { type: "skill", instructions, files: [] },
+    visibility: "private",
+    shared_with: [],
+    tags: [],
+    created_by: "alice",
+    created_at: "2026-01-01T00:00:00.000Z",
+  });
+
+  // ⚠️ THE FAKE MODELS THE RACE, WHICH IS WHAT MAKES THESE COUNTEREXAMPLES RATHER THAN CONFIRMATIONS. A lost
+  // race is one fact: NOTHING is there when you look, and the key is TAKEN by the time you insert. So a SELECT
+  // before any insert answers empty and a SELECT after one answers the winner's row — a rule about the world,
+  // not a queue keyed to one implementation's read order, which is the difference that matters: the pre-fix
+  // store reads first and the repaired one reads only after losing, and a positional queue would feed them
+  // different worlds and prove nothing.
+  //
+  // Under it the pre-fix store takes its pre-read, sees nothing, inserts, and returns silently — where in
+  // production the driver's unique violation escapes raw.
+  const racingClient = (opts: { insert: unknown[]; taken: unknown }) => {
+    const statements: string[] = [];
+    let inserted = false;
+    return {
+      statements,
+      client: {
+        query: async <R>(text: string) => {
+          statements.push(text.replace(/\s+/g, " ").trim());
+          if (text.includes("INSERT INTO everdict_capabilities")) {
+            inserted = true;
+            return { rows: opts.insert as R[] };
+          }
+          if (text.trimStart().startsWith("SELECT")) return { rows: (inserted ? [opts.taken] : []) as R[] };
+          return { rows: [] as R[] };
+        },
+      },
+    };
+  };
+
+  it("lets the key decide, rather than a read above the insert", async () => {
+    const { client, statements } = racingClient({ insert: [{ ok: 1 }], taken: ROW("do the thing") });
+    await new PgCapabilityStore(client).register(cap());
+
+    const insert = statements.find((t) => t.includes("INSERT INTO everdict_capabilities"));
+    expect(insert, "no insert was issued at all").toBeDefined();
+    // The conflict target is the primary key, and the answer comes back — without `RETURNING` there is no way
+    // to learn the row was already there other than by catching the driver's error.
+    expect(insert).toContain("ON CONFLICT (tenant, id, version) DO NOTHING");
+    expect(insert).toContain("RETURNING 1");
+  });
+
+  it("refuses the loser of a race whose content differs, in this store's own error", async () => {
+    // Nothing there when we looked; the key taken by the time we inserted; different content behind it.
+    // Pre-fix there is no losing arm at all — the store inserts and returns, and in production the driver's
+    // unique violation escapes raw.
+    const { client } = racingClient({ insert: [], taken: ROW("something else") });
+
+    await expect(new PgCapabilityStore(client).register(cap())).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("revives the tombstone when the loser's content is identical", async () => {
+    // The admitted class, and the reason the losing arm re-reads rather than simply refusing: re-registering
+    // identical content is how a soft-deleted capability comes back.
+    const { client, statements } = racingClient({ insert: [], taken: ROW("do the thing") });
+
+    await new PgCapabilityStore(client).register(cap());
+    expect(statements.some((t) => t.startsWith("UPDATE everdict_capabilities SET deleted_at=NULL"))).toBe(true);
   });
 });
