@@ -44,14 +44,20 @@ article's other question: when a new model is swapped in, does the agent still d
 }
 ```
 
-**The suite is four cases, and that is the measured size rather than the intended one.** Two complete
+**The suite is three cases, and that is the measured size rather than the intended one.** Two complete
 drill-alls in one session retired eleven: four because the answer sat in live source, seven because a capable
 model answers them cold — including after each was rewritten as a counter-intuitive yes/no where the intuitive
-answer is wrong. What survives shares one property: the correct answer names something **this repository
+answer is wrong. A twelfth, `provenance-at-the-source`, went on 2026-09-07 for a reason no drill could have
+produced: its assertion matched any competent answer to its own question, and its `neutralize` named a HEADING
+while the sentence that answers the prompt stayed in the file — so neither of its two contradictory verdicts
+meant what it said. What survives shares one property: the correct answer names something **this repository
 invented and a model cannot derive** — an external tool's counter-intuitive exit behaviour, a private gate's
-name, a private environment variable. The article's 20–50 baseline is a target for cases that MEASURE, and
-backfilling toward the number with cases that do not is how the suite got here. See `RETIRED.md`, and
-`lessons/2026-09-07-the-drill-is-not-deterministic.md` for why a retirement now needs two green drills.
+name, a private environment variable. All three are certified RED under their own drills
+(`docs/architecture/harness-drill-certificates.md`, 2026-09-07), which is a sentence the fifteen-case version
+could not say about twelve of them. The article's 20–50 baseline is a target for cases that MEASURE, and
+backfilling toward the number with cases that do not is how the suite got here — COVERAGE is the open question
+now, not validity. See `RETIRED.md`, and `lessons/2026-09-07-the-drill-is-not-deterministic.md` for why a
+retirement needs two green drills and what reading a case still catches that counting drills does not.
 
 **Before any of the fields: can the CODEBASE answer this?** A configuration eval can only measure what the
 repository cannot state for itself. Every case grants `Read,Grep,Glob`, so if deleting the sentence still
