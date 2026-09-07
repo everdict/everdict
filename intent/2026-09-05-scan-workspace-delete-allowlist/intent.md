@@ -1,6 +1,11 @@
 # Intent: deleting a workspace leaves sixty tables of its data behind
 
-Author: pnpm scan (scope `adapters`, sonnet) — verified by hand before filing. Status: draft
+Author: pnpm scan (scope `adapters`, sonnet) — verified by hand before filing. Status: shipped
+
+Shipped: d7077903
+
+Design: none — two named defects in one adapter, both with the source read and the failing input reproduced
+against a real Postgres.
 
 ## Problem
 
@@ -64,3 +69,55 @@ does not travel with a clone, and a finding nobody else can read is a finding th
 - Do any of the sixty carry cascade rules that already remove them? Some may be covered by
   `ON DELETE CASCADE` from a parent that IS in the list; that was not checked table by table, and the count
   above is of tables not named, not of tables provably orphaned.
+
+## Shipped
+
+**The sweep was not merely incomplete — the delete THREW** (`25494f14`). The intent said the delete "reports
+success and leaves that tenant's data in the database". It does not report success. `everdict_connections`
+was dropped in `0046_drop_connections.sql` and stayed in the list THIRD FROM THE TOP, so on any database
+migrated past 0046 the third statement raises `relation "everdict_connections" does not exist` and the whole
+call rejects. `DELETE /workspace` — reachable from the web's settings page and from an MCP tool, which answers
+the first open question — returns 500, the workspace row is never removed, and the two tables above the dead
+entry have already lost their rows. Verified against a real Postgres migrated to head (219 migrations): the
+workspace, its members and an agent row all survived a delete that threw.
+
+That is worth stating plainly, because it changes who was hurt. Nobody has quietly lost data believing it was
+deleted; everybody who tried to delete a workspace was told the operation failed, and it had.
+
+**The set is derived now.** `everdict_%` base tables in the current schema carrying a `workspace` or `tenant`
+column, ordered so a referenced table is swept after the ones pointing at it. A table added tomorrow is swept
+without anybody remembering that file exists, and a table dropped yesterday cannot break the delete. An empty
+derived set REFUSES rather than removing the workspace row: an enumeration that answered nothing is not a
+workspace with no data (rule `protocol` L5).
+
+**The second finding was real** (`d7077903`). `PgCapabilityStore.register`'s SELECT-then-INSERT let two
+concurrent registrations of one new version both insert; the loser's unique violation escaped as a raw driver
+error, so an idempotent re-register became a 500 and a genuine content conflict arrived as a driver error
+rather than this store's 409. `ON CONFLICT … DO NOTHING RETURNING 1` moves the decision to the statement the
+engine arbitrates, and the losing arm re-reads through the same code the pre-read used.
+
+## The open questions, answered
+
+- **Is `delete()` reachable from an API door?** Yes — `DELETE /workspace` (`workspace.routes.ts`), which
+  `apps/web`'s delete-workspace feature calls, plus the MCP tool beside it. Not an operator-only path.
+- **Do any of the sixty carry cascade rules that already remove them?** Effectively none. All 219 migrations
+  contain FIVE `REFERENCES` clauses in total, four of them `ON DELETE CASCADE`, pointing at
+  `everdict_trajectories` and `everdict_products` — both themselves tenant-scoped and swept directly. The
+  count of unswept tables was 55 by this reading (the intent said 60; the difference is live-versus-created
+  tables and columns added by `ALTER`), and cascades cover none of them.
+
+## Note — what the census cost, and what it bought
+
+Nothing here needed a model to find. It needed the migrations parsed against the list, which is thirty lines
+of script, and it turned "the sweep has drifted" into "the sweep has been broken since migration 0046". The
+scan named the right file and got the SEVERITY backwards — a reading is a starting point, and the arithmetic
+is the part that decides what to build.
+
+## Open question this change deliberately did not answer
+
+`RETAINED_AFTER_DELETE` ships EMPTY. Whether billing rows (`everdict_usage`, `everdict_budget_usage`) or an
+audit trail should outlive a workspace delete is a product decision nobody has made, and inventing one while
+repairing a sweep would file it in the wrong place. Today they are swept, which is what the door promises.
+There is also no refusal for deleting `_shared` — the seed owner every workspace resolves shared capabilities
+through. Nothing makes that reachable and nothing forbids it; it is named here rather than guarded, because an
+unreachable refusal is a claim about a window with nothing able to test it.
