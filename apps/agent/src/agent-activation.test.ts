@@ -1,5 +1,6 @@
 import type { PermissionHook } from "@everdict/agent-runtime";
 import type { AgentRegistry, TenantKeyStore } from "@everdict/application-control";
+import { NotFoundError } from "@everdict/contracts";
 import type {
   AgentMessageRecord,
   AgentSessionRecord,
@@ -681,6 +682,62 @@ describe("activateDirect — the T-d reaction step entry", () => {
     });
     expect(retry).toMatchObject({ started: false, sessionId: sessions.created[0]?.id });
     expect(sessions.created).toHaveLength(1); // never a duplicate run
+  });
+
+  // ── A TRANSIENT STORE FAILURE MUST NOT BECOME A PERMANENT VERDICT ────────────────────────────────
+  //
+  // `{skipped}` is defined by this function's own contract as PERMANENTLY not runnable: the T-d reaction
+  // workflow stops on it. A throw is what says transiently busy, retry later.
+  //
+  // Two lines collapsed every failure into the permanent answer: `catch { return { skipped: "not found" } }`
+  // around the spec read, and `.catch(() => [])` on the creator lookup — the literal shape rule `protocol` L2
+  // forbids, whose consequence here is `skipped: has no creator to act as`. So a brief Postgres blip during a
+  // reaction step ended that chain forever, for an agent that exists and is enabled. Found by `pnpm scan`.
+  it("throws on a store outage instead of answering {skipped}, and still skips a genuine absence", async () => {
+    const outage = () => {
+      throw new Error("connection terminated unexpectedly");
+    };
+    const specOutage = activator({ registry: { ...registryOf(spec()), get: async () => outage() } });
+    await expect(
+      specOutage.instance.activateDirect({
+        workspace: "acme",
+        agentId: "sentinel",
+        eventId: "ev-blip",
+        eventKind: "scorecard.completed",
+        message: "m",
+      }),
+    ).rejects.toThrow(/connection terminated/);
+
+    // The creator lookup is the same question one line down: a failed list is not "no creator".
+    const listOutage = activator({ registry: { ...registryOf(spec()), list: async () => outage() } });
+    await expect(
+      listOutage.instance.activateDirect({
+        workspace: "acme",
+        agentId: "sentinel",
+        eventId: "ev-blip-2",
+        eventKind: "scorecard.completed",
+        message: "m",
+      }),
+    ).rejects.toThrow(/connection terminated/);
+
+    // And a genuine absence is still the permanent answer it always was.
+    const absent = activator({
+      registry: {
+        ...registryOf(spec()),
+        get: async () => {
+          throw new NotFoundError("NOT_FOUND", { id: "sentinel" }, "agent sentinel not found");
+        },
+      },
+    });
+    expect(
+      await absent.instance.activateDirect({
+        workspace: "acme",
+        agentId: "sentinel",
+        eventId: "ev-absent",
+        eventKind: "scorecard.completed",
+        message: "m",
+      }),
+    ).toMatchObject({ skipped: expect.stringContaining("not found") });
   });
 
   it("answers {skipped} for a disabled or creator-less target, and the step instruction rides into the mailbox", async () => {

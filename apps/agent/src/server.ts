@@ -140,6 +140,31 @@ const idParams = z.object({ id: z.string().min(1) });
 const ACTIVATION_APPROVAL_TIMEOUT_MS = 10 * 60_000;
 
 // Project the parsed event-body fields into an ActivationEvent tail (workspace is supplied by the caller).
+// ── `causedBy` IS PLATFORM-AUTHORED, AND A MEMBER USED TO BE ABLE TO SEND IT ─────────────────────
+//
+// `causedBy` is the activation loop guard's key: `agent-activation.ts` skips an agent whose id prefixes it,
+// so an agent never wakes on its own effects. The platform stamps it where it means something — a checkpoint
+// verifier, a record's creator, an agent-authored workspace-file publish.
+//
+// `POST /agent/events` has two branches, and both parsed one schema that carried `causedBy`. So any workspace
+// member could post `causedBy: "agent:<id>:anything"` and silently suppress that agent's activation for that
+// event: nothing errors, nothing is logged as a refusal, and the agent simply does not react. A denial of
+// service against one named agent, spelled as a well-formed request, available to anyone who can call the
+// endpoint at all. It is the authorship law — a field the PLATFORM authors riding on a document a PRODUCER
+// submits, then acted on — and `pnpm untrusted-ingress` cannot see it, because the schema WAS the door's own
+// and faithfully carried a field it should never have accepted from that caller. Found by `pnpm scan`.
+//
+// The repair is the schema split the law prescribes: the member surface has no `causedBy`, so zod strips a
+// forged one before anything reads it, and the internally-authenticated branch extends the surface to add it.
+export const memberEventFieldsSchema = z.object({
+  kind: z.string().min(1),
+  message: z.string().min(1),
+  source: z.string().min(1).optional(),
+  eventId: z.string().min(1).optional(),
+  subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
+  payload: z.record(z.unknown()).optional(),
+});
+
 function eventOf(data: {
   kind: string;
   message: string;
@@ -1187,15 +1212,7 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
 
   // The event body — kind/message plus the platform-event identity + matching context (agent-automation A1/A3):
   // eventId (durable activation dedup), subject/payload (declarative trigger filters), causedBy (loop guard).
-  const eventFieldsSchema = z.object({
-    kind: z.string().min(1),
-    message: z.string().min(1),
-    source: z.string().min(1).optional(),
-    eventId: z.string().min(1).optional(),
-    subject: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(),
-    payload: z.record(z.unknown()).optional(),
-    causedBy: z.string().min(1).optional(),
-  });
+  const eventFieldsSchema = memberEventFieldsSchema;
   app.post("/agent/events", async (req, reply) => {
     const presented = req.headers["x-internal-token"];
     if (typeof presented === "string") {
@@ -1203,6 +1220,8 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
         return reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid internal token." });
       const parsed = eventFieldsSchema
         .extend({
+          // ⚠️ PLATFORM-AUTHORED, AND ONLY THIS BRANCH MAY SUPPLY IT. See `memberEventFieldsSchema`.
+          causedBy: z.string().min(1).optional(),
           workspace: z.string().min(1),
           // Teammate compatibility: the creator whose chat-spawned teammates also wake. Absent → registry
           // activation only (workspace-scoped facts have no single recipient).

@@ -9,6 +9,7 @@ import type {
   TraceEvent,
   TraceSpan,
 } from "@everdict/contracts";
+import { NotFoundError } from "@everdict/contracts";
 import { issueAgentToken } from "@everdict/db";
 import { assertTaskEnvelope, eventSelectorMatches } from "@everdict/domain";
 import { isGuardedAction } from "./action-policy.js";
@@ -531,11 +532,19 @@ export class AgentActivator {
     let spec: AgentSpec;
     try {
       spec = await this.deps.registry.get(input.workspace, input.agentId, "latest");
-    } catch {
-      return { skipped: `agent ${input.agentId} not found` };
+    } catch (err) {
+      // ⚠️ `{skipped}` is PERMANENT — this function's own contract, and the T-d reaction workflow stops on
+      // it. A bare `catch` collapsed a genuine absence and a connection blip into that one verdict, so a
+      // brief store outage during a reaction step ended the chain forever for an agent that exists and is
+      // enabled. Only NOT_FOUND is the permanent answer; everything else is transient and a THROW is what
+      // says retry later (rule `protocol` L2 — unknown is unignorable). Found by `pnpm scan`.
+      if (err instanceof NotFoundError) return { skipped: `agent ${input.agentId} not found` };
+      throw err;
     }
     if (!spec.enabled) return { skipped: `agent ${input.agentId} is disabled` };
-    const entries = await this.deps.registry.list(input.workspace).catch(() => []);
+    // Same question one line down: a failed list is not "this agent has no creator". `.catch(() => [])` is
+    // the literal spelling L2 forbids, and its consequence here was the same permanent skip.
+    const entries = await this.deps.registry.list(input.workspace);
     const creator = entries.find((entry) => entry.id === input.agentId)?.createdBy;
     if (!creator) return { skipped: `agent ${input.agentId} has no creator to act as (seed/_shared)` };
     const agentKey = `${input.workspace}:${input.agentId}`;
