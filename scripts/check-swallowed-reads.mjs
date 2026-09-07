@@ -48,7 +48,7 @@
 //
 // ── A RATCHET, NOT A WALL ────────────────────────────────────────────────────────────────────────
 //
-// 143 exist today across 73 files — the sum of `scripts/swallowed-reads-baseline.txt`, which is the number a
+// 141 exist today across 73 files — the sum of `scripts/swallowed-reads-baseline.txt`, which is the number a
 // reader can check rather than an adjective. Every move is recorded, because a baseline that grows without an
 // explanation is indistinguishable from one that was quietly re-based:
 //
@@ -66,6 +66,8 @@
 //                 the exclusion had always meant to cover and could not name. Nothing here is new debt; all
 //                 21 predate the change, and one of them — a harness registry read in
 //                 `scorecard-service.ts` — is the exact sibling of the defect that prompted the widening.
+//     143 → 141   two debts REPAID in the change that revealed them: `verifyManifest`'s harness and dataset
+//                 reads now answer `unverifiable` where they used to answer `missing`.
 //
 // Each is a place the TYPE failed to say it, and L2 says so itself: *"A scanner with an
 // allowlist is a design admission, not a solution."* The baseline is that admission, written down and

@@ -1886,6 +1886,53 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // digest check is made under the STAMP's own algorithm (digestUnder/digestsMatch): batches sealed since
   // V1 carry collision-resistant `sha256:` stamps, older ones the FNV identity stamp that is evidence
   // against honest data but never tamper-evidence — the caveat riding the response says which it was.
+  // ── A REGISTRY WE COULD NOT READ IS NOT A HARNESS THAT IS GONE ──────────────────────────────────
+  //
+  // `verifyManifest` answers whether this batch could be reproduced today, and its vocabulary already carries
+  // all three answers: `missing` is a fact about the workspace, `unverifiable` is what it says when no
+  // registry is wired at all — "we cannot tell". Until 2026-09-07 both registry reads below spent the second
+  // as the first: one wrapped the call in `try/catch { status: "missing" }` and the other in
+  // `.catch(() => undefined)`, so a Postgres failover during a verification answered "the harness is missing"
+  // and "the model binding no longer resolves". Those are claims about the world, recorded as this batch's
+  // reproducibility verdict, reached from a read that never happened — rule `protocol` L2, in the one place
+  // this product sells. Found by `pnpm scan`, in the sibling of a defect repaired the same day in
+  // `apps/api/src/composition/sandbox.ts`.
+  // The dataset half of the same read, with the same three answers — see `registeredHarness` for the incident.
+  // `datasets` is required on the deps, so there is no "not wired" arm here.
+  private async registeredDataset(
+    tenant: string,
+    id: string,
+    version: string | undefined,
+  ): Promise<{ kind: "read"; bundle: Dataset } | { kind: "absent" } | { kind: "unreadable"; reason?: string }> {
+    try {
+      return { kind: "read", bundle: await this.deps.datasets.get(tenant, id, version) };
+    } catch (err) {
+      if (err instanceof NotFoundError) return { kind: "absent" };
+      return {
+        kind: "unreadable",
+        reason: `the dataset registry could not be read, so drift could not be checked: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  private async registeredHarness(
+    tenant: string,
+    id: string,
+    version: string | undefined,
+  ): Promise<{ kind: "read"; spec: HarnessSpec } | { kind: "absent" } | { kind: "unreadable"; reason?: string }> {
+    // No registry wired is not a failed read either — it is the deployment saying it cannot answer.
+    if (!this.deps.harnesses) return { kind: "unreadable" };
+    try {
+      return { kind: "read", spec: await this.deps.harnesses.get(tenant, id, version) };
+    } catch (err) {
+      if (err instanceof NotFoundError) return { kind: "absent" };
+      return {
+        kind: "unreadable",
+        reason: `the harness registry could not be read, so drift could not be checked: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
   async verifyManifest(tenant: string, id: string): Promise<ManifestVerification> {
     const record = await this.get(id);
     if (!record || record.tenant !== tenant)
@@ -1900,7 +1947,23 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     const checks: ManifestCheck[] = [];
     // The registry bundle is read once — the composite, per-case and grading checks all compare against it;
     // an unresolvable bundle reads `missing` on each check that needed it.
-    const bundle = await this.deps.datasets.get(tenant, m.dataset.id, m.dataset.version).catch(() => undefined);
+    // The SAME three answers as the harness read below, for the same reason: `.catch(() => undefined)` here
+    // put a store outage into every check that needed the bundle, each of them recorded as `missing` — the
+    // dataset is gone, the sealed cases are gone, the grading defaults are gone. Three verdicts about the
+    // world from one read that did not happen.
+    const bundleRead = await this.registeredDataset(tenant, m.dataset.id, m.dataset.version);
+    const bundle = bundleRead.kind === "read" ? bundleRead.bundle : undefined;
+    // What an absent bundle is called. `absent` is drift and reads `missing`; unreadable is `unverifiable`,
+    // and the reason travels with it so the report says which one happened.
+    const bundleGone: ManifestCheck["status"] = bundleRead.kind === "absent" ? "missing" : "unverifiable";
+    const bundleNote =
+      bundleRead.kind === "unreadable" && bundleRead.reason !== undefined ? bundleRead.reason : undefined;
+    const bundleMissing = (subject: string, stored: string): ManifestCheck => ({
+      subject,
+      stored,
+      status: bundleGone,
+      ...(bundleNote !== undefined ? { note: bundleNote } : {}),
+    });
     // Dataset COMPOSITE — the sealed digest covers the post-subset, post-plan bundle; a subset or run-time
     // grading plan was a derived selection, so the registry bundle is not the same document (honest
     // unverifiable — the per-case `cases` check below still verifies the CONTENT).
@@ -1912,7 +1975,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         note: "the sealed composite was a subset/grading-plan selection — not replayable; the per-case seals still verify content",
       });
     } else if (bundle === undefined) {
-      checks.push({ subject: "dataset", stored: m.dataset.digest, status: "missing" });
+      checks.push(bundleMissing("dataset", m.dataset.digest));
     } else {
       // `current` is computed under the STAMP's algorithm (digestUnder) so a legacy-sealed row's stored and
       // current values stay comparable side by side; the verdict itself is digestsMatch's.
@@ -1929,7 +1992,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     // current are digests OVER the two per-case maps (equal maps ⇔ every case equal); drift names the cases.
     if (m.cases !== undefined) {
       if (bundle === undefined) {
-        checks.push({ subject: "cases", stored: contentDigest(m.cases), status: "missing" });
+        checks.push(bundleMissing("cases", contentDigest(m.cases)));
       } else {
         const byId = new Map(bundle.cases.map((c) => [c.id, c]));
         const current: Record<string, string> = {};
@@ -1977,7 +2040,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         }
       } else if (m.gradingCases !== undefined) {
         if (bundle === undefined) {
-          checks.push({ subject: "grading", stored: contentDigest(m.gradingCases), status: "missing" });
+          checks.push(bundleMissing("grading", contentDigest(m.gradingCases)));
         } else {
           const byId = new Map(bundle.cases.map((c) => [c.id, c]));
           const current: Record<string, string> = {};
@@ -2021,21 +2084,24 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     }
     // Harness — only when a resolved spec was sealed and the registry can resolve it now.
     if (m.harness.specDigest !== undefined) {
-      if (this.deps.harnesses) {
-        try {
-          const spec = await this.deps.harnesses.get(tenant, m.harness.id, m.harness.version);
-          const current = digestUnder(m.harness.specDigest, spec);
-          checks.push({
-            subject: "harness",
-            stored: m.harness.specDigest,
-            current,
-            status: current === m.harness.specDigest ? "match" : "drifted",
-          });
-        } catch {
-          checks.push({ subject: "harness", stored: m.harness.specDigest, status: "missing" });
-        }
+      const read = await this.registeredHarness(tenant, m.harness.id, m.harness.version);
+      if (read.kind === "read") {
+        const current = digestUnder(m.harness.specDigest, read.spec);
+        checks.push({
+          subject: "harness",
+          stored: m.harness.specDigest,
+          current,
+          status: current === m.harness.specDigest ? "match" : "drifted",
+        });
+      } else if (read.kind === "absent") {
+        checks.push({ subject: "harness", stored: m.harness.specDigest, status: "missing" });
       } else {
-        checks.push({ subject: "harness", stored: m.harness.specDigest, status: "unverifiable" });
+        checks.push({
+          subject: "harness",
+          stored: m.harness.specDigest,
+          status: "unverifiable",
+          ...(read.reason !== undefined ? { note: read.reason } : {}),
+        });
       }
     }
     // The harness MODEL closure (H13) — the specDigest check above verifies bytes that still contain an
@@ -2047,11 +2113,9 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
       ...(m.harness.serviceModels ?? {}),
     };
     if (Object.keys(sealedHarnessModels).length > 0) {
-      const currentSpec = this.deps.harnesses
-        ? await this.deps.harnesses.get(tenant, m.harness.id, m.harness.version).catch(() => undefined)
-        : undefined;
+      const currentRead = await this.registeredHarness(tenant, m.harness.id, m.harness.version);
       const currentClosure =
-        currentSpec === undefined ? undefined : await sealHarnessModelClosure(this.deps, tenant, currentSpec);
+        currentRead.kind === "read" ? await sealHarnessModelClosure(this.deps, tenant, currentRead.spec) : undefined;
       const currentModels: Record<string, string> | undefined =
         currentClosure === undefined
           ? undefined
@@ -2067,6 +2131,17 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
             stored: sealedValue,
             status: "unverifiable",
             note: "the model binding was sealed as unresolved — nothing to re-verify",
+          });
+          continue;
+        }
+        // A registry we could not READ says nothing about whether the binding still resolves — and this loop
+        // used to answer both with `missing`, whose note ("no longer resolves") is a claim about the world.
+        if (currentRead.kind === "unreadable") {
+          checks.push({
+            subject,
+            stored: sealedValue,
+            status: "unverifiable",
+            ...(currentRead.reason !== undefined ? { note: currentRead.reason } : {}),
           });
           continue;
         }

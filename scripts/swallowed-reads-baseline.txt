@@ -59,7 +59,7 @@
 1	packages/application-control/src/scorecard/scorecard-batch-service.ts
 1	packages/application-control/src/scorecard/scorecard-ingest-service.ts
 2	packages/application-control/src/scorecard/scorecard-score-service.ts
-3	packages/application-control/src/scorecard/scorecard-service.ts
+1	packages/application-control/src/scorecard/scorecard-service.ts
 1	packages/application-control/src/scorecard/workflow-batch-driver.ts
 4	packages/application-control/src/session/sandbox-session-service.ts
 9	packages/backends/src/orchestrators/k8s.ts
