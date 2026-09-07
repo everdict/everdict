@@ -41,13 +41,22 @@ Eval case: none — this is a property of the measuring instrument, not of the c
 measures. Replaying it as a prompt would test the wrong subject.
 
 The seven cases retired in this session were retired on **two green drills each**, before and after a
-rewrite, rather than on one. `provenance-at-the-source` flipped and was therefore KEPT, and it stays in the
-suite as the case that recorded this.
+rewrite, rather than on one. `provenance-at-the-source` flipped and was therefore KEPT.
+
+⚠️ **It was retired later the same day, and NOT for flipping.** Reading the case rather than its verdict found
+two defects the drill could not have told apart from noise: its assertion (`provenance|re-derive|at the
+source|carried|source`) is satisfied by any competent answer to its own question, and its `neutralize` named
+only the L3 HEADING while the sentence that answers the prompt — *"Banned re-derivations: metric name → judge
+id"* — stayed in the file. So the drill removed a title and left the lesson, and neither of its two verdicts
+meant what it said. The flip was the symptom that made somebody look; the reason is in `evals/RETIRED.md`.
+
+That sharpens the question below rather than answering it. More samples would have told us the case was
+unstable; only reading it told us why.
 
 The honest reading of the earlier finding also changes. "12 of 15 measure nothing" was one sample; what two
 samples support is narrower and still damning enough: **seven cases went green twice across a rewrite that
-deliberately changed the question**, and those are gone. The suite is four cases now, and every remaining one
-has at least one red drill on record.
+deliberately changed the question**, and those are gone. With the eighth retired for the reasons above the
+suite is three cases, and every remaining one has at least one red drill on record.
 
 ## The question this leaves open
 

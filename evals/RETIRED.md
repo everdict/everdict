@@ -3,6 +3,32 @@
 A case is retired here, with its reason, rather than deleted quietly. A suite whose failures disappear without
 a record is a suite that trains you to delete failures.
 
+## `provenance-at-the-source` — the assertion was satisfied by ordinary judgement, and the drill said so twice
+
+Asked whether a judge can be worked out by parsing a `judge:foo` metric name at read time; asserted
+`provenance|re-derive|at the source|carried|source`. Every one of those alternatives is a word a capable model
+reaches for while answering this question WELL and with no configuration at all — "record it at the source",
+"don't re-derive it" — so the case measured a default, which is the one thing an eval over the configuration
+cannot be about.
+
+Its removal drill said so from both directions, which is the part worth keeping. It drilled RED once and GREEN
+an hour later with nothing about it changed, and that flip is what
+`lessons/2026-09-07-the-drill-is-not-deterministic.md` was written from. A case whose certificate depends on
+which run you look at is not certifying anything; the honest reading of the pair is that it sits on the
+boundary where the lesson and the default answer agree, which is exactly where a case stops discriminating.
+
+The neutralization was the second half of the problem and is the more instructive one: `neutralize` named the
+heading `L3 — Provenance is born at the source` and nothing else, while the sentence that actually answers
+this prompt — *"Banned re-derivations: metric name → judge id"* — stayed in the file. So the drill removed a
+title and left the lesson, and a red would not have meant what it said either.
+
+**What a replacement would have to test.** Not the judgement (a model has it) but the WORKFLOW the rule
+carries and a model does not default to: *"Before writing a string-splitting or classifying helper, grep for
+the concept — the correct version usually exists."* That is a behaviour, it is observable in whether the
+agent searches before it writes, and it is not something a capable model does unprompted. It needs a prompt
+that hands the agent a classification to write rather than a question to answer, and it is a new case rather
+than a repair of this one.
+
 ## `authz-optional-reflex` — the shape it tested no longer exists
 
 Asked the agent to pass a resource-derived `teamId` to `gate(principal, action, teamId)`. The agent refused
