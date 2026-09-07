@@ -148,6 +148,24 @@ describe("PgWorkspaceStore delete", () => {
     expect(deletes.at(-1)).toBe("DELETE FROM everdict_workspaces WHERE id = $1");
   });
 
+  it("sweeps BOTH columns when one table carries both spellings", async () => {
+    // The residue of the derivation, and the case a comment cannot hold. No table has both today; the first
+    // version keyed the sweep by table name on the strength of that, so the day a migration adds one, the
+    // second column silently replaced the first and half the rows survived a delete that reported success —
+    // the defect this function exists to end, reintroduced by the repair.
+    const { client, statements } = fakeClient([
+      { table_name: "everdict_both", column_name: "workspace" },
+      { table_name: "everdict_both", column_name: "tenant" },
+    ]);
+    await new PgWorkspaceStore(client).delete("acme");
+
+    const deletes = statements.filter((s) => s.startsWith("DELETE FROM everdict_both"));
+    expect(deletes, "one of the two scope columns was never swept").toEqual([
+      "DELETE FROM everdict_both WHERE workspace = $1",
+      "DELETE FROM everdict_both WHERE tenant = $1",
+    ]);
+  });
+
   it("refuses when the schema resolved no tenant-scoped tables at all", async () => {
     // An empty derived set is a read that answered nothing, not a workspace with no data — and removing the
     // workspace row on top of it would report success over data nobody looked for.

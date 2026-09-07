@@ -123,10 +123,18 @@ export function proveInWorktree({ wt, sha, source, tests, log = () => {} }) {
         log(`    (pre-fix ${name} does not build: ${(built.stderr ?? "").trim().split("\n").at(-1) ?? ""})`);
       }
     }
-    for (const pkgDir of testPkgs) {
+    // ⚠️ ONE FILE PER INVOCATION, BECAUSE THE VERDICT IS PER FILE. Files were run per PACKAGE, in one call, and
+    // a non-zero exit credited every file in the group as "ran and went red". A commit touching both
+    // `apps/api/src/composition/foo.test.ts` (legitimately red) and `apps/api/src/trust/bar.trust.test.ts`
+    // (env-gated, skips here) is one package and one call: foo makes it exit non-zero, and bar — which
+    // executed nothing — is certified as proof. That is the "a green exit with nothing run is not a green"
+    // failure this function was written to close, reopened one level up at group granularity. Found by
+    // `pnpm review` on the change that closed the first one.
+    for (const test of tests) {
+      const pkgDir = packageDirOf(test);
       const name = nameOf(pkgDir);
       if (!name) return { ok: false, why: `${pkgDir} has no readable package.json, so its tests cannot be run` };
-      const files = tests.filter((t) => packageDirOf(t) === pkgDir).map((t) => path.relative(pkgDir, t));
+      const files = [path.relative(pkgDir, test)];
       // Every named file must be FOUND, or "no tests ran" reads as red for the wrong reason.
       for (const f of files) {
         if (!existsSync(path.join(wt, pkgDir, f))) return { ok: false, why: `${pkgDir}/${f} is not in the worktree` };
@@ -156,6 +164,9 @@ export function proveInWorktree({ wt, sha, source, tests, log = () => {} }) {
           why: `${files.join(", ")} PASSED on the pre-fix code. A test that is green before the fix never proved the bug was gone; it proves only that it runs.`,
         };
       }
+      // A red exit is not yet a proof either: a file that ran nothing AND exited non-zero did so for some
+      // other reason (a missing runner, a config error), and the restored-tree GREEN check below is what
+      // separates those. Recorded per file so that check names the same one file.
       redOn.push({ name, pkgDir, files });
     }
   } finally {

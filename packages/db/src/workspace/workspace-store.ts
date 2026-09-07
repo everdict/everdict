@@ -254,12 +254,27 @@ export class PgWorkspaceStore implements WorkspaceStore {
       [[...SCOPE_COLUMNS]],
     );
     const retained = new Set(RETAINED_AFTER_DELETE.map(([table]) => table));
+    // ⚠️ ONE ENTRY PER (TABLE, COLUMN), NOT PER TABLE. No table carries both spellings today — checked across
+    // all 219 migrations — and the first version of this keyed the map by table name on the strength of that,
+    // which put the invariant in a comment and the consequence in a silent overwrite: the day a migration adds
+    // a table with both, its second row replaces its first and exactly one column is ever swept, so the delete
+    // reports success and leaves that workspace's rows under the other one. That is the defect this whole
+    // function was written to end, reintroduced by the repair. A fact about today's schema is not a reason to
+    // narrow a derivation — the point of deriving is that tomorrow's schema needs nobody to remember.
     const scoped = new Map<string, ScopedTable>();
     for (const row of columns.rows) {
       if (retained.has(row.table_name)) continue;
       // The workspace row itself is deleted last, by id, after everything it owns.
       if (row.table_name === "everdict_workspaces") continue;
-      scoped.set(row.table_name, { table: row.table_name, column: row.column_name });
+      scoped.set(`${row.table_name}.${row.column_name}`, { table: row.table_name, column: row.column_name });
+    }
+    // Foreign keys are between TABLES, so the ordering graph below is keyed by table while the sweep is keyed
+    // by (table, column). A table with two scope columns is one node with two statements, ordered together.
+    const byTable = new Map<string, ScopedTable[]>();
+    for (const entry of scoped.values()) {
+      const list = byTable.get(entry.table) ?? [];
+      list.push(entry);
+      byTable.set(entry.table, list);
     }
     // parent → the tables that reference it, so a referenced table is swept after the ones pointing at it.
     const refs = await this.client.query<{ child: string; parent: string }>(
@@ -271,7 +286,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
     );
     const after = new Map<string, Set<string>>();
     for (const { child, parent } of refs.rows) {
-      if (child === parent || !scoped.has(child) || !scoped.has(parent)) continue;
+      if (child === parent || !byTable.has(child) || !byTable.has(parent)) continue;
       const set = after.get(parent) ?? new Set<string>();
       set.add(child);
       after.set(parent, set);
@@ -282,13 +297,13 @@ export class PgWorkspaceStore implements WorkspaceStore {
       if (placed.has(name) || seen.has(name)) return; // a reference cycle keeps whatever order it had
       seen.add(name);
       for (const child of after.get(name) ?? []) visit(child, seen);
-      const entry = scoped.get(name);
-      if (entry !== undefined && !placed.has(name)) {
+      const entries = byTable.get(name);
+      if (entries !== undefined && !placed.has(name)) {
         placed.add(name);
-        ordered.push(entry);
+        for (const entry of entries) ordered.push(entry);
       }
     };
-    for (const name of [...scoped.keys()].sort()) visit(name, new Set());
+    for (const name of [...byTable.keys()].sort()) visit(name, new Set());
     return ordered;
   }
 

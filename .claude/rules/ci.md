@@ -524,6 +524,12 @@ See skill `ci`.
   repairs. Same distinction `scripts/trust/trust-suite.mjs` makes pointed the other way — a skipped
   CERTIFICATION is a failure, because a certification is a claim, and a proof that ran nothing has simply said
   nothing. Read from vitest's summary line, never from the exit code, which cannot tell a pass from a skip.
+  ⚠️ **AND THE VERDICT IS PER FILE, WHICH TOOK A SECOND ROUND.** The first version ran a commit's test files
+  per PACKAGE in one `vitest run`, so a non-zero exit credited every file in the group — a commit touching a
+  normal test that legitimately goes red AND a trust test that skips is one package and one call, and the
+  skipped one was certified as proof. The safeguard against "nothing ran" was defeated one level up by its own
+  grouping. One file per invocation now. Found by `pnpm review` on the change that closed the first half,
+  which is the argument for reviewing a repair rather than trusting the reasoning that produced it.
   Applies to commits newer than the check itself (read from git, so history is not rewritten); fixes
   under `scripts/` and `evals/` are outside it — their proof is a truth table or a drill. Observed on two
   synthetic commits before it was wired: one proved, one refused. The playbook's alternative — lock test
