@@ -1,6 +1,10 @@
 # Intent: a member can forge the provenance an agent's loop guard trusts
 
-Author: pnpm scan (scope `agent`, sonnet, 90acbdab) — both verified by hand before filing. Status: draft
+Author: pnpm scan (scope `agent`, sonnet, 90acbdab) — both verified by hand before filing. Status: shipped
+
+Shipped: 931acbc8
+
+Design: none — two named defects with the source read and the failing input stated; the scan wrote the design.
 
 ## Problem
 
@@ -76,3 +80,26 @@ and every reaction chain that depends on an agent activating.
 - Should `causedBy` be typed so that only the platform can construct one, rather than filtered at each door?
   The three previous instances of this law were closed by splitting a schema; two doors in, that pattern may
   be the wrong shape for a field rather than a document.
+
+## Shipped
+
+Both, in `931acbc8`.
+
+**`causedBy`** — repaired as the authorship law prescribes rather than by validating the string:
+`memberEventFieldsSchema` carries no `causedBy`, so zod strips a forged one before anything reads it, and
+the internally-authenticated branch extends that surface to add the field. The test pins the SHAPE, and says
+plainly what it does not do: against the pre-fix source it fails on a missing export (the schema was a local
+inside `buildServer`), so it is a regression guard rather than a reproduction of the original request. A
+door-level counterexample would need an `AgentActivator` with a registry and a key store, and that setup
+would be most of the test.
+
+**The transient outage** — only `NotFoundError` is the permanent `{skipped}` now; every other failure throws,
+which is what says retry later, and the creator lookup no longer swallows. Its counterexample was seen RED
+for the stated reason (`promise resolved "{ skipped: 'agent sentinel not found' }" instead of rejecting`) and
+drives both the spec read and the list, with a genuine absence asserted to still skip.
+
+One consequence worth recording: removing the `.catch(() => [])` made `pnpm swallowed-reads` go RED, because
+the debt shrank and the baseline had not. That is the ratchet's other half working — a debt that quietly
+stops shrinking on paper stops being a debt anybody pays — and the baseline followed in `f89d3554`
+(132 → 131).
+
