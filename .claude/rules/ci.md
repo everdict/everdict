@@ -157,10 +157,17 @@ See skill `ci`.
   happen, so the line spelled a store outage exactly like a deleted ancestor. The remedy already existed forty
   lines above it in the same method (`evidenceUnavailable`), by the same author, in the same brief.
   ⚠️ It matches ONE structural fact, deliberately: **the value gets a name**. `const x = await …catch(…)` is
-  flagged; `void notify(…).catch(…)` is not (fire-and-forget is its own hatch in L2 and needs a different
-  repair) and neither is `res.json().catch(…)` (decoding a body is not a failed read). The tree holds 331
-  occurrences of the spellings and 83 of that shape; wiring a gate over all 331 is how a check teaches people
-  to skip its output. A RATCHET over `scripts/swallowed-reads-baseline.txt`, because L2 says it itself — *"a
+  flagged, and so is the conditional spelling of the same sentence (`const x = cond ? await …catch(…) : y`,
+  `const x = (await …catch(…)) ?? []`); `void notify(…).catch(…)` is not (fire-and-forget is its own hatch in
+  L2 and needs a different repair) and neither is `request.json()`/`res.json().catch(…)` (decoding a body is
+  not a failed read). Wiring a gate over every occurrence of the SPELLING is how a check teaches people to
+  skip its output — the bound shape is the part a decision rests on.
+  ⚠️ **It has now been found blind TWICE over regions it reported PASS on**, and both times by something else
+  looking. The `.tsx` glob was missing (found by `pnpm review`); then the pattern demanded `= await` adjacent
+  and joined only member-access continuations, so a conditional read broken across lines by the formatter was
+  invisible — which is how `pnpm scan` found two L2 violations in a file this gate called clean. Widening it
+  is a baseline move like any other and each one is recorded in the scanner's own header.
+  A RATCHET over `scripts/swallowed-reads-baseline.txt`, because L2 says it itself — *"a
   scanner with an allowlist is a design admission"* — and the baseline is that admission, counted. A file
   whose count DROPPED must update the baseline in the same change: a debt that quietly stops shrinking on
   paper stops being a debt anybody pays.

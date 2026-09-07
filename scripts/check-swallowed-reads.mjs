@@ -48,9 +48,9 @@
 //
 // ── A RATCHET, NOT A WALL ────────────────────────────────────────────────────────────────────────
 //
-// 132 exist today across 78 files — the sum of `scripts/swallowed-reads-baseline.txt`, which is the number a
-// reader can check rather than an adjective. It has moved twice and both moves are recorded, because a
-// baseline that grows without an explanation is indistinguishable from one that was quietly re-based:
+// 143 exist today across 73 files — the sum of `scripts/swallowed-reads-baseline.txt`, which is the number a
+// reader can check rather than an adjective. Every move is recorded, because a baseline that grows without an
+// explanation is indistinguishable from one that was quietly re-based:
 //
 //     83  → 105   a correction, not a change: the line claimed 83 while the file summed to 105 across 61
 //                 files (a running total somebody stopped counting partway down). Nothing was scanned that
@@ -59,6 +59,13 @@
 //                 entirely `.tsx`. That added 27 occurrences across 17 files — all of them pre-existing and
 //                 none of them new debt, but none of them previously visible either. The ratchet had been
 //                 reporting PASS over a region it could not read.
+//     132 → 131   a debt REPAID: `agent-activation.ts` stopped swallowing a registry read, and the ratchet
+//                 refused the change until the baseline said so, which is the arm working.
+//     131 → 143   a WIDENING, and the second time this scanner was found blind over a region it reported
+//                 PASS on. +21 for the conditional shape described above, −9 for `request.json()` decodes
+//                 the exclusion had always meant to cover and could not name. Nothing here is new debt; all
+//                 21 predate the change, and one of them — a harness registry read in
+//                 `scorecard-service.ts` — is the exact sibling of the defect that prompted the widening.
 //
 // Each is a place the TYPE failed to say it, and L2 says so itself: *"A scanner with an
 // allowlist is a design admission, not a solution."* The baseline is that admission, written down and
@@ -79,10 +86,16 @@ const write = process.argv.includes("--write");
 // are here because "we could not find out" becoming a quantity is the same erasure as it becoming a set.
 const EMPTY = String.raw`(\[\]|undefined|null|false|true|\(\{\}\)|\{\}|0|""|'')`;
 const BOUND = new RegExp(
-  String.raw`(?:const|let|var)\s+[\w{}\[\],:\s]+=\s*await\s+[^;\n]*?\.catch\(\(\)\s*=>\s*${EMPTY}\)`,
+  String.raw`(?:const|let|var)\s+[\w{}\[\],:\s]+=[^;\n]*?\bawait\s+[^;\n]*?\.catch\(\(\)\s*=>\s*${EMPTY}\)`,
 );
 // A response body is not a read that failed — the request already reported its own outcome.
-const DECODE = /\b\w*(?:res|response|reply|body)\s*\.\s*(?:json|text|arrayBuffer)\s*\(\s*\)\s*\.catch/i;
+// ⚠️ `req`/`request` ARE ON THIS LIST, and were not until the widening above made them reachable. The
+// alternation named `res|response|reply|body`, all of them the ANSWER side; an INBOUND body is decoded the
+// same way and for the same reason (`const body = (await request.json().catch(() => ({}))) as {…}` in a
+// Next.js route handler — a malformed body reads as an absent field, which is what the handler already has
+// to handle). The exclusion described one direction of one idiom, and the moment the pattern could see the
+// parenthesised form it started refusing two healthy route handlers. A check nobody reads is worse than none.
+const DECODE = /\b\w*(?:res|response|reply|body|req|request)\s*\.\s*(?:json|text|arrayBuffer)\s*\(\s*\)\s*\.catch/i;
 
 const files = execFileSync(
   "git",
@@ -111,13 +124,34 @@ if (files.length === 0) {
   process.exit(1);
 }
 
-// A continuation line — one whose first non-space character opens a member access — is part of the statement
-// above it. Nothing else is joined: this is the smallest rule that sees a wrapped chain and cannot run past
-// a statement boundary.
+// A continuation line is part of the statement above it. Two shapes qualify and no others:
+//
+//   `.foo(…)` / `?.foo(…)`   a wrapped member-access chain (the original rule)
+//   `? a` / `: b`            a wrapped CONDITIONAL — the arm of a ternary the formatter broke across lines
+//
+// ⚠️ THE SECOND ONE WAS MISSING, AND SO WAS THE HALF OF THE PATTERN THAT DEPENDS ON IT. `pnpm scan` found two
+// L2 violations in `apps/api/src/composition/sandbox.ts` — a harness registry read whose failure was spent as
+// "not registered" — and this check reported that file clean throughout, twice over:
+//
+//     const spec = harnesses
+//       ? await harnesses.get(tenant, ref.id, ref.version ?? "latest").catch(() => undefined)
+//       : undefined;
+//
+// Neither continuation line starts with a `.`, so the statement never joined; and even joined, the pattern
+// demanded `= await` ADJACENT, which a conditional never is. Both halves are the same mistake in different
+// clothes — reading the shape somebody happened to write rather than the shape the law describes. The law
+// says the value gets a name and a decision rests on it, and `const x = cond ? await … : undefined` is that
+// sentence exactly. So `await` may now sit anywhere on the right-hand side, still bounded by the statement
+// (`[^;\n]`), and a ternary arm joins like a chain does.
+//
+// This is the SECOND time this scanner has been found blind over a region it reported PASS on, after the
+// missing `.tsx` glob below. Both were found by something else looking — a review, then a scan — which is
+// the argument for keeping both running rather than for trusting either.
+const CONTINUATION = /^\s*(?:\??\.|\?\s|:\s)/;
 function logicalLines(src) {
   const out = [];
   for (const line of src.split("\n")) {
-    if (/^\s*\??\./.test(line) && out.length > 0) out[out.length - 1] += ` ${line.trim()}`;
+    if (CONTINUATION.test(line) && out.length > 0) out[out.length - 1] += ` ${line.trim()}`;
     else out.push(line);
   }
   return out;
