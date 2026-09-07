@@ -1,6 +1,11 @@
 # Intent: three Important findings the review left standing, and why they were not fixed in the same breath
 
-Author: maintainer (via `pnpm review` on 2ebc79ca). Status: draft
+Author: maintainer (via `pnpm review` on 2ebc79ca). Status: shipped
+
+Shipped: 06698280
+
+Design: none — three independent repairs, each with its counterexample named in this intent already. A design
+pass would restate them.
 
 ## Problem
 
@@ -56,3 +61,31 @@ both scripts import, proven by deleting it in one place and watching both fail.
   this repository has consistently declined.
 - Does `guard-siblings` already have the vocabulary to catch the duplicated pathspec, and if so why did it
   not? That question is worth more than the fix.
+
+## Shipped
+
+All three, in `06698280`, each with the counterexample this intent asked for.
+
+- **`.tsx`** — widened, and the widening cost 27 occurrences across 17 files, all pre-existing. The header
+  records both baseline moves separately (83 → 105 a correction, 105 → 132 a widening) so the growth cannot
+  be read as a quiet re-base, which was this intent's stated constraint. A fresh `.catch(() => [])` in a
+  `.tsx` file is refused; removing it turns the gate green.
+- **The band parser** — the repair is a validating check rather than a wider regex, as required. Three
+  counterexamples drove it: a decimal `window`, a quoted `floor`, and `direction: sideways`. Each refuses with
+  its own reason and exits 1; the real config exits 0. The discovery along the way: `slice(-"20.5")` is
+  `slice(NaN)`, which returns the whole array — a mis-typed window did not fail, it silently widened the band
+  to every sample ever recorded.
+- **The duplicated pathspec** — `RUN_OUTPUT_EXCLUDE` is exported and imported; the literal survives in one
+  place. The finding under it was worse than duplication: the comment above the constant claimed the
+  exclusion came "from this one definition, so the two cannot drift", while four copies sat elsewhere. A
+  comment promising another component's behaviour, in the file that states that law.
+
+## The open question this answered
+
+*Does `guard-siblings` already have the vocabulary to catch the duplicated pathspec, and if so why did it
+not?* It does not, and the reason is worth keeping: `guard-siblings` compares DOORS within one resource — the
+routes of an API slice — for guards their siblings carry. A constant copied between two gate scripts is not
+that shape. What would have caught it is what did: a reviewer reading for what a change now rests on. The
+gap is real and unfilled, and naming it here is cheaper than a scanner that would fire on every legitimate
+shared string.
+
