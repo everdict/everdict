@@ -2,7 +2,7 @@
 
 Author: pnpm scan (scope `agent`, sonnet, 90acbdab) — both verified by hand before filing. Status: shipped
 
-Shipped: 931acbc8
+Shipped: 0c441ad0
 
 Design: none — two named defects with the source read and the failing input stated; the scan wrote the design.
 
@@ -83,7 +83,7 @@ and every reaction chain that depends on an agent activating.
 
 ## Shipped
 
-Both, in `931acbc8`.
+Both, in `0c441ad0`.
 
 **`causedBy`** — repaired as the authorship law prescribes rather than by validating the string:
 `memberEventFieldsSchema` carries no `causedBy`, so zod strips a forged one before anything reads it, and
@@ -100,6 +100,6 @@ drives both the spec read and the list, with a genuine absence asserted to still
 
 One consequence worth recording: removing the `.catch(() => [])` made `pnpm swallowed-reads` go RED, because
 the debt shrank and the baseline had not. That is the ratchet's other half working — a debt that quietly
-stops shrinking on paper stops being a debt anybody pays — and the baseline followed in `f89d3554`
+stops shrinking on paper stops being a debt anybody pays — and the baseline followed in `dc8ef054`
 (132 → 131).
 

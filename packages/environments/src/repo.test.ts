@@ -47,9 +47,10 @@ describe("RepoEnvironment", () => {
     // ⚠️ SCOPED, and this assertion used to read `http.extraheader` with no URL — the spelling git applies to
     // EVERY host the process talks to. A clone whose tree carries a `.gitmodules` pointing elsewhere, or a
     // host answering with a cross-host 30x, therefore received a live installation token for somebody else's
-    // repositories. `gitAuthEnv` was scoped in `a175f871` and this sibling kept asserting the broadcast form,
-    // which is the one-lane-only law: the change fixed the writer and left a reader still certifying the old
-    // behaviour. The trailing `.git` is normalised away so the same repository written either way is one scope.
+    // repositories. The first version of the change that scoped `gitAuthEnv` left this sibling asserting the
+    // broadcast form — the one-lane-only law in the shape it takes when the other lane is a test — and the
+    // commit gate is what said so. The trailing `.git` is normalised away, so the same repository written
+    // either way produces one scope.
     expect(clone?.opts?.env?.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/private.extraheader");
     expect(clone?.opts?.env?.GIT_TERMINAL_PROMPT).toBe("0");
   });

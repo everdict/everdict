@@ -2,7 +2,7 @@
 
 Author: pnpm scan (scope `domain`, sonnet, 78c483f3) — verified by hand before filing. Status: shipped
 
-Shipped: 2c15f8d4
+Shipped: f505bc9e
 
 Design: none — one named defect with the source read and the failing input stated.
 
@@ -62,7 +62,7 @@ count llm_calls and cost, and the trajectory store.
 
 ## Shipped
 
-Shipped in `2c15f8d4`, stripped at the pull boundary rather than validated: for a pulled trace the platform said
+Shipped in `f505bc9e`, stripped at the pull boundary rather than validated: for a pulled trace the platform said
 nothing about placement, so silence is the honest answer.
 
 **Narrower than "strip everything the platform authors", and the reason is in the code.** Only the plane

@@ -2,7 +2,7 @@
 
 Author: pnpm scan (scope `contracts`, sonnet, ba700d60) — verified by hand before filing. Status: shipped
 
-Shipped: a175f871
+Shipped: ef9e3efc
 
 Design: none — the scan wrote the design: two named defects, each with the source read and the failing input stated. A design pass would restate the finding.
 
@@ -69,7 +69,7 @@ caller-named URL — webhooks, trace artifacts, OAuth.
 
 ## Shipped
 
-Both, in `a175f871`, each with its counterexample seen RED for the stated reason before the repair.
+Both, in `ef9e3efc`, each with its counterexample seen RED for the stated reason before the repair.
 
 **The credential scope.** `gitAuthEnv(token, remoteUrl)` now scopes to
 `http.<scheme>//<host>[:port]/<path>.extraheader`, normalising a trailing `.git` and dropping credentials,

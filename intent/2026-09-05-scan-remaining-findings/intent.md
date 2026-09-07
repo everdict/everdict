@@ -2,7 +2,7 @@
 
 Author: pnpm scan (scopes `execution`, `agent-runtime`, `api`) — two verified by hand, three reported. Status: shipped
 
-Shipped: 85c8f3b3
+Shipped: ebcd25a1
 
 Design: none — five independently-triaged findings, each with the source read and the failing input stated.
 
@@ -72,7 +72,7 @@ is not.
 All five were read against the codebase. Four were real and are repaired; the fifth was real about its own
 door and wrong about the population, which changed the repair from a patch into a check.
 
-**① A failed registry read consumed as "not registered"** — `a8de6779`. Real, and worse than filed. The
+**① A failed registry read consumed as "not registered"** — `54a28904`. Real, and worse than filed. The
 service-conversation lane answering a registered service harness with the process resolver's 404 is merely
 the wrong status; the session lane carries on with `spec === undefined`, and `makeHarness` does not refuse
 that — a `spec?.kind === "command"` miss falls into a switch on the id, so `claude-code` returns a
@@ -81,14 +81,14 @@ the bare built-in, provisioned a container for it and billed the session, with n
 the registry had not been read. One helper owns the read for both sites now; `NotFoundError` is the only
 permanent answer.
 
-**② Authority reserved before the check that refuses it** — `179c4a0a`. Real, and the open question is
+**② Authority reserved before the check that refuses it** — `2702a038`. Real, and the open question is
 answered: the reservation does NOT leak — `verifierOperation` settles the attempt `failed` in its catch — so
 the cost is the effects, not the ledger. Two of them, both avoidable: a durable reservation naming a container
 that will never exist, and a namespace created in the tenant's cluster for it. The agent lane and Nomad both
 put the refusal first, with a comment saying why (arch-review 58 W5); this longhand copy missed the move, for
 the second time at the same seam.
 
-**③ `spawnTools` all wrapped `intrinsic: true`** — `8df94a3d`. Real as a latent defect, NOT as a live escape,
+**③ `spawnTools` all wrapped `intrinsic: true`** — `3ee28118`. Real as a latent defect, NOT as a live escape,
 and the difference is the finding. `intrinsic` exempts a tool from BOTH envelope guards, and `spawn_teammate`
 creates another autonomous agent in the workspace's fleet — its own declaration says "NOT read-only: spawning
 delegates standing WRITE authority". No lane wires those host hooks together with an envelope today, so no
@@ -96,14 +96,14 @@ boundary was crossed; what existed was a capability ungoverned the moment one di
 tool now. The composition comment in `chat.ts` enumerated the kernel's additions wrongly and closed with "the
 test says so"; there was no such test, and now there is.
 
-**④ Microcompact clears ToolSearch results** — `302e4275`. Real, live, and the sharpest of the five. Discovery
+**④ Microcompact clears ToolSearch results** — `550785c6`. Real, live, and the sharpest of the five. Discovery
 was re-derived every turn from the transcript, and compaction is licensed to edit the transcript — so a
 select-form search over MCP tool names crossed the 400-char clear threshold, the parse failed, and every tool
 it had loaded left the outbound `tools[]` mid-procedure while the prompt began offering them again as
 undiscovered. The repair holds the set instead of teaching compaction about ToolSearch, which answers all
 three rungs of the ladder rather than the one the finding named.
 
-**⑤ Validation before the gate on `POST /harnesses`** — `85c8f3b3`. Real about the door, wrong about the
+**⑤ Validation before the gate on `POST /harnesses`** — `ebcd25a1`. Real about the door, wrong about the
 population, and the intent was right to say so: the scanner's *"unlike every other door"* did not survive a
 census. **45 of the 138 handlers that spell both `gate` and `safeParse` take them in that order, across 21
 resource slices.** It is not an authorization bypass — `gate` still runs before the service — so what it costs
@@ -115,7 +115,7 @@ the outcome is `pnpm gate-order`: a ratchet at 43, with the two harness doors re
 
 Two things, neither of them in the five.
 
-**`pnpm swallowed-reads` reported the file in finding ① clean, twice over** — `3ebde3ae`. Its statement joiner
+**`pnpm swallowed-reads` reported the file in finding ① clean, twice over** — `75f663ff`. Its statement joiner
 only pulled in continuation lines opening a member access, so a ternary the formatter broke across lines never
 became one logical line; and even joined, the pattern demanded `= await` ADJACENT, which a conditional never
 is. This is the SECOND time that scanner has been found blind over a region it reported PASS on, after the
@@ -123,7 +123,7 @@ missing `.tsx` glob, and both times by something else looking — a review, then
 intent's open question, which asked whether the shape deserved a scanner of its own: it has one, and the
 lesson is that a ratchet's PASS is a statement about what its pattern can see.
 
-**And widening it found the sibling** — `83085aca`. `verifyManifest` — the function answering whether a batch
+**And widening it found the sibling** — `28909105`. `verifyManifest` — the function answering whether a batch
 could be reproduced today, which is the claim this product sells — spent a store outage as "the harness is
 missing", "the model binding no longer resolves", and three separate "the dataset is gone". Its vocabulary
 already had the honest word (`unverifiable`, what it says when no registry is wired); both reads now use it.
