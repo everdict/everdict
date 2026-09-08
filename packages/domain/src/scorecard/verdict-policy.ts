@@ -3,15 +3,18 @@ import {
   type CaseMatcher,
   type CaseResult,
   type GraderSpec,
-  type MeasuredScore,
+  type MeasurementIdentity,
   type MetricAuthority,
   type MetricDefinition,
+  type Score,
   type VerdictAggregation,
   type VerdictPolicy,
   type VerdictPolicyRef,
   isConstitutionalMetric,
+  isMeasured,
   measuredScores,
   metricMatches,
+  normalizeScore,
 } from "@everdict/contracts";
 import { contentDigest, digestHex, digestsMatch } from "../provenance/content-digest.js";
 
@@ -29,7 +32,14 @@ export interface VerdictBasis {
   authority: MetricAuthority | "fallback";
   aggregation: VerdictAggregation;
   // The measurements that decided (metric + grader + their individual pass) — the audit trail of the verdict.
-  deciders: Array<{ metric: string; graderId: string; pass: boolean }>;
+  deciders: Array<{
+    metric: string;
+    graderId: string;
+    pass: boolean;
+    measurement?: MeasurementIdentity;
+    measurementRefs?: Array<{ index: number; digest: string }>;
+  }>;
+  policyDigest?: string;
 }
 
 export interface VerdictEvaluation {
@@ -68,7 +78,7 @@ export const DEFAULT_VERDICT_POLICY_V1: VerdictPolicy = {
 // once O1 lands): verdicts are derived on read, so an unstamped edit here would rewrite history — the
 // ScorecardBatch stamps this policy's ref at settle precisely so old records resolve their own policy.
 // A change is a NEW VERSION appended below, with the previous document frozen above.
-export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
+export const DEFAULT_VERDICT_POLICY_V11: VerdictPolicy = {
   id: "authority-ladder",
   version: "1.1.0",
   metrics: [
@@ -95,9 +105,26 @@ export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
   fallback: "all",
 };
 
+// New records use structured coordinates. The old documents stay byte-for-byte fixed.
+export const DEFAULT_VERDICT_POLICY: VerdictPolicy = {
+  ...DEFAULT_VERDICT_POLICY_V11,
+  version: "2.0.0",
+  measurementIdentity: "structured-v1",
+  metrics: [
+    { match: { metric: "judge" }, criterion: "overall", authority: "judge" },
+    { match: { metric: "judge" }, criterion: "any", authority: "judge", verdictRole: "diagnostic" },
+    // These retain the legacy reading for score rows without structured coordinates.
+    ...DEFAULT_VERDICT_POLICY_V11.metrics,
+  ],
+};
+
 // Append-only registry of every policy that has ever stamped a scorecard — resolving a stamp MUST find the
 // exact document, or the historical verdict cannot be re-derived. A new policy version is ADDED, never edited.
-const KNOWN_VERDICT_POLICIES: readonly VerdictPolicy[] = [DEFAULT_VERDICT_POLICY, DEFAULT_VERDICT_POLICY_V1];
+const KNOWN_VERDICT_POLICIES: readonly VerdictPolicy[] = [
+  DEFAULT_VERDICT_POLICY,
+  DEFAULT_VERDICT_POLICY_V11,
+  DEFAULT_VERDICT_POLICY_V1,
+];
 
 // A stamp as a record carries it: id+version always, digest on everything written since the stamp existed.
 export type StampedPolicyRef = Pick<VerdictPolicyRef, "id" | "version"> & Partial<Pick<VerdictPolicyRef, "digest">>;
@@ -170,6 +197,7 @@ export function composeVerdictPolicy(
         if (isConstitutionalMetric(m.id)) continue;
         additions.push({
           match: { metric: m.id },
+          ...(base.measurementIdentity ? { producer: { kind: "grader" as const, id: spec.id } } : {}),
           authority: m.authority,
           ...(m.direction ? { direction: m.direction } : {}),
         });
@@ -179,6 +207,7 @@ export function composeVerdictPolicy(
     if (spec.authority === undefined) continue;
     additions.push({
       match: { metric: spec.id },
+      ...(base.measurementIdentity ? { producer: { kind: "grader" as const, id: spec.id } } : {}),
       authority: spec.authority,
       ...(spec.direction ? { direction: spec.direction } : {}),
     });
@@ -220,19 +249,55 @@ function combine(aggregation: VerdictAggregation, deciders: Array<{ pass: boolea
 // one deciding value per metric. Attribution follows the DECISION: when the combination fails, the graderId
 // is the first FAILING grader's (the verdict basis must name the grader whose measurement decided it, not
 // whichever grader happened to emit first while another one failed the metric).
-function dedupeByMetric(scores: MeasuredScore[]): Array<{ metric: string; graderId: string; pass: boolean }> {
-  const byMetric = new Map<string, { metric: string; graderId: string; failedBy?: string; passes: boolean[] }>();
-  for (const s of scores) {
-    if (s.pass === undefined) continue;
-    const entry = byMetric.get(s.metric) ?? { metric: s.metric, graderId: s.graderId, passes: [] };
-    entry.passes.push(s.pass);
-    if (s.pass === false && entry.failedBy === undefined) entry.failedBy = s.graderId;
-    byMetric.set(s.metric, entry);
+function dedupeByMetric(scores: Score[], structured: boolean): VerdictBasis["deciders"] {
+  const grouped = new Map<string, VerdictBasis["deciders"][number]>();
+  for (const [index, score] of scores.entries()) {
+    if (!isMeasured(score) || score.pass === undefined) continue;
+    const measurement = structured ? score.measurement : undefined;
+    const key = measurement
+      ? JSON.stringify([
+          measurement.producer.kind,
+          measurement.producer.id,
+          measurement.metric,
+          measurement.criterion ?? null,
+        ])
+      : score.metric;
+    const refs = measurement ? [{ index, digest: contentDigest(normalizeScore(score)) }] : [];
+    const previous = grouped.get(key);
+    if (previous) {
+      if (!score.pass && previous.pass) {
+        previous.pass = false;
+        previous.graderId = score.graderId;
+      }
+      previous.measurementRefs?.push(...refs);
+    } else
+      grouped.set(key, {
+        metric: score.metric,
+        graderId: score.graderId,
+        pass: score.pass,
+        ...(measurement ? { measurement, measurementRefs: refs } : {}),
+      });
   }
-  return [...byMetric.values()].map((e) => {
-    const pass = e.passes.every(Boolean);
-    return { metric: e.metric, graderId: pass ? e.graderId : (e.failedBy ?? e.graderId), pass };
-  });
+  return [...grouped.values()];
+}
+
+function definitionMatches(
+  def: MetricDefinition,
+  score: { metric: string; measurement?: MeasurementIdentity },
+  structured: boolean,
+): boolean {
+  if (!structured || !score.measurement)
+    return def.producer === undefined && def.criterion === undefined && metricMatches(def.match, score.metric);
+  const m = score.measurement;
+  if (
+    def.producer &&
+    (def.producer.kind !== m.producer.kind || (def.producer.id !== undefined && def.producer.id !== m.producer.id))
+  )
+    return false;
+  if (def.criterion === "overall" && m.criterion !== undefined) return false;
+  if (def.criterion === "any" && m.criterion === undefined) return false;
+  if (typeof def.criterion === "object" && def.criterion.id !== m.criterion) return false;
+  return metricMatches(def.match, m.metric);
 }
 
 export function evaluateVerdict(
@@ -245,41 +310,56 @@ export function evaluateVerdict(
     return {};
   // Only measurements decide — unmeasured/invalid placeholders never reach a rung.
   const measured = measuredScores(result.scores);
+  const structured = policy.measurementIdentity === "structured-v1";
 
   // A REQUIRED metric with no measurement invalidates the case (its declared missingPolicy) — a verdict
   // standing on a hole it declared essential is not a verdict, and the absence states its cause.
   for (const d of policy.metrics) {
     if (d.verdictRole !== "required") continue;
     if ((d.missingPolicy ?? "invalidate_case") !== "invalidate_case") continue;
-    if (!measured.some((s) => metricMatches(d.match, s.metric))) {
+    if (!measured.some((s) => definitionMatches(d, s, structured))) {
       const metric = "metric" in d.match ? d.match.metric : `${d.match.prefix}*`;
       return { invalidated: { reason: "required_metric_missing", metric } };
     }
   }
 
-  const candidates = dedupeByMetric(measured).filter((c) => {
+  const candidates = dedupeByMetric(result.scores, structured).filter((c) => {
     // diagnostic/excluded metrics explain or observe — they never decide (stripped before any rung).
-    const def = policy.metrics.find((d) => metricMatches(d.match, c.metric));
+    const def = policy.metrics.find((d) => definitionMatches(d, c, structured));
     return def?.verdictRole !== "diagnostic" && def?.verdictRole !== "excluded";
   });
 
   // Index each pass-bearing metric to its first matching definition (declaration order = priority).
-  const matched = new Map<string, number>(); // metric → definition index
+  const matched = new Map<(typeof candidates)[number], number>(); // metric → definition index
   for (const c of candidates) {
-    const idx = policy.metrics.findIndex((d) => metricMatches(d.match, c.metric));
-    if (idx >= 0) matched.set(c.metric, idx);
+    const idx = policy.metrics.findIndex((d) => definitionMatches(d, c, structured));
+    if (idx >= 0) matched.set(c, idx);
   }
 
-  for (const authority of ["ground_truth", "objective", "judge"] as const) {
+  for (const authority of policy.authorityOrder ?? (["ground_truth", "objective", "judge"] as const)) {
     const deciders = candidates
       .filter((c) => {
-        const idx = matched.get(c.metric);
+        const idx = matched.get(c);
         return idx !== undefined && policy.metrics[idx]?.authority === authority;
       })
-      .sort((a, b) => (matched.get(a.metric) ?? 0) - (matched.get(b.metric) ?? 0));
+      .sort((a, b) => (matched.get(a) ?? 0) - (matched.get(b) ?? 0));
     if (deciders.length === 0) continue;
     const aggregation = policy.rungs[authority];
-    return { verdict: combine(aggregation, deciders), basis: { authority, aggregation, deciders } };
+    // Priority selects a metric definition, not whichever producer returned first.
+    // Distinct producers matching that definition still have to agree.
+    if (structured && aggregation === "priority") {
+      const first = deciders[0];
+      const firstDefinition = first === undefined ? undefined : matched.get(first);
+      const selected = deciders.filter((c) => matched.get(c) === firstDefinition);
+      return {
+        verdict: selected.every((c) => c.pass),
+        basis: { authority, aggregation, deciders: selected, policyDigest: contentDigest(policy) },
+      };
+    }
+    return {
+      verdict: combine(aggregation, deciders),
+      basis: { authority, aggregation, deciders, ...(structured ? { policyDigest: contentDigest(policy) } : {}) },
+    };
   }
 
   if (policy.fallback === "none") return {};
@@ -287,11 +367,16 @@ export function evaluateVerdict(
   // Observational is verdict-INERT by definition ("measured but not pass-deciding"): a declared
   // observational metric that happens to carry a pass must not decide a case just because no rung did —
   // that would make the declaration weaker than saying nothing at all.
-  const rest = candidates.filter((c) => matched.get(c.metric) === undefined);
+  const rest = candidates.filter((c) => matched.get(c) === undefined);
   if (rest.length === 0) return {};
   return {
     verdict: combine(policy.fallback, rest),
-    basis: { authority: "fallback", aggregation: policy.fallback, deciders: rest },
+    basis: {
+      authority: "fallback",
+      aggregation: policy.fallback,
+      deciders: rest,
+      ...(structured ? { policyDigest: contentDigest(policy) } : {}),
+    },
   };
 }
 

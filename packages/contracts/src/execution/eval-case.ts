@@ -544,9 +544,10 @@ export function sanitizeSubmittedResult(result: CaseResult, declaration: SettleD
     ...result,
     scores: result.scores.map((score) => {
       const spec = specProducing(declaration.graders, score.graderId);
+      const registered = declaration.judges.find((j) => j.id === score.graderId && isJudgeMetricOf(score.metric, j.id));
+      if (registered && spec === undefined) return sanitizeScore(score, { kind: "judge", id: registered.id });
       const ownsJudgeVerdict =
-        declaration.judges.some((j) => isJudgeMetricOf(score.metric, j.id)) ||
-        (spec !== undefined && (BUILTIN_JUDGE_GRADER_IDS.includes(spec.id) || declaredJudgeAuthority(spec)));
+        spec !== undefined && (BUILTIN_JUDGE_GRADER_IDS.includes(spec.id) || declaredJudgeAuthority(spec));
       return sanitizeScore(score, {
         kind: "grader",
         id: score.graderId,

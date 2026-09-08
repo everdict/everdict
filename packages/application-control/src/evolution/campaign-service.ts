@@ -1,4 +1,6 @@
+import { randomBytes } from "node:crypto";
 import type {
+  CampaignEvidenceView,
   CampaignFrame,
   CampaignFrameFromIssue,
   CampaignRound,
@@ -36,11 +38,13 @@ import {
   contentDigest,
   diagnosesOf,
   frameFromCases,
+  nonInferiorityOf,
   oracleTouched,
   roundEvidenceKey,
   roundEvidenceOf,
   seedLeakOf,
 } from "@everdict/domain";
+import { hashKey } from "../credential/credentials.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type {
   AdoptionOperationStore,
@@ -590,6 +594,64 @@ export class CampaignService {
   //
   // Readable while the campaign is OPEN or closed: a settled campaign's brief is how a member reads what the
   // last delegate was asked, which is half of "was this delegation any good".
+  async issueEvidenceGrant(tenant: string, id: string, seq?: number) {
+    const campaign = await this.get(tenant, id);
+    const roundSeq = seq ?? campaign.rounds.at(-1)?.seq ?? 0;
+    const evidence = roundSeq === 0 ? undefined : await this.roundEvidence(tenant, id, roundSeq);
+    const heldOut = new Set(campaign.frame.scenarios.filter((s) => s.heldOut).map((s) => s.id));
+    const targets = campaign.frame.targets.filter((caseId) => !heldOut.has(caseId));
+    const view: CampaignEvidenceView = {
+      campaignId: id,
+      seq: roundSeq,
+      subject: campaign.frame.subject,
+      targets: targets.map((caseId) => {
+        const row = evidence?.cases.find((c) => c.caseId === caseId && !c.heldOut);
+        return {
+          caseId,
+          ...(row ? { verdict: row.verdict, baseline: row.baseline, candidate: row.candidate } : {}),
+          diagnoses: (row?.diagnoses ?? []).map((d) => ({
+            kind: d.kind,
+            ...(d.locus?.service ? { service: d.locus.service } : {}),
+            ...(d.locus?.tool ? { tool: d.locus.tool } : {}),
+            ...(d.locus?.phase ? { phase: d.locus.phase } : {}),
+          })),
+        };
+      }),
+    };
+    const token = `cpe_${randomBytes(32).toString("base64url")}`;
+    const grant = await this.deps.store.createEvidenceGrant({
+      tokenHash: hashKey(token),
+      tenant,
+      campaignId: id,
+      expiresAt: new Date(Date.parse(this.now()) + 3600000).toISOString(),
+      view,
+      viewDigest: contentDigest(view),
+    });
+    return {
+      token,
+      expiresAt: grant.expiresAt,
+      campaignId: id,
+      view: grant.view,
+      instructions:
+        "Use this credential only to fetch this campaign's evidence view. Do not forward a workspace bearer or API key to the delegate.",
+    };
+  }
+
+  async resolveEvidenceGrant(tokenHash: string) {
+    const grant = await this.deps.store.evidenceGrant(tokenHash);
+    if (!grant || Date.parse(grant.expiresAt) <= Date.parse(this.now())) return undefined;
+    if (contentDigest(grant.view) !== grant.viewDigest)
+      throw new ConflictError("CONFLICT", {}, "evidence grant content no longer matches its sealed view");
+    return grant;
+  }
+
+  async evidenceView(tokenHash: string, campaignId: string): Promise<CampaignEvidenceView> {
+    const grant = await this.resolveEvidenceGrant(tokenHash);
+    if (!grant || grant.campaignId !== campaignId)
+      throw new NotFoundError("NOT_FOUND", {}, "evidence grant is absent or expired");
+    return grant.view;
+  }
+
   async roundBrief(tenant: string, id: string): Promise<DelegationBrief> {
     const record = await this.get(tenant, id);
     const rounds = [...record.rounds].sort((a, b) => a.seq - b.seq);
@@ -958,6 +1020,20 @@ export class CampaignService {
         },
         ended.detail,
       );
+    const evaluation = await this.deps.store.evaluationForScorecard(tenant, input.candidateScorecardId);
+    if (
+      !evaluation ||
+      evaluation.campaignId !== id ||
+      evaluation.reportedRound !== undefined ||
+      evaluation.candidate?.scorecardId !== input.candidateScorecardId ||
+      evaluation.baseline?.scorecardId !== input.baselineScorecardId ||
+      evaluation.candidateVersion !== input.candidateVersion
+    )
+      throw new ConflictError(
+        "CONFLICT",
+        {},
+        "round requires an unreported evaluation reserved before both scorecards were submitted",
+      );
     // The verdict is DERIVED from the production diff. A missing/unfinished/invisible scorecard throws
     // inside the read (requireSucceeded, under the caller's team ceiling) and the round is refused with that
     // reason — never logged half-known (L2), never read around the team axis.
@@ -1068,7 +1144,10 @@ export class CampaignService {
     const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
     const seq = record.rounds.length + 1;
     const at = this.now();
-    const verdict = verdictOf(snapshot, record.frame, oracle, builtSource, seedLeak, baselineSubject, candidateSubject);
+    const verdict = {
+      ...verdictOf(snapshot, record.frame, oracle, builtSource, seedLeak, baselineSubject, candidateSubject),
+      evaluationId: evaluation.id,
+    };
     // ── THE ROUND'S EVIDENCE IS STAGED BEFORE THE ROUND EXISTS (benchmark-evidence-spec.md §3) ──────
     //
     // Derived from what this method already read — the diff's per-case trials, the frame's flags, each side's
@@ -1095,10 +1174,12 @@ export class CampaignService {
       candidate: sideOf(input.candidateScorecardId, snapshot.candidate, candidateSubject),
       ...(snapshot.diff.trials !== undefined ? { trials: snapshot.diff.trials } : {}),
       verdict: {
+        evaluationId: evaluation.id,
         comparable: verdict.comparable,
         significantImprovements: verdict.significantImprovements,
         significantRegressions: verdict.significantRegressions,
         ...(verdict.heldOut !== undefined ? { heldOut: verdict.heldOut } : {}),
+        ...(verdict.nonInferiority !== undefined ? { nonInferiority: verdict.nonInferiority } : {}),
         ...(verdict.oracleReceipt !== undefined ? { oracleReceipt: verdict.oracleReceipt } : {}),
         ...(verdict.targets !== undefined ? { targets: verdict.targets } : {}),
         ...(verdict.detail !== undefined ? { detail: verdict.detail } : {}),
@@ -1761,6 +1842,16 @@ function verdictOf(
     comparable: true,
     ...(oracleReceipt ? { oracleReceipt } : {}),
     response,
+    ...(frame.nonInferiority
+      ? {
+          nonInferiority: nonInferiorityOf(
+            frame.nonInferiority,
+            [...heldOutIds],
+            frame.significance.heldOutFamilySize ?? frame.budget.maxRounds,
+            cases,
+          ),
+        }
+      : {}),
     significantImprovements: significant.filter((c) => c.delta > 0).length,
     significantRegressions: significant.filter((c) => c.delta < 0).length,
     heldOut: {

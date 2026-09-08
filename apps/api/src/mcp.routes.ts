@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { Principal } from "@everdict/auth";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -20,6 +21,18 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
   // Streamable HTTP MCP endpoint (stateful session). Every method needs a valid Bearer (none → 401 login challenge).
   // On initialize, create a server bound to the Principal + a session; subsequent requests route to that session by mcp-session-id.
   const sessions = new Map<string, StreamableHTTPServerTransport>();
+  const owners = new Map<string, string>();
+  const authorityKey = (p: Principal) =>
+    JSON.stringify({
+      subject: p.subject,
+      workspace: p.workspace,
+      via: p.via,
+      roles: [...p.roles].sort(),
+      scopes: p.scopes ? [...p.scopes].sort() : null,
+      teams: [...(p.teams ?? [])].sort(),
+      runnerId: p.runnerId,
+      evidenceGrant: p.evidenceGrant?.tokenHash,
+    });
   // Idle-session eviction (churn hygiene). A session holds a full McpServer (every tool as a closure over all
   // deps — heavy). Cleanup relied solely on transport.onclose, which fires on a graceful DELETE /mcp but NOT
   // when a runner is SIGKILLed / its network drops — so under runner churn the map accreted one McpServer per
@@ -41,6 +54,7 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
             transport.close(); // → onclose removes it from `sessions` and releases the McpServer for GC
           } catch {
             sessions.delete(sid);
+            owners.delete(sid);
           }
         }
       }
@@ -53,6 +67,11 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
     if (!principal) return mcpChallenge(req, reply);
     const sid = req.headers["mcp-session-id"] as string | undefined;
     let transport = sid ? sessions.get(sid) : undefined;
+    if (transport && owners.get(sid ?? "") !== authorityKey(principal))
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "MCP session belongs to a different authority; initialize a new session.",
+      });
     if (!transport) {
       // Stale/unknown session (e.g. after a control-plane restart) → 404 per the Streamable HTTP spec, which
       // obliges the client to start a NEW session with a fresh InitializeRequest. A 400 here strands well-behaved
@@ -69,12 +88,14 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
           sessions.set(id, transport as StreamableHTTPServerTransport);
+          owners.set(id, authorityKey(principal));
           lastSeen.set(id, Date.now());
         },
       });
       transport.onclose = () => {
         if (transport?.sessionId) {
           sessions.delete(transport.sessionId);
+          owners.delete(transport.sessionId);
           lastSeen.delete(transport.sessionId);
         }
       };
@@ -112,6 +133,11 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         .code(400)
         .send({ code: "BAD_REQUEST", message: "initialize request or a valid mcp-session-id is required." });
     }
+    if (owners.get(sid ?? "") !== authorityKey(principal))
+      return reply.code(403).send({
+        code: "FORBIDDEN",
+        message: "MCP session belongs to a different authority; initialize a new session.",
+      });
     touch(sid); // GET (SSE stream) / DELETE also count as activity
     reply.hijack();
     await transport.handleRequest(req.raw, reply.raw);

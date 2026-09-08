@@ -18,3 +18,10 @@ Contracts, domain, application-control/execution, database, graders, authenticat
 ## Constraints
 
 Preserve historical data and policy digests. Unknown authority refuses effects. Bind authorization before effects, and test PostgreSQL races and HTTP/MCP bypasses. Do not push or deploy.
+
+## Open questions
+
+Resolved: one attempt is a fixed baseline/candidate comparison and remains spent after every ending.
+Historical rounds keep their policy and count toward the family. New non-inferiority claims are opt-in
+and versioned. A campaign delegate uses a separate immutable evidence capability; workspace credentials
+remain with the orchestrator. Independently supplied credentials are outside that capability's scope.

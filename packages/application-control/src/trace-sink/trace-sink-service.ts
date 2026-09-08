@@ -117,7 +117,7 @@ export class TraceSinkService {
           // declared model when the attribution map states one; everything else — grader metrics, the inline
           // judge's bare "judge", a harness judge with no stated model — carries the batch identity. The map
           // only ever states declared models, so nothing here invents one.
-          const judgeId = judgeFamilyOf(sc.metric);
+          const judgeId = judgeFamilyOf(sc);
           const source =
             (judgeId !== undefined ? ctx.judgeModels?.[judgeId] : undefined) ?? `everdict:${ctx.scorecardId}`;
           return {

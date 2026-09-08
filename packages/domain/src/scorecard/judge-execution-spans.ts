@@ -1,4 +1,4 @@
-import { type TraceEvent, generationOfAttempt } from "@everdict/contracts";
+import { type Score, type TraceEvent, generationOfAttempt } from "@everdict/contracts";
 
 // ── THE JUDGE'S EXECUTION, IN THE VOCABULARY THE MEASUREMENT PLANE CANNOT MISREAD (report 1.1) ───────
 //
@@ -65,7 +65,10 @@ export interface JudgeEvidenceScope {
 // sliced the whole suffix and minted a phantom judge per criterion, each pointing at an evidence plane that
 // never existed. Anything that is not in the family (a grader's row, the inline judge's bare `judge`) is not
 // judge-attributable and answers undefined.
-export function judgeFamilyOf(metric: string): string | undefined {
+export function judgeFamilyOf(value: string | Score): string | undefined {
+  if (typeof value !== "string" && value.measurement)
+    return value.measurement.producer.kind === "judge" ? value.measurement.producer.id : undefined;
+  const metric = typeof value === "string" ? value : value.metric;
   if (!metric.startsWith("judge:")) return undefined;
   const rest = metric.slice("judge:".length);
   const colon = rest.indexOf(":");

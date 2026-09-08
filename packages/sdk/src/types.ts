@@ -20,7 +20,14 @@ export type Ref = string;
 export type DatasetInput = { id: string; version: string; [k: string]: unknown };
 export type HarnessInput = { id: string; version: string; [k: string]: unknown };
 
+export interface CampaignEvaluationRequest {
+  campaignId: string;
+  requestId: string;
+  candidateVersion: string;
+  side: "baseline" | "candidate";
+}
 export interface EvaluateInput {
+  campaignEvaluation?: CampaignEvaluationRequest;
   harness: Ref | HarnessInput; // "claude-code@1.0.0" or an inline HarnessSpec (registered first)
   dataset: Ref | DatasetInput; // "swe-lite@1.0.0" or an inline Dataset (registered first)
   trials?: number; // run each case N times (pass@k / flakiness)

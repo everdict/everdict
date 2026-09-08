@@ -51,14 +51,22 @@ describe("verdictSummaryOf / decisionPassRate — the stamped policy's own aggre
     snapshot: { kind: "prompt", output: "done" },
     scores: [
       // The composed policy declares this metric GROUND TRUTH — it decides the case…
-      { graderId: "biz", metric: "custom_business_state", value: pass ? 1 : 0, pass },
+      {
+        graderId: "biz",
+        metric: "custom_business_state",
+        measurement: { producer: { kind: "grader", id: "biz" }, metric: "custom_business_state" },
+        value: pass ? 1 : 0,
+        pass,
+      },
       // …while the judge disagrees, and the judge is the highest rung the headline LADDER can see.
       { graderId: "quality", metric: "judge:quality", value: pass ? 0 : 1, pass: !pass },
     ],
   });
 
   it("a composed ground_truth metric decides the aggregate even though the headline ladder cannot see it", () => {
-    const composed = composeVerdictPolicy([{ id: "custom_business_state", authority: "ground_truth" }]);
+    const composed = composeVerdictPolicy([
+      { id: "biz", metrics: [{ id: "custom_business_state", authority: "ground_truth" }] },
+    ]);
     const results = [scored(true), scored(true)];
     // The headline ranks judge:quality (its ladder knows nothing of the custom metric) — and reads 0%.
     expect(headlinePassRate({ summary: summarizeScorecard({ suiteId: "s", harness: "h@1", results }) })).toBe(0);

@@ -9,7 +9,7 @@ import { registerBillingTools } from "./api/billing/billing.mcp.js";
 import { registerBrowserProfileTools } from "./api/browser-profile/browser-profile.mcp.js";
 import { registerBrowserSessionTools } from "./api/browser-session/browser-session.mcp.js";
 import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
-import { registerCampaignTools } from "./api/campaign/campaign.mcp.js";
+import { registerCampaignEvidenceTools, registerCampaignTools } from "./api/campaign/campaign.mcp.js";
 import { registerCapabilityTools } from "./api/capability/capability.mcp.js";
 import { registerCheckpointTools } from "./api/checkpoint/checkpoint.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
@@ -78,6 +78,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: Agen
   // The session is bound to the caller AND (when declared at initialize) to the agent holding it, so anything the
   // session authors is attributed to that agent rather than looking like the member typed it.
   const ctx: McpToolContext = { deps, principal, ws: principal.workspace, ...(agent ? { agent } : {}) };
+
+  if (principal.evidenceGrant) {
+    registerCampaignEvidenceTools(server, ctx);
+    return server;
+  }
 
   registerRunTools(server, ctx);
   registerScorecardTools(server, ctx);

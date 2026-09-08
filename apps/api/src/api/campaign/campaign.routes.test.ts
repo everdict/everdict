@@ -1,5 +1,6 @@
-import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
+import { CampaignService, type CampaignSnapshot, RunService, hashKey } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { CampaignRoundInputSchema } from "@everdict/contracts";
 import type { CampaignFrame } from "@everdict/contracts";
 import { AgentSpecSchema } from "@everdict/contracts";
 import { NotFoundError, readUnknown } from "@everdict/contracts";
@@ -62,9 +63,9 @@ const frame: CampaignFrame = {
   observationPolicy: { allowDivergent: false },
 };
 
-function build(snapshot: CampaignSnapshot) {
+function build(snapshot: CampaignSnapshot, withAuth = false) {
   const store = new InMemoryEvolutionCampaignStore();
-  const campaignService = new CampaignService({
+  const campaignService = new ReservedFixtureCampaignService({
     // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
     // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
     scorecards: { get: async () => undefined },
@@ -91,6 +92,16 @@ function build(snapshot: CampaignSnapshot) {
   // defect exactly), so this uses `buildCampaignAdoption` over a real registry.
   const agents = new InMemoryAgentRegistry();
   const app = buildServer({
+    ...(withAuth
+      ? {
+          authenticator: {
+            authenticate: async (token: string) =>
+              token === "workspace-key"
+                ? { subject: "alice", workspace: "acme", roles: ["admin"], via: "api-key" as const }
+                : undefined,
+          },
+        }
+      : {}),
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
     // Opening a campaign resolves the issue's TEAM, so the tracker is a REQUIRED dependency of that route
@@ -115,6 +126,144 @@ function build(snapshot: CampaignSnapshot) {
   });
   return { app, store, agents };
 }
+
+describe("campaign evidence credentials — the HTTP read boundary", () => {
+  it("authenticates a scoped MCP session and refuses borrowing a workspace session over every method", async ({
+    onTestFinished,
+  }) => {
+    const { app } = build(winning, true);
+    onTestFinished(() => app.close());
+    const opened = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: { issueId: "iss_1", frame },
+    });
+    const issuance = await app.inject({
+      method: "POST",
+      url: `/campaigns/${opened.json().id}/evidence-grants`,
+      headers: H,
+      payload: {},
+    });
+    const grant = issuance.json().token as string;
+    // The MCP SDK owns raw Node sockets; light-my-request's socket double lacks destroySoon.
+    // Exercise the actual HTTP transport for this capability/session boundary.
+    const address = await app.listen({ port: 0, host: "127.0.0.1" });
+    const requestMcp = async (input: {
+      method: string;
+      url: string;
+      headers: Record<string, string>;
+      payload?: unknown;
+    }) => {
+      const res = await fetch(`${address}${input.url}`, {
+        method: input.method,
+        headers: { ...input.headers, ...(input.payload !== undefined ? { "content-type": "application/json" } : {}) },
+        ...(input.payload !== undefined ? { body: JSON.stringify(input.payload) } : {}),
+      });
+      return { statusCode: res.status, headers: Object.fromEntries(res.headers.entries()), body: await res.text() };
+    };
+    const initialize = async (token: string) => {
+      const res = await requestMcp({
+        method: "POST",
+        url: "/mcp",
+        headers: { authorization: `Bearer ${token}`, accept: "application/json, text/event-stream" },
+        payload: {
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+        },
+      });
+      expect(res.statusCode).toBe(200);
+      return String(res.headers["mcp-session-id"]);
+    };
+    const workspaceSession = await initialize("workspace-key");
+    const ownSession = await initialize(grant);
+    const headers = {
+      authorization: `Bearer ${grant}`,
+      "mcp-session-id": workspaceSession,
+      accept: "application/json, text/event-stream",
+    };
+    for (const method of ["POST", "GET", "DELETE"] as const) {
+      const res = await requestMcp({
+        method,
+        url: "/mcp",
+        headers,
+        ...(method === "POST" ? { payload: { jsonrpc: "2.0", id: 2, method: "tools/list" } } : {}),
+      });
+      expect(res.statusCode).toBe(403);
+    }
+    const tools = await requestMcp({
+      method: "POST",
+      url: "/mcp",
+      headers: { ...headers, "mcp-session-id": ownSession },
+      payload: { jsonrpc: "2.0", id: 3, method: "tools/list" },
+    });
+    expect(tools.statusCode).toBe(200);
+    expect(tools.body).toContain("get_campaign_evidence_view");
+    expect(tools.body).not.toContain("get_scorecard");
+    expect(tools.body).not.toContain("run_scorecard");
+    await requestMcp({ method: "DELETE", url: "/mcp", headers: { ...headers, "mcp-session-id": ownSession } });
+    await requestMcp({ method: "DELETE", url: "/mcp", headers: { ...headers, authorization: "Bearer workspace-key" } });
+    await app.close();
+  });
+
+  it("serves only the bound view and refuses scorecards, workspace promotion, wrong campaigns, and invalid keys", async () => {
+    const { app, store } = build(winning);
+    const opening = await app.inject({
+      method: "POST",
+      url: "/campaigns",
+      headers: H,
+      payload: {
+        issueId: "iss_1",
+        frame: { ...frame, scenarios: [...frame.scenarios, { id: "visible", heldOut: false }], targets: ["visible"] },
+      },
+    });
+    const id = opening.json().id as string;
+    const issuance = await app.inject({
+      method: "POST",
+      url: `/campaigns/${id}/evidence-grants`,
+      headers: H,
+      payload: {},
+    });
+    expect(issuance.statusCode).toBe(201);
+    const token = issuance.json().token as string;
+    const headers = { authorization: `Bearer ${token}`, "x-everdict-workspace": "other", "x-everdict-tenant": "other" };
+    const view = await app.inject({ method: "GET", url: `/campaigns/${id}/evidence-view`, headers });
+    expect(view.statusCode).toBe(200);
+    expect(view.json()).toMatchObject({ campaignId: id, targets: [{ caseId: "visible", diagnoses: [] }] });
+    expect(JSON.stringify(view.json())).not.toContain("c1");
+    for (const url of ["/scorecards", `/campaigns/${id}`, "/campaigns/other/evidence-view", "/workspaces"])
+      expect((await app.inject({ method: "GET", url, headers })).statusCode).toBe(403);
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/campaigns/${id}/evidence-view`,
+          headers: { authorization: "Bearer cpe_invalid" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    const saved = await store.evidenceGrant(hashKey(token));
+    if (!saved) throw new Error("grant was not durable");
+    await store.createEvidenceGrant({
+      ...saved,
+      tokenHash: hashKey("cpe_expired"),
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: `/campaigns/${id}/evidence-view`,
+          headers: { authorization: "Bearer cpe_expired" },
+        })
+      ).statusCode,
+    ).toBe(401);
+    expect(await store.get("acme", id)).toBeDefined();
+    await app.close();
+  });
+});
 
 const winning: CampaignSnapshot = {
   diff: {
@@ -637,7 +786,7 @@ describe("POST /campaigns with frame.fromIssue — the issue's case links become
   const appOver = (links: Link[]) => {
     const store = new InMemoryEvolutionCampaignStore();
     const issues = issueWith(links);
-    const campaignService = new CampaignService({
+    const campaignService = new ReservedFixtureCampaignService({
       // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
       // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
       scorecards: { get: async () => undefined },
@@ -997,7 +1146,7 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
     github: { mergePullRequest: (...args: unknown[]) => Promise<{ sha: string; alreadyMerged: boolean }> } | undefined,
   ) {
     const store = new InMemoryEvolutionCampaignStore();
-    const campaignService = new CampaignService({
+    const campaignService = new ReservedFixtureCampaignService({
       // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
       // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
       scorecards: { get: async () => undefined },
@@ -1125,3 +1274,54 @@ describe("POST /campaigns/:id/merge pays the adoption's code debt", () => {
     await app.close();
   });
 });
+
+// These settlement tests supply completed scorecards through a diff fixture. Model the submission
+// boundary explicitly: each new pair consumes a real store reservation before settlement. Duplicate
+// fixture labels receive fresh ids, as ScorecardService would mint for distinct executions.
+let fixtureAttempt = 0;
+class ReservedFixtureCampaignService extends CampaignService {
+  private readonly fixtureDeps: ConstructorParameters<typeof CampaignService>[0];
+  private readonly aliases = new Map<string, string>();
+  private attempt = 0;
+  constructor(deps: ConstructorParameters<typeof CampaignService>[0]) {
+    const aliases = new Map<string, string>();
+    super({
+      ...deps,
+      diffs: {
+        diffSnapshot: (tenant, baseline, candidate, opts) =>
+          deps.diffs.diffSnapshot(tenant, aliases.get(baseline) ?? baseline, aliases.get(candidate) ?? candidate, opts),
+      },
+    });
+    this.fixtureDeps = deps;
+    this.aliases = aliases;
+  }
+  override async logRound(...args: Parameters<CampaignService["logRound"]>) {
+    const [tenant, id, input, by] = args;
+    const campaign = await this.fixtureDeps.store.get(tenant, id);
+    if (!campaign || campaign.state !== "open" || !CampaignRoundInputSchema.safeParse(input).success)
+      return super.logRound(...args);
+    const bound = { ...input };
+    this.attempt = ++fixtureAttempt;
+    const requestId = `fixture-${this.attempt}`;
+    for (const side of ["baseline", "candidate"] as const) {
+      const field = side === "baseline" ? "baselineScorecardId" : "candidateScorecardId";
+      if (await this.fixtureDeps.store.evaluationForScorecard(tenant, input[field])) {
+        bound[field] = `${input[field]}-attempt-${this.attempt}`;
+        this.aliases.set(bound[field], input[field]);
+      }
+      await this.fixtureDeps.store.reserveEvaluation({
+        tenant,
+        campaignId: id,
+        requestId,
+        candidateVersion: input.candidateVersion,
+        side,
+        scorecardId: bound[field],
+        requestDigest: bound[field],
+        at: "2026-08-26T00:00:00.000Z",
+        caseIds: campaign.frame.scenarios.map((s) => s.id),
+        trials: campaign.frame.trialsPerCase,
+      });
+    }
+    return super.logRound(tenant, id, bound, by);
+  }
+}

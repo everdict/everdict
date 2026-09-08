@@ -277,6 +277,7 @@ const SCOPE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
 // There is no third: the WORKSPACE is the only boundary — everything a workspace holds is the workspace's, so an
 // action a role grants reaches every asset under it.
 export function can(principal: Principal, action: Action): boolean {
+  if (principal.evidenceGrant) return false; // Only the grant-specific view surface is authorized.
   const roleOk = principal.roles.some((r) => ROLE_PERMISSIONS[r]?.has(action) ?? false);
   if (!roleOk) return false;
   // A subject with no scope (OIDC user / legacy key) keeps the role permissions as-is (unlimited). If scoped, narrowed by intersection.

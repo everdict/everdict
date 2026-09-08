@@ -106,3 +106,19 @@ no default-to-first**. Discriminated unions carry the shape variants:
 
 See `packages/contracts/src/index.ts` for the full export list and the `foundation` skill for module
 boundaries; rule `core-contracts.md` has the inlined push rules (no I/O, schema = SSOT, interfaces here).
+
+## Evolution evidence authority (2026-09-08)
+
+- Carry `EvaluatedSubjectIdentity` from the evaluated seal through evidence and adoption;
+  never reconstruct an environment's digest from its controlled harness.
+- New campaign round evidence must belong to a durable `CampaignEvaluation`, reserved
+  before both scorecard submissions. `ExperimentFamily.consumed` includes failed and
+  unreported attempts. A transport must forward the request binding, never mint it at logRound.
+- Scores use structured measurement coordinates; `isJudgeMetricOf(score, id)` and
+  `judgeFamilyOf(score)` preserve producer ownership. String overloads are legacy adapters.
+  Keep historical policy documents unchanged when changing matching semantics.
+- `nonInferiority` is a separate versioned claim with an inconclusive result. Do not
+  describe zero detected significant regressions as a non-inferiority guarantee.
+- Campaign delegates receive a target-only evidence grant, not workspace credentials.
+  Scoped principals bypass membership promotion and register only their evidence reader.
+  See `docs/architecture/evolution-review-follow-up.md` for request and compatibility rules.

@@ -3,9 +3,13 @@ import type {
   CampaignBuildRecord,
   CampaignBuildSetRecord,
   CampaignClose,
+  CampaignEvaluation,
+  CampaignEvaluationRequest,
+  CampaignEvidenceGrant,
   CampaignRound,
   CampaignState,
   EvolutionCampaignRecord,
+  ExperimentFamily,
   HarnessSeeds,
   ReadResult,
 } from "@everdict/contracts";
@@ -39,7 +43,25 @@ export type CampaignCloseOutcome =
   | { kind: "conflict"; expected: number; actual: number }
   | { kind: "absent" };
 
-export interface EvolutionCampaignStore {
+export interface ReserveCampaignEvaluation extends CampaignEvaluationRequest {
+  tenant: string;
+  scorecardId: string;
+  requestDigest: string;
+  at: string;
+  caseIds: string[];
+  trials: number;
+}
+export interface ExperimentFamilyStore {
+  reserveEvaluation(
+    input: ReserveCampaignEvaluation,
+  ): Promise<{ kind: "reserved" | "replay"; evaluation: CampaignEvaluation; scorecardId: string }>;
+  evaluationForScorecard(tenant: string, scorecardId: string): Promise<CampaignEvaluation | undefined>;
+  family(tenant: string, campaignId: string): Promise<ExperimentFamily | undefined>;
+}
+
+export interface EvolutionCampaignStore extends ExperimentFamilyStore {
+  createEvidenceGrant(grant: CampaignEvidenceGrant): Promise<CampaignEvidenceGrant>;
+  evidenceGrant(tokenHash: string): Promise<CampaignEvidenceGrant | undefined>;
   create(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void>; // id collision → throw (ConflictError)
   get(tenant: string, id: string): Promise<EvolutionCampaignRecord | undefined>;
   // is built from what the caller may see rather than filtered after it (arch-review 76 P1-security).

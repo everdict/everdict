@@ -1,6 +1,7 @@
 // The authenticated subject. The result of authentication, owned by the control plane.
 // workspace = tenant = trust-zone key — members of the same workspace run in the same zone (isolation/warm pool).
 export interface Principal {
+  evidenceGrant?: { tokenHash: string; campaignId: string; expiresAt: string };
   subject: string; // user sub (OIDC) or key identifier — the identity key (authz/scope use only this value)
   workspace: string; // = tenant (the key for isolation/fairness/budget/store/registry)
   roles: string[]; // ["admin"|"member"|"viewer"|"runner"|"ci"...]

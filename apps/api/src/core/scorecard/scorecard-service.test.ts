@@ -1,5 +1,6 @@
 import { type SealedTrajectory, type TrajectoryStore, collectTrajectoryEvents } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { CampaignFrameSchema } from "@everdict/contracts";
 import {
   BadRequestError,
   CURRENT_EVIDENCE_VERSION,
@@ -20,6 +21,7 @@ import {
   storedExecutionId,
 } from "@everdict/contracts";
 import { MANIFEST_IDENTITY_VERSION, measuredScores } from "@everdict/contracts";
+import { InMemoryEvolutionCampaignStore } from "@everdict/db";
 import {
   InMemoryEnvelopeStore,
   InMemoryPlatformEventStore,
@@ -33,6 +35,7 @@ import {
   CircuitBreaker,
   DEFAULT_VERDICT_POLICY,
   DEFAULT_VERDICT_POLICY_V1,
+  DEFAULT_VERDICT_POLICY_V11,
   type Principal,
   Run,
   caseResultDigest,
@@ -6214,7 +6217,7 @@ describe("ScorecardService.gate — the recorded release gate (A1/B1)", () => {
     //   default  → the judge decides    → both sides PASS → no regression → the gate would say PASS.
     //   stamped  → schema_valid decides → 6/6 → 0/6       → a Fisher-significant trial regression → BLOCK.
     // Pre-fix, caseTrialStats always judged under the default ladder, so this release shipped green.
-    const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
+    const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }], DEFAULT_VERDICT_POLICY_V11);
     const stamp = verdictPolicyRef(policy);
     const manifest = {
       identityVersion: MANIFEST_IDENTITY_VERSION, // declared era (I8)
@@ -6927,3 +6930,82 @@ async function whole(
   if (!planes) return undefined;
   return { ...planes, events: await collectTrajectoryEvents(store, tenant, runId, opts ?? {}) };
 }
+
+describe("ScorecardService — reserved campaign evaluation submissions", () => {
+  it("spends before dispatch, returns exact replays, and refuses unbudgeted reruns and rescoring", async () => {
+    const campaigns = new InMemoryEvolutionCampaignStore();
+    const datasets = new InMemoryDatasetRegistry();
+    const dataset = datasetWithCase();
+    const firstCase = dataset.cases[0];
+    if (!firstCase) throw new Error("fixture case missing");
+    dataset.cases.push({ ...firstCase, id: "c2" });
+    await datasets.register("acme", dataset);
+    const frame = CampaignFrameSchema.parse({
+      subject: { type: "harness", id: "scripted", baselineVersion: "0" },
+      scenarios: [
+        { id: "c1", heldOut: true },
+        { id: "c2", heldOut: true },
+      ],
+      judges: [],
+      trialsPerCase: 5,
+      budget: { maxRounds: 1 },
+      significance: { fdrAlpha: 0.05, heldOutFamilySize: 1 },
+    });
+    const at = "2026-09-08T00:00:00.000Z";
+    await campaigns.create({
+      id: "campaign",
+      tenant: "acme",
+      issueId: "issue",
+      frame,
+      frameDigest: contentDigest(frame),
+      rounds: [],
+      state: "open",
+      createdBy: "alice",
+      createdAt: at,
+      updatedAt: at,
+    });
+    let dispatched = 0;
+    let ids = 0;
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      store,
+      datasets,
+      campaigns,
+      newId: () => `reserved-${++ids}`,
+      dispatcher: {
+        async dispatch(job) {
+          expect(await campaigns.family("acme", "campaign")).toMatchObject({ consumed: 1 });
+          dispatched++;
+          return { ...caseResult(true), caseId: job.evalCase.id };
+        },
+      },
+    });
+    const request = {
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      trials: 5,
+      campaignEvaluation: {
+        campaignId: "campaign",
+        requestId: "attempt",
+        candidateVersion: "1",
+        side: "candidate" as const,
+      },
+    };
+    const submitted = await service.submit(request);
+    await waitTerminal(store, submitted.id);
+    const replay = await service.submit(request);
+    expect(replay.id).toBe(submitted.id);
+    expect(dispatched).toBe(10);
+    expect((await campaigns.evaluationForScorecard("acme", submitted.id))?.candidate?.scorecardId).toBe(submitted.id);
+    await expect(
+      service.submit({ ...request, campaignEvaluation: { ...request.campaignEvaluation, requestId: "extra" } }),
+    ).rejects.toThrow(/budget/);
+    await expect(service.submit({ ...request, trials: 2 })).rejects.toThrow(/different/);
+    await expect(service.rerun({ tenant: "acme", id: submitted.id })).rejects.toThrow(/immutable/);
+    await expect(service.retryFailed({ tenant: "acme", id: submitted.id })).rejects.toThrow(/immutable/);
+    await expect(service.retryCases({ tenant: "acme", id: submitted.id, cases: [] })).rejects.toThrow(/immutable/);
+    await expect(service.scoreGroup({ tenant: "acme", id: submitted.id, judges: [] })).rejects.toThrow(/immutable/);
+    expect(dispatched).toBe(10);
+  });
+});

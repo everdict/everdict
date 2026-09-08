@@ -1,3 +1,4 @@
+import type { ExperimentFamilyStore } from "@everdict/application-control";
 import type {
   ConstitutionApprovalStore,
   EnvelopeStore,
@@ -63,6 +64,7 @@ export function modelBindingResolver(
 
 // Batch eval: run a dataset (bundle of cases) against a harness@version, aggregate into a scorecard + apply the selected judges to each trace.
 export function buildScorecard(deps: {
+  campaigns?: ExperimentFamilyStore;
   scorecardStore: ScorecardStore;
   runStore: RunStore;
   // The scoring stage (mig 0149) — a pass dual-writes its judgments here (expand step).
@@ -179,6 +181,7 @@ export function buildScorecard(deps: {
   const traceSourcesForIngest = new TraceSourceService(settingsStore, { secretsFor: runtimeSecretsFor });
 
   return new ScorecardService({
+    ...(deps.campaigns ? { campaigns: deps.campaigns } : {}),
     envelopes: deps.envelopes, // §5.2 — submit-gate headroom + per-case draw-down
     ...(envelopeMaxInFlight() !== undefined ? { admissionMaxInFlight: envelopeMaxInFlight() } : {}),
     trajectories: deps.trajectories, // P5 dual-write — child-case traces seal in the owned store

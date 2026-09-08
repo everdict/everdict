@@ -4,19 +4,27 @@ import type {
   CampaignSubjectRef,
   EvolutionCampaignStore,
   OutboxEvent,
+  ReserveCampaignEvaluation,
 } from "@everdict/application-control";
 import {
   type AdoptionOperation,
   type CampaignClose,
+  type CampaignEvaluation,
+  CampaignEvaluationSchema,
+  type CampaignEvidenceGrant,
+  CampaignEvidenceGrantSchema,
   type CampaignRound,
   type CampaignState,
   ConflictError,
   type EvolutionCampaignRecord,
   EvolutionCampaignRecordSchema,
+  type ExperimentFamily,
+  ExperimentFamilySchema,
 } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
 import { type SqlClient, withTransaction } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
+import { familyMembers, reserveInFamily } from "./experiment-family.js";
 
 // ── EvolutionCampaignStore impls (docs/architecture/evolution-lineage.md, Track D) ───────────────────
 //
@@ -27,7 +35,11 @@ import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 // Reserve every open campaign's remaining allocation before its evaluations can start.
 // Closed campaigns retain their spent rounds. The database serializes this decision with create.
-function assertFamilyCapacity(record: EvolutionCampaignRecord, records: EvolutionCampaignRecord[]): void {
+function assertFamilyCapacity(
+  record: EvolutionCampaignRecord,
+  records: EvolutionCampaignRecord[],
+  attempts: CampaignEvaluation[] = [],
+): void {
   if (!record.frame.continues) return;
   const byId = new Map(records.map((r) => [r.id, r]));
   let root = record.frame.continues;
@@ -52,7 +64,15 @@ function assertFamilyCapacity(record: EvolutionCampaignRecord, records: Evolutio
   const limit = byId.get(root)?.frame.significance.heldOutFamilySize;
   const reserved = records
     .filter((r) => family.has(r.id))
-    .reduce((n, r) => n + (r.state === "open" ? r.frame.budget.maxRounds : r.rounds.length), 0);
+    .reduce(
+      (n, r) =>
+        n +
+        (r.state === "open"
+          ? r.frame.budget.maxRounds
+          : r.rounds.filter((round) => !round.verdict.evaluationId).length +
+            attempts.filter((a) => a.campaignId === r.id).length),
+      0,
+    );
   if (
     limit === undefined ||
     record.frame.significance.heldOutFamilySize !== limit ||
@@ -67,6 +87,49 @@ function assertFamilyCapacity(record: EvolutionCampaignRecord, records: Evolutio
 
 export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
   private readonly byId = new Map<string, EvolutionCampaignRecord>();
+  private readonly grants = new Map<string, CampaignEvidenceGrant>();
+  async createEvidenceGrant(grant: CampaignEvidenceGrant) {
+    if (this.grants.has(grant.tokenHash)) throw new ConflictError("CONFLICT", {}, "evidence grant already exists");
+    this.grants.set(grant.tokenHash, structuredClone(grant));
+    return structuredClone(grant);
+  }
+  async evidenceGrant(tokenHash: string) {
+    return structuredClone(this.grants.get(tokenHash));
+  }
+  private readonly families = new Map<string, ExperimentFamily>();
+  private readonly evaluations = new Map<string, CampaignEvaluation>();
+
+  async reserveEvaluation(input: ReserveCampaignEvaluation) {
+    const records = [...this.byId.values()].filter((r) => r.tenant === input.tenant);
+    const { root } = familyMembers(input.campaignId, records);
+    const result = reserveInFamily(
+      input,
+      records,
+      this.families.get(`${input.tenant}/${root.id}`),
+      [...this.evaluations.values()].filter((a) => a.tenant === input.tenant),
+    );
+    this.families.set(`${input.tenant}/${root.id}`, result.family);
+    this.evaluations.set(result.evaluation.id, result.evaluation);
+    return { kind: result.kind, evaluation: structuredClone(result.evaluation), scorecardId: result.scorecardId };
+  }
+
+  async evaluationForScorecard(tenant: string, scorecardId: string) {
+    return structuredClone(
+      [...this.evaluations.values()].find(
+        (a) =>
+          a.tenant === tenant && (a.baseline?.scorecardId === scorecardId || a.candidate?.scorecardId === scorecardId),
+      ),
+    );
+  }
+
+  async family(tenant: string, campaignId: string) {
+    const { root } = familyMembers(
+      campaignId,
+      [...this.byId.values()].filter((r) => r.tenant === tenant),
+    );
+    return structuredClone(this.families.get(`${tenant}/${root.id}`));
+  }
+
   // The authorizations this store's closes have written. One process holds both; the Pg deployment splits
   // them because the CONSUMER is the registry write, not the campaign.
   private readonly adoptions = new Map<string, AdoptionOperation>();
@@ -77,6 +140,7 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     assertFamilyCapacity(
       record,
       [...this.byId.values()].filter((r) => r.tenant === record.tenant),
+      [...this.evaluations.values()].filter((a) => a.tenant === record.tenant),
     );
     this.byId.set(record.id, record);
     if (events) this.events.push(...events);
@@ -107,13 +171,25 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     expectedRounds: number,
     events?: OutboxEvent[],
   ): Promise<CampaignAppendOutcome> {
-    const record = await this.get(tenant, id);
-    if (!record) return { kind: "absent" };
+    const record = this.byId.get(id);
+    if (!record || record.tenant !== tenant) return { kind: "absent" };
     if (record.state !== "open") return { kind: "terminal", state: record.state };
     if (record.rounds.length !== expectedRounds)
       return { kind: "conflict", expected: expectedRounds, actual: record.rounds.length };
     if (record.rounds.length >= record.frame.budget.maxRounds)
       return { kind: "conflict", expected: expectedRounds, actual: record.rounds.length };
+    const evaluation = round.verdict.evaluationId ? this.evaluations.get(round.verdict.evaluationId) : undefined;
+    if (
+      round.verdict.evaluationId &&
+      (!evaluation ||
+        evaluation.tenant !== tenant ||
+        evaluation.campaignId !== id ||
+        evaluation.reportedRound !== undefined ||
+        evaluation.candidate?.scorecardId !== round.candidateScorecardId ||
+        evaluation.baseline?.scorecardId !== round.baselineScorecardId)
+    )
+      throw new ConflictError("CONFLICT", {}, "round does not own an unreported evaluation");
+    if (evaluation) this.evaluations.set(evaluation.id, { ...evaluation, reportedRound: round.seq });
     const rounds = [...record.rounds, round];
     this.byId.set(id, { ...record, rounds, updatedAt: round.at });
     if (events) this.events.push(...events);
@@ -243,8 +319,8 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     events?: OutboxEvent[],
     adoption?: AdoptionOperation,
   ): Promise<CampaignCloseOutcome> {
-    const record = await this.get(tenant, id);
-    if (!record) return { kind: "absent" };
+    const record = this.byId.get(id);
+    if (!record || record.tenant !== tenant) return { kind: "absent" };
     if (record.state !== "open") return { kind: "already", state: record.state };
     // The gate answer being closed was computed over exactly `expectedRounds` rounds — a round that landed
     // since makes the answer stale, and closing over it would record a settlement the record's own gate,
@@ -305,13 +381,82 @@ const VALUES = "($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8::jsonb, $9, $10::t
 export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
   constructor(private readonly client: SqlClient) {}
 
+  async createEvidenceGrant(grant: CampaignEvidenceGrant): Promise<CampaignEvidenceGrant> {
+    const { rows } = await this.client.query<{ document: unknown }>(
+      "INSERT INTO everdict_campaign_evidence_grants (token_hash, document) VALUES ($1,$2::jsonb) RETURNING document",
+      [grant.tokenHash, JSON.stringify(grant)],
+    );
+    if (!rows[0]) throw new ConflictError("CONFLICT", {}, "evidence grant was not persisted");
+    return CampaignEvidenceGrantSchema.parse(rows[0].document);
+  }
+  async evidenceGrant(tokenHash: string): Promise<CampaignEvidenceGrant | undefined> {
+    const { rows } = await this.client.query<{ document: unknown }>(
+      "SELECT document FROM everdict_campaign_evidence_grants WHERE token_hash=$1",
+      [tokenHash],
+    );
+    return rows[0] ? CampaignEvidenceGrantSchema.parse(rows[0].document) : undefined;
+  }
+
+  private async evaluations(tenant: string): Promise<CampaignEvaluation[]> {
+    const { rows } = await this.client.query<{ document: unknown }>(
+      "SELECT document FROM everdict_campaign_evaluations WHERE tenant=$1",
+      [tenant],
+    );
+    return rows.map((r) => CampaignEvaluationSchema.parse(r.document));
+  }
+
+  async family(tenant: string, campaignId: string): Promise<ExperimentFamily | undefined> {
+    const { root } = familyMembers(campaignId, await this.list(tenant));
+    const { rows } = await this.client.query<{ document: unknown }>(
+      "SELECT document FROM everdict_experiment_families WHERE tenant=$1 AND id=$2",
+      [tenant, root.id],
+    );
+    return rows[0] ? ExperimentFamilySchema.parse(rows[0].document) : undefined;
+  }
+
+  async evaluationForScorecard(tenant: string, scorecardId: string): Promise<CampaignEvaluation | undefined> {
+    const { rows } = await this.client.query<{ document: unknown }>(
+      "SELECT document FROM everdict_campaign_evaluations WHERE tenant=$1 AND (document->'baseline'->>'scorecardId'=$2 OR document->'candidate'->>'scorecardId'=$2)",
+      [tenant, scorecardId],
+    );
+    return rows[0] ? CampaignEvaluationSchema.parse(rows[0].document) : undefined;
+  }
+
+  async reserveEvaluation(input: ReserveCampaignEvaluation) {
+    return withTransaction(this.client, "reserve held-out evaluation", async (tx) => {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`campaign-family:${input.tenant}`]);
+      const store = new PgEvolutionCampaignStore(tx);
+      // Lock the campaign against close before checking its state and binding a second arm.
+      await tx.query("SELECT id FROM everdict_evolution_campaigns WHERE tenant=$1 AND id=$2 FOR UPDATE", [
+        input.tenant,
+        input.campaignId,
+      ]);
+      const records = await store.list(input.tenant);
+      const result = reserveInFamily(
+        input,
+        records,
+        await store.family(input.tenant, input.campaignId),
+        await store.evaluations(input.tenant),
+      );
+      await tx.query(
+        "INSERT INTO everdict_experiment_families (tenant,id,document) VALUES ($1,$2,$3::jsonb) ON CONFLICT (tenant,id) DO UPDATE SET document=EXCLUDED.document",
+        [input.tenant, result.family.id, JSON.stringify(result.family)],
+      );
+      await tx.query(
+        "INSERT INTO everdict_campaign_evaluations (tenant,id,campaign_id,family_id,document) VALUES ($1,$2,$3,$4,$5::jsonb) ON CONFLICT (tenant,id) DO UPDATE SET document=EXCLUDED.document",
+        [input.tenant, result.evaluation.id, input.campaignId, result.family.id, JSON.stringify(result.evaluation)],
+      );
+      return { kind: result.kind, evaluation: result.evaluation, scorecardId: result.scorecardId };
+    });
+  }
+
   async create(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void> {
     if (record.frame.continues) {
       await withTransaction(this.client, "reserve experiment family budget", async (tx) => {
         // A separate statement after the lock sees the preceding creator's committed reservation.
         await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`campaign-family:${record.tenant}`]);
         const store = new PgEvolutionCampaignStore(tx);
-        assertFamilyCapacity(record, await store.list(record.tenant));
+        assertFamilyCapacity(record, await store.list(record.tenant), await store.evaluations(record.tenant));
         await store.insert(record, events);
       });
       return;
@@ -375,6 +520,41 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
   }
 
   async appendRound(
+    tenant: string,
+    id: string,
+    round: CampaignRound,
+    expectedRounds: number,
+    events?: OutboxEvent[],
+  ): Promise<CampaignAppendOutcome> {
+    if (round.verdict.evaluationId)
+      return withTransaction(this.client, "report evaluation and append round", async (tx) => {
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`campaign-family:${tenant}`]);
+        const { rows } = await tx.query<{ document: unknown }>(
+          "SELECT document FROM everdict_campaign_evaluations WHERE tenant=$1 AND id=$2 FOR UPDATE",
+          [tenant, round.verdict.evaluationId],
+        );
+        const evaluation = rows[0] ? CampaignEvaluationSchema.parse(rows[0].document) : undefined;
+        if (
+          !evaluation ||
+          evaluation.campaignId !== id ||
+          evaluation.reportedRound !== undefined ||
+          evaluation.baseline?.scorecardId !== round.baselineScorecardId ||
+          evaluation.candidate?.scorecardId !== round.candidateScorecardId
+        )
+          throw new ConflictError("CONFLICT", {}, "round does not own an unreported evaluation");
+        const result = await new PgEvolutionCampaignStore(tx).appendRows(tenant, id, round, expectedRounds, events);
+        if (result.kind === "appended")
+          await tx.query("UPDATE everdict_campaign_evaluations SET document=$3::jsonb WHERE tenant=$1 AND id=$2", [
+            tenant,
+            evaluation.id,
+            JSON.stringify({ ...evaluation, reportedRound: round.seq }),
+          ]);
+        return result;
+      });
+    return this.appendRows(tenant, id, round, expectedRounds, events);
+  }
+
+  private async appendRows(
     tenant: string,
     id: string,
     round: CampaignRound,

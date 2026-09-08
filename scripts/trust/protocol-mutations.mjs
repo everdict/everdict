@@ -16,6 +16,36 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const MUTATIONS = [
+  {
+    name: "evolution-review — an evidence bearer borrows a workspace MCP session",
+    file: "apps/api/src/mcp.routes.ts",
+    from: 'if (transport && owners.get(sid ?? "") !== authorityKey(principal))',
+    to: 'if (false && transport && owners.get(sid ?? "") !== authorityKey(principal))',
+    suite: ["--root", "apps/api", "src/api/campaign/campaign.routes.test.ts"],
+  },
+
+  {
+    name: "evolution-review — family attempts do not consume the shared budget",
+    file: "packages/db/src/evolution/experiment-family.ts",
+    from: "consumed: current.consumed + (old ? 0 : 1)",
+    to: "consumed: current.consumed",
+    suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
+  },
+  {
+    name: "evolution-review — adoption ignores its non-inferiority policy",
+    file: "packages/domain/src/evolution/campaign-gate.ts",
+    from: "if (frame.nonInferiority !== undefined) {",
+    to: "if ((() => false)() && frame.nonInferiority !== undefined) {",
+    suite: ["--root", "packages/domain", "src/evolution/campaign-gate.test.ts"],
+  },
+  {
+    name: "evolution-review — a scoped MCP principal receives general workspace tools",
+    file: "apps/api/src/mcp.ts",
+    from: "if (principal.evidenceGrant) {",
+    to: "if (false) {",
+    suite: ["--root", "apps/api", "src/api/campaign/campaign-mcp.test.ts"],
+  },
+
   // ── THE EVOLUTION LOOP, DRIVEN FOR REAL (docs/architecture/evolution-lineage.md) ─────────────────
   //
   // Three defects found by standing a campaign up end to end against a real harness. Each is silent: the

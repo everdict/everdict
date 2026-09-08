@@ -58,6 +58,12 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
               "FOUNDS it from the profile's image), with `environment`/`image` it works in that one, and " +
               "`repo` clones in as usual. Only `harness` conflicts (that also says who runs)",
           ),
+        campaign_id: z
+          .string()
+          .optional()
+          .describe(
+            "Use platform-authored target-only evidence and a scoped credential for this campaign; requires profile and excludes brief/world.",
+          ),
         brief: z
           .object({
             goal: z.string(),
@@ -132,6 +138,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
     },
     ({
       profile,
+      campaign_id,
       brief,
       image,
       environment,
@@ -143,6 +150,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       ttlSec,
     }: {
       profile?: { source?: string; id: string; version?: string };
+      campaign_id?: string;
       brief?: {
         goal: string;
         context?: string;
@@ -164,6 +172,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           await sessions.create({
             tenant: ws,
             createdBy: principal.subject,
+            ...(campaign_id ? { campaignId: campaign_id } : {}),
             ...(profile !== undefined ? { profile } : {}),
             // The tool's loose reference shape is validated into the contract here — one parse, so a bad
             // reference kind is refused by name instead of reaching the delegate as a broken brief.

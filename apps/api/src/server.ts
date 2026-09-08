@@ -48,7 +48,7 @@ import { registerProfileRoutes } from "./api/profile/profile.routes.js";
 import { registerProjectRoutes } from "./api/project/project.routes.js";
 import { registerProxyRoutes } from "./api/proxy/proxy.routes.js";
 import { registerQueueRoutes } from "./api/queue/queue.routes.js";
-import type { ServerDeps } from "./api/route-context.js";
+import { type ServerDeps, resolveIdentity } from "./api/route-context.js";
 import { registerRubricRoutes } from "./api/rubric/rubric.routes.js";
 import { registerRunObservabilityRoutes } from "./api/run/run-observability.routes.js";
 import { registerRunRoutes } from "./api/run/run.routes.js";
@@ -81,6 +81,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({
     logger: deps.logLevel ? { level: deps.logLevel } : false,
     bodyLimit: 16 * 1024 * 1024,
+  });
+
+  // Evidence credentials have a server-wide boundary, including routes with no ordinary action gate.
+  // MCP authenticates separately and exposes only its capability-specific tool set.
+  app.addHook("onRequest", async (req, reply) => {
+    if (req.headers.authorization?.startsWith("Bearer cpe_") && req.url.split("?")[0] !== "/mcp") {
+      const principal = await resolveIdentity(req, reply, deps);
+      if (!principal) return reply;
+    }
   });
 
   // When a body-less mutating request (usually DELETE) is sent with only content-type: application/json attached

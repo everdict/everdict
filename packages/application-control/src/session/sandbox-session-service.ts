@@ -30,6 +30,7 @@ import {
   renderDelegationBrief,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
+import type { CampaignService } from "../evolution/campaign-service.js";
 import { stampFacts } from "../platform-event/outbox.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { PlatformEventEmitter } from "../ports/platform-event-emitter.js";
@@ -169,6 +170,7 @@ export interface CreateSandboxInput {
   // the delegate's working directory as a file it reads, and sealed on the session trajectory as evidence.
   // Only meaningful with `profile`.
   brief?: DelegationBrief;
+  campaignId?: string;
   environment?: { source?: string; id: string; version?: string };
   image?: string;
   harness?: { id: string; version?: string; image?: string; conversation?: boolean };
@@ -338,6 +340,7 @@ export interface WorldSnapshotResult {
 }
 
 export interface SandboxSessionServiceDeps {
+  campaigns?: Pick<CampaignService, "issueEvidenceGrant">;
   store: RunStore;
   // The deployment's default container compute. Optional since front-door conversations: a deployment with
   // registered runtimes but no local compute still serves conversations — the container lanes then refuse
@@ -519,7 +522,34 @@ export class SandboxSessionService {
 
   // Boot a session: capacity → resolve the image → provision → ONLY THEN the ledger record (born running,
   // run.submitted fact via the E0 outbox). The id is minted before the record so the map and the row agree.
-  async create(input: CreateSandboxInput): Promise<RunRecord> {
+  async create(rawInput: CreateSandboxInput): Promise<RunRecord> {
+    let input = rawInput;
+    let campaignGrant: Awaited<ReturnType<CampaignService["issueEvidenceGrant"]>> | undefined;
+    if (input.campaignId !== undefined) {
+      if (!input.profile || input.brief || input.world || input.hibernate)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          {},
+          "A campaign delegate requires a profile and platform-authored context; custom briefs and persistent worlds are not permitted.",
+        );
+      if (!this.deps.campaigns)
+        throw new BadRequestError("BAD_REQUEST", {}, "Campaign evidence grants are not configured.");
+      campaignGrant = await this.deps.campaigns.issueEvidenceGrant(input.tenant, input.campaignId);
+      input = {
+        ...input,
+        ttlSec: Math.min(input.ttlSec ?? 900, 3600),
+        brief: {
+          goal: "Propose a candidate improvement using the permitted target evidence.",
+          context: JSON.stringify(campaignGrant.view),
+          references: [],
+          doneWhen: ["Return the proposed change and its rationale to the orchestrator."],
+          constraints: [
+            "Read campaign evidence with the credential in CAMPAIGN_EVIDENCE.json. It expires after one hour.",
+            "Keep evaluation and adoption with the orchestrator. Workspace credentials must not be passed to this delegate.",
+          ],
+        },
+      };
+    }
     this.sweep();
     // A kind:"service" harness ref routes to the front-door conversation branch (a warm topology on a
     // workspace runtime, driven over HTTP). Resolution is a read — no slot, no compute — so probing it before
@@ -622,6 +652,16 @@ export class SandboxSessionService {
       if (delegation) {
         try {
           await handle.writeFile(`${delegation.workDir}/${delegation.instructionsFile}`, delegation.instructions);
+          if (campaignGrant)
+            await handle.writeFile(
+              `${delegation.workDir}/CAMPAIGN_EVIDENCE.json`,
+              JSON.stringify({
+                token: campaignGrant.token,
+                campaignId: campaignGrant.campaignId,
+                expiresAt: campaignGrant.expiresAt,
+                path: `/campaigns/${encodeURIComponent(campaignGrant.campaignId)}/evidence-view`,
+              }),
+            );
           if (briefMarkdown !== undefined) await handle.writeFile(`${delegation.workDir}/BRIEF.md`, briefMarkdown);
         } catch (err) {
           throw new UpstreamError(

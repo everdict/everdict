@@ -4,7 +4,12 @@ import {
   citableReport,
   originSource,
 } from "@everdict/application-control";
-import { NotFoundError, type ScorecardStatus, ScorecardStatusSchema } from "@everdict/contracts";
+import {
+  CampaignEvaluationRequestSchema,
+  NotFoundError,
+  type ScorecardStatus,
+  ScorecardStatusSchema,
+} from "@everdict/contracts";
 import { type Action, authorize } from "@everdict/domain";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -47,6 +52,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         description:
           "Run a dataset against harness@version and aggregate a scorecard (async — returns a queued record, then poll with get_scorecard). If runtime is given, execute on that runtime.",
         inputSchema: {
+          campaign_evaluation: CampaignEvaluationRequestSchema.optional(),
           dataset_id: z.string(),
           dataset_version: z.string().optional(),
           harness_id: z.string(),
@@ -150,6 +156,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({
+        campaign_evaluation,
         dataset_id,
         dataset_version,
         harness_id,
@@ -172,6 +179,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
           ok(
             await scorecards.submit({
               tenant: ws,
+              ...(campaign_evaluation ? { campaignEvaluation: campaign_evaluation } : {}),
               submittedBy: principal.subject, // clone private-repo cases via my personal connection
               submitterRoles: principal.roles, // constitution seed (ground_truth declarations are admin-only)
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },

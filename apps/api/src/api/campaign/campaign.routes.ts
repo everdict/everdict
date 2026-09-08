@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { z } from "zod";
+import { z } from "zod";
 import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { campaignDocs } from "./campaign.docs.js";
@@ -13,6 +13,41 @@ import { OpenCampaignBodySchema } from "./request/open-campaign.js";
 // Evolution campaigns — the settlement behind the agent-evolve loop (docs/architecture/evolution-lineage.md,
 // Track D). Reuses the scorecard actions (no new authz action): read = scorecards:read, write = scorecards:run.
 export function registerCampaignRoutes(app: FastifyInstance, deps: ServerDeps): void {
+  app.post<{ Params: { id: string } }>(
+    "/campaigns/:id/evidence-grants",
+    { schema: campaignDocs.evidenceGrant },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "scorecards:run");
+        if (!deps.campaignService) return reply.code(404).send({ code: "NOT_FOUND" });
+        const body = z.object({ seq: z.number().int().nonnegative().optional() }).parse(req.body ?? {});
+        return reply
+          .code(201)
+          .send(await deps.campaignService.issueEvidenceGrant(principal.workspace, req.params.id, body.seq));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+  app.get<{ Params: { id: string } }>(
+    "/campaigns/:id/evidence-view",
+    { schema: campaignDocs.evidenceView },
+    async (req, reply) => {
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        if (!principal.evidenceGrant)
+          return reply.code(403).send({ code: "FORBIDDEN", message: "An evidence grant is required." });
+        if (!deps.campaignService) return reply.code(404).send({ code: "NOT_FOUND" });
+        return reply.send(await deps.campaignService.evidenceView(principal.evidenceGrant.tokenHash, req.params.id));
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
+
   app.post("/campaigns", { schema: campaignDocs.open }, async (req, reply) => {
     if (!deps.campaignService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "campaign service not configured" });

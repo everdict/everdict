@@ -853,3 +853,5 @@ export {
   type VerifierDurabilityPolicy,
 } from "./execution/verifier-operation.js";
 export { RetryCasesInPlace, type RetryCasesSupport, type RunRetryCase } from "./scorecard/retry-cases-in-place.js";
+
+export type { ExperimentFamilyStore, ReserveCampaignEvaluation } from "./ports/evolution-campaign-store.js";

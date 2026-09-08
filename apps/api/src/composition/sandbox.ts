@@ -35,6 +35,7 @@ import type { ScopedSecretsFn } from "./types.js";
 // `EVERDICT_SANDBOX_DRIVER`). Everywhere else the routes and the tools are simply absent. Caps default CLOSED-ish (2 per tenant / 8 total) — a session is a scarcer resource than
 // an eval case because nothing ends it but the clock.
 export function buildSandboxSessions(opts: {
+  campaigns?: SandboxSessionServiceDeps["campaigns"];
   store: RunStore;
   trajectories?: TrajectoryStore;
   events?: PlatformEventEmitter;
@@ -367,6 +368,7 @@ export function buildSandboxSessions(opts: {
   // so which cluster, which credential and which trust zone have one answer for all of them.
   const driverFor = (tenant: string, runtime: string) => opts.compute.computeFor(tenant, runtime);
   return new SandboxSessionService({
+    ...(opts.campaigns ? { campaigns: opts.campaigns } : {}),
     store: opts.store,
     driver,
     driverFor,

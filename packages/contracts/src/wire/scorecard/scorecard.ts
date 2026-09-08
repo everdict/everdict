@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CaseResultSchema, ScorecardSchema } from "../../execution/eval-case.js";
+import { MeasurementIdentitySchema } from "../../execution/grader.js";
 import { ScorecardOutcomesSchema, ScorecardRecordSchema } from "../../records/scorecard.js";
 
 // Response DTO — a scorecard record (batch eval). The @everdict/db ScorecardRecordSchema is the SSOT shape.
@@ -20,7 +21,16 @@ export const ServedCaseResultSchema = CaseResultSchema.extend({
     .object({
       authority: z.enum(["ground_truth", "objective", "judge", "observational", "fallback"]),
       aggregation: z.enum(["priority", "all", "any", "majority"]),
-      deciders: z.array(z.object({ metric: z.string(), graderId: z.string(), pass: z.boolean() })),
+      deciders: z.array(
+        z.object({
+          metric: z.string(),
+          graderId: z.string(),
+          pass: z.boolean(),
+          measurement: MeasurementIdentitySchema.optional(),
+          measurementRefs: z.array(z.object({ index: z.number().int().nonnegative(), digest: z.string() })).optional(),
+        }),
+      ),
+      policyDigest: z.string().optional(),
     })
     .optional()
     .describe(

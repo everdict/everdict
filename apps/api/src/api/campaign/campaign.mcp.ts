@@ -11,6 +11,17 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
   const { deps, principal, ws } = ctx;
   if (!deps.campaignService) return;
   const campaigns = deps.campaignService;
+  server.registerTool(
+    "issue_campaign_evidence_grant",
+    {
+      description:
+        "Issue a one-hour credential for an immutable target-only delegate evidence view. Give the delegate this credential; keep workspace credentials with the orchestrator.",
+      annotations: { readOnlyHint: false },
+      inputSchema: { campaign_id: z.string(), seq: z.number().int().nonnegative().optional() },
+    },
+    ({ campaign_id, seq }) =>
+      run(principal, "scorecards:run", async () => ok(await campaigns.issueEvidenceGrant(ws, campaign_id, seq))),
+  );
 
   server.registerTool(
     "open_campaign",
@@ -463,5 +474,27 @@ export function registerCampaignTools(server: McpServer, ctx: McpToolContext): v
         gate(principal, "scorecards:run");
         return ok(await campaigns.settle(ws, id, principal.subject));
       }),
+  );
+}
+
+// A separate MCP tool set: a grant never registers general workspace readers or writers.
+export function registerCampaignEvidenceTools(server: McpServer, ctx: McpToolContext): void {
+  const grant = ctx.principal.evidenceGrant;
+  const campaigns = ctx.deps.campaignService;
+  if (!grant || !campaigns) return;
+  server.registerTool(
+    "get_campaign_evidence_view",
+    {
+      description: "Read the immutable target-only evidence view bound to this credential.",
+      annotations: { readOnlyHint: true },
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        return ok(await campaigns.evidenceView(grant.tokenHash, grant.campaignId));
+      } catch (err) {
+        return fail((err as Error).message);
+      }
+    },
   );
 }

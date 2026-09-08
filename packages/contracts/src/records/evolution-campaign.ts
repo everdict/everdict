@@ -22,6 +22,89 @@ export const CampaignSubjectSchema = z.object({
 });
 export type CampaignSubject = z.infer<typeof CampaignSubjectSchema>;
 
+export const CampaignEvidenceViewSchema = z.object({
+  campaignId: z.string(),
+  seq: z.number().int().nonnegative(),
+  subject: CampaignSubjectSchema,
+  targets: z.array(
+    z.object({
+      caseId: z.string(),
+      verdict: z.enum(["improved", "regressed", "unchanged", "unclear"]).optional(),
+      baseline: z.object({ rate: z.number(), trials: z.number() }).optional(),
+      candidate: z.object({ rate: z.number(), trials: z.number() }).optional(),
+      diagnoses: z.array(
+        z.object({
+          kind: z.string(),
+          service: z.string().optional(),
+          tool: z.string().optional(),
+          phase: z.string().optional(),
+        }),
+      ),
+    }),
+  ),
+});
+export type CampaignEvidenceView = z.infer<typeof CampaignEvidenceViewSchema>;
+export const CampaignEvidenceGrantSchema = z.object({
+  tokenHash: z.string(),
+  tenant: z.string(),
+  campaignId: z.string(),
+  expiresAt: z.string(),
+  view: CampaignEvidenceViewSchema,
+  viewDigest: z.string(),
+});
+export type CampaignEvidenceGrant = z.infer<typeof CampaignEvidenceGrantSchema>;
+
+export const CampaignEvaluationRequestSchema = z.object({
+  campaignId: z.string().min(1),
+  requestId: z.string().min(1).max(200),
+  candidateVersion: z.string().min(1),
+  side: z.enum(["baseline", "candidate"]),
+});
+export type CampaignEvaluationRequest = z.infer<typeof CampaignEvaluationRequestSchema>;
+export const ExperimentFamilySchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  limit: z.number().int().positive(),
+  consumed: z.number().int().nonnegative(),
+});
+export type ExperimentFamily = z.infer<typeof ExperimentFamilySchema>;
+export const CampaignEvaluationSchema = z.object({
+  id: z.string(),
+  tenant: z.string(),
+  familyId: z.string(),
+  campaignId: z.string(),
+  requestId: z.string(),
+  candidateVersion: z.string(),
+  createdAt: z.string(),
+  baseline: z.object({ scorecardId: z.string(), requestDigest: z.string() }).optional(),
+  candidate: z.object({ scorecardId: z.string(), requestDigest: z.string() }).optional(),
+  reportedRound: z.number().int().positive().optional(),
+});
+export type CampaignEvaluation = z.infer<typeof CampaignEvaluationSchema>;
+
+export const NonInferiorityPolicySchema = z.object({
+  version: z.literal("hoeffding-v1"),
+  margin: z.number().min(0).max(1),
+  alpha: z.number().gt(0).lt(1),
+  minimumTrials: z.number().int().positive(),
+});
+export type NonInferiorityPolicy = z.infer<typeof NonInferiorityPolicySchema>;
+export const NonInferiorityResultSchema = z.object({
+  policyDigest: z.string(),
+  status: z.enum(["non_inferior", "inferior", "inconclusive"]),
+  cases: z.array(
+    z.object({
+      caseId: z.string(),
+      baselineTrials: z.number().int().nonnegative(),
+      candidateTrials: z.number().int().nonnegative(),
+      lowerDelta: z.number().optional(),
+      upperDelta: z.number().optional(),
+      status: z.enum(["non_inferior", "inferior", "inconclusive"]),
+    }),
+  ),
+});
+export type NonInferiorityResult = z.infer<typeof NonInferiorityResultSchema>;
+
 export const OracleCheckReceiptSchema = z.object({
   repository: z.string().min(1),
   baselineSha: z.string().min(1),
@@ -76,6 +159,7 @@ const CampaignFrameShape = z.object({
   // block to contain no detected significant regressions. Default empty = the aggregate rule, which every campaign written before had.
   targets: z.array(z.string().min(1).max(300)).max(500).default([]),
   // Absent preserves historical significant-improvement semantics.
+  nonInferiority: NonInferiorityPolicySchema.optional(),
   targetSatisfaction: z.object({ minimumCandidateRate: z.number().min(0).max(1) }).optional(),
   // ── DOES THIS EXAM RESPOND TO A CORRECT ANSWER? (the positive control) ───────────────────────────
   //
@@ -589,6 +673,7 @@ export const CampaignRoundSchema = z.object({
     // here by key + digest — never "the record's current results", which a later re-score would move under a
     // decision that already rested on them (rule `protocol` L4). Absent on rows logged before the record
     // existed; a read of such a round says so rather than inventing one.
+    evaluationId: z.string().optional(),
     evidence: z.object({ key: z.string().min(1), digest: z.string().min(1) }).optional(),
     // The frame's `targets`, answered one by one (evolution-routing-spec.md §3): `flipped` improved significantly
     // on the candidate and met any declared success-rate threshold; `unflipped` did not.
@@ -618,6 +703,7 @@ export const CampaignRoundSchema = z.object({
     candidateSource: CandidateSourceSchema.optional(),
     // …and which oracle paths the candidate's pull request touched, when the frame declared a scope and the
     // change fell inside it (D3). Present only on such a round; the round is then `comparable: false`.
+    nonInferiority: NonInferiorityResultSchema.optional(),
     oracleReceipt: OracleCheckReceiptSchema.optional(),
     oracleTouched: z.array(z.string().max(300)).optional(),
     // …and what the judges said about the candidate's account of itself (arch-review 71 P1-evolution).
@@ -985,6 +1071,7 @@ export const RoundEvidenceSchema = z.object({
   }),
   cases: z.array(RoundEvidenceCaseSchema),
   aggregate: z.object({
+    evaluationId: z.string().min(1).optional(),
     comparable: z.boolean(),
     significantImprovements: z.number().int().min(0),
     significantRegressions: z.number().int().min(0),
@@ -997,6 +1084,7 @@ export const RoundEvidenceSchema = z.object({
         satisfied: z.array(z.string()).optional(),
       })
       .optional(),
+    nonInferiority: NonInferiorityResultSchema.optional(),
     oracleReceipt: OracleCheckReceiptSchema.optional(),
     detail: z.string().optional(),
   }),

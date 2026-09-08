@@ -207,6 +207,7 @@ describe("JudgeGrader", () => {
     expect(scores[1]).toEqual({
       graderId: "judge",
       metric: "judge:accuracy",
+      measurement: { producer: { kind: "grader", id: "judge" }, metric: "judge", criterion: "accuracy" },
       status: "unmeasured",
       reason: "unsupported",
       retryable: false,

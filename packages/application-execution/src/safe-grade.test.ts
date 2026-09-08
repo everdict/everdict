@@ -10,7 +10,7 @@ const CTX = {
 } as unknown as GradeContext;
 
 describe("safeGrade — isolate a grader's run-time failure", () => {
-  it("passes a healthy grader's score through unchanged (as a one-element list)", async () => {
+  it("preserves a healthy measurement and stamps its trusted producer", async () => {
     const ok: Grader = {
       id: "judge",
       // What the JudgeGrader implementation owns by construction (arch-review 17 P0-2 / 18 P0-1).
@@ -18,7 +18,15 @@ describe("safeGrade — isolate a grader's run-time failure", () => {
       grade: async (): Promise<Score> => ({ graderId: "judge", metric: "judge", value: 1, pass: true }),
     };
     const scores = await safeGrade(ok, CTX);
-    expect(scores).toEqual([{ graderId: "judge", metric: "judge", value: 1, pass: true }]);
+    expect(scores).toEqual([
+      {
+        graderId: "judge",
+        metric: "judge",
+        value: 1,
+        pass: true,
+        measurement: { producer: { kind: "grader", id: "judge" }, metric: "judge" },
+      },
+    ]);
   });
 
   it("collects a multi-metric grader's Score[] in order (multi-metric contract)", async () => {

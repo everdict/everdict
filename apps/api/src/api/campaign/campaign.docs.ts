@@ -1,4 +1,9 @@
-import { DelegationBriefSchema, EvolutionCampaignRecordSchema, RoundEvidenceSchema } from "@everdict/contracts";
+import {
+  CampaignEvidenceViewSchema,
+  DelegationBriefSchema,
+  EvolutionCampaignRecordSchema,
+  RoundEvidenceSchema,
+} from "@everdict/contracts";
 import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
@@ -27,9 +32,36 @@ export const campaignDocs: Record<
   | "builds"
   | "buildSets"
   | "roundEvidence"
-  | "roundBrief",
+  | "roundBrief"
+  | "evidenceGrant"
+  | "evidenceView",
   FastifySchema
 > = {
+  evidenceGrant: {
+    summary: "Issue a target-only campaign evidence credential",
+    tags: ["campaign"],
+    description:
+      "Requires scorecards:run. Returns a one-hour credential scoped to an immutable target-only view. Keep workspace credentials with the orchestrator.",
+    body: toJsonSchema(z.object({ seq: z.number().int().nonnegative().optional() })),
+    response: {
+      201: toJsonSchema(
+        z.object({
+          token: z.string(),
+          expiresAt: z.string(),
+          campaignId: z.string(),
+          view: CampaignEvidenceViewSchema,
+          instructions: z.string(),
+        }),
+      ),
+      ...errorResponses(400, 401, 403, 404, 409),
+    },
+  },
+  evidenceView: {
+    summary: "Read a credential-bound campaign evidence view",
+    tags: ["campaign"],
+    description: "Requires the issued evidence credential. General workspace credentials cannot use this door.",
+    response: { 200: toJsonSchema(CampaignEvidenceViewSchema), ...errorResponses(401, 403, 404, 409) },
+  },
   open: {
     summary: "Open an evolution campaign",
     description:
@@ -51,7 +83,7 @@ export const campaignDocs: Record<
       properties: {
         subjectType: {
           type: "string",
-          enum: ["agent", "harness"],
+          enum: ["agent", "harness", "environment"],
           description: "With subjectId: one capability's campaigns — its evolution memory",
         },
         subjectId: { type: "string" },

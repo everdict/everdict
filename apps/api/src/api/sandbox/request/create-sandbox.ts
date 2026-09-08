@@ -21,6 +21,7 @@ export const CreateSandboxBodySchema = z
       })
       .optional(),
     brief: DelegationBriefSchema.optional(),
+    campaignId: z.string().min(1).optional(),
     image: z.string().min(1).max(400).optional(),
     environment: z
       .object({

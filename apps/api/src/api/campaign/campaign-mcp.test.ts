@@ -1,6 +1,7 @@
 import { CampaignService, type CampaignSnapshot, RunService } from "@everdict/application-control";
 import type { Principal } from "@everdict/auth";
 import type { Dispatcher } from "@everdict/backends";
+import { CampaignRoundInputSchema } from "@everdict/contracts";
 import { AgentSpecSchema, type CampaignFrame, readUnknown } from "@everdict/contracts";
 import { NotFoundError } from "@everdict/contracts";
 import { InMemoryEvolutionCampaignStore, InMemoryRunStore } from "@everdict/db";
@@ -119,7 +120,7 @@ function makeDeps(
     ...winning,
     candidate: { record: { ...winning.candidate.record, manifest: { harness: { specDigest } } } },
   };
-  const campaignService = new CampaignService({
+  const campaignService = new ReservedFixtureCampaignService({
     // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
     // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
     scorecards: { get: async () => undefined },
@@ -177,6 +178,35 @@ const textOf = (result: unknown): string => {
   const content = (result as { content?: { type: string; text?: string }[] }).content ?? [];
   return content.map((c) => c.text ?? "").join("");
 };
+
+describe("campaign evidence credentials — the MCP tool boundary", () => {
+  it("registers only the bound evidence reader", async () => {
+    const deps = makeDeps();
+    if (!deps.campaignService) throw new Error("fixture service missing");
+    const campaign = await deps.campaignService.open("acme", { issueId: "iss_1", frame }, "alice");
+    const issued = await deps.campaignService.issueEvidenceGrant("acme", campaign.id);
+    const { hashKey } = await import("@everdict/application-control");
+    const tokenHash = hashKey(issued.token);
+    const principal: Principal = {
+      subject: "delegate",
+      workspace: "acme",
+      roles: [],
+      via: "agent",
+      scopes: [],
+      evidenceGrant: { tokenHash, campaignId: campaign.id, expiresAt: issued.expiresAt },
+    };
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const server = buildMcpServer(deps, principal);
+    const client = new Client({ name: "delegate", version: "1" });
+    await server.connect(serverT);
+    await client.connect(clientT);
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["get_campaign_evidence_view"]);
+    expect((await client.callTool({ name: "get_campaign_evidence_view", arguments: {} })).isError).toBeFalsy();
+    expect((await client.callTool({ name: "get_scorecard", arguments: { id: "held-out" } })).isError).toBe(true);
+    await client.close();
+    await server.close();
+  });
+});
 
 describe("campaign MCP tools — the loop's settlement surface", () => {
   it("open → log_campaign_round (derived verdict) → campaign_decision → settle_campaign", async () => {
@@ -391,3 +421,54 @@ describe("merge_campaign_candidate — the same authorization, its second effect
     expect(textOf(merged)).toMatch(/not registered yet|no code debt/);
   });
 });
+
+// These settlement tests supply completed scorecards through a diff fixture. Model the submission
+// boundary explicitly: each new pair consumes a real store reservation before settlement. Duplicate
+// fixture labels receive fresh ids, as ScorecardService would mint for distinct executions.
+let fixtureAttempt = 0;
+class ReservedFixtureCampaignService extends CampaignService {
+  private readonly fixtureDeps: ConstructorParameters<typeof CampaignService>[0];
+  private readonly aliases = new Map<string, string>();
+  private attempt = 0;
+  constructor(deps: ConstructorParameters<typeof CampaignService>[0]) {
+    const aliases = new Map<string, string>();
+    super({
+      ...deps,
+      diffs: {
+        diffSnapshot: (tenant, baseline, candidate, opts) =>
+          deps.diffs.diffSnapshot(tenant, aliases.get(baseline) ?? baseline, aliases.get(candidate) ?? candidate, opts),
+      },
+    });
+    this.fixtureDeps = deps;
+    this.aliases = aliases;
+  }
+  override async logRound(...args: Parameters<CampaignService["logRound"]>) {
+    const [tenant, id, input, by] = args;
+    const campaign = await this.fixtureDeps.store.get(tenant, id);
+    if (!campaign || campaign.state !== "open" || !CampaignRoundInputSchema.safeParse(input).success)
+      return super.logRound(...args);
+    const bound = { ...input };
+    this.attempt = ++fixtureAttempt;
+    const requestId = `fixture-${this.attempt}`;
+    for (const side of ["baseline", "candidate"] as const) {
+      const field = side === "baseline" ? "baselineScorecardId" : "candidateScorecardId";
+      if (await this.fixtureDeps.store.evaluationForScorecard(tenant, input[field])) {
+        bound[field] = `${input[field]}-attempt-${this.attempt}`;
+        this.aliases.set(bound[field], input[field]);
+      }
+      await this.fixtureDeps.store.reserveEvaluation({
+        tenant,
+        campaignId: id,
+        requestId,
+        candidateVersion: input.candidateVersion,
+        side,
+        scorecardId: bound[field],
+        requestDigest: bound[field],
+        at: "2026-08-26T00:00:00.000Z",
+        caseIds: campaign.frame.scenarios.map((s) => s.id),
+        trials: campaign.frame.trialsPerCase,
+      });
+    }
+    return super.logRound(tenant, id, bound, by);
+  }
+}

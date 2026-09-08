@@ -1,10 +1,16 @@
-import { CaseMatcherSchema, GraderSpecSchema, JudgeRunConfigSchema } from "@everdict/contracts";
+import {
+  CampaignEvaluationRequestSchema,
+  CaseMatcherSchema,
+  GraderSpecSchema,
+  JudgeRunConfigSchema,
+} from "@everdict/contracts";
 import { z } from "zod";
 import { ScorecardOriginBodySchema } from "./scorecard-origin.js";
 
 // Run-scorecard body — dataset×harness (version defaults to latest, the service resolves a concrete version) + selected judges.
 // harness.pins = submit-time ephemeral pins (slot→image, registry unchanged) — a CI PR trigger swaps just one service image for the eval.
 export const RunScorecardBodySchema = z.object({
+  campaignEvaluation: CampaignEvaluationRequestSchema.optional(),
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({
     id: z.string(),

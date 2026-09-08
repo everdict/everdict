@@ -123,6 +123,7 @@ export {
   composeVerdictPolicy,
   DEFAULT_VERDICT_POLICY,
   DEFAULT_VERDICT_POLICY_V1,
+  DEFAULT_VERDICT_POLICY_V11,
   evaluateVerdict,
   type PolicyResolution,
   resolvePolicyResolution,
@@ -757,3 +758,5 @@ export {
 } from "./execution/verifier-receipt.js";
 
 export { addCalendarDays, daysBetween, weekdayOf } from "./tracker/calendar.js";
+
+export { nonInferiorityOf } from "./evolution/non-inferiority.js";

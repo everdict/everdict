@@ -109,7 +109,15 @@ describe("codeJudgeRunSubmitter — the wrapper job as a first-class run", () =>
     expect(jobs[0]?.submittedBy).toBe("user-1");
     const done = await service.get(record.id);
     expect(done?.status).toBe("succeeded");
-    expect(done?.result?.scores).toEqual([{ graderId: "judge", metric: "judge", value: 1, pass: true }]);
+    expect(done?.result?.scores).toEqual([
+      {
+        graderId: "judge",
+        metric: "judge",
+        value: 1,
+        pass: true,
+        measurement: { producer: { kind: "grader", id: "judge" }, metric: "judge" },
+      },
+    ]);
   });
 
   it("placement: spec.runtime wins; else the source case's placement is inherited (re-score co-locate)", async () => {

@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { hashKey } from "@everdict/application-control";
 import type {
   ConstitutionApprovalStore,
   ConstitutionalPublisher,
@@ -292,12 +293,41 @@ export interface ServerDeps {
 }
 
 // Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.
+async function resolveEvidencePrincipal(token: string, deps: ServerDeps): Promise<Principal | undefined> {
+  const grant = await deps.campaignService?.resolveEvidenceGrant(hashKey(token));
+  if (!grant) return undefined;
+  return {
+    subject: `evidence:${grant.tokenHash}`,
+    workspace: grant.tenant,
+    roles: [],
+    scopes: [],
+    via: "agent",
+    evidenceGrant: { tokenHash: grant.tokenHash, campaignId: grant.campaignId, expiresAt: grant.expiresAt },
+  };
+}
+
 export async function resolveIdentity(
   req: FastifyRequest,
   reply: FastifyReply,
   deps: ServerDeps,
 ): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
+  if (typeof authz === "string" && authz.startsWith("Bearer cpe_")) {
+    const principal = await resolveEvidencePrincipal(authz.slice(7).trim(), deps);
+    if (!principal) {
+      reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid or expired evidence grant." });
+      return undefined;
+    }
+    const path = req.url.split("?")[0];
+    if (
+      req.method !== "GET" ||
+      path !== `/campaigns/${encodeURIComponent(principal.evidenceGrant?.campaignId ?? "")}/evidence-view`
+    ) {
+      reply.code(403).send({ code: "FORBIDDEN", message: "This credential only permits its campaign evidence view." });
+      return undefined;
+    }
+    return principal;
+  }
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
     // workspaceHint (x-everdict-workspace) — used by GitHub Actions federation to match against that workspace's repo links.
     const principal = await deps.authenticator.authenticate(authz.slice(7).trim(), {
@@ -347,7 +377,7 @@ export async function applyActiveWorkspace(base: Principal, req: FastifyRequest,
   // (Without the exclusion it would be promoted to the owner's membership role and the device credential would gain admin.)
   // GitHub Actions federation (via=github-actions) is the same — a workspace fixed by repo-link trust + the ci role, and it is not
   // a member (bootstrapping would give the CI repo a member row).
-  if (base.via === "runner" || base.via === "github-actions") return base;
+  if (base.evidenceGrant || base.via === "runner" || base.via === "github-actions") return base;
   const store = deps.workspaceStore;
   if (!store) return base;
   const subject = base.subject;
@@ -413,6 +443,8 @@ export function zodIssues(err: z.ZodError): string[] {
 // Active-workspace / membership bootstrap applies the same way (so list_workspaces etc. behave consistently).
 export async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
+  if (typeof authz === "string" && authz.startsWith("Bearer cpe_"))
+    return resolveEvidencePrincipal(authz.slice(7).trim(), deps);
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
     const base = await deps.authenticator.authenticate(authz.slice(7).trim(), { workspaceHint: workspaceHintOf(req) });
     if (!base) {

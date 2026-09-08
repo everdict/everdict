@@ -32,6 +32,7 @@ import type { DatasetRegistry } from "../ports/dataset-registry.js";
 import type { Dispatcher } from "../ports/dispatcher.js";
 import type { EnvelopeStore } from "../ports/envelope-store.js";
 import type { EnvironmentRegistry } from "../ports/environment-registry.js";
+import type { ExperimentFamilyStore } from "../ports/evolution-campaign-store.js";
 import type { ExecutionAttemptStore } from "../ports/execution-attempt-store.js";
 import type { HarnessInstanceRegistry } from "../ports/harness-instance-registry.js";
 import type { IntermediateCleanupStore } from "../ports/intermediate-cleanup-store.js";
@@ -53,6 +54,7 @@ import type { OrchestrationEvent } from "./scorecard-observability.js";
 // per-collaborator Pick views each service constructor narrows to.
 
 export interface ScorecardServiceDeps {
+  campaigns?: ExperimentFamilyStore; // A campaign submission refuses when this deployment has no family ledger.
   dispatcher: Dispatcher; // dispatch a case as a job (same path as a single run)
   store: ScorecardStore;
   // Grader factory (@everdict/graders) injected into executeCase/collectDeferredTrace collection-mode scoring — the

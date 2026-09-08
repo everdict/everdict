@@ -74,6 +74,89 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       by: "agent:everdict",
     });
 
+    it("caps concurrent unreported evaluations across historically overallocated siblings", async () => {
+      const root = trustId("legacy-family");
+      const familyFrame = { ...frame, significance: { ...frame.significance, heldOutFamilySize: 10 } };
+      await store.create({ ...record(root), frame: familyFrame, state: "adopted", rounds: [round(1), round(2)] });
+      const b = trustId("sibling-b");
+      const c = trustId("sibling-c");
+      await store.create({ ...record(b), frame: { ...familyFrame, continues: root, budget: { maxRounds: 8 } } });
+      // Seed the second open sibling as a pre-upgrade row: today's creation guard already refuses it.
+      await pg.client.query(
+        `INSERT INTO everdict_evolution_campaigns
+        (id,tenant,issue_id,frame,frame_digest,rounds,state,created_by,created_at,updated_at)
+        SELECT $1,tenant,issue_id,frame,frame_digest,rounds,state,created_by,created_at,updated_at
+        FROM everdict_evolution_campaigns WHERE tenant='trust' AND id=$2`,
+        [c, b],
+      );
+      const calls = [b, c].flatMap((campaignId) =>
+        Array.from({ length: 8 }, (_, n) =>
+          store.reserveEvaluation({
+            tenant: "trust",
+            campaignId,
+            requestId: `attempt-${n}`,
+            candidateVersion: "2",
+            side: "candidate",
+            scorecardId: `${campaignId}-${n}`,
+            requestDigest: `${campaignId}-${n}`,
+            at: "2026-09-08T00:00:00.000Z",
+            caseIds: ["s1", "s2"],
+            trials: 5,
+          }),
+        ),
+      );
+      const results = await Promise.allSettled(calls);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(8);
+      expect(results.filter((r) => r.status === "rejected")).toHaveLength(8);
+      expect(await store.family("trust", b)).toMatchObject({ id: root, consumed: 10, limit: 10 });
+      expect((await store.get("trust", b))?.rounds).toHaveLength(0);
+      expect((await store.get("trust", c))?.rounds).toHaveLength(0);
+    });
+
+    it("atomically consumes the last family attempt, replays submissions, and seals one report", async () => {
+      const id = trustId("attempts");
+      await store.create({ ...record(id), frame: { ...frame, budget: { maxRounds: 1 } } });
+      const request = (requestId: string, side: "baseline" | "candidate" = "candidate") => ({
+        tenant: "trust",
+        campaignId: id,
+        requestId,
+        candidateVersion: "1.0.1",
+        side,
+        scorecardId: `${id}-${requestId}-${side}`,
+        requestDigest: `${requestId}-${side}`,
+        at: "2026-09-08T00:00:00.000Z",
+        caseIds: ["s1", "s2"],
+        trials: 5,
+      });
+      const raced = await Promise.allSettled([
+        store.reserveEvaluation(request("a")),
+        store.reserveEvaluation(request("b")),
+      ]);
+      expect(raced.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(raced.filter((r) => r.status === "rejected")).toHaveLength(1);
+      const winner = raced.find((r) => r.status === "fulfilled");
+      if (!winner || winner.status !== "fulfilled") throw new Error("no reserved attempt");
+      const attempt = winner.value.evaluation;
+      expect(await store.family("trust", id)).toMatchObject({ consumed: 1 });
+      const replay = await store.reserveEvaluation({ ...request(attempt.requestId), scorecardId: "unused-id" });
+      expect(replay.kind).toBe("replay");
+      expect(replay.evaluation.id).toBe(attempt.id);
+      const pair = await store.reserveEvaluation(request(attempt.requestId, "baseline"));
+      const report = {
+        ...round(1),
+        baselineScorecardId: pair.scorecardId,
+        candidateScorecardId: winner.value.scorecardId,
+        verdict: { ...round(1).verdict, evaluationId: attempt.id },
+      };
+      const reports = await Promise.allSettled([
+        store.appendRound("trust", id, report, 0),
+        store.appendRound("trust", id, report, 0),
+      ]);
+      expect(reports.filter((r) => r.status === "fulfilled" && r.value.kind === "appended")).toHaveLength(1);
+      expect(reports.filter((r) => r.status === "rejected")).toHaveLength(1);
+      expect((await store.evaluationForScorecard("trust", winner.value.scorecardId))?.reportedRound).toBe(1);
+    });
+
     it("reserves a shared family's open sibling allocations across concurrent creators", async () => {
       const root = trustId("family");
       const familyFrame = { ...frame, significance: { ...frame.significance, heldOutFamilySize: 10 } };

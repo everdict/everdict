@@ -1044,7 +1044,7 @@ export class ScorecardScoreService {
         if (!judgeGradeable(r)) continue;
         const caseKey = childKey(r.caseId, r.trial);
         for (const j of judges) {
-          const delta = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
+          const delta = r.scores.filter((s) => isJudgeMetricOf(s, j.id));
           if (delta.length > 0)
             produced.set(unit(caseKey, j.id), { case: caseKeyOf(r.caseId, r.trial), scores: delta });
         }
@@ -1386,7 +1386,7 @@ export class ScorecardScoreService {
     const entries: StagedJudgment[] = results.flatMap((r) => {
       const caseKey = childKey(r.caseId, r.trial);
       return selected.flatMap((j) => {
-        const scores = r.scores.filter((s) => isJudgeMetricOf(s.metric, j.id));
+        const scores = r.scores.filter((s) => isJudgeMetricOf(s, j.id));
         // A judge with no rows on this case produced nothing here — staging an empty row would assert a
         // judgment that does not exist, and the parity report would then count it as one.
         return scores.length > 0
@@ -1487,7 +1487,7 @@ export class ScorecardScoreService {
         const won = acceptedByCase.get(caseKey);
         if (won === undefined || won.size === 0) continue; // every judge here was superseded — write nothing
         const winners = [...won].map((id) => ({ id }));
-        const mine = r.scores.filter((s) => winners.some((j) => isJudgeMetricOf(s.metric, j.id)));
+        const mine = r.scores.filter((s) => winners.some((j) => isJudgeMetricOf(s, j.id)));
         nextScores = [...stripJudgeScores(child.result.scores, winners), ...mine];
       }
       const written = await store.update(

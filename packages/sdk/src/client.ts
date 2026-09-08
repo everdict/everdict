@@ -83,6 +83,7 @@ export class EverdictClient {
     return this.request("POST", "/harnesses", harness);
   }
   submitScorecard(input: {
+    campaignEvaluation?: EvaluateInput["campaignEvaluation"];
     dataset: { id: string; version: string };
     harness: { id: string; version: string };
     trials?: number;
@@ -123,6 +124,7 @@ export class EverdictClient {
     const submitted = await this.submitScorecard({
       dataset,
       harness,
+      ...(input.campaignEvaluation ? { campaignEvaluation: input.campaignEvaluation } : {}),
       ...(input.trials !== undefined ? { trials: input.trials } : {}),
       ...(input.judges ? { judges: input.judges } : {}),
       ...(input.runtime ? { runtime: input.runtime } : {}),

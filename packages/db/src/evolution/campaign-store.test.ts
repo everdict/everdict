@@ -7,6 +7,7 @@ import {
   type OutboxEvent,
 } from "@everdict/application-control";
 import type { SeedProvenanceReader } from "@everdict/application-control";
+import { CampaignRoundInputSchema } from "@everdict/contracts";
 import type { CampaignFrame, CampaignRound, EvolutionCampaignRecord, Score } from "@everdict/contracts";
 import {
   BadRequestError,
@@ -112,6 +113,65 @@ const CLOSE = {
   at: "2026-08-26T01:00:00.000Z",
   by: "alice",
 };
+
+describe("ExperimentFamily — attempts are consumed before results exist", () => {
+  const request = (campaignId: string, requestId: string, side: "baseline" | "candidate" = "candidate") => ({
+    tenant: "acme",
+    campaignId,
+    requestId,
+    side,
+    candidateVersion: "1.0.1",
+    scorecardId: `${requestId}-${side}`,
+    requestDigest: `${requestId}-${side}`,
+    at: "2026-09-08T00:00:00.000Z",
+    caseIds: ["c1", "c2"],
+    trials: 5,
+  });
+  it("counts unreported attempts across closed siblings and never refunds them", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    await store.create(record({ id: "root", state: "no_improvement" }));
+    const sibling = (id: string, maxRounds: number) =>
+      record({ id, frame: { ...frame, continues: "root", budget: { maxRounds } } });
+    await store.create(sibling("b", 3));
+    await Promise.all(["b1", "b2", "b3"].map((id) => store.reserveEvaluation(request("b", id))));
+    await store.close("acme", "b", "no_improvement", CLOSE, 0);
+    await expect(store.create(sibling("c-too-large", 3))).rejects.toThrow(/family|budget|reserved/);
+    await store.create(sibling("c", 2));
+    await Promise.all(["c1", "c2"].map((id) => store.reserveEvaluation(request("c", id))));
+    await expect(store.reserveEvaluation(request("c", "c3"))).rejects.toThrow(/budget/);
+    expect(await store.family("acme", "c")).toMatchObject({ id: "root", limit: 5, consumed: 5 });
+  });
+  it("replays exactly one arm, binds both arms to one attempt, and refuses request substitution", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    await store.create(record());
+    const first = await store.reserveEvaluation(request("evc_1", "one", "baseline"));
+    const replay = await store.reserveEvaluation({
+      ...request("evc_1", "one", "baseline"),
+      scorecardId: "new-server-id",
+    });
+    expect(replay.kind).toBe("replay");
+    expect(replay.scorecardId).toBe("one-baseline");
+    const second = await store.reserveEvaluation(request("evc_1", "one"));
+    expect(second.evaluation.id).toBe(first.evaluation.id);
+    expect(await store.family("acme", "evc_1")).toMatchObject({ consumed: 1 });
+    await expect(store.reserveEvaluation({ ...request("evc_1", "one"), requestDigest: "changed" })).rejects.toThrow(
+      /different/,
+    );
+    await expect(store.reserveEvaluation({ ...request("evc_1", "two"), scorecardId: "one-candidate" })).rejects.toThrow(
+      /already bound/,
+    );
+    await expect(store.reserveEvaluation({ ...request("evc_1", "wrong"), trials: 10 })).rejects.toThrow(/frozen/);
+    const logged = {
+      ...round(1),
+      baselineScorecardId: "one-baseline",
+      candidateScorecardId: "one-candidate",
+      verdict: { ...round(1).verdict, evaluationId: first.evaluation.id },
+    };
+    expect(await store.appendRound("acme", "evc_1", logged, 0)).toMatchObject({ kind: "appended" });
+    expect((await store.evaluationForScorecard("acme", "one-candidate"))?.reportedRound).toBe(1);
+    await expect(store.appendRound("acme", "evc_1", { ...logged, seq: 2 }, 1)).rejects.toThrow(/unreported/);
+  });
+});
 
 describe("InMemoryEvolutionCampaignStore — the guards answer, they never assume", () => {
   it("reserves open siblings' full budgets atomically", async () => {
@@ -275,8 +335,8 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
   let n = 0;
   // Both halves, because the settlement writes through one and the authorization is read through the other
   // — a fixture that carries only the campaign half cannot see an adoption at all.
-  const service = (store: EvolutionCampaignStore & AdoptionOperationStore) =>
-    new CampaignService({
+  const service = (store: EvolutionCampaignStore & AdoptionOperationStore, reserved = true) =>
+    new (reserved ? ReservedFixtureCampaignService : CampaignService)({
       // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
       // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
       scorecards: { get: async () => undefined },
@@ -293,6 +353,15 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       newId: () => `id_${++n}`,
       now: () => "2026-08-26T02:00:00.000Z",
     });
+
+  it("refuses a completed scorecard pair that never consumed a submission reservation", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    const svc = service(store, false);
+    const campaign = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
+    snapshots.set("sc-win", snapshot(comparison()));
+    await expect(svc.logRound("acme", campaign.id, LOG, "alice")).rejects.toThrow(/reserved before/);
+    expect((await store.get("acme", campaign.id))?.rounds).toHaveLength(0);
+  });
 
   const trialCase = (caseId: string, delta: number, significant: boolean, trials = 5) => ({
     caseId,
@@ -912,6 +981,12 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     // A concurrent loop logs round 2 AFTER the settle computed its answer over 1 round — modeled by a store
     // wrapper that interleaves the append between the settle's read and its close.
     const raced: EvolutionCampaignStore & AdoptionOperationStore = {
+      reserveEvaluation: store.reserveEvaluation.bind(store),
+      evaluationForScorecard: store.evaluationForScorecard.bind(store),
+      family: store.family.bind(store),
+      createEvidenceGrant: store.createEvidenceGrant.bind(store),
+      evidenceGrant: store.evidenceGrant.bind(store),
+
       create: store.create.bind(store),
       get: store.get.bind(store),
       list: store.list.bind(store),
@@ -931,7 +1006,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       // The real store's own answer, not `true`: `deferCompletion` is a conditional write (rule `testing`).
       deferCompletion: store.deferCompletion.bind(store),
     };
-    const svc2 = new CampaignService({
+    const svc2 = new ReservedFixtureCampaignService({
       // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
       // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
       scorecards: { get: async () => undefined },
@@ -1224,7 +1299,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
           },
         ],
       };
-      const svc = new CampaignService({
+      const svc = new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -1314,7 +1389,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       builds: NonNullable<ConstructorParameters<typeof CampaignService>[0]["builds"]>,
       changes: ReturnType<typeof prReader>,
     ) =>
-      new CampaignService({
+      new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -1464,7 +1539,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     it("[§3] a logged round names an evidence object whose bytes re-digest to the seal, per case, with its run ids", async () => {
       const store = new InMemoryEvolutionCampaignStore();
       const evidence = new InMemoryCampaignEvidenceStore();
-      const svc = new CampaignService({
+      const svc = new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -1549,7 +1624,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       await store.appendRound(
         "acme",
         rec.id,
-        { ...logged, seq: 2, verdict: { ...logged.verdict, evidence: undefined } },
+        { ...logged, seq: 2, verdict: { ...logged.verdict, evidence: undefined, evaluationId: undefined } },
         1,
       );
       await expect(svc.roundEvidence("acme", rec.id, 2)).rejects.toMatchObject({ status: 404 });
@@ -1557,7 +1632,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
 
     it("[§3] a store that cannot take the evidence refuses the round — nothing is appended without its bytes", async () => {
       const store = new InMemoryEvolutionCampaignStore();
-      const svc = new CampaignService({
+      const svc = new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -1606,7 +1681,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         }),
       });
       const build = (seedProvenance: SeedProvenanceReader) =>
-        new CampaignService({
+        new ReservedFixtureCampaignService({
           // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
           // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
           scorecards: { get: async () => undefined },
@@ -1670,7 +1745,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         ...frame,
         subject: { type: "harness", id: "shop", baselineVersion: "1.0.0" },
       };
-      const svc = new CampaignService({
+      const svc = new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -1806,7 +1881,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       },
     });
     const withReader = (store: InMemoryEvolutionCampaignStore, changes: ReturnType<typeof reader>) =>
-      new CampaignService({
+      new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -1929,7 +2004,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     type Run = { tenant: string; kind?: string; session?: { ttlSec: number }; usage?: { usd: number } };
     const ledger = (runs: Record<string, Run>) => ({ get: async (id: string) => runs[id] });
     const withRuns = (store: InMemoryEvolutionCampaignStore, runs: Record<string, Run>) =>
-      new CampaignService({
+      new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
@@ -2043,3 +2118,54 @@ it("returns only the campaigns whose frame subject matches, newest first", async
   expect((await store.list("acme", { type: "harness", id: "nobody" })).map((r) => r.id)).toEqual([]);
   expect((await store.list("acme")).map((r) => r.id)).toHaveLength(4);
 });
+
+// These settlement tests supply completed scorecards through a diff fixture. Model the submission
+// boundary explicitly: each new pair consumes a real store reservation before settlement. Duplicate
+// fixture labels receive fresh ids, as ScorecardService would mint for distinct executions.
+let fixtureAttempt = 0;
+class ReservedFixtureCampaignService extends CampaignService {
+  private readonly fixtureDeps: ConstructorParameters<typeof CampaignService>[0];
+  private readonly aliases = new Map<string, string>();
+  private attempt = 0;
+  constructor(deps: ConstructorParameters<typeof CampaignService>[0]) {
+    const aliases = new Map<string, string>();
+    super({
+      ...deps,
+      diffs: {
+        diffSnapshot: (tenant, baseline, candidate, opts) =>
+          deps.diffs.diffSnapshot(tenant, aliases.get(baseline) ?? baseline, aliases.get(candidate) ?? candidate, opts),
+      },
+    });
+    this.fixtureDeps = deps;
+    this.aliases = aliases;
+  }
+  override async logRound(...args: Parameters<CampaignService["logRound"]>) {
+    const [tenant, id, input, by] = args;
+    const campaign = await this.fixtureDeps.store.get(tenant, id);
+    if (!campaign || campaign.state !== "open" || !CampaignRoundInputSchema.safeParse(input).success)
+      return super.logRound(...args);
+    const bound = { ...input };
+    this.attempt = ++fixtureAttempt;
+    const requestId = `fixture-${this.attempt}`;
+    for (const side of ["baseline", "candidate"] as const) {
+      const field = side === "baseline" ? "baselineScorecardId" : "candidateScorecardId";
+      if (await this.fixtureDeps.store.evaluationForScorecard(tenant, input[field])) {
+        bound[field] = `${input[field]}-attempt-${this.attempt}`;
+        this.aliases.set(bound[field], input[field]);
+      }
+      await this.fixtureDeps.store.reserveEvaluation({
+        tenant,
+        campaignId: id,
+        requestId,
+        candidateVersion: input.candidateVersion,
+        side,
+        scorecardId: bound[field],
+        requestDigest: bound[field],
+        at: "2026-08-26T00:00:00.000Z",
+        caseIds: campaign.frame.scenarios.map((s) => s.id),
+        trials: campaign.frame.trialsPerCase,
+      });
+    }
+    return super.logRound(tenant, id, bound, by);
+  }
+}

@@ -173,7 +173,11 @@ export function judgeAttemptsOf(
 ): Map<string, number> {
   const out = new Map<string, number>();
   for (const j of judges) {
-    const verdict = result.scores.find((s) => s.metric === `judge:${j.id}`);
+    const verdict = result.scores.find(
+      (s) =>
+        isJudgeMetricOf(s, j.id) &&
+        (s.measurement ? s.measurement.criterion === undefined : s.metric === `judge:${j.id}`),
+    );
     // Only the `unmeasured` variant counts attempts — a measured verdict ended the counting, and an invalid
     // one is a grader bug the orchestration is already done with.
     if (verdict?.status === "unmeasured") out.set(j.id, verdict.attempts ?? 0);
@@ -184,7 +188,7 @@ export function judgeAttemptsOf(
 // Strip EVERYTHING the selected judges previously wrote — verdicts, criterion children, placeholders — so a
 // re-score replaces its own output wholesale instead of accreting duplicates next to stale rows.
 export function stripJudgeScores(scores: Score[], judges: ReadonlyArray<{ id: string }>): Score[] {
-  return scores.filter((s) => !judges.some((j) => isJudgeMetricOf(s.metric, j.id)));
+  return scores.filter((s) => !judges.some((j) => isJudgeMetricOf(s, j.id)));
 }
 
 // Progress-step failure/verdict reason — prefer a trace error event over a pass:false score.detail. Carried verbatim
@@ -373,7 +377,7 @@ export function completeJudgeCoverage(
   judges: ReadonlyArray<{ id: string }>,
   detail = "the judge did not report a verdict for this case",
 ): Score[] {
-  const missing = judges.filter((j) => !scores.some((s) => isJudgeMetricOf(s.metric, j.id)));
+  const missing = judges.filter((j) => !scores.some((s) => isJudgeMetricOf(s, j.id)));
   if (missing.length === 0) return [...scores];
   return [
     ...scores,

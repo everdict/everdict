@@ -234,7 +234,13 @@ describe("RunService verdict derivation — the application layer owns the inter
       // ground truth, custom_gate outranks the judge (pass) — the two policies genuinely disagree.
       scores: [
         { graderId: "judge", metric: "judge:quality", value: 0, pass: false },
-        { graderId: "custom_gate", metric: "custom_gate", value: 1, pass: true },
+        {
+          graderId: "custom_gate",
+          metric: "custom_gate",
+          value: 1,
+          pass: true,
+          measurement: { producer: { kind: "grader", id: "custom_gate" }, metric: "custom_gate" },
+        },
       ],
     },
     ...over,

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { MeasurementIdentity } from "./grader.js";
 
 // Verdict policy — the authority ladder as DATA instead of hardcoded metric-name arrays. The old
 // implementation understood strings ("state", "judge") rather than meanings: a new ground-truth grader
@@ -101,7 +102,13 @@ export function isJudgeFamilyMetric(metric: string): boolean {
 // "Is this metric judge <judgeId>'s own" — the verdict (`judge:<id>`) or one of its criteria (`judge:<id>:<c>`),
 // never a different judge whose id merely shares a prefix. Lives here (moved from `@everdict/domain`) because
 // the settle asks it with only declarations in hand, and the domain re-exports it unchanged.
-export function isJudgeMetricOf(metric: string, judgeId: string): boolean {
+export function isJudgeMetricOf(
+  value: string | { metric: string; measurement?: MeasurementIdentity },
+  judgeId: string,
+): boolean {
+  if (typeof value !== "string" && value.measurement)
+    return value.measurement.producer.kind === "judge" && value.measurement.producer.id === judgeId;
+  const metric = typeof value === "string" ? value : value.metric;
   return metric === `${JUDGE_METRIC_ROOT}:${judgeId}` || metric.startsWith(`${JUDGE_METRIC_ROOT}:${judgeId}:`);
 }
 
@@ -193,6 +200,8 @@ export type MetricMatcher = z.infer<typeof MetricMatcherSchema>;
 
 export const MetricDefinitionSchema = z.object({
   match: MetricMatcherSchema,
+  producer: z.object({ kind: z.enum(["grader", "judge"]), id: z.string().optional() }).optional(),
+  criterion: z.union([z.literal("overall"), z.literal("any"), z.object({ id: z.string() })]).optional(),
   authority: MetricAuthoritySchema,
   // Reading direction for numeric deltas (diff/comparability): absent = unknown → a consumer must not
   // interpret the delta's sign as improvement/regression.
@@ -223,6 +232,12 @@ export const CaseMatcherSchema = z.union([
 export type CaseMatcher = z.infer<typeof CaseMatcherSchema>;
 
 export const VerdictPolicySchema = z.object({
+  measurementIdentity: z.literal("structured-v1").optional(),
+  authorityOrder: z
+    .array(z.enum(["ground_truth", "objective", "judge"]))
+    .length(3)
+    .refine((order) => new Set(order).size === 3, "authority order must contain each deciding rung once")
+    .optional(),
   id: z.string().min(1),
   version: z.string().min(1),
   // Declaration order is the priority order inside a "priority" rung.

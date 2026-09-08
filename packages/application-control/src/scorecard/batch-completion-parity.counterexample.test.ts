@@ -1,5 +1,5 @@
 import type { CaseResult } from "@everdict/contracts";
-import { storedExecutionId } from "@everdict/contracts";
+import { sanitizeSubmittedResult, storedExecutionId } from "@everdict/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { collectDeferredTrace } from "../execution/collect-trace.js";
 import { InMemoryExecutionAttemptStore } from "../ports/execution-attempt-store.js";
@@ -161,7 +161,12 @@ describe("[R64 COUNTEREXAMPLE] a recovered batch case is completed the way a nor
     // The parity assertion, which is the one that will not drift: whatever `collectDeferredTrace` grows next,
     // the recovered document has to grow it too, because they are compared rather than enumerated.
     const [recovered] = await adoptAndCapture();
-    const normal = await collectDeferredTrace(traceDeps() as never, "acme", EVAL_CASE, UNCOLLECTED);
+    // Compare at the same boundary: normal completion sanitizes in CaseOutcomeCommitter,
+    // while recovery sanitizes before its receipt. Neither receipt consumes the raw collector output.
+    const normal = sanitizeSubmittedResult(
+      await collectDeferredTrace(traceDeps() as never, "acme", EVAL_CASE, UNCOLLECTED),
+      { graders: [{ id: "tests-pass" }], judges: [] },
+    );
     expect(recovered).toEqual(normal);
   });
 
@@ -231,7 +236,10 @@ describe("[R64 COUNTEREXAMPLE] a recovered batch case is completed the way a nor
       })
       .catch(() => undefined);
 
-    const normal = await collectDeferredTrace(empty() as never, "acme", EVAL_CASE, UNCOLLECTED);
+    const normal = sanitizeSubmittedResult(
+      await collectDeferredTrace(empty() as never, "acme", EVAL_CASE, UNCOLLECTED),
+      { graders: [{ id: "tests-pass" }], judges: [] },
+    );
     expect(seen[0], "a degraded collection produced a different document on the recovery path").toEqual(normal);
   });
 });

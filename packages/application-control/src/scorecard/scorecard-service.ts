@@ -214,12 +214,30 @@ export class ScorecardService {
   }
 
   // Resolve the dataset synchronously (NotFound→404), resolve the harness version/spec, create the record, then run the batch asynchronously.
+  private async assertNotCampaignEvaluation(tenant: string, id: string): Promise<void> {
+    if (this.deps.campaigns && (await this.deps.campaigns.evaluationForScorecard(tenant, id)))
+      throw new ConflictError(
+        "CONFLICT",
+        { id },
+        "campaign evaluation results are immutable; submit a new reserved evaluation",
+      );
+  }
+
   async submit(rawInput: RunScorecardInput): Promise<ScorecardRecord> {
+    let input = rawInput;
+    if (rawInput.campaignEvaluation) {
+      if ((rawInput.retries ?? 0) > 0 || rawInput.oomAutoBoost)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          {},
+          "campaign evaluations use fixed trials; submit a new reserved attempt instead of automatic re-execution",
+        );
+      input = { ...rawInput, retries: 0, oomAutoBoost: false };
+    }
     // Deployment policy: the batch's execution target (a registered runtime or self:<runner>) must be specified — 400 if absent (blocks a silent local fallback).
     assertRuntimeTarget(this.deps.requireRuntime, rawInput.runtime);
     // runtime:"auto" — expand to EVERY runtime the tenant has registered and shard across them (same comma-list
     // round-robin; each backend's capacity still admission-controls actual placement via the Scheduler).
-    let input = rawInput;
     if (input.runtime === "auto") {
       const ids = this.deps.runtimesFor ? await this.deps.runtimesFor(input.tenant) : [];
       if (ids.length === 0)
@@ -500,6 +518,28 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
         );
     }
 
+    if (input.campaignEvaluation) {
+      if (!this.deps.campaigns) throw new ConflictError("CONFLICT", {}, "campaign evaluation ledger is not configured");
+      const reserved = await this.deps.campaigns.reserveEvaluation({
+        ...input.campaignEvaluation,
+        tenant: input.tenant,
+        scorecardId: record.id,
+        requestDigest: contentDigest(rawInput),
+        at: this.now(),
+        caseIds: selectedCases.map((c) => c.id),
+        trials: input.trials ?? 1,
+      });
+      if (reserved.kind === "replay") {
+        const existing = await this.deps.store.get(reserved.scorecardId);
+        if (existing && existing.tenant === input.tenant) return existing;
+        throw new ConflictError(
+          "CONFLICT",
+          { evaluationId: reserved.evaluation.id },
+          "evaluation is reserved but its submission is not yet durable; no second dispatch was started",
+        );
+      }
+    }
+
     // What the admission below claimed, so a failed create can give it back (arch-review 18 P1).
     let admissionRequestId: string | undefined;
     let admittedEnvelopeId: string | undefined;
@@ -736,6 +776,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
   // Phase 2 detached (P2) — apply judges over an existing group's runs and re-aggregate; also the "promote
   // experiment → scorecard" move (scoring an experiment flips its kind). Delegated to the score collaborator.
   async scoreGroup(input: ScoreGroupInput): Promise<ScorecardRecord> {
+    await this.assertNotCampaignEvaluation(input.tenant, input.id);
     // Same rule at the re-score door (arch-review 16 P1-7): the selection a pass runs under is the unit the
     // stage claims and the strip mutates, and neither can hold a judge twice.
     assertJudgeSelection(input.judges);
@@ -908,6 +949,7 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     retries?: number;
     cases?: { ids?: string[]; tags?: string[]; limit?: number };
   }): Promise<ScorecardRecord> {
+    await this.assertNotCampaignEvaluation(input.tenant, input.id);
     const src = await this.get(input.id);
     if (!src || src.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "scorecard not found.");
@@ -1746,24 +1788,26 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return this.batch.resume(id, authority);
   }
 
-  retryFailed(input: {
+  async retryFailed(input: {
     tenant: string;
     id: string;
     submittedBy?: string;
     failureClass?: "infra" | "config" | "harness" | "agent";
   }): Promise<ScorecardRecord> {
+    await this.assertNotCampaignEvaluation(input.tenant, input.id);
     return this.batch.retryFailed(input);
   }
 
   // …and the IN-PLACE retry: the same scorecard, a new attempt per named case, the displaced ones kept on
   // the attempt ledger. `retryFailed` above forks a new record; this one repairs the record you have.
-  retryCases(input: {
+  async retryCases(input: {
     tenant: string;
     id: string;
     cases: readonly CaseKey[];
     reason?: string;
     submittedBy?: string;
   }): Promise<ScorecardRecord> {
+    await this.assertNotCampaignEvaluation(input.tenant, input.id);
     return this.batch.retryCases(input);
   }
 

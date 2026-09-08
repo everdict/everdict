@@ -1,69 +1,139 @@
-# Evolution identity and evidence follow-up
+---
+kind: wiki
+title: "Evolution identity and evidence authority"
+status: current
+updated: 2026-09-08
+anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-service.ts, packages/db/src/evolution/campaign-store.ts, apps/api/src/mcp.routes.ts]
+---
+# Evolution identity and evidence authority
 
-This change responds to the review of main at
-`25814996b975a8b721272396b547854adde6fd6f` (2026-09-08).
+Implements the review of main at `25814996b975a8b721272396b547854adde6fd6f`
+(2026-09-08). The pure domain decisions and the durable adoption effect remain separate.
 
-## Implemented contracts
+## Subject and oracle identity
 
-- Resolve an `EvaluatedSubjectIdentity` once from each evaluated scorecard. Environment
-  subjects use their environment seal's version and document digest; harness and agent
-  subjects retain the harness seal used by their existing execution path. Conflicting
-  environment seals refuse the round. Evidence records that identity, and verdicts and
-  adoption proofs use its digest. A missing digest remains unverified; no current
-  registry document is substituted for an old seal.
-- Oracle reads require both evaluated commit SHAs in the same repository. The GitHub
-  adapter compares those immutable SHAs, includes rename source paths, and refuses to
-  claim completeness at the 300-file comparison limit. A receipt records repository,
-  both SHAs, normalized path-list digest, and completeness. Missing provenance or a
-  receipt for different commits makes the round non-comparable. Existing unscoped
-  frames and stored historical rounds retain their meaning.
-- Creating a continuation reserves its full round allocation alongside allocations
-  of all open siblings and descendants. Closed members count their logged rounds.
-  PostgreSQL serializes the capacity check and creation (including its outbox) in one
-  transaction using a tenant-scoped advisory lock. Round append also enforces the
-  campaign's allocation. Existing overallocated families cannot open more successors;
-  this change does not retroactively invalidate their frames or rounds.
-- A frame may declare `targetSatisfaction.minimumCandidateRate`. A target must then
-  both improve significantly and reach that candidate pass rate to count as flipped.
-  `improved` and `satisfied` are recorded separately. Without the new declaration,
-  historical significant-improvement semantics remain. This threshold concerns the
-  observed pass rate; it is not a confidence bound on the population success rate.
-- Delegation briefs retain target traces after improvement and omit the full candidate
-  scorecard reference. Learned text remains proposal advice and cannot authorize adoption.
+`EvaluatedSubjectIdentity` is resolved once from each evaluated scorecard. Environment
+subjects use the environment seal's version and document digest; harness and agent
+subjects use the harness seal their execution actually consumed. Conflicting environment
+seals refuse the round. Evidence, verdict and adoption proof carry the same identity.
+No current registry read substitutes for missing historical seals.
 
-## Remaining boundaries
+Oracle inspection compares the evaluated baseline and candidate SHAs in the same
+repository, including rename source paths. Its receipt binds both SHAs, a normalized
+path-list digest and completeness. GitHub comparisons reaching the 300-file response
+limit are incomplete. A moved PR head cannot change the commits inspected. Missing
+provenance or mismatched receipts make the round non-comparable.
 
-Campaign allocation is **not** an evaluation-attempt ledger. Standalone evaluation and
-scorecard ingestion can still happen before `logRound`, and a caller can choose which
-completed scorecards to report. Closing an open campaign releases its unlogged allocation.
-Consequently the allocation fix prevents sibling campaign overcommit; it does not certify
-that every actual held-out evaluation was counted, nor repair pre-existing overcommit.
+## Experiment-family attempts
 
-The next boundary needs a durable `ExperimentFamily` and an evaluation reservation minted
-before dispatch, with one attempt identifier bound to the resulting scorecards. Dispatch,
-ingestion, retries, cancellation, and round append must all consume that same identifier.
-Unreported and failed dispatched attempts must remain spent; retrying an idempotent request
-must reuse its reservation. Adding a reservation only at `logRound` would still be too late.
+Opening a continuation reserves its maximum round allocation alongside open siblings.
+Closed members retain legacy rounds plus all evaluation attempts, including unreported
+ones. PostgreSQL serializes allocation and creation with the same tenant advisory lock
+used by evaluation reservations.
 
-`heldOut.regressions === 0` continues to mean **no statistically significant regression was
-detected**. It is not proof of non-inferiority. A separate, versioned adoption policy must
-specify a tolerable degradation margin, minimum evidence, confidence procedure, and an
-inconclusive outcome before stronger claims are exposed.
+Before dispatch, `ScorecardService.submit` consumes a durable family attempt and binds
+its server-minted scorecard id to one arm. Submit both arms with the same `campaignId`,
+`requestId` and `candidateVersion`; `side` is `baseline` or `candidate`. Each arm must
+request exactly the frozen scenarios and trial count. HTTP and SDK use
+`campaignEvaluation`; MCP `run_scorecard` uses `campaign_evaluation`.
 
-Structured producer/metric/criterion identities and stable measurement references need a
-versioned migration of score producers, normalization, deduplication, verdict policies, and
-stored bases. Adding fields to the writer alone would leave authority at the old string
-parser. The existing sealed authority hierarchy and historical-policy resolution therefore
-remain unchanged in this change.
+```json
+{
+  "campaignEvaluation": {
+    "campaignId": "campaign-id",
+    "requestId": "candidate-2-attempt-1",
+    "candidateVersion": "2",
+    "side": "candidate"
+  },
+  "trials": 20
+}
+```
 
-Removing the scorecard reference narrows the brief's advertised capabilities; it does not
-revoke the delegate's independent credentials. End-to-end held-out isolation still requires
-a target-only evidence authorization surface and enforcement on every referenced run read.
+One pair consumes one predeclared comparison, even when only one arm is submitted.
+The request digest prevents substitution under an existing request id. A replay returns
+the original scorecard without dispatching again. Failed, cancelled and unreported
+attempts remain spent. Automatic execution retries and in-place rescore/retry operations
+are refused for these scorecards; use a new reserved comparison for a new measurement.
+Existing internal recovery may resume the same durable execution, but cannot grant a
+fresh campaign comparison.
+
+A crash between reservation and scorecard creation leaves the attempt spent. Replaying
+an attempt whose scorecard is not durably readable returns a conflict and never
+speculatively dispatches. This conservative handling also covers an unknown commit
+outcome. No refund or automatic redispatch is inferred from an absent result.
+
+`logRound` accepts only the exact pair belonging to an unreported reservation. The
+append CAS, outbox and reported-round marker commit together. Evidence records the
+attempt id. Standalone evaluations and ingestion remain available, but their results
+cannot become new campaign round evidence. Historical rounds remain readable and count
+against their family's budget; old overallocated families cannot execute beyond the
+family limit through the reserved submission path. This is an authority boundary for
+campaign evidence, not a claim that independent workspace administrators cannot perform
+unrelated experiments.
+
+## Adoption claims
+
+A frame can declare `targetSatisfaction.minimumCandidateRate`. `improved` records
+significant improvement; `satisfied` records meeting the observed success-rate threshold.
+Both are required to flip a target when the threshold is declared. Improved targets
+remain in subsequent feedback until the declared task is satisfied.
+
+A separate `nonInferiority` policy declares `version: "hoeffding-v1"`, `margin`, `alpha`
+and `minimumTrials`. Simultaneous bounded-Bernoulli intervals use a union bound over
+both arms, all held-out cases and the preregistered family. Trials within each arm must
+be independent Bernoulli observations. No independence between cases or arms is needed
+for the union bound. A lower delta bound at least `-margin` establishes non-inferiority;
+an upper bound below it establishes inferiority; insufficient samples or overlapping
+bounds are inconclusive. The gate requires a matching policy digest and complete
+per-case non-inferiority evidence before adoption under this policy.
+
+Without this optional policy, zero held-out regressions continues to mean only **no
+statistically significant regression was detected**. It is not proof of non-inferiority.
+The target success threshold is an observed rate, not a population confidence bound.
+
+## Measurements and historical policies
+
+Scores carry structured producer kind/id, metric and optional criterion. The trusted
+collector binds producer identity; producer-authored claims cannot choose authority.
+Legacy label parsing is confined to the collection/legacy compatibility boundary.
+Policy `2.0.0` matches and deduplicates structured coordinates, preserving separate
+inline criteria and registered judges even when their display labels collide. Rescoring
+and judgment-evidence attribution use the same ownership coordinates.
+
+Deciders name every contributing measurement by original score-array index and canonical
+score digest, together with the policy digest. These references are local to the case's
+score vector. Optional `authorityOrder` and producer/criterion selectors permit explicit,
+validated, sealed policy composition. Versions `1.0.0` and `1.1.0` remain unchanged;
+historical records are not relabeled or silently interpreted under today's policy.
+Observation assessments are retained on new structured scores; legacy normalization keeps
+its original digest representation. Unmeasured/invalid scores remain distinct from measured failures. Partial evidence does
+not automatically invalidate unrelated measurements.
+
+## Delegate evidence capability
+
+`POST /campaigns/:id/evidence-grants` and MCP `issue_campaign_evidence_grant` issue a
+one-hour `cpe_` credential. The stored grant contains a digest-sealed, immutable view of
+only non-held-out targets, their rates and structured diagnosis locations. It excludes
+scorecard/run references, held-out rows and free-form learned/judge text.
+
+The credential permits only `GET /campaigns/:id/evidence-view` and an MCP server exposing
+only `get_campaign_evidence_view`. Each read rechecks expiry and the view digest. It cannot
+switch workspaces, gain membership roles, access general readers or invoke mutation tools.
+
+Create a sandbox with `profile` and HTTP `campaignId` / MCP `campaign_id` to use this
+handoff. The service authors the brief from the allowed view and writes the scoped token
+to `CAMPAIGN_EVIDENCE.json`, separately from the trace-recorded brief. Custom briefs and
+persistent worlds are refused for this flow; the sandbox TTL is capped at one hour.
+The orchestrator retains evaluation and adoption authority. The legacy round brief
+remains an orchestrator read; it is not a credential grant. Independently supplied
+workspace credentials or access to an external repository cannot be revoked by this
+capability, and are outside its isolation claim.
 
 ## Verification
 
-Regression coverage includes environment evaluation through the production adoption adapter,
-a changed PR head receipt, immutable GitHub comparison and renamed oracle paths, concurrent
-family creation in memory and real PostgreSQL, target improvement below a success threshold,
-and brief reference filtering. No live GitHub request or production deployment is required
-by these tests.
+Regression scenarios cover environment evaluation through the production adoption
+adapter, immutable commit comparison and renamed oracle paths, family creation and
+attempt/append races on real PostgreSQL, submission replay and immutable campaign
+results, unsatisfied improvements, inconclusive non-inferiority, measurement-name
+collisions, historical policy replay, and HTTP/MCP/sandbox evidence capabilities.
+No live GitHub or production deployment is part of these checks.

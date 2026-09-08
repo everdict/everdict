@@ -1,3 +1,4 @@
+import type { CampaignEvaluationRequest } from "@everdict/contracts";
 import {
   type CaseMatcher,
   type Dataset,
@@ -93,6 +94,7 @@ export function originSource(via: string): string {
 }
 
 export interface RunScorecardInput {
+  campaignEvaluation?: CampaignEvaluationRequest;
   submitterTeamId?: string;
   tenant: string;
   // INTERNAL (experiment façade only — routes never expose these two): group kind stamped on the record, and a

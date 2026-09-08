@@ -25,7 +25,42 @@ export type UnmeasuredReason = (typeof UNMEASURED_REASONS)[number];
 // isMeasured gate stood between and a mean. Here a non-measurement carries NO `value` at all: a dead grader
 // has no number to leak, and a consumer that reads `.value` without narrowing fails to COMPILE.
 
+export const MeasurementIdentitySchema = z.object({
+  producer: z.object({ kind: z.enum(["grader", "judge"]), id: z.string().min(1) }),
+  metric: z.string().min(1),
+  criterion: z.string().min(1).optional(),
+});
+export type MeasurementIdentity = z.infer<typeof MeasurementIdentitySchema>;
+
+// The collector supplies the producer. Legacy label parsing is confined to this
+// collection adapter; policy and deduplication consume the resulting coordinates.
+export function measurementIdentityOf(metric: string, producer: ScoreProducer): MeasurementIdentity {
+  const owner = { kind: producer.kind, id: producer.id };
+  if (producer.kind === "judge") {
+    const root = `judge:${producer.id}`;
+    return {
+      producer: owner,
+      metric: "judge",
+      ...(metric.startsWith(`${root}:`) ? { criterion: metric.slice(root.length + 1) } : {}),
+    };
+  }
+  if (producer.ownsJudgeVerdict && (metric === "judge" || metric.startsWith("judge:"))) {
+    const prefix = `judge:${producer.id}:`;
+    return {
+      producer: owner,
+      metric: "judge",
+      ...(metric !== "judge"
+        ? {
+            criterion: metric.startsWith(prefix) ? metric.slice(prefix.length) : metric.slice("judge:".length),
+          }
+        : {}),
+    };
+  }
+  return { producer: owner, metric };
+}
+
 const ScoreIdentitySchema = {
+  measurement: MeasurementIdentitySchema.optional(),
   graderId: z.string(),
   metric: z.string(),
   detail: z.unknown().optional(),
@@ -199,6 +234,7 @@ function normalizeScoreShape(raw: unknown): unknown {
   const identity = {
     graderId,
     metric,
+    ...(raw.measurement !== undefined ? { measurement: raw.measurement } : {}),
     ...(detail !== undefined ? { detail } : {}),
     ...(Array.isArray(traceEvents) && traceEvents.length > 0 ? { traceEvents } : {}),
   };
@@ -230,6 +266,11 @@ function normalizeScoreShape(raw: unknown): unknown {
     ...(pass !== undefined ? { pass } : {}),
     ...(label !== undefined ? { label } : {}),
     status: "measured",
+    // Legacy normalization omitted this field, including from receipt digests. Only the
+    // structured-score era can retain it without silently changing historical seals.
+    ...(raw.measurement !== undefined && raw.observationAssessment !== undefined
+      ? { observationAssessment: raw.observationAssessment }
+      : {}),
   };
 }
 
@@ -276,7 +317,13 @@ export function sanitizeScore(score: Score, producer?: ScoreProducer): Score {
   // in the detail so the author sees exactly what they emitted and what to do instead. Silently renaming it
   // would be the other temptation, and it hides the violation from the person who can fix it.
   const forged = producer === undefined ? undefined : forgedMetricReason(score.metric, producer);
-  if (!idsBroken && !valueBroken && forged === undefined) return score;
+  if (!idsBroken && !valueBroken && forged === undefined) {
+    if (producer === undefined) return score;
+    const measurement = measurementIdentityOf(score.metric, producer);
+    // Idempotent at repeated settlement boundaries; the untrusted producer field is replaced.
+    if (JSON.stringify(score.measurement) === JSON.stringify(measurement)) return score;
+    return { ...score, measurement };
+  }
   const shownValue = isMeasured(score) ? String(score.value) : "none";
   return {
     // The violating producer's own execution evidence still travels — an invalid row that kept the call is

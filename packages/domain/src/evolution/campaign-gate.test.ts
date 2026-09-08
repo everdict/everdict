@@ -396,6 +396,19 @@ describe("[COUNTEREXAMPLE] a frame with targets adopts only when every target fl
     ]);
     expect(answer.kind, "adopted over an unflipped target").toBe("continue");
   });
+  it("does not adopt an unassessed non-inferiority claim", () => {
+    const strict = {
+      ...targeted,
+      nonInferiority: { version: "hoeffding-v1" as const, margin: 0.05, alpha: 0.05, minimumTrials: 100 },
+    };
+    const candidate = round({
+      significantImprovements: 2,
+      heldOut: { improvements: 0, regressions: 0 },
+      targets: { flipped: ["t1", "t2"], unflipped: [] },
+    });
+    expect(campaignAdoption(strict, [candidate]).kind).toBe("continue");
+  });
+
   it("requires an explicit satisfaction result when the frame declares a success rate", () => {
     const policy = { ...targeted, targetSatisfaction: { minimumCandidateRate: 0.9 } };
     const candidate = round({

@@ -55,6 +55,31 @@ export type CampaignGateAnswer =
 function winning(round: CampaignRound, frame: CampaignFrame): boolean {
   const v = round.verdict;
   if (!v.comparable) return false;
+  if (frame.nonInferiority !== undefined) {
+    const policy = frame.nonInferiority;
+    const proof = v.nonInferiority;
+    const ids = frame.scenarios.filter((s) => s.heldOut).map((s) => s.id);
+    if (
+      proof?.status !== "non_inferior" ||
+      proof.policyDigest !== contentDigest(frame.nonInferiority) ||
+      ids.length === 0 ||
+      proof.cases.length !== ids.length ||
+      !ids.every((id) =>
+        proof.cases.some(
+          (c) =>
+            c.caseId === id &&
+            c.status === "non_inferior" &&
+            c.lowerDelta !== undefined &&
+            c.lowerDelta >= -policy.margin &&
+            c.upperDelta !== undefined &&
+            c.upperDelta >= c.lowerDelta &&
+            c.baselineTrials >= policy.minimumTrials &&
+            c.candidateTrials >= policy.minimumTrials,
+        ),
+      )
+    )
+      return false;
+  }
   const held = v.heldOut;
   if (held === undefined) return false;
   // ── …AND THE CANDIDATE'S OWN ACCOUNT HAS TO HOLD UP (arch-review 71 P1-evolution) ─────────────────

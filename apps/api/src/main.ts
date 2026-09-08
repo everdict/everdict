@@ -968,6 +968,7 @@ async function main(): Promise<void> {
   });
 
   const scorecardService = buildScorecard({
+    campaigns: campaignStore,
     environmentRegistry,
     publicationOperations: publicationOperationStore,
     publisherId: REPLICA_ID,
@@ -1881,6 +1882,7 @@ async function main(): Promise<void> {
   // the in-process TTL reaper half (the durable reaper rung survives a process death). Sits BELOW the
   // capability service because agent worlds (W1) publish snapshots through it.
   const sandboxSessions = buildSandboxSessions({
+    campaigns: campaignService,
     store,
     trajectories: trajectoryStore,
     events: lateEvents,

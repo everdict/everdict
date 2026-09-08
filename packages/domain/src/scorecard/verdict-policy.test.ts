@@ -42,6 +42,7 @@ describe("evaluateVerdict — the verdict explains itself", () => {
     });
     expect(verdict).toBe(true);
     expect(basis).toEqual({
+      policyDigest: verdictPolicyDigest(DEFAULT_VERDICT_POLICY),
       authority: "ground_truth",
       aggregation: "priority",
       deciders: [{ metric: "state", graderId: "state", pass: true }],
@@ -277,11 +278,32 @@ describe("composeVerdictPolicy — a custom grader gains authority by DECLARING 
     const policy = composeVerdictPolicy([{ id: "schema_valid", authority: "objective" }]);
     expect(policy.id).toBe("composed");
     // the declared metric now OVERRULES a judge (objective rung > judge rung)
-    const { verdict, basis } = evaluateVerdict({ scores: [s("schema_valid", false), s("judge:q", true)] }, policy);
+    const { verdict, basis } = evaluateVerdict(
+      {
+        scores: [
+          {
+            ...s("schema_valid", false),
+            measurement: { producer: { kind: "grader", id: "schema_valid" }, metric: "schema_valid" },
+          },
+          s("judge:q", true),
+        ],
+      },
+      policy,
+    );
     expect(verdict).toBe(false);
     expect(basis?.authority).toBe("objective");
     // under the default (undeclared) policy the same metric only reaches the fallback
-    expect(evaluateVerdict({ scores: [s("schema_valid", false), s("judge:q", true)] }).verdict).toBe(true);
+    expect(
+      evaluateVerdict({
+        scores: [
+          {
+            ...s("schema_valid", false),
+            measurement: { producer: { kind: "grader", id: "schema_valid" }, metric: "schema_valid" },
+          },
+          s("judge:q", true),
+        ],
+      }).verdict,
+    ).toBe(true);
   });
 
   it("a declared ground truth never OUTRANKS the built-ins — additions append after state/tests_pass", () => {

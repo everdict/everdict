@@ -2066,6 +2066,35 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     doneWhen: ["the two cases pass"],
   };
 
+  it("a campaign delegate receives a platform view and scoped credential, never a caller brief", async () => {
+    const fake = fakeDelegationProfile();
+    const grant = {
+      token: "cpe_scoped",
+      expiresAt: "2026-09-08T01:00:00.000Z",
+      campaignId: "campaign",
+      view: {
+        campaignId: "campaign",
+        seq: 0,
+        subject: { type: "harness" as const, id: "h", baselineVersion: "1" },
+        targets: [{ caseId: "allowed", diagnoses: [] }],
+      },
+      instructions: "scoped",
+    };
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      campaigns: { issueEvidenceGrant: async () => grant },
+    });
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, campaignId: "campaign" });
+    const context = driver.written.find((w) => w.path.endsWith("/BRIEF.md"));
+    const credential = driver.written.find((w) => w.path.endsWith("/CAMPAIGN_EVIDENCE.json"));
+    expect(context?.data).toContain("allowed");
+    expect(context?.data).not.toContain("cpe_scoped");
+    expect(credential?.data).toContain("cpe_scoped");
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, campaignId: "campaign", brief }),
+    ).rejects.toThrow(/platform-authored/);
+  });
+
   it("boots the profile's environment, IS a conversation, and seeds instructions + brief before the record", async () => {
     const fake = fakeDelegationProfile();
     const { service, driver, runStore } = build({ resolveDelegationProfile: async () => fake.resolved });

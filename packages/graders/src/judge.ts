@@ -308,6 +308,7 @@ export class JudgeGrader implements Grader {
     const overall: MeasuredScore = {
       graderId: this.id,
       metric: JUDGE_OVERALL_METRIC,
+      measurement: { producer: { kind: "grader", id: this.id }, metric: "judge" },
       value: verdict.score,
       pass: verdict.pass,
       detail: consistency
@@ -328,13 +329,21 @@ export class JudgeGrader implements Grader {
         return {
           graderId: this.id,
           metric: this.criterionMetric(c.id),
+          measurement: { producer: { kind: "grader", id: this.id }, metric: "judge", criterion: c.id },
           status: "unmeasured",
           reason: "unsupported", // this Judge impl cannot score criteria — configuration, not a transient error
           retryable: false,
           detail: "skipped: criterion missing from the verdict",
         };
       }
-      return { graderId: this.id, metric: this.criterionMetric(c.id), value: v.score, pass: v.pass, detail: v.reason };
+      return {
+        graderId: this.id,
+        metric: this.criterionMetric(c.id),
+        measurement: { producer: { kind: "grader", id: this.id }, metric: "judge", criterion: c.id },
+        value: v.score,
+        pass: v.pass,
+        detail: v.reason,
+      };
     });
     return [overall, ...perCriterion];
   }

@@ -182,7 +182,7 @@ function expectedJudgmentUnits(input: Pick<ScoringPassInput, "results">): number
   const pairs = new Set<string>();
   for (const result of input.results)
     for (const score of result.scores ?? []) {
-      const judgeId = judgeFamilyOf(score.metric);
+      const judgeId = judgeFamilyOf(score);
       if (judgeId !== undefined) pairs.add(JSON.stringify([childKey(result.caseId, result.trial), judgeId]));
     }
   return pairs.size;
@@ -402,7 +402,7 @@ export function judgmentReceiptsFromPlane(
       //
       // The first segment is exact rather than a heuristic: `JudgeIdSchema` forbids ':' in a judge id, and the
       // selection surface refuses one at submit, so everything after the first colon is criterion.
-      const judgeId = judgeFamilyOf(score.metric);
+      const judgeId = judgeFamilyOf(score);
       if (judgeId === undefined) continue;
       const rows = byJudge.get(judgeId) ?? [];
       rows.push(score);

@@ -214,6 +214,19 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
       },
     });
     const campaign = await campaigns.open("acme", { issueId: "iss-9", frame }, "alice");
+    for (const side of ["baseline", "candidate"] as const)
+      await store.reserveEvaluation({
+        tenant: "acme",
+        campaignId: campaign.id,
+        requestId: "environment-e2",
+        candidateVersion: "2",
+        side,
+        scorecardId: side === "baseline" ? "b" : "c",
+        requestDigest: side,
+        at: "2026-09-08T00:00:00.000Z",
+        caseIds: frame.scenarios.map((s) => s.id),
+        trials: frame.trialsPerCase,
+      });
     await campaigns.logRound(
       "acme",
       campaign.id,
