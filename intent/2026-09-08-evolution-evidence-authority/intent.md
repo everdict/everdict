@@ -1,6 +1,7 @@
 # Intent: complete the remaining evolution evidence and authority work
 
-Author: maintainer (requested in conversation). Status: accepted
+Author: maintainer (requested in conversation). Status: shipped
+Shipped: f6e3ba2b
 Design: none — the accepted review and evolution-review-follow-up document specify the required boundaries; the implementation plan records their concrete integration.
 
 ## Problem

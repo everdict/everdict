@@ -59,5 +59,28 @@ exactly 8 are admitted and the family remains at its limit of 10.
 The non-inferiority counterexample was observed red before its gate was added (a round
 without the declared assessment adopted). Protocol mutation rungs neutralize family
 consumption, non-inferiority enforcement, MCP tool restriction and session ownership.
-Their executed outcomes and final repository checks are recorded after the implementation
-commit so the mutation runner can restore the exact committed source.
+They were executed after the implementation commit so the mutation runner could restore
+the exact committed source.
+
+## Executed results
+
+Implementation: `891eb99b`. Verification completed on 2026-09-08.
+
+- Full default suite: 8,464 passed and 438 skipped across 29 packages; all 51 Turbo tasks
+  succeeded. Skipped infrastructure-dependent tests are not counted as executed coverage.
+- Real PostgreSQL campaign trust suite: all 6 tests passed, including the shared-family
+  reservation race, append/close competition and atomic outbox/reporting.
+- Full build: 29 tasks passed. Typecheck: 51 tasks passed. Format, lint, docs-check,
+  intent-chain, migrations (214 files) and whitespace checks passed.
+- `protocol-mutations --only evolution-review`: all 4 selected mutations caused assertion
+  failures, with no collection errors or compiler-only outcomes. Removing session ownership
+  caused 1 failed assertion; removing family consumption caused 2; removing non-inferiority
+  enforcement caused 1; removing scoped MCP tool registration caused 1. This is the selected
+  4-rung subset of the 317-rung catalog, not a claim that the whole catalog ran.
+- The mutation runner restored all source files to the implementation commit; the worktree
+  was clean before this verification record was added.
+
+The initial non-inferiority test and the historical observation-digest regression were both
+observed failing against the preceding behavior, then passed with their respective fixes.
+Migration 0214 is included for deployment; no production migration, push or deployment was
+performed.
