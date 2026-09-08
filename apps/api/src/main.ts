@@ -1395,7 +1395,7 @@ async function main(): Promise<void> {
     // declared a scope then rejects every round as unverifiable, which is the fail-closed answer (L2) — never
     // an empty listing that would read as "the change was clean".
     changes: {
-      pullRequestFiles: async (tenant, repository, pullNumber) => {
+      pullRequestFiles: async (tenant, repository, pullNumber, commits) => {
         if (githubAppService === undefined)
           return readUnknown(
             "no workspace GitHub App is configured on this deployment, so a pull request's changed files cannot be read",
@@ -1403,8 +1403,9 @@ async function main(): Promise<void> {
         return readOrUnknown(async () => {
           const listing = await githubAppService.listPullRequestChanges(tenant, repository, pullNumber, {
             maxFiles: 100,
+            commits,
           });
-          return { paths: listing.files.map((f) => f.filename), complete: !listing.truncated };
+          return { paths: listing.files.map((f) => f.filename), complete: !listing.truncated, ...commits };
         }, `pull request #${pullNumber} of ${repository}`);
       },
     },

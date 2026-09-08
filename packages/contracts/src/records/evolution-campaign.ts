@@ -3,7 +3,7 @@ import { z } from "zod";
 // ── THE CAMPAIGN IS A SETTLEMENT (docs/architecture/evolution-lineage.md, Track D) ───────────────────
 //
 // The agent-evolve loop's discipline — frozen scenario/judge/trial frame, a budget stated up front, stop
-// after consecutive rejected rounds, adopt only on significant-improvement-with-zero-regressions — was
+// after consecutive rejected rounds, adopt only on significant improvement with no detected significant regressions — was
 // prose in a skill body, enforced by nobody, journaled in a markdown log the loop itself edits. A decision
 // (adoption) rested on a journal. This record is the settlement half: the FRAME is frozen at open and
 // referenced by digest thereafter (L4 — the loop cannot weaken its own judges, scenarios or thresholds
@@ -21,6 +21,25 @@ export const CampaignSubjectSchema = z.object({
   baselineVersion: z.string().min(1).max(100),
 });
 export type CampaignSubject = z.infer<typeof CampaignSubjectSchema>;
+
+export const OracleCheckReceiptSchema = z.object({
+  repository: z.string().min(1),
+  baselineSha: z.string().min(1),
+  candidateSha: z.string().min(1),
+  pathsDigest: z.string().min(1),
+  complete: z.boolean(),
+});
+export type OracleCheckReceipt = z.infer<typeof OracleCheckReceiptSchema>;
+
+export const EvaluatedSubjectIdentitySchema = z.object({
+  type: CampaignSubjectSchema.shape.type,
+  id: z.string().min(1),
+  version: z.string().min(1),
+  documentKind: z.enum(["harness", "environment"]),
+  // Missing in older seals means unverified, never a digest from another document.
+  digest: z.string().min(1).optional(),
+});
+export type EvaluatedSubjectIdentity = z.infer<typeof EvaluatedSubjectIdentitySchema>;
 
 // The frozen half of the campaign. Everything the adoption decision depends on is HERE, at open — a value
 // that arrived later would be a rule the loop chose after seeing the data.
@@ -54,8 +73,10 @@ const CampaignFrameShape = z.object({
   // failed — "the actual issue was resolved" was never asked. `targets` are scenario ids the loop is briefed on
   // and optimizes against, so they are NOT held-out (a case the loop is shown is not a generalization
   // population by any meaning of the word); the gate requires every one of them to flip, and the held-out
-  // block to regress nowhere. Default empty = the aggregate rule, which every campaign written before had.
+  // block to contain no detected significant regressions. Default empty = the aggregate rule, which every campaign written before had.
   targets: z.array(z.string().min(1).max(300)).max(500).default([]),
+  // Absent preserves historical significant-improvement semantics.
+  targetSatisfaction: z.object({ minimumCandidateRate: z.number().min(0).max(1) }).optional(),
   // ── DOES THIS EXAM RESPOND TO A CORRECT ANSWER? (the positive control) ───────────────────────────
   //
   // Everything else the frame freezes is about the COMPARISON — which cases, which judges, how many trials,
@@ -570,11 +591,14 @@ export const CampaignRoundSchema = z.object({
     // existed; a read of such a round says so rather than inventing one.
     evidence: z.object({ key: z.string().min(1), digest: z.string().min(1) }).optional(),
     // The frame's `targets`, answered one by one (evolution-routing-spec.md §3): `flipped` improved significantly
-    // on the candidate, `unflipped` did not. Present exactly when the frame declares targets; absent on rounds
+    // on the candidate and met any declared success-rate threshold; `unflipped` did not.
+    // `improved` and `satisfied` retain the separate claims. Present when the frame declares targets; absent on rounds
     // of a frame without them and on rows written before the field existed — the gate reads its presence as the
     // frame's, never as the data's.
     targets: z
       .object({
+        improved: z.array(z.string()).optional(),
+        satisfied: z.array(z.string()).optional(),
         flipped: z.array(z.string().min(1).max(300)),
         unflipped: z.array(z.string().min(1).max(300)),
       })
@@ -594,6 +618,7 @@ export const CampaignRoundSchema = z.object({
     candidateSource: CandidateSourceSchema.optional(),
     // …and which oracle paths the candidate's pull request touched, when the frame declared a scope and the
     // change fell inside it (D3). Present only on such a round; the round is then `comparable: false`.
+    oracleReceipt: OracleCheckReceiptSchema.optional(),
     oracleTouched: z.array(z.string().max(300)).optional(),
     // …and what the judges said about the candidate's account of itself (arch-review 71 P1-evolution).
     // Counted over the CANDIDATE side: the question is whether the thing being adopted tells the truth about
@@ -948,15 +973,31 @@ export const RoundEvidenceSchema = z.object({
   campaignId: z.string().min(1),
   seq: z.number().int().min(1),
   frameDigest: z.string().min(1),
-  baseline: z.object({ scorecardId: z.string().min(1), version: z.string().min(1) }),
-  candidate: z.object({ scorecardId: z.string().min(1), version: z.string().min(1) }),
+  baseline: z.object({
+    scorecardId: z.string().min(1),
+    version: z.string().min(1),
+    subject: EvaluatedSubjectIdentitySchema.optional(),
+  }),
+  candidate: z.object({
+    scorecardId: z.string().min(1),
+    version: z.string().min(1),
+    subject: EvaluatedSubjectIdentitySchema.optional(),
+  }),
   cases: z.array(RoundEvidenceCaseSchema),
   aggregate: z.object({
     comparable: z.boolean(),
     significantImprovements: z.number().int().min(0),
     significantRegressions: z.number().int().min(0),
     heldOut: z.object({ improvements: z.number().int().min(0), regressions: z.number().int().min(0) }).optional(),
-    targets: z.object({ flipped: z.array(z.string()), unflipped: z.array(z.string()) }).optional(),
+    targets: z
+      .object({
+        flipped: z.array(z.string()),
+        unflipped: z.array(z.string()),
+        improved: z.array(z.string()).optional(),
+        satisfied: z.array(z.string()).optional(),
+      })
+      .optional(),
+    oracleReceipt: OracleCheckReceiptSchema.optional(),
     detail: z.string().optional(),
   }),
   at: z.string(),

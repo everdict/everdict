@@ -203,6 +203,32 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
           );
         },
         async listPullRequestFiles(repository, pullNumber, opts) {
+          if (opts.commits) {
+            const { baselineSha, candidateSha } = opts.commits;
+            if (![baselineSha, candidateSha].every((sha) => /^[a-f0-9]{40}$/i.test(sha)))
+              throw new Error("oracle comparison requires full commit SHAs");
+            const comparison = z
+              .object({
+                files: z.array(
+                  z.object({
+                    filename: z.string(),
+                    previous_filename: z.string().optional(),
+                    status: z.string(),
+                    additions: z.number(),
+                    deletions: z.number(),
+                    patch: z.string().optional(),
+                  }),
+                ),
+              })
+              .parse(await (await gh(`${base}/repos/${repository}/compare/${baselineSha}...${candidateSha}`)).json());
+            // GitHub caps comparison files at 300. At the cap, completeness is unknown.
+            // Include the old name too: moving a protected file is an oracle change.
+            const files = comparison.files.flatMap((f) => [
+              f,
+              ...(f.previous_filename ? [{ ...f, filename: f.previous_filename }] : []),
+            ]);
+            return { files, changedFiles: comparison.files.length >= 300 ? files.length + 1 : files.length };
+          }
           const perPage = Math.min(100, Math.max(1, opts.maxFiles));
           // The PR itself carries changed_files — the honest denominator for "is this the whole diff".
           const pr = z

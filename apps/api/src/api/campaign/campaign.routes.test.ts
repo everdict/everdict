@@ -954,8 +954,8 @@ describe("campaign routes — an environment subject", () => {
       },
     };
     const { app, logged } = await openAndLog(bare, "2.0.0");
-    expect(logged.statusCode).toBe(400);
-    expect(logged.json()).toMatchObject({ message: expect.stringContaining("sealed no version of environment") });
+    expect(logged.statusCode).toBe(409);
+    expect(logged.json()).toMatchObject({ message: expect.stringContaining("environment seal is missing") });
     await app.close();
   });
 });

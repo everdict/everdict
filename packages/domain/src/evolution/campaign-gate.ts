@@ -90,7 +90,8 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
   // ── THE ISSUE'S OWN CASES HAVE TO FLIP (docs/architecture/evolution-routing-spec.md §3) ───────────
   //
   // A frame with `targets` asks a sharper question than "did anything held-out improve": did THESE cases, the
-  // ones the issue named, now pass — and did nothing held-out regress. The aggregate `improvements >= 1` is
+  // ones the issue named, meet the target policy — with no detected significant held-out regression.
+  // This is not a non-inferiority claim. The aggregate `improvements >= 1` is
   // replaced by the targets, because a narrow, correct fix improves what it was asked to and nothing else, and
   // that IS the adoption the program describes. Read from the POLICY (the frame), never from the data: a round
   // that carries no `targets` block under a frame that declares them is a round that could not answer, and a
@@ -98,6 +99,10 @@ function winning(round: CampaignRound, frame: CampaignFrame): boolean {
   if (frame.targets.length > 0) {
     const t = v.targets;
     if (t === undefined) return false;
+    if (frame.targetSatisfaction !== undefined) {
+      const satisfied = new Set(t.satisfied ?? []);
+      if (!frame.targets.every((id) => satisfied.has(id))) return false;
+    }
     const flipped = new Set(t.flipped);
     if (!frame.targets.every((id) => flipped.has(id))) return false;
     return held.regressions === 0;

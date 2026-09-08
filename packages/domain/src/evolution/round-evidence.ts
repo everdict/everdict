@@ -1,4 +1,4 @@
-import type { RoundEvidence, RoundEvidenceCase } from "@everdict/contracts";
+import type { EvaluatedSubjectIdentity, RoundEvidence, RoundEvidenceCase } from "@everdict/contracts";
 import { type HarnessSlot, type JudgedDiagnosis, attributeCase } from "./diagnosis.js";
 
 // ── THE ROUND'S EVIDENCE, DERIVED (docs/architecture/benchmark-evidence-spec.md §3) ──────────────────
@@ -35,6 +35,7 @@ export interface RoundEvidenceInput {
 export interface RoundEvidenceSide {
   scorecardId: string;
   version: string;
+  subject?: EvaluatedSubjectIdentity;
   // The side's per-case results, when the record carries them — the trace coordinates a reader follows, and the
   // diagnoses the SERVICE already parsed off the result's measured judge scores (evidence spec §2). Parsed there,
   // not here: a domain file may not read a raw score array (the measured-gate guard), and the service is the one
@@ -68,7 +69,7 @@ export function roundEvidenceOf(input: RoundEvidenceInput): RoundEvidence {
       .filter((r) => r.caseId === c.caseId)
       .flatMap((r) => r.diagnoses ?? []);
     const attribution =
-      verdict === "improved"
+      verdict === "improved" && !targets.has(c.caseId)
         ? undefined
         : input.slots === undefined
           ? {
@@ -99,8 +100,16 @@ export function roundEvidenceOf(input: RoundEvidenceInput): RoundEvidence {
     campaignId: input.campaignId,
     seq: input.seq,
     frameDigest: input.frameDigest,
-    baseline: { scorecardId: input.baseline.scorecardId, version: input.baseline.version },
-    candidate: { scorecardId: input.candidate.scorecardId, version: input.candidate.version },
+    baseline: {
+      scorecardId: input.baseline.scorecardId,
+      version: input.baseline.version,
+      ...(input.baseline.subject ? { subject: input.baseline.subject } : {}),
+    },
+    candidate: {
+      scorecardId: input.candidate.scorecardId,
+      version: input.candidate.version,
+      ...(input.candidate.subject ? { subject: input.candidate.subject } : {}),
+    },
     cases,
     aggregate: input.verdict,
     at: input.at,

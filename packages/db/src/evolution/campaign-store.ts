@@ -10,11 +10,12 @@ import {
   type CampaignClose,
   type CampaignRound,
   type CampaignState,
+  ConflictError,
   type EvolutionCampaignRecord,
   EvolutionCampaignRecordSchema,
 } from "@everdict/contracts";
 import { contentDigest } from "@everdict/domain";
-import type { SqlClient } from "../client.js";
+import { type SqlClient, withTransaction } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 
 // ── EvolutionCampaignStore impls (docs/architecture/evolution-lineage.md, Track D) ───────────────────
@@ -23,6 +24,46 @@ import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 // so a unit test over the in-memory store exercises the refusal a production Postgres would give (rule
 // `testing`: a guard the in-memory twin does not have is a guard no unit test can see). Facts ride the
 // same write via the E0 outbox `events` parameter, exactly as the tracker stores carry theirs.
+
+// Reserve every open campaign's remaining allocation before its evaluations can start.
+// Closed campaigns retain their spent rounds. The database serializes this decision with create.
+function assertFamilyCapacity(record: EvolutionCampaignRecord, records: EvolutionCampaignRecord[]): void {
+  if (!record.frame.continues) return;
+  const byId = new Map(records.map((r) => [r.id, r]));
+  let root = record.frame.continues;
+  const visited = new Set<string>();
+  while (true) {
+    if (visited.has(root)) throw new ConflictError("CONFLICT", {}, "cyclic experiment family");
+    visited.add(root);
+    const parent = byId.get(root);
+    if (!parent) throw new ConflictError("CONFLICT", {}, "experiment family predecessor is missing");
+    if (!parent.frame.continues) break;
+    root = parent.frame.continues;
+  }
+  const family = new Set([root]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of records)
+      if (r.frame.continues && family.has(r.frame.continues) && !family.has(r.id)) {
+        family.add(r.id);
+        grew = true;
+      }
+  }
+  const limit = byId.get(root)?.frame.significance.heldOutFamilySize;
+  const reserved = records
+    .filter((r) => family.has(r.id))
+    .reduce((n, r) => n + (r.state === "open" ? r.frame.budget.maxRounds : r.rounds.length), 0);
+  if (
+    limit === undefined ||
+    record.frame.significance.heldOutFamilySize !== limit ||
+    reserved + record.frame.budget.maxRounds > limit
+  )
+    throw new ConflictError(
+      "CONFLICT",
+      { reserved, limit },
+      "experiment family has insufficient unreserved held-out budget",
+    );
+}
 
 export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
   private readonly byId = new Map<string, EvolutionCampaignRecord>();
@@ -33,6 +74,10 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
 
   async create(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void> {
     if (this.byId.has(record.id)) throw new Error(`campaign ${record.id} already exists`);
+    assertFamilyCapacity(
+      record,
+      [...this.byId.values()].filter((r) => r.tenant === record.tenant),
+    );
     this.byId.set(record.id, record);
     if (events) this.events.push(...events);
   }
@@ -66,6 +111,8 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     if (!record) return { kind: "absent" };
     if (record.state !== "open") return { kind: "terminal", state: record.state };
     if (record.rounds.length !== expectedRounds)
+      return { kind: "conflict", expected: expectedRounds, actual: record.rounds.length };
+    if (record.rounds.length >= record.frame.budget.maxRounds)
       return { kind: "conflict", expected: expectedRounds, actual: record.rounds.length };
     const rounds = [...record.rounds, round];
     this.byId.set(id, { ...record, rounds, updatedAt: round.at });
@@ -259,6 +306,20 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
   constructor(private readonly client: SqlClient) {}
 
   async create(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void> {
+    if (record.frame.continues) {
+      await withTransaction(this.client, "reserve experiment family budget", async (tx) => {
+        // A separate statement after the lock sees the preceding creator's committed reservation.
+        await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`campaign-family:${record.tenant}`]);
+        const store = new PgEvolutionCampaignStore(tx);
+        assertFamilyCapacity(record, await store.list(record.tenant));
+        await store.insert(record, events);
+      });
+      return;
+    }
+    await this.insert(record, events);
+  }
+
+  private async insert(record: EvolutionCampaignRecord, events?: OutboxEvent[]): Promise<void> {
     const base = [
       record.id,
       record.tenant,
@@ -329,6 +390,7 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
          UPDATE everdict_evolution_campaigns
          SET rounds = rounds || $3::jsonb, updated_at = $4::timestamptz
          WHERE tenant=$1 AND id=$2 AND state='open' AND jsonb_array_length(rounds) = $5
+           AND jsonb_array_length(rounds) < (frame->'budget'->>'maxRounds')::int
          RETURNING jsonb_array_length(rounds) AS n
        )${
          ev !== undefined

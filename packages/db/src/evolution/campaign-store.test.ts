@@ -114,6 +114,18 @@ const CLOSE = {
 };
 
 describe("InMemoryEvolutionCampaignStore — the guards answer, they never assume", () => {
+  it("reserves open siblings' full budgets atomically", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    const familyFrame = { ...frame, significance: { ...frame.significance, heldOutFamilySize: 10 } };
+    await store.create(record({ id: "root", state: "adopted", rounds: [round(1), round(2)], frame: familyFrame }));
+    const sibling = (id: string) =>
+      record({ id, frame: { ...familyFrame, continues: "root", budget: { maxRounds: 8 } } });
+    const outcomes = await Promise.allSettled([store.create(sibling("B")), store.create(sibling("C"))]);
+    expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    expect(outcomes.filter((r) => r.status === "rejected")).toHaveLength(1);
+    expect(await store.list("acme")).toHaveLength(2);
+  });
+
   it("appends only against the expected round count — a stale writer gets conflict, not last-write-wins", async () => {
     const store = new InMemoryEvolutionCampaignStore();
     await store.create(record());
@@ -319,7 +331,17 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
   const snapshot = (
     diff: CampaignComparison,
     over: Partial<Pick<CampaignSnapshot, "baseline" | "candidate">> = {},
-  ): CampaignSnapshot => ({ diff, baseline: side("1.0.0"), candidate: side("1.0.1"), ...over });
+  ): CampaignSnapshot => ({
+    diff,
+    baseline: {
+      record: {
+        ...side("1.0.0").record,
+        origin: { source: "github-actions", repo: "acme/harness", sha: "baseline-sha" },
+      },
+    },
+    candidate: side("1.0.1"),
+    ...over,
+  });
 
   const LOG = {
     hypothesis: "shorter instructions",
@@ -327,6 +349,74 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     baselineScorecardId: "sc-base",
     candidateScorecardId: "sc-win",
   };
+
+  it("environment evidence and adoption proof retain the evaluated environment identity", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    const svc = service(store);
+    const envFrame: CampaignFrame = { ...frame, subject: { type: "environment", id: "world", baselineVersion: "1" } };
+    const rec = await svc.open("acme", { issueId: "iss_1", frame: envFrame }, "alice");
+    const envSide = (version: string) => ({
+      record: {
+        harness: { id: "fixed", version: "1" },
+        manifest: {
+          harness: { specDigest: "sha256:harness" },
+          environments: { c1: { ref: `world@${version}`, digest: `sha256:world-${version}` } },
+        },
+      },
+    });
+    snapshots.set("sc-env", snapshot(comparison(), { baseline: envSide("1"), candidate: envSide("2") }));
+    const logged = await svc.logRound(
+      "acme",
+      rec.id,
+      { ...LOG, candidateScorecardId: "sc-env", candidateVersion: "2" },
+      "alice",
+    );
+    expect(logged.round.verdict.candidateSpecDigest).toBe("sha256:world-2");
+    const evidence = await svc.roundEvidence("acme", rec.id, 1);
+    expect(evidence).toMatchObject({
+      baseline: { version: "1" },
+      candidate: {
+        version: "2",
+        subject: { type: "environment", id: "world", documentKind: "environment", digest: "sha256:world-2" },
+      },
+    });
+    await svc.settle("acme", rec.id, "alice");
+    expect((await store.forCampaign("acme", rec.id))?.proof.candidate).toMatchObject({
+      type: "environment",
+      id: "world",
+      version: "2",
+      specDigest: "sha256:world-2",
+    });
+  });
+
+  it("a significant improvement below the declared success rate is improved but not satisfied", async () => {
+    const store = new InMemoryEvolutionCampaignStore();
+    const svc = service(store);
+    const rec = await svc.open(
+      "acme",
+      {
+        issueId: "iss_1",
+        frame: {
+          ...frame,
+          scenarios: [...frame.scenarios, { id: "target", heldOut: false }],
+          targets: ["target"],
+          targetSatisfaction: { minimumCandidateRate: 0.9 },
+        },
+      },
+      "alice",
+    );
+    const diff = comparison();
+    diff.trials?.cases.push(trialCase("target", 0.2, true));
+    snapshots.set("sc-target-rate", snapshot(diff));
+    const result = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-target-rate" }, "alice");
+    expect(result.round.verdict.targets).toMatchObject({
+      improved: ["target"],
+      satisfied: [],
+      flipped: [],
+      unflipped: ["target"],
+    });
+    expect(result.answer.kind).toBe("continue");
+  });
 
   it("open freezes the frame with a digest and journals into a REAL issue only", async () => {
     const store = new InMemoryEvolutionCampaignStore();
@@ -1157,6 +1247,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       snapshots.set(
         "sc-built",
         snapshot(comparison(), {
+          baseline: {
+            record: { ...side("1.0.0").record, origin: { source: "api", repo: "acme/scaffold", sha: "baseline-sha" } },
+          },
           candidate: {
             record: {
               ...side("1.0.1").record,
@@ -1203,12 +1296,17 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const scopedFrame: CampaignFrame = { ...frame, oracleScope: ["tests/", "datasets/**"] };
     const prReader = (files: Record<number, string[]>) => ({
       calls: [] as Array<{ repo: string; pr: number }>,
-      async pullRequestFiles(_tenant: string, repo: string, pr: number) {
+      async pullRequestFiles(
+        _tenant: string,
+        repo: string,
+        pr: number,
+        commits: { baselineSha: string; candidateSha: string },
+      ) {
         this.calls.push({ repo, pr });
         const paths = files[pr];
         return paths === undefined
           ? { kind: "absent" as const }
-          : { kind: "read" as const, value: { paths, complete: true } };
+          : { kind: "read" as const, value: { paths, complete: true, ...commits } };
       },
     });
     const withLedger = (
@@ -1243,7 +1341,12 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       // The driver submitted the batch itself: an `api` origin with no repository and no pull request.
       snapshots.set(
         "sc-built-nopr",
-        snapshot(comparison(), { candidate: { record: { ...side("1.0.1").record, origin: { source: "api" } } } }),
+        snapshot(comparison(), {
+          baseline: {
+            record: { ...side("1.0.0").record, origin: { source: "api", repo: "acme/scaffold", sha: "baseline-sha" } },
+          },
+          candidate: { record: { ...side("1.0.1").record, origin: { source: "api" } } },
+        }),
       );
       const { round: logged } = await svc.logRound(
         "acme",
@@ -1265,6 +1368,9 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       snapshots.set(
         "sc-built-otherpr",
         snapshot(comparison(), {
+          baseline: {
+            record: { ...side("1.0.0").record, origin: { source: "api", repo: "acme/scaffold", sha: "baseline-sha" } },
+          },
           candidate: {
             record: {
               ...side("1.0.1").record,
@@ -1340,7 +1446,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         { ...LOG, candidateScorecardId: "sc-targets" },
         "agent:everdict",
       );
-      expect(logged.verdict.targets).toEqual({ flipped: ["c1"], unflipped: [] });
+      expect(logged.verdict.targets).toEqual({ improved: ["c1"], flipped: ["c1"], unflipped: [] });
       expect(logged.verdict.heldOut).toEqual({ improvements: 1, regressions: 0 });
       // …and a frame without targets records no block at all — absence is the frame's, not the data's.
       const plain = await svc.open("acme", { issueId: "iss_1", frame }, "alice");
@@ -1682,14 +1788,21 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const built = (version: string, over: Partial<typeof origin> = {}) => ({
       record: { ...side(version).record, origin: { ...origin, ...over } },
     });
-    const reader = (files: Record<number, { paths: string[]; complete: boolean } | "absent" | "unknown">) => ({
+    const reader = (
+      files: Record<number, { paths: string[]; complete: boolean; candidateSha?: string } | "absent" | "unknown">,
+    ) => ({
       calls: [] as Array<{ repo: string; pr: number }>,
-      async pullRequestFiles(_tenant: string, repo: string, pr: number) {
+      async pullRequestFiles(
+        _tenant: string,
+        repo: string,
+        pr: number,
+        commits: { baselineSha: string; candidateSha: string },
+      ) {
         this.calls.push({ repo, pr });
         const answer = files[pr];
         if (answer === undefined || answer === "absent") return { kind: "absent" as const };
         if (answer === "unknown") return readUnknown<{ paths: string[]; complete: boolean }>("github said 502");
-        return { kind: "read" as const, value: answer };
+        return { kind: "read" as const, value: { ...commits, ...answer } };
       },
     });
     const withReader = (store: InMemoryEvolutionCampaignStore, changes: ReturnType<typeof reader>) =>
@@ -1745,6 +1858,22 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
       );
       expect(logged.verdict.comparable, logged.verdict.detail).toBe(true);
       expect(logged.verdict.oracleTouched).toBeUndefined();
+      expect(logged.verdict.oracleReceipt).toMatchObject({
+        repository: "acme/harness",
+        baselineSha: "baseline-sha",
+        candidateSha: "abc123",
+        complete: true,
+      });
+    });
+
+    it("rejects a listing for PR head B when the candidate was evaluated at A", async () => {
+      const store = new InMemoryEvolutionCampaignStore();
+      const svc = withReader(store, reader({ 7: { paths: ["src/clean.ts"], complete: true, candidateSha: "head-B" } }));
+      const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
+      snapshots.set("sc-moved-head", snapshot(comparison(), { candidate: built("1.0.1", { sha: "evaluated-A" }) }));
+      const result = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-moved-head" }, "alice");
+      expect(result.round.verdict.comparable).toBe(false);
+      expect(result.round.verdict.detail).toContain("does not attest the evaluated commits");
     });
 
     it("REJECTS as unverifiable when the change cannot be read — no pull request, a truncated listing, a failed read", async () => {

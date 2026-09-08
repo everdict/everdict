@@ -238,7 +238,7 @@ export class GithubAppService {
     workspace: string,
     repository: string,
     pullNumber: number,
-    opts: { maxFiles?: number },
+    opts: { maxFiles?: number; commits?: { baselineSha: string; candidateSha: string } },
     host?: string,
   ): Promise<{ changedFiles: number; files: GithubPullRequestFile[]; truncated: boolean }> {
     const { token, host: resolved } = await this.tokenForRepository(
@@ -250,7 +250,7 @@ export class GithubAppService {
     const maxFiles = Math.min(Math.max(opts.maxFiles ?? 50, 1), 100);
     const { changedFiles, files } = await this.repoOps
       .for(token, resolved)
-      .listPullRequestFiles(repository, pullNumber, { maxFiles });
+      .listPullRequestFiles(repository, pullNumber, { maxFiles, ...(opts.commits ? { commits: opts.commits } : {}) });
     return { changedFiles, files, truncated: files.length < changedFiles };
   }
 

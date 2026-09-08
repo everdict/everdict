@@ -396,6 +396,23 @@ describe("[COUNTEREXAMPLE] a frame with targets adopts only when every target fl
     ]);
     expect(answer.kind, "adopted over an unflipped target").toBe("continue");
   });
+  it("requires an explicit satisfaction result when the frame declares a success rate", () => {
+    const policy = { ...targeted, targetSatisfaction: { minimumCandidateRate: 0.9 } };
+    const candidate = round({
+      significantImprovements: 2,
+      heldOut: { improvements: 0, regressions: 0 },
+      targets: { flipped: ["t1", "t2"], unflipped: [], improved: ["t1", "t2"] },
+    });
+    expect(campaignAdoption(policy, [candidate]).kind).toBe("continue");
+    candidate.verdict.targets = {
+      flipped: ["t1", "t2"],
+      unflipped: [],
+      improved: ["t1", "t2"],
+      satisfied: ["t1", "t2"],
+    };
+    expect(campaignAdoption(policy, [candidate]).kind).toBe("adopt");
+  });
+
   it("every target flipped and nothing held-out regressed: adopt — no held-out improvement is required", () => {
     const answer = campaignAdoption(targeted, [
       round({

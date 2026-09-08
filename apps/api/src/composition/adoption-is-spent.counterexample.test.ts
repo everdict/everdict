@@ -1,6 +1,7 @@
-import type { AdoptionOperationStore } from "@everdict/application-control";
+import { type AdoptionOperationStore, CampaignService } from "@everdict/application-control";
 import type { AdoptionOperation, CampaignAdoptionProof } from "@everdict/contracts";
-import { AgentSpecSchema } from "@everdict/contracts";
+import { AgentSpecSchema, CampaignFrameSchema, EnvironmentSpecSchema, readUnknown } from "@everdict/contracts";
+import { InMemoryCampaignEvidenceStore, InMemoryEvolutionCampaignStore } from "@everdict/db";
 import { contentDigest } from "@everdict/domain";
 import { InMemoryAgentRegistry, InMemoryEnvironmentRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
@@ -131,6 +132,125 @@ const candidateOf = (proof: CampaignAdoptionProof) => ({
 });
 
 describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's authorization", () => {
+  it("evaluates E1 to E2 under one harness and registers the environment proved by that round", async () => {
+    const environments = new InMemoryEnvironmentRegistry();
+    const spec = EnvironmentSpecSchema.parse({
+      id: "world",
+      version: "2",
+      env: { kind: "prompt", context: "new world" },
+    });
+    const baselineSpec = EnvironmentSpecSchema.parse({
+      ...spec,
+      version: "1",
+      env: { kind: "prompt", context: "old world" },
+    });
+    const store = new InMemoryEvolutionCampaignStore();
+    const frame = CampaignFrameSchema.parse({
+      subject: { type: "environment", id: "world", baselineVersion: "1" },
+      scenarios: [
+        { id: "c1", heldOut: true },
+        { id: "c2", heldOut: true },
+      ],
+      trialsPerCase: 5,
+      judges: [],
+      budget: { maxRounds: 2 },
+      significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 },
+      stopAfterRejectedRounds: 2,
+    });
+    const side = (document: typeof spec) => ({
+      record: {
+        harness: { id: "fixed-harness", version: "1" },
+        manifest: {
+          harness: { specDigest: "sha256:fixed-harness" },
+          environments: { c1: { ref: `world@${document.version}`, digest: contentDigest(document) } },
+        },
+      },
+    });
+    const cases = ["c1", "c2"].map((caseId) => ({
+      caseId,
+      baselineRate: 0,
+      candidateRate: 1,
+      baselineTrials: 5,
+      candidateTrials: 5,
+      delta: 1,
+      z: 2,
+      method: "fisher" as const,
+      p: 0.01,
+      significant: true,
+    }));
+    const campaigns = new CampaignService({
+      store,
+      operations: store,
+      evidence: new InMemoryCampaignEvidenceStore(),
+      issues: { get: async () => ({ id: "iss-9" }) },
+      scorecards: { get: async () => undefined },
+      datasets: { get: async () => ({ cases: [] }) },
+      runs: { get: async () => undefined },
+      changes: { pullRequestFiles: async () => readUnknown("unused") },
+      seedProvenance: {
+        seedsOf: async () => ({ kind: "read", value: undefined }),
+        evidenceOf: async () => ({ kind: "read", value: [] }),
+      },
+      shape: { slotsOf: async () => ({ kind: "read", value: [] }) },
+      diffs: {
+        diffSnapshot: async () => ({
+          baseline: side(baselineSpec),
+          candidate: side(spec),
+          diff: {
+            comparability: "full",
+            experiment: { held: [], confounds: [], unverified: [] },
+            trials: {
+              baseline: "b",
+              candidate: "c",
+              zThreshold: 1.96,
+              minDelta: 0,
+              cases,
+              improvements: cases,
+              regressions: [],
+              missing: { casesOnlyInBaseline: [], casesOnlyInCandidate: [], unscoredCases: [] },
+            },
+          },
+        }),
+      },
+    });
+    const campaign = await campaigns.open("acme", { issueId: "iss-9", frame }, "alice");
+    await campaigns.logRound(
+      "acme",
+      campaign.id,
+      { hypothesis: "a better world", candidateVersion: "2", baselineScorecardId: "b", candidateScorecardId: "c" },
+      "alice",
+    );
+    const evidence = await campaigns.roundEvidence("acme", campaign.id, 1);
+    expect(evidence.candidate.subject).toMatchObject({
+      type: "environment",
+      id: "world",
+      version: "2",
+      digest: contentDigest(spec),
+    });
+    await campaigns.settle("acme", campaign.id, "alice");
+    const operation = await store.forCampaign("acme", campaign.id);
+    if (!operation) throw new Error("expected adoption authorization");
+    expect(operation.proof.candidate.specDigest).toBe(contentDigest(spec));
+    await buildCampaignAdoption({
+      operations: store,
+      environments,
+      agents: new InMemoryAgentRegistry(),
+      harnesses: unusedHarnesses(),
+      templates: unusedTemplates(),
+      issues: openIssue(),
+    }).adopt({
+      tenant: "acme",
+      campaignId: campaign.id,
+      proof: operation.proof,
+      candidate: candidateOf(operation.proof),
+      spec,
+      by: "alice",
+      via: "web",
+    });
+    expect(contentDigest(await environments.get("acme", "world", "2"))).toBe(contentDigest(spec));
+    expect((await store.forCampaign("acme", campaign.id))?.state).toBe("registered");
+  });
+
   it("registers the adopted version and SPENDS the authorization, through the production wiring", async () => {
     const proof = proofFor(await measuredDigest());
     const { store, current } = operations(proof);

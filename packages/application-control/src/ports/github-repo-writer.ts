@@ -99,7 +99,7 @@ export interface GithubRepoWriter {
   listPullRequestFiles(
     repository: string,
     pullNumber: number,
-    opts: { maxFiles: number },
+    opts: { maxFiles: number; commits?: { baselineSha: string; candidateSha: string } },
   ): Promise<{ changedFiles: number; files: GithubPullRequestFile[] }>;
   // Merge one pull request into its base. `sha` is the head the caller MEASURED: GitHub refuses the merge when
   // the head has moved since, which is the L1 precondition a code adoption needs (the commit that lands is the

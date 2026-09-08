@@ -110,27 +110,26 @@ function briefableTargets(frame: CampaignRoundBriefInput["frame"]): string[] {
   return frame.targets.filter((id) => !heldOut.has(id));
 }
 
-// A trace reference is a RUN, and only for a target that has not been flipped yet: handing over the trace of a
-// case that already passes spends the delegate's context on work that is done.
+// Only target run references are handed over. Improvement alone does not establish resolution.
 function targetTraces(frame: CampaignRoundBriefInput["frame"], evidence: RoundEvidence): DelegationReference[] {
   const targets = new Set(briefableTargets(frame));
   const refs: DelegationReference[] = [];
   for (const c of evidence.cases) {
-    if (!targets.has(c.caseId) || c.verdict === "improved") continue;
+    if (!targets.has(c.caseId)) continue;
     // The mechanism, in the platform's vocabulary: the diagnosis KIND and where it lives. Never the note.
     const mechanism = c.diagnoses
       .map((d) => [d.kind, d.locus?.service, d.locus?.tool, d.locus?.phase].filter((x) => x !== undefined).join("/"))
       .filter((s) => s !== "");
     const slot = c.attribution?.kind === "measured" ? c.attribution.slot : undefined;
     const because = [
-      `case '${c.caseId}' still fails on the candidate`,
+      `candidate behavior for target '${c.caseId}'`,
       ...(mechanism.length > 0 ? [`diagnosed ${[...new Set(mechanism)].join(", ")}`] : []),
       ...(slot !== undefined ? [`attributed to slot '${slot}'`] : []),
     ].join("; ");
     for (const t of c.traces) {
       if (t.side !== "candidate") continue;
       refs.push({ type: "run", id: t.runId, note: because });
-      break; // one trace per case: a second trial of the same failure is the same evidence twice
+      break; // one trace per case: keep the handoff bounded
     }
   }
   return refs;
@@ -213,11 +212,6 @@ export function campaignRoundBrief(input: CampaignRoundBriefInput): DelegationBr
       note: "the baseline — what you are changing, and what the candidate is measured against",
     });
   if (evidence !== undefined) {
-    references.push({
-      type: "scorecard",
-      id: evidence.candidate.scorecardId,
-      note: "the last round's candidate batch — the run this brief's traces come from",
-    });
     references.push(...targetTraces(frame, evidence));
   }
 

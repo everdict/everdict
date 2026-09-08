@@ -74,6 +74,22 @@ describe.skipIf(!TRUST_PG_ENABLED)(
       by: "agent:everdict",
     });
 
+    it("reserves a shared family's open sibling allocations across concurrent creators", async () => {
+      const root = trustId("family");
+      const familyFrame = { ...frame, significance: { ...frame.significance, heldOutFamilySize: 10 } };
+      await store.create({ ...record(root), frame: familyFrame, state: "adopted", rounds: [round(1), round(2)] });
+      const sibling = (id: string) => ({
+        ...record(id),
+        frame: { ...familyFrame, continues: root, budget: { maxRounds: 8 } },
+      });
+      const outcomes = await Promise.allSettled([
+        store.create(sibling(trustId("sibling-b"))),
+        store.create(sibling(trustId("sibling-c"))),
+      ]);
+      expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(outcomes.filter((r) => r.status === "rejected")).toHaveLength(1);
+    });
+
     const event = (id: string, campaignId: string) => ({
       id,
       tenant: "trust",

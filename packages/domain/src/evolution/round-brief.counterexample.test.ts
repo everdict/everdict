@@ -146,14 +146,13 @@ describe("campaignRoundBrief — the handoff the platform authors", () => {
     expect(text).not.toMatch(/held-out rationale/);
   });
 
-  it("hands over the traces of targets that are STILL failing, one each, and not the ones already flipped", () => {
+  it("hands over target traces even after improvement, without a full scorecard capability", () => {
     const refs = campaignRoundBrief(input()).references;
     const runs = refs.filter((r) => r.type === "run").map((r) => r.id);
-    expect(runs).toEqual(["run_cand_open"]); // one per case; `run_cand_open_2` is the same failure twice
-    expect(runs).not.toContain("run_cand_done"); // a flipped target spends context on finished work
+    expect(runs).toEqual(["run_cand_open", "run_cand_done"]); // one per case; `run_cand_open_2` is the same failure twice
     expect(refs.some((r) => r.type === "issue" && r.id === "iss_1")).toBe(true);
     expect(refs.some((r) => r.type === "harness" && r.version === "1.0.0")).toBe(true);
-    expect(refs.some((r) => r.type === "scorecard" && r.id === "sc_cand")).toBe(true);
+    expect(refs.some((r) => r.type === "scorecard")).toBe(false);
   });
 
   it("states a finish line the delegate can actually check, and never the scorecard", () => {

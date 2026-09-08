@@ -6,7 +6,9 @@ import type {
   CaseResult,
   DelegationBrief,
   DomainFact,
+  EvaluatedSubjectIdentity,
   EvolutionCampaignRecord,
+  OracleCheckReceipt,
   ReadResult,
   RoundEvidence,
   VerdictPolicy,
@@ -100,7 +102,7 @@ export interface CampaignComparisonSide {
     // …and WHICH ENVIRONMENT DOCUMENT each referencing case ran against (harness-definability-spec.md §2),
     // which is where an environment campaign's treatment coordinates live: the harness stamp names the
     // harness, so a subject that is not the harness has to be read from the seal.
-    manifest?: { harness?: { specDigest?: string }; environments?: Record<string, { ref: string }> };
+    manifest?: { harness?: { specDigest?: string }; environments?: Record<string, { ref: string; digest?: string }> };
     // ── WHERE THE BATCH SAYS IT CAME FROM (docs/architecture/code-evolution-loop.md, D4) ──────────
     //
     // The scorecard's trigger provenance: `source` is stamped server-side from the submitter's credential, the
@@ -115,6 +117,33 @@ export interface CampaignComparisonSide {
       runUrl?: string;
       pinOverrides?: Record<string, string>;
     };
+  };
+}
+
+// Resolve the treatment from the evaluated seal, never from a later registry read.
+function evaluatedSubjectOf(side: CampaignComparisonSide, subject: CampaignFrame["subject"]): EvaluatedSubjectIdentity {
+  if (subject.type !== "environment")
+    return {
+      type: subject.type,
+      id: subject.id,
+      version: side.record.harness.version,
+      documentKind: "harness",
+      digest: side.record.manifest?.harness?.specDigest,
+    };
+  const entries = Object.values(side.record.manifest?.environments ?? {}).filter((e) =>
+    e.ref.startsWith(`${subject.id}@`),
+  );
+  const refs = new Set(entries.map((e) => e.ref));
+  const digests = new Set(entries.map((e) => e.digest));
+  const entry = entries[0];
+  if (entry === undefined || refs.size !== 1 || digests.size !== 1)
+    throw new ConflictError("CONFLICT", { subject }, "the evaluated environment seal is missing or inconsistent");
+  return {
+    type: subject.type,
+    id: subject.id,
+    version: entry.ref.slice(subject.id.length + 1),
+    documentKind: "environment",
+    digest: entry.digest,
   };
 }
 
@@ -135,11 +164,16 @@ function unreadableBuildLedger(campaignId: string, candidateVersion: string): (e
 
 // One compared side, in the shape the evidence record reads: the batch id the caller named, the version the
 // record itself says it evaluated, and the run coordinates its results carry.
-function sideOf(scorecardId: string, side: CampaignComparisonSide): RoundEvidenceSide {
+function sideOf(
+  scorecardId: string,
+  side: CampaignComparisonSide,
+  subject: EvaluatedSubjectIdentity,
+): RoundEvidenceSide {
   const results = side.record.scorecard?.results;
   return {
     scorecardId,
-    version: side.record.harness.version,
+    version: subject.version,
+    subject,
     ...(results !== undefined
       ? {
           results: results.map((r) => ({
@@ -333,7 +367,8 @@ export interface CampaignServiceDeps {
       tenant: string,
       repository: string,
       pullNumber: number,
-    ): Promise<ReadResult<{ paths: string[]; complete: boolean }>>;
+      commits: { baselineSha: string; candidateSha: string },
+    ): Promise<ReadResult<{ paths: string[]; complete: boolean; baselineSha?: string; candidateSha?: string }>>;
   };
   // ── THE DELEGATION SESSION A ROUND NAMES (code-evolution-loop.md, delegation budget) ────────────
   //
@@ -353,8 +388,8 @@ export interface CampaignServiceDeps {
 type SeedLeakCheck = { kind: "clean" } | { kind: "leak"; seeds: string[] } | { kind: "unverifiable"; reason: string };
 
 export type OracleCheck =
-  | { kind: "clean" }
-  | { kind: "touched"; paths: string[] }
+  | { kind: "clean"; receipt: OracleCheckReceipt }
+  | { kind: "touched"; paths: string[]; receipt: OracleCheckReceipt }
   | { kind: "unverifiable"; reason: string };
 
 export interface NewCampaignInput {
@@ -724,7 +759,8 @@ export class CampaignService {
         }
       }
     }
-    for (const c of everyCampaign) if (tree.has(c.id) && !seen.has(c.id)) spent += c.rounds.length;
+    for (const c of everyCampaign)
+      if (tree.has(c.id) && !seen.has(c.id)) spent += c.state === "open" ? c.frame.budget.maxRounds : c.rounds.length;
 
     // 1. It continues a RESULT. A campaign that halted proved nothing to carry forward, and one still open
     //    has not finished spending its own share of the family.
@@ -957,6 +993,8 @@ export class CampaignService {
     };
     const baselineHarness = snapshot.baseline.record.harness;
     const candidateHarness = snapshot.candidate.record.harness;
+    const baselineSubject = evaluatedSubjectOf(snapshot.baseline, record.frame.subject);
+    const candidateSubject = evaluatedSubjectOf(snapshot.candidate, record.frame.subject);
     // ── AN ENVIRONMENT SUBJECT IS VERIFIED AGAINST THE SEAL, NOT THE HARNESS STAMP (§2) ────────────
     //
     // For an agent or a harness subject the scorecard's own harness stamp names the treatment, which is what
@@ -966,25 +1004,8 @@ export class CampaignService {
     // (it is normally the treatment).
     if (record.frame.subject.type === "environment") {
       const subjectId = record.frame.subject.id;
-      const pinned = (side: "baseline" | "candidate"): string => {
-        const sealed = snapshot[side].record.manifest?.environments;
-        const refs = new Set(Object.values(sealed ?? {}).map((e) => e.ref));
-        const mine = [...refs].filter((r) => r.startsWith(`${subjectId}@`));
-        if (mine.length === 0)
-          refuse(`the ${side} scorecard sealed no version of environment '${subjectId}' — it did not run it`, {
-            side,
-            sealed: [...refs],
-          });
-        if (mine.length > 1)
-          refuse(`the ${side} scorecard ran ${mine.length} versions of environment '${subjectId}' at once`, {
-            side,
-            refs: mine,
-          });
-        // `mine[0]` exists: the two refusals above cover empty and many, and both throw.
-        return (mine[0] ?? "").slice(subjectId.length + 1);
-      };
-      const baselineEnv = pinned("baseline");
-      const candidateEnv = pinned("candidate");
+      const baselineEnv = baselineSubject.version;
+      const candidateEnv = candidateSubject.version;
       if (candidateEnv !== input.candidateVersion)
         refuse(
           `the candidate scorecard ran ${subjectId}@${candidateEnv}, not the declared candidate ${input.candidateVersion}`,
@@ -995,7 +1016,15 @@ export class CampaignService {
           `the baseline scorecard ran ${subjectId}@${baselineEnv}, not the frame's baseline ${record.frame.subject.baselineVersion}`,
           { frame: record.frame.subject.baselineVersion, actual: baselineEnv },
         );
-      if (baselineHarness.id !== candidateHarness.id || baselineHarness.version !== candidateHarness.version)
+      const baselineHarnessDigest = snapshot.baseline.record.manifest?.harness?.specDigest;
+      const candidateHarnessDigest = snapshot.candidate.record.manifest?.harness?.specDigest;
+      if (
+        baselineHarness.id !== candidateHarness.id ||
+        baselineHarness.version !== candidateHarness.version ||
+        (baselineHarnessDigest !== undefined &&
+          candidateHarnessDigest !== undefined &&
+          baselineHarnessDigest !== candidateHarnessDigest)
+      )
         refuse(
           `an environment campaign holds the harness constant and the sides ran ${baselineHarness.id}@${baselineHarness.version} vs ${candidateHarness.id}@${candidateHarness.version}`,
           { baseline: baselineHarness, candidate: candidateHarness },
@@ -1039,7 +1068,7 @@ export class CampaignService {
     const delegation = await this.delegationOf(tenant, record.frame, input.delegationRunId);
     const seq = record.rounds.length + 1;
     const at = this.now();
-    const verdict = verdictOf(snapshot, record.frame, oracle, builtSource, seedLeak);
+    const verdict = verdictOf(snapshot, record.frame, oracle, builtSource, seedLeak, baselineSubject, candidateSubject);
     // ── THE ROUND'S EVIDENCE IS STAGED BEFORE THE ROUND EXISTS (benchmark-evidence-spec.md §3) ──────
     //
     // Derived from what this method already read — the diff's per-case trials, the frame's flags, each side's
@@ -1062,14 +1091,15 @@ export class CampaignService {
         ? { slotsUnreadable: shape.kind === "unknown" ? shape.reason : "the candidate version is not registered" }
         : {}),
       ...(shape === undefined ? { slotsUnreadable: "an agent subject has no slots" } : {}),
-      baseline: sideOf(input.baselineScorecardId, snapshot.baseline),
-      candidate: sideOf(input.candidateScorecardId, snapshot.candidate),
+      baseline: sideOf(input.baselineScorecardId, snapshot.baseline, baselineSubject),
+      candidate: sideOf(input.candidateScorecardId, snapshot.candidate, candidateSubject),
       ...(snapshot.diff.trials !== undefined ? { trials: snapshot.diff.trials } : {}),
       verdict: {
         comparable: verdict.comparable,
         significantImprovements: verdict.significantImprovements,
         significantRegressions: verdict.significantRegressions,
         ...(verdict.heldOut !== undefined ? { heldOut: verdict.heldOut } : {}),
+        ...(verdict.oracleReceipt !== undefined ? { oracleReceipt: verdict.oracleReceipt } : {}),
         ...(verdict.targets !== undefined ? { targets: verdict.targets } : {}),
         ...(verdict.detail !== undefined ? { detail: verdict.detail } : {}),
       },
@@ -1241,16 +1271,34 @@ export class CampaignService {
         reason:
           "the candidate names no pull request — neither Everdict's build record nor the scorecard's origin (origin.repo / origin.prNumber) carries one — so what the candidate changed cannot be read against the frame's oracle scope",
       };
-    const read = await this.deps.changes.pullRequestFiles(tenant, source.repo, source.prNumber);
+    const baseline = candidateSourceOf(snapshot.baseline);
+    if (!source.sha || !baseline?.sha || baseline.repo !== source.repo)
+      return {
+        kind: "unverifiable",
+        reason: "the evaluated baseline and candidate must seal commits in the same repository",
+      };
+    const read = await this.deps.changes.pullRequestFiles(tenant, source.repo, source.prNumber, {
+      baselineSha: baseline.sha,
+      candidateSha: source.sha,
+    });
     switch (read.kind) {
       case "read": {
+        if (read.value.baselineSha !== baseline.sha || read.value.candidateSha !== source.sha)
+          return { kind: "unverifiable", reason: "the oracle listing does not attest the evaluated commits" };
         if (!read.value.complete)
           return {
             kind: "unverifiable",
             reason: `pull request #${source.prNumber} of ${source.repo} changes more files than could be listed, so the oracle scope cannot be checked against the whole change`,
           };
         const touched = oracleTouched(read.value.paths, frame.oracleScope);
-        return touched.length > 0 ? { kind: "touched", paths: touched } : { kind: "clean" };
+        const receipt = {
+          repository: source.repo,
+          baselineSha: baseline.sha,
+          candidateSha: source.sha,
+          pathsDigest: contentDigest([...new Set(read.value.paths)].sort()),
+          complete: read.value.complete,
+        };
+        return touched.length > 0 ? { kind: "touched", paths: touched, receipt } : { kind: "clean", receipt };
       }
       case "absent":
         return {
@@ -1506,6 +1554,8 @@ function verdictOf(
   oracle: OracleCheck | undefined,
   builtSource: CandidateSource | undefined,
   seedLeak: SeedLeakCheck,
+  baselineSubject: EvaluatedSubjectIdentity,
+  candidateSubject: EvaluatedSubjectIdentity,
 ): CampaignRound["verdict"] {
   const comparison = snapshot.diff;
   // Identity coverage first: an absent identity read is NOT "verified" (L2) — it blocks like an unverified
@@ -1529,8 +1579,10 @@ function verdictOf(
   // compare still names the pull request that produced its candidate, which is what the next brief reads.
   // Everdict's OWN build account (D2) outranks the scorecard origin whenever it built the candidate.
   const candidateSource = builtSource ?? candidateSourceOf(snapshot.candidate);
+  const oracleReceipt = oracle && oracle.kind !== "unverifiable" ? oracle.receipt : undefined;
   const rejected = (detail: string): CampaignRound["verdict"] => ({
     comparable: false,
+    ...(oracleReceipt ? { oracleReceipt } : {}),
     significantImprovements: 0,
     significantRegressions: 0,
     unverifiedAxes,
@@ -1650,8 +1702,8 @@ function verdictOf(
   // ⚠️ Scoped to a HARNESS subject on purpose. An ENVIRONMENT campaign REQUIRES the harness to be identical on
   // both sides — that is what isolates the world as the treatment — so the same equality is the precondition
   // there rather than the defect.
-  const baselineSpecDigest = snapshot.baseline.record.manifest?.harness?.specDigest;
-  const candidateSpecDigest = snapshot.candidate.record.manifest?.harness?.specDigest;
+  const baselineSpecDigest = baselineSubject.digest;
+  const candidateSpecDigest = candidateSubject.digest;
   if (
     frame.subject.type === "harness" &&
     baselineSpecDigest !== undefined &&
@@ -1673,11 +1725,23 @@ function verdictOf(
   // significantly on the candidate. Derived here, from the same significance the held-out block reads, so the
   // gate's "did the issue's cases pass" is the platform's answer and not the driver's.
   const improved = new Set(significant.filter((c) => c.delta > 0).map((c) => c.caseId));
+  const satisfied = new Set(
+    comparison.trials.cases
+      .filter(
+        (c) =>
+          frame.targetSatisfaction !== undefined && c.candidateRate >= frame.targetSatisfaction.minimumCandidateRate,
+      )
+      .map((c) => c.caseId),
+  );
+  const accepted =
+    frame.targetSatisfaction === undefined ? improved : new Set([...improved].filter((id) => satisfied.has(id)));
   const targets =
     frame.targets.length > 0
       ? {
-          flipped: frame.targets.filter((id) => improved.has(id)),
-          unflipped: frame.targets.filter((id) => !improved.has(id)),
+          improved: frame.targets.filter((id) => improved.has(id)),
+          ...(frame.targetSatisfaction ? { satisfied: frame.targets.filter((id) => satisfied.has(id)) } : {}),
+          flipped: frame.targets.filter((id) => accepted.has(id)),
+          unflipped: frame.targets.filter((id) => !accepted.has(id)),
         }
       : undefined;
   // ── THE ABSOLUTE LEVEL, BORN WHERE IT IS MEASURED (rule `protocol` L3) ────────────────────────────
@@ -1695,6 +1759,7 @@ function verdictOf(
   };
   return {
     comparable: true,
+    ...(oracleReceipt ? { oracleReceipt } : {}),
     response,
     significantImprovements: significant.filter((c) => c.delta > 0).length,
     significantRegressions: significant.filter((c) => c.delta < 0).length,
