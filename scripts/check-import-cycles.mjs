@@ -15,8 +15,11 @@
 // own module that imports from neither, and the cycle disappears along with the question of which writer
 // "owns" the shared thing.
 // watches: nothing — walks the module graph.
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
+import { promisify } from "node:util";
+
+const run = promisify(execFile);
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const BASELINE = `${ROOT}/scripts/import-cycles-baseline.txt`;
@@ -33,22 +36,26 @@ const ROOTS = [
   "apps/api/src",
 ];
 
-function cyclesIn(root) {
+// ⚠️ ONE ROOT PER INVOCATION, AND THE SEVEN RUN AT ONCE. madge accepts several paths, and taking that
+// shortcut re-bases every path it prints (`domain/src/…` instead of `packages/domain/src/…`) — which would
+// rewrite all sixteen baseline entries for a speed change, and a baseline that moves for a reason other than
+// a repaid debt is a ratchet nobody can read. So the roots stay separate and are merely no longer serialized:
+// this was 52.6s and the single largest step in `pnpm ci:local`, against ~2.7s of actual work per root.
+async function cyclesIn(root) {
   // madge prints `1) a.ts > b.ts` per cycle; anything else (headers, the "no circular" line) is noise.
-  // ⚠️ madge EXITS 1 when it finds cycles, which is its whole job — so a plain `execFileSync` throws on the
-  // only interesting case and this check would have passed exactly when there was nothing to report. Caught
-  // by driving it against a tree that HAS cycles rather than by reading the code.
+  // ⚠️ madge EXITS 1 when it finds cycles, which is its whole job — so a plain throw-on-non-zero would throw
+  // on the only interesting case and this check would have passed exactly when there was something to
+  // report. Caught by driving it against a tree that HAS cycles rather than by reading the code.
   let out;
   try {
-    out = execFileSync("npx", ["madge", "--circular", "--extensions", "ts", root], {
+    ({ stdout: out } = await run("npx", ["madge", "--circular", "--extensions", "ts", root], {
       cwd: ROOT,
       encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+      maxBuffer: 32 * 1024 * 1024,
+    }));
   } catch (err) {
-    const failed = err;
-    if (typeof failed?.stdout !== "string") throw err; // madge itself broke — not a cycle report
-    out = failed.stdout;
+    if (typeof err?.stdout !== "string") throw err; // madge itself broke — not a cycle report
+    out = err.stdout;
   }
   return out
     .split("\n")
@@ -56,7 +63,7 @@ function cyclesIn(root) {
     .map((line) => `${root} :: ${line.replace(/^\s*\d+\)\s*/, "").trim()}`);
 }
 
-const found = ROOTS.flatMap(cyclesIn).sort();
+const found = (await Promise.all(ROOTS.map(cyclesIn))).flat().sort();
 
 if (process.argv.includes("--write")) {
   writeFileSync(BASELINE, `${found.join("\n")}\n`);
