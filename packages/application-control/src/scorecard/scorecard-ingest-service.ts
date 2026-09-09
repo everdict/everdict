@@ -4,6 +4,7 @@ import {
   CURRENT_EVIDENCE_VERSION,
   type CaseKey,
   type CaseResult,
+  ConflictError,
   type Dataset,
   EVERDICT_TRACE_SOURCE,
   type EvalCase,
@@ -23,6 +24,7 @@ import {
   ScorecardBatch,
   type ScorecardTransition,
   appendScoringRevision,
+  contentDigest,
   initialScoringPassId,
   inputObservationOf,
   judgmentReceiptsFromPlane,
@@ -38,6 +40,7 @@ import { collectExactTrajectoryEvents, trajectoryReadableBy } from "../ports/tra
 import { traceAuthorizationCredential } from "../trace-source/authorization-credential.js";
 import { drainPublicationOperation, planPublicationOperation } from "./publication.js";
 import type { ScorecardIngestDeps } from "./scorecard-deps.js";
+
 import { analysisBundle, initialPassId, offloadResults, stageAnalysis } from "./scorecard-observability.js";
 import type {
   IngestScorecardBody,
@@ -49,6 +52,36 @@ import type {
 // Sentinel version paired with TRACE_EVAL_REF for the "evaluate traces" path (no dataset / no harness run). Kept
 // distinct from a real registrable version so a trace-eval scorecard is unambiguous (dataset.id === TRACE_EVAL_REF).
 const TRACE_EVAL_VERSION = "external";
+
+// ── WHAT AN INGESTED BATCH ASKED, IN THE VOCABULARY THE CAMPAIGN LEDGER CHECKS (review R3) ──────────
+//
+// The submit path names its exam directly (`cases` + `trials`); an upload names it by REPETITION — one
+// `traces[]` entry per try, with `caseId` the scenario id. The ledger refuses an arm that did not request
+// exactly the frame's frozen scenarios and `trialsPerCase`, so the two have to be derived here rather than
+// taken from the caller: a caller-declared trial count over an upload of a different shape is the same
+// annotation-instead-of-authority failure the reservation exists to close (rule `protocol` L3).
+//
+// A RAGGED upload — five traces for one scenario and one for another — has no single trial count, and
+// picking one (the max, the min, the first) would let a thin arm pass as a full one. It is refused, and the
+// refusal names the counts so the caller can see which scenario is short.
+function ingestedExam(traces: ReadonlyArray<{ caseId: string }>): { caseIds: string[]; trials: number } {
+  const perCase = new Map<string, number>();
+  for (const t of traces) perCase.set(t.caseId, (perCase.get(t.caseId) ?? 0) + 1);
+  const counts = new Set(perCase.values());
+  const [trials] = counts;
+  // The wire schema requires at least one trace, but this method is also a programmatic entry point and an
+  // empty upload has no exam to state — refused with its own words rather than through the ragged branch,
+  // which would report a scenario list nobody sent.
+  if (trials === undefined)
+    throw new ConflictError("CONFLICT", {}, "a campaign arm must upload at least one trace per frozen scenario");
+  if (counts.size !== 1)
+    throw new ConflictError(
+      "CONFLICT",
+      { perCase: Object.fromEntries(perCase) },
+      `a campaign arm must upload the same number of traces for every scenario — the trials are what the repeated caseIds mean, and this upload carries ${[...perCase.entries()].map(([id, n]) => `${id}:${n}`).join(", ")}`,
+    );
+  return { caseIds: [...perCase.keys()], trials };
+}
 
 // The dataset/harness ref a scorecard carries when it scores traces directly (no chosen dataset/harness) — the NOT-NULL
 // columns stay populated with the sentinel instead of a real registry entry (no migration; consumers detect + special-case it).
@@ -104,6 +137,31 @@ export class ScorecardIngestService {
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       now: this.now(),
     });
+    // ── THE CAMPAIGN COMPARISON THIS UPLOAD SPENDS (review 2026-09-09 R3) ──────────────────────────
+    //
+    // Reserved BEFORE the record is created and before any scoring is started, exactly as the submit path
+    // does it (L1: the ledger returns the binding, and only then does the work begin). A replay returns the
+    // scorecard the first attempt bound rather than uploading a second set of traces under one reservation.
+    if (input.campaignEvaluation) {
+      if (!this.deps.campaigns) throw new ConflictError("CONFLICT", {}, "campaign evaluation ledger is not configured");
+      const reserved = await this.deps.campaigns.reserveEvaluation({
+        ...input.campaignEvaluation,
+        tenant: input.tenant,
+        scorecardId: record.id,
+        requestDigest: contentDigest(input),
+        at: this.now(),
+        ...ingestedExam(traces),
+      });
+      if (reserved.kind === "replay") {
+        const existing = await this.deps.store.get(reserved.scorecardId);
+        if (existing && existing.tenant === input.tenant) return existing;
+        throw new ConflictError(
+          "CONFLICT",
+          { evaluationId: reserved.evaluation.id },
+          "evaluation is reserved but its submission is not yet durable; no second ingest was started",
+        );
+      }
+    }
     await this.deps.store.create(record);
     void this.trackIngest(
       record,

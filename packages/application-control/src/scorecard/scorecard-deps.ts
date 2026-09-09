@@ -387,6 +387,10 @@ export type ScorecardBatchDeps = Pick<
 export type ScorecardIngestDeps = Pick<
   ScorecardServiceDeps,
   | "store"
+  // The experiment-family ledger an ingested campaign arm reserves against (review 2026-09-09 R3). Optional
+  // on the deps for the same reason it is on the submit path — a deployment with no ledger REFUSES a campaign
+  // ingest rather than silently accepting an unreserved one.
+  | "campaigns"
   | "datasets"
   | "defaultTraceGraders"
   | "buildTraceSource"

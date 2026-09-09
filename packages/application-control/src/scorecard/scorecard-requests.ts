@@ -1,5 +1,6 @@
 import type { CampaignEvaluationRequest } from "@everdict/contracts";
 import {
+  CampaignEvaluationRequestSchema,
   type CaseMatcher,
   type Dataset,
   EnvSnapshotSchema,
@@ -36,6 +37,18 @@ export const IngestScorecardBodySchema = z.object({
     )
     .min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  // ── THE CAMPAIGN COMPARISON THIS UPLOAD SPENDS (review 2026-09-09 R3) ────────────────────────────
+  //
+  // `logRound` requires every round to own an unreported reservation binding BOTH scorecard ids, and only
+  // `POST /scorecards` could make one. The first-party `agent_evolve` procedure runs `try_agent` and uploads
+  // its traces through this door, so the loop this contract exists for could not produce an acceptable pair
+  // at all — its identity waivers waive unverified axes and label-only adoption, never the reservation.
+  //
+  // Same shape as the submit path's `campaignEvaluation`: both arms carry one `campaignId`, `requestId` and
+  // `candidateVersion`, and differ only in `side`. The uploaded traces must cover exactly the frame's frozen
+  // scenarios, with the same number of traces per scenario as `trialsPerCase` — repeated `caseId`s ARE the
+  // trials on this lane, and the ledger checks that count the way it checks `trials` on the submit path.
+  campaignEvaluation: CampaignEvaluationRequestSchema.optional(),
 });
 export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
 export type IngestScorecardInput = IngestScorecardBody & {
