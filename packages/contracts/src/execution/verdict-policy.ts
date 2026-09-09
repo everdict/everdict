@@ -147,8 +147,38 @@ export type ScoreProducer =
       // it; so does the code-judge WRAPPER, whose spec the control plane builds — see `forgedMetricReason`
       // for the exact bound and the residual it leaves.
       ownsJudgeVerdict?: boolean;
+      // ── WHICH SHAPE THIS PRODUCER'S CRITERIA CARRY (review 2026-09-09 R4) ─────────────────────────
+      //
+      // Two spellings reach this boundary: a producer whose rows are not rewritten downstream emits
+      // `judge:<criterion>`, and the INLINE judge grader namespaces its own criteria as
+      // `judge:<producerId>:<criterion>` (arch-review 19 P1). The collector was GUESSING between them —
+      // longer prefix first, shorter as the fallback — which is a label being parsed for a coordinate the
+      // construction already knew (rule `protocol` L3). An inline `judge` scoring a criterion literally
+      // named `judge:x` therefore landed on the same measurement identity as one named `x`, and structured
+      // deduplication combines two identities that collide.
+      //
+      // Declared by whoever CONSTRUCTS the producer: `safeGrade` reads it off the runtime grader class, and
+      // the control-plane settle derives it from the declaration through `specNamespacesJudgeCriteria`.
+      // Absent = the unrewritten shape, which is what every producer other than the inline judge emits.
+      namespacesJudgeCriteria?: boolean;
     }
   | { kind: "judge"; id: string };
+
+// The prefix this producer puts in front of a criterion id, and the metric its OVERALL row wears. Not the
+// same string for every producer, and not derivable from the row — so it is read from the producer descriptor
+// the collection boundary authored, never from the label being classified.
+export function judgeMetricShapeOf(producer: ScoreProducer): { overall: string; criterionPrefix: string } {
+  if (producer.kind === "judge")
+    return {
+      overall: `${JUDGE_METRIC_ROOT}:${producer.id}`,
+      criterionPrefix: `${JUDGE_METRIC_ROOT}:${producer.id}:`,
+    };
+  return {
+    overall: JUDGE_METRIC_ROOT,
+    criterionPrefix:
+      producer.namespacesJudgeCriteria === true ? `${JUDGE_METRIC_ROOT}:${producer.id}:` : `${JUDGE_METRIC_ROOT}:`,
+  };
+}
 
 // May this producer emit this metric? Pure and total — the reason, or undefined when it may.
 export function forgedMetricReason(metric: string, producer: ScoreProducer): string | undefined {

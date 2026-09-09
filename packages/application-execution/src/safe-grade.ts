@@ -56,6 +56,9 @@ export async function safeGrade(grader: Grader, ctx: GradeContext): Promise<Scor
       id: grader.id,
       ...(grader.ownsMetrics !== undefined ? { ownsMetrics: grader.ownsMetrics } : {}),
       ...(grader.ownsJudgeVerdict === true ? { ownsJudgeVerdict: true } : {}),
+      // …and the criterion SHAPE the implementation was constructed with, so the collector strips the one
+      // prefix this grader actually wrote instead of trying both (review 2026-09-09 R4).
+      ...(grader.namespacesJudgeCriteria === true ? { namespacesJudgeCriteria: true } : {}),
     };
     // What is LEFT of the case's budget. Never negative: a deadline already past means this grader gets no
     // time at all, which is the honest answer — the case's budget was spent before it started.

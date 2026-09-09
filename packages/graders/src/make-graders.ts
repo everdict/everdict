@@ -5,6 +5,7 @@ import {
   JudgeCriterionSchema,
   declaredJudgeAuthority,
   declaredOwnedMetrics,
+  specNamespacesJudgeCriteria,
 } from "@everdict/contracts";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
@@ -212,7 +213,11 @@ function buildGrader(s: GraderSpec, opts: { judge?: Judge }): Grader {
         // The INLINE construction — its scores reach the plane unrewritten, so its criteria namespace
         // themselves here (arch-review 19 P1). The registered runner and the code-judge wrapper build their
         // own JudgeGrader and apply the runner's rewrite instead; setting it there would double it.
-        namespaceCriteria: true,
+        //
+        // Read from the ONE owner rather than written as a literal (review 2026-09-09 R4): the control-plane
+        // settle has to answer the same question from the declaration alone, and a second copy here would
+        // let the two disagree about exactly the producer whose criteria collide.
+        namespaceCriteria: specNamespacesJudgeCriteria(s),
         ...(typeof s.config?.rubric === "string" ? { rubric: s.config.rubric } : {}),
         ...(criteria.success ? { criteria: criteria.data } : {}),
         ...(typeof s.config?.promptTemplate === "string" ? { promptTemplate: s.config.promptTemplate } : {}),

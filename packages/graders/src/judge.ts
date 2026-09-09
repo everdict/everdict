@@ -243,12 +243,17 @@ export class JudgeGrader implements Grader {
   // implementation. Declared on the CLASS rather than stamped at construction, so it cannot be lost by a call
   // site that builds the grader directly instead of going through `makeGraders`.
   readonly ownsJudgeVerdict = true;
+  // …and WHICH of the two shapes below this instance emits, declared to the collection boundary rather than
+  // left for it to infer from the label (review 2026-09-09 R4). `safeGrade` copies it onto the producer, so
+  // the collector strips exactly the prefix this construction wrote and two criteria that differ only by a
+  // `judge:` in their id stay two measurements.
+  readonly namespacesJudgeCriteria: boolean;
 
   // `judge:<criterion>` inline, `judge:<thisJudgeId>:<criterion>` when namespaced — see `namespaceCriteria`.
   // The OVERALL metric is deliberately untouched: it is a deciding verdict in both wirings already, and
   // renaming it would break the metric continuity of every existing trend for no correctness gain.
   private criterionMetric(criterionId: string): string {
-    return this.opts.namespaceCriteria === true ? `judge:${this.id}:${criterionId}` : `judge:${criterionId}`;
+    return this.namespacesJudgeCriteria ? `judge:${this.id}:${criterionId}` : `judge:${criterionId}`;
   }
 
   constructor(
@@ -284,6 +289,7 @@ export class JudgeGrader implements Grader {
     } = {},
   ) {
     this.id = opts.id ?? "judge";
+    this.namespacesJudgeCriteria = opts.namespaceCriteria === true;
   }
 
   async grade(ctx: GradeContext): Promise<Score | Score[]> {

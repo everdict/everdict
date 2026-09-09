@@ -5,7 +5,13 @@ import type { EnvDelta, EvalCase, Scorecard } from "./eval-case.js";
 import { type MeasurementIdentity, MeasurementIdentitySchema } from "./measurement-identity.js";
 import type { TraceEvidence } from "./trace-source.js";
 import { type TraceEvent, TraceEventSchema } from "./trace.js";
-import { type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
+import {
+  JUDGE_METRIC_ROOT,
+  type ScoreProducer,
+  forgedMetricReason,
+  isJudgeFamilyMetric,
+  judgeMetricShapeOf,
+} from "./verdict-policy.js";
 
 // Why a score was NOT a measurement. Closed vocabulary — a new skip path picks an existing reason or adds one here.
 export const UNMEASURED_REASONS = [
@@ -31,30 +37,46 @@ export type UnmeasuredReason = (typeof UNMEASURED_REASONS)[number];
 // public surface is exactly where it always was.
 export { MeasurementIdentitySchema, type MeasurementIdentity };
 
-// The collector supplies the producer. Legacy label parsing is confined to this
-// collection adapter; policy and deduplication consume the resulting coordinates.
+// The collector supplies the producer, and the producer descriptor supplies the SHAPE — which prefix this
+// producer's criteria carry and which metric its overall row wears (`judgeMetricShapeOf`). Nothing here
+// parses an ambiguous label for a coordinate the construction already knew.
+//
+// ── WHY THE SHAPE IS DECLARED RATHER THAN GUESSED (review 2026-09-09 R4) ────────────────────────────
+//
+// This tried the namespaced prefix first and fell back to the bare one, so a producer emitting the bare
+// shape and a namespaced producer emitting a criterion whose id happens to start with the producer's own id
+// were read identically: for the inline `judge`, criterion `x` (`judge:x`) and criterion `judge:x`
+// (`judge:judge:x`) both collapsed onto criterion `x`, under one producer and one canonical metric. Two
+// distinct criteria with one measurement identity is a structured-deduplication collision — `dedupeByMetric`
+// keys on exactly these four coordinates — and a criterion-specific policy clause then covers a criterion
+// nobody named. The judge already emits the right coordinates; they were overwritten by this parse.
+//
+// ── AND THE OFF-PREFIX ROW KEEPS THE READING IT ALREADY HAD ─────────────────────────────────────────
+//
+// A judge-family metric carrying neither the overall name nor the declared prefix is a shape this producer's
+// construction cannot have written — a submitted `judge:x` under an inline-judge declaration, say. The
+// tempting repair is to leave its metric verbatim, and that is WRONG in the direction that matters: the
+// canonical `judge` metric with a criterion is DIAGNOSTIC under the default policy, while a verbatim
+// `judge:x` matches `{prefix: "judge:", segments: 2}` and DECIDES. Reclassifying an unrecognised row would
+// have promoted a producer-submitted verdict from explaining to deciding, which is the authorship defect the
+// judge family exists to prevent — found by asking what this change made load-bearing, not by reading it.
+//
+// So the fallback is exactly what it was before: everything after `judge:` is the criterion. That keeps the
+// residual `forgedMetricReason` already documents (`judge:x` is a criterion named `x` and the family of a
+// judge called `x` at once) unchanged, and it is not the collision this change is about — the two criteria of
+// ONE producer are what stopped colliding, and no row's authority moved.
 export function measurementIdentityOf(metric: string, producer: ScoreProducer): MeasurementIdentity {
   const owner = { kind: producer.kind, id: producer.id };
-  if (producer.kind === "judge") {
-    const root = `judge:${producer.id}`;
-    return {
-      producer: owner,
-      metric: "judge",
-      ...(metric.startsWith(`${root}:`) ? { criterion: metric.slice(root.length + 1) } : {}),
-    };
-  }
-  if (producer.ownsJudgeVerdict && (metric === "judge" || metric.startsWith("judge:"))) {
-    const prefix = `judge:${producer.id}:`;
-    return {
-      producer: owner,
-      metric: "judge",
-      ...(metric !== "judge"
-        ? {
-            criterion: metric.startsWith(prefix) ? metric.slice(prefix.length) : metric.slice("judge:".length),
-          }
-        : {}),
-    };
-  }
+  const emitsJudgeFamily = producer.kind === "judge" || producer.ownsJudgeVerdict === true;
+  if (!emitsJudgeFamily || !isJudgeFamilyMetric(metric)) return { producer: owner, metric };
+  const shape = judgeMetricShapeOf(producer);
+  if (metric === shape.overall) return { producer: owner, metric: JUDGE_METRIC_ROOT };
+  const criterion = metric.startsWith(shape.criterionPrefix)
+    ? metric.slice(shape.criterionPrefix.length)
+    : metric.slice(`${JUDGE_METRIC_ROOT}:`.length);
+  // A prefix with nothing after it names no criterion, and `MeasurementIdentity.criterion` is `min(1)` — an
+  // empty one would stamp a `measurement` the record schema then refuses, which is a row nobody can read back.
+  if (criterion !== "") return { producer: owner, metric: JUDGE_METRIC_ROOT, criterion };
   return { producer: owner, metric };
 }
 
@@ -410,6 +432,11 @@ export interface Grader {
   readonly ownsMetrics?: readonly string[];
   // May emit the inline judge's own shapes. See `forgedMetricReason` for the bound and its residual.
   readonly ownsJudgeVerdict?: boolean;
+  // …and whether those shapes NAMESPACE this grader's criteria under its own id (`judge:<id>:<criterion>`)
+  // rather than leaving them at `judge:<criterion>`. A property of the construction, declared on the
+  // implementation so the collection boundary reads it instead of guessing at the label (review 2026-09-09
+  // R4 — the guess collapsed two distinct criteria onto one measurement identity).
+  readonly namespacesJudgeCriteria?: boolean;
   // A grader that runs commands in the environment (compute) at scoring time declares true (outcome-family: tests-pass/command etc.).
   // Undeclared = observation-only (trace/snapshot) → runCase scores it after releasing compute, minimizing sandbox occupancy to
   // the execution window (not held while waiting on the judge LLM). docs/architecture/streaming-case-pipeline.md

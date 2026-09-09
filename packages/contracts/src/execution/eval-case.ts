@@ -70,6 +70,19 @@ export function declaredJudgeAuthority(spec: Pick<GraderSpec, "authority">): boo
   return spec.authority === "judge";
 }
 
+// …and WHICH SHAPE that producer's criteria carry (review 2026-09-09 R4). The INLINE judge grader namespaces
+// its criteria under its own id (`makeGraders` builds it that way, arch-review 19 P1); every other judge-family
+// producer that reaches a collection boundary unrewritten — the code-judge WRAPPER's script grader — leaves
+// them at `judge:<criterion>`. Keyed on the spec's `id`, which is the grader KIND (`config.id` renames the
+// instance, never the construction).
+//
+// ONE spelling, for the same reason as `declaredOwnedMetrics`: `makeGraders` reads it when it constructs the
+// inline judge and `sanitizeSubmittedResult` reads it when the settle asks again with only the declaration in
+// hand. Written twice, the two would answer differently for exactly the producer whose criteria collide.
+export function specNamespacesJudgeCriteria(spec: Pick<GraderSpec, "id">): boolean {
+  return BUILTIN_JUDGE_GRADER_IDS.includes(spec.id);
+}
+
 // The declaration a settle checks a submitted result against: what the case DECLARED (its graders — the
 // sealed plan for a batch child, the row's own `caseSpec` for a standalone run) and which judges the PLATFORM
 // applied to it (the batch's selection; a standalone run has none). Both halves are required: an omitted
@@ -551,6 +564,10 @@ export function sanitizeSubmittedResult(result: CaseResult, declaration: SettleD
       return sanitizeScore(score, {
         kind: "grader",
         id: score.graderId,
+        // …and which criterion shape that producer's rows carry, from the same declaration (R4). Without it
+        // this boundary guessed, and the guess is what made an inline judge's criterion `judge:x`
+        // indistinguishable from its criterion `x`.
+        ...(spec !== undefined && specNamespacesJudgeCriteria(spec) ? { namespacesJudgeCriteria: true } : {}),
         // What this producer is entitled to, from the two sources the runtime class would have carried: the
         // built-in's own name (a table, because a declaration is all this seam holds) and the names the
         // declaration may grant. Undeclared → nothing, which is what makes a runner's `tests-pass` on a case
