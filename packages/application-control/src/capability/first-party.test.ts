@@ -386,6 +386,53 @@ describe("firstPartyCatalogExtras", () => {
 // name in the body, that the two disciplines it adds to harness_evolve are stated (the oracle's PATHS as a
 // constraint the driver checks against the PR, and the CI-built digest pinned into a REAL candidate version
 // because a PR-mode scorecard names the base version), and that its brief reference travels with it.
+// ── REVIEW 2026-09-09 R3: a supported procedure could not satisfy the reservation contract ────────
+//
+// `logRound` came to require an unreported reservation owning BOTH scorecard ids, and every shipped evolve
+// procedure still told the agent to execute first and log afterwards. `agent_evolve` was the sharpest case —
+// it uploads through `ingest_scorecard`, which had no reservation field at all, so the procedure could not
+// produce an acceptable pair through any sequence of the doors it was given. Its identity waivers do not
+// waive this: they waive unverified axes and label-only adoption, which is a different question.
+//
+// Asserted over EVERY evolve procedure rather than the one that was broken. The three share no symbol, so a
+// fourth written after this lesson has nothing to grep — the same reason the door-preload check above runs
+// over all of them (rule `protocol`, the one-lane-only law).
+//
+// The anchor is the request FIELD, not phrasing: a procedure that says "reserve first" and never names the
+// parameter has told the agent nothing it can type.
+describe.each([
+  ["agent-evolve", "campaignEvaluation"],
+  ["harness-evolve", "campaign_evaluation"],
+  ["code-evolve", "campaign_evaluation"],
+])("the %s example reserves its comparison before it executes", (id, field) => {
+  const skill = firstPartySkillExamples().find((r) => r.id === id);
+
+  it("names the reservation parameter of the door it executes through, on both arms", () => {
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    const body = skill.spec.instructions;
+    expect(body, `${id} must name the reservation parameter`).toContain(field);
+    // Both arms, because a procedure that reserves only the candidate leaves the baseline unbound and the
+    // round refused — the failure appears one step away from the omission. Whitespace-tolerant: these bodies
+    // wrap at 110 columns and the value can land on the next line.
+    for (const side of ["baseline", "candidate"])
+      expect(body, `${id} must show the ${side} arm`).toMatch(new RegExp(`side:\\s*"${side}"`));
+    // …and it must say the pair is REFUSED without one, or the agent reads the parameter as optional.
+    expect(body, `${id} must state that a round without a reservation is refused`).toMatch(
+      /refuses? a pair that owns no unreported reservation/i,
+    );
+  });
+
+  it("does not tell the driver to reuse one baseline batch across rounds", () => {
+    expect(skill).toBeDefined();
+    if (!skill || skill.spec.type !== "skill") return;
+    // The ledger binds each scorecard to ONE comparison, so a reused baseline is a submission the platform
+    // refuses. `harness_evolve` recommended the reuse in two places — its pricing note and its ageing
+    // warning — and both had to move.
+    expect(skill.spec.instructions).not.toMatch(/baseline is run once and reused|baseline is reused every round/i);
+  });
+});
+
 describe("the code-evolve example composes delegation into the campaign", () => {
   const skill = firstPartySkillExamples().find((r) => r.id === "code-evolve");
 
@@ -403,6 +450,10 @@ describe("the code-evolve example composes delegation into the campaign", () => 
       "adopt_campaign_candidate",
       "merge_campaign_candidate",
       "build_campaign_candidate",
+      // The brief is RENDERED by the platform, not composed by the driver (review 2026-09-09 R3): the
+      // renderer is also what keeps held-out ids, pass rates and judge rationale out of the delegate's hands,
+      // and a hand-written brief has no such guard.
+      "get_campaign_round_brief",
       "oracle",
       "changed files",
       "Do NOT merge",
@@ -410,6 +461,8 @@ describe("the code-evolve example composes delegation into the campaign", () => 
     ]) {
       expect(skill.spec.instructions).toContain(anchor);
     }
+    // …and that door is preloaded, or the agent has to go looking for it mid-walk.
+    expect(/select:([a-z_,]+)/.exec(skill.spec.instructions)?.[1]).toContain("get_campaign_round_brief");
     const brief = skill.spec.files.find((f) => f.path === "references/round-brief.md");
     expect(brief).toBeDefined();
     for (const anchor of ["goal", "constraints", "doneWhen", "oracle", "DIGEST"]) {

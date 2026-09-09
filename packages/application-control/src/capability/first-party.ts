@@ -757,12 +757,29 @@ Everdict's tools load on demand. Before anything else:
   round halts \`identity_unverified\` and the campaign can neither adopt nor settle. That is the honest price
   of shadow tries; \`harness_evolve\` runs real batches and needs neither.
 
+## 0.5. Reserve the comparison BEFORE you run either arm
+- A round's evidence has to be a comparison the RECORD handed out. \`ingest_scorecard\` carries
+  \`campaignEvaluation { campaignId, requestId, candidateVersion, side }\`; both arms of one round use the
+  SAME \`requestId\` and \`candidateVersion\` and differ only in \`side\` ("baseline" | "candidate"). The
+  reservation is consumed before anything is uploaded, so the budget is spent whether or not the arm lands.
+- \`log_campaign_round\` REFUSES a pair that owns no unreported reservation. A scorecard you ingested for some
+  other reason is not campaign evidence however good it looks, and the two identity waivers do not waive this
+  — they waive unverified axes and label-only adoption, which is a different question.
+- Each arm must cover EXACTLY the frame's frozen scenarios, with \`trialsPerCase\` traces per scenario. A
+  ragged upload — five tries for one scenario, one for another — is refused: repeated caseIds ARE the trials
+  on this lane, and a thin arm passing as a full one is the measurement that cannot be defended.
+- ONE reservation per round, and a fresh one for the next: an ingested scorecard is bound to the comparison it
+  was reserved for, so a baseline upload cannot be re-pointed at round N+1. Every round uploads both arms.
+- A spent reservation stays spent. If an upload fails, the comparison is gone — ask \`campaign_decision\`
+  rather than assuming the round is still available, and expect the budget to have moved.
+
 ## 1. Baseline — and its noise floor
 - For each scenario run \`try_agent\` { agentId } N times; collect each result's \`trace\`.
 - Ingest ONE scorecard (\`ingest_scorecard\`): \`harness: { id: "agent:<agentId>", version: <its version> }\`,
-  one \`traces[]\` entry PER TRY with \`caseId\` = the scenario id (repeated caseIds ARE the trials), and the
-  goal judges in \`judges\`. The frame's \`judges\` are checked against the judges that SCORED each side (the
-  scoring ledger), so the same set goes into every ingest on both sides.
+  one \`traces[]\` entry PER TRY with \`caseId\` = the scenario id (repeated caseIds ARE the trials), the
+  goal judges in \`judges\`, and \`campaignEvaluation { campaignId, requestId, candidateVersion, side:
+  "baseline" }\` — the reservation from step 0.5. The frame's \`judges\` are checked against the judges that
+  SCORED each side (the scoring ledger), so the same set goes into every ingest on both sides.
 - Read the batch's trial summary (\`get_scorecard\`): the per-case variance and flake rate are the NOISE FLOOR.
   A delta smaller than this floor is not information. If the baseline itself is wildly flaky (flake rate
   above ~0.4), stop and fix scenario determinism first — evolution on a noisy oracle adopts noise.
@@ -799,7 +816,8 @@ Everdict's tools load on demand. Before anything else:
   mid-campaign — the thing under measurement may not read the measurement's notes.
 
 ## 3. Evaluate the candidate
-- Same scenarios, same N, same judges → a second ingested scorecard (candidate version label in \`harness\`).
+- Same scenarios, same N, same judges → a second ingested scorecard (candidate version label in \`harness\`),
+  carrying \`campaignEvaluation\` with the round's \`requestId\` and \`side: "candidate"\`.
 - \`diff_scorecards\` { baseline, candidate } is for YOUR reading — what moved, and where to aim the next
   hypothesis. Read \`comparability\` FIRST — 'none' means the comparison does not hold, which is a different
   fact from "no difference". The trials diff carries per-case Fisher/z significance with the FDR correction
@@ -961,19 +979,35 @@ If you find yourself wanting either waiver, the BATCH is wrong, not the frame. F
 - \`judges\` when the goal is a judge score. The frame pins them and both sides must match exactly.
 - \`create_issue\` for the narrative journal, then \`open_campaign { issueId, frame }\` for the RECORD. Frozen
   at that call; a frame you want to change is a new campaign.
-- Price the walk BEFORE opening it (\`estimate_scorecard\`): a round is cases x N executions, and unlike a
-  shadow try that is compute as well as tokens. The baseline is run once and reused, so steady state is one
-  batch per round.
+- Price the walk BEFORE opening it (\`estimate_scorecard\`): a round is cases x N executions on BOTH arms, and
+  unlike a shadow try that is compute as well as tokens. Steady state is two batches per round — see step 0.5
+  for why the baseline is not reused.
+
+## 0.5. Reserve the comparison BEFORE you run either arm
+- A round's evidence has to be a comparison the RECORD handed out. \`run_scorecard\` carries
+  \`campaign_evaluation { campaignId, requestId, candidateVersion, side }\`; both arms of one round use the
+  SAME \`requestId\` and \`candidateVersion\` and differ only in \`side\` ("baseline" | "candidate"). The
+  reservation is consumed before dispatch, so the budget is spent whether or not the batch lands.
+- \`log_campaign_round\` REFUSES a pair that owns no unreported reservation. A batch you ran for some other
+  reason is not campaign evidence however good it looks.
+- Each arm must request EXACTLY the frame's frozen scenarios and \`trialsPerCase\`; anything else is refused
+  at submit rather than discovered as an incomparable round.
+- **A BASELINE BATCH IS NOT REUSABLE ACROSS ROUNDS.** The ledger binds each scorecard to ONE comparison, so
+  every round runs its own baseline. That is the cost of an evidence chain nobody can re-point, and it
+  retires the reused-baseline ageing problem below: each round's two arms run against the same world.
+- A spent reservation stays spent. If a submission fails, that comparison is gone — ask \`campaign_decision\`
+  rather than assuming the round is still available, and expect the budget to have moved.
 
 ## 1. Baseline — and its noise floor
-- \`run_scorecard { dataset, harness: <id>@<baselineVersion>, trials: N }\`, then \`get_scorecard\`: the
-  per-case variance and flake rate are the NOISE FLOOR. A delta smaller than this floor is not information,
-  and a baseline flaking above ~0.4 means you are about to evolve on a noisy oracle — fix scenario determinism
-  first.
-- The baseline is reused every round, and a reused baseline AGES. If the dataset's task image is a moving tag,
-  an old baseline and a fresh candidate record different image bytes and every round comes back confounded on
-  \`execution_world\`. Re-run the baseline; never waive it, because a delta measured across two worlds says
-  nothing about the scaffold.
+- \`run_scorecard { dataset, harness: <id>@<baselineVersion>, trials: N, campaign_evaluation: { …, side:
+  "baseline" } }\`, then \`get_scorecard\`: the per-case variance and flake rate are the NOISE FLOOR. A delta
+  smaller than this floor is not information, and a baseline flaking above ~0.4 means you are about to evolve
+  on a noisy oracle — fix scenario determinism first.
+- Round 1's baseline batch is also the noise floor reading; every LATER round runs its own baseline under its
+  own reservation. That is why a reused baseline can no longer AGE against its candidate: if the dataset's
+  task image is a moving tag, an old baseline and a fresh candidate would record different image bytes and the
+  round would come back confounded on \`execution_world\` — a delta measured across two worlds says nothing
+  about the scaffold, and running the two arms together is what removes the question.
 
 ## 2. Mutate — one lever per round
 A candidate is an INSTANCE: \`{ template: {id, version}, id, version, pins, overrides? }\`. The template is the
@@ -1003,7 +1037,8 @@ and the one that most deserves a fresh baseline). Load \`references/levers.md\` 
   what the correction cost. Sweep the registry when the campaign closes, not while it is walking.
 
 ## 3. Evaluate the candidate, and record the round
-- The same dataset, the same N, the same judges → a second batch on the candidate version.
+- The same dataset, the same N, the same judges → a second batch on the candidate version, carrying
+  \`campaign_evaluation\` with the round's \`requestId\` and \`side: "candidate"\`.
 - \`diff_scorecards\` is for YOUR reading — what moved, and where to aim next. Read \`comparability\` FIRST:
   'none' means the comparison does not hold, which is a different fact from "no difference".
 - Then \`log_campaign_round { hypothesis, learned, candidateVersion, baselineScorecardId,
@@ -1138,7 +1173,7 @@ its own managed store and mints the candidate version; you run the round, and le
 write the harness's code yourself, you never touch the oracle, and you never merge on your own authority.
 
 Everdict's tools load on demand. Before anything else:
-\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,resolve_harness_delegate,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,add_issue_link,open_campaign,get_campaign,get_campaign_round_evidence,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
+\`ToolSearch\` with \`select:list_public_capabilities,list_capabilities,create_sandbox,submit_sandbox_task,read_sandbox_task_trace,sandbox_exec,sandbox_git_push,close_sandbox,get_harness_instance,resolve_harness_delegate,diff_harness_versions,build_campaign_candidate,get_campaign_builds,pin_harness_images,run_scorecard,get_scorecard,list_scorecards,diff_scorecards,create_issue,update_issue,add_issue_link,open_campaign,get_campaign,get_campaign_round_brief,get_campaign_round_evidence,log_campaign_round,campaign_decision,settle_campaign,campaign_adoption,adopt_campaign_candidate,merge_campaign_candidate\`.
 
 ## 0. Frame the campaign — the exam, the repository, the delegate, the oracle's paths
 - Everything \`harness_evolve\` freezes, frozen the same way: \`subject: { type: "harness", id, baselineVersion }\`,
@@ -1197,21 +1232,44 @@ Everdict's tools load on demand. Before anything else:
   at most the frame's.
 - \`create_issue\` for the journal, then \`open_campaign { issueId, frame }\`. Frozen at that call.
 
+## 0.5. Reserve the comparison BEFORE you run either arm
+- A round's evidence has to be a comparison the RECORD handed out. \`run_scorecard\` carries
+  \`campaign_evaluation { campaignId, requestId, candidateVersion, side }\`; both arms of one round use the
+  SAME \`requestId\` and \`candidateVersion\` (the version the build minted) and differ only in \`side\`
+  ("baseline" | "candidate"). \`log_campaign_round\` refuses a pair that owns no unreported reservation.
+- **A BASELINE BATCH IS NOT REUSABLE ACROSS ROUNDS.** The ledger binds each scorecard to ONE comparison, so
+  every round runs both arms. Price the walk that way before opening it.
+- The candidate arm can only be reserved once its version EXISTS, so the order is: delegate → build → reserve
+  both arms → run both → log. A reservation is spent whether or not the batch lands, so do not reserve
+  speculatively against a build that has not finished.
+
 ## 1. Baseline — and its noise floor
-- \`run_scorecard { dataset, harness: <id>@<baselineVersion>, trials: N }\`, then \`get_scorecard\`: per-case variance
-  and flake rate are the NOISE FLOOR. A baseline flaking above ~0.4 means fix scenario determinism first.
+- \`run_scorecard { dataset, harness: <id>@<baselineVersion>, trials: N, campaign_evaluation: { …, side:
+  "baseline" } }\`, then \`get_scorecard\`: per-case variance and flake rate are the NOISE FLOOR. A baseline
+  flaking above ~0.4 means fix scenario determinism first.
+- **Everdict has to have BUILT both arms, or the oracle cannot answer.** The oracle scope is checked between
+  the two commits Everdict's own build ledger observed — a scorecard's \`origin\` is the submitter's word and
+  decides nothing. So the frame's \`baselineVersion\` must itself be a version Everdict built (this campaign's
+  ledger, or a predecessor's when this campaign \`continues\` one); otherwise every oracle-scoped round comes
+  back \`unverifiable\`. Build the baseline through \`build_campaign_candidate\` once before round 1 if it was
+  registered some other way.
 - Note the baseline's source: the commit its pinned image was built from. The chain check will want the next
   campaign to start from what this one adopts, in code as well as in bytes.
 
 ## 2. Delegate the mutation — one hypothesis, one PR
 - Read what the walk knows: \`get_campaign\` for every round's \`learned\`, then the failing cases' traces. Form ONE
   hypothesis about the CODE — a mechanism, not a wish.
+- **ASK THE PLATFORM FOR THE BRIEF; DO NOT WRITE ONE.** \`get_campaign_round_brief { id }\` renders the next
+  round's \`DelegationBrief\` from the frozen frame and the last round's SEALED evidence — goal, context, the
+  traces of targets still failing, the oracle's paths as constraints, and a \`doneWhen\` the delegate can check
+  in its own sandbox. That renderer is also the guard that keeps held-out ids, pass rates and judge rationale
+  out of the delegate's hands; a hand-written brief has no such guard, and the candidate reading its own
+  evaluators is the oracle rule broken from the other side. \`references/round-brief.md\` documents the SHAPE
+  it returns — read it to understand the brief, not to compose one.
 - Open the session: \`create_sandbox { profile, repo: { git, ref: <default branch> }, brief, ttlSec }\` with
-  \`ttlSec\` inside the frame's delegation budget, and keep its run id — the round names it. The brief follows
-  \`references/round-brief.md\` — \`goal\` as a condition on the harness's behavior on the failing scenarios,
-  \`context\` with the hypothesis and what is already ruled out, \`references\` to the scorecard and traces with a
-  note each, \`constraints\` that name the oracle's paths and the one lever, \`doneWhen\` as the repository's own
-  tests and build.
+  the brief the platform rendered and \`ttlSec\` inside the frame's delegation budget, and keep its run id —
+  the round names it. Add to that brief only what the platform cannot know (an operational constraint of your
+  own); never replace it, and never paste evidence it deliberately withheld.
 - Supervise: \`submit_sandbox_task\` one turn at a time, \`read_sandbox_task_trace\` until done, and read what it DID.
   Push back when it drifts from the one lever. If it reports the hypothesis is wrong, believe it and re-scope.
 - Verify yourself with \`sandbox_exec\`: the tests, the build, and \`git diff --stat\` against the oracle's paths.
@@ -1235,9 +1293,11 @@ Everdict's tools load on demand. Before anything else:
   The record refuses the round anyway (\`oracleScope\`), but a build you did not start is budget you did not
   spend: a PR that touched the exam is closed, noted in the issue, and re-briefed.
 - \`diff_harness_versions\` between baseline and the built candidate is how you check you moved one thing.
-- \`run_scorecard\` on \`<id>@<candidateVersion>\` (the version the build minted) with the same dataset, N and judges, and pass
+- \`run_scorecard\` on \`<id>@<candidateVersion>\` (the version the build minted) with the same dataset, N and
+  judges, \`campaign_evaluation\` carrying the round's \`requestId\` and \`side: "candidate"\`, and
   \`origin: { campaignId, repo, sha, prNumber }\` so the batch says which round it is and where its code came
-  from; a \`scorecard.completed\` subscription filtered on \`campaignId\` wakes you when it lands. Then
+  from; a \`scorecard.completed\` subscription filtered on \`campaignId\` wakes you when it lands. The origin is
+  a LABEL — the oracle reads the commits off Everdict's build ledger, never off it. Then
   \`log_campaign_round { hypothesis, learned, candidateVersion, baselineScorecardId, candidateScorecardId,
   delegation_run_id }\`. The round records where the candidate came from (the scorecard's origin: repo, sha, PR,
   pin override) and what the delegate cost (from the run ledger) beside the verdict the platform derives. You do
