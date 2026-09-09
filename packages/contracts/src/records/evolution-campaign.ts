@@ -111,6 +111,17 @@ export const OracleCheckReceiptSchema = z.object({
   candidateSha: z.string().min(1),
   pathsDigest: z.string().min(1),
   complete: z.boolean(),
+  // ── WHOSE WORD THE TWO COMMITS ARE (review 2026-09-09 R1) ────────────────────────────────────────
+  //
+  // Present since the check stopped resolving them from the scorecards' `origin`, whose `repo`/`sha` are the
+  // SUBMITTER's fields: a baseline origin naming the candidate's own commit made the oracle compare a commit
+  // with itself and return `clean` about a change it never looked at. Both commits now come from Everdict's
+  // build ledger, and this says so on the receipt.
+  //
+  // ABSENT on a receipt written before that — those commits were the submitter's word, which is a different
+  // claim and must not read like this one. Optional at rest for exactly that reason (the schema-split law:
+  // a creation rule applied at decode time is a data outage), never omitted by a receipt written today.
+  commitProvenance: z.literal("everdict-build").optional(),
 });
 export type OracleCheckReceipt = z.infer<typeof OracleCheckReceiptSchema>;
 

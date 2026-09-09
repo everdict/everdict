@@ -1239,7 +1239,7 @@ export class CampaignService {
     // The oracle boundary, read AFTER the identity checks and BEFORE the verdict: a frame that froze a scope
     // asks what the candidate's pull request changed — the pull request Everdict's build record names, else
     // the one the scorecard's origin names.
-    const oracle = await this.oracleCheck(tenant, record.frame, snapshot, builtSource);
+    const oracle = await this.oracleCheck(tenant, record, input.candidateVersion, builtSource);
     // …and whether the candidate was SEEDED with the exam (harness-identity-and-seeds-spec.md §4) — the same
     // door, the same treatment as a candidate that edited the dataset.
     const seedLeak = await this.seedLeakCheck(tenant, record.frame, input.candidateVersion);
@@ -1402,6 +1402,32 @@ export class CampaignService {
     };
   }
 
+  // ── …AND THE SAME LEDGER, SEARCHED UP THE CHAIN (review 2026-09-09 R1) ──────────────────────────
+  //
+  // A successor campaign's baseline is its predecessor's adopted candidate, so the build that minted it sits
+  // in the predecessor's ledger rather than in this one's. `continues` is the chain, and it is walked with a
+  // visited set because the store's own family reader already refuses a cycle and this one must not hang on
+  // a record written before it did.
+  //
+  // `undefined` is "no build in this workspace minted that version", which the oracle reads as unverifiable —
+  // never as clean. A ledger that could not be READ throws out of `builtSourceFor` and refuses the round (L2).
+  private async builtSourceForVersion(
+    tenant: string,
+    campaign: EvolutionCampaignRecord,
+    version: string,
+  ): Promise<CandidateSource | undefined> {
+    const seen = new Set<string>();
+    let node: EvolutionCampaignRecord | undefined = campaign;
+    while (node !== undefined && !seen.has(node.id)) {
+      seen.add(node.id);
+      const built = await this.builtSourceFor(tenant, node.id, version);
+      if (built !== undefined) return built;
+      const parent: string | undefined = node.frame.continues;
+      node = parent === undefined ? undefined : await this.deps.store.get(tenant, parent);
+    }
+    return undefined;
+  }
+
   // ── WAS THE CANDIDATE SEEDED WITH ITS OWN EXAM (harness-identity-and-seeds-spec.md §4) ──────────
   //
   // Only a harness subject ships seeds. Three answers, never two: clean, leak (with the seeds), or unverifiable
@@ -1438,31 +1464,63 @@ export class CampaignService {
 
   // ── DID THE CANDIDATE TOUCH ITS OWN EXAM (docs/architecture/code-evolution-loop.md, D3) ─────────
   //
-  // Answered from the pull request the candidate names — Everdict's own build record first (D2: the commit it
-  // observed and the pull request it was asked to build), the candidate scorecard's origin second — and the
-  // repository's own listing of what that pull request changed. Three answers, never two: clean, touched
-  // (with the paths), or unverifiable — a candidate that names no pull request on either account, a listing
-  // the reader could not complete, or a read that failed. The last is refused rather than waved through: "we
-  // could not check" is not "clean" (L2).
+  // Answered from the pull request the candidate names and the repository's own listing of what that pull
+  // request changed, between the two commits the two ARMS were actually built from. Three answers, never two:
+  // clean, touched (with the paths), or unverifiable — a candidate whose commit Everdict cannot vouch for, a
+  // listing the reader could not complete, or a read that failed. The last is refused rather than waved
+  // through: "we could not check" is not "clean" (L2).
+  //
+  // ── BOTH COMMITS COME FROM EVERDICT'S OWN BUILD LEDGER (review 2026-09-09 R1) ────────────────────
+  //
+  // They used to come from the scorecards' `origin` — and `origin.repo` / `origin.sha` are the SUBMITTER's
+  // fields (the door stamps `origin.source` server-side and copies the coordinates verbatim). Storing a
+  // coordinate is not proving which code ran, so the check verified that two caller-authored strings agreed
+  // and echoed them into its receipt:
+  //
+  //   evaluate baseline B against candidate A, where A edits a protected oracle file
+  //   submit the BASELINE's origin with sha A  →  the oracle compares A to A  →  no changed paths  →  clean
+  //
+  // A `clean` receipt then answered a different question from the B-to-A change that was measured, with the
+  // forged coordinate sitting inside the receipt as though it were evidence.
+  //
+  // So the commits are resolved from the ledger Everdict WRITES: a `built`/`minted` record whose minted
+  // instance version is the one that arm evaluated. The version is not the caller's word either — `logRound`
+  // has already refused a round whose declared versions disagree with the scorecards' own harness stamps, so
+  // the join is (what the batch says it ran) → (what Everdict built under that name) → (the commit its build
+  // session observed). A caller's `origin` stays on the round as provenance (D4) and decides nothing here.
+  //
+  // The baseline's build is searched up the CHAIN as well as in this campaign: a successor's baseline is its
+  // predecessor's adopted candidate, and that is the campaign whose ledger built it.
   private async oracleCheck(
     tenant: string,
-    frame: CampaignFrame,
-    snapshot: CampaignSnapshot,
+    campaign: EvolutionCampaignRecord,
+    candidateVersion: string,
     builtSource: CandidateSource | undefined,
   ): Promise<OracleCheck | undefined> {
+    const frame = campaign.frame;
     if (frame.oracleScope.length === 0) return undefined;
-    const source = builtSource ?? candidateSourceOf(snapshot.candidate);
-    if (source?.repo === undefined || source.prNumber === undefined)
+    const source = builtSource;
+    if (source === undefined)
+      return {
+        kind: "unverifiable",
+        reason: `Everdict's build ledger holds no build that minted ${frame.subject.id}@${candidateVersion}, so the commit this candidate evaluated is the submitter's word — an oracle check over a caller-named commit answers a different question from the change that was measured. Run the candidate through a build Everdict performs`,
+      };
+    if (source.repo === undefined || source.prNumber === undefined || !source.sha)
       return {
         kind: "unverifiable",
         reason:
-          "the candidate names no pull request — neither Everdict's build record nor the scorecard's origin (origin.repo / origin.prNumber) carries one — so what the candidate changed cannot be read against the frame's oracle scope",
+          "Everdict's build record for this candidate names no repository, pull request and observed commit together, so what the candidate changed cannot be read against the frame's oracle scope",
       };
-    const baseline = candidateSourceOf(snapshot.baseline);
-    if (!source.sha || !baseline?.sha || baseline.repo !== source.repo)
+    const baseline = await this.builtSourceForVersion(tenant, campaign, frame.subject.baselineVersion);
+    if (baseline === undefined || !baseline.sha)
       return {
         kind: "unverifiable",
-        reason: "the evaluated baseline and candidate must seal commits in the same repository",
+        reason: `Everdict's build ledger holds no build that minted the frame's baseline ${frame.subject.id}@${frame.subject.baselineVersion}, so the commit the baseline arm evaluated cannot be established and the oracle has nothing verified to compare against`,
+      };
+    if (baseline.repo !== source.repo)
+      return {
+        kind: "unverifiable",
+        reason: `the two arms were built from different repositories (${baseline.repo ?? "none"} vs ${source.repo}), so one pull request's listing cannot say what changed between them`,
       };
     const read = await this.deps.changes.pullRequestFiles(tenant, source.repo, source.prNumber, {
       baselineSha: baseline.sha,
@@ -1484,6 +1542,8 @@ export class CampaignService {
           candidateSha: source.sha,
           pathsDigest: contentDigest([...new Set(read.value.paths)].sort()),
           complete: read.value.complete,
+          // Both commits came from the build ledger — the refusals above admit nothing else (R1).
+          commitProvenance: "everdict-build" as const,
         };
         return touched.length > 0 ? { kind: "touched", paths: touched, receipt } : { kind: "clean", receipt };
       }

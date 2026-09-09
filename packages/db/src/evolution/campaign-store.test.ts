@@ -1356,7 +1356,10 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     // outranks it for the verdict — was read AFTER it. A driver-submitted batch carries no `origin.prNumber`,
     // so every oracle-scoped round of an Everdict-built candidate was "unverifiable", and the first-party code
     // loop could not adopt under an oracle scope at all.
-    const buildLedger = (prNumber: number, repo = "acme/scaffold") => ({
+    // Both arms, because the oracle now resolves BOTH commits from this ledger (review 2026-09-09 R1): a
+    // baseline whose commit is only a caller-authored `origin.sha` is a commit the submitter chose, and one
+    // chosen equal to the candidate's made the comparison empty and the receipt `clean`.
+    const buildLedger = (prNumber: number, repo = "acme/scaffold", baselineVersion: string | undefined = "1.0.0") => ({
       setsForCampaign: async () => [],
       forCampaign: async () => [
         {
@@ -1367,6 +1370,18 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
           image: { ref: "reg/ns/scaffold-image:sha-observed@sha256:beef" },
           base: { image: "reg/scaffold:1.0.0" },
         },
+        ...(baselineVersion === undefined
+          ? []
+          : [
+              {
+                id: "bld_0",
+                state: "built",
+                candidateVersion: baselineVersion,
+                source: { git: `https://github.com/${repo}.git`, repo, ref: "main", sha: "baseline-observed-sha" },
+                image: { ref: "reg/ns/scaffold-image:sha-baseline@sha256:cafe" },
+                base: { image: "reg/scaffold:0.9.0" },
+              },
+            ]),
       ],
     });
     const scopedFrame: CampaignFrame = { ...frame, oracleScope: ["tests/", "datasets/**"] };
@@ -1881,13 +1896,57 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         return { kind: "read" as const, value: { ...commits, ...answer } };
       },
     });
-    const withReader = (store: InMemoryEvolutionCampaignStore, changes: ReturnType<typeof reader>) =>
+    // ── THE COMMITS THE ORACLE COMPARES COME FROM EVERDICT'S OWN BUILD LEDGER (review 2026-09-09 R1) ──
+    //
+    // They used to come from the two scorecards' `origin`, whose coordinates the SUBMITTER writes. Both arms
+    // are minted here, because a check that resolves only the candidate still compares it against a commit
+    // the caller chose.
+    const oracleLedger = (
+      over: { prNumber?: number; sha?: string; repo?: string; noPr?: boolean; noBaseline?: boolean } = {},
+    ) => {
+      const repo = over.repo ?? "acme/harness";
+      return {
+        setsForCampaign: async () => [],
+        forCampaign: async () => [
+          {
+            id: "bld_c",
+            state: "built",
+            candidateVersion: "1.0.1",
+            source: {
+              git: `https://github.com/${repo}.git`,
+              repo,
+              ref: "pr-head",
+              sha: over.sha ?? "abc123",
+              ...(over.noPr === true ? {} : { prNumber: over.prNumber ?? 7 }),
+            },
+            base: { image: "reg/harness:1.0.0" },
+          },
+          ...(over.noBaseline === true
+            ? []
+            : [
+                {
+                  id: "bld_b",
+                  state: "built",
+                  candidateVersion: "1.0.0",
+                  source: { git: `https://github.com/${repo}.git`, repo, ref: "main", sha: "baseline-sha" },
+                  base: { image: "reg/harness:0.9.0" },
+                },
+              ]),
+        ],
+      };
+    };
+    const withReader = (
+      store: InMemoryEvolutionCampaignStore,
+      changes: ReturnType<typeof reader>,
+      builds: NonNullable<ConstructorParameters<typeof CampaignService>[0]["builds"]> = oracleLedger(),
+    ) =>
       new ReservedFixtureCampaignService({
         // The frame's positive control (`exam-proof.ts`). No fixture here names one, so this is never read;
         // it is REQUIRED on the deps because an optional capability hides an unwired composition root.
         scorecards: { get: async () => undefined },
         store,
         operations: store,
+        builds,
         changes,
         runs: noRuns,
         datasets: noDatasets,
@@ -1944,7 +2003,11 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
 
     it("rejects a listing for PR head B when the candidate was evaluated at A", async () => {
       const store = new InMemoryEvolutionCampaignStore();
-      const svc = withReader(store, reader({ 7: { paths: ["src/clean.ts"], complete: true, candidateSha: "head-B" } }));
+      const svc = withReader(
+        store,
+        reader({ 7: { paths: ["src/clean.ts"], complete: true, candidateSha: "head-B" } }),
+        oracleLedger({ sha: "evaluated-A" }),
+      );
       const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
       snapshots.set("sc-moved-head", snapshot(comparison(), { candidate: built("1.0.1", { sha: "evaluated-A" }) }));
       const result = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-moved-head" }, "alice");
@@ -1958,21 +2021,35 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         8: { paths: ["src/loop.ts"], complete: false },
         9: "unknown",
       });
-      const svc = withReader(store, changes);
-      const rec = await svc.open("acme", { issueId: "iss_1", frame: scoped }, "alice");
-      // No pull request named at all: nothing to read.
-      snapshots.set("sc-nopr", snapshot(comparison()));
-      const noPr = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-nopr" }, "agent:everdict");
+      const rec0 = await withReader(store, changes).open("acme", { issueId: "iss_1", frame: scoped }, "alice");
+      // No pull request on the build Everdict made: nothing to read.
+      snapshots.set("sc-nopr", snapshot(comparison(), { candidate: built("1.0.1") }));
+      const noPr = await withReader(store, changes, oracleLedger({ noPr: true })).logRound(
+        "acme",
+        rec0.id,
+        { ...LOG, candidateScorecardId: "sc-nopr" },
+        "agent:everdict",
+      );
       expect(noPr.round.verdict.comparable).toBe(false);
-      expect(noPr.round.verdict.detail).toMatch(/names no pull request/);
+      expect(noPr.round.verdict.detail).toMatch(/names no repository, pull request and observed commit/);
       // A listing the reader could not complete is not a listing.
       snapshots.set("sc-trunc", snapshot(comparison(), { candidate: built("1.0.1", { prNumber: 8 }) }));
-      const trunc = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-trunc" }, "agent:everdict");
+      const trunc = await withReader(store, changes, oracleLedger({ prNumber: 8 })).logRound(
+        "acme",
+        rec0.id,
+        { ...LOG, candidateScorecardId: "sc-trunc" },
+        "agent:everdict",
+      );
       expect(trunc.round.verdict.comparable).toBe(false);
       expect(trunc.round.verdict.detail).toMatch(/more files than could be listed/);
       // A read that failed is UNKNOWN, never clean.
       snapshots.set("sc-unk", snapshot(comparison(), { candidate: built("1.0.1", { prNumber: 9 }) }));
-      const unk = await svc.logRound("acme", rec.id, { ...LOG, candidateScorecardId: "sc-unk" }, "agent:everdict");
+      const unk = await withReader(store, changes, oracleLedger({ prNumber: 9 })).logRound(
+        "acme",
+        rec0.id,
+        { ...LOG, candidateScorecardId: "sc-unk" },
+        "agent:everdict",
+      );
       expect(unk.round.verdict.comparable).toBe(false);
       expect(unk.round.verdict.detail).toMatch(/github said 502/);
     });
