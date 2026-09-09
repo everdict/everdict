@@ -306,6 +306,15 @@ See skill `ci`.
   blob over a 1.8 MB range would have stamped for about a fifth of what it claimed, so the diff is grouped per
   file, every group is reviewed, and a range needing more than eight groups is REFUSED — a 541-file push is
   the problem, not the reviewer. `--range` never stamps, for the reason `--only` never stamps an eval run.
+  ⚠️ **THE REVIEW RESUMES FROM ITS LAST STAMP, AND REFUSES TO RESUME FROM PROSE.** The stamp names a HEAD, so
+  one more commit used to mean reading the whole push again — measured at $3.10 for 101 files, then $4.24 for
+  the same 101 to earn a stamp covering a three-file repair the reviewer itself had asked for. The base is now
+  the newest stamped ANCESTOR of HEAD (an ancestor, because a stamp from another branch says nothing about
+  this history), and the stamp file is a chain rather than one link. The GATE is unchanged: it still demands
+  a stamp naming HEAD. But a part that came back as prose instead of JSON is recorded `unstructured` and still
+  stamps — deliberately, a formatting failure is not a finding — and resuming past it would drop those files
+  from every later range forever. So the stamp records `unstructured=<n>` and such a stamp is skipped as a
+  resume point: the walk goes further back and that region is read again.
 - **The gate RECORDS what it decided** (`.git/everdict-gate-log.jsonl`, one JSON line per push decision).
   `pnpm guardrails` proves the decision is CORRECT over constructed facts; nothing recorded what it actually
   decided, so the gate's own leading indicator (wait per gate) had no data and its lagging one (violations
