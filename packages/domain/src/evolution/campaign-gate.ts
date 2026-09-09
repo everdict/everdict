@@ -300,9 +300,16 @@ export function campaignStoppedAt(
     // The last budgeted round ends the campaign unless it is the one being adopted.
     if (i + 1 >= frame.budget.maxRounds && !won) return { reason: "budget_exhausted", atRound: i + 1 };
   }
-  // The spend is THREADED here and not yet read: this commit gives every decision the ledger the reservation
-  // door already spends against, and changes no answer. The ending that reads it is the next commit.
-  void spend;
+  // …and the same ending read off the ATTEMPT ledger, for the budget rounds alone cannot see: spent, nothing
+  // left to spend, and nothing still able to land. A winning latest round is untouched — adoption is that
+  // campaign's exit and the loop above already declined to stop on it.
+  const latest = rounds.at(-1);
+  if (
+    spend.consumed >= frame.budget.maxRounds &&
+    spend.outstanding === 0 &&
+    (latest === undefined || !winning(latest, frame))
+  )
+    return { reason: "budget_exhausted", atRound: rounds.length };
   return undefined;
 }
 
@@ -325,7 +332,7 @@ export function campaignRoundRefusal(
       detail:
         stopped.reason === "no_improvement"
           ? `${frame.stopAfterRejectedRounds} consecutive rounds were rejected by round ${stopped.atRound} — the campaign ended by its own rule; ask the gate and settle it`
-          : `all ${frame.budget.maxRounds} budgeted rounds are logged and the last is not adoptable — the campaign ended by its own rule; ask the gate and settle it`,
+          : `${Math.max(stopped.atRound, spend.consumed)} of ${frame.budget.maxRounds} budgeted comparisons are spent and the last is not adoptable — the campaign ended by its own rule; ask the gate and settle it`,
     };
   if (rounds.length >= frame.budget.maxRounds)
     return {
@@ -385,7 +392,7 @@ function decideAdoption(
       : {
           kind: "halt",
           reason: "budget_exhausted",
-          detail: `${Math.min(ended.atRound, frame.budget.maxRounds)} of ${frame.budget.maxRounds} budgeted rounds are spent and the latest budgeted candidate is not adoptable${tail}`,
+          detail: `${Math.min(Math.max(ended.atRound, spend.consumed), frame.budget.maxRounds)} of ${frame.budget.maxRounds} budgeted comparisons are spent and the latest budgeted candidate is not adoptable${tail}`,
         };
   }
   // Not stopped and still over budget: only a trace whose LAST budgeted round won can get here, followed by
@@ -453,5 +460,12 @@ function decideAdoption(
     if (r === undefined || winning(r, frame)) break;
     consecutiveRejected += 1;
   }
-  return { kind: "continue", roundsLeft: frame.budget.maxRounds - rounds.length, consecutiveRejected };
+  // `roundsLeft` is what the DOOR will still hand out, which is the budget minus what is spent — not minus
+  // the rounds that happened to be reported. A driver told "1 round left" by a number the reservation ledger
+  // does not share is a driver that meets a refusal it was just promised would not come.
+  return {
+    kind: "continue",
+    roundsLeft: Math.max(0, frame.budget.maxRounds - Math.max(spend.consumed, rounds.length)),
+    consecutiveRejected,
+  };
 }

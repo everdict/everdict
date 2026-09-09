@@ -24,16 +24,22 @@ import {
   NotFoundError,
   RoundEvidenceSchema,
   type Score,
+  type ScorecardStatus,
+  TERMINAL_SCORECARD_STATUSES,
   isJudgeFamilyMetric,
   isMeasured,
+  readOrUnknown,
 } from "@everdict/contracts";
 import { campaignFrameDefects } from "@everdict/contracts";
 import { type ExperimentIdentity, type RoundEvidenceSide, type TrialDiff, campaignRoundBrief } from "@everdict/domain";
 import {
+  type CampaignArmState,
   type CampaignGateAnswer,
+  type CampaignSpend,
   adoptionProofOf,
   campaignAdoption,
   campaignRoundRefusal,
+  campaignSpendOf,
   caseLinksOf,
   contentDigest,
   diagnosesOf,
@@ -42,7 +48,6 @@ import {
   oracleTouched,
   roundEvidenceKey,
   roundEvidenceOf,
-  roundsOnlySpend,
   seedLeakOf,
 } from "@everdict/domain";
 import { hashKey } from "../credential/credentials.js";
@@ -199,6 +204,26 @@ function sideOf(
   };
 }
 
+// What one reserved arm's batch is, from the record the PLATFORM holds about it (review 2026-09-09 R2).
+// `undefined` is a batch whose row is not there — the state a crash between the reservation and the
+// scorecard's creation leaves, and the follow-up record already says such an attempt is never re-dispatched
+// (`submit`'s replay arm refuses when the reserved scorecard is not durably readable). Another workspace's
+// row reads the same way, as every cross-tenant read here does.
+//
+// ⚠️ THAT MEANS A COMPARISON READS AS LOST WHILE ITS SUBMISSION IS STILL IN FLIGHT. The reservation is
+// written before the scorecard row so a replay cannot dispatch twice, so between those two commits this
+// answers "lost" about an arm that is about to exist. The exposure is bounded: only a campaign whose budget
+// is otherwise fully spent can be ENDED by it, and `settle` re-reads the ledger, so the window has to still
+// be open at the close for anything to be lost. It is stated rather than papered over with a clock — the
+// honest close is one durable act across the two stores, which this change does not build.
+function armStateOf(card: { tenant: string; status: ScorecardStatus } | undefined, tenant: string): CampaignArmState {
+  if (card === undefined || card.tenant !== tenant) return "lost";
+  if (card.status === "succeeded") return "succeeded";
+  // `failed`, `cancelled` and `superseded` are the terminals that are not a result — the negated form is what
+  // the scorecard contract itself warns about, so the allowlist is read rather than re-spelled.
+  return (TERMINAL_SCORECARD_STATUSES as readonly string[]).includes(card.status) ? "lost" : "live";
+}
+
 function candidateSourceOf(side: CampaignComparisonSide): CandidateSource | undefined {
   const origin = side.record.origin;
   if (origin === undefined) return undefined;
@@ -293,6 +318,12 @@ export interface CampaignServiceDeps {
     get(id: string): Promise<
       | {
           tenant: string;
+          // ── WHETHER A RESERVED COMPARISON CAN STILL LAND (review 2026-09-09 R2) ─────────────────
+          //
+          // The batch's own lifecycle status, which is what separates a reservation still running from one
+          // whose result is irrecoverable. Read from the PLATFORM's record of the batch, never from the
+          // driver's word about it (L3): the driver is the party whose campaign would otherwise be ended.
+          status: ScorecardStatus;
           manifest?: { verdictPolicy?: VerdictPolicy };
           scorecard?: {
             results: ReadonlyArray<{ caseId?: string; scores: Score[]; failure?: CaseResult["failure"] }>;
@@ -968,10 +999,65 @@ export class CampaignService {
     );
   }
 
+  // ── HOW MUCH OF THIS CAMPAIGN'S BUDGET IS SPENT, AND WHAT CAN STILL LAND (review 2026-09-09 R2) ──
+  //
+  // The reservation door spends `budget.maxRounds` against the ATTEMPT ledger; the gate used to count rounds.
+  // A comparison reserved and never reported is spent in the first number and invisible in the second, so a
+  // campaign that lost its only attempt could neither reserve again ("evaluation budget is exhausted") nor
+  // settle ("the gate answers continue"). One ledger now answers both (`campaignSpendOf`).
+  //
+  // The conservative half is kept: a lost attempt stays SPENT. What it stops doing is holding the campaign
+  // open — an attempt whose batch failed, was cancelled or was never created can never be reported, and the
+  // ending fires once nothing is outstanding.
+  //
+  // A batch the store could not be read for is `unknown`, which `attemptStandingOf` reads as OUTSTANDING:
+  // ending a campaign on a read that did not happen is the collapse L2 exists to refuse, and the cost of the
+  // other direction is only that a settle waits for the store to answer.
+  private async spendOf(
+    tenant: string,
+    campaign: EvolutionCampaignRecord,
+    // The comparison the CALLER is landing right now, if any. Its arms are not resolved: `logRound` is in the
+    // middle of reporting it, so it is outstanding by construction, and asking the batch store whether it
+    // still lives would let this round's own reservation end the campaign before the round lands.
+    claiming?: string,
+  ): Promise<{ spend: CampaignSpend; unresolved: number }> {
+    const attempts = await this.deps.store.attemptsForCampaign(tenant, campaign.id);
+    const arms = new Map<string, CampaignArmState>();
+    let unresolved = 0;
+    for (const attempt of attempts) {
+      if (attempt.reportedRound !== undefined) continue; // a reported attempt is already an ending's evidence
+      if (attempt.id === claiming) continue; // unresolved arms read as `unknown`, which is outstanding
+      for (const side of [attempt.baseline, attempt.candidate]) {
+        if (side === undefined || arms.has(side.scorecardId)) continue;
+        const read = await readOrUnknown(
+          () => this.deps.scorecards.get(side.scorecardId),
+          `the batch ${side.scorecardId} a campaign comparison was reserved for`,
+        );
+        switch (read.kind) {
+          case "unknown":
+            unresolved += 1;
+            continue; // left out of the map, which `attemptStandingOf` reads as `unknown` → outstanding
+          case "absent":
+            // `readOrUnknown` never produces this arm (the port answers `undefined` for a missing row, which
+            // is a READ), and an exhaustive switch is what keeps that true if the port ever returns one.
+            arms.set(side.scorecardId, armStateOf(undefined, tenant));
+            continue;
+          case "read":
+            arms.set(side.scorecardId, armStateOf(read.value, tenant));
+            continue;
+          default:
+            return assertNever(read);
+        }
+      }
+    }
+    return { spend: campaignSpendOf(campaign.rounds, attempts, arms), unresolved };
+  }
+
   async decision(tenant: string, id: string): Promise<CampaignGateAnswer> {
     const record = await this.get(tenant, id);
     this.requireEligibleFrame(record);
-    return campaignAdoption(record.frame, record.rounds, roundsOnlySpend(record.rounds));
+    const { spend } = await this.spendOf(tenant, record);
+    return campaignAdoption(record.frame, record.rounds, spend);
   }
 
   async logRound(
@@ -1008,19 +1094,13 @@ export class CampaignService {
     // predicate is the domain's (`campaignRoundRefusal`, the same owner the gate reads), and the refusal is
     // race-safe because `appendRound` CASes on the round count this answer was computed over: two writers at
     // the last budgeted slot cannot both land.
-    const ended = campaignRoundRefusal(record.frame, record.rounds, roundsOnlySpend(record.rounds));
-    if (ended !== undefined)
-      throw new ConflictError(
-        "CONFLICT",
-        {
-          campaign: id,
-          reason: ended.reason,
-          atRound: ended.atRound,
-          rounds: record.rounds.length,
-          budget: record.frame.budget.maxRounds,
-        },
-        ended.detail,
-      );
+    // ── THE RESERVATION THIS ROUND SPENDS, RESOLVED BEFORE THE ENDING IS ASKED (R2) ────────────────
+    //
+    // Order matters here. The ending below is counted over the attempt ledger, and this call is REPORTING one
+    // of that ledger's entries — so the ending has to be asked about the campaign's OTHER comparisons, never
+    // about the one being landed. Asked the other way round, a batch this pair's own reservation names would
+    // decide whether the pair may be logged at all, and a campaign at its last budgeted comparison could
+    // never report it.
     const evaluation = await this.deps.store.evaluationForScorecard(tenant, input.candidateScorecardId);
     if (
       !evaluation ||
@@ -1034,6 +1114,28 @@ export class CampaignService {
         "CONFLICT",
         {},
         "round requires an unreported evaluation reserved before both scorecards were submitted",
+      );
+    // ── …AND A ROUND PAST THE FRAME'S OWN ENDING IS REFUSED, NOT SCORED ───────────────────────────
+    //
+    // The budget and the rejected streak were answered by `decision` and enforced by nobody: a driver that
+    // never asked, or ignored a halt, could log past either until a round happened to win — and the gate,
+    // reading the latest round first, adopted it at a level the pre-registered family never covered. The
+    // predicate is the domain's (`campaignRoundRefusal`, the same owner the gate reads), and the refusal is
+    // race-safe because `appendRound` CASes on the round count this answer was computed over: two writers at
+    // the last budgeted slot cannot both land.
+    const { spend } = await this.spendOf(tenant, record, evaluation.id);
+    const ended = campaignRoundRefusal(record.frame, record.rounds, spend);
+    if (ended !== undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        {
+          campaign: id,
+          reason: ended.reason,
+          atRound: ended.atRound,
+          rounds: record.rounds.length,
+          budget: record.frame.budget.maxRounds,
+        },
+        ended.detail,
       );
     // The verdict is DERIVED from the production diff. A missing/unfinished/invisible scorecard throws
     // inside the read (requireSucceeded, under the caller's team ceiling) and the round is refused with that
@@ -1232,11 +1334,10 @@ export class CampaignService {
     switch (outcome.kind) {
       case "appended": {
         const rounds = [...record.rounds, round];
-        return {
-          record: { ...record, rounds },
-          round,
-          answer: campaignAdoption(record.frame, rounds, roundsOnlySpend(rounds)),
-        };
+        // Re-read the ledger rather than adjusting the pre-append spend: `appendRound` is what marks this
+        // attempt reported, and the answer a driver acts on must be counted over what the store now holds.
+        const after = await this.spendOf(tenant, { ...record, rounds });
+        return { record: { ...record, rounds }, round, answer: campaignAdoption(record.frame, rounds, after.spend) };
       }
       case "conflict":
         throw new ConflictError(
@@ -1466,12 +1567,18 @@ export class CampaignService {
     if (record.state !== "open")
       throw new ConflictError("CONFLICT", { state: record.state }, "the campaign already settled");
     this.requireEligibleFrame(record);
-    const answer = campaignAdoption(record.frame, record.rounds, roundsOnlySpend(record.rounds));
+    const { spend, unresolved } = await this.spendOf(tenant, record);
+    const answer = campaignAdoption(record.frame, record.rounds, spend);
     if (answer.kind === "continue")
       throw new ConflictError(
         "CONFLICT",
-        { answer },
-        "the gate answers continue — the campaign settles only on an adoptable candidate or its own ending",
+        { answer, spend, unresolved },
+        unresolved > 0
+          ? // Saying WHICH continue this is: a campaign held open by a comparison whose batch could not be
+            // read is waiting on the store, not on the driver, and the repair is to ask again rather than to
+            // log another round (L2 — "could not find out" is an escalation, never a decision).
+            `the gate answers continue, and ${unresolved} of this campaign's reserved comparisons could not be read — retry once the scorecard store answers`
+          : "the gate answers continue — the campaign settles only on an adoptable candidate or its own ending",
       );
     // `exam_inert` settles like the other two endings: the gate decided the campaign is over and named the
     // instrument rather than the hypotheses. `identity_unverified` is the one halt reason that is NOT a
