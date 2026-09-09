@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { MeasurementIdentity } from "./grader.js";
+import type { MeasurementIdentity } from "./measurement-identity.js";
 
 // Verdict policy — the authority ladder as DATA instead of hardcoded metric-name arrays. The old
 // implementation understood strings ("state", "judge") rather than meanings: a new ground-truth grader

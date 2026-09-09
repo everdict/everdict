@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ComputeHandle, ComputeSpec } from "./compute.js";
 import type { EnvSnapshot } from "./environment.js";
 import type { EnvDelta, EvalCase, Scorecard } from "./eval-case.js";
+import { type MeasurementIdentity, MeasurementIdentitySchema } from "./measurement-identity.js";
 import type { TraceEvidence } from "./trace-source.js";
 import { type TraceEvent, TraceEventSchema } from "./trace.js";
 import { type ScoreProducer, forgedMetricReason } from "./verdict-policy.js";
@@ -25,12 +26,10 @@ export type UnmeasuredReason = (typeof UNMEASURED_REASONS)[number];
 // isMeasured gate stood between and a mean. Here a non-measurement carries NO `value` at all: a dead grader
 // has no number to leak, and a consumer that reads `.value` without narrowing fails to COMPILE.
 
-export const MeasurementIdentitySchema = z.object({
-  producer: z.object({ kind: z.enum(["grader", "judge"]), id: z.string().min(1) }),
-  metric: z.string().min(1),
-  criterion: z.string().min(1).optional(),
-});
-export type MeasurementIdentity = z.infer<typeof MeasurementIdentitySchema>;
+// The identity itself is declared one module over, because `verdict-policy.ts` reads it and this file builds
+// it — see `measurement-identity.ts` for why that has to be a module of its own. Re-exported here so the
+// public surface is exactly where it always was.
+export { MeasurementIdentitySchema, type MeasurementIdentity };
 
 // The collector supplies the producer. Legacy label parsing is confined to this
 // collection adapter; policy and deduplication consume the resulting coordinates.
