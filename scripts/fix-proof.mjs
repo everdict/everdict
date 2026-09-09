@@ -82,8 +82,15 @@ export function verdictFor({ subject, body, files }) {
   if (tests.length > 0) return { kind: "proof-owed", source, tests, ...(fixtures.length > 0 ? { fixtures } : {}) };
   // Every test file declared a fixture, or none was shipped at all: either way the fix has no proof, and the
   // two are the same refusal because they leave the same hole.
+  //
+  // …and the DECLINE is available to both, which the first version got wrong by gating it on
+  // `touched.length === 0`. A commit whose only test file is a declared fixture AND which says
+  // `Regression-test: none — <why>` had followed the grammar exactly and was answered `violation`, under a
+  // message telling it to add the line it already had. The sentence above says the two cases leave the same
+  // hole; the code then treated only one of them as fillable (found by `pnpm review` on the commit that
+  // introduced it).
   const declared = DECLARATION.exec(body);
-  if (declared && touched.length === 0) return { kind: "declined", why: declared[1].trim() };
+  if (declared) return { kind: "declined", why: declared[1].trim() };
   return { kind: "violation", source };
 }
 

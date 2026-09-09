@@ -309,5 +309,13 @@ Stated limits:
 - **`decision` and `settle` read one scorecard per bound arm of every unreported attempt.**
   Bounded by `budget.maxRounds` (≤ 1000, typically ≤ 20) and deduplicated by scorecard id, but
   it is a linear read where there was none.
+- **The oracle's own attestation cannot fail, and R1 now leans on it.** `oracleCheck` refuses a
+  listing whose `baselineSha`/`candidateSha` disagree with the commits it asked for — and the
+  only production wiring of `changes.pullRequestFiles` builds those two fields by spreading
+  `...commits`, its own input. The check compares a value with itself. It is not false today,
+  because R1 made the commits come from the build ledger; what it cannot do is notice that
+  premise being removed. Honoring it needs `listPullRequestChanges` to return the commits
+  GitHub actually compared, which its adapter does not read. Found by `pnpm review` on this
+  change, graded `carried`.
 - Not executed: real PostgreSQL (`trust-fast` — `attemptsForCampaign`'s statement has not been
   planned by an engine), live GitHub, `pnpm protocol-mutations`, and the deployment E2E.
