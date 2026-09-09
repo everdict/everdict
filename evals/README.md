@@ -50,7 +50,7 @@ retired, so a reader copied the shape of a case the suite no longer had, and the
 became a file the drill does not remove the lesson from and the case would have certified nothing. A document
 about the cases is inside the tree the cases are asked in. The real ones are in `evals/cases/`.
 
-**The suite is two cases, and that is the measured size rather than the intended one.** Two complete
+**The suite is ONE case, and that is the measured size rather than the intended one.** Two complete
 drill-alls in one session retired eleven: four because the answer sat in live source, seven because a capable
 model answers them cold — including after each was rewritten as a counter-intuitive yes/no where the intuitive
 answer is wrong. Two more went on 2026-09-07 for reasons no single drill could have
@@ -58,10 +58,16 @@ produced. `provenance-at-the-source`: its assertion matched any competent answer
 `neutralize` named a HEADING while the sentence that answers the prompt stayed in the file, so neither of its
 two contradictory verdicts meant what it said. `biome-write-is-not-evidence`: its assertion was the name of a
 public distinction in the tool itself, so its four drills — RED, RED, then GREEN, GREEN — were measuring which
-model answer came back rather than what the configuration carries. What survives shares one property: the correct answer names something **this repository
-invented and a model cannot derive** — an external tool's counter-intuitive exit behaviour, a private gate's
-name, a private environment variable. Both are certified RED under their own drills
-(`docs/architecture/harness-drill-certificates.md`, 2026-09-07), which is a sentence the fifteen-case version
+model answer came back rather than what the configuration carries. `sibling-doors-guard-alike` went on
+2026-09-09, after a pass that found two real defects in it — its lesson lived in four files and it named one,
+and its assertion asked for a name that lives in `package.json` — fixed both, and watched it go green a third
+time. A control's NAME is a fact about the manifest rather than about the configuration, and no drill can
+remove the manifest.
+
+What survives shares one property: the correct answer names something **this repository
+invented and a model cannot derive** — a private environment variable that only the rule knows is the
+difference between a scenario that ran and one that skipped. It is certified RED under its own drill
+(`docs/architecture/harness-drill-certificates.md`), which is a sentence the fifteen-case version
 could not say about twelve of them. The article's 20–50 baseline is a target for cases that MEASURE, and
 backfilling toward the number with cases that do not is how the suite got here — COVERAGE is the open question
 now, not validity. See `RETIRED.md`, and `lessons/2026-09-07-the-drill-is-not-deterministic.md` for why a

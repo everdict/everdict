@@ -29,6 +29,37 @@ new case rather than a repair of this one.
 **The suite is two cases now.** That is a coverage problem and it is stated as one: the answer is writing cases
 that measure, never keeping ones that do not.
 
+## `sibling-doors-guard-alike` — the control's NAME is in `package.json`, and no drill can remove it
+
+Asked what is owed after adding a route that carries the same guard its siblings already have; asserted
+`guard-siblings|baseline`. Three drills, three greens, across two rewrites.
+
+The 2026-09-09 pass found two real defects in it and fixed both, and it still went green:
+
+- **The lesson lived in four files and the case named one.** `.claude/rules/auth.md`, `docs/auth.md` and the
+  scanner's own header all name the control; only `.claude/rules/ci.md` was a subject, so the drill removed a
+  quarter of the lesson. The leak scan could not see it — its fingerprint is the case's WHOLE needle set, and
+  those three carry one of the two needles. A partial copy is invisible to that check and sufficient for the
+  session under test. Subjects were widened to all four.
+- **The assertion asked for a name.** `baseline` is in almost every ratchet gate's header here, and
+  `guard-siblings` is a script name in `package.json` — a tracked file no drill removes, because removing it
+  would break the repository rather than the lesson. Tightened to demand the name AND the ratchet.
+
+It went green anyway, and the reason is the second bullet taken to its end: **a control's name is a fact about
+this repository's `package.json`, not about its configuration**, and "it is a ratchet with a baseline" is true
+of eight other gates whose headers the session may read. There is no assertion left that this lesson uniquely
+supplies and a capable model does not reach by reading the scanner it is asking about.
+
+**What a replacement would have to assert.** Not that `pnpm guard-siblings` exists — the manifest says that —
+but this rule's actual contribution: *the neighbours may themselves be deviant, so copying them can ADD a
+baselined deviation rather than avoid one.* That is a claim about the 21 recorded rows, not about the check,
+and a case for it would have to make the deviant-sibling situation concrete rather than ask a general
+question. It is a new case, not a repair of this one.
+
+**The suite is one case now**, and that is worse than the two this file already called a coverage problem. The
+answer is the same: write cases that measure. A case that certifies nothing is not coverage — its presence in
+the directory reads as coverage, which is the more expensive kind of nothing.
+
 ## `provenance-at-the-source` — the assertion was satisfied by ordinary judgement, and the drill said so twice
 
 Asked whether a judge can be worked out by parsing a `judge:foo` metric name at read time; asserted
