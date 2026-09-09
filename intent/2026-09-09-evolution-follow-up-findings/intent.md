@@ -1,7 +1,7 @@
 # Intent: close the four findings the 2026-09-09 evolution follow-up review left open
 
 Author: maintainer (requested in conversation). Status: shipped
-Shipped: 3a5a400b
+Shipped: c4c54eae
 Design: none — `docs/architecture/evolution-review-2026-09-09.md` is the requirements document. Each finding
 already carries its reproduction, the repair it requires in the reviewer's own words, and the closure test
 that would settle it; a design pass over that would restate it.
@@ -17,7 +17,7 @@ is this paragraph and the commit graph agreeing with it. The predecessor is
 
 ## Problem
 
-The 2026-09-08 change (`8f538e4f`, `891eb99b`) bound campaign evaluations to a durable attempt ledger and
+The 2026-09-08 change (`75851600`, `f6e3ba2b`) bound campaign evaluations to a durable attempt ledger and
 tightened the evidence a round rests on. Its own follow-up review found four things that change did not
 close — three of which are ways the settlement can be wrong or stuck, none of which any gate can see:
 

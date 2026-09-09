@@ -7,10 +7,10 @@ anchors: [packages/application-control/src/evolution/campaign-service.ts, packag
 ---
 # Evolution follow-up review — 2026-09-09
 
-Reviewed commit: `f75f86b790efac38a874e16aea3c90eba4b2448e`.
+Reviewed commit: `7f6fd9db` (`f75f86b790efac38a874e16aea3c90eba4b2448e` when the review ran — see below).
 Scope: the fixes following the review of main at
 `25814996b975a8b721272396b547854adde6fd6f`, including implementation commits
-`8f538e4f` and `891eb99b` and their verification record.
+`75851600` and `f6e3ba2b` and their verification record.
 
 **All four findings are closed.** Each carries the repair, the committed regression test,
 and the neutralization under which that test was observed red. The status lines below were
@@ -19,9 +19,16 @@ whose reproduction is deleted with its fix cannot be re-checked.
 
 See [the implementation overview](evolution-review-follow-up.md), the
 [request these repairs were filed under](https://github.com/everdict/everdict/blob/main/intent/2026-09-09-evolution-follow-up-findings/intent.md)
-and [the original verification record](https://github.com/everdict/everdict/blob/f75f86b790efac38a874e16aea3c90eba4b2448e/intent/2026-09-08-evolution-evidence-authority/review.md).
+and [the original verification record](https://github.com/everdict/everdict/blob/7f6fd9db/intent/2026-09-08-evolution-evidence-authority/review.md).
 P1 affects adoption integrity or the ability to complete an evolution campaign;
 P2 affects semantic identity and extension behavior.
+
+⚠️ **The shas above are the rebuilt ones.** `pnpm ci:commits` found that the reviewed batch's
+first commit left one of its own transport assertions red — it changed a missing environment
+seal from a 400 to a 409 and the next commit repaired the assertion — so a bisect would have
+landed on a hole. The repair was moved into the commit that made it, which rewrote every sha
+from there, and every citation in this tree was re-pointed. The reviewed TREES are unchanged
+apart from those two assertion lines.
 
 ## R1 — P1: oracle commit coordinates are not bound to evaluated code
 
