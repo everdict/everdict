@@ -129,6 +129,40 @@ const ciLedger =
         }),
       );
 
+// ── A STAMP IS ABOUT A TREE, AND A REWRITE KEEPS THE TREE ───────────────────────────────────────────
+//
+// `fast` says one thing: lint, typecheck and test passed on this commit's content. That is a property of the
+// TREE and of the diff to its parent, and neither moves when a commit is reworded, reordered, or rebased onto
+// an identical predecessor — but the sha does, so every stamp died and the walk started over. Measured on the
+// session that wrote this: three history repairs, each invalidating sixteen-to-twenty stamps, each costing an
+// hour of the same lint+typecheck+test over trees that had already passed them.
+//
+// So a pushed commit inherits a `fast` stamp when some stamped commit has the SAME tree and the same parent
+// tree. Both halves are needed: the suite is a function of the tree, and `pnpm fix-proof` — which the same
+// walk runs — is a function of the DIFF, so a tree whose parent moved has not been proved.
+//
+// ⚠️ IT GRANTS `fast` AND NEVER `full`. `pnpm ci:local` also runs gitleaks over ALL history and
+// `pnpm intent-chain` over the commit graph, and those are not tree properties: two identical trees on
+// different ancestries are different answers. The tip still has to carry its own `full`.
+const treeKey = (sha) => {
+  const tree = git("rev-parse", `${sha}^{tree}`).stdout.trim();
+  const parentTree = git("rev-parse", `${sha}^^{tree}`).stdout.trim(); // "" for a root commit
+  return tree === "" ? undefined : `${tree} ${parentTree}`;
+};
+if (ciLedger !== null) {
+  const stampedTrees = new Set();
+  for (const [sha, level] of ciLedger) {
+    if (level !== "fast" && level !== "full") continue;
+    const key = treeKey(sha);
+    if (key !== undefined) stampedTrees.add(key);
+  }
+  for (const sha of git("rev-list", "HEAD", "--max-count=400").stdout.split("\n").filter(Boolean)) {
+    if (ciLedger.has(sha)) continue;
+    const key = treeKey(sha);
+    if (key !== undefined && stampedTrees.has(key)) ciLedger.set(sha, "fast");
+  }
+}
+
 // What this push would carry. The remote's own ref is the base — anything it already has was gated when it
 // was pushed. If that ref cannot be resolved (a first push, a detached setup), fall back to guarding HEAD
 // alone rather than refusing everything.

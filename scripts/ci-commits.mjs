@@ -82,6 +82,28 @@ const readLedger = () => {
 };
 const stampedAlready = new Set(readLedger().map((l) => l.split(" ")[0]));
 
+// ── …AND A STAMP IS ABOUT A TREE, SO A REWRITE DOES NOT SPEND THE WALK AGAIN ────────────────────────
+//
+// What this walk proves is lint+typecheck+test on a commit's CONTENT and `pnpm fix-proof` on its DIFF. Both
+// are functions of (tree, parent tree), and neither moves when a commit is reworded, reordered or rebased
+// onto an identical predecessor — only the sha does. Measured on the session that wrote this: three history
+// repairs, each invalidating every stamp, each re-running an hour of the same suites over trees that had
+// already passed them.
+//
+// The equivalence is (tree, parent tree) rather than tree alone because the fix-proof half reverts to the
+// PARENT: a commit whose content is unchanged but whose parent moved has a different diff and is not proved.
+// `pre-push-gate.mjs` resolves the same equivalence when it reads the ledger, from the same two facts.
+const treeKeyOf = (sha) => {
+  const tree = git(["rev-parse", `${sha}^{tree}`]).stdout.trim();
+  if (tree === "") return undefined;
+  return `${tree} ${git(["rev-parse", `${sha}^^{tree}`]).stdout.trim()}`;
+};
+const provenTrees = new Set();
+for (const sha of stampedAlready) {
+  const key = treeKeyOf(sha);
+  if (key !== undefined) provenTrees.add(key);
+}
+
 // A throwaway worktree: the checks run against a checkout of each commit, never by moving this one. The
 // script must not disturb the tree the maintainer is working in — that is how a "verification" step becomes
 // the thing that loses work.
@@ -110,8 +132,13 @@ try {
   for (const [i, sha] of commits.entries()) {
     const short = sha.slice(0, 9);
     const subject = git(["log", "-1", "--format=%s", sha]).stdout.trim().slice(0, 68);
-    if (stampedAlready.has(sha)) {
-      console.log(`· ${short} already stamped — ${subject}`);
+    const key = treeKeyOf(sha);
+    const byTree = !stampedAlready.has(sha) && key !== undefined && provenTrees.has(key);
+    if (stampedAlready.has(sha) || byTree) {
+      console.log(
+        `· ${short} already stamped${byTree ? " (same tree and parent as a stamped commit)" : ""} — ${subject}`,
+      );
+      if (byTree) stamped.push(sha); // record the sha too, so the hook need not re-derive it
       continue;
     }
     console.log(`\n▶ [${i + 1}/${commits.length}] ${short} — ${subject}`);
