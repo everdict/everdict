@@ -12,6 +12,7 @@
 // can drive this file against a REAL linked worktree and read what it would have done; the wired hook never
 // passes it, and guardrails refuses a settings file that does.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -144,10 +145,22 @@ const ciLedger =
 // ⚠️ IT GRANTS `fast` AND NEVER `full`. `pnpm ci:local` also runs gitleaks over ALL history and
 // `pnpm intent-chain` over the commit graph, and those are not tree properties: two identical trees on
 // different ancestries are different answers. The tip still has to carry its own `full`.
+// ⚠️ AND THE KEY CARRIES THE MESSAGE, BECAUSE THE RULE DOES. `fix-proof` applies to a commit because its
+// SUBJECT says `fix:`, and what it exempts comes from `Regression-test:` / `Fixture-only:` lines in the body —
+// none of which is in the tree. So a `chore:` commit stamped fast, reworded to `fix(x): …` with an identical
+// tree and parent, would have inherited a stamp for a rule it was never checked against. Found by
+// `pnpm review` on the commit that introduced this inheritance.
+//
+// The message digest is the whole message rather than the three facts derived from it: a reword is rare, and
+// missing an inheritance costs one re-run while granting a wrong one costs a certificate.
 const treeKey = (sha) => {
   const tree = git("rev-parse", `${sha}^{tree}`).stdout.trim();
   const parentTree = git("rev-parse", `${sha}^^{tree}`).stdout.trim(); // "" for a root commit
-  return tree === "" ? undefined : `${tree} ${parentTree}`;
+  if (tree === "") return undefined;
+  const message = createHash("sha256")
+    .update(git("log", "-1", "--format=%B", sha).stdout)
+    .digest("hex");
+  return `${tree} ${parentTree} ${message}`;
 };
 if (ciLedger !== null) {
   const stampedTrees = new Set();

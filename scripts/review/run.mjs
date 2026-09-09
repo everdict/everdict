@@ -87,12 +87,24 @@ if (opts.range === undefined && !haveBase) {
 // nothing about this history; `merge-base --is-ancestor` is the question, asked per candidate newest-first.
 // ⚠️ AND `--range` KEEPS ITS MEANING: it names a slice deliberately and writes no stamp, so it must not be
 // silently narrowed by a stamp it knows nothing about.
+// ⚠️ A STAMP WHOSE OWN REVIEW LEFT A PART UNSTRUCTURED IS NOT A PLACE TO RESUME FROM. A chunk that comes
+// back as prose instead of JSON is RECORDED (`unstructured`) and the run still stamps — deliberately, because
+// a formatting failure is not a finding. That was harmless while every review re-read the whole push: the
+// next run covered those files again. Resuming turns it into a permanent hole — the files in that part fall
+// out of every later range, and the stamp on HEAD then certifies coverage of content nothing ever assessed.
+// Found by `pnpm review` on the commit that introduced the resume.
+//
+// So the stamp line records it, and a stamp carrying `unstructured=<n>` is skipped as a resume point: the
+// walk keeps going back until it finds a review that read everything it was given, and the unstructured
+// region is read again. It still satisfies the GATE (which asks only that HEAD is stamped) — what it does
+// not do is let the next review stand on it.
 const stampedHeads = (() => {
   try {
     return readFileSync(path.join(root, ".git", "everdict-review-ok"), "utf8")
       .split("\n")
-      .map((l) => l.split(" ")[0])
       .filter(Boolean)
+      .filter((l) => !/\bunstructured=[1-9]/.test(l))
+      .map((l) => l.split(" ")[0])
       .reverse(); // newest last in the file, so newest first here
   } catch {
     return [];
@@ -374,7 +386,12 @@ const priorStamps = (() => {
 })();
 writeFileSync(
   stampFile,
-  `${[...priorStamps.filter((l) => l.split(" ")[0] !== head), `${head} from=${(reviewedThrough ?? base).slice(0, 40)}`].slice(-100).join("\n")}\n`,
+  `${[
+    ...priorStamps.filter((l) => l.split(" ")[0] !== head),
+    `${head} from=${(reviewedThrough ?? base).slice(0, 40)}${unstructuredParts > 0 ? ` unstructured=${unstructuredParts}` : ""}`,
+  ]
+    .slice(-100)
+    .join("\n")}\n`,
 );
 console.log(
   `· review stamp written for ${head.slice(0, 9)}${important.length > 0 ? " — Important findings above are yours to judge, not the gate's" : ""}`,
