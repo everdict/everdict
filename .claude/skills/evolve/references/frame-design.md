@@ -179,10 +179,22 @@ frame tells you which of the issue's cases still fail.
 
 **`oracleScope`** — repository path patterns that ARE the exam: the dataset, the judge rubrics, the eval
 configs, the tests the graders run. Default empty. Non-empty means the round door reads what the candidate's
-pull request changed (from the repository the candidate scorecard's origin names) and a change inside the
-scope makes the round `comparable: false` — "the candidate touched the oracle", with the paths on the verdict
-as `oracleTouched`. A change that CANNOT be read — the scorecard names no pull request, the listing was
-truncated, the repository could not be asked — is non-comparable too: "could not check" is not "clean".
+pull request changed and a change inside the scope makes the round `comparable: false` — "the candidate
+touched the oracle", with the paths on the verdict as `oracleTouched`. A change that CANNOT be read — the
+listing was truncated, the repository could not be asked — is non-comparable too: "could not check" is not
+"clean".
+
+⚠️ **BOTH commits come from Everdict's own build ledger, and from nothing else.** The candidate's is the
+commit the build session observed for the version this round evaluated; the baseline's is the commit that
+built the frame's `baselineVersion`, looked up in this campaign's ledger and up the `continues` chain. A
+scorecard's `origin.repo`/`origin.sha` are the SUBMITTER's fields — the door stamps only `origin.source` —
+so they ride the round as provenance and decide nothing here. Reading them was a hole: a baseline origin set
+to the candidate's own sha made the oracle compare a commit with itself, find no changed paths, and certify
+`clean` about a change it never looked at (review 2026-09-09 R1).
+
+The consequence to plan for: **a campaign whose baseline Everdict did not build cannot use an oracle scope**
+— every round comes back `unverifiable`, naming which side is missing. Build the baseline through
+`build_campaign_candidate` once before round 1, or leave the scope empty and check the diff yourself.
 
 The pattern language is small: `*` within a segment, `?` one character, `**` across segments, a trailing `/`
 for a directory and its subtree, and a bare path for itself or its subtree (`pathMatchesPattern` in

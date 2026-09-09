@@ -54,8 +54,21 @@ So the split to hold in mind, because every mistake below is a confusion of the 
    actually behaves, and the next round loses its evidence. This is measured: WikiSkill (arXiv 2608.27454)
    gave the same knowledge to the proposer for +15.0 points and then also to the executing agent, and it went
    down 2.8. It is the oracle rule wearing a different coat.
-3. **Run both sides.** `POST /scorecards` for baseline and candidate, each with `trials` at least the
-   frame's `trialsPerCase`. Statistics need repeats; one trial per case produces no signal at all.
+3. **Reserve the comparison, then run both sides.** A round's evidence has to be a comparison the record
+   handed out. `POST /scorecards` (MCP `run_scorecard`) takes `campaignEvaluation` /`campaign_evaluation`
+   `{campaignId, requestId, candidateVersion, side}`; `POST /scorecards/ingest` takes the same block under
+   `campaignEvaluation`. Both arms of one round use the SAME `requestId` and `candidateVersion` and differ
+   only in `side` (`baseline` | `candidate`), and each must request exactly the frame's frozen scenarios and
+   `trialsPerCase` — an ingest names its trials by REPETITION (one `traces[]` entry per try), so a ragged
+   upload is refused rather than passed off as a full arm.
+
+   `POST /campaigns/:id/rounds` refuses a pair that owns no unreported reservation, so a scorecard you ran
+   for some other reason is not campaign evidence however good it looks.
+
+   ⚠️ **A baseline batch is not reusable across rounds.** The ledger binds each scorecard to ONE comparison,
+   so every round runs both arms — price the walk that way. ⚠️ **A reservation is spent whether or not the
+   batch lands.** A submission that fails takes the comparison with it; ask the gate rather than assuming the
+   round is still there. Statistics need repeats; one trial per case produces no signal at all.
 4. **Wait.** Scorecards are async. Poll `GET /scorecards/:id`, or subscribe to `scorecard.completed` —
    it is a triggerable kind, so a subscription can wake an agent when a side lands. The campaign's own
    facts (`campaign.round_logged`, `campaign.closed`) are feed facts and are NOT triggerable: the loop
@@ -88,7 +101,11 @@ So the split to hold in mind, because every mistake below is a confusion of the 
    characters, `learned` 10 to 4000, `candidateVersion` up to 100 — the same bounds on both transports.
 6. **Ask.** `GET /campaigns/:id/decision` (MCP: `campaign_decision`) returns `CampaignGateAnswer` without
    touching anything: `continue` (go to 2), `adopt`, or `halt` with a reason. Ask this rather than counting
-   rounds yourself — the arithmetic is the frame's, not yours.
+   rounds yourself — the arithmetic is the frame's, not yours, and it is counted over the RESERVATIONS rather
+   than over the rounds you managed to log. `continue.roundsLeft` is what the submission door will still hand
+   out; a campaign whose comparisons were all spent without being reported halts `budget_exhausted` instead of
+   sitting open forever. A comparison still running keeps the campaign live — exhaustion never closes a walk
+   whose reserved pair can still finish and win.
 7. **Close.** `POST /campaigns/:id/settle` (MCP: `settle_campaign`) writes the gate's answer. It REFUSES
    while the answer is `continue`: a campaign settles on an adoptable candidate or on its own ending.
 8. **Spend it.** A close that adopted leaves a durable authorization; read it with

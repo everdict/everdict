@@ -62,8 +62,32 @@ carry them on `origin.repo`/`origin.prNumber` instead; otherwise fix the App ins
 
 ## `POST /campaigns/:id/rounds` refuses (409 / 400)
 
-A round is never refused for being BAD — but it is refused when the campaign is over, or when the row could
-not hold it.
+A round is never refused for being BAD — but it is refused when the campaign is over, when the pair owns no
+reserved comparison, or when the row could not hold it.
+
+**"round requires an unreported evaluation reserved before both scorecards were submitted"** (409) — the pair
+was not reserved, or its reservation belongs to another campaign / candidate version, or it was already
+reported by an earlier round. Every round spends a comparison the record handed out at SUBMIT time
+(`campaignEvaluation` on `POST /scorecards` and on `POST /scorecards/ingest`, `campaign_evaluation` on MCP
+`run_scorecard`) — two arms, one `requestId`, one `candidateVersion`, differing only in `side`. A scorecard
+you ran for some other reason cannot be turned into campaign evidence afterwards; run the pair again under a
+reservation.
+
+**"a campaign evaluation must request exactly its frozen scenarios and trials"** (409, at the SUBMIT door) —
+an arm asked for a different slice or a different trial count than the frame froze. Repaired on the batch
+side; the frame cannot move. On the ingest lane the trials are the REPEATED `caseId`s, so this also fires
+when the upload carries the wrong number of tries per scenario.
+
+**"a campaign arm must upload the same number of traces for every scenario"** (409, ingest only) — a ragged
+upload. There is no single trial count to check against the frame, and picking one would let a thin arm pass
+as a full one. Upload `trialsPerCase` tries for every scenario.
+
+**"a scorecard is already bound to an evaluation"** (409) — a baseline batch cannot be reused across rounds.
+Each scorecard belongs to ONE comparison, so every round runs both arms.
+
+**"experiment family or campaign evaluation budget is exhausted"** (409) — the reservations are spent. They
+stay spent whether or not their batches landed, so a failed submission costs a comparison. Ask the decision;
+the gate reads the same ledger and will answer `budget_exhausted` once nothing is still outstanding.
 
 **"all N budgeted rounds are logged …"** (409) — the budget is spent. The record enforces its own ending:
 a round past the budget would be judged at a level the pre-registered family does not cover. Ask the
@@ -82,6 +106,12 @@ in this workspace's ledger, or is a case run rather than a session.
 budgets $Y"** (409) — the session ran past the frame's delegation budget; the round is refused, not scored.
 Open the next session within the budget (`create_sandbox` with `ttlSec` at most the frame's).
 
+**"Everdict's build ledger holds no build that minted …"** — recorded as `comparable: false` rather than
+refused, on a frame with a non-empty `oracleScope`. Both commits the oracle compares come from Everdict's own
+build ledger; a scorecard `origin` is the submitter's word and is not read. The message names which side is
+missing — the round's candidate, or the frame's `baselineVersion` — and the repair is to build that side
+through `build_campaign_candidate`.
+
 **"the build ledger could not be read, so whether Everdict built candidate … cannot be established"** (500) —
 Everdict's own build store did not answer. Nothing was logged: a round whose provenance cannot be read is not
 logged wearing the caller's coordinates. Retry once the ledger answers.
@@ -98,7 +128,12 @@ Not a refusal — an answer. Settle it and stop.
 **`no_improvement`** — K consecutive rejected rounds. The hypothesis well is dry. Note this halt outranks the
 budget one, so seeing it means the streak ended the campaign, not the budget.
 
-**`budget_exhausted`** — `maxRounds` spent with the latest candidate not adoptable.
+**`budget_exhausted`** — `maxRounds` spent with the latest candidate not adoptable. Counted over the
+RESERVATIONS, not over the rounds you managed to log: a comparison that was reserved and then lost (its
+submission failed, its execution was cancelled, one arm succeeded and the other did not) is spent, and once
+nothing is still outstanding the campaign ends rather than sitting open with a round it can never buy. A
+reserved comparison that can still finish keeps the campaign `continue` — exhaustion never closes a walk
+whose pair might still win.
 
 **`identity_unverified`** — the latest round WON, and the win cannot be trusted as identity. Two distinct
 causes, and the detail says which:
@@ -177,6 +212,11 @@ smaller per-round level that buys.
 
 **"the gate answers continue — the campaign settles only on an adoptable candidate or its own ending"** —
 you settled too early. Ask `GET /campaigns/:id/decision` first; that is what it is for.
+
+**"the gate answers continue, and N of this campaign's reserved comparisons could not be read"** — the
+scorecard store did not answer for a batch a reservation names, so the gate cannot tell a comparison that is
+still running from one that is lost. It answers `continue` rather than closing a campaign on a read that did
+not happen. Retry once the store answers; nothing is wrong with the campaign.
 
 **"the campaign already settled"** — a close is once.
 

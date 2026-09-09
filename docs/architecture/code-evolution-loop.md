@@ -129,14 +129,27 @@ scaffold. Any of those is the candidate rewriting its own exam.
 The frame is the place to freeze that boundary: an `oracleScope` of repository path patterns, declared at
 open. A round whose candidate PR touches a path in scope is recorded `comparable: false` with the reason
 `oracle touched` — the same treatment as a drifted scenario set, because it is the same defect: the exam
-moved. **Landed:** `CampaignService.logRound` reads the pull request the candidate names — Everdict's own
-build record first (D2: the pull request the build was asked for), the candidate scorecard's origin second —
-through the workspace GitHub App's changed-files listing (a REQUIRED dependency that answers `unknown` where
-no App is configured), matches it with `oracleTouched` (`@everdict/domain`), and records the offending paths on the
+moved. **Landed:** `CampaignService.logRound` reads the pull request the candidate names through the
+workspace GitHub App's changed-files listing (a REQUIRED dependency that answers `unknown` where no App is
+configured), matches it with `oracleTouched` (`@everdict/domain`), and records the offending paths on the
 verdict as `oracleTouched`. Three answers, never two: clean, touched, or unverifiable — a candidate with no
 pull request, a truncated listing, or a failed read is non-comparable, because "could not check" is not
 "clean" (L2). The brief still carries the boundary with its reason, so the delegate is told before it is
 refused.
+
+⚠️ **Both commits come from Everdict's own build ledger (review 2026-09-09 R1).** The candidate's is the
+commit its build session observed for the version this round evaluated; the baseline's is the commit that
+built the frame's `baselineVersion`, resolved from this campaign's ledger and up the `continues` chain
+(a successor's baseline is its predecessor's adopted candidate). The scorecards' `origin.repo`/`origin.sha`
+are the SUBMITTER's fields — the door stamps only `origin.source` — so they ride the round as provenance
+(D4) and decide nothing here. Reading them was a hole with a clean-looking receipt: submit the BASELINE's
+origin with the candidate's own sha, and the oracle compared a commit with itself, received no changed paths
+and certified `clean` about a change it never looked at. `OracleCheckReceipt.commitProvenance` records that
+the commits are the platform's word; its absence marks a receipt written before this change.
+
+The consequence is stated rather than worked around: **a campaign whose baseline Everdict did not build
+cannot use an oracle scope** — every round answers `unverifiable`, naming the missing side. Build the
+baseline through `build_campaign_candidate` once before round 1.
 
 ### D4 — the round records where its candidate came from
 

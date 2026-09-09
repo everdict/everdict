@@ -2,13 +2,19 @@
 kind: wiki
 title: "Evolution identity and evidence authority"
 status: current
-updated: 2026-09-08
+updated: 2026-09-09
 anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-service.ts, packages/db/src/evolution/campaign-store.ts, apps/api/src/mcp.routes.ts]
 ---
 # Evolution identity and evidence authority
 
 Implements the review of main at `25814996b975a8b721272396b547854adde6fd6f`
 (2026-09-08). The pure domain decisions and the durable adoption effect remain separate.
+
+The [2026-09-09 follow-up review](evolution-review-2026-09-09.md) identified four gaps in
+provenance, attempt-aware endings, first-party execution paths and criterion identity. All
+four are now closed; that page carries each repair, its committed regression test and the
+neutralization under which the test was observed red. The sections below are updated to
+describe what is in force.
 
 ## Subject and oracle identity
 
@@ -18,11 +24,19 @@ subjects use the harness seal their execution actually consumed. Conflicting env
 seals refuse the round. Evidence, verdict and adoption proof carry the same identity.
 No current registry read substitutes for missing historical seals.
 
-Oracle inspection compares the evaluated baseline and candidate SHAs in the same
-repository, including rename source paths. Its receipt binds both SHAs, a normalized
-path-list digest and completeness. GitHub comparisons reaching the 300-file response
-limit are incomplete. A moved PR head cannot change the commits inspected. Missing
-provenance or mismatched receipts make the round non-comparable.
+Oracle inspection compares two commits in the same repository, including rename source
+paths. Its receipt binds both SHAs, a normalized path-list digest, completeness and
+`commitProvenance`. GitHub comparisons reaching the 300-file response limit are incomplete.
+A moved PR head cannot change the commits inspected. Missing provenance or mismatched
+receipts make the round non-comparable.
+
+Both commits come from Everdict's own build ledger and from nothing else: the candidate's
+from the build that minted the round's candidate version, the baseline's from the build that
+minted the frame's `baselineVersion`, resolved in this campaign and up the `continues` chain.
+The join to the evaluated arms is the instance version, which `logRound` has already checked
+against each scorecard's own harness stamp. A scorecard's `origin` remains provenance on the
+round and decides nothing here. A campaign whose baseline Everdict did not build therefore
+cannot use an oracle scope — every round answers `unverifiable`, naming the missing side.
 
 ## Experiment-family attempts
 
@@ -64,8 +78,17 @@ outcome. No refund or automatic redispatch is inferred from an absent result.
 
 `logRound` accepts only the exact pair belonging to an unreported reservation. The
 append CAS, outbox and reported-round marker commit together. Evidence records the
-attempt id. Standalone evaluations and ingestion remain available, but their results
-cannot become new campaign round evidence. Historical rounds remain readable and count
+attempt id. `POST /scorecards/ingest` takes the same `campaignEvaluation` block, so the
+shadow-try loop can reserve through the door it uploads to; an ingested arm names its trials
+by repetition, and a ragged upload is refused rather than accepted as a full arm. A
+standalone evaluation or ingestion that reserved nothing still cannot become round evidence.
+
+The campaign's endings are counted over that ledger rather than over the rounds. One owner
+(`campaignSpendOf`) is read by the gate, by the write-side round refusal and by the
+reservation door: a campaign ends on the budget when every comparison is spent AND none is
+still outstanding, and a batch the store could not be read for keeps the campaign open rather
+than closing it on a read that did not happen. Lost attempts stay spent; nothing refunds
+budget. Historical rounds remain readable and count
 against their family's budget; old overallocated families cannot execute beyond the
 family limit through the reserved submission path. This is an authority boundary for
 campaign evidence, not a claim that independent workspace administrators cannot perform

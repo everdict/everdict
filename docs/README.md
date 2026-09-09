@@ -134,6 +134,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/knowledge-graph.md](architecture/knowledge-graph.md) — the workspace knowledge graph
 - [architecture/evolution-lineage.md](architecture/evolution-lineage.md) — evolution lineage: ancestry recorded at the write, events on the outbox, the campaign as a settlement
 - [architecture/evolution-review-follow-up.md](architecture/evolution-review-follow-up.md) — evaluated identities, family attempts, adoption claims and scoped delegate evidence
+- [architecture/evolution-review-2026-09-09.md](architecture/evolution-review-2026-09-09.md) — four open follow-up findings, reproductions and verification limits
 - [architecture/parallel-evolution.md](architecture/parallel-evolution.md) — campaigns in parallel form a tree: what the shared held-out family costs, why bytes merge and evidence does not, and the one place the schema is a tree where a merge needs a DAG
 - [architecture/code-evolution-loop.md](architecture/code-evolution-loop.md) — code evolution: a delegated coding agent mutates the harness repo, everdict builds the image into its own store, the campaign decides
 - [architecture/evolution-routing-spec.md](architecture/evolution-routing-spec.md) — spec: WHO from the slot's maintainer, WHAT from attributed evidence, the issue binds the cases, the gate verifies the targets flipped, build sets, memory across campaigns
