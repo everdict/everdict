@@ -27,6 +27,35 @@ import path from "node:path";
 const SOURCE = /^(packages|apps)\/[^/]+\/.*\.(ts|tsx)$/;
 const TEST = /\.test\.tsx?$/;
 const DECLARATION = /^Regression-test:\s*none\s*[—-]\s*(\S.*)$/m;
+// ── A FIXTURE THE FIX ITSELF FORCES, NAMED BY THE AUTHOR ─────────────────────────────────────────────
+//
+// The proof below requires EVERY test file a fix touches to go red on the pre-fix source. Some cannot, and
+// not because anybody was careless: a commit that changes a TYPE its fixtures are written against forces
+// those fixtures to move WITH it, and such a file is green before the fix by construction. Measured on
+// `891eb99b` — three of its seventeen test files — and the split was tried in both directions and is
+// impossible: put them before the fix and they do not compile (`'measurement' does not exist in type
+// 'MeasuredScore'`), put them after and the fix's own suite is red. They belong in that commit, the commit
+// is correctly formed, and the rule refused it.
+//
+// So the author NAMES them, in the body, in the same declaration grammar `Regression-test: none` uses. This
+// is deliberately not a heuristic: a check that guessed which greens are "just fixtures" would be a check
+// that admits the vacuous proofs this whole function exists to refuse. A person writes the claim, a reviewer
+// reads it, and `git log --grep` finds every one.
+//
+// ⚠️ IT CANNOT DECLARE AWAY THE WHOLE PROOF. A fix that names every test file it touches is refused as a
+// violation, exactly as a fix that ships no test at all is — the declaration exempts fixtures from a proof,
+// never a commit from having one.
+const FIXTURE_DECLARATION = /^Fixture-only:\s*(\S[^\n]*?)\s*[—-]\s*(\S.*)$/m;
+
+/** The test files a commit declared as fixtures its own change forces — paths, comma-separated. */
+export function declaredFixtures(body) {
+  const m = FIXTURE_DECLARATION.exec(body);
+  if (!m?.[1]) return [];
+  return m[1]
+    .split(",")
+    .map((f) => f.trim())
+    .filter(Boolean);
+}
 
 /**
  * @param {{ subject: string, body: string, files: string[] }} commit
@@ -36,11 +65,20 @@ const DECLARATION = /^Regression-test:\s*none\s*[—-]\s*(\S.*)$/m;
 export function verdictFor({ subject, body, files }) {
   if (!/^fix(\(|!|:)/.test(subject)) return { kind: "not-a-fix" };
   const source = files.filter((f) => SOURCE.test(f) && !TEST.test(f) && !f.endsWith(".d.ts"));
-  const tests = files.filter((f) => SOURCE.test(f) && TEST.test(f));
+  const touched = files.filter((f) => SOURCE.test(f) && TEST.test(f));
   if (source.length === 0) return { kind: "outside-vitest" };
-  if (tests.length > 0) return { kind: "proof-owed", source, tests };
+  // A declared fixture is exempt from the proof, not from the commit: it still ships, it is still reviewed,
+  // and what it stops being is EVIDENCE. A path named here that the commit does not touch is a stale
+  // declaration and is reported rather than ignored — a reason that outlived its subject reads as permission.
+  const fixtures = declaredFixtures(body);
+  const stale = fixtures.filter((f) => !touched.includes(f));
+  if (stale.length > 0) return { kind: "stale-fixture-declaration", stale };
+  const tests = touched.filter((f) => !fixtures.includes(f));
+  if (tests.length > 0) return { kind: "proof-owed", source, tests, ...(fixtures.length > 0 ? { fixtures } : {}) };
+  // Every test file declared a fixture, or none was shipped at all: either way the fix has no proof, and the
+  // two are the same refusal because they leave the same hole.
   const declared = DECLARATION.exec(body);
-  if (declared) return { kind: "declined", why: declared[1].trim() };
+  if (declared && touched.length === 0) return { kind: "declined", why: declared[1].trim() };
   return { kind: "violation", source };
 }
 

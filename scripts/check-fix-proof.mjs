@@ -106,6 +106,11 @@ if (since === undefined) {
     const verdict = verdictFor({ subject, body, files });
     if (verdict.kind === "not-a-fix" || verdict.kind === "outside-vitest") continue;
     fixes++;
+    if (verdict.kind === "stale-fixture-declaration") {
+      fail(
+        `${sha.slice(0, 9)} "${subject.slice(0, 60)}" declares \`Fixture-only:\` for ${verdict.stale.join(", ")}, which it does not touch. A declaration whose subject is gone reads as permission for a file nobody looked at.`,
+      );
+    }
     if (verdict.kind === "violation") {
       fail(
         `${sha.slice(0, 9)} "${subject.slice(0, 60)}" changes ${verdict.source.slice(0, 3).join(", ")}${verdict.source.length > 3 ? ", …" : ""} and no test file, and its body has no \`Regression-test: none — <why>\` line. A fix with no test that was red before it is a fix nobody can tell from a coincidence.`,
