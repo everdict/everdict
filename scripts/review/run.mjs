@@ -70,13 +70,53 @@ if (opts.range === undefined && !haveBase) {
   );
   process.exit(1);
 }
-const range = opts.range ?? `${base}...HEAD`;
+// ── WHAT HAS ALREADY BEEN READ IS NOT READ AGAIN ────────────────────────────────────────────────────
+//
+// The stamp names a HEAD, so adding one commit made the next review re-read the whole push. Measured on the
+// session that wrote this: 101 files for $3.10, then a three-file repair, then the same 101 files for $4.24 —
+// and the second run's job was to read three files. A control whose cost is a function of the branch's age
+// rather than of what changed is one people stop running, which is the failure this repository names for
+// every gate it has.
+//
+// So the base is the NEWEST STAMPED ANCESTOR of HEAD when there is one: the range before it was reviewed and
+// stamped under exactly this rule, so the union of the stamps still covers what the push carries. The gate is
+// untouched — it still demands a stamp naming HEAD, and this only changes what the reviewer has to read to
+// earn one.
+//
+// ⚠️ AN ANCESTOR, NEVER MERELY A STAMPED SHA. A stamp from a branch this HEAD does not descend from says
+// nothing about this history; `merge-base --is-ancestor` is the question, asked per candidate newest-first.
+// ⚠️ AND `--range` KEEPS ITS MEANING: it names a slice deliberately and writes no stamp, so it must not be
+// silently narrowed by a stamp it knows nothing about.
+const stampedHeads = (() => {
+  try {
+    return readFileSync(path.join(root, ".git", "everdict-review-ok"), "utf8")
+      .split("\n")
+      .map((l) => l.split(" ")[0])
+      .filter(Boolean)
+      .reverse(); // newest last in the file, so newest first here
+  } catch {
+    return [];
+  }
+})();
+const reviewedThrough =
+  opts.range !== undefined
+    ? undefined
+    : stampedHeads.find(
+        (sha) =>
+          sha !== head &&
+          git("cat-file", "-e", `${sha}^{commit}`).status === 0 &&
+          git("merge-base", "--is-ancestor", sha, head).status === 0 &&
+          git("merge-base", "--is-ancestor", sha, base).status !== 0, // already-pushed work was reviewed then
+      );
+const range = opts.range ?? `${reviewedThrough ?? base}...HEAD`;
 
 const files = git("diff", "--name-only", range).stdout.split("\n").filter(Boolean);
 if (files.length === 0) {
   console.error(`✖ review: ${range} carries no changes. A review over an empty range would stamp for nothing.`);
   process.exit(1);
 }
+if (reviewedThrough !== undefined)
+  console.log(`· resuming from the stamp at ${reviewedThrough.slice(0, 9)} — ${files.length} file(s) changed since`);
 // ⚠️ ONE TRUNCATED BLOB WOULD BE A FALSE CERTIFICATE. The first draft took the whole diff, cut it at 400 KB
 // and stamped as though the range had been reviewed; this branch's range is 1.8 MB over 541 files, so that
 // stamp would have covered about a fifth of what it claimed. The diff is grouped per file into chunks that
@@ -320,7 +360,22 @@ if (opts.range !== undefined || opts.at !== undefined) {
   console.log("· no push stamp: --range/--at reviewed something other than what this push carries.");
   process.exit(0);
 }
-writeFileSync(path.join(root, ".git", "everdict-review-ok"), `${head}\n`);
+// APPENDED, not overwritten: the stamp is now a chain — each line covers from the previous one, and the next
+// review finds its base by looking for its newest stamped ancestor here. Overwriting kept one link and threw
+// the rest away, so the resume above would have had nothing to resume from on the run after next. The gate
+// asks membership (`some(line => …=== head)`), so a file with history satisfies it exactly as one line did.
+const stampFile = path.join(root, ".git", "everdict-review-ok");
+const priorStamps = (() => {
+  try {
+    return readFileSync(stampFile, "utf8").split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+})();
+writeFileSync(
+  stampFile,
+  `${[...priorStamps.filter((l) => l.split(" ")[0] !== head), `${head} from=${(reviewedThrough ?? base).slice(0, 40)}`].slice(-100).join("\n")}\n`,
+);
 console.log(
   `· review stamp written for ${head.slice(0, 9)}${important.length > 0 ? " — Important findings above are yours to judge, not the gate's" : ""}`,
 );
