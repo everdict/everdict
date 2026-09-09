@@ -50,6 +50,26 @@ const DECIDED = new Map([
   // act belongs to the door that already holds the bytes (the agent loop, the CLI, the registry itself).
   // The merge half HAS no bytes — its body is the proof alone — and it is on the page.
   ["/campaigns/:p/adopt", "the body carries the candidate's document bytes, which a browser does not hold"],
+  // ── THE DELEGATE'S EVIDENCE CREDENTIAL, AND THE ONE DOOR IT OPENS ────────────────────────────────
+  //
+  // `evidence-view` is not a door a member can reach at all, and that is by construction rather than by
+  // omission: `resolveIdentity` mints an `evidenceGrant` principal ONLY for an `Authorization: Bearer cpe_…`
+  // credential, and the handler answers 403 without one. A workspace session (JWT or `ak_`) never carries the
+  // grant, so building a page for this route would be building a page the platform refuses. The same guard
+  // runs the other way: a `cpe_` credential is refused for every path except its own campaign's view, so
+  // this is a fence with two sides rather than a surface nobody got to.
+  [
+    "/campaigns/:p/evidence-view",
+    "authenticated only by an evidence grant; a workspace session is refused by construction",
+  ],
+  // …and the door that MINTS that credential. A member already reads the round's evidence unredacted through
+  // `campaignRoundEvidence`; this returns a narrowed view (the frame's targets, held-out rows filtered out,
+  // diagnoses reduced to kind and locus) behind a bearer token whose whole purpose is to be handed to
+  // something that is NOT a member — the sandboxed coding agent a round delegates to. A page that printed a
+  // raw `cpe_…` for a person to copy would be worse than no page: it turns a scoped, expiring credential into
+  // something that lives in a clipboard, and the redaction it carries protects a reader the browser is not.
+  // The handoff belongs to the loop that opens the sandbox, which is where `code_evolve` does it.
+  ["/campaigns/:p/evidence-grants", "mints a scoped bearer credential for a non-member delegate, not a page's read"],
   ["/workspace/mattermost/messages", "outbound notification send; the platform calls it"],
   ["/bundles/apply", "one-shot register for the CLI/GitOps"],
   ["/scorecards/backfill-models", "an operator maintenance sweep over historical records"],
