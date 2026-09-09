@@ -1,5 +1,5 @@
 import type { CampaignClose, CampaignFrame, CampaignRound, EvolutionCampaignRecord } from "@everdict/contracts";
-import { adoptionProofOf, campaignAdoption, contentDigest } from "@everdict/domain";
+import { adoptionProofOf, campaignAdoption, contentDigest, roundsOnlySpend } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { InMemoryEvolutionCampaignStore } from "./campaign-store.js";
 
@@ -88,7 +88,7 @@ const settled = async (specDigest?: string) => {
   const store = new InMemoryEvolutionCampaignStore();
   const rec = record([round(specDigest)]);
   await store.create(rec);
-  const answer = campaignAdoption(rec.frame, rec.rounds);
+  const answer = campaignAdoption(rec.frame, rec.rounds, roundsOnlySpend(rec.rounds));
   const proof = adoptionProofOf(answer, rec, rec.rounds);
   expect(proof, "the gate authorized nothing, so this fixture measures nothing").toBeDefined();
   if (proof === undefined) throw new Error("unreachable");
@@ -270,7 +270,11 @@ describe("[R71 COUNTEREXAMPLE] an adopted campaign leaves an authorization someb
     const store = new InMemoryEvolutionCampaignStore();
     const rec = record([round("sha256:c1")]);
     await store.create(rec);
-    const proof = adoptionProofOf(campaignAdoption(rec.frame, rec.rounds), rec, rec.rounds);
+    const proof = adoptionProofOf(
+      campaignAdoption(rec.frame, rec.rounds, roundsOnlySpend(rec.rounds)),
+      rec,
+      rec.rounds,
+    );
     if (proof === undefined) throw new Error("unreachable");
 
     // `expectedRounds` disagrees with the record — the CAS the close already had.

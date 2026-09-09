@@ -122,6 +122,12 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     );
   }
 
+  async attemptsForCampaign(tenant: string, campaignId: string) {
+    return [...this.evaluations.values()]
+      .filter((a) => a.tenant === tenant && a.campaignId === campaignId)
+      .map((a) => structuredClone(a));
+  }
+
   async family(tenant: string, campaignId: string) {
     const { root } = familyMembers(
       campaignId,
@@ -412,6 +418,14 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
       [tenant, root.id],
     );
     return rows[0] ? ExperimentFamilySchema.parse(rows[0].document) : undefined;
+  }
+
+  async attemptsForCampaign(tenant: string, campaignId: string): Promise<CampaignEvaluation[]> {
+    const { rows } = await this.client.query<{ document: unknown }>(
+      "SELECT document FROM everdict_campaign_evaluations WHERE tenant=$1 AND campaign_id=$2",
+      [tenant, campaignId],
+    );
+    return rows.map((r) => CampaignEvaluationSchema.parse(r.document));
   }
 
   async evaluationForScorecard(tenant: string, scorecardId: string): Promise<CampaignEvaluation | undefined> {

@@ -1,6 +1,7 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { CampaignFrameSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { roundsOnlySpend } from "./campaign-attempts.js";
 import { adoptionProofOf, campaignAdoption } from "./campaign-gate.js";
 
 // ── HELD-OUT WAS AN ANNOTATION NOBODY READ (arch-review 71 P1-high) ─────────────────────────────────
@@ -121,19 +122,29 @@ describe("[R71 COUNTEREXAMPLE] adoption authority comes from the held-out popula
   it("does NOT adopt on training-only improvement", async () => {
     // The defect, stated as the experiment it is: the candidate improved exactly where the loop has been
     // pushing, and nowhere it was not allowed to look.
-    const answer = campaignAdoption(frame(), [round({ trainingImprovements: 3, heldOutImprovements: 0 })]);
+    const answer = campaignAdoption(
+      frame(),
+      [round({ trainingImprovements: 3, heldOutImprovements: 0 })],
+      roundsOnlySpend([round({ trainingImprovements: 3, heldOutImprovements: 0 })]),
+    );
     expect(answer.kind, "training-only improvement was adopted").toBe("continue");
   });
 
   it("adopts when the HELD-OUT population improved and did not regress", async () => {
-    const answer = campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]);
+    const answer = campaignAdoption(
+      frame(),
+      [round({ heldOutImprovements: 1 })],
+      roundsOnlySpend([round({ heldOutImprovements: 1 })]),
+    );
     expect(answer.kind, "held-out improvement did not carry adoption authority").toBe("adopt");
   });
 
   it("REFUSES adoption on any held-out regression, however much training improved", async () => {
-    const answer = campaignAdoption(frame(), [
-      round({ heldOutImprovements: 2, heldOutRegressions: 1, trainingImprovements: 9 }),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [round({ heldOutImprovements: 2, heldOutRegressions: 1, trainingImprovements: 9 })],
+      roundsOnlySpend([round({ heldOutImprovements: 2, heldOutRegressions: 1, trainingImprovements: 9 })]),
+    );
     expect(answer.kind, "a held-out regression was outvoted by training gains").not.toBe("adopt");
   });
 });
@@ -158,7 +169,11 @@ describe("[R71 COUNTEREXAMPLE] adoption authority comes from the held-out popula
 
 describe("[R71 COUNTEREXAMPLE] a divergent observation account refuses adoption", () => {
   it("does NOT adopt when the candidate's own judges called its account divergent", () => {
-    const answer = campaignAdoption(frame(), [round({ heldOutImprovements: 3, divergent: 1 })]);
+    const answer = campaignAdoption(
+      frame(),
+      [round({ heldOutImprovements: 3, divergent: 1 })],
+      roundsOnlySpend([round({ heldOutImprovements: 3, divergent: 1 })]),
+    );
     expect(answer.kind, "a candidate whose own judge called its account divergent was adopted").toBe("continue");
   });
 
@@ -166,19 +181,43 @@ describe("[R71 COUNTEREXAMPLE] a divergent observation account refuses adoption"
     // The escape hatch is a frozen decision, not a runtime argument: a campaign optimizing through known
     // observation noise says so in the frame, before it sees any rounds.
     const permissive = frame({ observationPolicy: { allowDivergent: true } } as never);
-    expect(campaignAdoption(permissive, [round({ heldOutImprovements: 1, divergent: 2 })]).kind).toBe("adopt");
+    expect(
+      campaignAdoption(
+        permissive,
+        [round({ heldOutImprovements: 1, divergent: 2 })],
+        roundsOnlySpend([round({ heldOutImprovements: 1, divergent: 2 })]),
+      ).kind,
+    ).toBe("adopt");
   });
 
   it("REFUSES when unclear exceeds the frame's bound", () => {
     // `unclear` is neither arm. A round mostly made of "I could not tell" is not evidence, and a campaign
     // that cares says how much it will accept.
     const bounded = frame({ observationPolicy: { allowDivergent: false, maxUnclear: 1 } } as never);
-    expect(campaignAdoption(bounded, [round({ heldOutImprovements: 2, unclear: 5 })]).kind).toBe("continue");
-    expect(campaignAdoption(bounded, [round({ heldOutImprovements: 2, unclear: 1 })]).kind).toBe("adopt");
+    expect(
+      campaignAdoption(
+        bounded,
+        [round({ heldOutImprovements: 2, unclear: 5 })],
+        roundsOnlySpend([round({ heldOutImprovements: 2, unclear: 5 })]),
+      ).kind,
+    ).toBe("continue");
+    expect(
+      campaignAdoption(
+        bounded,
+        [round({ heldOutImprovements: 2, unclear: 1 })],
+        roundsOnlySpend([round({ heldOutImprovements: 2, unclear: 1 })]),
+      ).kind,
+    ).toBe("adopt");
   });
 
   it("adopts normally when the account holds up", () => {
-    expect(campaignAdoption(frame(), [round({ heldOutImprovements: 1 })]).kind).toBe("adopt");
+    expect(
+      campaignAdoption(
+        frame(),
+        [round({ heldOutImprovements: 1 })],
+        roundsOnlySpend([round({ heldOutImprovements: 1 })]),
+      ).kind,
+    ).toBe("adopt");
   });
 });
 
@@ -205,7 +244,7 @@ describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
     const proved = round({ heldOutImprovements: 1, noBytes: true });
     (proved.verdict as { candidateSpecDigest?: string }).candidateSpecDigest = "sha256:c1";
 
-    const answer = campaignAdoption(frame(), [proved]);
+    const answer = campaignAdoption(frame(), [proved], roundsOnlySpend([proved]));
 
     expect(answer.kind).toBe("adopt");
     expect(
@@ -222,7 +261,11 @@ describe("[R71 COUNTEREXAMPLE] an adoption names the bytes it proved", () => {
     // bytes for, because a close carrying no authorization is the state arch-review 71 abolished. What
     // this case pins is unchanged — the answer says `undefined` rather than inventing a digest.
     const waiving = frame({ allowLabelOnlyAdoption: true } as never);
-    const answer = campaignAdoption(waiving, [round({ heldOutImprovements: 1, noBytes: true })]);
+    const answer = campaignAdoption(
+      waiving,
+      [round({ heldOutImprovements: 1, noBytes: true })],
+      roundsOnlySpend([round({ heldOutImprovements: 1, noBytes: true })]),
+    );
     expect(answer.kind).toBe("adopt");
     expect(answer.kind === "adopt" ? answer.candidateSpecDigest : "x").toBeUndefined();
   });
@@ -259,8 +302,8 @@ describe("[R72 COUNTEREXAMPLE] a proof says how strong it is", () => {
     });
     const campaign = { id: "camp-1", frameDigest: "sha256:f", issueId: "iss-1", frame: f };
     return {
-      answer: campaignAdoption(f, withDigest),
-      proof: adoptionProofOf(campaignAdoption(f, withDigest), campaign, withDigest),
+      answer: campaignAdoption(f, withDigest, roundsOnlySpend(withDigest)),
+      proof: adoptionProofOf(campaignAdoption(f, withDigest, roundsOnlySpend(withDigest)), campaign, withDigest),
     };
   };
 
@@ -303,14 +346,14 @@ describe("[R72 COUNTEREXAMPLE] missing observations are not a clean account", ()
   it("REFUSES a round nobody looked at, under a frame that requires coverage", () => {
     const strict = frame({ observationPolicy: { allowDivergent: false, minimumCoverage: 0.5 } } as never);
     expect(
-      campaignAdoption(strict, [covered(0, 10)]).kind,
+      campaignAdoption(strict, [covered(0, 10)], roundsOnlySpend([covered(0, 10)])).kind,
       "zero divergences over zero assessments read as a clean account",
     ).toBe("continue");
   });
 
   it("ADOPTS when enough of the round was actually assessed", () => {
     const strict = frame({ observationPolicy: { allowDivergent: false, minimumCoverage: 0.5 } } as never);
-    expect(campaignAdoption(strict, [covered(8, 10)]).kind).toBe("adopt");
+    expect(campaignAdoption(strict, [covered(8, 10)], roundsOnlySpend([covered(8, 10)])).kind).toBe("adopt");
   });
 
   it("REFUSES a round with NO observations block at all, under a frame that requires coverage", () => {
@@ -327,7 +370,7 @@ describe("[R72 COUNTEREXAMPLE] missing observations are not a clean account", ()
     const bare = { ...round({ heldOutImprovements: 1 }), verdict: bareVerdict } as unknown as CampaignRound;
 
     expect(
-      campaignAdoption(strict, [bare]).kind,
+      campaignAdoption(strict, [bare], roundsOnlySpend([bare])).kind,
       "a frame demanding coverage was satisfied by a round that recorded none",
     ).toBe("continue");
   });
@@ -339,12 +382,12 @@ describe("[R72 COUNTEREXAMPLE] missing observations are not a clean account", ()
     const legacy = round({ heldOutImprovements: 1 });
     (legacy.verdict as { observations?: unknown }).observations = { divergent: 0, unclear: 0 };
 
-    expect(campaignAdoption(strict, [legacy]).kind).toBe("continue");
+    expect(campaignAdoption(strict, [legacy], roundsOnlySpend([legacy])).kind).toBe("continue");
   });
 
   it("leaves a frame that asked for no coverage exactly as it was", () => {
     // The control: coverage is opt-in, and a campaign that never declared a requirement keeps the behaviour
     // it had. This adds a way to demand evidence; it does not silently start refusing.
-    expect(campaignAdoption(frame(), [covered(0, 10)]).kind).toBe("adopt");
+    expect(campaignAdoption(frame(), [covered(0, 10)], roundsOnlySpend([covered(0, 10)])).kind).toBe("adopt");
   });
 });

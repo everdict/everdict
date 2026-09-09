@@ -1,5 +1,6 @@
 import type { CampaignAdoptionProof, CampaignFrame, CampaignRound, CandidateSource } from "@everdict/contracts";
 import { contentDigest } from "../provenance/content-digest.js";
+import type { CampaignSpend } from "./campaign-attempts.js";
 
 // ── THE PURE ADOPTION GATE (docs/architecture/evolution-lineage.md, Track D) ─────────────────────────
 //
@@ -273,7 +274,20 @@ export function inertDetail(kind: ExamInertness, rounds: number): string {
   }
 }
 
-export function campaignStoppedAt(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignStop | undefined {
+export function campaignStoppedAt(
+  frame: CampaignFrame,
+  rounds: readonly CampaignRound[],
+  // ── THE BUDGET IS SPENT BY RESERVATIONS, NOT BY ROUNDS (review 2026-09-09 R2) ─────────────────────
+  //
+  // A comparison this campaign reserved and never reported spent budget the door will not hand out again,
+  // and left no round for this function to count. So the ending could not fire on the ledger that had
+  // actually run out: the door refused every further reservation while the gate answered `continue`, and
+  // `settle` refuses `continue` — a campaign that could neither progress nor close.
+  //
+  // The ending fires only when nothing is OUTSTANDING. A reserved comparison that can still finish is
+  // exactly the case the review warns not to close prematurely: the campaign stays live until it lands.
+  spend: CampaignSpend,
+): CampaignStop | undefined {
   let consecutiveRejected = 0;
   for (let i = 0; i < rounds.length; i += 1) {
     const r = rounds[i];
@@ -286,6 +300,9 @@ export function campaignStoppedAt(frame: CampaignFrame, rounds: readonly Campaig
     // The last budgeted round ends the campaign unless it is the one being adopted.
     if (i + 1 >= frame.budget.maxRounds && !won) return { reason: "budget_exhausted", atRound: i + 1 };
   }
+  // The spend is THREADED here and not yet read: this commit gives every decision the ledger the reservation
+  // door already spends against, and changes no answer. The ending that reads it is the next commit.
+  void spend;
   return undefined;
 }
 
@@ -295,8 +312,13 @@ export function campaignStoppedAt(frame: CampaignFrame, rounds: readonly Campaig
 export function campaignRoundRefusal(
   frame: CampaignFrame,
   rounds: readonly CampaignRound[],
+  // The round being logged holds an OUTSTANDING reservation by construction (`logRound` refuses a pair that
+  // owns none), so the attempt-ledger ending above cannot fire on the very comparison it authorized. A
+  // caller with no liveness evidence passes `roundsOnlySpend`, which reads every attempt as still able to
+  // land — the direction that never ends a campaign on something it did not check.
+  spend: CampaignSpend,
 ): (CampaignStop & { detail: string }) | undefined {
-  const stopped = campaignStoppedAt(frame, rounds);
+  const stopped = campaignStoppedAt(frame, rounds, spend);
   if (stopped !== undefined)
     return {
       ...stopped,
@@ -314,11 +336,15 @@ export function campaignRoundRefusal(
   return undefined;
 }
 
-export function campaignAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {
+export function campaignAdoption(
+  frame: CampaignFrame,
+  rounds: readonly CampaignRound[],
+  spend: CampaignSpend,
+): CampaignGateAnswer {
   // Attached ONCE, to whatever the decision turns out to be, rather than at each of the nine return sites —
   // a field spelled nine times is eight chances for the next ending to forget it (rule `protocol`, the
   // one-lane-only law counted at return statements instead of call sites).
-  const answer = decideAdoption(frame, rounds);
+  const answer = decideAdoption(frame, rounds, spend);
   const neverSolved = neverSolvedAcross(frame, rounds);
   if (neverSolved === undefined) return answer;
   // …and if this ending has scenarios nothing ever passed AND the frame never named a positive control, say
@@ -334,9 +360,13 @@ export function campaignAdoption(frame: CampaignFrame, rounds: readonly Campaign
   return { ...answer, neverSolved };
 }
 
-function decideAdoption(frame: CampaignFrame, rounds: readonly CampaignRound[]): CampaignGateAnswer {
+function decideAdoption(
+  frame: CampaignFrame,
+  rounds: readonly CampaignRound[],
+  spend: CampaignSpend,
+): CampaignGateAnswer {
   // The ending first: a round logged after the frame's own rule fired is not evidence, whatever it scored.
-  const ended = campaignStoppedAt(frame, rounds);
+  const ended = campaignStoppedAt(frame, rounds, spend);
   if (ended !== undefined) {
     const after = rounds.length - ended.atRound;
     const tail = after > 0 ? ` — the ${after} round(s) logged after it are not adoption evidence` : "";

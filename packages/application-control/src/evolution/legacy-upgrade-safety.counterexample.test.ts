@@ -4,7 +4,7 @@ import {
   type CampaignRound,
   EvolutionCampaignRecordSchema,
 } from "@everdict/contracts";
-import { campaignAdoption } from "@everdict/domain";
+import { campaignAdoption, roundsOnlySpend } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 
 // ── A CREATION RULE APPLIED AT DECODE TIME IS A DATA OUTAGE — TWICE MORE (arch-review 75) ───────────
@@ -175,7 +175,7 @@ describe("[R75 COUNTEREXAMPLE] a frame that may be read may not decide", () => {
     // The gate is a total function over the frame and the rounds; it has no idea the frame is legacy, and
     // teaching it would make the pure decision depend on a schema version. The refusal belongs to the
     // SERVICE, at every entry point that produces or consumes new evidence.
-    expect(campaignAdoption(oneHeldOut, [roundAfterUpgrade]).kind).toBe("adopt");
+    expect(campaignAdoption(oneHeldOut, [roundAfterUpgrade], roundsOnlySpend([roundAfterUpgrade])).kind).toBe("adopt");
   });
 
   it("the frame's own defects are the ONE predicate, shared with the creation schema", async () => {

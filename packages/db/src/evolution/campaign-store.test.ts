@@ -983,6 +983,7 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
     const raced: EvolutionCampaignStore & AdoptionOperationStore = {
       reserveEvaluation: store.reserveEvaluation.bind(store),
       evaluationForScorecard: store.evaluationForScorecard.bind(store),
+      attemptsForCampaign: store.attemptsForCampaign.bind(store),
       family: store.family.bind(store),
       createEvidenceGrant: store.createEvidenceGrant.bind(store),
       evidenceGrant: store.evidenceGrant.bind(store),

@@ -1,5 +1,6 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { roundsOnlySpend } from "./campaign-attempts.js";
 import { campaignAdoption } from "./campaign-gate.js";
 
 // ── INERTNESS IS ALL-OR-NOTHING AND THE REAL FAILURE WAS A SUBSET ────────────────────────────────────
@@ -72,30 +73,52 @@ const round = (response?: { solved: string[]; failed: string[]; scenarios: numbe
 describe("neverSolved — the scenarios nothing has ever passed", () => {
   it("names them while the campaign is still RUNNING, which is when it is worth knowing", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s2"], failed: ["s1", "s3", "s4"], scenarios: 4 }),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s2"], failed: ["s1", "s3", "s4"], scenarios: 4 }),
+      ],
+      roundsOnlySpend([
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s2"], failed: ["s1", "s3", "s4"], scenarios: 4 }),
+      ]),
+    );
     expect(answer.kind).toBe("continue");
     expect(answer.neverSolved).toEqual(["s3", "s4"]);
   });
 
   it("a scenario solved in ANY round is not never-solved — the union across the walk, not the latest round", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [
-      round({ solved: ["s1", "s2", "s3", "s4"], failed: [], scenarios: 4 }),
-      round({ solved: [], failed: ["s1", "s2", "s3", "s4"], scenarios: 4 }),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [
+        round({ solved: ["s1", "s2", "s3", "s4"], failed: [], scenarios: 4 }),
+        round({ solved: [], failed: ["s1", "s2", "s3", "s4"], scenarios: 4 }),
+      ],
+      roundsOnlySpend([
+        round({ solved: ["s1", "s2", "s3", "s4"], failed: [], scenarios: 4 }),
+        round({ solved: [], failed: ["s1", "s2", "s3", "s4"], scenarios: 4 }),
+      ]),
+    );
     expect(answer.neverSolved).toBeUndefined();
   });
 
   it("…and it rides the ENDING too, where somebody is asking why the campaign stopped", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      ],
+      roundsOnlySpend([
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      ]),
+    );
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     // Not `exam_inert`: this exam DOES respond, on s1. Three of four scenarios being unpassable is a fact
@@ -106,16 +129,17 @@ describe("neverSolved — the scenarios nothing has ever passed", () => {
 
   it("SILENCE IS NOT EVIDENCE: one round that cannot say withholds the whole answer", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round(),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }), round()],
+      roundsOnlySpend([round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }), round()]),
+    );
     expect(answer.neverSolved).toBeUndefined();
   });
 
   it("an unstarted campaign says nothing — there is no walk to read", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), []);
+    const answer = campaignAdoption(frame(), [], roundsOnlySpend([]));
     expect(answer).toEqual({ kind: "continue", roundsLeft: 10, consecutiveRejected: 0 });
   });
 
@@ -125,22 +149,38 @@ describe("neverSolved — the scenarios nothing has ever passed", () => {
     // ever passed, and no control named. Not on a healthy campaign — a frame every scenario has been solved
     // on has nothing to answer for, and a warning that fires everywhere is read nowhere.
     seq = 0;
-    const answer = campaignAdoption(frame(), [
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      ],
+      roundsOnlySpend([
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      ]),
+    );
     if (answer.kind !== "halt") throw new Error("expected a halt");
     expect(answer.detail).toMatch(/no positive control|examProvenBy/);
   });
 
   it("…and a frame that DID name one is not nagged about it", () => {
     seq = 0;
-    const answer = campaignAdoption(frame({ examProvenBy: "sc-oracle" }), [
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-      round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
-    ]);
+    const answer = campaignAdoption(
+      frame({ examProvenBy: "sc-oracle" }),
+      [
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      ],
+      roundsOnlySpend([
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+        round({ solved: ["s1"], failed: ["s2", "s3", "s4"], scenarios: 4 }),
+      ]),
+    );
     if (answer.kind !== "halt") throw new Error("expected a halt");
     expect(answer.detail).not.toMatch(/no positive control/);
   });
@@ -148,7 +188,7 @@ describe("neverSolved — the scenarios nothing has ever passed", () => {
   it("a fully inert exam is still `exam_inert`, and names every scenario", () => {
     seq = 0;
     const dead = () => round({ solved: [], failed: ["s1", "s2", "s3", "s4"], scenarios: 4 });
-    const answer = campaignAdoption(frame(), [dead(), dead(), dead()]);
+    const answer = campaignAdoption(frame(), [dead(), dead(), dead()], roundsOnlySpend([dead(), dead(), dead()]));
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("exam_inert");

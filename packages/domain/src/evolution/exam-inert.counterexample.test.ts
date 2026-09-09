@@ -1,5 +1,6 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { roundsOnlySpend } from "./campaign-attempts.js";
 import { campaignAdoption, campaignStoppedAt } from "./campaign-gate.js";
 
 // ── A DIFFERENTIAL CANNOT SEE A DEAD INSTRUMENT ──────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ const ceiling = () => round({ solved: ["s1", "s2", "s3"], failed: [], scenarios:
 describe("exam_inert — an ending that names the instrument, not the hypotheses", () => {
   it("three rejected rounds in which NOTHING was ever solved end as exam_inert, not no_improvement", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [inert(), inert(), inert()]);
+    const answer = campaignAdoption(frame(), [inert(), inert(), inert()], roundsOnlySpend([inert(), inert(), inert()]));
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("exam_inert");
@@ -112,16 +113,16 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
 
   it("…and the ending's TIMING is untouched — the same round, whatever the diagnosis", () => {
     seq = 0;
-    const dead = campaignStoppedAt(frame(), [inert(), inert(), inert()]);
+    const dead = campaignStoppedAt(frame(), [inert(), inert(), inert()], roundsOnlySpend([inert(), inert(), inert()]));
     seq = 0;
-    const live = campaignStoppedAt(frame(), [alive(), alive(), alive()]);
+    const live = campaignStoppedAt(frame(), [alive(), alive(), alive()], roundsOnlySpend([alive(), alive(), alive()]));
     expect(dead?.atRound).toBe(3);
     expect(live?.atRound).toBe(3);
   });
 
   it("one round that solved something makes the exam responsive, and the ending is no_improvement again", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [inert(), alive(), inert()]);
+    const answer = campaignAdoption(frame(), [inert(), alive(), inert()], roundsOnlySpend([inert(), alive(), inert()]));
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("no_improvement");
@@ -129,7 +130,11 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
 
   it("an exam every arm passes completely is inert too — there is no headroom to measure", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [ceiling(), ceiling(), ceiling()]);
+    const answer = campaignAdoption(
+      frame(),
+      [ceiling(), ceiling(), ceiling()],
+      roundsOnlySpend([ceiling(), ceiling(), ceiling()]),
+    );
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("exam_inert");
@@ -141,7 +146,7 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
     // legacy trace be diagnosed as a broken exam it may never have had — L2's third value, at the one
     // place where guessing costs a campaign.
     seq = 0;
-    const answer = campaignAdoption(frame(), [round(), round(), round()]);
+    const answer = campaignAdoption(frame(), [round(), round(), round()], roundsOnlySpend([round(), round(), round()]));
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("no_improvement");
@@ -149,7 +154,7 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
 
   it("a partly-legacy trace cannot conclude either — one round that cannot say is enough to withhold it", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [inert(), round(), inert()]);
+    const answer = campaignAdoption(frame(), [inert(), round(), inert()], roundsOnlySpend([inert(), round(), inert()]));
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("no_improvement");
@@ -157,7 +162,11 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
 
   it("rounds the platform could not MEASURE end as exam_inert, not as three failed hypotheses", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [unmeasured(), unmeasured(), unmeasured()]);
+    const answer = campaignAdoption(
+      frame(),
+      [unmeasured(), unmeasured(), unmeasured()],
+      roundsOnlySpend([unmeasured(), unmeasured(), unmeasured()]),
+    );
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("exam_inert");
@@ -166,7 +175,11 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
 
   it("a mix of measured-and-dead with could-not-measure withholds the diagnosis rather than guessing", () => {
     seq = 0;
-    const answer = campaignAdoption(frame(), [inert(), unmeasured(), inert()]);
+    const answer = campaignAdoption(
+      frame(),
+      [inert(), unmeasured(), inert()],
+      roundsOnlySpend([inert(), unmeasured(), inert()]),
+    );
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("no_improvement");
@@ -175,7 +188,7 @@ describe("exam_inert — an ending that names the instrument, not the hypotheses
   it("a spent budget over a dead exam names the exam, because that is what a next round would meet", () => {
     seq = 0;
     const f = frame({ budget: { maxRounds: 2 }, stopAfterRejectedRounds: 9 });
-    const answer = campaignAdoption(f, [inert(), inert()]);
+    const answer = campaignAdoption(f, [inert(), inert()], roundsOnlySpend([inert(), inert()]));
     expect(answer.kind).toBe("halt");
     if (answer.kind !== "halt") return;
     expect(answer.reason).toBe("exam_inert");

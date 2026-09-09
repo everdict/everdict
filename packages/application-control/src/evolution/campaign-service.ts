@@ -42,6 +42,7 @@ import {
   oracleTouched,
   roundEvidenceKey,
   roundEvidenceOf,
+  roundsOnlySpend,
   seedLeakOf,
 } from "@everdict/domain";
 import { hashKey } from "../credential/credentials.js";
@@ -970,7 +971,7 @@ export class CampaignService {
   async decision(tenant: string, id: string): Promise<CampaignGateAnswer> {
     const record = await this.get(tenant, id);
     this.requireEligibleFrame(record);
-    return campaignAdoption(record.frame, record.rounds);
+    return campaignAdoption(record.frame, record.rounds, roundsOnlySpend(record.rounds));
   }
 
   async logRound(
@@ -1007,7 +1008,7 @@ export class CampaignService {
     // predicate is the domain's (`campaignRoundRefusal`, the same owner the gate reads), and the refusal is
     // race-safe because `appendRound` CASes on the round count this answer was computed over: two writers at
     // the last budgeted slot cannot both land.
-    const ended = campaignRoundRefusal(record.frame, record.rounds);
+    const ended = campaignRoundRefusal(record.frame, record.rounds, roundsOnlySpend(record.rounds));
     if (ended !== undefined)
       throw new ConflictError(
         "CONFLICT",
@@ -1231,7 +1232,11 @@ export class CampaignService {
     switch (outcome.kind) {
       case "appended": {
         const rounds = [...record.rounds, round];
-        return { record: { ...record, rounds }, round, answer: campaignAdoption(record.frame, rounds) };
+        return {
+          record: { ...record, rounds },
+          round,
+          answer: campaignAdoption(record.frame, rounds, roundsOnlySpend(rounds)),
+        };
       }
       case "conflict":
         throw new ConflictError(
@@ -1461,7 +1466,7 @@ export class CampaignService {
     if (record.state !== "open")
       throw new ConflictError("CONFLICT", { state: record.state }, "the campaign already settled");
     this.requireEligibleFrame(record);
-    const answer = campaignAdoption(record.frame, record.rounds);
+    const answer = campaignAdoption(record.frame, record.rounds, roundsOnlySpend(record.rounds));
     if (answer.kind === "continue")
       throw new ConflictError(
         "CONFLICT",

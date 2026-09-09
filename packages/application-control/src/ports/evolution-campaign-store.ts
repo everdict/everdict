@@ -57,6 +57,13 @@ export interface ExperimentFamilyStore {
   ): Promise<{ kind: "reserved" | "replay"; evaluation: CampaignEvaluation; scorecardId: string }>;
   evaluationForScorecard(tenant: string, scorecardId: string): Promise<CampaignEvaluation | undefined>;
   family(tenant: string, campaignId: string): Promise<ExperimentFamily | undefined>;
+  // ── THE LEDGER AN ENDING IS COUNTED OVER (review 2026-09-09 R2) ─────────────────────────────────
+  //
+  // Every reserved comparison of ONE campaign, reported and unreported alike. The reservation door already
+  // spends `budget.maxRounds` against this list; the adoption gate counted rounds instead, so a campaign
+  // whose reservations were spent without being reported could neither reserve again nor settle. The gate
+  // reads the same ledger the door does (rule `protocol` L3 — one owner of "how much is spent").
+  attemptsForCampaign(tenant: string, campaignId: string): Promise<CampaignEvaluation[]>;
 }
 
 export interface EvolutionCampaignStore extends ExperimentFamilyStore {

@@ -521,6 +521,15 @@ export {
   campaignRoundRefusal,
   campaignStoppedAt,
 } from "./evolution/campaign-gate.js";
+// …and the ATTEMPT ledger that gate's endings are counted over (review 2026-09-09 R2).
+export {
+  type AttemptStanding,
+  type CampaignArmState,
+  type CampaignSpend,
+  attemptStandingOf,
+  campaignSpendOf,
+  roundsOnlySpend,
+} from "./evolution/campaign-attempts.js";
 export { type SeedEvidence, seedLeakOf } from "./evolution/seed-leak.js";
 export { type HarnessSlot, type JudgedDiagnosis, attributeCase, diagnosesOf } from "./evolution/diagnosis.js";
 export {

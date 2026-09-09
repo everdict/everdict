@@ -5,7 +5,13 @@ import {
   type EvolutionCampaignRecord,
   type ExperimentFamily,
 } from "@everdict/contracts";
-import { campaignRoundRefusal, contentDigest } from "@everdict/domain";
+import { type CampaignArmState, campaignRoundRefusal, campaignSpendOf, contentDigest } from "@everdict/domain";
+
+// The reservation door holds no evidence about whether a spent comparison can still land — that needs the
+// batches' own lifecycle, which lives a layer up (`CampaignService.spendOf`). An empty map is the reading in
+// which every unreported attempt is still OUTSTANDING, which is the direction that never ends a campaign on
+// something this seam did not check (review 2026-09-09 R2).
+const NO_LIVENESS_EVIDENCE: ReadonlyMap<string, CampaignArmState> = new Map();
 
 export function familyMembers(
   campaignId: string,
@@ -68,7 +74,14 @@ export function reserveInFamily(
     throw new ConflictError("CONFLICT", {}, "a scorecard is already bound to an evaluation");
   if (campaign.state !== "open" || old?.reportedRound !== undefined)
     throw new ConflictError("CONFLICT", {}, "campaign or evaluation is already settled");
-  const ended = campaignRoundRefusal(campaign.frame, campaign.rounds);
+  // The SAME spend the gate is counted over — this door and that gate disagreeing about how much of
+  // `budget.maxRounds` is left is the deadlock R2 reproduced (rule `protocol` L3, one owner).
+  const ownSpend = campaignSpendOf(
+    campaign.rounds,
+    attempts.filter((a) => a.campaignId === campaign.id),
+    NO_LIVENESS_EVIDENCE,
+  );
+  const ended = campaignRoundRefusal(campaign.frame, campaign.rounds, ownSpend);
   if (ended) throw new ConflictError("CONFLICT", {}, ended.detail);
   const want = campaign.frame.scenarios.map((s) => s.id).sort();
   if (
@@ -80,10 +93,7 @@ export function reserveInFamily(
       {},
       "a campaign evaluation must request exactly its frozen scenarios and trials",
     );
-  const ownSpent =
-    attempts.filter((a) => a.campaignId === campaign.id).length +
-    campaign.rounds.filter((r) => !r.verdict.evaluationId).length;
-  if (!old && (current.consumed >= current.limit || ownSpent >= campaign.frame.budget.maxRounds))
+  if (!old && (current.consumed >= current.limit || ownSpend.consumed >= campaign.frame.budget.maxRounds))
     throw new ConflictError(
       "CONFLICT",
       { family: current },

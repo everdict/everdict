@@ -1,5 +1,6 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { roundsOnlySpend } from "./campaign-attempts.js";
 import { adoptionProofOf, campaignAdoption } from "./campaign-gate.js";
 
 // ── A FIX THAT CLOSED THE LOUDER HALF AND REOPENED THE QUIET ONE (arch-review 73 P0) ────────────────
@@ -82,7 +83,7 @@ describe("[R73 COUNTEREXAMPLE] an adopt answer always carries something to autho
     const frame = frameWith();
     const rounds = [wonWithoutBytes()];
 
-    const answer = campaignAdoption(frame, rounds);
+    const answer = campaignAdoption(frame, rounds, roundsOnlySpend(rounds));
 
     expect(answer.kind, "the gate adopted a candidate whose bytes it could not name").toBe("halt");
     if (answer.kind !== "halt") return;
@@ -98,7 +99,7 @@ describe("[R73 COUNTEREXAMPLE] an adopt answer always carries something to autho
     // abolished as the minting rules change.
     for (const frame of [frameWith(), frameWith({ allowLabelOnlyAdoption: true } as Partial<CampaignFrame>)])
       for (const rounds of [[wonWithoutBytes()], [wonWithoutBytes("sha256:c1")]]) {
-        const answer = campaignAdoption(frame, rounds);
+        const answer = campaignAdoption(frame, rounds, roundsOnlySpend(rounds));
         if (answer.kind !== "adopt") continue;
         expect(
           adoptionProofOf(answer, campaignOf(frame), rounds),
@@ -113,7 +114,7 @@ describe("[R73 COUNTEREXAMPLE] an adopt answer always carries something to autho
     const frame = frameWith({ allowLabelOnlyAdoption: true } as Partial<CampaignFrame>);
     const rounds = [wonWithoutBytes()];
 
-    const answer = campaignAdoption(frame, rounds);
+    const answer = campaignAdoption(frame, rounds, roundsOnlySpend(rounds));
     expect(answer.kind).toBe("adopt");
     const proof = adoptionProofOf(answer, campaignOf(frame), rounds);
     expect(proof?.candidate.identity).toBe("label_only");
@@ -125,7 +126,7 @@ describe("[R73 COUNTEREXAMPLE] an adopt answer always carries something to autho
     const frame = frameWith();
     const rounds = [wonWithoutBytes("sha256:c1")];
 
-    const answer = campaignAdoption(frame, rounds);
+    const answer = campaignAdoption(frame, rounds, roundsOnlySpend(rounds));
     expect(answer.kind).toBe("adopt");
     const proof = adoptionProofOf(answer, campaignOf(frame), rounds);
     expect(proof?.candidate.identity).toBe("exact");

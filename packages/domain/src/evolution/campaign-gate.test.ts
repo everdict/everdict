@@ -1,5 +1,6 @@
 import type { CampaignFrame, CampaignRound } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
+import { roundsOnlySpend } from "./campaign-attempts.js";
 import { adoptionProofOf, campaignAdoption, campaignRoundRefusal, campaignStoppedAt } from "./campaign-gate.js";
 
 // ── THE ADOPTION GATE IS CODE, NOT PROSE (docs/architecture/evolution-lineage.md, Track D) ───────────
@@ -85,13 +86,17 @@ const round = (
 describe("campaignAdoption — a total answer over the frame and the rounds", () => {
   it("an unstarted campaign continues with the whole budget", () => {
     seq = 0;
-    expect(campaignAdoption(frame(), [])).toEqual({ kind: "continue", roundsLeft: 10, consecutiveRejected: 0 });
+    expect(campaignAdoption(frame(), [], roundsOnlySpend([]))).toEqual({
+      kind: "continue",
+      roundsLeft: 10,
+      consecutiveRejected: 0,
+    });
   });
 
   it("adopts the LATEST round's candidate on significant improvement with zero regressions", () => {
     seq = 0;
     const rounds = [round({}), round({ significantImprovements: 2 })];
-    expect(campaignAdoption(frame(), rounds)).toEqual({
+    expect(campaignAdoption(frame(), rounds, roundsOnlySpend(rounds))).toEqual({
       kind: "adopt",
       version: "1.0.2",
       provingScorecardId: "sc-cand-2",
@@ -103,7 +108,7 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
   it("a single significant regression blocks adoption however many improvements ride beside it", () => {
     seq = 0;
     const rounds = [round({ significantImprovements: 3, significantRegressions: 1 })];
-    expect(campaignAdoption(frame(), rounds).kind).not.toBe("adopt");
+    expect(campaignAdoption(frame(), rounds, roundsOnlySpend(rounds)).kind).not.toBe("adopt");
   });
 
   it("an EARLIER winning round does not adopt — only the latest candidate is on the table", () => {
@@ -111,13 +116,13 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
     // return to the winning variant explicitly, not a gate doing archaeology.
     seq = 0;
     const rounds = [round({ significantImprovements: 1 }), round({})];
-    expect(campaignAdoption(frame(), rounds).kind).toBe("continue");
+    expect(campaignAdoption(frame(), rounds, roundsOnlySpend(rounds)).kind).toBe("continue");
   });
 
   it("refuses to adopt over an unverified world identity — the waiver must have been recorded at open", () => {
     seq = 0;
     const rounds = [round({ significantImprovements: 1, unverifiedAxes: ["execution_world"] })];
-    const answer = campaignAdoption(frame(), rounds);
+    const answer = campaignAdoption(frame(), rounds, roundsOnlySpend(rounds));
     expect(answer).toEqual({
       kind: "halt",
       reason: "identity_unverified",
@@ -128,7 +133,7 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
   it("adopts over an unverified axis ONLY under the frame's recorded waiver, and says which axes were waived", () => {
     seq = 0;
     const rounds = [round({ significantImprovements: 1, unverifiedAxes: ["execution_world"] })];
-    expect(campaignAdoption(frame({ allowUnverifiedIdentity: true }), rounds)).toEqual({
+    expect(campaignAdoption(frame({ allowUnverifiedIdentity: true }), rounds, roundsOnlySpend(rounds))).toEqual({
       kind: "adopt",
       version: "1.0.1",
       provingScorecardId: "sc-cand-1",
@@ -142,13 +147,16 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
     // evidence, and treating them as a win would let a broken comparison adopt.
     seq = 0;
     const rounds = [round({ comparable: false, significantImprovements: 5 })];
-    expect(campaignAdoption(frame(), rounds).kind).toBe("continue");
+    expect(campaignAdoption(frame(), rounds, roundsOnlySpend(rounds)).kind).toBe("continue");
   });
 
   it("halts as no_improvement after the frame's consecutive rejected rounds", () => {
     seq = 0;
     const rounds = [round({}), round({}), round({})];
-    expect(campaignAdoption(frame(), rounds)).toMatchObject({ kind: "halt", reason: "no_improvement" });
+    expect(campaignAdoption(frame(), rounds, roundsOnlySpend(rounds))).toMatchObject({
+      kind: "halt",
+      reason: "no_improvement",
+    });
   });
 
   it("a win resets the rejected streak — three rejections must be consecutive", () => {
@@ -156,14 +164,14 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
     // rejected, rejected, WIN (not adopted — say identity blocked it? no: keep it simple, a comparable win
     // then two more rejections: streak is 2, not 4.
     const rounds = [round({}), round({}), round({ significantImprovements: 1 }), round({}), round({})];
-    const answer = campaignAdoption(frame(), rounds);
+    const answer = campaignAdoption(frame(), rounds, roundsOnlySpend(rounds));
     expect(answer).toEqual({ kind: "continue", roundsLeft: 5, consecutiveRejected: 2 });
   });
 
   it("halts as budget_exhausted when the rounds spend the frame's cap without an adoptable latest", () => {
     seq = 0;
     const rounds = [round({}), round({ significantImprovements: 1, significantRegressions: 1 })];
-    expect(campaignAdoption(frame({ budget: { maxRounds: 2 } }), rounds)).toMatchObject({
+    expect(campaignAdoption(frame({ budget: { maxRounds: 2 } }), rounds, roundsOnlySpend(rounds))).toMatchObject({
       kind: "halt",
       reason: "budget_exhausted",
     });
@@ -172,7 +180,7 @@ describe("campaignAdoption — a total answer over the frame and the rounds", ()
   it("the streak halt wins over the budget halt — the more specific reason names the problem", () => {
     seq = 0;
     const rounds = [round({}), round({}), round({})];
-    expect(campaignAdoption(frame({ budget: { maxRounds: 3 } }), rounds)).toMatchObject({
+    expect(campaignAdoption(frame({ budget: { maxRounds: 3 } }), rounds, roundsOnlySpend(rounds))).toMatchObject({
       kind: "halt",
       reason: "no_improvement",
     });
@@ -208,7 +216,9 @@ describe("[COUNTEREXAMPLE] the adoption gate cannot see what the loop says it le
     expect(told.map((r) => r.seq)).toEqual(bare.map((r) => r.seq));
     expect(told.every((r) => (r.learned ?? "").length > 0)).toBe(true);
     expect(bare.every((r) => r.learned === undefined)).toBe(true);
-    expect(campaignAdoption(frame(), told)).toEqual(campaignAdoption(frame(), bare));
+    expect(campaignAdoption(frame(), told, roundsOnlySpend(told))).toEqual(
+      campaignAdoption(frame(), bare, roundsOnlySpend(bare)),
+    );
   });
 
   // …and the same for WHOSE finding it was. `informedBy` records that a proposal came from a sibling branch's
@@ -225,7 +235,9 @@ describe("[COUNTEREXAMPLE] the adoption gate cannot see what the loop says it le
     ];
     expect(informed.every((r) => r.informedBy.length > 0)).toBe(true);
     expect(alone.every((r) => r.informedBy.length === 0)).toBe(true);
-    expect(campaignAdoption(frame(), informed)).toEqual(campaignAdoption(frame(), alone));
+    expect(campaignAdoption(frame(), informed, roundsOnlySpend(informed))).toEqual(
+      campaignAdoption(frame(), alone, roundsOnlySpend(alone)),
+    );
   });
 
   it("a losing round keeps its finding, and still loses", () => {
@@ -237,7 +249,7 @@ describe("[COUNTEREXAMPLE] the adoption gate cannot see what the loop says it le
       { learned: "the two sides ran different task-container bytes; re-run the baseline before hypothesising" },
     );
     expect(incomparable.learned).toBeDefined();
-    const answer = campaignAdoption(frame(), [incomparable]);
+    const answer = campaignAdoption(frame(), [incomparable], roundsOnlySpend([incomparable]));
     expect(answer.kind, "a finding argued a losing round into an adoption").not.toBe("adopt");
   });
 });
@@ -258,14 +270,23 @@ describe("[COUNTEREXAMPLE] the frame's endings bind the trace, whatever was logg
     seq = 0;
     const rounds = [round({}), round({}), round({ significantImprovements: 1 })];
     const over = frame({ budget: { maxRounds: 2 }, significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 } });
-    expect(campaignAdoption(over, rounds)).toMatchObject({ kind: "halt", reason: "budget_exhausted" });
+    expect(campaignAdoption(over, rounds, roundsOnlySpend(rounds))).toMatchObject({
+      kind: "halt",
+      reason: "budget_exhausted",
+    });
   });
 
   it("a win logged AFTER the rejected streak fired is not adoption evidence", () => {
     seq = 0;
     const rounds = [round({}), round({}), round({}), round({ significantImprovements: 1 })];
-    expect(campaignAdoption(frame(), rounds)).toMatchObject({ kind: "halt", reason: "no_improvement" });
-    expect(campaignStoppedAt(frame(), rounds)).toEqual({ reason: "no_improvement", atRound: 3 });
+    expect(campaignAdoption(frame(), rounds, roundsOnlySpend(rounds))).toMatchObject({
+      kind: "halt",
+      reason: "no_improvement",
+    });
+    expect(campaignStoppedAt(frame(), rounds, roundsOnlySpend(rounds))).toEqual({
+      reason: "no_improvement",
+      atRound: 3,
+    });
   });
 
   it("a trace whose LAST budgeted round won and then kept going is not adoption evidence either", () => {
@@ -274,42 +295,63 @@ describe("[COUNTEREXAMPLE] the frame's endings bind the trace, whatever was logg
     seq = 0;
     const rounds = [round({}), round({ significantImprovements: 1 }), round({ significantImprovements: 1 })];
     const over = frame({ budget: { maxRounds: 2 }, significance: { fdrAlpha: 0.05, heldOutFamilySize: 2 } });
-    expect(campaignStoppedAt(over, rounds)).toBeUndefined();
-    expect(campaignAdoption(over, rounds)).toMatchObject({ kind: "halt", reason: "budget_exhausted" });
+    expect(campaignStoppedAt(over, rounds, roundsOnlySpend(rounds))).toBeUndefined();
+    expect(campaignAdoption(over, rounds, roundsOnlySpend(rounds))).toMatchObject({
+      kind: "halt",
+      reason: "budget_exhausted",
+    });
   });
 
   it("campaignRoundRefusal names why a new round may not be appended — and answers nothing while the walk is live", () => {
     seq = 0;
-    expect(campaignRoundRefusal(frame({ budget: { maxRounds: 2 } }), [round({}), round({})])).toMatchObject({
+    expect(
+      campaignRoundRefusal(
+        frame({ budget: { maxRounds: 2 } }),
+        [round({}), round({})],
+        roundsOnlySpend([round({}), round({})]),
+      ),
+    ).toMatchObject({
       reason: "budget_exhausted",
     });
     // …even when the last budgeted round WON: adoption is the exit, not another round.
     seq = 0;
     expect(
-      campaignRoundRefusal(frame({ budget: { maxRounds: 2 } }), [round({}), round({ significantImprovements: 1 })]),
+      campaignRoundRefusal(
+        frame({ budget: { maxRounds: 2 } }),
+        [round({}), round({ significantImprovements: 1 })],
+        roundsOnlySpend([round({}), round({ significantImprovements: 1 })]),
+      ),
     ).toMatchObject({ reason: "budget_exhausted" });
     seq = 0;
-    expect(campaignRoundRefusal(frame(), [round({}), round({}), round({})])).toMatchObject({
+    expect(
+      campaignRoundRefusal(
+        frame(),
+        [round({}), round({}), round({})],
+        roundsOnlySpend([round({}), round({}), round({})]),
+      ),
+    ).toMatchObject({
       reason: "no_improvement",
     });
     seq = 0;
-    expect(campaignRoundRefusal(frame(), [round({}), round({})])).toBeUndefined();
-    expect(campaignRoundRefusal(frame(), [])).toBeUndefined();
+    expect(
+      campaignRoundRefusal(frame(), [round({}), round({})], roundsOnlySpend([round({}), round({})])),
+    ).toBeUndefined();
+    expect(campaignRoundRefusal(frame(), [], roundsOnlySpend([]))).toBeUndefined();
   });
 
   it("the endings do not move an honest trace: a win inside the budget still adopts, and a live walk continues", () => {
     seq = 0;
     expect(
-      campaignAdoption(frame({ budget: { maxRounds: 3 } }), [
-        round({}),
-        round({}),
-        round({ significantImprovements: 1 }),
-      ]),
+      campaignAdoption(
+        frame({ budget: { maxRounds: 3 } }),
+        [round({}), round({}), round({ significantImprovements: 1 })],
+        roundsOnlySpend([round({}), round({}), round({ significantImprovements: 1 })]),
+      ),
     ).toMatchObject({
       kind: "adopt",
     });
     seq = 0;
-    expect(campaignAdoption(frame(), [round({}), round({})])).toMatchObject({
+    expect(campaignAdoption(frame(), [round({}), round({})], roundsOnlySpend([round({}), round({})]))).toMatchObject({
       kind: "continue",
       consecutiveRejected: 2,
     });
@@ -325,15 +367,19 @@ describe("[COUNTEREXAMPLE] the frame's endings bind the trace, whatever was logg
 describe("the identity halt is actionable", () => {
   it("names allowUnverifiedIdentity for an unverified axis, and allowLabelOnlyAdoption for a label-only candidate", () => {
     seq = 0;
-    const unverified = campaignAdoption(frame(), [
-      round({ significantImprovements: 1, unverifiedAxes: ["dataset_content", "execution_world"] }),
-    ]);
+    const unverified = campaignAdoption(
+      frame(),
+      [round({ significantImprovements: 1, unverifiedAxes: ["dataset_content", "execution_world"] })],
+      roundsOnlySpend([round({ significantImprovements: 1, unverifiedAxes: ["dataset_content", "execution_world"] })]),
+    );
     expect(unverified).toMatchObject({ kind: "halt", reason: "identity_unverified" });
     expect((unverified as { detail: string }).detail).toContain("allowUnverifiedIdentity");
     seq = 0;
-    const labelOnly = campaignAdoption(frame(), [
-      round({ significantImprovements: 1, candidateSpecDigest: undefined }),
-    ]);
+    const labelOnly = campaignAdoption(
+      frame(),
+      [round({ significantImprovements: 1, candidateSpecDigest: undefined })],
+      roundsOnlySpend([round({ significantImprovements: 1, candidateSpecDigest: undefined })]),
+    );
     expect(labelOnly).toMatchObject({ kind: "halt", reason: "identity_unverified" });
     expect((labelOnly as { detail: string }).detail).toContain("allowLabelOnlyAdoption");
   });
@@ -345,7 +391,7 @@ describe("the adopt answer carries where the candidate came from, and the gate d
     seq = 0;
     const source = { source: "github-actions", repo: "acme/harness", sha: "abc123", prNumber: 7 };
     const rounds = [round({}), round({ significantImprovements: 1, candidateSource: source })];
-    const answer = campaignAdoption(frame(), rounds);
+    const answer = campaignAdoption(frame(), rounds, roundsOnlySpend(rounds));
     expect(answer).toMatchObject({ kind: "adopt", candidateSource: source });
     const proof = adoptionProofOf(
       answer,
@@ -365,10 +411,12 @@ describe("the adopt answer carries where the candidate came from, and the gate d
     ];
     const strip = (a: ReturnType<typeof campaignAdoption>) =>
       a.kind === "adopt" ? { ...a, candidateSource: undefined } : a;
-    expect(strip(campaignAdoption(frame(), sourced))).toEqual(strip(campaignAdoption(frame(), bare)));
+    expect(strip(campaignAdoption(frame(), sourced, roundsOnlySpend(sourced)))).toEqual(
+      strip(campaignAdoption(frame(), bare, roundsOnlySpend(bare))),
+    );
     seq = 0;
     const losing = [round({ candidateSource: { source: "api", sha: "def" } })];
-    expect(campaignAdoption(frame(), losing).kind).toBe("continue");
+    expect(campaignAdoption(frame(), losing, roundsOnlySpend(losing)).kind).toBe("continue");
   });
 });
 
@@ -387,13 +435,23 @@ describe("[COUNTEREXAMPLE] a frame with targets adopts only when every target fl
     targets: ["t1", "t2"],
   });
   it("held-out improvements elsewhere do NOT adopt while a target is still failing", () => {
-    const answer = campaignAdoption(targeted, [
-      round({
-        significantImprovements: 2,
-        heldOut: { improvements: 2, regressions: 0 },
-        targets: { flipped: ["t1"], unflipped: ["t2"] },
-      }),
-    ]);
+    const answer = campaignAdoption(
+      targeted,
+      [
+        round({
+          significantImprovements: 2,
+          heldOut: { improvements: 2, regressions: 0 },
+          targets: { flipped: ["t1"], unflipped: ["t2"] },
+        }),
+      ],
+      roundsOnlySpend([
+        round({
+          significantImprovements: 2,
+          heldOut: { improvements: 2, regressions: 0 },
+          targets: { flipped: ["t1"], unflipped: ["t2"] },
+        }),
+      ]),
+    );
     expect(answer.kind, "adopted over an unflipped target").toBe("continue");
   });
   it("does not adopt an unassessed non-inferiority claim", () => {
@@ -406,7 +464,7 @@ describe("[COUNTEREXAMPLE] a frame with targets adopts only when every target fl
       heldOut: { improvements: 0, regressions: 0 },
       targets: { flipped: ["t1", "t2"], unflipped: [] },
     });
-    expect(campaignAdoption(strict, [candidate]).kind).toBe("continue");
+    expect(campaignAdoption(strict, [candidate], roundsOnlySpend([candidate])).kind).toBe("continue");
   });
 
   it("requires an explicit satisfaction result when the frame declares a success rate", () => {
@@ -416,47 +474,72 @@ describe("[COUNTEREXAMPLE] a frame with targets adopts only when every target fl
       heldOut: { improvements: 0, regressions: 0 },
       targets: { flipped: ["t1", "t2"], unflipped: [], improved: ["t1", "t2"] },
     });
-    expect(campaignAdoption(policy, [candidate]).kind).toBe("continue");
+    expect(campaignAdoption(policy, [candidate], roundsOnlySpend([candidate])).kind).toBe("continue");
     candidate.verdict.targets = {
       flipped: ["t1", "t2"],
       unflipped: [],
       improved: ["t1", "t2"],
       satisfied: ["t1", "t2"],
     };
-    expect(campaignAdoption(policy, [candidate]).kind).toBe("adopt");
+    expect(campaignAdoption(policy, [candidate], roundsOnlySpend([candidate])).kind).toBe("adopt");
   });
 
   it("every target flipped and nothing held-out regressed: adopt — no held-out improvement is required", () => {
-    const answer = campaignAdoption(targeted, [
-      round({
-        significantImprovements: 2,
-        heldOut: { improvements: 0, regressions: 0 },
-        targets: { flipped: ["t1", "t2"], unflipped: [] },
-      }),
-    ]);
+    const answer = campaignAdoption(
+      targeted,
+      [
+        round({
+          significantImprovements: 2,
+          heldOut: { improvements: 0, regressions: 0 },
+          targets: { flipped: ["t1", "t2"], unflipped: [] },
+        }),
+      ],
+      roundsOnlySpend([
+        round({
+          significantImprovements: 2,
+          heldOut: { improvements: 0, regressions: 0 },
+          targets: { flipped: ["t1", "t2"], unflipped: [] },
+        }),
+      ]),
+    );
     expect(answer.kind).toBe("adopt");
   });
   it("every target flipped but a held-out case regressed: not adopted — the fix must not cost the rest", () => {
-    const answer = campaignAdoption(targeted, [
-      round({
-        significantImprovements: 2,
-        significantRegressions: 1,
-        heldOut: { improvements: 0, regressions: 1 },
-        targets: { flipped: ["t1", "t2"], unflipped: [] },
-      }),
-    ]);
+    const answer = campaignAdoption(
+      targeted,
+      [
+        round({
+          significantImprovements: 2,
+          significantRegressions: 1,
+          heldOut: { improvements: 0, regressions: 1 },
+          targets: { flipped: ["t1", "t2"], unflipped: [] },
+        }),
+      ],
+      roundsOnlySpend([
+        round({
+          significantImprovements: 2,
+          significantRegressions: 1,
+          heldOut: { improvements: 0, regressions: 1 },
+          targets: { flipped: ["t1", "t2"], unflipped: [] },
+        }),
+      ]),
+    );
     expect(answer.kind).toBe("continue");
   });
   it("a round under a targeted frame that carries no targets block could not answer, and does not adopt", () => {
-    const answer = campaignAdoption(targeted, [
-      round({ significantImprovements: 2, heldOut: { improvements: 2, regressions: 0 } }),
-    ]);
+    const answer = campaignAdoption(
+      targeted,
+      [round({ significantImprovements: 2, heldOut: { improvements: 2, regressions: 0 } })],
+      roundsOnlySpend([round({ significantImprovements: 2, heldOut: { improvements: 2, regressions: 0 } })]),
+    );
     expect(answer.kind).toBe("continue");
   });
   it("without targets the aggregate rule stands unchanged", () => {
-    const answer = campaignAdoption(frame(), [
-      round({ significantImprovements: 1, heldOut: { improvements: 1, regressions: 0 } }),
-    ]);
+    const answer = campaignAdoption(
+      frame(),
+      [round({ significantImprovements: 1, heldOut: { improvements: 1, regressions: 0 } })],
+      roundsOnlySpend([round({ significantImprovements: 1, heldOut: { improvements: 1, regressions: 0 } })]),
+    );
     expect(answer.kind).toBe("adopt");
   });
 });
