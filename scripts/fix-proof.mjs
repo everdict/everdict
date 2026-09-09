@@ -89,7 +89,32 @@ export function proveInWorktree({ wt, sha, source, tests, log = () => {} }) {
   const testPkgs = [...new Set(tests.map(packageDirOf))];
   // A sibling package's dist is what a cross-package import resolves to (turbo: test dependsOn ^build), so a
   // source revert in one package is invisible to a test in another until that package is rebuilt.
-  const rebuild = sourcePkgs.filter((p) => !testPkgs.includes(p));
+  //
+  // ⚠️ ASKED PER TEST, NOT PER PACKAGE SET. This read `sourcePkgs.filter((p) => !testPkgs.includes(p))` — a
+  // package was excluded from the rebuild as soon as ANY of the commit's tests lived in it. A commit that
+  // changes one package's source and carries BOTH an in-package test and a cross-package one therefore
+  // rebuilt nothing, and the cross-package counterexample ran against the FIXED dist: it passed, and the
+  // prover read that as "green on the pre-fix code" and refused a commit whose proof was real.
+  //
+  // It is a FALSE REFUSAL, which is the half of a predicate nobody tests — every case written for this
+  // function was a proof that should be rejected, and none was a proof that must be admitted (the
+  // both-sides law in skill `code-review`). It was found twice in one push, on two independent commits, and
+  // both times it read as the author's mistake rather than as the check's.
+  //
+  // The two cases differ and the question separates them: a test in the SAME package reads its package's
+  // SOURCE, so the revert alone is enough; a test in ANOTHER package reads this one's DIST, so the rebuild is
+  // what makes the revert visible at all. So a source package is rebuilt whenever the commit has any test
+  // outside it — a superset of what was rebuilt before, never less.
+  //
+  // ⚠️ AND THAT SUPERSET HAS A PRICE, STATED RATHER THAN CLAIMED AWAY. Reverting more packages means a test
+  // can now go red because a symbol its sibling has not grown yet cannot be imported, rather than because the
+  // invariant is gone — and the restored-tree GREEN check below does NOT separate those two, since a missing
+  // export is red before and green after exactly like a real proof. That hazard is not new (a source package
+  // with no tests of its own was always rebuilt) and it is not closed here; what changes is that a signature
+  // change now reaches it more often. The honest separation is to read WHY vitest went red, which this
+  // function does not do. Until it does, a commit whose only red is an unresolved import has a proof this
+  // gate cannot distinguish from a real one.
+  const rebuild = sourcePkgs.filter((p) => tests.some((t) => packageDirOf(t) !== p));
 
   const restore = () => {
     git("checkout", "--quiet", sha, "--", ...source);
