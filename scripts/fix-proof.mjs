@@ -45,7 +45,12 @@ const DECLARATION = /^Regression-test:\s*none\s*[—-]\s*(\S.*)$/m;
 // ⚠️ IT CANNOT DECLARE AWAY THE WHOLE PROOF. A fix that names every test file it touches is refused as a
 // violation, exactly as a fix that ships no test at all is — the declaration exempts fixtures from a proof,
 // never a commit from having one.
-const FIXTURE_DECLARATION = /^Fixture-only:\s*(\S[^\n]*?)\s*[—-]\s*(\S.*)$/m;
+// ⚠️ THE DASH IS SURROUNDED BY SPACE, BECAUSE THE VALUES CONTAIN THE SEPARATOR. `Regression-test: none — <why>`
+// can write `[—-]` with optional space around it: "none" has no hyphen in it. These values are PATHS, and
+// `packages/application-control/...` does — so the lazy match found `packages/application` and reported the
+// rest of the path as the reason, then refused the commit for declaring a file it does not touch. The check
+// caught it, which is the check working; the grammar is what was wrong.
+const FIXTURE_DECLARATION = /^Fixture-only:\s*(\S[^\n]*?)\s+[—-]\s+(\S.*)$/m;
 
 /** The test files a commit declared as fixtures its own change forces — paths, comma-separated. */
 export function declaredFixtures(body) {
