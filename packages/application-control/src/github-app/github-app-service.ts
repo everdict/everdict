@@ -244,7 +244,7 @@ export class GithubAppService {
     changedFiles: number;
     files: GithubPullRequestFile[];
     truncated: boolean;
-    compared?: { baselineSha?: string; candidateSha?: string };
+    compared?: { baselineSha?: string; candidateSha?: string; mergeBaseSha?: string };
   }> {
     const { token, host: resolved } = await this.tokenForRepository(
       workspace,

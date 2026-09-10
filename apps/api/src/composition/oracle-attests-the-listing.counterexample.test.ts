@@ -14,7 +14,7 @@ import { oracleChanges } from "./oracle-changes.js";
 // The attested commits are read from the LISTING now (rule `protocol` L3 — provenance is born at the source),
 // and a remote that does not say leaves the round unverifiable rather than attested by its own request.
 const REQUESTED = { baselineSha: "a".repeat(40), candidateSha: "b".repeat(40) };
-const COMPARED = { baselineSha: "c".repeat(40), candidateSha: "d".repeat(40) };
+const COMPARED = { baselineSha: "c".repeat(40), candidateSha: "d".repeat(40), mergeBaseSha: "e".repeat(40) };
 
 const appService = (listing: Record<string, unknown>): GithubAppService =>
   ({
@@ -31,6 +31,9 @@ describe("the oracle listing attests what GitHub compared", () => {
     // The counterexample. Before the repair these were REQUESTED's shas, whatever the remote had said.
     expect(read.value.baselineSha).toBe(COMPARED.baselineSha);
     expect(read.value.candidateSha).toBe(COMPARED.candidateSha);
+    // Where the comparison STARTED travels too — naming both commits is not covering the difference between
+    // them, and the consumer refuses a listing that began somewhere else (review 2026-09-10 R1).
+    expect(read.value.mergeBaseSha).toBe(COMPARED.mergeBaseSha);
     expect(read.value.paths).toEqual(["src/a.ts"]);
   });
 
@@ -43,6 +46,7 @@ describe("the oracle listing attests what GitHub compared", () => {
     // Absent, not the request. `oracleCheck` then answers `unverifiable` — the fail-closed direction.
     expect(read.value.baselineSha).toBeUndefined();
     expect(read.value.candidateSha).toBeUndefined();
+    expect(read.value.mergeBaseSha).toBeUndefined();
   });
 
   it("answers UNKNOWN with the reason on a deployment with no GitHub App, never an empty listing", async () => {

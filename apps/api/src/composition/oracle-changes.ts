@@ -24,7 +24,15 @@ export function oracleChanges(githubAppService: GithubAppService | undefined): C
       repository: string,
       pullNumber: number,
       commits: { baselineSha: string; candidateSha: string },
-    ): Promise<ReadResult<{ paths: string[]; complete: boolean; baselineSha?: string; candidateSha?: string }>> => {
+    ): Promise<
+      ReadResult<{
+        paths: string[];
+        complete: boolean;
+        baselineSha?: string;
+        candidateSha?: string;
+        mergeBaseSha?: string;
+      }>
+    > => {
       if (githubAppService === undefined)
         return readUnknown(
           "no workspace GitHub App is configured on this deployment, so a pull request's changed files cannot be read",
@@ -39,6 +47,7 @@ export function oracleChanges(githubAppService: GithubAppService | undefined): C
           complete: !listing.truncated,
           ...(listing.compared?.baselineSha ? { baselineSha: listing.compared.baselineSha } : {}),
           ...(listing.compared?.candidateSha ? { candidateSha: listing.compared.candidateSha } : {}),
+          ...(listing.compared?.mergeBaseSha ? { mergeBaseSha: listing.compared.mergeBaseSha } : {}),
         };
       }, `pull request #${pullNumber} of ${repository}`);
     },

@@ -35,21 +35,45 @@ describe("oracle comparison pins evaluated commits", () => {
     // DIFFERENT from what was asked, because a value that equals the request cannot show which one was read.
     const ahead = await compare({
       base_commit: { sha: "c".repeat(40) },
+      merge_base_commit: { sha: "c".repeat(40) },
       status: "ahead",
       commits: [{ sha: "e".repeat(40) }, { sha: "d".repeat(40) }],
     }).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
-    expect(ahead.compared).toEqual({ baselineSha: "c".repeat(40), candidateSha: "d".repeat(40) });
+    expect(ahead.compared).toEqual({
+      baselineSha: "c".repeat(40),
+      candidateSha: "d".repeat(40),
+      // The comparison started at the base, so its files ARE the two-tree difference (review 2026-09-10 R1).
+      mergeBaseSha: "c".repeat(40),
+    });
+    // …and a DIVERGED one says so, which is the whole finding: both requested SHAs come back genuine while
+    // the files describe merge-base→candidate. Reported, not repaired here — the consumer decides.
+    const diverged = await compare({
+      base_commit: { sha: "c".repeat(40) },
+      merge_base_commit: { sha: "f".repeat(40) },
+      status: "diverged",
+      commits: [{ sha: "d".repeat(40) }],
+    }).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
+    expect(diverged.compared).toEqual({
+      baselineSha: "c".repeat(40),
+      candidateSha: "d".repeat(40),
+      mergeBaseSha: "f".repeat(40),
+    });
     // Nothing lies between an identical pair, so the head IS the base — not "no attestation".
     const identical = await compare({
       base_commit: { sha: "c".repeat(40) },
+      merge_base_commit: { sha: "c".repeat(40) },
       status: "identical",
       commits: [],
     }).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
-    expect(identical.compared).toEqual({ baselineSha: "c".repeat(40), candidateSha: "c".repeat(40) });
+    expect(identical.compared).toEqual({
+      baselineSha: "c".repeat(40),
+      candidateSha: "c".repeat(40),
+      mergeBaseSha: "c".repeat(40),
+    });
     // A response that says neither attests neither. The oracle reads that as unverifiable; echoing `asked`
     // here would have made the round look attested by its own request.
     const silent = await compare({}).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
-    expect(silent.compared).toEqual({ baselineSha: undefined, candidateSha: undefined });
+    expect(silent.compared).toEqual({ baselineSha: undefined, candidateSha: undefined, mergeBaseSha: undefined });
   });
 
   it("does not claim completeness at the comparison endpoint's file cap", async () => {

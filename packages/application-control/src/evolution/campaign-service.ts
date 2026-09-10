@@ -404,7 +404,18 @@ export interface CampaignServiceDeps {
       repository: string,
       pullNumber: number,
       commits: { baselineSha: string; candidateSha: string },
-    ): Promise<ReadResult<{ paths: string[]; complete: boolean; baselineSha?: string; candidateSha?: string }>>;
+    ): Promise<
+      ReadResult<{
+        paths: string[];
+        complete: boolean;
+        baselineSha?: string;
+        candidateSha?: string;
+        // Where the listing's comparison STARTED. A three-dot comparison lists merge-base→candidate, so
+        // this equalling the evaluated baseline is what makes `paths` the two-tree difference the oracle
+        // is asking about (review 2026-09-10 R1). Absent = the reader did not say, which refuses.
+        mergeBaseSha?: string;
+      }>
+    >;
   };
   // ── THE DELEGATION SESSION A ROUND NAMES (code-evolution-loop.md, delegation budget) ────────────
   //
@@ -1539,6 +1550,19 @@ export class CampaignService {
       case "read": {
         if (read.value.baselineSha !== baseline.sha || read.value.candidateSha !== source.sha)
           return { kind: "unverifiable", reason: "the oracle listing does not attest the evaluated commits" };
+        // ── THE LISTING MUST DESCRIBE THE TWO EVALUATED TREES, NOT A COMMON ANCESTOR'S (R1, 2026-09-10) ──
+        //
+        // Naming both commits is not the same claim as covering the difference between them. GitHub's
+        // comparison is three-dot: on a diverged history its `files` describe merge-base→candidate, so a
+        // protected file the BASELINE changed after the fork is absent from the list while both attested
+        // SHAs are genuine. Reproduced against live public GitHub — a clean receipt over a README that
+        // differs between the two evaluated commits. So the comparison's own starting point is part of
+        // the attestation, and anything but the evaluated baseline leaves the round unverifiable.
+        if (read.value.mergeBaseSha !== baseline.sha)
+          return {
+            kind: "unverifiable",
+            reason: `the oracle listing compares from ${read.value.mergeBaseSha ?? "a starting point it did not name"} rather than from the evaluated baseline ${baseline.sha}, so its file list describes a common ancestor's difference and can omit a protected file the baseline changed — rebase the candidate onto the evaluated baseline and build again`,
+          };
         if (!read.value.complete)
           return {
             kind: "unverifiable",

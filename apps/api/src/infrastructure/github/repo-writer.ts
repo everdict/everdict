@@ -214,6 +214,16 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
                 // nothing between the two. Read rather than assumed — this is the oracle's attestation, and a
                 // response that omits it leaves the round unverifiable rather than attested by its own request.
                 base_commit: z.object({ sha: z.string() }).optional(),
+                // ── WHERE THE COMPARISON ACTUALLY STARTED (review 2026-09-10 R1) ─────────────────
+                //
+                // `/compare/A...B` is THREE-DOT: its `files` describe merge-base→B, not A→B. On a
+                // diverged history those are different answers, and the endpoint still echoes A and B
+                // faithfully — so an attestation built from `base_commit` and the head is genuine and
+                // still does not say what the caller assumed. Reproduced against live public GitHub: a
+                // protected file differing between the two evaluated commits was absent from `files`.
+                // The merge base is therefore part of the attestation, and the consumer refuses when it
+                // is not the evaluated baseline.
+                merge_base_commit: z.object({ sha: z.string() }).optional(),
                 status: z.string().optional(),
                 commits: z.array(z.object({ sha: z.string() })).default([]),
                 files: z.array(
@@ -240,7 +250,11 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
             return {
               files,
               changedFiles: comparison.files.length >= 300 ? files.length + 1 : files.length,
-              compared: { baselineSha: comparedBaseline, candidateSha: comparedCandidate },
+              compared: {
+                baselineSha: comparedBaseline,
+                candidateSha: comparedCandidate,
+                mergeBaseSha: comparison.merge_base_commit?.sha,
+              },
             };
           }
           const perPage = Math.min(100, Math.max(1, opts.maxFiles));

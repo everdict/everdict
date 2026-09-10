@@ -104,7 +104,12 @@ type Deps = ConstructorParameters<typeof CampaignService>[0];
 
 // A repository that answers honestly: a comparison of a commit with ITSELF lists nothing changed, which is
 // exactly why a forged baseline used to come back clean.
-const repository = (changedBetween: Record<string, string[]>) => ({
+//
+// `mergeBaseSha` defaults to the baseline it was asked about — an `ahead` comparison, where the listing IS the
+// two-tree difference. `divergedFrom` models the other shape GitHub really answers with (review 2026-09-10
+// R1): a three-dot comparison whose files describe merge-base→candidate while both attested SHAs stay
+// genuine, so a protected file the BASELINE changed after the fork never appears.
+const repository = (changedBetween: Record<string, string[]>, divergedFrom?: string | null) => ({
   calls: [] as Array<{ pr: number; baselineSha: string; candidateSha: string }>,
   async pullRequestFiles(
     _tenant: string,
@@ -114,7 +119,17 @@ const repository = (changedBetween: Record<string, string[]>) => ({
   ) {
     this.calls.push({ pr, ...commits });
     const key = `${commits.baselineSha}..${commits.candidateSha}`;
-    return { kind: "read" as const, value: { paths: changedBetween[key] ?? [], complete: true, ...commits } };
+    return {
+      kind: "read" as const,
+      value: {
+        paths: changedBetween[key] ?? [],
+        complete: true,
+        ...commits,
+        // `null` is the endpoint that named no starting point at all — a different answer from "started at
+        // the baseline", and refused for its own reason (rule `protocol` L2: not saying is a third value).
+        ...(divergedFrom === null ? {} : { mergeBaseSha: divergedFrom ?? commits.baselineSha }),
+      },
+    };
   },
 });
 
@@ -252,6 +267,49 @@ describe("[COUNTEREXAMPLE] the oracle compares the commits Everdict built, not t
       complete: true,
       commitProvenance: "everdict-build",
     });
+  });
+
+  it("R1 — a DIVERGED comparison cannot certify clean: its files describe a common ancestor, not the baseline", async () => {
+    // Reproduced against live public GitHub before this refusal existed (`octocat/Hello-World`,
+    // b1b3f972…...b3cbd5bb…): status `diverged`, both requested SHAs echoed back faithfully, `files` listing
+    // only CONTRIBUTING.md — while the protected README genuinely differs between the two evaluated commits.
+    // The production oracle answered `clean`. Nothing was forged: three-dot comparison semantics are simply a
+    // different question from the one the oracle asks, and naming both commits is not covering the difference
+    // between them.
+    //
+    // Here the fork point is `sha-fork`, and the listing from it happens to touch nothing in scope — the
+    // shape the old check accepted. What the frame protects (`datasets/**`) changed on the BASELINE side,
+    // where a merge-base comparison cannot see it.
+    const diverged = repository({ "sha-B..sha-A": ["src/loop.ts"] }, "sha-fork");
+    const { round } = await drive(
+      {
+        setsForCampaign: async () => [],
+        forCampaign: async () => [buildOf("bld_c", "1.0.1", "sha-A", 7), buildOf("bld_b", "1.0.0", "sha-B")],
+      },
+      { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
+      diverged,
+    );
+    // Refused, and the reason names the repair the operator has to make — not "touched", because nothing
+    // here established that anything in scope changed, and not "clean", because nothing established it did
+    // not. The third answer is the honest one (rule `protocol` L2).
+    expect(round.verdict.comparable).toBe(false);
+    expect(round.verdict.detail).toMatch(/compares from sha-fork rather than from the evaluated baseline sha-B/);
+    expect(round.verdict.oracleTouched ?? []).toEqual([]);
+    expect(round.verdict.oracleReceipt).toBeUndefined();
+  });
+
+  it("R1 — a listing that names no starting point is unverifiable, never assumed to have started at the baseline", async () => {
+    const silent = repository({}, null);
+    const { round } = await drive(
+      {
+        setsForCampaign: async () => [],
+        forCampaign: async () => [buildOf("bld_c", "1.0.1", "sha-A", 7), buildOf("bld_b", "1.0.0", "sha-B")],
+      },
+      { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
+      silent,
+    );
+    expect(round.verdict.comparable).toBe(false);
+    expect(round.verdict.detail).toMatch(/a starting point it did not name/);
   });
 
   it("a candidate with no platform build record is unverifiable, whatever its origin claims", async () => {
