@@ -96,3 +96,32 @@ export function campaignSpendOf(
     outstanding: standings.filter((s) => s.kind === "outstanding").length,
   };
 }
+
+// ── HOW MANY HELD-OUT TESTS THE FAMILY PRE-REGISTERED (review of the follow-up batch) ────────────────
+//
+// `significance.heldOutFamilySize` is what a chain corrects its rounds against, and it was read in two places
+// that disagreed about the one case the schema still permits — a root where it is absent. `assertFamilyCapacity`
+// refused every successor unconditionally; `reserveInFamily` silently defaulted to `budget.maxRounds` and
+// admitted the reservation. Same field, same missing value, opposite answers, and a legacy root reaches it:
+// `campaignFrameDefects` refuses an undeclared family for anything producing NEW evidence, and a record
+// written before that rule stays readable.
+//
+// One owner, three-valued rather than defaulted, because the two callers legitimately want different things
+// from the same absence and neither may guess at the other's:
+//
+//   declared     the root pre-registered a family; both callers use it
+//   undeclared   the root never did — the chain door REFUSES (a family it cannot account for may not grow),
+//                and the reservation door treats the campaign as its own family, because refusing there would
+//                strand a legacy campaign inside its own already-frozen budget
+//
+// The point is not that the two answers converge; it is that the FACT is read once and each caller says out
+// loud what it does with it (rule `protocol` L3 — a predicate written twice has already diverged, and this one
+// had).
+export type ExperimentFamilyLimit = { kind: "declared"; limit: number } | { kind: "undeclared" };
+
+export function experimentFamilyLimit(rootFrame: {
+  significance: { heldOutFamilySize?: number };
+}): ExperimentFamilyLimit {
+  const declared = rootFrame.significance.heldOutFamilySize;
+  return declared === undefined ? { kind: "undeclared" } : { kind: "declared", limit: declared };
+}

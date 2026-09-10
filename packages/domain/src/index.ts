@@ -526,8 +526,10 @@ export {
   type AttemptStanding,
   type CampaignArmState,
   type CampaignSpend,
+  type ExperimentFamilyLimit,
   attemptStandingOf,
   campaignSpendOf,
+  experimentFamilyLimit,
   roundsOnlySpend,
 } from "./evolution/campaign-attempts.js";
 export { type SeedEvidence, seedLeakOf } from "./evolution/seed-leak.js";
