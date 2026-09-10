@@ -309,13 +309,31 @@ Stated limits:
 - **`decision` and `settle` read one scorecard per bound arm of every unreported attempt.**
   Bounded by `budget.maxRounds` (≤ 1000, typically ≤ 20) and deduplicated by scorecard id, but
   it is a linear read where there was none.
-- **The oracle's own attestation cannot fail, and R1 now leans on it.** `oracleCheck` refuses a
-  listing whose `baselineSha`/`candidateSha` disagree with the commits it asked for — and the
-  only production wiring of `changes.pullRequestFiles` builds those two fields by spreading
-  `...commits`, its own input. The check compares a value with itself. It is not false today,
-  because R1 made the commits come from the build ledger; what it cannot do is notice that
-  premise being removed. Honoring it needs `listPullRequestChanges` to return the commits
-  GitHub actually compared, which its adapter does not read. Found by `pnpm review` on this
-  change, graded `carried`.
+- **The oracle's own attestation could not fail, and R1 leaned on it — CLOSED, 2026-09-10.**
+  `oracleCheck` refuses a listing whose `baselineSha`/`candidateSha` disagree with the commits
+  it asked for, and the only production wiring of `changes.pullRequestFiles` built those two
+  fields by spreading `...commits`, its own input: the check compared a value with itself, in
+  either direction, for every input. It was never false — R1 made both commits come from the
+  build ledger — but a guard that cannot fail cannot notice its premise being removed, which is
+  the only reason it exists. Repaired by reading the attestation from the LISTING: the GitHub
+  adapter reports what the comparison endpoint said it compared (`base_commit.sha`, and the head
+  as the comparison's last commit), `listPullRequestChanges` passes it through untouched, and the
+  composition became a named function (`apps/api/src/composition/oracle-changes.ts`) so its
+  counterexample drives the production closure rather than one of its own. A remote that attests
+  neither leaves the round `unverifiable`, which is the fail-closed direction. Found by
+  `pnpm review` on this change, graded `carried`, now `real` and closed —
+  `apps/api/src/composition/oracle-attests-the-listing.counterexample.test.ts` (3/3 red under
+  neutralization for the stated reason) and the adapter's own arm in
+  `apps/api/src/infrastructure/github/oracle-commit.counterexample.test.ts`.
+  ⚠️ **Still not executed against live GitHub.** The adapter's reading of `base_commit.sha`,
+  `status` and `commits` is pinned against constructed responses, not against the API.
+- **The experiment family's held-out size was read at two doors — CLOSED, 2026-09-10.** For a
+  root that declared no `significance.heldOutFamilySize` — legacy only, since
+  `campaignFrameDefects` requires it for anything producing new evidence — `assertFamilyCapacity`
+  refused while blaming a budget shortfall it had not measured and `reserveInFamily` defaulted to
+  `budget.maxRounds` and admitted. `experimentFamilyLimit` (`@everdict/domain`) owns the fact now,
+  three-valued rather than defaulted, and each door states what it does with the absence. The
+  same finding's other half — an open sibling charged its full allocation — is the declared
+  policy and was not changed.
 - Not executed: real PostgreSQL (`trust-fast` — `attemptsForCampaign`'s statement has not been
   planned by an engine), live GitHub, `pnpm protocol-mutations`, and the deployment E2E.

@@ -32,6 +32,15 @@ See skill `ci`.
   the web build and the mutation suite answer questions about the tree being PUBLISHED, while a broken build or
   a failing test is what a bisect actually lands on. The two levels are recorded separately because stamping
   them alike would put the same lie one level down. So: `pnpm ci:commits` then `pnpm ci:local`, then push.
+  ⚠️ **A STAMP IS INHERITED BY AN IDENTICAL TREE, AND THE COMMIT MESSAGE IS PART OF WHAT WAS CHECKED.** A
+  history rewrite reproduces the same trees under new shas, and re-running lint+typecheck+test on each of
+  twenty already-checked trees cost about an hour per rewrite — so a commit whose `(tree, parent tree)` was
+  already ledgered inherits `fast`. The first version keyed on those two alone, and `pnpm review` found what
+  that permits: `git commit --amend -m "fix(x): …"` changes no byte of source, keeps both trees, and produces a
+  commit the fix-proof rule now demands a RED regression test for — inherited, with nothing run. The key hashes
+  the COMMIT MESSAGE too (`<tree> <parent tree> <sha256(message)>`), so a reword is a new commit to this ledger
+  and gets checked. It grants `fast` and never `full`: `ci:local` asks about the tree being PUBLISHED, which is
+  a question about HEAD, not about an ancestor that happens to match.
 - The 5 essential commands are NOT the whole gate. CI additionally runs: `pnpm cone`,
   `pnpm web-imports`, `pnpm artifact-frame`, **`pnpm convention-harness`**, **`pnpm docs-check`**, **`pnpm intent-chain`**, **`pnpm guardrails`**, **`pnpm scanner-watches`**, **`pnpm controls-documented`**, **`pnpm lesson-evals`**, **`pnpm grader-collapse`**, **`pnpm python`**, **`pnpm swallowed-reads`**,
   **`pnpm constructed-casts`**, **`pnpm guarded-doubles`**, **`pnpm unwired-capabilities`**, **`pnpm option-forwarding`**,
