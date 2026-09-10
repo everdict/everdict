@@ -209,6 +209,13 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
               throw new Error("oracle comparison requires full commit SHAs");
             const comparison = z
               .object({
+                // GitHub's own account of WHAT IT COMPARED. `base_commit.sha` is the resolved base; the head is
+                // the last commit of the comparison, and an `identical` comparison has none because there is
+                // nothing between the two. Read rather than assumed — this is the oracle's attestation, and a
+                // response that omits it leaves the round unverifiable rather than attested by its own request.
+                base_commit: z.object({ sha: z.string() }).optional(),
+                status: z.string().optional(),
+                commits: z.array(z.object({ sha: z.string() })).default([]),
                 files: z.array(
                   z.object({
                     filename: z.string(),
@@ -221,13 +228,20 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
                 ),
               })
               .parse(await (await gh(`${base}/repos/${repository}/compare/${baselineSha}...${candidateSha}`)).json());
+            const comparedBaseline = comparison.base_commit?.sha;
+            const comparedCandidate =
+              comparison.status === "identical" ? comparedBaseline : comparison.commits.at(-1)?.sha;
             // GitHub caps comparison files at 300. At the cap, completeness is unknown.
             // Include the old name too: moving a protected file is an oracle change.
             const files = comparison.files.flatMap((f) => [
               f,
               ...(f.previous_filename ? [{ ...f, filename: f.previous_filename }] : []),
             ]);
-            return { files, changedFiles: comparison.files.length >= 300 ? files.length + 1 : files.length };
+            return {
+              files,
+              changedFiles: comparison.files.length >= 300 ? files.length + 1 : files.length,
+              compared: { baselineSha: comparedBaseline, candidateSha: comparedCandidate },
+            };
           }
           const perPage = Math.min(100, Math.max(1, opts.maxFiles));
           // The PR itself carries changed_files — the honest denominator for "is this the whole diff".

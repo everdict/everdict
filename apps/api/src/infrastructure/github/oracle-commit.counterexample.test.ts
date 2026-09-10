@@ -27,6 +27,31 @@ describe("oracle comparison pins evaluated commits", () => {
     expect(result.changedFiles).toBe(result.files.length);
   });
 
+  it("attests the commits GITHUB names, and nothing when it names none", async () => {
+    const compare = (body: Record<string, unknown>) =>
+      githubRepoWriterFactory(async () => Response.json({ files: [], ...body })).for("test-token");
+    const asked = { baselineSha: "a".repeat(40), candidateSha: "b".repeat(40) };
+    // GitHub's own account: the resolved base, and the head as the last commit of the comparison. Deliberately
+    // DIFFERENT from what was asked, because a value that equals the request cannot show which one was read.
+    const ahead = await compare({
+      base_commit: { sha: "c".repeat(40) },
+      status: "ahead",
+      commits: [{ sha: "e".repeat(40) }, { sha: "d".repeat(40) }],
+    }).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
+    expect(ahead.compared).toEqual({ baselineSha: "c".repeat(40), candidateSha: "d".repeat(40) });
+    // Nothing lies between an identical pair, so the head IS the base — not "no attestation".
+    const identical = await compare({
+      base_commit: { sha: "c".repeat(40) },
+      status: "identical",
+      commits: [],
+    }).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
+    expect(identical.compared).toEqual({ baselineSha: "c".repeat(40), candidateSha: "c".repeat(40) });
+    // A response that says neither attests neither. The oracle reads that as unverifiable; echoing `asked`
+    // here would have made the round look attested by its own request.
+    const silent = await compare({}).listPullRequestFiles("acme/repo", 7, { maxFiles: 100, commits: asked });
+    expect(silent.compared).toEqual({ baselineSha: undefined, candidateSha: undefined });
+  });
+
   it("does not claim completeness at the comparison endpoint's file cap", async () => {
     const writer = githubRepoWriterFactory(async () =>
       Response.json({
