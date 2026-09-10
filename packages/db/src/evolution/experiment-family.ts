@@ -5,7 +5,13 @@ import {
   type EvolutionCampaignRecord,
   type ExperimentFamily,
 } from "@everdict/contracts";
-import { type CampaignArmState, campaignRoundRefusal, campaignSpendOf, contentDigest } from "@everdict/domain";
+import {
+  type CampaignArmState,
+  campaignRoundRefusal,
+  campaignSpendOf,
+  contentDigest,
+  experimentFamilyLimit,
+} from "@everdict/domain";
 
 // The reservation door holds no evidence about whether a spent comparison can still land — that needs the
 // batches' own lifecycle, which lives a layer up (`CampaignService.spendOf`). An empty map is the reading in
@@ -54,7 +60,12 @@ export function reserveInFamily(
   if (old && old.candidateVersion !== input.candidateVersion)
     throw new ConflictError("CONFLICT", {}, "evaluation request id belongs to another candidate");
   const binding = old?.[input.side];
-  const limit = root.frame.significance.heldOutFamilySize ?? root.frame.budget.maxRounds;
+  // Same owner the chain door reads (`experimentFamilyLimit`), and a DIFFERENT answer to `undeclared`, stated
+  // rather than defaulted: a legacy root that pre-registered no family is its own family, so it may still
+  // spend the budget it froze. Refusing here would strand it; admitting it as somebody else's allocation is
+  // what the two separate reads used to do.
+  const declaredLimit = experimentFamilyLimit(root.frame);
+  const limit = declaredLimit.kind === "declared" ? declaredLimit.limit : root.frame.budget.maxRounds;
   const current = family ?? {
     id: root.id,
     tenant: input.tenant,

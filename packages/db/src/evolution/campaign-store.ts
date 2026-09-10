@@ -21,7 +21,7 @@ import {
   type ExperimentFamily,
   ExperimentFamilySchema,
 } from "@everdict/contracts";
-import { contentDigest } from "@everdict/domain";
+import { contentDigest, experimentFamilyLimit } from "@everdict/domain";
 import { type SqlClient, withTransaction } from "../client.js";
 import { EVENT_COLUMNS, eventValuesClause } from "../results/outbox.js";
 import { familyMembers, reserveInFamily } from "./experiment-family.js";
@@ -61,7 +61,20 @@ function assertFamilyCapacity(
         grew = true;
       }
   }
-  const limit = byId.get(root)?.frame.significance.heldOutFamilySize;
+  const rootFrame = byId.get(root)?.frame;
+  // ONE owner for how large the held-out family is (`experimentFamilyLimit`) — this door and the reservation
+  // door used to read the field separately and disagreed on the one value the schema still permits, an
+  // UNDECLARED family. A chain door may not grow a family it cannot account for, so `undeclared` refuses here
+  // and says so; the reservation door states its own, different answer out loud.
+  const declared = rootFrame ? experimentFamilyLimit(rootFrame) : undefined;
+  if (declared === undefined) throw new ConflictError("CONFLICT", {}, "experiment family predecessor is missing");
+  if (declared.kind === "undeclared")
+    throw new ConflictError(
+      "CONFLICT",
+      {},
+      "experiment family root declares no held-out family size, so a continuation cannot be accounted for",
+    );
+  const limit = declared.limit;
   const reserved = records
     .filter((r) => family.has(r.id))
     .reduce(
@@ -73,11 +86,7 @@ function assertFamilyCapacity(
             attempts.filter((a) => a.campaignId === r.id).length),
       0,
     );
-  if (
-    limit === undefined ||
-    record.frame.significance.heldOutFamilySize !== limit ||
-    reserved + record.frame.budget.maxRounds > limit
-  )
+  if (record.frame.significance.heldOutFamilySize !== limit || reserved + record.frame.budget.maxRounds > limit)
     throw new ConflictError(
       "CONFLICT",
       { reserved, limit },
