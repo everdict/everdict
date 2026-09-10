@@ -1248,7 +1248,16 @@ export class CampaignService {
     const seq = record.rounds.length + 1;
     const at = this.now();
     const verdict = {
-      ...verdictOf(snapshot, record.frame, oracle, builtSource, seedLeak, baselineSubject, candidateSubject),
+      ...verdictOf(
+        snapshot,
+        record.frame,
+        oracle,
+        builtSource,
+        seedLeak,
+        baselineSubject,
+        candidateSubject,
+        heldOutFamilySize,
+      ),
       evaluationId: evaluation.id,
     };
     // ── THE ROUND'S EVIDENCE IS STAGED BEFORE THE ROUND EXISTS (benchmark-evidence-spec.md §3) ──────
@@ -1809,6 +1818,14 @@ function verdictOf(
   seedLeak: SeedLeakCheck,
   baselineSubject: EvaluatedSubjectIdentity,
   candidateSubject: EvaluatedSubjectIdentity,
+  // The pre-registered family size, PASSED rather than re-read. This function used to spell
+  // `frame.significance.heldOutFamilySize ?? frame.budget.maxRounds` at its one use, a third copy of the
+  // predicate the reservation and chain doors were just unified behind `experimentFamilyLimit`. It was
+  // unreachable — the only caller refuses an undeclared family a hundred lines above, at the seam that
+  // derives the level — and an unreachable fallback is the shape whose premise rots quietly. The caller has
+  // already proved the value; a required parameter makes it impossible to prove it twice and differently
+  // (rule `protocol` L3 — a predicate written twice has already diverged).
+  heldOutFamilySize: number,
 ): CampaignRound["verdict"] {
   const comparison = snapshot.diff;
   // Identity coverage first: an absent identity read is NOT "verified" (L2) — it blocks like an unverified
@@ -2016,12 +2033,7 @@ function verdictOf(
     response,
     ...(frame.nonInferiority
       ? {
-          nonInferiority: nonInferiorityOf(
-            frame.nonInferiority,
-            [...heldOutIds],
-            frame.significance.heldOutFamilySize ?? frame.budget.maxRounds,
-            cases,
-          ),
+          nonInferiority: nonInferiorityOf(frame.nonInferiority, [...heldOutIds], heldOutFamilySize, cases),
         }
       : {}),
     significantImprovements: significant.filter((c) => c.delta > 0).length,
