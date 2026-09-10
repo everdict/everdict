@@ -73,7 +73,13 @@ describeTrust("TRUST-133 — a grader that hangs settles as a fact, inside the c
     // case's own declaration, would turn a legitimately slow judge (a delegated harness dispatching a whole
     // agent) into a failure. The budget is the user's statement of how long this case may take.
     expect(await safeGrade(answers, context(1))).toEqual([
-      { graderId: "answers", metric: "answers", value: 1, status: "measured" },
+      {
+        graderId: "answers",
+        metric: "answers",
+        value: 1,
+        status: "measured",
+        measurement: { producer: { kind: "grader", id: "answers" }, metric: "answers" },
+      },
     ]);
   });
 });

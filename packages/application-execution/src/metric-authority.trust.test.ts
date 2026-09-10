@@ -47,7 +47,18 @@ describeTrust("TRUST-78 — an undeclared producer cannot name itself ground tru
     // The legitimate path, which must stay open or the guard is just a ban on a word. Ownership is intrinsic:
     // the built-in whose metric is fixed in its own code owns that name, and nothing in a spec can transfer it.
     const [score] = await safeGrade(emitting("tests-pass", "tests_pass", { ownsMetrics: ["tests_pass"] }), CTX);
-    expect(score).toEqual({ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true });
+    // ⚠️ The `measurement` half is asserted, not tolerated. The structured identity is stamped HERE, at the
+    // collection boundary, precisely so nothing downstream re-derives a producer from a metric NAME (rule
+    // `protocol` L3) — so a scenario that lets the field float has stopped certifying the thing that makes
+    // the name safe to carry. These four scenarios were the ones the identity change never ran against:
+    // `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE=1`, so `pnpm test` skipped every one of them.
+    expect(score).toEqual({
+      graderId: "tests-pass",
+      metric: "tests_pass",
+      value: 1,
+      pass: true,
+      measurement: { producer: { kind: "grader", id: "tests-pass" }, metric: "tests_pass" },
+    });
   });
 
   it("TRUST-79 — a DECLARATION is not a wildcard: declaring one authority does not buy another's name", async () => {
@@ -66,7 +77,15 @@ describeTrust("TRUST-78 — an undeclared producer cannot name itself ground tru
     // builds that wrapper, and the inner collection boundary sees only a CaseJob. It does NOT extend to the
     // reserved authority names, which is where the previous version's wildcard did its damage.
     const [own] = await safeGrade(emitting("code-judge", "judge", { ownsJudgeVerdict: true }), CTX);
-    expect(own).toEqual({ graderId: "code-judge", metric: "judge", value: 1, pass: true });
+    expect(own).toEqual({
+      graderId: "code-judge",
+      metric: "judge",
+      value: 1,
+      pass: true,
+      // The grant is over the judge FAMILY and the producer is still a grader: the identity says so, which is
+      // what stops a later reader inferring "judge" from the metric name it happens to wear.
+      measurement: { producer: { kind: "grader", id: "code-judge" }, metric: "judge" },
+    });
     // Criteria are multi-segment by design (`judge:milestone:<id>` is a real code-judge shape).
     const [criterion] = await safeGrade(
       emitting("code-judge", "judge:milestone:login", { ownsJudgeVerdict: true }),
@@ -88,6 +107,12 @@ describeTrust("TRUST-78 — an undeclared producer cannot name itself ground tru
 
   it("an ordinary custom metric is untouched — the rule is about reserved names, not about custom graders", async () => {
     const [score] = await safeGrade(emitting("my-script", "my_score"), CTX);
-    expect(score).toEqual({ graderId: "my-script", metric: "my_score", value: 1, pass: true });
+    expect(score).toEqual({
+      graderId: "my-script",
+      metric: "my_score",
+      value: 1,
+      pass: true,
+      measurement: { producer: { kind: "grader", id: "my-script" }, metric: "my_score" },
+    });
   });
 });

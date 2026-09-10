@@ -42,9 +42,29 @@ describeTrust("TRUST-12 — a child run's served verdict is its parent's stamped
       harness: "h@1",
       trace: [],
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      // ⚠️ THE SCORES CARRY THEIR STAMPED IDENTITY, BECAUSE THAT IS WHAT A COLLECTION BOUNDARY WRITES.
+      // Without `measurement` these rows take a branch production no longer produces: a structured policy
+      // can only match an identity-less score against a rung declaring NEITHER producer NOR criterion, and
+      // the declared `custom_gate` rung now carries its producer — so the composed policy stopped deciding
+      // and the premise below silently inverted. The pairing is unreachable in production (a record resolves
+      // to its OWN embedded policy, and a pre-stamp record to the frozen v1 ladder, so yesterday's scores are
+      // never judged by today's composition), which is exactly why only a drifted fixture could reach it —
+      // rule `testing`, the fixture-drift law: default to the REAL shape and let the weak branch opt in.
       scores: [
-        { graderId: "judge", metric: "judge:quality", value: 0, pass: false },
-        { graderId: "custom_gate", metric: "custom_gate", value: 1, pass: true },
+        {
+          graderId: "judge",
+          metric: "judge:quality",
+          value: 0,
+          pass: false,
+          measurement: { producer: { kind: "judge", id: "quality" }, metric: "judge" },
+        },
+        {
+          graderId: "custom_gate",
+          metric: "custom_gate",
+          value: 1,
+          pass: true,
+          measurement: { producer: { kind: "grader", id: "custom_gate" }, metric: "custom_gate" },
+        },
       ],
     };
     expect(caseVerdict(result)).toBe(false); // today's ladder says FAIL …

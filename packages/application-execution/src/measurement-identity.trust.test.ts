@@ -61,7 +61,15 @@ describeTrust("TRUST-101 — a grader declares the semantics of what it MEASURES
       grade: async (): Promise<Score> => ({ graderId: "my-check", metric: "business_verified", value: 1, pass: true }),
     };
     expect(await safeGrade(grader, CTX)).toEqual([
-      { graderId: "my-check", metric: "business_verified", value: 1, pass: true },
+      {
+        graderId: "my-check",
+        metric: "business_verified",
+        value: 1,
+        pass: true,
+        // Stamped at collection, from the PRODUCER rather than from the name — the half of this scenario's
+        // own subject that it was not asserting.
+        measurement: { producer: { kind: "grader", id: "my-check" }, metric: "business_verified" },
+      },
     ]);
   });
 

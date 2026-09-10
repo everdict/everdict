@@ -1,5 +1,5 @@
 import { InMemoryCaseReceiptStore, ScorecardService, settleRun } from "@everdict/application-control";
-import { storedExecutionId } from "@everdict/contracts";
+import { sanitizeSubmittedResult, storedExecutionId } from "@everdict/contracts";
 import type { CaseCommitReceipt, CaseJob, CaseResult, RunRecord } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@everdict/db";
 import { Run, caseResultDigest } from "@everdict/domain";
@@ -38,13 +38,25 @@ function mulberry32(seed: number): () => number {
   };
 }
 
-const resultOf = (caseId: string, value: number): CaseResult => ({
-  caseId,
-  harness: "h@1.0.0",
-  trace: [],
-  snapshot: { kind: "prompt", output: "" },
-  scores: [{ metric: "pass", graderId: "g", value, pass: value > 0 }],
-});
+// ⚠️ CANONICAL BEFORE THE FIRST READER, WHICH IS WHAT THE PRODUCTION COMMITTER DOES.
+// `CaseOutcomeCommitter` sanitizes ONCE and then hands the same document to the receipt's digest, the child's
+// terminal write and the batch's count — its own comment says why: "asking it only [inside the transaction]
+// would seal a receipt over the bytes a producer submitted and store the bytes the platform accepted". This
+// fixture reaches past the committer to `commitCase` + `settleRun`, so it has to do the same thing, or it
+// re-creates that divergence and calls it a race: `Run.succeed` stamps each score's measurement identity, so
+// a receipt digested from a raw literal names bytes the row will never hold. It went unseen because a
+// `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE=1` — `pnpm test` skipped it entirely.
+const resultOf = (caseId: string, value: number): CaseResult =>
+  sanitizeSubmittedResult(
+    {
+      caseId,
+      harness: "h@1.0.0",
+      trace: [],
+      snapshot: { kind: "prompt", output: "" },
+      scores: [{ metric: "pass", graderId: "g", value, pass: value > 0 }],
+    },
+    { graders: [], judges: [] },
+  );
 
 describeTrust("TRUST-174 ① — two drivers, one case, every interleaving: the commit invariants hold", () => {
   it("across 200 seeded interleavings of commit/commit/takeover, exactly one receipt survives and it names a terminal child with its own bytes", async () => {
