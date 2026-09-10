@@ -96,11 +96,22 @@ export interface GithubRepoWriter {
   ): Promise<GithubIssueComment[]>;
   // The files one pull request changes, with GitHub's own per-file diff. `maxFiles` bounds the page — the PR's
   // own `changedFiles` count says whether the listing is the whole change (the caller compares and reports).
+  //
+  // ⚠️ `compared` IS THE ATTESTATION, AND IT IS READ FROM THE RESPONSE, NEVER ECHOED FROM `opts.commits`.
+  // The oracle's whole claim is that the listing describes the two commits the arms were BUILT from, and the
+  // composition that used to satisfy it spread its own input into its own return — so the service's check
+  // (`read.value.baselineSha !== baseline.sha`) compared a value with itself and could not fail. The field is
+  // named differently from the request on purpose: a caller cannot satisfy it by forwarding what it asked for.
+  // Absent means the remote did not say, which the oracle reads as unverifiable (rule `protocol` L2/L3).
   listPullRequestFiles(
     repository: string,
     pullNumber: number,
     opts: { maxFiles: number; commits?: { baselineSha: string; candidateSha: string } },
-  ): Promise<{ changedFiles: number; files: GithubPullRequestFile[] }>;
+  ): Promise<{
+    changedFiles: number;
+    files: GithubPullRequestFile[];
+    compared?: { baselineSha?: string; candidateSha?: string };
+  }>;
   // Merge one pull request into its base. `sha` is the head the caller MEASURED: GitHub refuses the merge when
   // the head has moved since, which is the L1 precondition a code adoption needs (the commit that lands is the
   // one the round evaluated). Idempotent on a pull request that is already merged — answers its merge commit

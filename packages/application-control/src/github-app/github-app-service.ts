@@ -240,7 +240,12 @@ export class GithubAppService {
     pullNumber: number,
     opts: { maxFiles?: number; commits?: { baselineSha: string; candidateSha: string } },
     host?: string,
-  ): Promise<{ changedFiles: number; files: GithubPullRequestFile[]; truncated: boolean }> {
+  ): Promise<{
+    changedFiles: number;
+    files: GithubPullRequestFile[];
+    truncated: boolean;
+    compared?: { baselineSha?: string; candidateSha?: string };
+  }> {
     const { token, host: resolved } = await this.tokenForRepository(
       workspace,
       repository,
@@ -248,10 +253,12 @@ export class GithubAppService {
       host,
     );
     const maxFiles = Math.min(Math.max(opts.maxFiles ?? 50, 1), 100);
-    const { changedFiles, files } = await this.repoOps
+    const { changedFiles, files, compared } = await this.repoOps
       .for(token, resolved)
       .listPullRequestFiles(repository, pullNumber, { maxFiles, ...(opts.commits ? { commits: opts.commits } : {}) });
-    return { changedFiles, files, truncated: files.length < changedFiles };
+    // `compared` travels verbatim — this layer neither supplies nor repairs it. What the remote did not say is
+    // what the oracle must be told (see the port's note on why this field is not the request echoed back).
+    return { changedFiles, files, truncated: files.length < changedFiles, ...(compared ? { compared } : {}) };
   }
 
   // ── MERGE A PULL REQUEST (docs/architecture/code-evolution-loop.md, D5) ─────────────────────────

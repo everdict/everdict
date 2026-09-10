@@ -71,7 +71,7 @@ import type {
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
-import { UpstreamError, readOrUnknown, readUnknown } from "@everdict/contracts";
+import { UpstreamError } from "@everdict/contracts";
 import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
@@ -112,6 +112,7 @@ import { buildManagedImages } from "./composition/images.js";
 import { buildIntegrations } from "./composition/integrations.js";
 import { lateBoundEmitter, lateBoundIssueLinker } from "./composition/late-events.js";
 import { deploymentNomad } from "./composition/nomad-env.js";
+import { oracleChanges } from "./composition/oracle-changes.js";
 import { makePersistence } from "./composition/persistence.js";
 import { REPLICA_ID } from "./composition/replica.js";
 import { retainedDispositionOf } from "./composition/retained-disposition.js";
@@ -1389,27 +1390,9 @@ async function main(): Promise<void> {
     // Everdict's own account of a candidate it BUILT (code-evolution-loop.md, D2): the round's candidateSource
     // comes from the `built` record whose minted version is the round's candidate.
     builds: campaignBuildStore,
-    // ── WHAT A CANDIDATE'S PULL REQUEST CHANGED (docs/architecture/code-evolution-loop.md, D3) ──────
-    //
-    // The frame's `oracleScope` is checked against the files the candidate's pull request touched, read through
-    // the workspace GitHub App. A deployment without the App answers UNKNOWN with the reason — the frame that
-    // declared a scope then rejects every round as unverifiable, which is the fail-closed answer (L2) — never
-    // an empty listing that would read as "the change was clean".
-    changes: {
-      pullRequestFiles: async (tenant, repository, pullNumber, commits) => {
-        if (githubAppService === undefined)
-          return readUnknown(
-            "no workspace GitHub App is configured on this deployment, so a pull request's changed files cannot be read",
-          );
-        return readOrUnknown(async () => {
-          const listing = await githubAppService.listPullRequestChanges(tenant, repository, pullNumber, {
-            maxFiles: 100,
-            commits,
-          });
-          return { paths: listing.files.map((f) => f.filename), complete: !listing.truncated, ...commits };
-        }, `pull request #${pullNumber} of ${repository}`);
-      },
-    },
+    // What a candidate's pull request changed — a NAMED composition so its counterexample drives this
+    // closure rather than one of its own (`composition/oracle-changes.ts`).
+    changes: oracleChanges(githubAppService),
     // The delegation session a budgeted round names — the run ledger, read by id and checked for the tenant
     // inside the service.
     runs: store,
