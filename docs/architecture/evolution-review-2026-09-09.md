@@ -335,5 +335,15 @@ Stated limits:
   three-valued rather than defaulted, and each door states what it does with the absence. The
   same finding's other half — an open sibling charged its full allocation — is the declared
   policy and was not changed.
-- Not executed: real PostgreSQL (`trust-fast` — `attemptsForCampaign`'s statement has not been
-  planned by an engine), live GitHub, `pnpm protocol-mutations`, and the deployment E2E.
+- **`trust-fast` HAS now been executed — 2026-09-10, 439 scenarios, 0 failed** (throwaway Postgres +
+  MinIO + ClickHouse; `apps/api/src/trust` minus Temporal, `packages`, `apps/agent`). So
+  `attemptsForCampaign`'s statement has been planned by a real engine, and so have the two
+  campaign scenarios. ⚠️ **It was RED when first run, in six scenarios, and none of them was this
+  batch's work**: the measurement-identity change (R4) made `sanitizeScore` stamp a fourth key on
+  every score, and five scenarios assert a whole `Score` with `toEqual` while a sixth digested a
+  raw literal into a receipt and stored the sanitized document. Every one of those files gates on
+  `EVERDICT_TRUST_SUITE=1`, so `pnpm test`, `pnpm ci:commits` and `pnpm ci:local` were all green
+  over them — and `trust-fast` is a GitHub workflow, which this deployment has had disabled since
+  2026-08-21 (declared-limits C3). Repaired to the shape production produces, each now ASSERTING
+  the stamped identity. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+- Not executed: live GitHub, `pnpm protocol-mutations`, and the deployment E2E.
