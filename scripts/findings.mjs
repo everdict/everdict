@@ -59,29 +59,47 @@ for (let i = 0; i < argv.length; i++) {
 // ── the ledger ───────────────────────────────────────────────────────────────────────────────────
 // One line per graded finding: date · source@key · `file` · **verdict** — why
 const LINE = /^- (\d{4}-\d{2}-\d{2}) · (review|scan)@(\S+) · `([^`]+)` · \*\*(real|false-positive|carried)\*\* — (.+)$/;
-// ── A LINE THAT LOOKS LIKE AN ENTRY AND DOES NOT PARSE IS AN ERROR, NOT SILENCE ──────────────────
+// ── EVERY LINE AFTER THE MARKER IS AN ENTRY, OR THE FILE IS REFUSED ─────────────────────────────
 //
 // `.filter(Boolean)` used to drop an unparsed line, so an entry reading as a perfectly good grading to a
 // PERSON was invisible to the counter — and the counter is the whole point of this file. It happened: a
 // verdict written `**real**, and PREDICTIVE` (an adverb after the closing asterisks) graded a finding in the
-// reader's eyes and nowhere else, quietly lowering nothing and raising nothing. Found by `pnpm review`, which
-// read the regex; `pnpm findings` reported 88 graded over 89 entry-shaped lines and said nothing about the
-// difference. An entry-shaped line that fails the full form is now named and refused.
-const ENTRY_SHAPED = /^- \d{4}-\d{2}-\d{2} · /;
+// reader's eyes and nowhere else, quietly lowering nothing and raising nothing. `pnpm findings` reported 88
+// graded over 89 entry-shaped lines and said nothing about the difference.
+//
+// ⚠️ THE FIRST REPAIR GUESSED AT A SHAPE AND LEFT A RESIDUE. It flagged a line matching
+// `- <date> · `, which is the half of the space I had just removed — a line broken INSIDE that prefix (a
+// missing separator, a different date format) still vanished, reproducing the defect class in the diff that
+// closed it (found by `pnpm review`, and it is skill `code-review`'s residue rule exactly).
+//
+// So the rule is total instead: the file declares where its entries start, and EVERY non-empty line after
+// that marker must parse. No shape is guessed, so there is no other half to miss.
+const ENTRIES_MARKER = "<!-- entries below, newest last -->";
 const readLedger = () => {
   if (!existsSync(LEDGER)) return [];
+  const text = readFileSync(LEDGER, "utf8");
+  const at = text.indexOf(ENTRIES_MARKER);
+  if (at < 0) {
+    console.error(
+      `✖ findings: ${path.relative(root, LEDGER)} has lost its \`${ENTRIES_MARKER}\` marker, so where the
+  entries begin cannot be established and every line below would be read as prose.`,
+    );
+    process.exit(1);
+  }
   const entries = [];
   const malformed = [];
-  for (const raw of readFileSync(LEDGER, "utf8").split("\n")) {
+  for (const raw of text.slice(at + ENTRIES_MARKER.length).split("\n")) {
     const line = raw.trim();
+    if (line === "") continue;
     const m = LINE.exec(line);
     if (m) entries.push({ date: m[1], source: m[2], key: m[3], file: m[4], verdict: m[5], why: m[6] });
-    else if (ENTRY_SHAPED.test(line)) malformed.push(line);
+    else malformed.push(line);
   }
   if (malformed.length > 0) {
     console.error(
-      `✖ findings: ${malformed.length} line(s) in ${path.relative(root, LEDGER)} look like entries and do not parse.
-  They grade a finding for a reader and for nothing else — the count below would silently omit them.
+      `✖ findings: ${malformed.length} line(s) below the entries marker in ${path.relative(root, LEDGER)} do not parse.
+  Everything after that marker is an entry; a line that is not one grades a finding for a reader and for
+  nothing else, and the count below would silently omit it.
   The form is:  - <date> · <review|scan>@<key> · \`<file>\` · **real|false-positive|carried** — <why>`,
     );
     for (const line of malformed) console.error(`    ${line.slice(0, 120)}`);
