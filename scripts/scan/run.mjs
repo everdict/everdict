@@ -134,15 +134,47 @@ if (opts.dismiss) {
   process.exit(0);
 }
 
-// What has already been dismissed, so a finding comes back marked rather than as new.
+// ── WHAT HAS ALREADY BEEN DISMISSED, AND WHY A LINE IT CANNOT READ IS AN ERROR ───────────────────
+//
+// A dismissed finding comes back MARKED rather than as new, which is the whole pressure this ledger applies.
+// A line this reader silently skipped therefore un-dismissed a finding: it returns as new, nobody is told,
+// and the findings-per-scan trend moves for a reason no one can see.
+//
+// It used to `.exec` a guessed shape and drop whatever missed — the identical defect `scripts/findings.mjs`
+// carried for its own ledger, found there first and only then here, because nothing asked how many readers
+// answer this same question (skill `code-review`, pass 4: count the siblings, not the callers). Same total
+// rule as its sibling now: the file declares where its entries begin and every non-empty line below must
+// parse.
+const DISMISSED_MARKER = "<!-- entries below, newest last -->";
+const DISMISSED_LINE = /^-\s+`[\d-]+`\s+·\s+\*\*([^*]+)\*\*\s+·\s+`([^`]+)`/;
 const dismissed = new Set();
-try {
-  for (const line of readFileSync(DISMISSED, "utf8").split("\n")) {
-    const m = /^-\s+`[\d-]+`\s+·\s+\*\*([^*]+)\*\*\s+·\s+`([^`]+)`/.exec(line);
-    if (m) dismissed.add(`${m[1]}:${m[2]}`);
+if (existsSync(DISMISSED)) {
+  const text = readFileSync(DISMISSED, "utf8");
+  const at = text.indexOf(DISMISSED_MARKER);
+  if (at < 0) {
+    console.error(
+      `✖ scan: ${DISMISSED} has lost its \`${DISMISSED_MARKER}\` marker, so where the dismissals begin cannot
+  be established — every dismissal below would read as prose and come back as a new finding.`,
+    );
+    process.exit(1);
   }
-} catch {
-  // no record yet is not the same as an unreadable one, but for a display marker the two are the same answer
+  const malformed = [];
+  for (const raw of text.slice(at + DISMISSED_MARKER.length).split("\n")) {
+    const line = raw.trim();
+    if (line === "") continue;
+    const m = DISMISSED_LINE.exec(line);
+    if (m) dismissed.add(`${m[1]}:${m[2]}`);
+    else malformed.push(line);
+  }
+  if (malformed.length > 0) {
+    console.error(
+      `✖ scan: ${malformed.length} line(s) below the entries marker in ${DISMISSED} do not parse.
+  Everything after that marker is a dismissal; a line that is not one dismisses a finding for a reader and
+  for nothing else, so the finding returns as NEW on the next run with nobody told why.`,
+    );
+    for (const line of malformed) console.error(`    ${line.slice(0, 120)}`);
+    process.exit(1);
+  }
 }
 
 // ── which scope ──────────────────────────────────────────────────────────────────────────────────

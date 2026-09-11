@@ -86,6 +86,23 @@ const readLedger = () => {
     );
     process.exit(1);
   }
+  // ⚠️ …AND A WELL-FORMED ENTRY IN THE WRONG PLACE IS THE SAME DEFECT MOVED. The total rule below covers
+  // everything AFTER the marker, so a disposition pasted into the prose above it was invisible again — graded
+  // for a reader, counted by nothing. Found by `pnpm review` on the commit that wrote the total rule, which
+  // is twice in a row that a repair here covered the half it had just looked at.
+  const misplaced = text
+    .slice(0, at)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => LINE.test(l));
+  if (misplaced.length > 0) {
+    console.error(
+      `✖ findings: ${misplaced.length} disposition line(s) in ${path.relative(root, LEDGER)} sit ABOVE the
+  \`${ENTRIES_MARKER}\` marker, where nothing reads them. Move them below it.`,
+    );
+    for (const line of misplaced) console.error(`    ${line.slice(0, 120)}`);
+    process.exit(1);
+  }
   const entries = [];
   const malformed = [];
   for (const raw of text.slice(at + ENTRIES_MARKER.length).split("\n")) {
