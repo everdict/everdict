@@ -43,7 +43,6 @@
 2	packages/application-control/src/approval/approval-service.ts
 1	packages/application-control/src/cancellation/cancellation-coordinator.ts
 1	packages/application-control/src/environment-adoption/adopted-image-reach.ts
-1	packages/application-control/src/environment-adoption/environment-adoption-service.ts
 1	packages/application-control/src/environment/created-world.ts
 1	packages/application-control/src/evolution/campaign-build-service.ts
 1	packages/application-control/src/execution/execute-case.ts
