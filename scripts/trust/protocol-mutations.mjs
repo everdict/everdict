@@ -3106,6 +3106,18 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/results/twin-refuses-an-absent-parent.counterexample.test.ts"],
   },
   {
+    // ── …AND ITS SIBLING ON THE UPDATE PATH, WHICH THE FIRST REPAIR LEFT STANDING ──────────────────
+    //
+    // `CaseOutcomeCommitter.settleChildOn → settleRun → update(...)` reaches the parallel inline check every
+    // batch settlement, and `parentDriverEpoch` defaults a missing row to 0. Found by `pnpm review` on the
+    // commit that repaired `create` — the sibling law applied to its own repair.
+    name: "Adapters — the in-memory run store settles a child against a parent row that is absent",
+    file: "packages/db/src/results/run-store.ts",
+    from: "    if (parent && this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return undefined;",
+    to: "    void parent;",
+    suite: ["--root", "packages/db", "src/results/twin-refuses-an-absent-parent.counterexample.test.ts"],
+  },
+  {
     // ── pnpm scan (domain, 2026-09-11) · a keep-alive may not rewrite the grant a budget reads ─────
     //
     // `session.ttlSec` is what `CampaignService`'s delegation budget refuses on ("was granted ${n}s"), and a

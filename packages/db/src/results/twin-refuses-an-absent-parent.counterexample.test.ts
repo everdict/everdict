@@ -56,6 +56,27 @@ describe("[COUNTEREXAMPLE] an in-memory parent that is not there does not admit 
     await expect(runs.create(child("sc-1"), [], { parentDriver: { scorecardId: "sc-1", epoch: 0 } })).rejects.toThrow();
   });
 
+  it("refuses an UPDATE fenced on a parent row that is absent — the sibling of the check above", async () => {
+    // `create` was repaired first and `update`'s parallel inline check was left standing, which `pnpm review`
+    // found on that very commit. It matters more, not less: `CaseOutcomeCommitter.settleChildOn → settleRun`
+    // reaches this path on every batch settlement, and the Pg twin asks existence and epoch in ONE clause —
+    // `EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $1 AND s.owner_epoch = $2)`.
+    //
+    // Seen red under neutralization: "expected { id: 'r-1', tenant: 'acme', …(6) } to be undefined" — the
+    // settlement coming back with a record, i.e. admitted against a parent that is not there.
+    const scorecards = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    runs.attachScorecards(scorecards);
+    await scorecards.create(scorecard());
+    await runs.create(child("sc-1"), [], { parentDriver: { scorecardId: "sc-1", epoch: 0 } });
+    // …now settle it against a parent this store never saw, with the epoch a missing row defaults to.
+    const admitted = await runs.update("r-1", { status: "succeeded" }, [], {
+      parentDriver: { scorecardId: "sc-gone", epoch: 0 },
+    });
+    expect(admitted).toBeUndefined();
+    expect((await runs.get("r-1"))?.status).not.toBe("succeeded");
+  });
+
   it("…and still admits one whose parent is present and open — the refusal is not a ban", async () => {
     const runs = await paired(true);
     await runs.create(child("sc-1"), [], { parentDriver: { scorecardId: "sc-1", epoch: 0 } });

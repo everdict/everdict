@@ -133,7 +133,15 @@ export class InMemoryRunStore implements RunStore {
     // …and the parent batch's driver fence (arch-review 33 P0), on the same terms as the scoring one: with
     // the pair wired, an epoch that moved under the writer refuses the write; unpaired, this store is not
     // part of a batch topology and the condition has nothing to evaluate.
+    // ⚠️ EXISTENCE FIRST, ON THE SAME TERMS AS `create` — AND FOR THE SAME REASON THAT ONE NEEDED IT.
+    // `parentDriverEpoch` defaults a missing row to 0, so a settlement carrying `epoch: 0` for a scorecard
+    // this store never saw passed the comparison and the write was admitted. The Pg twin asks both halves in
+    // ONE clause — `EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $1 AND s.owner_epoch = $2)` —
+    // and `CaseOutcomeCommitter.settleChildOn → settleRun → update(...)` is a live path that reaches it.
+    // `create` was repaired first and this parallel check was left standing; found by `pnpm review` on that
+    // very commit, which is the sibling law applied to its own repair.
     const parent = guard?.parentDriver;
+    if (parent && this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return undefined;
     if (this.parentDriverEpoch && parent && this.parentDriverEpoch(parent.scorecardId) !== parent.epoch)
       return undefined;
     // …and the settled row refuses a second outcome, exactly as the SQL condition refuses it. A dev store that
