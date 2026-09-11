@@ -1316,6 +1316,63 @@ describe("runAgentLoop", () => {
     expect(result.content).toBe("understood");
   });
 
+  it("gates send_message behind the permission hook ONCE the host seam can reach outside the run", async () => {
+    // ── [pnpm scan · agent-runtime · 2026-09-11] THE SIBLING OF THE TEST ABOVE, WHICH NEVER LEARNED ──
+    //
+    // `send_message` was hardcoded `isReadOnly: true` with no `effects`, so `needsPermit` evaluated FALSE and
+    // the host's consent hook was never consulted — with `sendMessage` wired, the message reached a real
+    // teammate or session with no human in the loop. `kernel/loop.ts` already drops the `intrinsic()`
+    // exemption for exactly that case ("One tool, two reaches; the exemption follows the reach"); the
+    // ENVELOPE followed the reach and the PERMIT did not.
+    //
+    // Seen red before the fix: "expected [ 'teammate-1' ] to deeply equal []" — the delivery the host was
+    // never asked about.
+    const delivered: string[] = [];
+    const { transport } = fakeTransport([
+      toolCallResult("s1", "send_message", JSON.stringify({ to: "teammate-1", message: "do the thing" })),
+      textResult("understood"),
+    ]);
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      sendMessage: async (to: string) => {
+        delivered.push(to);
+        return { ok: true };
+      },
+      permit: async () => "deny" as const,
+    });
+    expect(delivered).toEqual([]); // refused before the host delivered anything
+    expect(result.content).toBe("understood");
+  });
+
+  it("…and an INTERNAL send_message is still cognition — no host seam, no consent prompt", async () => {
+    // The other half of the predicate, and the reason this is not simply `isReadOnly: false`. Messaging this
+    // run's own background sub-agent leaves nothing: the recipient carries the same envelope, and asking a
+    // human to approve each internal message would make the loop unusable. A denying permit hook must not
+    // touch it.
+    const { transport } = fakeTransport([
+      toolCallResult("s1", "send_message", JSON.stringify({ to: "bg-1", message: "narrow your task" })),
+      textResult("understood"),
+    ]);
+    const permitted: string[] = [];
+    const result = await runAgentLoop({
+      transport,
+      model: "m",
+      systemPrompt: "sys",
+      history,
+      registry: new ToolRegistry([]),
+      permit: async ({ name }: { name: string }) => {
+        permitted.push(name);
+        return "deny" as const;
+      },
+    });
+    expect(permitted).not.toContain("send_message");
+    expect(result.content).toBe("understood");
+  });
+
   it("exposes list_teammates when the host wires it (team discovery for coordination)", async () => {
     const { transport } = fakeTransport([toolCallResult("l1", "list_teammates", "{}"), textResult("I see the team")]);
     const result = await runAgentLoop({

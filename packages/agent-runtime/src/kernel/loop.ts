@@ -718,7 +718,11 @@ export async function runAgentLoop(opts: AgentLoopOptions): Promise<AgentLoopRes
           // carry the same envelope. With the host seam wired it also delivers to a teammate or another
           // session — an effect outside the task — so it stops being intrinsic and rides the envelope's read
           // list like any other capability. One tool, two reaches; the exemption follows the reach.
-          opts.sendMessage ? buildSendMessageTool(deliverMessage) : intrinsic(buildSendMessageTool(deliverMessage)),
+          // `external` and the dropped `intrinsic()` are ONE decision said twice on purpose: the first makes the
+          // permit hook decide, the second makes the envelope's read list apply. Both follow the reach.
+          opts.sendMessage
+            ? buildSendMessageTool(deliverMessage, { external: true })
+            : intrinsic(buildSendMessageTool(deliverMessage)),
           ...(opts.spawnTeammate ? [buildSpawnTeammateTool(opts.spawnTeammate)] : []),
           ...(opts.listTeammates ? [buildListTeammatesTool(opts.listTeammates)] : []),
         ]

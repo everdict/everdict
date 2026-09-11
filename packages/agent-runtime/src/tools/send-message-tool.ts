@@ -6,8 +6,26 @@ export const SEND_MESSAGE_TOOL_NAME = "send_message";
 // you launched — to give it new information, narrow its task, or ask it to wrap up — turning a fire-and-forget delegate
 // into a two-way collaborator. `deliver` routes the message into that sub-agent's mailbox; it drains it at its next
 // step. Delivery to an unknown / already-finished sub-agent is a soft error the model sees (not a throw).
+//
+// ── ONE TOOL, TWO REACHES — AND `isReadOnly` FOLLOWS THE REACH (pnpm scan, agent-runtime, 2026-09-11) ──
+//
+// Reaching only THIS run's own background sub-agents is cognition: they carry the same envelope, nothing
+// leaves the task, and asking a human to approve each internal message would make the loop unusable. With
+// the host's `sendMessage` seam wired the same tool ALSO delivers to a teammate or another session — an
+// effect outside the task — and `kernel/loop.ts` already says so where it assembles the tool, dropping the
+// `intrinsic()` exemption for exactly that case: "One tool, two reaches; the exemption follows the reach."
+//
+// The ENVELOPE exemption followed the reach. The PERMIT gate did not. `isReadOnly: true` was hardcoded and
+// `effects` was absent, so `dispatchOne`'s
+// `needsPermit = captured || isReadOnly !== true || (effects && effectsRequireConsent(effects))` evaluated
+// FALSE and the host's consent hook was never consulted — the message reached a real recipient with no human
+// in the loop. Its sibling `spawn_teammate` had this exact defect fixed (`isReadOnly: false`, and a
+// regression test whose comment reads "Pre-fix, isReadOnly:true skipped the gate entirely"); this door never
+// learned it, which is the sibling law rule `protocol` names.
 export function buildSendMessageTool(
   deliver: (to: string, message: string) => { ok: boolean; error?: string } | Promise<{ ok: boolean; error?: string }>,
+  // `true` when the host wired a seam that can deliver OUTSIDE this run. The caller knows; the tool cannot.
+  opts: { external?: boolean } = {},
 ): ToolDefinition {
   return {
     name: SEND_MESSAGE_TOOL_NAME,
@@ -28,7 +46,8 @@ export function buildSendMessageTool(
       required: ["to", "message"],
       additionalProperties: false,
     },
-    isReadOnly: true,
+    // Read-only ONLY while the reach is internal. A host seam makes this a write the permit hook decides.
+    isReadOnly: opts.external !== true,
     alwaysLoad: true,
     call: async (input) => {
       const to = (input as { to?: unknown }).to;

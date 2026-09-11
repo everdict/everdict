@@ -3041,6 +3041,20 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── pnpm scan (agent-runtime, 2026-09-11) · the permit gate follows the reach, like the envelope ──
+    //
+    // `send_message` reaches this run's own sub-agents (cognition) or, with the host seam wired, a real
+    // teammate — an effect outside the task. `loop.ts` already drops the `intrinsic()` exemption for the
+    // second case; `isReadOnly` had to follow, or `needsPermit` is false and the host's consent hook is never
+    // asked. Neutralizing it hardcodes read-only again, and the sibling of `spawn_teammate`'s own regression
+    // test must notice.
+    name: "Agent-runtime — send_message skips the consent hook when the host can reach outside the run",
+    file: "packages/agent-runtime/src/tools/send-message-tool.ts",
+    from: "    isReadOnly: opts.external !== true,",
+    to: "    isReadOnly: (void opts, true),",
+    suite: ["--root", "packages/agent-runtime", "src/kernel/loop.test.ts"],
+  },
+  {
     // ── pnpm scan (execution, 2026-09-11) · the lost-response reclaim must be able to FIND the object ──
     //
     // `reclaimByName` filters on `everdict.dev/job`, and no manifest wrote it — `jobsByLabel` is a
