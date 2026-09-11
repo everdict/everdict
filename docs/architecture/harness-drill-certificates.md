@@ -260,9 +260,11 @@ meaning:    ⚠️ THE CASE WAS ASSERTING A FALSE FACT, AND THE DRILL COULD NOT 
             ⚠️ Its `neutralize` set had to change with it: the exclusivity check
             refused the obvious needles because `lessons/2026-09-10-…` and
             `check-trust-certified.mjs` both carry all of them, so the drill
-            would have certified nothing. The third needle is
-            "skipping is the local default", which `git grep` puts in CLAUDE.md
-            and nowhere else.
+            would have certified nothing. The third needle is a phrase `git grep`
+            finds in CLAUDE.md and nowhere else — deliberately NOT reproduced
+            here, because this page would then be a file outside `subject`
+            carrying every needle, and the check would refuse the case. `pnpm
+            review` predicted exactly that about the first draft of this entry.
 verdict:    the one surviving case measures what it claims, and what it claimed
             was wrong until today. A drill certifies that a lesson is LOAD-BEARING;
             nothing in this harness certifies that it is CORRECT.
