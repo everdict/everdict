@@ -43,18 +43,40 @@ const AUTHORITY = {
 // An API server that APPLIES the Job and then loses the response. `created` is what the cluster holds;
 // `events` is what this dispatch did about it.
 function k8sApi(opts: { created: Set<string>; events: string[]; loseResponse: boolean; deleteFails?: boolean }) {
+  // What the cluster holds, WITH the labels the manifest carried — because that is what a label query filters
+  // on, and a double that keeps only names cannot answer one honestly.
+  const labels = new Map<string, Record<string, string>>();
   return {
     async ensureNamespace() {},
-    async applyJob(m: { kind?: string; metadata?: { name?: string } }) {
+    async applyJob(m: { kind?: string; metadata?: { name?: string; labels?: Record<string, string> } }) {
       if (m.kind === "NetworkPolicy") return;
       const name = m.metadata?.name ?? "?";
       opts.created.add(name);
+      labels.set(name, m.metadata?.labels ?? {});
       opts.events.push("applied");
       if (opts.loseResponse) throw new Error("socket hang up");
     },
-    async jobsByLabel() {
-      // The cluster answers honestly: the object IS there, which is the whole point.
-      return [...opts.created].map((name) => ({ name, namespace: "everdict", suspended: true }));
+    // ⚠️ THIS DOUBLE IGNORED ITS SELECTOR AND SO MASKED THE BUG IT WAS WRITTEN FOR.
+    // The real `jobsByLabel` is `kubectl get jobs -A -l <selector>` — the filter runs SERVER-SIDE, so a Job
+    // that does not carry the label is never returned no matter what exists. This double took no argument
+    // and echoed back everything `created`, which made `reclaimByName` look like it found the object while
+    // production filtered on `everdict.dev/job`, a key no manifest ever wrote. The test passed for years
+    // over a reclaim path that could only ever answer `absent` (rule `testing`: a double that answers more
+    // permissively than the real one is a green light wired to nothing).
+    async jobsByLabel(selector: string) {
+      const wanted = new Map(
+        selector
+          .split(",")
+          .map((clause) => clause.split("="))
+          .filter((pair): pair is [string, string] => pair.length === 2)
+          .map(([k, v]) => [k.trim(), v.trim()]),
+      );
+      return [...opts.created]
+        .filter((name) => {
+          const held = labels.get(name) ?? {};
+          return [...wanted].every(([k, v]) => held[k] === v);
+        })
+        .map((name) => ({ name, namespace: "everdict", suspended: true }));
     },
     async jobUid() {
       return "uid-1";

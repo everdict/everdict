@@ -1342,6 +1342,21 @@ export function buildK8sJob(
         app: "everdict",
         "everdict.dev/tenant": tenant,
         "everdict.dev/case": caseLabelValue(job.evalCase.id),
+        // ── THE LABEL `reclaimByName` FILTERS ON, WHICH NOTHING WROTE (pnpm scan, execution, 2026-09-11) ──
+        //
+        // `reclaimByName` is the arch-review 63 P1 repair: an `applyJob` whose HTTP response was lost may
+        // have created the object anyway, so the catch handler looks for it and deletes it. It looks by
+        // `everdict.dev/job=<name>` — and `grep` found exactly ONE occurrence of that key in the repository,
+        // this reader. No manifest ever set it, `jobsByLabel` filters SERVER-SIDE (`kubectl get jobs -A -l`),
+        // so the query matched nothing every time and the function answered `absent` for an object that was
+        // really there. The operator was then told `reclaimed: "absent"` — nothing needs cleanup — while an
+        // inert Job and its owned pull Secret stayed on the cluster forever, because
+        // `ttlSecondsAfterFinished` never fires on a Job that is still suspended.
+        //
+        // The name is DNS-1123 and ≤63 chars by construction (`k8sJobName`), which is exactly the label-value
+        // grammar, so it needs no separate sanitizer. `reclaimByName` still matches the EXACT name after the
+        // filter — the label narrows the query, the name decides.
+        "everdict.dev/job": name,
         ...(job.runId ? { "everdict.dev/run": runLabelValue(job.runId) } : {}),
       },
     },

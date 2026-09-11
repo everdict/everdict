@@ -3041,6 +3041,20 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── pnpm scan (execution, 2026-09-11) · the lost-response reclaim must be able to FIND the object ──
+    //
+    // `reclaimByName` filters on `everdict.dev/job`, and no manifest wrote it — `jobsByLabel` is a
+    // server-side `kubectl -l`, so the query matched nothing and the arch-review 63 P1 repair answered
+    // `absent` for an object that was really there. Neutralizing the label restores that state, and the
+    // counterexample's own assertions — which could never fire while its double ignored the selector — must
+    // notice.
+    name: "Execution — the K8s reclaim filters on a label no manifest writes",
+    file: "packages/backends/src/orchestrators/k8s.ts",
+    from: '        "everdict.dev/job": name,',
+    to: '        ...(false ? { "everdict.dev/job": name } : {}),',
+    suite: ["--root", "packages/backends", "src/orchestrators/ambiguous-create.counterexample.test.ts"],
+  },
+  {
     // ── pnpm scan (adapters, 2026-09-11) · the in-memory twin refuses what Postgres refuses ────────
     //
     // `PARENT_AUTHORIZES` opens with an EXISTS over `everdict_scorecards`; the twin asked only for a status
