@@ -234,6 +234,48 @@ context:    eight cases were retired to get here. Seven on two green drills each
             `lessons/2026-09-07-the-drill-is-not-deterministic.md`.
 ```
 
+## 2026-09-11 — one case, and the assertion that was wrong
+
+```
+drill:      removal (eval suite, --drill, four runs across one day)
+date:       2026-09-11
+ran by:     Claude (session deleting the workflows)
+scope:      1 case — the suite is `skipped-scenario-is-not-passing` alone
+observed:   4 RED, 0 GREEN, 0 inconclusive. Re-drilled after each edit to one of
+            its subjects: the trust-certified rule bullet, the C3 rewrite, the
+            workflow deletion, and the assertion correction below.
+meaning:    ⚠️ THE CASE WAS ASSERTING A FALSE FACT, AND THE DRILL COULD NOT SEE IT.
+            Its `mustMatch` was /EVERDICT_TRUST_DATABASE_URL/, which the
+            2026-09-07 certificate above cites approvingly as "a name this
+            repository invented". It is — and it is not the skip gate.
+            `trust-context.ts` says in its own comment that
+            `EVERDICT_TRUST_SUITE=1` runs the suite AT ALL and the URLs only
+            select what a scenario drives once inside it, so setting the URLs
+            alone still skips everything. The case required the answer to name
+            the wrong variable, and went RED under drill the whole time, because
+            a drill asks whether the CONFIGURATION carries the assertion — never
+            whether the assertion is TRUE. Found by `pnpm review`, not by any
+            drill, and not by four of them.
+            The assertion is /EVERDICT_TRUST_SUITE/ now and re-certified RED.
+            ⚠️ Its `neutralize` set had to change with it: the exclusivity check
+            refused the obvious needles because `lessons/2026-09-10-…` and
+            `check-trust-certified.mjs` both carry all of them, so the drill
+            would have certified nothing. The third needle is
+            "skipping is the local default", which `git grep` puts in CLAUDE.md
+            and nowhere else.
+verdict:    the one surviving case measures what it claims, and what it claimed
+            was wrong until today. A drill certifies that a lesson is LOAD-BEARING;
+            nothing in this harness certifies that it is CORRECT.
+context:    the suite went from two cases to one on 2026-09-09, when
+            `sibling-doors-guard-alike` was retired after a third green drill —
+            its assertion named `guard-siblings`, which is a `package.json`
+            script name, so a control's NAME can be grepped out of the tree a
+            drill leaves standing. `intent/2026-09-07-assertions-reachable-without-the-lesson/`
+            is the filed diagnosis and is still `draft`. The `eval-pass-rate`
+            band now reads FLAT over 19 identical samples: a sigma over one case
+            says nothing.
+```
+
 ## Reading these next time
 
 - A block older than ninety days is expired; run the drill again before citing the score it supported.

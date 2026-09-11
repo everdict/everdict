@@ -699,7 +699,10 @@ See skill `ci`.
   `docker port <name>` before blaming the suite, and re-create rather than `docker start`. A cold database
   times out TRUST-64 — run it twice against a fresh container before treating a lone timeout as red.
 - **A trust scenario that SKIPS is not a passing one, and locally that is the default.** Without
-  `EVERDICT_TRUST_DATABASE_URL` these files skip, so `pnpm test` going green says nothing about them. After
+  `EVERDICT_TRUST_SUITE=1` every one of these files is `describe.skip`, so `pnpm test` going green says
+  nothing about them — the infrastructure URLs only choose what a scenario DRIVES once inside that gate, so
+  setting them alone still skips everything (`apps/api/src/trust/trust-context.ts` states the two-var split).
+  `pnpm trust-fast` / `pnpm trust-full` set the flag for you, which is why the recipes above do not. After
   changing anything a trust scenario asserts on — a return type especially, since `expect(x).toBe(false)`
   still compiles when `x` becomes an object — run the suite against a real Postgres before pushing.
   A change to a trust-suite subject (the commit ledger, the fences, the settle path) runs it BEFORE pushing,
