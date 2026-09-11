@@ -28,6 +28,17 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
   "X was not called" becomes vacuously true the moment X stops existing. After any deletion, run
   `pnpm protocol-mutations --only <the rung>`; a protocol that stays green under its own neutralization has
   lost its test. No gate runs this any more (see rule `ci`) — the author does, and `--only` takes seconds.
+- **A BARE `.rejects.toThrow()` CANNOT TELL A REFUSAL FROM THE CRASH A MISSING REFUSAL CAUSES.** A guard's
+  counterexample asserts that the call rejects; delete the guard and the next line reads a field off the row
+  that is not there, so the call rejects with a `TypeError` and the counterexample is GREEN over a protocol
+  that is gone. Measured: `twin-refuses-an-absent-parent` drove its own mutation rung green that way, on the
+  day it was written, while the sibling case — which asserts an outcome VALUE rather than a throw — went red
+  exactly as it must. The vacuity is invisible in an ordinary run, because the guard is there and the right
+  error is raised.
+  So a refusal is asserted BY NAME (`rejects.toThrow(/no longer drives the batch/)`, or the error subtype),
+  and then the WORLD is read back — nothing was written — which is the assertion a crash cannot satisfy.
+  Same law as the red message naming the invariant, one level down: what the test accepts as evidence is as
+  much a part of it as what it drives.
 - **An empty `describe(...)` FAILS the suite** ("No test found in suite") — and only in a full run, not when
   you run the file alone. Delete the block; never leave a shell where tests were removed.
 - **A guard/scanner is reverted once to confirm it goes RED** over the defect it was written for. Two scanner

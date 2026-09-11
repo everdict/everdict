@@ -3101,8 +3101,12 @@ const MUTATIONS = [
     // twin the more permissive of the two on an authorization axis — the one place that is worst.
     name: "Adapters — the in-memory run store admits a dispatch whose parent row is absent",
     file: "packages/db/src/results/run-store.ts",
-    from: "    if (row === undefined) return false;\n    // …the parent's fencing token, which the child's own epoch cannot stand in for.\n    if ((row.ownerEpoch ?? 0) !== parent.epoch) return false;",
-    to: "    if ((row?.ownerEpoch ?? 0) !== parent.epoch) return false;",
+    // ⚠️ The neutralization is the PRE-FIX BODY, not a `void`: a missing row reads as epoch 0 and as no
+    // status, so the dispatch is ADMITTED. Deleting only the existence line instead leaves `row.status`
+    // reading through an absent row, and the TypeError that follows satisfies a bare `.rejects.toThrow()` —
+    // green, over a protocol that is gone. Found by driving this rung after the accessors were collapsed.
+    from: "    if (row === undefined) return false;\n    // …the parent's fencing token, which the child's own epoch cannot stand in for.\n    if ((row.ownerEpoch ?? 0) !== parent.epoch) return false;\n    // …and whether that parent still ADMITS work: a cancel settles it terminal without touching the epoch,\n    // so an epoch-only condition would let a proved loop open a case for a batch the user stopped.\n    const status = row.status;",
+    to: "    if ((row?.ownerEpoch ?? 0) !== parent.epoch) return false;\n    const status = row?.status;",
     suite: ["--root", "packages/db", "src/results/twin-refuses-an-absent-parent.counterexample.test.ts"],
   },
   {

@@ -52,8 +52,17 @@ const paired = async (present: boolean) => {
 
 describe("[COUNTEREXAMPLE] an in-memory parent that is not there does not admit work", () => {
   it("refuses a dispatch whose parent scorecard row is absent — as the Pg EXISTS clause does", async () => {
+    // ⚠️ THE REFUSAL IS NAMED, AND THE WORLD IS READ BACK. A bare `.rejects.toThrow()` accepts ANY throw,
+    // and a neutralized guard here does not merely admit the write — it reaches `row.status` on a row that
+    // is not there and dies with a TypeError, which rejects just as happily. That is how this case stayed
+    // GREEN under its own mutation while the protocol was gone: the assertion could not tell the refusal it
+    // was written for from the crash the missing refusal causes. Assert the store's own words, and then that
+    // nothing was written (rule `protocol`: the test for this asserts the WORLD, not the refusal).
     const runs = await paired(false);
-    await expect(runs.create(child("sc-1"), [], { parentDriver: { scorecardId: "sc-1", epoch: 0 } })).rejects.toThrow();
+    await expect(runs.create(child("sc-1"), [], { parentDriver: { scorecardId: "sc-1", epoch: 0 } })).rejects.toThrow(
+      /no longer drives the batch/,
+    );
+    expect(await runs.get("r-1"), "the dispatch was admitted against a parent that is not there").toBeUndefined();
   });
 
   it("refuses an UPDATE fenced on a parent row that is absent — the sibling of the check above", async () => {
