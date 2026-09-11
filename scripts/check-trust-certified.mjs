@@ -106,15 +106,55 @@ if (!marker) {
   process.exit(0);
 }
 
-const [sha, at, executed] = readFileSync(marker, "utf8").trim().split(/\s+/);
+const [sha, at, executed, ...certifiedScope] = readFileSync(marker, "utf8").trim().split(/\s+/);
 const days = at ? Math.floor((Date.now() - Date.parse(at)) / 86_400_000) : undefined;
-const known = sha && spawnSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root }).status === 0;
+// ANCESTOR, not merely present. `cat-file -e` answers yes for an object the repository still holds and no
+// ref reaches — which is every commit a history rewrite orphaned, and this session rewrote its own twice.
+// A certification of a commit this branch does not descend from says nothing about this tree; same predicate
+// `scripts/review/run.mjs` uses to decide whether a stamp may be resumed from.
+const known =
+  sha !== undefined && spawnSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: root }).status === 0;
 console.log(
   `  last certified ${sha ? sha.slice(0, 9) : "?"} on ${at?.slice(0, 10) ?? "?"}` +
     `${days === undefined ? "" : ` (${days}d ago)`} — ${executed ?? "?"} scenario(s) executed, 0 failed`,
 );
 if (!known) {
   console.log("  ⚠ that commit is not in this history (a rewrite, or another repository) — treat it as none.");
+  console.log(RECIPE);
+  process.exit(0);
+}
+
+// ── THE MARKER'S SCOPE IS A CLAIM, AND IT IS THE CLAIM THIS SCRIPT EXISTS TO CHECK ───────────────────
+//
+// `trust-suite.mjs` takes a scope, and its own header documents running a NAMED SUBSET — which is exactly
+// what a person debugging one lane does. That run passes, writes the marker, and until this block existed the
+// reader below compared only the sha: a certification of `apps/api/src/trust` alone printed "nothing in the
+// certified scope has changed since" while every `packages/**` and `apps/agent/**` scenario had never run at
+// that commit. A partial certification reading as a full one is the incident this whole script is about,
+// reproduced by the script itself (found by `pnpm review`).
+//
+// Coverage, not equality: a BROADER certification still covers the required scope, and refusing it would
+// refuse the full nightly. What is reported is a required include the marker does not carry, and an exclude
+// the marker applied that the required scope does not — both are ways the run looked at less than this
+// claims.
+const certifiedIncludes = certifiedScope.filter((a) => !a.startsWith("!"));
+const certifiedExcludes = certifiedScope.filter((a) => a.startsWith("!")).map((a) => a.slice(1));
+const uncovered = include.filter((p) => !certifiedIncludes.some((c) => p === c || p.startsWith(`${c}/`)));
+const overExcluded = certifiedExcludes.filter((c) => !exclude.some((e) => c === e || c.startsWith(e)));
+if (certifiedScope.length === 0) {
+  console.log(
+    `  ⚠ the marker records no scope, so what it certified cannot be established — treat it as none.
+    (A marker written before this field existed. Re-run the suite to replace it.)`,
+  );
+  console.log(RECIPE);
+  process.exit(0);
+}
+if (uncovered.length > 0 || overExcluded.length > 0) {
+  console.log(
+    `  ✖ that run certified a NARROWER scope than the required check's: \`${certifiedScope.join(" ")}\`.
+    Never run at that commit: ${[...uncovered, ...overExcluded.map((e) => `!${e}`)].join(" ")}
+    A partial certification reading as a full one is the thing this check exists to refuse.`,
+  );
   console.log(RECIPE);
   process.exit(0);
 }
@@ -126,7 +166,9 @@ const changed = git("diff", "--name-only", sha, "HEAD", "--", ...include)
   .filter(Boolean)
   .filter((f) => !exclude.some((p) => f.startsWith(p)));
 if (changed.length === 0) {
-  console.log("  ✓ nothing in the certified scope has changed since — every scenario still describes this tree.");
+  console.log(
+    "  ✓ the full required scope was certified and nothing in it has changed since — every scenario still describes this tree.",
+  );
   process.exit(0);
 }
 const changedScenarios = changed.filter((f) => f.endsWith(".trust.test.ts"));

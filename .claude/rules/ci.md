@@ -569,6 +569,16 @@ See skill `ci`.
   on evidence that no longer describes them. ⚠️ It IS red on scope drift, and the scope is PARSED OUT of
   `trust-fast.yml` rather than copied beside it — a count over the wrong population is worse than no count,
   and a second copy of that list is the drift this repository has paid for repeatedly.
+  ⚠️ **AND THE MARKER'S OWN SCOPE IS A CLAIM, CHECKED AGAINST THE REQUIRED ONE.** `trust-suite.mjs` takes a
+  scope and its header documents running a NAMED SUBSET, which is what anyone debugging one lane does. That
+  run passes and writes the marker — and the first draft compared only the sha, so a certification of
+  `apps/api/src/trust` alone printed "nothing in the certified scope has changed since" while every
+  `packages/**` and `apps/agent/**` scenario had never run at that commit. The script reproduced the exact
+  incident it was written to close, and `pnpm review` found it on the commit that added it. Coverage is what
+  is checked, not equality: a BROADER run still covers, a missing required include or an extra exclude is
+  named, and a marker recording no scope at all is treated as none. The certified sha must also be an
+  ANCESTOR of HEAD — `cat-file -e` answers yes for a commit a rewrite orphaned, and this repository rewrites
+  its own history routinely.
   ⚠️ **It is a fallback, not the repair.** The repair is turning the workflow back on; this makes the gap
   visible for as long as C3 says it stays.
 - **`pnpm agent-evals` is the configuration's own regression suite, and it is NOT in this gate.** `docs-check`
