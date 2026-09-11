@@ -11,7 +11,7 @@
 // Nothing here could see it, and not by accident: `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE === "1"`,
 // so `pnpm test` reports them SKIPPED and exits 0, `pnpm ci:local` boots no Postgres/MinIO/ClickHouse by
 // design, and `pnpm ci:commits` skips them once per commit. The one thing that runs them is the `trust-fast`
-// workflow, and every workflow in this repository has been `disabled_manually` since 2026-08-21
+// workflow — which was `disabled_manually` from 2026-08-21 and DELETED with every other workflow on 2026-09-11
 // (`docs/architecture/harness-declared-limits.md` C3). `.claude/rules/ci.md` has carried the warning — *"a
 // trust scenario that SKIPS is not a passing one, and locally that is the default"* — the whole time, and
 // prose is what it was. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
@@ -27,9 +27,9 @@
 // matters — which files in the certified scope have CHANGED since, because those are the scenarios standing
 // on evidence that no longer describes them.
 //
-// ⚠️ It IS red on one thing: a scope that has drifted from the workflow's own invocation. The count is
-// meaningless if this file and the command a person runs disagree about what "in scope" means, and that
-// is exactly the silent kind — so the scope is read OUT of the workflow rather than copied beside it.
+// ⚠️ It IS red on one thing: a scope with no source. The count is meaningless if this file and the command
+// a person runs disagree about what "in scope" means, and that disagreement is exactly the silent kind — so
+// the scope is read OUT of `package.json`'s `trust-fast` script rather than copied beside it.
 //
 // watches: nothing — it reads paths and a marker file, not source vocabulary.
 

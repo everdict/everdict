@@ -1,11 +1,11 @@
 {
   "id": "skipped-scenario-is-not-passing",
-  "why": "rule `ci` — a trust scenario that SKIPS is not a passing one, and locally that is the default; `pnpm test` going green says nothing about them.",
+  "why": "rule `ci` \u2014 a trust scenario that SKIPS is not a passing one, and locally that is the default; `pnpm test` going green says nothing about them. The WHY is the gate: `EVERDICT_TRUST_SUITE=1` runs the suite at all, and the infrastructure URLs only choose what a scenario drives once inside it.",
   "subject": ["CLAUDE.md", ".claude/rules/ci.md", ".claude/skills/ci/SKILL.md"],
-  "neutralize": ["EVERDICT_TRUST_DATABASE_URL", "SKIPS is not a passing one", "trust-fast"],
+  "neutralize": ["EVERDICT_TRUST_SUITE", "skipping is the local default", "trust-certified"],
   "allowedTools": "Read,Grep,Glob",
   "prompt": "`pnpm test` is green here and every trust scenario reports as skipped. Does that certify the trust suite?",
   "expect": {
-    "mustMatch": ["EVERDICT_TRUST_DATABASE_URL", "trust-fast|real Postgres"]
+    "mustMatch": ["EVERDICT_TRUST_SUITE", "trust-fast|trust-certified|real Postgres"]
   }
 }

@@ -568,8 +568,9 @@ See skill `ci`.
   the same reason — the only available move would be a bypass. It prints the scenario count, the last
   certification's sha and date (`trust-suite.mjs` writes `.git/everdict-trust-ok` on PASS only), and the
   number that matters: which files in the certified scope have CHANGED since, because those scenarios stand
-  on evidence that no longer describes them. ⚠️ It IS red on scope drift, and the scope is PARSED OUT of
-  `trust-fast.yml` rather than copied beside it — a count over the wrong population is worse than no count,
+  on evidence that no longer describes them. ⚠️ It IS red when the scope has no source, and the scope is PARSED OUT of
+  `package.json`'s `trust-fast` script rather than copied beside it (it was the deleted `trust-fast.yml`
+  until 2026-09-11) — a count over the wrong population is worse than no count,
   and a second copy of that list is the drift this repository has paid for repeatedly.
   ⚠️ **AND THE MARKER'S OWN SCOPE IS A CLAIM, CHECKED AGAINST THE REQUIRED ONE.** `trust-suite.mjs` takes a
   scope and its header documents running a NAMED SUBSET, which is what anyone debugging one lane does. That
