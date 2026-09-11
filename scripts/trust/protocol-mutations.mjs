@@ -3041,6 +3041,73 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── review 2026-09-10 R1 · the oracle listing must SAY what it looked at ───────────────────────
+    //
+    // `/compare/A...B` is three-dot, so on a diverged history its files describe merge-base→B. Naming both
+    // commits is not covering the difference between them, and a reader that declares neither a starting
+    // point nor a cover has established nothing. Neutralizing the refusal admits a silent listing, and the
+    // counterexample suite must notice.
+    name: "Evolve — an oracle listing that says nothing about what it covered is accepted",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "        if (cover === undefined || read.value.mergeBaseSha === undefined)",
+    to: "        if (cover === undefined && read.value.mergeBaseSha === undefined && cover !== undefined)",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/oracle-commits-are-built.counterexample.test.ts"],
+  },
+  {
+    // ── review 2026-09-10 R1 · and the cover it declares must agree with its own merge base ────────
+    //
+    // `pathsCover` is a CLAIM; the merge base is the fact that says whether the claim is coherent. A reader
+    // reporting the evaluated commits' own difference while comparing from somewhere else has not covered the
+    // baseline side. Neutralizing the cross-check trusts the claim, and the suite must notice.
+    name: "Evolve — an oracle reader that contradicts its own merge base is trusted",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: '        if ((cover === "evaluated-difference") !== startedAtBaseline)',
+    to: '        if ((void startedAtBaseline, cover === "evaluated-difference") && cover !== "evaluated-difference")',
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/oracle-commits-are-built.counterexample.test.ts"],
+  },
+  {
+    // ── review 2026-09-09 (carried) · two records minting one version is not a tie to break ────────
+    //
+    // `builtSourceFor` used to take the first ledger record whose version matched — a clock wearing an index,
+    // and the ORACLE decides on the commit it picks. Records that AGREE are a rebuild; records that DISAGREE
+    // have no fact saying which arm evaluated which, and nothing here may choose. Neutralizing the refusal
+    // restores resolution by ledger order, and the suite must notice.
+    name: "Evolve — a build ledger that disagrees with itself resolves by row order",
+    file: "packages/application-control/src/evolution/campaign-service.ts",
+    from: "    if (builtKeys.length > 1) ambiguousBuildLedger(candidateVersion, builtKeys);",
+    to: "    void builtKeys;",
+    build: "@everdict/application-control",
+    suite: ["--root", "packages/db", "src/evolution/oracle-commits-are-built.counterexample.test.ts"],
+  },
+  {
+    // ── review 2026-09-09 (carried) · the experiment family's held-out size has ONE owner ──────────
+    //
+    // A root that declared no `heldOutFamilySize` is the one value the schema still permits, and two doors
+    // answered it in opposite directions. The chain door refuses — a family it cannot account for may not
+    // grow. Neutralizing that admits a continuation under a family nobody pre-registered, and the
+    // counterexample suite must notice.
+    name: "Evolve — a continuation of an undeclared experiment family is admitted",
+    file: "packages/db/src/evolution/campaign-store.ts",
+    from: '  if (declared.kind === "undeclared")',
+    to: '  if (declared.kind === "undeclared" && declared.kind !== "undeclared")',
+    suite: ["--root", "packages/db", "src/evolution/family-limit-has-one-owner.counterexample.test.ts"],
+  },
+  {
+    // ── review 2026-09-10 R1 · a diverged history is COVERED by a second comparison ────────────────
+    //
+    // With merge base M, baseline B and candidate C, `files(M...C)` alone omits what B changed after the
+    // fork — which is how a clean receipt was issued over a protected file that genuinely differs. The union
+    // with `files(M...B)` is a superset of the two-tree difference. Neutralizing the second call drops the
+    // baseline side, and the adapter's counterexample must notice.
+    name: "Evolve — a diverged comparison never reads the baseline side of the fork",
+    file: "apps/api/src/infrastructure/github/repo-writer.ts",
+    from: "            const diverged =\n              mergeBaseSha !== undefined && comparedBaseline !== undefined && mergeBaseSha !== comparedBaseline;",
+    to: "            const diverged = (void mergeBaseSha, void comparedBaseline, false) as boolean;",
+    suite: ["--root", "apps/api", "src/infrastructure/github/oracle-commit.counterexample.test.ts"],
+  },
+  {
     // code-evolution-loop.md D3. A candidate whose pull request touched the frame's oracle paths rewrote its own
     // exam; the round is non-comparable whatever it scored. Neutralizing the refusal files it as a win, and the
     // service suite must notice.
