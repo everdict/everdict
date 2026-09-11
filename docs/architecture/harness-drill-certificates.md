@@ -2,7 +2,7 @@
 kind: wiki
 title: "Harness drill certificates — what was tried against the controls, and what happened"
 status: current
-updated: 2026-09-06
+updated: 2026-09-11
 ---
 # Harness drill certificates — what was tried against the controls, and what happened
 
@@ -276,6 +276,57 @@ context:    the suite went from two cases to one on 2026-09-09, when
             is the filed diagnosis and is still `draft`. The `eval-pass-rate`
             band now reads FLAT over 19 identical samples: a sigma over one case
             says nothing.
+```
+
+## 2026-09-11 (later) — the drill went GREEN, and the case cannot be drilled at all
+
+```
+drill:      removal (eval suite, `--drill-all`, after the last edit to a subject)
+date:       2026-09-11
+ran by:     Claude (session closing the scan rotation)
+scope:      1 case — the suite is `skipped-scenario-is-not-passing` alone
+observed:   0 RED, 1 GREEN. The case answers correctly with all three lesson
+            lines removed from its three subjects (30.6s), and says so:
+            "still passes with its lesson removed".
+meaning:    the block above certifies this same case RED four times in one day.
+            Today it is green and no configuration edit explains the difference.
+            `git grep` in the drilled tree finds the first assertion's string in
+            FIFTY-ONE tracked files outside `subject` — `apps/api/src/trust/trust-context.ts`
+            (the gate itself, in the comment that explains it), forty-five
+            `*.trust.test.ts` files, `docs/trust-certification.md`, the lesson
+            of 2026-09-10, `scripts/trust/trust-suite.mjs` — and the second
+            assertion is an alternation that every one of those satisfies too.
+            The four RED certificates were variance: the session answered from
+            whichever document it read first, and on four occasions that was a
+            subject.
+            ⚠️ THE LEAK SCAN COULD NOT SEE THIS, AND IS NOT BROKEN. It refuses a
+            case when ONE file outside `subject` carries EVERY needle — the whole
+            fingerprint — which is the right question for "does this lesson live
+            somewhere the drill does not reach". The ASSERTION is a different
+            union: `mustMatch` is satisfied by the needles INDIVIDUALLY, and each
+            one alone lives in dozens of files. A case is drillable only when its
+            ASSERTIONS are unreachable from the drilled tree; the fingerprint
+            being unique is necessary and nowhere near sufficient.
+verdict:    `skipped-scenario-is-not-passing` measures whether a session can FIND
+            the answer, not whether the configuration carries it. Second case to
+            fail this way — `sibling-doors-guard-alike` was retired on 2026-09-09
+            for the same reason — and the filed diagnosis is
+            `intent/2026-09-07-assertions-reachable-without-the-lesson/`, still
+            `draft`. NOT retired here: it is the suite's only case, `pnpm agent-evals`
+            refuses an empty corpus, and choosing the replacement question is the
+            design pass that intent asks for.
+            ⚠️ The suite still PASSES and the push stamp it wrote is honest — the
+            case runs, the answer is correct, the drill is advisory by
+            construction. What is no longer honest is reading that green as
+            evidence that `.claude/**` is load-bearing for this question.
+context:    this repository writes its lessons into source comments on purpose —
+            rule `protocol`'s case law, every scanner's header, and
+            `trust-context.ts`'s own explanation of the two-variable split. A
+            drill that removes the lesson from the configuration alone can
+            therefore only certify a lesson the SOURCE does not also carry, which
+            for anything already mechanised is almost nothing. That is the
+            boundary the next case has to be designed against, and it is a
+            property of this repository rather than a defect in the drill.
 ```
 
 ## Reading these next time
