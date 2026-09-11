@@ -151,6 +151,17 @@ run("gitleaks (full history)", resolveGitleaks(), [
 // here that notices drift is read at the cadence a push already has, rather than waiting to be typed.
 run("bands (dry run)", "pnpm", ["watch-bands", "--dry-run"]);
 
+// ── WHAT THIS GATE DID NOT CERTIFY ─────────────────────────────────────────────────────────────────
+//
+// `ci:local` boots no Postgres, no object store and no ClickHouse, by design — so every `*.trust.test.ts`
+// SKIPS, and vitest reports a skip and a pass with the same exit code. That is how six certifications stayed
+// red for days while this gate, `pnpm test` and `pnpm ci:commits` were all green nine times over
+// (`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`). It does not run them and
+// does not fail on them; it refuses to let "skipped" and "passed" look alike in the summary a person reads.
+// It IS red when the scope drifts from `trust-fast.yml`, because a count over the wrong population is worse
+// than no count.
+run("pnpm trust-certified", "pnpm", ["trust-certified"]);
+
 // Stamp — only a clean tree proves HEAD is what we just validated.
 //
 // `git diff HEAD` + untracked, not `status --porcelain`: the latter also compares the worktree to the INDEX,

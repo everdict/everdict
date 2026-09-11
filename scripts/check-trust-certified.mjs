@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+// `pnpm trust-certified` — how many trust scenarios this push has NOT certified, and when anything last did.
+//
+// ── THE INCIDENT ─────────────────────────────────────────────────────────────────────────────────────
+//
+// A change made `sanitizeScore` stamp a structured identity on every score. Five trust scenarios assert a
+// whole `Score` with `toEqual`, so they went red on the new key; a sixth digested a raw literal into a commit
+// receipt while the store persisted the sanitized document, so the receipt named bytes the row would never
+// hold. All six shipped, and stayed red for days.
+//
+// Nothing here could see it, and not by accident: `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE === "1"`,
+// so `pnpm test` reports them SKIPPED and exits 0, `pnpm ci:local` boots no Postgres/MinIO/ClickHouse by
+// design, and `pnpm ci:commits` skips them once per commit. The one thing that runs them is the `trust-fast`
+// workflow, and every workflow in this repository has been `disabled_manually` since 2026-08-21
+// (`docs/architecture/harness-declared-limits.md` C3). `.claude/rules/ci.md` has carried the warning — *"a
+// trust scenario that SKIPS is not a passing one, and locally that is the default"* — the whole time, and
+// prose is what it was. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+//
+// ── WHAT THIS DOES, AND WHAT IT DELIBERATELY DOES NOT ────────────────────────────────────────────────
+//
+// It does NOT run them. Booting three containers inside the push gate is the cost the maintainer chose not to
+// pay, and a gate that needs infrastructure it cannot start teaches people to bypass gates.
+//
+// It also does NOT fail. Same reason: `ci:local` cannot certify these, so refusing the push would make the
+// only available move a bypass. What it refuses is that **skipped and passed look alike** in the summary a
+// person actually reads. It prints the count, the last certification's sha and date, and — the number that
+// matters — which files in the certified scope have CHANGED since, because those are the scenarios standing
+// on evidence that no longer describes them.
+//
+// ⚠️ It IS red on one thing: a scope that has drifted from the workflow's own invocation. The count is
+// meaningless if this file and `trust-fast.yml` disagree about what "in scope" means, and that disagreement
+// is exactly the silent kind — so the scope is read OUT of the workflow rather than copied beside it.
+//
+// watches: nothing — it reads paths and a marker file, not source vocabulary.
+
+import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout.trim();
+
+// ── THE SCOPE IS THE WORKFLOW'S, READ RATHER THAN RESTATED ───────────────────────────────────────────
+//
+// `trust-fast.yml` is the SSOT for what the required check covers. A second copy here would drift the way
+// every second copy in this repository has drifted (rule `protocol` L3), and it would drift SILENTLY: the
+// number below would go on looking authoritative while describing a different population.
+const WORKFLOW = path.join(root, ".github/workflows/trust-fast.yml");
+if (!existsSync(WORKFLOW)) {
+  console.error("✖ trust-certified: .github/workflows/trust-fast.yml is missing — the scope has no source.");
+  process.exit(1);
+}
+const workflow = readFileSync(WORKFLOW, "utf8");
+const invocation = workflow.slice(workflow.indexOf("node scripts/trust/trust-suite.mjs"));
+if (!invocation.startsWith("node scripts/trust/trust-suite.mjs")) {
+  console.error("✖ trust-certified: trust-fast.yml no longer invokes scripts/trust/trust-suite.mjs.");
+  process.exit(1);
+}
+// The run block is a YAML folded scalar: the argument lines are indented under it and end at the first
+// dedent or blank line. Quotes are the workflow's own shell quoting and are stripped.
+const scope = [];
+for (const raw of invocation.split("\n").slice(1)) {
+  const line = raw.trim();
+  if (line === "" || line.endsWith(":") || line.startsWith("- ")) break;
+  scope.push(line.replace(/^'|'$/g, ""));
+}
+const include = scope.filter((a) => !a.startsWith("!"));
+const exclude = scope.filter((a) => a.startsWith("!")).map((a) => a.slice(1));
+if (include.length === 0) {
+  console.error("✖ trust-certified: parsed no scope out of trust-fast.yml's invocation.");
+  process.exit(1);
+}
+
+// ── THE CORPUS ───────────────────────────────────────────────────────────────────────────────────────
+//
+// An empty corpus is not a pass (CLAUDE.md): a counter with nothing to count reads exactly like coverage.
+const files = git("ls-files", "*.trust.test.ts")
+  .split("\n")
+  .filter(Boolean)
+  .filter((f) => include.some((p) => f.startsWith(p)) && !exclude.some((p) => f.startsWith(p)));
+if (files.length === 0) {
+  console.error(
+    `✖ trust-certified: no *.trust.test.ts matched the workflow's scope (${scope.join(" ")}).
+  Refusing to report over an empty corpus — nothing to count is not nothing to certify.`,
+  );
+  process.exit(1);
+}
+
+const gitDir = git("rev-parse", "--absolute-git-dir");
+const commonDir = path.resolve(root, git("rev-parse", "--git-common-dir"));
+const marker = [gitDir, commonDir].map((d) => path.join(d, "everdict-trust-ok")).find((f) => existsSync(f));
+
+console.log("▶ trust certification — NOT run here (three containers; declared-limits C3)");
+console.log(`  ${files.length} scenario file(s) in the required check's scope: ${scope.join(" ")}`);
+
+const RECIPE =
+  "  run it: docs/trust-certification.md, or `.claude/rules/ci.md`'s EVERDICT_TRUST_* recipe against throwaway containers.";
+
+if (!marker) {
+  console.log(
+    `  ✖ NEVER certified from this checkout. Those ${files.length} file(s) have run here zero times, and
+    \`pnpm test\` reports every one of them as SKIPPED, which is not the same as passing.`,
+  );
+  console.log(RECIPE);
+  process.exit(0);
+}
+
+const [sha, at, executed] = readFileSync(marker, "utf8").trim().split(/\s+/);
+const days = at ? Math.floor((Date.now() - Date.parse(at)) / 86_400_000) : undefined;
+const known = sha && spawnSync("git", ["cat-file", "-e", `${sha}^{commit}`], { cwd: root }).status === 0;
+console.log(
+  `  last certified ${sha ? sha.slice(0, 9) : "?"} on ${at?.slice(0, 10) ?? "?"}` +
+    `${days === undefined ? "" : ` (${days}d ago)`} — ${executed ?? "?"} scenario(s) executed, 0 failed`,
+);
+if (!known) {
+  console.log("  ⚠ that commit is not in this history (a rewrite, or another repository) — treat it as none.");
+  console.log(RECIPE);
+  process.exit(0);
+}
+
+// The number that matters. A certification is a statement about a TREE; every file in scope that has moved
+// since is a scenario standing on evidence that no longer describes it.
+const changed = git("diff", "--name-only", sha, "HEAD", "--", ...include)
+  .split("\n")
+  .filter(Boolean)
+  .filter((f) => !exclude.some((p) => f.startsWith(p)));
+if (changed.length === 0) {
+  console.log("  ✓ nothing in the certified scope has changed since — every scenario still describes this tree.");
+  process.exit(0);
+}
+const changedScenarios = changed.filter((f) => f.endsWith(".trust.test.ts"));
+console.log(
+  `  ⚠ ${changed.length} file(s) in scope have changed since, ${changedScenarios.length} of them scenarios —
+    UNCERTIFIED at HEAD. This is advisory on purpose; it is not advisory about whether they ran.`,
+);
+for (const f of changed.slice(0, 12)) console.log(`      ${f}`);
+if (changed.length > 12) console.log(`      … and ${changed.length - 12} more`);
+console.log(RECIPE);

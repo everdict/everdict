@@ -15,7 +15,7 @@
 //   EVERDICT_TRUST_DATABASE_URL=postgresql://… node scripts/trust/trust-suite.mjs
 //   …/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-'   (a named SUBSET — see below)
 import { spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -188,5 +188,33 @@ if (certified) {
 const summary = lines.join("\n");
 console.log(`\n${summary}\n`);
 if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary}\n`);
+
+// ── A CERTIFICATION THAT LEAVES NO TRACE CANNOT BE MISSED ────────────────────────────────────────────
+//
+// These scenarios gate on `EVERDICT_TRUST_SUITE=1`, so `pnpm test` SKIPS them and exits 0, `pnpm ci:local`
+// boots no database by design, and `pnpm ci:commits` skips them once per commit. The one thing that runs them
+// is the `trust-fast` workflow — and every workflow in this repository has been `disabled_manually` since
+// 2026-08-21 (declared-limits C3). So a change shipped with six certifications red and nothing anywhere could
+// say how long it had been since anything ran them
+// (`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`).
+//
+// A PASS therefore records WHAT it certified and WHERE: `pnpm trust-certified` reads this back and reports the
+// gap on every `ci:local`, so "skipped" and "passed" stop looking alike in the summary a person actually reads.
+// Written on PASS only — a failed or skipped run certifies nothing and must not move the marker forward.
+// Both the worktree's git dir and the COMMON one, for the reason `ci-local.mjs` gives: a linked worktree's
+// `.git` is a file, and the reader looks in the shared repository.
+if (certified) {
+  const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const dirOf = (flag) => spawnSync("git", ["rev-parse", flag], { encoding: "utf8" }).stdout.trim();
+  const line = `${head} ${new Date().toISOString()} ${passed.length} ${scopeArgs.join(" ")}\n`;
+  for (const dir of new Set([dirOf("--absolute-git-dir"), path.resolve(process.cwd(), dirOf("--git-common-dir"))])) {
+    try {
+      writeFileSync(path.join(dir, "everdict-trust-ok"), line);
+    } catch {
+      // A certification that ran is a fact whether or not this marker could be written; the run's own summary
+      // above is the evidence. Never turn an unwritable path into a failed certification.
+    }
+  }
+}
 
 process.exit(certified ? 0 : 1);

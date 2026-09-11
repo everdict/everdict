@@ -552,6 +552,25 @@ See skill `ci`.
   under `scripts/` and `evals/` are outside it — their proof is a truth table or a drill. Observed on two
   synthetic commits before it was wired: one proved, one refused. The playbook's alternative — lock test
   files during a fix — is declined as C-row-6 on the declared-limits page.
+- **`pnpm trust-certified` counts what this gate did NOT certify, and it is the fallback while C3 stands.**
+  `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE=1`, so `pnpm test` reports every one of them SKIPPED and
+  exits 0, `ci:local` boots no Postgres/MinIO/ClickHouse by design, and `ci:commits` skips them once per
+  commit. The one thing that runs them is `trust-fast`, a workflow this deployment has had disabled since
+  2026-08-21. So a change shipped with SIX certifications red — five asserting a whole `Score` with `toEqual`
+  against a shape that had grown a key, one sealing a receipt over bytes the row would never hold — and
+  nothing anywhere could say how long it had been since anything ran them. The warning three bullets down has
+  been in this file the whole time, and prose is what it was
+  (`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`).
+  It does not run them: three containers inside the push gate is the cost the maintainer declined, and a gate
+  needing infrastructure it cannot start teaches people to bypass gates. It does not FAIL on them either, for
+  the same reason — the only available move would be a bypass. It prints the scenario count, the last
+  certification's sha and date (`trust-suite.mjs` writes `.git/everdict-trust-ok` on PASS only), and the
+  number that matters: which files in the certified scope have CHANGED since, because those scenarios stand
+  on evidence that no longer describes them. ⚠️ It IS red on scope drift, and the scope is PARSED OUT of
+  `trust-fast.yml` rather than copied beside it — a count over the wrong population is worse than no count,
+  and a second copy of that list is the drift this repository has paid for repeatedly.
+  ⚠️ **It is a fallback, not the repair.** The repair is turning the workflow back on; this makes the gap
+  visible for as long as C3 says it stays.
 - **`pnpm agent-evals` is the configuration's own regression suite, and it is NOT in this gate.** `docs-check`
   and `convention-harness` guard the SHAPE of `CLAUDE.md`/rules/skills — paths resolve, symbols exist, globs
   match live code, descriptions survive. Neither can ask whether the agent still does the work to the same
