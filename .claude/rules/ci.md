@@ -5,9 +5,8 @@ paths: "**/*"
 
 See skill `ci`.
 
-- **NEVER `git push` before the full GitHub Actions CI passes locally.** Run `pnpm ci:local`
-  (`scripts/ci-local.mjs`) — it mirrors `.github/workflows/ci.yml` step-for-step and, on a clean
-  green tree, stamps `.git/everdict-ci-ok` with the HEAD sha.
+- **NEVER `git push` before `pnpm ci:local` passes.** It is not a mirror of anything any more — it IS the
+  pipeline. On a clean green tree it stamps `.git/everdict-ci-ok` with the HEAD sha.
 - **Enforced, not advisory**: a PreToolUse hook (`scripts/hooks/pre-push-gate.mjs`, wired in
   `.claude/settings.json`) denies `git push` unless every commit the push carries is stamped and HEAD's stamp
   is `full`. Committing after the gate invalidates that commit's stamp — re-run `pnpm ci:local` (turbo cache
@@ -19,11 +18,14 @@ See skill `ci`.
   directory now, every fact is read from the checkout that is pushing, and `pnpm guardrails` drives the hook
   in `--probe` mode (same facts, same decision, no ledger write, no verdict) against a real linked worktree
   on every run. A settings file that wires `--probe` as the hook is refused.
-  ⚠️ **Remote CI is OFF, and has been since 2026-08-21.** Every GitHub Actions workflow is `disabled_manually`
-  (declared as C3 on `docs/architecture/harness-declared-limits.md`), so `gh run watch` after a push waits for
-  a run that will not exist and the four "required checks" on `main` never report. The local gate IS the
-  pipeline. Check `gh api repos/{owner}/{repo}/actions/workflows --jq '.workflows[].state'` before expecting
-  a remote run; when they are `active` again, confirm green after every push as the skill says.
+  ⚠️ **THERE IS NO REMOTE CI, AND THERE IS NO WORKFLOW TO RE-ENABLE.** Every GitHub Actions workflow was
+  disabled on 2026-08-21 and DELETED on 2026-09-11 by the maintainer's decision — the whole
+  .github/workflows directory is gone (declared as C3 on `docs/architecture/harness-declared-limits.md`). So there is nothing to watch after
+  a push, nothing to check the state of, and no drift between a yml and this gate because there is only this
+  gate. The four "required checks" configured on `main` name workflows that no longer exist and never report;
+  a push therefore always reports "4 of 4 required status checks are expected", which is expected.
+  What the workflows used to run lives in commands a person types: `pnpm ci:local` (what `ci.yml` ran),
+  `pnpm trust-fast` (the required subset) and `pnpm trust-full` (what the nightly ran, plus Temporal).
 - **EVERY COMMIT IN A PUSH, NOT ONLY ITS TIP.** `pnpm ci:local` validates HEAD, and GitHub also only runs its
   checks on the tip — so a batch of eight commits used to ship seven that had never been built, while the split
   history advertised a bisectability it did not have and nothing downstream contradicted it. `.git/everdict-ci-ok`
@@ -676,28 +678,33 @@ See skill `ci`.
   because an unrelated probe happened to run the commit gate over it. Running the formatter is not evidence;
   `pnpm lint` afterwards is. This is the same shape as the substitution-that-silently-missed in arch-review
   67: the tool said nothing, and nothing is not confirmation.
-- **`trust-fast` is a REQUIRED check and `pnpm ci:local` does not cover it.** `.github/workflows/trust-fast.yml`
-  (job name **`trust fast (real Postgres)`**) runs the trust subset that needs a real Postgres **and a real
-  object store** on every push and PR, through `scripts/trust/trust-suite.mjs` so that a scenario which
-  SKIPPED still fails the check. Scope = `apps/api/src/trust` minus the Temporal durability files, **plus
-  `packages/` and `apps/agent`** — those two were nightly-only until arch-review 56, which is how a signature
-  change left a package's scenario red for a day where the required check could not see it. MinIO joined in
-  arch-review 68 for the same reason one level down: four reviews had repaired the two-phase intermediates
-  against a MOCKED 412, and deleting the conditional create leaves that counterexample 4/4 green while a real
-  endpoint silently overwrites. The local gate deliberately boots neither, so this is the one required check
-  you cannot pre-run with `ci:local`; reproduce it against a THROWAWAY Postgres and a THROWAWAY MinIO (the
-  suite migrates whatever database you give it — never point it at a dev stack) with
-  `EVERDICT_TRUST_DATABASE_URL=… EVERDICT_TRUST_S3_ENDPOINT=… EVERDICT_TRUST_S3_ACCESS_KEY=…
-  EVERDICT_TRUST_S3_SECRET_KEY=… node scripts/trust/trust-suite.mjs apps/api/src/trust
-  '!apps/api/src/trust/temporal-' packages apps/agent`.
+- **`pnpm trust-fast` is the trust subset, and `pnpm ci:local` does not run it.** It needs a real Postgres,
+  a real object store and a real ClickHouse, and `ci:local` boots none of them by design. It goes through
+  `scripts/trust/trust-suite.mjs` so a scenario that SKIPPED still FAILS the certification. Scope =
+  `apps/api/src/trust` minus the Temporal durability files, **plus `packages/` and `apps/agent`** — those two
+  were nightly-only until arch-review 56, which is how a signature change left a package's scenario red for a
+  day where the check could not see it. MinIO joined in arch-review 68 for the same reason one level down:
+  four reviews had repaired the two-phase intermediates against a MOCKED 412, and deleting the conditional
+  create leaves that counterexample 4/4 green while a real endpoint silently overwrites.
+  **The scope lives in `package.json`'s `trust-fast` script and nowhere else** — it used to live in
+  `trust-fast.yml`, which was deleted with every other workflow on 2026-09-11, and `pnpm trust-certified`
+  PARSES that script rather than keeping a second copy. `pnpm trust-full` is the whole tree (what the nightly
+  ran); Temporal additionally needs `EVERDICT_TRUST_TEMPORAL`.
+  Run it against THROWAWAY containers — the suite migrates whatever database you give it, so never point it
+  at a dev stack:
+  `EVERDICT_TRUST_DATABASE_URL=… EVERDICT_TRUST_CLICKHOUSE_URL=… EVERDICT_TRUST_S3_ENDPOINT=…
+  EVERDICT_TRUST_S3_ACCESS_KEY=… EVERDICT_TRUST_S3_SECRET_KEY=… pnpm trust-fast`.
+  ⚠️ `docker run -p` sometimes leaves a container UP with no port mapping and no error; check
+  `docker port <name>` before blaming the suite, and re-create rather than `docker start`. A cold database
+  times out TRUST-64 — run it twice against a fresh container before treating a lone timeout as red.
 - **A trust scenario that SKIPS is not a passing one, and locally that is the default.** Without
   `EVERDICT_TRUST_DATABASE_URL` these files skip, so `pnpm test` going green says nothing about them. After
   changing anything a trust scenario asserts on — a return type especially, since `expect(x).toBe(false)`
   still compiles when `x` becomes an object — run the suite against a real Postgres before pushing.
-  A change to a trust-suite subject (the commit ledger, the fences, the settle path) runs it BEFORE pushing.
-  What still stays nightly is Temporal and Windows (`trust-nightly.yml`, non-blocking) — MinIO does not, as
-  of arch-review 68; see `docs/trust-certification.md`.
+  A change to a trust-suite subject (the commit ledger, the fences, the settle path) runs it BEFORE pushing,
+  and `pnpm trust-certified` inside `ci:local` is what tells you it is owed. Temporal and Windows are outside
+  `trust-fast` and need `pnpm trust-full` with their own infrastructure; see `docs/trust-certification.md`.
 - A failure you did not cause (someone else's WIP / earlier commit) still blocks your push:
   surface it to the maintainer instead of silently absorbing or bypassing it.
-- After pushing, confirm the run went green:
-  `gh run watch $(gh run list -L1 --json databaseId -q '.[0].databaseId') --exit-status`.
+- **There is nothing to confirm after a push.** No workflow runs, so a push is final the moment it lands and
+  the gate that ran before it is the only thing that ever will.

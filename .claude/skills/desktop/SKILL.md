@@ -80,7 +80,8 @@ logged-in web session over a minimal preload bridge.
   the packaged entry is swapped via `extraMetadata.main` (dev keeps `dist/main.js`). Keep
   `linux.executableName` path-safe (the package name `@everdict/desktop` is not). Local dev:
   `pnpm -F @everdict/desktop dev` (`EVERDICT_WEB_URL=http://localhost:3000` against a dev web).
-- Releases ship from CI only: push tag `desktop-vX.Y.Z` → `.github/workflows/desktop-release.yml`
+- ⚠️ Releases used to ship from CI only; that workflow was DELETED on 2026-09-11 (declared-limits C3), so a
+  release is built by hand from the same matrix. What it did: push tag `desktop-vX.Y.Z` → desktop-release
   builds the 3-OS matrix and publishes one GitHub Release (manual dispatch → draft). The version in
   `apps/desktop/package.json` stays `0.0.0` — CI injects the tag version at build time; do NOT bump
   it in commits. deb metadata requires `author` (with email) + `homepage` in package.json — keep them.

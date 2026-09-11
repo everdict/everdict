@@ -1,17 +1,19 @@
 ---
 name: ci
-description: Local CI parity — run everything .github/workflows/ci.yml runs BEFORE any git push (pnpm ci:local = 5 quality gates + cone/web-imports/empty-env-boot + self-contained web job + gitleaks; a PreToolUse hook blocks unstamped pushes), and verify the run went green after. Use before committing/pushing, when CI fails on GitHub, or when editing .github/workflows or the gate/hook scripts.
+description: The push gate — pnpm ci:local is the ONLY pipeline this repository has (5 quality gates + cone/web-imports/empty-env-boot + self-contained web job + gitleaks; a PreToolUse hook blocks unstamped pushes). There is no remote CI and nothing to watch after a push. Use before committing/pushing, when the gate is red, or when editing the gate/hook scripts or the trust suite.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # CI (local parity before every push)
 
-**The rule: never push red.** Every push to `main` triggers `.github/workflows/ci.yml`; a red
-`main` blocks everyone. Before `git push`, reproduce the FULL pipeline locally — the workflow
-file is the SSOT (re-read it when in doubt; this skill mirrors it but the yml wins).
+**The rule: never push red.** ⚠️ **There is no remote CI.** Every GitHub Actions workflow was disabled on
+2026-08-21 and DELETED on 2026-09-11 (declared-limits C3), so `pnpm ci:local` is not a mirror of a pipeline —
+it IS the pipeline, and a push is final the moment it lands. Nothing runs afterwards to catch what it missed.
+The four "required checks" configured on `main` name workflows that no longer exist, so every push reports
+"4 of 4 required status checks are expected"; that is expected and means nothing ran.
 
 ## The gate — one command
 ```bash
-pnpm ci:local   # scripts/ci-local.mjs — mirrors ci.yml step-for-step
+pnpm ci:local   # scripts/ci-local.mjs — the whole gate
 ```
 On success with a **clean tree** it stamps `.git/everdict-ci-ok` with the HEAD sha. A dirty-tree
 pass prints green but does NOT stamp (CI validates the pushed commit, not your working tree):
@@ -25,7 +27,7 @@ THIS repo's `.git` — linked worktrees included, with cwd inside one or via `gi
 other repos pass through. Never work around it (no stamp forging, no pushing outside the tool);
 if it blocks you wrongly, fix the hook, don't dodge it.
 
-## What the gate runs (mirror of ci.yml, 3 jobs)
+## What the gate runs
 1. **core**: `pnpm lint` → `typecheck` → `test` → `build` → `cone` (agent-cone guard) →
    `web-imports` (web runtime-decoupling guard) → `artifact-frame` (the agent's sandboxed-dashboard design
    system must stay in step across contracts/web/theme) → `node scripts/live/empty-env-boot.mjs`.
@@ -40,23 +42,30 @@ if it blocks you wrongly, fix the hook, don't dodge it.
 
 When iterating on ONE failed step, run that step directly, then finish with a full `pnpm ci:local`.
 
-## The required check the gate does NOT mirror — `trust-fast`
-`.github/workflows/trust-fast.yml` (job **`trust fast (real Postgres)`**) is a **required check** and runs
-outside `ci:local` on purpose: it needs a real Postgres service, and booting a database before every push is
-the cost the local gate exists to avoid. It runs the Postgres-only trust subset (`apps/api/src/trust` minus
-the Temporal durability files) through `scripts/trust/trust-suite.mjs`, whose rule is that a scenario which
-SKIPPED is a FAILED certification — a required check that quietly skips would be worse than none.
+## The suite the gate does NOT run — `pnpm trust-fast`
+It needs a real Postgres, object store and ClickHouse, and booting three containers before every push is the
+cost the local gate exists to avoid. Its rule is that a scenario which SKIPPED is a FAILED certification, so
+it cannot be "run" by simply not having the infrastructure.
+
+**`pnpm trust-certified`, inside `ci:local`, is what tells you it is owed** — it prints how long it has been
+since anything certified and which files in scope have CHANGED since. The scope lives in `package.json`'s
+`trust-fast` script and nowhere else; `pnpm trust-full` is the whole tree (Temporal additionally needs
+`EVERDICT_TRUST_TEMPORAL`).
 
 Touching a trust-suite subject (the commit ledger, the fences, settle, the receipt/attempt stores)? Run it
-before pushing, against any throwaway Postgres:
+before pushing, against THROWAWAY containers — the suite migrates whatever database you give it:
 ```bash
-docker run -d --rm --name pg-trust -e POSTGRES_USER=everdict -e POSTGRES_PASSWORD=everdict \
-  -e POSTGRES_DB=everdict_trust -p 55440:5432 postgres:16
-EVERDICT_TRUST_DATABASE_URL=postgresql://everdict:everdict@127.0.0.1:55440/everdict_trust \
-  node scripts/trust/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-'
+docker run -d --name trust-pg --network bridge -e POSTGRES_PASSWORD=trust -e POSTGRES_DB=trust -p 55444:5432 postgres:16
+docker run -d --name trust-minio --network bridge -e MINIO_ROOT_USER=k -e MINIO_ROOT_PASSWORD=s -p 59000:9000 minio/minio server /data
+docker run -d --name trust-ch --network bridge -p 58123:8123 --ulimit nofile=262144:262144 clickhouse/clickhouse-server:24-alpine
+docker port trust-pg   # ⚠️ sometimes EMPTY with the container UP — re-create, do not `docker start`
+EVERDICT_TRUST_DATABASE_URL=postgres://postgres:trust@127.0.0.1:55444/trust \
+EVERDICT_TRUST_CLICKHOUSE_URL=http://127.0.0.1:58123 \
+EVERDICT_TRUST_S3_ENDPOINT=http://127.0.0.1:59000 EVERDICT_TRUST_S3_ACCESS_KEY=k EVERDICT_TRUST_S3_SECRET_KEY=s \
+  pnpm trust-fast
 ```
-~5 min after `pnpm build`. The FULL suite (Temporal + MinIO + Windows) stays nightly and non-blocking —
-`trust-nightly.yml`, `docs/trust-certification.md`.
+A cold database times out TRUST-64 — run it twice before treating a lone timeout as red.
+See `docs/trust-certification.md`.
 
 ## Failure protocol
 1. **Your change broke it** → fix, re-run, push only on stamp.
@@ -64,25 +73,20 @@ EVERDICT_TRUST_DATABASE_URL=postgresql://everdict:everdict@127.0.0.1:55440/everd
 2. **Pre-existing failure** (someone else's WIP or an earlier commit) → it still blocks your
    push. Surface it to the maintainer; do not sweep others' files into your commit and do not
    push on top of red "because it wasn't me".
-3. **Gate drift** (step exists in ci.yml but not in `scripts/ci-local.mjs`) → the yml wins; fix
-   the gate script and this skill in the same PR (skills travel with the code).
+3. **Gate drift is gone as a failure mode.** There is no second list to drift from: `scripts/ci-local.mjs`
+   is the only place a step exists. Adding a control means adding it there AND naming it in rule `ci`, which
+   `pnpm controls-documented` refuses to let you skip.
 
-## After pushing — confirm green (the push is not done until this is)
-⚠️ **Only while the workflows are enabled.** Every GitHub Actions workflow here has been `disabled_manually`
-since 2026-08-21 (declared-limits C3): there is no remote run to watch, and the local gate is the whole
-pipeline. Check first, and skip this section while they say `disabled_manually`:
-```bash
-gh api repos/{owner}/{repo}/actions/workflows --jq '.workflows[] | [.name,.state] | @tsv'
-gh run watch $(gh run list -L1 --json databaseId -q '.[0].databaseId') --exit-status
-```
-If it fails remotely despite local green, diff the environment (node 22, `pnpm install
---frozen-lockfile`, clean checkout — e.g. locally-built `dist/` can mask a missing CI build step);
-`gh run view <id> --log-failed` or `gh api repos/{owner}/{repo}/actions/jobs/<job-id>/logs` for
-the exact step output.
+## After pushing — there is nothing to confirm
+No workflow runs, so the gate that ran BEFORE the push is the only thing that ever will. That is the whole
+weight of `ci:local`: a step it does not run is a step nothing runs.
 
-## The gate the yml runs that this page used to omit
-`ci.yml` grew well past the four bullets above; the yml is the SSOT and this skill names only what changes how
-you work. One of them does: **`pnpm intent-chain`** enforces the Plan→Build handoff from the commit graph, so a
+⚠️ One consequence worth holding: a locally-built `dist/` can mask a missing build step, and no clean-checkout
+run exists to catch it any more. `pnpm ci:commits` builds each commit in a THROWAWAY worktree, which is the
+closest thing left to a clean-environment check — run it, not just `ci:local`.
+
+## The gates this page names only because they change how you work
+**`pnpm intent-chain`** enforces the Plan→Build handoff from the commit graph, so a
 `plan.md` must be committed in a LATER commit than the `intent.md` it cites. Writing both in one commit fails
 the gate — by design, because that is the shape a plan written after the diff takes. See `intent/README.md`.
 

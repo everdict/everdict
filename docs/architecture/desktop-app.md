@@ -334,7 +334,7 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
    `self:<id>` executes on the desktop → `provenance{ranOn:self-hosted, runner, by}` verified.
    Keyring-less Linux needed one product fix: opt in to safeStorage `basic_text` with a logged warning
    (VSCode-style), else `isEncryptionAvailable()=false` blocks pairing.
-6. ✅ **Release CI** (`.github/workflows/desktop-release.yml`) — tag `desktop-vX.Y.Z` (or manual
+6. ⚠️ **Release CI — DELETED 2026-09-11** (declared-limits C3). It was a desktop-release workflow on tag `desktop-vX.Y.Z` (or manual
    dispatch → draft) fans out a 3-OS matrix (ubuntu/macos/windows runners): version injected from the
    tag, `turbo build --filter=@everdict/desktop` (dep chain only), esbuild bundle → electron-builder
    per-OS (`--linux` AppImage+deb · `--mac` dmg+zip×[x64,arm64] · `--win` nsis), then one job collects

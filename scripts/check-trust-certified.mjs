@@ -41,30 +41,40 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout.trim();
 
-// ── THE SCOPE IS THE WORKFLOW'S, READ RATHER THAN RESTATED ───────────────────────────────────────────
+// ── THE SCOPE IS `pnpm trust-fast`'S OWN, READ RATHER THAN RESTATED ──────────────────────────────────
 //
-// `trust-fast.yml` is the SSOT for what the required check covers. A second copy here would drift the way
-// every second copy in this repository has drifted (rule `protocol` L3), and it would drift SILENTLY: the
-// number below would go on looking authoritative while describing a different population.
-const WORKFLOW = path.join(root, ".github/workflows/trust-fast.yml");
-if (!existsSync(WORKFLOW)) {
-  console.error("✖ trust-certified: .github/workflows/trust-fast.yml is missing — the scope has no source.");
+// It used to be parsed out of `.github/workflows/trust-fast.yml`, which was the SSOT while a workflow ran it.
+// The workflows were DELETED on 2026-09-11 (declared-limits C3 — remote CI is not merely off, it is gone, and
+// the trust suite is run locally when it is needed), so the scope moved to the command a person actually
+// types. Same discipline either way: a second copy here would drift the way every second copy in this
+// repository has drifted (rule `protocol` L3), and it would drift SILENTLY — the count below would go on
+// looking authoritative while describing a different population.
+const PACKAGE_JSON = path.join(root, "package.json");
+const TRUST_FAST = "trust-fast";
+const RUNNER = "node scripts/trust/trust-suite.mjs";
+let invocation;
+try {
+  invocation = JSON.parse(readFileSync(PACKAGE_JSON, "utf8")).scripts?.[TRUST_FAST];
+} catch (err) {
+  console.error(`✖ trust-certified: package.json could not be read (${err instanceof Error ? err.message : err}).`);
   process.exit(1);
 }
-const workflow = readFileSync(WORKFLOW, "utf8");
-const invocation = workflow.slice(workflow.indexOf("node scripts/trust/trust-suite.mjs"));
-if (!invocation.startsWith("node scripts/trust/trust-suite.mjs")) {
-  console.error("✖ trust-certified: trust-fast.yml no longer invokes scripts/trust/trust-suite.mjs.");
+if (typeof invocation !== "string" || !invocation.startsWith(RUNNER)) {
+  console.error(
+    `✖ trust-certified: package.json has no \`${TRUST_FAST}\` script invoking ${RUNNER} — the scope has no source.
+  That script IS the required subset's definition now that no workflow carries it; restore it rather than
+  copying a scope in here.`,
+  );
   process.exit(1);
 }
-// The run block is a YAML folded scalar: the argument lines are indented under it and end at the first
-// dedent or blank line. Quotes are the workflow's own shell quoting and are stripped.
-const scope = [];
-for (const raw of invocation.split("\n").slice(1)) {
-  const line = raw.trim();
-  if (line === "" || line.endsWith(":") || line.startsWith("- ")) break;
-  scope.push(line.replace(/^'|'$/g, ""));
-}
+// Whitespace-separated arguments after the runner. The quotes are the shell's (a leading `!` is a pathspec
+// negation, quoted so no shell eats it) and are stripped.
+const scope = invocation
+  .slice(RUNNER.length)
+  .trim()
+  .split(/\s+/)
+  .filter(Boolean)
+  .map((arg) => arg.replace(/^'|'$/g, ""));
 const include = scope.filter((a) => !a.startsWith("!"));
 const exclude = scope.filter((a) => a.startsWith("!")).map((a) => a.slice(1));
 if (include.length === 0) {

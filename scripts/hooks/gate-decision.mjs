@@ -172,7 +172,7 @@ export function decideGate({
     return {
       allow: false,
       arm: ARMS.TIP_UNSTAMPED,
-      reason: `push blocked: HEAD ${short(head)} has no FULL gate stamp. Run \`pnpm ci:local\` (mirrors .github/workflows/ci.yml), then push.`,
+      reason: `push blocked: HEAD ${short(head)} has no FULL gate stamp. Run \`pnpm ci:local\` (the whole pipeline — there is no remote CI), then push.`,
     };
   }
   return {

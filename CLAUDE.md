@@ -50,15 +50,17 @@ it is. (Found by the agent-eval suite: asked "biome exited 0, is lint green?", t
 five commands and never reached the rule that records the trap — `.claude/rules/ci.md` is injected while you
 EDIT, and the question is asked before anything is touched.)
 Quality is non-negotiable: all five must pass before a PR.
-**Before ANY `git push`: `pnpm ci:local`** — mirrors the FULL GitHub Actions CI (the five commands
-above PLUS `pnpm cone` + `pnpm web-imports` + empty-env boot + the self-contained web job + full-history
-gitleaks) and stamps `.git/everdict-ci-ok` on a clean green tree; a PreToolUse hook denies unstamped
-pushes. `.github/workflows/ci.yml` is the SSOT; see rule `.claude/rules/ci.md` + skill `ci`. **`ci:local` does NOT
-cover `trust-fast`** — a required check needing a real Postgres + object store, where a scenario that SKIPS is
-a FAILED certification, and skipping is the local default without `EVERDICT_TRUST_DATABASE_URL`. Never push
-red. **Remote CI is OFF** (every workflow `disabled_manually` since 2026-08-21 — declared-limits C3): the local
-gate is the whole pipeline, and `gh run watch … --exit-status` after a push applies only once the workflows
-are enabled again. The hook guards every checkout that shares this `.git`, linked worktrees included.
+**Before ANY `git push`: `pnpm ci:local`** — the five commands above PLUS `pnpm cone` + `pnpm web-imports` +
+empty-env boot + the self-contained web job + full-history gitleaks; it stamps `.git/everdict-ci-ok` on a
+clean green tree and a PreToolUse hook denies unstamped pushes. See rule `.claude/rules/ci.md` + skill `ci`.
+**There is NO remote CI.** Every GitHub Actions workflow was disabled on 2026-08-21 and DELETED on
+2026-09-11 by the maintainer's decision (declared-limits C3): `ci:local` is not a mirror of a pipeline, it IS
+the pipeline, and there is no run to watch after a push. Never push red.
+**`ci:local` does NOT run the trust suite** — it needs a real Postgres + object store + ClickHouse, a
+scenario that SKIPS is a FAILED certification, and skipping is the local default. `pnpm trust-fast` carries
+the required subset's scope and `pnpm trust-full` the whole tree; `pnpm trust-certified` (inside `ci:local`)
+reports how long it has been and what has changed since. The hook guards every checkout that shares this
+`.git`, linked worktrees included.
 
 ## The harness's own directories
 - `intent/`   — where a change starts: `intent.md` → `spec.md` → `plan.md`, one directory per change. `pnpm intent-chain`.

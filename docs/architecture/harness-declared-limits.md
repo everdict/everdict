@@ -192,46 +192,58 @@ declined is only the clause that a spec be produced for every intent uncondition
 **Reopens if** — a change that declined its design pass ships a defect the pass would have flagged as an area
 of concern. Then the declaration was the wrong shape, and the trigger should be unconditional.
 
-## C3 · Remote CI is switched off, and the local gate is the pipeline
+## C3 · There is no remote CI — the workflows are deleted, and the local gate is the whole pipeline
 
 **Clause** — play `CI/CD integration and deployment`, L3: *judgment steps run non-interactively in the
-pipeline*; and the wording of rule `ci` and skill `ci`, which tell a session to confirm a remote run went
-green.
+pipeline*.
 
-**Declined because** — every GitHub Actions workflow in this repository has been `disabled_manually` since
-2026-08-21 09:25 KST. At this project's cadence (roughly 2,700 commits per ninety days) a full remote run per
-push is a cost the maintainer chose not to pay, and the local gate refuses before anything leaves the machine,
-which is the stronger place. The audit skill's own table accepts a stamp ledger plus a push gate plus a check
-over the gate's wiring as the enforcement point without a runner.
+**Declined because** — the maintainer's decision, taken twice. Every GitHub Actions workflow was
+`disabled_manually` on 2026-08-21 09:25 KST, and on **2026-09-11 all seven were DELETED**: `ci`, `trust-fast`,
+`trust-nightly`, `cli-release`, `desktop-release`, `images`, `browser-image`. At this project's cadence
+(roughly 2,700 commits per ninety days) a remote run per push is a cost that was not worth paying, and a
+disabled workflow is a file that reads like a pipeline while being none — so the second decision removed the
+ambiguity rather than living with it. What needs running is run locally, by a person, on purpose.
 
-**What its absence does not mean** — nothing is ungated. `pnpm ci:local` mirrors `ci.yml` step for step and
-stamps a ledger; the push hook refuses an unstamped push; `pnpm guardrails` refuses a tree where the hook is
-unwired. What IS true, and was not written down anywhere until the second audit read it off the GitHub API:
-the four "required status checks" on `main` name workflows that never run, `enforce_admins` is off, and 378
-first-parent commits reached `main` between the last remote run and the audit with no remote check. Rule `ci`
-and skill `ci` no longer instruct a session to watch a run that will not exist; they say to check the workflow
-state first.
+**What its absence does not mean** — nothing is ungated. `pnpm ci:local` runs every step the deleted `ci.yml`
+ran (verified before deleting: the only difference was `pnpm install`, which is environmental) and stamps a
+ledger; `pnpm ci:commits` walks every commit in a push through a throwaway worktree; the push hook refuses an
+unstamped push; `pnpm guardrails` refuses a tree where the hook is unwired. The four "required status checks"
+configured on `main` name workflows that no longer exist, so every push reports "4 of 4 required status checks
+are expected" — that line means nothing ran, and it is expected.
 
-**What its absence DID mean, once, measured** — `trust-fast` is a required check this entry silenced, and
-`ci:local` cannot substitute for it: it boots no Postgres, object store or ClickHouse by design, so every
-`*.trust.test.ts` SKIPS and vitest reports a skip and a pass with the same exit code. On 2026-09-10 six
-certifications were found red — five asserting a whole `Score` against a shape that had grown a key, one
-sealing a receipt over bytes the row would never hold — after days in which `pnpm test`, `pnpm ci:commits`
-and `pnpm ci:local` were all green over them. Nothing anywhere could say how long it had been since anything
-ran them. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+**What IS lost, stated rather than implied** — four things, and none of them was a judgment step:
+- **A clean-environment build.** A locally-built `dist/` can mask a missing build step and no clean checkout
+  runs any more. `pnpm ci:commits` builds each commit in a throwaway worktree, which is the closest
+  substitute and is the reason to run it rather than `ci:local` alone.
+- **A schedule.** The nightly trust pass ran at 03:00 whether or not anyone remembered. Now nobody does
+  unless they do; see the next entry.
+- **Release publishing.** Tags `cli-v*`, `desktop-v*`, `v*`/`api-v*`/`web-v*`/`agent-v*` used to build SEA
+  binaries, desktop bundles and images. A release is now built by hand from the matrices those workflows
+  described, which `docs/architecture/runner-distribution.md`, `docs/architecture/desktop-app.md` and skill
+  `desktop` preserve. The `releases/<tag>.md` authorization gate is unaffected and still refuses a tag push
+  without one.
+- **A second reader of the gate list.** Rule `ci` used to warn about drift between `ci.yml` and
+  `scripts/ci-local.mjs`; there is now one list, so that failure mode is gone and its replacement is
+  `pnpm controls-documented`, which refuses a control that exists and is named nowhere.
 
-**What now makes the gap visible** — `pnpm trust-certified`, wired into `ci:local`, prints the scenario count
-in the required check's scope (parsed out of `trust-fast.yml`, never copied beside it), the last
-certification's sha and date, and which files in that scope have CHANGED since. It does not run them and does
-not fail on them — three containers inside the push gate is the cost declined above, and a gate needing
-infrastructure it cannot start teaches people to bypass gates. It is red only on scope drift. ⚠️ **It is the
-fallback, not the repair, and shipping it is what records that this entry STAYS.** The repair is
-`gh workflow enable`.
+**What its absence DID cost, once, measured** — the trust suite is the part `ci:local` cannot substitute for:
+it boots no Postgres, object store or ClickHouse by design, so every `*.trust.test.ts` SKIPS and vitest
+reports a skip and a pass with the same exit code. On 2026-09-10 six certifications were found red — five
+asserting a whole `Score` against a shape that had grown a key, one sealing a receipt over bytes the row
+would never hold — after days in which `pnpm test`, `pnpm ci:commits` and `pnpm ci:local` were all green over
+them. Nothing anywhere could say how long it had been since anything ran them. See
+`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
 
-**Reopens if** — a red `main` reaches the remote that the local gate would have refused — which can only
-happen from a shell outside the tool (entry 2) — or the maintainer re-enables the workflows, at which point
-this entry is superseded, the "confirm green" instruction is unconditional again, and `pnpm trust-certified`
-becomes a redundant reader rather than the only one. `gh workflow enable` is one command per workflow.
+**What now makes that gap visible** — `pnpm trust-certified`, wired into `ci:local`. It prints the scenario
+count in the subset's scope, the last certification's sha and date, and which files in that scope have
+CHANGED since. It does not run the suite and does not fail on it — three containers inside the push gate is
+the cost declined above, and a gate needing infrastructure it cannot start teaches people to bypass gates. It
+is red only when the scope has no source. The scope now lives in `package.json`'s `trust-fast` script, which
+the check PARSES rather than copying; `pnpm trust-full` is what the nightly ran.
+
+**Reopens if** — someone decides the cost is worth paying again, which now means writing workflows rather
+than enabling them. Deleting them was the decision; there is no switch left to flip, and this entry should be
+SUPERSEDED rather than edited if that changes.
 
 ## C4 · A dry run of the bands refuses; it does not file
 

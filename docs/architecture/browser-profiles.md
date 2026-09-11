@@ -221,7 +221,7 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    The browser image is a **third-party** dependency (`chromedp/headless-shell`, the chromedp project on Docker Hub —
    we do not build it). It is **pinned by digest** in ONE place — `DEFAULT_BROWSER_IMAGE`
    (`packages/topology/src/deploy/browser-image.ts`, used by the docker/nomad/k8s per-case browsers **and** the S6
-   interactive provisioner) — per the infra rule (ban `:latest`, reproducible). `.github/workflows/browser-image.yml`
+   interactive provisioner) — per the infra rule (ban `:latest`, reproducible). the browser-image workflow (deleted 2026-09-11 with every other workflow — declared-limits C3; the mirror is run by hand now)
    mirrors the pinned upstream to `ghcr.io/everdict/headless-shell` (digest-preserving `imagetools create`), so a
    managed / air-gapped deployment can drop the Docker Hub dependency by pointing `EVERDICT_BROWSER_IMAGE` /
    `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, re-run the

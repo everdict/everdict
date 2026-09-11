@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// Local CI parity gate — runs everything .github/workflows/ci.yml runs, in the same order.
+// THE pipeline. It was a local mirror of `.github/workflows/ci.yml` until 2026-09-11, when every workflow was
+// deleted (declared-limits C3) — so there is no longer anything to be in parity WITH, and a step missing here
+// is a step nothing runs. Adding a control means adding it here and naming it in rule `ci`, which
+// `pnpm controls-documented` refuses to let you skip.
 // Never `git push` red: this script is the "confirm before push" rule (.claude/rules/ci.md, skill `ci`).
 // On success with a CLEAN tree it stamps .git/everdict-ci-ok with the HEAD sha; the Claude Code
 // PreToolUse hook (scripts/hooks/pre-push-gate.mjs) blocks `git push` unless that stamp matches HEAD
@@ -14,7 +17,7 @@ import { RUN_OUTPUT_EXCLUDE } from "./hooks/gate-decision.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const GITLEAKS_VERSION = "8.24.3"; // keep in sync with ci.yml
+const GITLEAKS_VERSION = "8.24.3"; // pinned here; this is the only place it is declared now
 const gitleaksCache = path.join(homedir(), ".cache", "everdict", `gitleaks-${GITLEAKS_VERSION}`, "gitleaks");
 
 // The judgement step on a red gate used to be manual, and the person who could most use it is the one who has
@@ -68,7 +71,7 @@ function resolveGitleaks() {
   return gitleaksCache;
 }
 
-// Job 1 — core (identical order to ci.yml).
+// Job 1 — core.
 run("pnpm lint", "pnpm", ["lint"]);
 run("pnpm typecheck", "pnpm", ["typecheck"]);
 run("pnpm test", "pnpm", ["test"]);
@@ -137,7 +140,7 @@ runBundleSelfTests();
 run("web lint", "pnpm", ["-F", "@everdict/web", "lint"]);
 run("web build", "pnpm", ["-F", "@everdict/web", "build"]);
 
-// Job 3 — secret scan (full history, same flags as ci.yml).
+// Job 3 — secret scan (full history).
 run("gitleaks (full history)", resolveGitleaks(), [
   "git",
   ".",
@@ -158,7 +161,7 @@ run("bands (dry run)", "pnpm", ["watch-bands", "--dry-run"]);
 // red for days while this gate, `pnpm test` and `pnpm ci:commits` were all green nine times over
 // (`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`). It does not run them and
 // does not fail on them; it refuses to let "skipped" and "passed" look alike in the summary a person reads.
-// It IS red when the scope drifts from `trust-fast.yml`, because a count over the wrong population is worse
+// It IS red when the scope has no source, because a count over the wrong population is worse
 // than no count.
 run("pnpm trust-certified", "pnpm", ["trust-certified"]);
 
@@ -242,7 +245,7 @@ console.log(`\n✓ CI-PARITY GREEN — stamped ${head.slice(0, 9)} full — safe
 // ── THE SCORERS NO GATE HAD READ ────────────────────────────────────────────────────────────────────
 //
 // `examples/bundles/**` is outside the layer spine and its scorers are Python, so nothing in this file could
-// execute them — and a SpreadsheetBench wave's entire score came from one of them. See the ci.yml block of
+// execute them — and a SpreadsheetBench wave's entire score came from one of them. See the deleted ci.yml's block of
 // the same name.
 function runBundleSelfTests() {
   const tests = globSelfTests();

@@ -113,7 +113,7 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `agent-runtime/` — the agent kernel: `runAgentLoop`, `ToolDefinition`/`ToolRegistry`, the envelope + consent
   gates, sub-agents, MCP bridging.
 - `testing/` — Vitest, fake-injection units, `buildServer`+`inject`, env-gated live E2E (no Testcontainers).
-- `ci/` — local CI parity: mirror `.github/workflows/ci.yml` before ANY push, confirm green after.
+- `ci/` — local CI parity: mirror the deleted ci.yml workflow before ANY push, confirm green after.
 
 ---
 

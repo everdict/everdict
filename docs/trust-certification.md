@@ -20,12 +20,22 @@ A dead grader is not a zero. A batch that ran 4 of 5 cases is not a batch that p
 restore is not today's policy. A replica that stopped answering is not a replica that died. An exhausted
 budget is not a budget.
 
-- **Where it runs**: `.github/workflows/trust-nightly.yml` — nightly at 03:00 UTC, plus `workflow_dispatch`.
-  The full suite is deliberately **not** part of the push gate (`ci.yml`); see
-  [Why the full suite is not in ci.yml](#why-the-full-suite-is-not-in-ciyml).
-- **…and the subset that DOES gate a push**: `.github/workflows/trust-fast.yml` (job name
-  `trust fast (real Postgres)`) — the scenarios that need a real Postgres and a real object store, on every
-  push and pull request, as a **required check**. Certifying invariants only at 03:00 means certifying them
+- ⚠️ **Where it runs: A PERSON'S MACHINE.** Both workflows that used to run this — a nightly full pass and a
+  per-push subset — were DELETED on 2026-09-11 along with every other GitHub Actions workflow
+  (`docs/architecture/harness-declared-limits.md` C3). Nothing runs this on a schedule or on a push any more.
+  What survives is the two commands, and the scope that used to live in the yml now lives in them:
+  - **`pnpm trust-fast`** — the subset that needs a real Postgres, object store and ClickHouse
+    (`apps/api/src/trust` minus the Temporal files, plus `packages` and `apps/agent`).
+  - **`pnpm trust-full`** — the whole tree, which is what the nightly ran; Temporal additionally needs
+    `EVERDICT_TRUST_TEMPORAL`.
+  - **`pnpm trust-certified`**, inside `pnpm ci:local`, is the only thing that now NOTICES: it reports how
+    long it has been since anything certified and which files in scope have changed since. It does not run
+    the suite and does not fail on it, so reading its line is the whole mechanism.
+- **What that costs, stated rather than implied**: certifying invariants only when somebody remembers means
+  certifying them after the change that broke them shipped. That already happened once —
+  `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md` — and it is the reason
+  `trust-certified` exists.
+- **The subset that used to gate a push** was a required check running on every push and pull request. Certifying invariants only at 03:00 means certifying them
   after the change that broke them merged. MinIO joined it in arch-review 68 for exactly that reason: four
   consecutive reviews had repaired the two-phase case's intermediates against a MOCKED 412, which proves the
   adapter's branch and never the endpoint's behaviour.

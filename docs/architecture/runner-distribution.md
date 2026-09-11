@@ -51,7 +51,7 @@ Verified: the 1 MB bundle contains **0** temporal/native references and executes
 ## Slices
 
 - **S1 — standalone bundle (DONE).** Runner-only entry + esbuild bundle; temporal-free, runs end to end.
-- **S2 — SEA binaries + release CI.** Node SEA (`postject` into the platform node) on a 3-OS matrix, tag `cli-v*` → GitHub Release assets (`everdict-runner-{linux,macos,windows}-{x64,arm64}`). Mirrors `.github/workflows/desktop-release.yml`.
+- **S2 — SEA binaries + release CI.** ⚠️ The `cli-v*` workflow was DELETED on 2026-09-11 (declared-limits C3); the matrix below describes what it did and what a manual release has to reproduce. Node SEA (`postject` into the platform node) on a 3-OS matrix, tag `cli-v*` → GitHub Release assets (`everdict-runner-{linux,macos,windows}-{x64,arm64}`). Mirrored the desktop-release workflow, deleted at the same time and for the same reason.
 - **S3 — `GET /install.sh`.** Control-plane route rendering the OS/arch-detecting installer (download the matching asset → install to a PATH dir → pair). Token embedded (same one-time secret as the printed command). BFF↔MCP parity not required (a plain script route).
 - **S4 — web one-liner.** The "Register shared runner" registered step shows the served `curl … | sh` one-liner alongside the raw attach command.
 

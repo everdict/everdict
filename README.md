@@ -4,7 +4,6 @@
 
 **Know if your agents actually work.**
 
-[![CI](https://github.com/everdict/everdict/actions/workflows/ci.yml/badge.svg)](https://github.com/everdict/everdict/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-5e6ad2.svg)](LICENSE)
 [![Self-hosted](https://img.shields.io/badge/deploy-self--hosted-1f2430.svg)](deploy/compose)
 [![MCP](https://img.shields.io/badge/agents-MCP%20ready-1f2430.svg)](docs/mcp.md)

@@ -16,6 +16,8 @@
     "web-imports": "node scripts/check-web-imports.mjs",
     "web-reach": "node scripts/check-web-reach.mjs",
     "trust-certified": "node scripts/check-trust-certified.mjs",
+    "trust-fast": "node scripts/trust/trust-suite.mjs apps/api/src/trust '!apps/api/src/trust/temporal-' packages apps/agent",
+    "trust-full": "node scripts/trust/trust-suite.mjs",
     "migrations": "node scripts/check-migrations.mjs",
     "artifact-frame": "node scripts/check-artifact-frame.mjs",
     "convention-harness": "node scripts/check-convention-harness.mjs",
