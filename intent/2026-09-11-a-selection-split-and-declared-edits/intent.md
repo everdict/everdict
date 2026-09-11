@@ -1,6 +1,6 @@
 # Intent: a selection split and declared edits, so an optimizer loop can search without spending the exam
 
-Author: maintainer (requested in conversation — "support SkillOpt's methodology in Everdict"). Status: draft
+Author: maintainer (requested in conversation — "support SkillOpt's methodology in Everdict"). Status: accepted
 
 Design: owed — `pnpm design --next` picks this up when it is accepted. The platform/driver boundary below is
 argued but not settled, and §"Open questions" is the design pass rather than leftovers from it.
