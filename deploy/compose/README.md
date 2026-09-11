@@ -101,7 +101,13 @@ docker build -f apps/web/Dockerfile --target runtime -t everdict-web .
 ## Versions — each service releases on its own tag
 
 The four server images are built from one commit but versioned separately: a git tag names one service and
-one version, and `.github/workflows/images.yml` publishes only that image.
+one version.
+
+⚠️ **NOTHING PUBLISHES THEM AUTOMATICALLY ANY MORE.** The `images` workflow that watched these tags was
+deleted on 2026-09-11 with every other GitHub Actions workflow (`docs/architecture/harness-declared-limits.md`
+C3). Pushing one of the tags below builds and publishes NOTHING; the table is the naming contract a manual
+`docker buildx build --push` has to honour, not a description of something that runs. The `releases/<tag>.md`
+authorization gate is unaffected and still refuses a tag push without one.
 
 | tag | publishes |
 |---|---|

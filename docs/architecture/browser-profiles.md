@@ -224,8 +224,9 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    interactive provisioner) — per the infra rule (ban `:latest`, reproducible). the browser-image workflow (deleted 2026-09-11 with every other workflow — declared-limits C3; the mirror is run by hand now)
    mirrors the pinned upstream to `ghcr.io/everdict/headless-shell` (digest-preserving `imagetools create`), so a
    managed / air-gapped deployment can drop the Docker Hub dependency by pointing `EVERDICT_BROWSER_IMAGE` /
-   `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, re-run the
-   mirror workflow. Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod
+   `RuntimeSpec.browserImage` at the mirror. To bump: re-resolve the digest, update `browser-image.ts`, and re-run the
+   mirror BY HAND — the workflow that did it is gone (see above), so the `imagetools create` it ran is now a
+   command somebody types. Follow-up: managed **K8s** reachability (per-session `kubectl port-forward` / ingress to the pod
    CDP) — lifts this from a control-plane-host Docker daemon to the SaaS cluster.
    - **S6b — remote sidecar pool (socket-free, multi-user self-hosted).** ✅ SHIPPED. `DockerBrowserProvisioner`
      assumes the control plane runs **on** the Docker host (it shells out to `docker` and reaches the published port
