@@ -139,6 +139,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/parallel-evolution.md](architecture/parallel-evolution.md) — campaigns in parallel form a tree: what the shared held-out family costs, why bytes merge and evidence does not, and the one place the schema is a tree where a merge needs a DAG
 - [architecture/evolution-literature-review.md](architecture/evolution-literature-review.md) — WikiSkill, all 46 direct references, and 13 complementary papers: mechanisms, limitations, and insights for Everdict
 - [architecture/evolution-research-directions.md](architecture/evolution-research-directions.md) — proposed changes to experience learning, candidate search, skill routing, and harness evolution, with staged experiments
+- [architecture/evolution-first-loop.md](architecture/evolution-first-loop.md) — the direction for C1/C2/C5: what the platform owns and why, the order the cost arithmetic forces, the five refusals, and the three-arm first experiment
 - [architecture/code-evolution-loop.md](architecture/code-evolution-loop.md) — code evolution: a delegated coding agent mutates the harness repo, everdict builds the image into its own store, the campaign decides
 - [architecture/evolution-routing-spec.md](architecture/evolution-routing-spec.md) — spec: WHO from the slot's maintainer, WHAT from attributed evidence, the issue binds the cases, the gate verifies the targets flipped, build sets, memory across campaigns
 - [architecture/capability-store.md](architecture/capability-store.md) — the capability store (SSOT)
