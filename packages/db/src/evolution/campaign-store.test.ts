@@ -1396,12 +1396,21 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         this.calls.push({ repo, pr });
         const paths = files[pr];
         // `mergeBaseSha` IS the baseline here — an `ahead` comparison, whose file list is the two-tree
-        // difference the oracle asks about. Stated rather than omitted: a listing that does not say where it
-        // started is refused now, and a fixture that omits the field would be testing that refusal instead of
-        // the scope check it is about (review 2026-09-10 R1).
+        // difference the oracle asks about, so it covers `evaluated-difference`. Stated rather than omitted:
+        // a listing that does not say where it started or what it covered is refused now, and a fixture that
+        // omits either would be testing that refusal instead of the scope check it is about (2026-09-10 R1).
         return paths === undefined
           ? { kind: "absent" as const }
-          : { kind: "read" as const, value: { paths, complete: true, ...commits, mergeBaseSha: commits.baselineSha } };
+          : {
+              kind: "read" as const,
+              value: {
+                paths,
+                complete: true,
+                ...commits,
+                mergeBaseSha: commits.baselineSha,
+                pathsCover: "evaluated-difference" as const,
+              },
+            };
       },
     });
     const withLedger = (
@@ -1897,7 +1906,15 @@ describe("CampaignService — verdicts are derived and frame-checked, settlement
         const answer = files[pr];
         if (answer === undefined || answer === "absent") return { kind: "absent" as const };
         if (answer === "unknown") return readUnknown<{ paths: string[]; complete: boolean }>("github said 502");
-        return { kind: "read" as const, value: { ...commits, mergeBaseSha: commits.baselineSha, ...answer } };
+        return {
+          kind: "read" as const,
+          value: {
+            ...commits,
+            mergeBaseSha: commits.baselineSha,
+            pathsCover: "evaluated-difference" as const,
+            ...answer,
+          },
+        };
       },
     });
     // ── THE COMMITS THE ORACLE COMPARES COME FROM EVERDICT'S OWN BUILD LEDGER (review 2026-09-09 R1) ──

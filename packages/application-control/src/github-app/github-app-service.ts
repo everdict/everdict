@@ -244,7 +244,12 @@ export class GithubAppService {
     changedFiles: number;
     files: GithubPullRequestFile[];
     truncated: boolean;
-    compared?: { baselineSha?: string; candidateSha?: string; mergeBaseSha?: string };
+    compared?: {
+      baselineSha?: string;
+      candidateSha?: string;
+      mergeBaseSha?: string;
+      pathsCover?: "evaluated-difference" | "fork-union";
+    };
   }> {
     const { token, host: resolved } = await this.tokenForRepository(
       workspace,

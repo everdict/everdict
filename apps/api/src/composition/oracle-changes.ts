@@ -31,6 +31,7 @@ export function oracleChanges(githubAppService: GithubAppService | undefined): C
         baselineSha?: string;
         candidateSha?: string;
         mergeBaseSha?: string;
+        pathsCover?: "evaluated-difference" | "fork-union";
       }>
     > => {
       if (githubAppService === undefined)
@@ -48,6 +49,7 @@ export function oracleChanges(githubAppService: GithubAppService | undefined): C
           ...(listing.compared?.baselineSha ? { baselineSha: listing.compared.baselineSha } : {}),
           ...(listing.compared?.candidateSha ? { candidateSha: listing.compared.candidateSha } : {}),
           ...(listing.compared?.mergeBaseSha ? { mergeBaseSha: listing.compared.mergeBaseSha } : {}),
+          ...(listing.compared?.pathsCover ? { pathsCover: listing.compared.pathsCover } : {}),
         };
       }, `pull request #${pullNumber} of ${repository}`);
     },

@@ -410,10 +410,12 @@ export interface CampaignServiceDeps {
         complete: boolean;
         baselineSha?: string;
         candidateSha?: string;
-        // Where the listing's comparison STARTED. A three-dot comparison lists merge-base→candidate, so
-        // this equalling the evaluated baseline is what makes `paths` the two-tree difference the oracle
-        // is asking about (review 2026-09-10 R1). Absent = the reader did not say, which refuses.
+        // Where the listing's comparison STARTED, and what its paths COVER. A three-dot comparison lists
+        // merge-base→candidate, so a merge base equal to the evaluated baseline makes `paths` the two-tree
+        // difference the oracle asks about; a diverged one is covered by unioning both sides of the fork,
+        // which is a superset of it (review 2026-09-10 R1). Absent = the reader did not say, which refuses.
         mergeBaseSha?: string;
+        pathsCover?: "evaluated-difference" | "fork-union";
       }>
     >;
   };
@@ -1550,18 +1552,34 @@ export class CampaignService {
       case "read": {
         if (read.value.baselineSha !== baseline.sha || read.value.candidateSha !== source.sha)
           return { kind: "unverifiable", reason: "the oracle listing does not attest the evaluated commits" };
-        // ── THE LISTING MUST DESCRIBE THE TWO EVALUATED TREES, NOT A COMMON ANCESTOR'S (R1, 2026-09-10) ──
+        // ── THE LISTING MUST COVER THE TWO EVALUATED TREES, NOT A COMMON ANCESTOR'S DIFFERENCE ──────
         //
-        // Naming both commits is not the same claim as covering the difference between them. GitHub's
-        // comparison is three-dot: on a diverged history its `files` describe merge-base→candidate, so a
-        // protected file the BASELINE changed after the fork is absent from the list while both attested
-        // SHAs are genuine. Reproduced against live public GitHub — a clean receipt over a README that
-        // differs between the two evaluated commits. So the comparison's own starting point is part of
-        // the attestation, and anything but the evaluated baseline leaves the round unverifiable.
-        if (read.value.mergeBaseSha !== baseline.sha)
+        // Naming both commits is not the same claim as covering the difference between them (R1,
+        // 2026-09-10). GitHub's comparison is three-dot: on a diverged history its `files` describe
+        // merge-base→candidate, so a protected file the BASELINE changed after the fork is absent while
+        // both attested SHAs are genuine. Reproduced against live public GitHub — a clean receipt over a
+        // README that differs between the two evaluated commits.
+        //
+        // So the reader states what its paths COVER and this decides on that, never on the three shas:
+        //
+        //   evaluated-difference   the comparison started at the evaluated baseline — exact
+        //   fork-union             it did not, and the reader unioned both sides of the fork — a SUPERSET
+        //                          of the two-tree difference, so a scope that misses it is genuinely clean
+        //
+        // Anything else is unverifiable, including silence: a reader that does not say what it covered has
+        // not covered anything (rule `protocol` L2). A `fork-union` whose merge base IS the baseline is a
+        // reader contradicting itself, and so is an `evaluated-difference` whose merge base is not.
+        const cover = read.value.pathsCover;
+        const startedAtBaseline = read.value.mergeBaseSha === baseline.sha;
+        if (cover === undefined || read.value.mergeBaseSha === undefined)
           return {
             kind: "unverifiable",
-            reason: `the oracle listing compares from ${read.value.mergeBaseSha ?? "a starting point it did not name"} rather than from the evaluated baseline ${baseline.sha}, so its file list describes a common ancestor's difference and can omit a protected file the baseline changed — rebase the candidate onto the evaluated baseline and build again`,
+            reason: `the oracle listing does not say where its comparison started or what its paths cover, so it cannot establish that the evaluated baseline ${baseline.sha} and candidate ${source.sha} agree outside the changed set`,
+          };
+        if ((cover === "evaluated-difference") !== startedAtBaseline)
+          return {
+            kind: "unverifiable",
+            reason: `the oracle listing claims to cover the ${cover === "evaluated-difference" ? "evaluated commits' own difference" : "union of both sides of the fork"} while comparing from ${read.value.mergeBaseSha}, which the evaluated baseline ${baseline.sha} ${startedAtBaseline ? "is" : "is not"} — the reader disagrees with itself`,
           };
         if (!read.value.complete)
           return {
@@ -1575,6 +1593,10 @@ export class CampaignService {
           candidateSha: source.sha,
           pathsDigest: contentDigest([...new Set(read.value.paths)].sort()),
           complete: read.value.complete,
+          // WHAT THE PATHS COVERED. A `clean` receipt is sound under either value; a `touched` one derived
+          // from a `fork-union` may name a path both arms changed to the same bytes, so the receipt says
+          // which question was answered rather than leaving an auditor to infer it from three shas.
+          pathsCover: cover,
           // Both commits came from the build ledger — the refusals above admit nothing else (R1).
           commitProvenance: "everdict-build" as const,
         };

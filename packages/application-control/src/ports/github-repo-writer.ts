@@ -110,7 +110,16 @@ export interface GithubRepoWriter {
   ): Promise<{
     changedFiles: number;
     files: GithubPullRequestFile[];
-    compared?: { baselineSha?: string; candidateSha?: string; mergeBaseSha?: string };
+    compared?: {
+      baselineSha?: string;
+      candidateSha?: string;
+      mergeBaseSha?: string;
+      // What `files` COVERS. `evaluated-difference` — the merge base IS the evaluated baseline, so the
+      // comparison's own file list is the two-tree difference. `fork-union` — the history diverged, and the
+      // list is the union of both sides of the fork, which is a SUPERSET of that difference (see the
+      // adapter's note). Absent means the reader did not say, which the oracle reads as unverifiable.
+      pathsCover?: "evaluated-difference" | "fork-union";
+    };
   }>;
   // Merge one pull request into its base. `sha` is the head the caller MEASURED: GitHub refuses the merge when
   // the head has moved since, which is the L1 precondition a code adoption needs (the commit that lands is the

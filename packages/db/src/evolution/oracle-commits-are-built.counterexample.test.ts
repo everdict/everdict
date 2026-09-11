@@ -106,9 +106,10 @@ type Deps = ConstructorParameters<typeof CampaignService>[0];
 // exactly why a forged baseline used to come back clean.
 //
 // `mergeBaseSha` defaults to the baseline it was asked about — an `ahead` comparison, where the listing IS the
-// two-tree difference. `divergedFrom` models the other shape GitHub really answers with (review 2026-09-10
-// R1): a three-dot comparison whose files describe merge-base→candidate while both attested SHAs stay
-// genuine, so a protected file the BASELINE changed after the fork never appears.
+// two-tree difference (`pathsCover: "evaluated-difference"`). `divergedFrom` models the other shape GitHub
+// really answers with (review 2026-09-10 R1): a three-dot comparison whose files describe merge-base→candidate
+// while both attested SHAs stay genuine. The adapter covers that by unioning both sides of the fork, so a
+// diverged fixture reports `fork-union` and its `changedBetween` key is the union it would have built.
 const repository = (changedBetween: Record<string, string[]>, divergedFrom?: string | null) => ({
   calls: [] as Array<{ pr: number; baselineSha: string; candidateSha: string }>,
   async pullRequestFiles(
@@ -127,7 +128,12 @@ const repository = (changedBetween: Record<string, string[]>, divergedFrom?: str
         ...commits,
         // `null` is the endpoint that named no starting point at all — a different answer from "started at
         // the baseline", and refused for its own reason (rule `protocol` L2: not saying is a third value).
-        ...(divergedFrom === null ? {} : { mergeBaseSha: divergedFrom ?? commits.baselineSha }),
+        ...(divergedFrom === null
+          ? {}
+          : {
+              mergeBaseSha: divergedFrom ?? commits.baselineSha,
+              pathsCover: divergedFrom === undefined ? ("evaluated-difference" as const) : ("fork-union" as const),
+            }),
       },
     };
   },
@@ -269,18 +275,18 @@ describe("[COUNTEREXAMPLE] the oracle compares the commits Everdict built, not t
     });
   });
 
-  it("R1 — a DIVERGED comparison cannot certify clean: its files describe a common ancestor, not the baseline", async () => {
-    // Reproduced against live public GitHub before this refusal existed (`octocat/Hello-World`,
+  it("R1 — a DIVERGED comparison is COVERED by both sides of the fork, and the baseline's own change is caught", async () => {
+    // Reproduced against live public GitHub before any of this existed (`octocat/Hello-World`,
     // b1b3f972…...b3cbd5bb…): status `diverged`, both requested SHAs echoed back faithfully, `files` listing
     // only CONTRIBUTING.md — while the protected README genuinely differs between the two evaluated commits.
     // The production oracle answered `clean`. Nothing was forged: three-dot comparison semantics are simply a
-    // different question from the one the oracle asks, and naming both commits is not covering the difference
-    // between them.
+    // different question from the one the oracle asks.
     //
-    // Here the fork point is `sha-fork`, and the listing from it happens to touch nothing in scope — the
-    // shape the old check accepted. What the frame protects (`datasets/**`) changed on the BASELINE side,
-    // where a merge-base comparison cannot see it.
-    const diverged = repository({ "sha-B..sha-A": ["src/loop.ts"] }, "sha-fork");
+    // The adapter covers it with a SECOND comparison — merge-base→baseline — and unions the two lists, which
+    // is a superset of the true two-tree difference. Here the candidate touched only `src/loop.ts` since the
+    // fork and the BASELINE moved `datasets/tb.json`, which a merge-base comparison alone cannot see. The
+    // union carries it, so the scope check catches what the first repair could only refuse.
+    const diverged = repository({ "sha-B..sha-A": ["src/loop.ts", "datasets/tb.json"] }, "sha-fork");
     const { round } = await drive(
       {
         setsForCampaign: async () => [],
@@ -289,12 +295,60 @@ describe("[COUNTEREXAMPLE] the oracle compares the commits Everdict built, not t
       { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
       diverged,
     );
-    // Refused, and the reason names the repair the operator has to make — not "touched", because nothing
-    // here established that anything in scope changed, and not "clean", because nothing established it did
-    // not. The third answer is the honest one (rule `protocol` L2).
     expect(round.verdict.comparable).toBe(false);
-    expect(round.verdict.detail).toMatch(/compares from sha-fork rather than from the evaluated baseline sha-B/);
-    expect(round.verdict.oracleTouched ?? []).toEqual([]);
+    expect(round.verdict.oracleTouched).toEqual(["datasets/tb.json"]);
+    // …and the receipt says WHICH question was answered, because a `touched` over a union may name a path
+    // both arms changed to the same bytes, and an auditor may not infer that from three shas.
+    expect(round.verdict.oracleReceipt).toMatchObject({ pathsCover: "fork-union" });
+  });
+
+  it("R1 — a diverged comparison whose union misses the scope is still CLEAN, because the union is a superset", async () => {
+    // The half that makes the refusal unnecessary: a path in NEITHER side's list has the same bytes at the
+    // fork, at the baseline and at the candidate, so the two evaluated trees agree on it. An ordinary pull
+    // request cut before its baseline was built is diverged by definition, and this is why it can still earn
+    // a clean oracle instead of being told to rebase.
+    const diverged = repository({ "sha-B..sha-A": ["src/loop.ts", "README.md"] }, "sha-fork");
+    const { round } = await drive(
+      {
+        setsForCampaign: async () => [],
+        forCampaign: async () => [buildOf("bld_c", "1.0.1", "sha-A", 7), buildOf("bld_b", "1.0.0", "sha-B")],
+      },
+      { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
+      diverged,
+    );
+    expect(round.verdict.comparable, round.verdict.detail).toBe(true);
+    expect(round.verdict.oracleReceipt).toMatchObject({ pathsCover: "fork-union", commitProvenance: "everdict-build" });
+  });
+
+  it("R1 — a reader that disagrees with itself is unverifiable, whichever way it disagrees", async () => {
+    // `pathsCover` is a CLAIM, and the merge base is the fact that decides whether the claim is coherent.
+    // A reader reporting the evaluated commits' own difference while comparing from somewhere else has not
+    // covered the baseline side; one reporting a fork union while comparing from the baseline has answered
+    // a question nobody asked. Neither is trusted, and the refusal says which way it broke.
+    const lying = repository({ "sha-B..sha-A": [] }, "sha-fork");
+    lying.pullRequestFiles = async function (_t: string, _r: string, pr: number, commits) {
+      this.calls.push({ pr, ...commits });
+      return {
+        kind: "read" as const,
+        value: {
+          paths: [],
+          complete: true,
+          ...commits,
+          mergeBaseSha: "sha-fork",
+          pathsCover: "evaluated-difference" as const,
+        },
+      };
+    };
+    const { round } = await drive(
+      {
+        setsForCampaign: async () => [],
+        forCampaign: async () => [buildOf("bld_c", "1.0.1", "sha-A", 7), buildOf("bld_b", "1.0.0", "sha-B")],
+      },
+      { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
+      lying,
+    );
+    expect(round.verdict.comparable).toBe(false);
+    expect(round.verdict.detail).toMatch(/the reader disagrees with itself/);
     expect(round.verdict.oracleReceipt).toBeUndefined();
   });
 
@@ -309,7 +363,8 @@ describe("[COUNTEREXAMPLE] the oracle compares the commits Everdict built, not t
       silent,
     );
     expect(round.verdict.comparable).toBe(false);
-    expect(round.verdict.detail).toMatch(/a starting point it did not name/);
+    expect(round.verdict.detail).toMatch(/does not say where its comparison started or what its paths cover/);
+    expect(round.verdict.oracleReceipt).toBeUndefined();
   });
 
   it("a candidate with no platform build record is unverifiable, whatever its origin claims", async () => {

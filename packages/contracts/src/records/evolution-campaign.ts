@@ -122,6 +122,21 @@ export const OracleCheckReceiptSchema = z.object({
   // claim and must not read like this one. Optional at rest for exactly that reason (the schema-split law:
   // a creation rule applied at decode time is a data outage), never omitted by a receipt written today.
   commitProvenance: z.literal("everdict-build").optional(),
+  // ── WHICH QUESTION THE PATHS ANSWERED (review 2026-09-10 R1) ─────────────────────────────────────
+  //
+  // GitHub's comparison is three-dot, so `/compare/B...C` lists merge-base→C. When the history diverged,
+  // that omits what the BASELINE changed after the fork — which is how a `clean` receipt was issued over a
+  // protected file that genuinely differs between the two evaluated commits, with both shas honest.
+  //
+  //   evaluated-difference   the comparison started at the evaluated baseline; the paths are exact
+  //   fork-union             it did not, and both sides of the fork were unioned — a SUPERSET, so `clean`
+  //                          is sound and `touched` may name a path both arms changed to the same bytes
+  //
+  // ABSENT on a receipt written before the distinction existed: those paths are merge-base→candidate and
+  // nobody checked where that started, which is a weaker claim than either value here and must not read
+  // like one. Optional at rest for that reason (the schema-split law), never omitted by a receipt written
+  // today — the check refuses a listing that does not declare it.
+  pathsCover: z.enum(["evaluated-difference", "fork-union"]).optional(),
 });
 export type OracleCheckReceipt = z.infer<typeof OracleCheckReceiptSchema>;
 

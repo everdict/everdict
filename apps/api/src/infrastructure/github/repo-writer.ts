@@ -221,8 +221,8 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
                 // faithfully — so an attestation built from `base_commit` and the head is genuine and
                 // still does not say what the caller assumed. Reproduced against live public GitHub: a
                 // protected file differing between the two evaluated commits was absent from `files`.
-                // The merge base is therefore part of the attestation, and the consumer refuses when it
-                // is not the evaluated baseline.
+                // The merge base is therefore part of the attestation, and it is also what makes the
+                // SECOND comparison below possible.
                 merge_base_commit: z.object({ sha: z.string() }).optional(),
                 status: z.string().optional(),
                 commits: z.array(z.object({ sha: z.string() })).default([]),
@@ -241,19 +241,69 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
             const comparedBaseline = comparison.base_commit?.sha;
             const comparedCandidate =
               comparison.status === "identical" ? comparedBaseline : comparison.commits.at(-1)?.sha;
-            // GitHub caps comparison files at 300. At the cap, completeness is unknown.
+            const mergeBaseSha = comparison.merge_base_commit?.sha;
             // Include the old name too: moving a protected file is an oracle change.
-            const files = comparison.files.flatMap((f) => [
-              f,
-              ...(f.previous_filename ? [{ ...f, filename: f.previous_filename }] : []),
-            ]);
+            const expand = (rows: typeof comparison.files) =>
+              rows.flatMap((f) => [f, ...(f.previous_filename ? [{ ...f, filename: f.previous_filename }] : [])]);
+            // GitHub caps a comparison at 300 files. At the cap, completeness is unknown.
+            const CAP = 300;
+
+            // ── A DIVERGED HISTORY IS COVERED BY TWO COMPARISONS, NOT REFUSED ────────────────────
+            //
+            // The first repair for R1 was a refusal: merge base ≠ evaluated baseline ⇒ unverifiable. Sound,
+            // and it fires on ORDINARY pull requests — a branch cut before the baseline was built is
+            // diverged by definition — leaving a campaign no route to a clean oracle but rebase-and-rebuild.
+            //
+            // The endpoint can answer the real question with one more call. With merge base M, evaluated
+            // baseline B and candidate C, `files(M...C)` is what C changed since the fork and `files(M...B)`
+            // is what B changed since it. A path in NEITHER list has the same bytes in M, B and C, so B and C
+            // agree on it — which makes the UNION a superset of the true B↔C difference, and a scope that
+            // misses the union genuinely clean. The union can over-report (a path both sides changed to the
+            // same bytes), and over-reporting is the direction an oracle is allowed to be wrong in.
+            //
+            // A two-tree diff computed by hand off the trees API would be exact and would be a second diff
+            // implementation this check would then have to trust. This is one more GET.
+            const diverged =
+              mergeBaseSha !== undefined && comparedBaseline !== undefined && mergeBaseSha !== comparedBaseline;
+            const forkSide = diverged
+              ? z
+                  .object({
+                    files: z.array(
+                      z.object({
+                        filename: z.string(),
+                        previous_filename: z.string().optional(),
+                        status: z.string(),
+                        additions: z.number(),
+                        deletions: z.number(),
+                        patch: z.string().optional(),
+                      }),
+                    ),
+                  })
+                  .parse(
+                    await (
+                      await gh(`${base}/repos/${repository}/compare/${mergeBaseSha}...${comparedBaseline}`)
+                    ).json(),
+                  )
+              : undefined;
+
+            const expanded = expand(comparison.files);
+            const byPath = new Map(expanded.map((f) => [f.filename, f]));
+            // The baseline side contributes PATHS. Its per-file patch describes M→B and would be read as the
+            // candidate's diff by anything rendering these rows, so only names it introduces are added, and
+            // they are added with the baseline arm's own status.
+            for (const f of expand(forkSide?.files ?? [])) if (!byPath.has(f.filename)) byPath.set(f.filename, f);
+            const files = [...byPath.values()];
+            const atCap = comparison.files.length >= CAP || (forkSide?.files.length ?? 0) >= CAP;
             return {
               files,
-              changedFiles: comparison.files.length >= 300 ? files.length + 1 : files.length,
+              changedFiles: atCap ? files.length + 1 : files.length,
               compared: {
                 baselineSha: comparedBaseline,
                 candidateSha: comparedCandidate,
-                mergeBaseSha: comparison.merge_base_commit?.sha,
+                mergeBaseSha,
+                // What `files` COVERS, so the consumer never has to infer it from the three shas:
+                // the two evaluated trees' own difference, or a superset built from both sides of the fork.
+                pathsCover: diverged ? ("fork-union" as const) : ("evaluated-difference" as const),
               },
             };
           }
