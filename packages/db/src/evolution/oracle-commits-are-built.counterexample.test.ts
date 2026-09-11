@@ -367,6 +367,45 @@ describe("[COUNTEREXAMPLE] the oracle compares the commits Everdict built, not t
     expect(round.verdict.oracleReceipt).toBeUndefined();
   });
 
+  it("two build records minting one version from DIFFERENT sources refuse the round — neither is chosen", async () => {
+    // The clock this used to resolve by (review 2026-09-09, carried until now). `find` took the first record
+    // whose version matched, so the commit the oracle checks the exam against was decided by ledger order.
+    // Refused now, and refused at the ROUND: falling through would hand `verdictOf` the SUBMITTER's origin,
+    // which is what R1 closed (rule `protocol` L3).
+    await expect(
+      drive(
+        {
+          setsForCampaign: async () => [],
+          forCampaign: async () => [
+            buildOf("bld_c", "1.0.1", "sha-A", 7),
+            buildOf("bld_c2", "1.0.1", "sha-OTHER", 9),
+            buildOf("bld_b", "1.0.0", "sha-B"),
+          ],
+        },
+        { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
+      ),
+    ).rejects.toThrow(/records minting 1\.0\.1 from different sources/);
+  });
+
+  it("…and two records that AGREE are one answer written twice, which is an ordinary rebuild", async () => {
+    // The admitted class, named before the predicate was written: a retry that built the same commit again
+    // differs in id and image and in nothing the oracle reads. Refusing it would refuse a rebuild.
+    const { round } = await drive(
+      {
+        setsForCampaign: async () => [],
+        forCampaign: async () => [
+          buildOf("bld_c", "1.0.1", "sha-A", 7),
+          buildOf("bld_c-retry", "1.0.1", "sha-A", 7),
+          buildOf("bld_b", "1.0.0", "sha-B"),
+        ],
+      },
+      { diff: winning, baseline: arm("1.0.0"), candidate: arm("1.0.1") },
+      repository({ "sha-B..sha-A": ["src/loop.ts", "README.md"] }),
+    );
+    expect(round.verdict.comparable, round.verdict.detail).toBe(true);
+    expect(round.verdict.oracleReceipt).toMatchObject({ baselineSha: "sha-B", candidateSha: "sha-A" });
+  });
+
   it("a candidate with no platform build record is unverifiable, whatever its origin claims", async () => {
     // Given: the candidate scorecard carries a perfectly well-formed origin and Everdict built nothing
     const { round, changes } = await drive(

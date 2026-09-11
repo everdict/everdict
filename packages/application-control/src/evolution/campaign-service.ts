@@ -172,6 +172,34 @@ function unreadableBuildLedger(campaignId: string, candidateVersion: string): (e
   };
 }
 
+// ── TWO RECORDS MINTING ONE VERSION IS NOT A TIE TO BREAK (review 2026-09-09, carried) ───────────────
+//
+// `builtSourceFor` picked the FIRST record whose `candidateVersion` matched — a resolution by whatever order
+// the ledger returned, which is a clock wearing an index. That was tolerable while the answer was provenance
+// on the round; it stopped being tolerable when the ORACLE started deciding on it (R1), because the commit
+// this picks is the commit the exam is checked against.
+//
+// Records that AGREE are not ambiguous: a rebuild of the same source is one answer written twice, and
+// refusing it would refuse an ordinary retry. What is refused is a DISAGREEMENT — two records claiming the
+// same version was built from different coordinates — because there is no fact here that says which is the
+// one the arm evaluated, and picking either is the re-derivation L3 names.
+//
+// Same treatment as an unreadable ledger, and for the same reason: the round is not logged. A round whose
+// candidate's own origin cannot be established would otherwise fall back to `candidateSourceOf(snapshot)` —
+// the SUBMITTER's coordinates, which is exactly what R1 closed.
+function ambiguousBuildLedger(candidateVersion: string, coordinates: string[]): never {
+  throw new ConflictError(
+    "CONFLICT",
+    { candidateVersion, coordinates },
+    `Everdict's build ledger holds ${coordinates.length} records minting ${candidateVersion} from different sources (${coordinates.join(" · ")}), so the commit this candidate was built from cannot be established and nothing here may choose between them; the round was not logged`,
+  );
+}
+
+// The coordinates two ledger records must agree on to be one answer written twice. Deliberately NOT the whole
+// record: image digests, ids and timestamps differ across a rebuild without changing what was built from.
+const sourceKey = (s: { repo?: string; sha?: string; prNumber?: number }): string =>
+  `${s.repo ?? "?"}@${s.sha ?? "?"}#${s.prNumber ?? "?"}`;
+
 // One compared side, in the shape the evidence record reads: the batch id the caller named, the version the
 // record itself says it evaluated, and the run coordinates its results carry.
 function sideOf(
@@ -214,8 +242,16 @@ function sideOf(
 // written before the scorecard row so a replay cannot dispatch twice, so between those two commits this
 // answers "lost" about an arm that is about to exist. The exposure is bounded: only a campaign whose budget
 // is otherwise fully spent can be ENDED by it, and `settle` re-reads the ledger, so the window has to still
-// be open at the close for anything to be lost. It is stated rather than papered over with a clock — the
-// honest close is one durable act across the two stores, which this change does not build.
+// be open at the close for anything to be lost.
+//
+// It is stated rather than papered over with a clock, and it is FILED rather than only stated:
+// `intent/2026-09-11-a-reservation-and-its-batch-are-one-durable-act/`. Two candidate repairs, and choosing
+// between them is the design pass — the reservation and the batch row commit together (which needs a
+// transaction seam neither store has: `PgScorecardStore.create` is a single data-modifying CTE, and
+// `reserveInFamily` reads a family and enforces a budget before it writes, so it cannot become one), or an
+// absent row becomes a third answer that CONVERGES, with an owner that can retire a reservation whose
+// submission is never coming. The second is L5's shape; the first makes the state unreachable. What is not
+// available is deciding from here that an absent row has been absent long enough.
 function armStateOf(card: { tenant: string; status: ScorecardStatus } | undefined, tenant: string): CampaignArmState {
   if (card === undefined || card.tenant !== tenant) return "lost";
   if (card.status === "succeeded") return "succeeded";
@@ -1392,7 +1428,10 @@ export class CampaignService {
     const sets = await this.deps.builds
       .setsForCampaign(tenant, campaignId)
       .catch(unreadableBuildLedger(campaignId, candidateVersion));
-    const set = sets.find((s) => s.state === "minted" && s.candidateVersion === candidateVersion);
+    const minted = sets.filter((s) => s.state === "minted" && s.candidateVersion === candidateVersion);
+    const mintedKeys = [...new Set(minted.map((s) => sourceKey({ ...s.source, ...(s.sha ? { sha: s.sha } : {}) })))];
+    if (mintedKeys.length > 1) ambiguousBuildLedger(candidateVersion, mintedKeys);
+    const set = minted[0];
     if (set !== undefined)
       return {
         source: "everdict-build",
@@ -1410,7 +1449,10 @@ export class CampaignService {
     const builds = await this.deps.builds
       .forCampaign(tenant, campaignId)
       .catch(unreadableBuildLedger(campaignId, candidateVersion));
-    const built = builds.find((b) => b.state === "built" && b.candidateVersion === candidateVersion);
+    const madeIt = builds.filter((b) => b.state === "built" && b.candidateVersion === candidateVersion);
+    const builtKeys = [...new Set(madeIt.map((b) => sourceKey(b.source)))];
+    if (builtKeys.length > 1) ambiguousBuildLedger(candidateVersion, builtKeys);
+    const built = madeIt[0];
     if (built === undefined) return undefined;
     return {
       source: "everdict-build",
