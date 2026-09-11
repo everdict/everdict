@@ -110,3 +110,17 @@ Carried, and recorded where a reader meets them rather than resolved here:
 - **The adapter's reading of a comparison response is pinned against constructed bodies**, plus one live probe
   of the diverged case. `base_commit`, `merge_base_commit`, `status` and `commits` are read from the documented
   shape, and no authenticated or GitHub Enterprise response has been seen.
+
+Two questions this batch inherited from `intent/2026-09-09-evolution-follow-up-findings/` and settled on
+2026-09-11:
+
+- **`builtSourceFor` resolved a version by whichever record the ledger returned first** — a clock wearing an
+  index, and the ORACLE had come to decide on it. Records that AGREE are one answer written twice (a rebuild)
+  and are admitted; records that DISAGREE about the source refuse the round, because nothing here may choose
+  between them and falling through would hand `verdictOf` the submitter's own coordinates, which is what R1
+  closed.
+- **The in-flight reservation window is FILED, not fixed** —
+  `intent/2026-09-11-a-reservation-and-its-batch-are-one-durable-act/`. It needs a transaction seam neither
+  store has, or a convergent third answer with an owner; choosing between those is a design pass, and doing
+  it at speed beside four other changes is how this session's six red certifications were written in the
+  first place.
