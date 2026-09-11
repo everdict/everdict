@@ -158,7 +158,19 @@ export class AgentActivator {
   private readonly chains = new Map<string, Promise<void>>(); // per-agent serialization (one run at a time)
   private readonly pending = new Map<string, number>();
   private readonly lastActivation = new Map<string, number>(); // `${ws}:${agent}:${kind}` → epoch ms
-  private readonly controllers = new Map<string, AbortController>(); // live runs, by session id (stop control)
+  // ── LIVE RUNS, AND THE WORKSPACE EACH ONE BELONGS TO (pnpm scan, agent, 2026-09-11) ───────────────
+  //
+  // This map held a bare `AbortController` keyed by session id, and `stop(sessionId)` aborted whatever it
+  // found. `POST /agent/runs/:id/stop` checked that the CALLER holds member or admin — a role in the
+  // caller's OWN workspace — and then reached into a process-wide map with no workspace anywhere, so one
+  // workspace could abort another's live headless run. Its sibling nine hundred lines up,
+  // `/agent/sessions/:id/stop`, is scoped and says so: "the live-turn registry is keyed by (workspace, id),
+  // so an admin stop can never reach across workspaces". This registry was not, and rule `api-layer` is
+  // unambiguous — EVERY read/write is workspace-scoped, and another workspace's resource reads 404.
+  //
+  // The workspace travels WITH the controller rather than in a second map beside it: two structures that
+  // must agree about which runs are live is the shape that drifts (rule `protocol` L3).
+  private readonly controllers = new Map<string, { workspace: string; abort: AbortController }>();
   private readonly stopped = new Set<string>(); // session ids stopped by a member (settle as cancelled, not failed)
   private readonly cooldownMs: number;
   private readonly maxQueued: number;
@@ -440,7 +452,7 @@ export class AgentActivator {
       `agent:${agentId}`,
     );
     const controller = new AbortController();
-    this.controllers.set(sessionId, controller);
+    this.controllers.set(sessionId, { workspace, abort: controller });
     // O2 baseline: the session carries the interrupted run's history — this run's trajectory starts after it.
     const baseSeq = await this.lastSeq(workspace, sessionId);
     try {
@@ -505,11 +517,13 @@ export class AgentActivator {
 
   // Member stop (fleet view control): abort the live run's loop; the wrapper settles it as cancelled.
   // Returns false when the session has no live run here (already settled / not this process).
-  stop(sessionId: string): boolean {
-    const controller = this.controllers.get(sessionId);
-    if (!controller) return false;
+  // A run of ANOTHER workspace answers exactly like one that is not live — the caller learns nothing about
+  // whether the id exists, which is what `404` means at this door.
+  stop(workspace: string, sessionId: string): boolean {
+    const live = this.controllers.get(sessionId);
+    if (!live || live.workspace !== workspace) return false;
     this.stopped.add(sessionId);
-    controller.abort();
+    live.abort.abort();
     return true;
   }
 
@@ -653,7 +667,7 @@ export class AgentActivator {
       `agent:${agentId}`,
     );
     const controller = new AbortController();
-    this.controllers.set(sessionId, controller);
+    this.controllers.set(sessionId, { workspace: event.workspace, abort: controller });
     try {
       this.deps.mailbox.enqueue(event.workspace, sessionId, {
         from: "event",

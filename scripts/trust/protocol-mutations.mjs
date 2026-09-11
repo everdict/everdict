@@ -3041,6 +3041,18 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── pnpm scan (agent, 2026-09-11) · a stop reaches only the caller's own workspace ─────────────
+    //
+    // `POST /agent/runs/:id/stop` checked a role in the CALLER's workspace and then aborted whatever the
+    // process-wide map held. Neutralizing the workspace comparison restores the cross-tenant stop, and the
+    // counterexample must notice.
+    name: "Agent — one workspace aborts another's live headless run",
+    file: "apps/agent/src/agent-activation.ts",
+    from: "    if (!live || live.workspace !== workspace) return false;",
+    to: "    if (!live || (void workspace, false)) return false;",
+    suite: ["--root", "apps/agent", "src/agent-activation.test.ts"],
+  },
+  {
     // ── pnpm scan (api, 2026-09-11) · every dataset-write door asks the constitutional question ─────
     //
     // `datasets:write` is a member action; declaring `ground_truth` is not. Three of four dataset-write

@@ -684,6 +684,55 @@ describe("activateDirect — the T-d reaction step entry", () => {
     expect(sessions.created).toHaveLength(1); // never a duplicate run
   });
 
+  // ── [pnpm scan · agent · 2026-09-11] ONE WORKSPACE MAY NOT STOP ANOTHER'S RUN ──────────────────
+  //
+  // `POST /agent/runs/:id/stop` checked that the caller holds member or admin — a role in the CALLER's
+  // workspace — and then called `activator.stop(id)` against a process-wide map with no workspace anywhere.
+  // Its sibling `/agent/sessions/:id/stop` is scoped and says so in its own comment: "the live-turn registry
+  // is keyed by (workspace, id), so an admin stop can never reach across workspaces." This registry was not,
+  // and rule `api-layer` is unambiguous: every read/write is workspace-scoped, and another workspace's
+  // resource reads 404.
+  //
+  // Both directions, because a scope check with only the refusal case has an unmeasured false-positive rate:
+  // the foreign stop must fail AND the owning workspace's must still work.
+  //
+  // Seen red under neutralization: "expected true to be false" — the cross-workspace abort going through.
+  it("refuses a stop from another workspace, and still stops the run for the one that owns it", async () => {
+    const sessions = sessionsStub();
+    // The turn signals when it has actually begun and then hangs until aborted, so the two stops below run
+    // against a genuinely LIVE registry entry rather than a race with activation.
+    let turnBegan: () => void = () => {};
+    const began = new Promise<void>((resolve) => {
+      turnBegan = resolve;
+    });
+    const { instance } = activator({
+      registry: registryOf(spec()),
+      sessions,
+      runTurn: async (_sessionId, _token, signal) => {
+        turnBegan();
+        return new Promise((resolve) => {
+          signal?.addEventListener("abort", () => resolve(undefined));
+        });
+      },
+    });
+    await instance.activateDirect({
+      workspace: "acme",
+      agentId: "sentinel",
+      eventId: "ev-scope#s0",
+      eventKind: "scorecard.completed",
+      message: "live",
+    });
+    await began;
+    const sessionId = sessions.created[0]?.id ?? "";
+    expect(sessionId).not.toBe("");
+
+    // A neighbour who knows the id gets exactly what a non-existent run gets.
+    expect(instance.stop("other-workspace", sessionId)).toBe(false);
+    // …and the owner can still stop it.
+    expect(instance.stop("acme", sessionId)).toBe(true);
+    await instance.idle();
+  });
+
   // ── A TRANSIENT STORE FAILURE MUST NOT BECOME A PERMANENT VERDICT ────────────────────────────────
   //
   // `{skipped}` is defined by this function's own contract as PERMANENTLY not runnable: the T-d reaction

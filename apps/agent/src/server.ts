@@ -1205,7 +1205,9 @@ export function buildServer(deps: AgentServerDeps): FastifyInstance {
     if (!principal.roles.some((r) => r === "member" || r === "admin"))
       return reply.code(403).send({ code: "FORBIDDEN", message: "Stopping a run requires the member role." });
     const { id } = idParams.parse(req.params);
-    if (!activator?.stop(id))
+    // Scoped like every other `:id` door in this file — the role check above is a role in the CALLER's
+    // workspace and says nothing about whose run this is.
+    if (!activator?.stop(principal.workspace, id))
       return reply.code(404).send({ code: "NOT_FOUND", message: "No live run for that session." });
     return reply.send({ ok: true });
   });
