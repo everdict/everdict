@@ -560,11 +560,23 @@ export const CampaignRoundSchema = z.object({
   // lived only in whatever prose a human wrote beside it. A campaign that rejects nineteen candidates has
   // learned nineteen things and could not hand one of them to round twenty.
   //
-  // WikiSkill (arXiv 2608.27454) measured what that costs. Giving the PROPOSER a knowledge layer that
-  // survives rollback moved their benchmark from 43.8% to 63.7% — the single largest effect in the paper,
-  // larger than the skill evolution it was supporting. Their layer is a patch-edited wiki; ours is this
-  // field, append-only with the round, because a document the loop may rewrite is a document the loop can
-  // use to revise its own history (L4), and we already have an append-only trace to hang it on.
+  // WikiSkill (arXiv 2608.27454v1) measured what that costs. In their Table 3 Gemini-3.5-Flash ablation,
+  // averaged over FOUR benchmarks, giving the PROPOSER a knowledge layer that survives rollback moved the
+  // mean from 48.7% to 63.7% (+15.0 points) with executor access disabled — the single largest effect in the
+  // paper, larger than the skill evolution it was supporting. Their layer is a patch-edited wiki; ours is
+  // this field, append-only with the round, because a document the loop may rewrite is a document the loop
+  // can use to revise its own history (L4), and we already have an append-only trace to hang it on.
+  //
+  // ⚠️ TWO CORRECTIONS TO WHAT THIS COMMENT USED TO CLAIM (`docs/architecture/evolution-literature-review.md`).
+  // It said 43.8% → 63.7%: 43.8 is a different configuration's LiveMath cell, not the matched average, and
+  // citing it overstated the effect by five points. And removing proposer access also removes the MAINTAINER,
+  // so the ablation does not isolate wiki topology against a same-budget flat history — it is evidence that
+  // durable development knowledge helps a proposer, not that this shape of it is the reason.
+  //
+  // ⚠️ AND THE SAME PAPER'S EXECUTOR ABLATION IS NOT A LAW. Adding executor access moved 63.7 to 60.9 (−2.8
+  // points) in that one setting, which is a reason to evaluate runtime memory as part of the CANDIDATE — not
+  // a finding that runtime knowledge is universally harmful. The rule below is ours and rests on L3, not on
+  // their number.
   //
   // ⚠️ IT IS ADVICE, NEVER EVIDENCE. `campaignAdoption` does not read it and must not: this is the one value
   // on the round the LOOP authors about itself, and the whole point of deriving the verdict is that the loop
