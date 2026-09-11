@@ -3101,20 +3101,21 @@ const MUTATIONS = [
     // twin the more permissive of the two on an authorization axis — the one place that is worst.
     name: "Adapters — the in-memory run store admits a dispatch whose parent row is absent",
     file: "packages/db/src/results/run-store.ts",
-    from: "    if (this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return false;",
-    to: "    void this.parentExists;",
+    from: "    if (row === undefined) return false;\n    // …the parent's fencing token, which the child's own epoch cannot stand in for.\n    if ((row.ownerEpoch ?? 0) !== parent.epoch) return false;",
+    to: "    if ((row?.ownerEpoch ?? 0) !== parent.epoch) return false;",
     suite: ["--root", "packages/db", "src/results/twin-refuses-an-absent-parent.counterexample.test.ts"],
   },
   {
     // ── …AND ITS SIBLING ON THE UPDATE PATH, WHICH THE FIRST REPAIR LEFT STANDING ──────────────────
     //
-    // `CaseOutcomeCommitter.settleChildOn → settleRun → update(...)` reaches the parallel inline check every
-    // batch settlement, and `parentDriverEpoch` defaults a missing row to 0. Found by `pnpm review` on the
-    // commit that repaired `create` — the sibling law applied to its own repair.
+    // `CaseOutcomeCommitter.settleChildOn → settleRun → update(...)` reaches the settlement fence on every
+    // batch settlement, and a missing row reads as epoch 0 — which is what a fresh settlement carries, so the
+    // epoch comparison alone admits it. Found by `pnpm review` on the commit that repaired the dispatch half
+    // — the sibling law applied to its own repair.
     name: "Adapters — the in-memory run store settles a child against a parent row that is absent",
     file: "packages/db/src/results/run-store.ts",
-    from: "    if (parent && this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return undefined;",
-    to: "    void parent;",
+    from: "    return row !== undefined && (row.ownerEpoch ?? 0) === parent.epoch;",
+    to: "    return (row?.ownerEpoch ?? 0) === parent.epoch;",
     suite: ["--root", "packages/db", "src/results/twin-refuses-an-absent-parent.counterexample.test.ts"],
   },
   {

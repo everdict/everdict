@@ -33,6 +33,14 @@ function page(rows: RunRecord[], opts?: RunListOptions): RunRecord[] {
   return rows.slice(offset, opts?.limit !== undefined ? offset + opts.limit : undefined);
 }
 
+// The scorecard side of the pair (`attachScorecards`), named because the store holds it as ONE value rather
+// than as one accessor per question — see the field's comment.
+type ScorecardOwner = {
+  peek(
+    id: string,
+  ): { scoringPass?: { passId?: string; status?: string } | null; ownerEpoch?: number; status?: string } | undefined;
+};
+
 export class InMemoryRunStore implements RunStore {
   private readonly runs = new Map<string, RunRecord>();
 
@@ -60,54 +68,71 @@ export class InMemoryRunStore implements RunStore {
   // the invariant: an unpaired run store is not part of a scoring topology at all, and refusing instead
   // would break every unrelated test into attaching a stub that always says yes, which is a fence that
   // certifies nothing. The boundary this invariant protects is the Postgres one.
-  attachScorecards(owner: {
-    peek(
-      id: string,
-    ): { scoringPass?: { passId?: string; status?: string } | null; ownerEpoch?: number; status?: string } | undefined;
-  }): void {
-    // A TERMINAL pass is not an owner (arch-review 17 P0-3) — the Pg fence adds `status = 'running'` to the
-    // same EXISTS, so the twin resolves an owner only while the marker is live. Answering the passId of a
-    // failed marker here would let the in-memory pair accept a write the database refuses.
-    this.scoringPassOwner = (scorecardId) => {
-      const live = owner.peek(scorecardId)?.scoringPass;
-      return live?.status === "running" ? live.passId : undefined;
-    };
-    // …and the parent's fencing token, which the child's own epoch cannot stand in for.
-    this.parentDriverEpoch = (scorecardId) => owner.peek(scorecardId)?.ownerEpoch ?? 0;
-    // …and whether that parent still ADMITS work: a cancel settles it terminal without touching the epoch,
-    // so an epoch-only condition would let a proved loop open a case for a batch the user stopped.
-    // ⚠️ ABSENT AND "NO STATUS" ARE ONE `undefined` OUT OF `peek`, AND THEY ARE NOT ONE ANSWER.
-    // `parentAdmitsWork` read this field alone and treated `undefined` as "no constraint", so a run naming a
-    // scorecard this store does not have was ADMITTED — while the Postgres twin's `PARENT_AUTHORIZES` opens
-    // with `EXISTS (SELECT 1 FROM everdict_scorecards …)` and refuses exactly that. The twin was more
-    // permissive than production on an AUTHORIZATION axis, which is the one place that is worst, and no unit
-    // test built on this pair could see it (rule `testing` — a guard the twin does not have is a guard no
-    // unit test can see). The record's presence is asked separately now.
-    // Found by `pnpm scan` over `adapters`, 2026-09-11.
-    this.parentExists = (scorecardId) => owner.peek(scorecardId) !== undefined;
-    this.parentStatus = (scorecardId) => owner.peek(scorecardId)?.status;
+  attachScorecards(owner: ScorecardOwner): void {
+    this.scorecards = owner;
+  }
+
+  // ⚠️ ONE FIELD, BECAUSE "IS THIS STORE PAIRED" IS ONE FACT.
+  // It was four independent optional accessors — `scoringPassOwner`, `parentExists`, `parentDriverEpoch`,
+  // `parentStatus` — all assigned in `attachScorecards` and nowhere else, and each guard picked its own one
+  // to enter on: `create` on the epoch accessor, `update`'s existence half on the existence accessor, the
+  // scoring fence on the pass-owner accessor. Four readers of one fact is three too many (rule `protocol`:
+  // make the state that distinguishes them unreachable, rather than picking the right reader), and this very
+  // fence has already been repaired twice for asking one half of the question. Found by `pnpm review` on the
+  // commit that closed the second of those.
+  private scorecards?: ScorecardOwner;
+
+  // A TERMINAL pass is not an owner (arch-review 17 P0-3) — the Pg fence adds `status = 'running'` to the
+  // same EXISTS, so the twin resolves an owner only while the marker is live. Answering the passId of a
+  // failed marker here would let the in-memory pair accept a write the database refuses.
+  private scoringPassOwner(scorecardId: string): string | undefined {
+    const live = this.scorecards?.peek(scorecardId)?.scoringPass;
+    return live?.status === "running" ? live.passId : undefined;
   }
 
   // The dispatch intent's whole question: mine, and still open.
   private parentAdmitsWork(parent: { scorecardId: string; epoch: number }): boolean {
-    // Unpaired, this store is not part of a batch topology and asks nothing — that is what the optional
-    // accessors mean. PAIRED, the parent row must EXIST, exactly as the Pg twin's `EXISTS` clause requires.
-    if (this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return false;
-    if (this.parentDriverEpoch?.(parent.scorecardId) !== parent.epoch) return false;
-    const status = this.parentStatus?.(parent.scorecardId);
+    // Unpaired, this store is not part of a batch topology and asks nothing — that is what an absent pair
+    // means.
+    const owner = this.scorecards;
+    if (owner === undefined) return true;
+    const row = owner.peek(parent.scorecardId);
+    // ⚠️ ABSENT AND "NO STATUS" ARE ONE `undefined` OUT OF `peek`, AND THEY ARE NOT ONE ANSWER.
+    // This read the status alone and treated `undefined` as "no constraint", so a run naming a scorecard this
+    // store does not have was ADMITTED — while the Postgres twin's `PARENT_AUTHORIZES` opens with
+    // `EXISTS (SELECT 1 FROM everdict_scorecards …)` and refuses exactly that. The twin was more permissive
+    // than production on an AUTHORIZATION axis, which is the one place that is worst, and no unit test built
+    // on this pair could see it (rule `testing` — a guard the twin does not have is a guard no unit test can
+    // see). Found by `pnpm scan` over `adapters`, 2026-09-11.
+    if (row === undefined) return false;
+    // …the parent's fencing token, which the child's own epoch cannot stand in for.
+    if ((row.ownerEpoch ?? 0) !== parent.epoch) return false;
+    // …and whether that parent still ADMITS work: a cancel settles it terminal without touching the epoch,
+    // so an epoch-only condition would let a proved loop open a case for a batch the user stopped.
+    const status = row.status;
     return status === undefined || !TERMINAL_SCORECARD_STATUSES.includes(status as never);
   }
 
-  private scoringPassOwner?: (scorecardId: string) => string | undefined;
-  private parentExists?: (scorecardId: string) => boolean;
-  private parentDriverEpoch?: (scorecardId: string) => number | undefined;
-  private parentStatus?: (scorecardId: string) => string | undefined;
+  // The SETTLEMENT's question, which is not the dispatch's: existence and the fencing token, and deliberately
+  // NOT the status — the Pg twin's UPDATE fence asks both halves in ONE clause,
+  // `EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $1 AND s.owner_epoch = $2)`, because a
+  // settlement legitimately lands on a scorecard the same write is closing.
+  // `CaseOutcomeCommitter.settleChildOn → settleRun → update(…)` reaches it on every batch settlement, and
+  // the epoch alone could not answer it: a missing row reads as epoch 0, which is what a fresh settlement
+  // carries. `create` was repaired first and this parallel check was left standing — the sibling law applied
+  // to its own repair, found by `pnpm review` on that very commit.
+  private parentStillDrives(parent: { scorecardId: string; epoch: number }): boolean {
+    const owner = this.scorecards;
+    if (owner === undefined) return true;
+    const row = owner.peek(parent.scorecardId);
+    return row !== undefined && (row.ownerEpoch ?? 0) === parent.epoch;
+  }
 
   async create(record: RunRecord, events?: OutboxEvent[], guard?: RunCreateGuard): Promise<void> {
     // The dispatch intent's condition, on the same terms as the update fence: with the scorecard pair wired,
     // a parent epoch that moved refuses the insert; unpaired, this store is not part of a batch topology.
     const parent = guard?.parentDriver;
-    if (this.parentDriverEpoch && parent && !this.parentAdmitsWork(parent))
+    if (parent && !this.parentAdmitsWork(parent))
       throw new ConflictError(
         "CONFLICT",
         { scorecard: parent.scorecardId, run: record.id },
@@ -129,21 +154,13 @@ export class InMemoryRunStore implements RunStore {
     // resolver the fence cannot be evaluated, and a fence that cannot be evaluated must REFUSE: silently
     // allowing the write would make the dev store the one place the invariant does not hold.
     const fence = guard?.scoring;
-    if (this.scoringPassOwner && fence && this.scoringPassOwner(fence.scorecardId) !== fence.passId) return undefined;
-    // …and the parent batch's driver fence (arch-review 33 P0), on the same terms as the scoring one: with
-    // the pair wired, an epoch that moved under the writer refuses the write; unpaired, this store is not
-    // part of a batch topology and the condition has nothing to evaluate.
-    // ⚠️ EXISTENCE FIRST, ON THE SAME TERMS AS `create` — AND FOR THE SAME REASON THAT ONE NEEDED IT.
-    // `parentDriverEpoch` defaults a missing row to 0, so a settlement carrying `epoch: 0` for a scorecard
-    // this store never saw passed the comparison and the write was admitted. The Pg twin asks both halves in
-    // ONE clause — `EXISTS (SELECT 1 FROM everdict_scorecards s WHERE s.id = $1 AND s.owner_epoch = $2)` —
-    // and `CaseOutcomeCommitter.settleChildOn → settleRun → update(...)` is a live path that reaches it.
-    // `create` was repaired first and this parallel check was left standing; found by `pnpm review` on that
-    // very commit, which is the sibling law applied to its own repair.
-    const parent = guard?.parentDriver;
-    if (parent && this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return undefined;
-    if (this.parentDriverEpoch && parent && this.parentDriverEpoch(parent.scorecardId) !== parent.epoch)
+    if (this.scorecards !== undefined && fence && this.scoringPassOwner(fence.scorecardId) !== fence.passId)
       return undefined;
+    // …and the parent batch's driver fence (arch-review 33 P0), on the same terms as the scoring one: with
+    // the pair wired, a parent row that is absent or whose epoch moved under the writer refuses the write;
+    // unpaired, this store is not part of a batch topology and the condition has nothing to evaluate.
+    const parent = guard?.parentDriver;
+    if (parent && !this.parentStillDrives(parent)) return undefined;
     // …and the settled row refuses a second outcome, exactly as the SQL condition refuses it. A dev store that
     // allowed the overwrite would make the in-memory path the one place "first terminal write wins" is false.
     if (guard?.expectNonTerminal === true && isRunTerminal(cur)) return undefined;
