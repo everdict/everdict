@@ -56,8 +56,10 @@ clean green tree and a PreToolUse hook denies unstamped pushes. See rule `.claud
 **There is NO remote CI.** Every GitHub Actions workflow was disabled on 2026-08-21 and DELETED on
 2026-09-11 by the maintainer's decision (declared-limits C3): `ci:local` is not a mirror of a pipeline, it IS
 the pipeline, and there is no run to watch after a push. Never push red.
-**`ci:local` does NOT run the trust suite** — it needs a real Postgres + object store + ClickHouse, a
-scenario that SKIPS is a FAILED certification, and skipping is the local default. `pnpm trust-fast` carries
+**`ci:local` does NOT run the trust suite** — it needs a real Postgres + object store + ClickHouse, and
+**skipping is the local default**: every `*.trust.test.ts` gates on `EVERDICT_TRUST_DATABASE_URL` (plus the
+other `EVERDICT_TRUST_*` vars), so without them the files SKIP and vitest exits 0. A scenario that skipped
+certified NOTHING, and a skip and a pass are the same exit code. `pnpm trust-fast` carries
 the required subset's scope and `pnpm trust-full` the whole tree; `pnpm trust-certified` (inside `ci:local`)
 reports how long it has been and what has changed since. The hook guards every checkout that shares this
 `.git`, linked worktrees included.

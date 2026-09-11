@@ -28,7 +28,7 @@
 // on evidence that no longer describes them.
 //
 // ⚠️ It IS red on one thing: a scope that has drifted from the workflow's own invocation. The count is
-// meaningless if this file and `trust-fast.yml` disagree about what "in scope" means, and that disagreement
+// meaningless if this file and the command a person runs disagree about what "in scope" means, and that
 // is exactly the silent kind — so the scope is read OUT of the workflow rather than copied beside it.
 //
 // watches: nothing — it reads paths and a marker file, not source vocabulary.
@@ -78,7 +78,7 @@ const scope = invocation
 const include = scope.filter((a) => !a.startsWith("!"));
 const exclude = scope.filter((a) => a.startsWith("!")).map((a) => a.slice(1));
 if (include.length === 0) {
-  console.error("✖ trust-certified: parsed no scope out of trust-fast.yml's invocation.");
+  console.error(`✖ trust-certified: parsed no scope out of package.json's \`${TRUST_FAST}\` script.`);
   process.exit(1);
 }
 
