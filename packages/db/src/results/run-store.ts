@@ -76,17 +76,30 @@ export class InMemoryRunStore implements RunStore {
     this.parentDriverEpoch = (scorecardId) => owner.peek(scorecardId)?.ownerEpoch ?? 0;
     // …and whether that parent still ADMITS work: a cancel settles it terminal without touching the epoch,
     // so an epoch-only condition would let a proved loop open a case for a batch the user stopped.
+    // ⚠️ ABSENT AND "NO STATUS" ARE ONE `undefined` OUT OF `peek`, AND THEY ARE NOT ONE ANSWER.
+    // `parentAdmitsWork` read this field alone and treated `undefined` as "no constraint", so a run naming a
+    // scorecard this store does not have was ADMITTED — while the Postgres twin's `PARENT_AUTHORIZES` opens
+    // with `EXISTS (SELECT 1 FROM everdict_scorecards …)` and refuses exactly that. The twin was more
+    // permissive than production on an AUTHORIZATION axis, which is the one place that is worst, and no unit
+    // test built on this pair could see it (rule `testing` — a guard the twin does not have is a guard no
+    // unit test can see). The record's presence is asked separately now.
+    // Found by `pnpm scan` over `adapters`, 2026-09-11.
+    this.parentExists = (scorecardId) => owner.peek(scorecardId) !== undefined;
     this.parentStatus = (scorecardId) => owner.peek(scorecardId)?.status;
   }
 
   // The dispatch intent's whole question: mine, and still open.
   private parentAdmitsWork(parent: { scorecardId: string; epoch: number }): boolean {
+    // Unpaired, this store is not part of a batch topology and asks nothing — that is what the optional
+    // accessors mean. PAIRED, the parent row must EXIST, exactly as the Pg twin's `EXISTS` clause requires.
+    if (this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return false;
     if (this.parentDriverEpoch?.(parent.scorecardId) !== parent.epoch) return false;
     const status = this.parentStatus?.(parent.scorecardId);
     return status === undefined || !TERMINAL_SCORECARD_STATUSES.includes(status as never);
   }
 
   private scoringPassOwner?: (scorecardId: string) => string | undefined;
+  private parentExists?: (scorecardId: string) => boolean;
   private parentDriverEpoch?: (scorecardId: string) => number | undefined;
   private parentStatus?: (scorecardId: string) => string | undefined;
 

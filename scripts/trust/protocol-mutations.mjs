@@ -3041,6 +3041,18 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── pnpm scan (adapters, 2026-09-11) · the in-memory twin refuses what Postgres refuses ────────
+    //
+    // `PARENT_AUTHORIZES` opens with an EXISTS over `everdict_scorecards`; the twin asked only for a status
+    // and read `peek`'s single `undefined` as "no constraint". Neutralizing the existence check makes the
+    // twin the more permissive of the two on an authorization axis — the one place that is worst.
+    name: "Adapters — the in-memory run store admits a dispatch whose parent row is absent",
+    file: "packages/db/src/results/run-store.ts",
+    from: "    if (this.parentExists !== undefined && !this.parentExists(parent.scorecardId)) return false;",
+    to: "    void this.parentExists;",
+    suite: ["--root", "packages/db", "src/results/twin-refuses-an-absent-parent.counterexample.test.ts"],
+  },
+  {
     // ── pnpm scan (domain, 2026-09-11) · a keep-alive may not rewrite the grant a budget reads ─────
     //
     // `session.ttlSec` is what `CampaignService`'s delegation budget refuses on ("was granted ${n}s"), and a

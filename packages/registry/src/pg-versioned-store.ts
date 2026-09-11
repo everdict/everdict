@@ -125,11 +125,22 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     item: T,
     createdBy?: string,
     origin?: CapabilityOrigin,
-    opts?: {
-      preserveEntityOwner?: boolean;
-      authority?: { expectedOwnerTeamId?: string; initialTeamId?: string };
-    },
   ): Promise<"registered"> {
+    // ── THERE IS NO OWNERSHIP AUTHORITY ON THIS WRITE, AND THERE USED TO BE A PARAMETER SAYING THERE WAS ──
+    //
+    // This signature carried `opts?: { preserveEntityOwner?: boolean; authority?: { expectedOwnerTeamId?,
+    // initialTeamId? } }` and read NONE of it — `grep 'opts\.'` in this file returned nothing, and `register`,
+    // its only caller, never passed a fifth argument. Vestigial from arch-review 119, which threaded an
+    // `expectedOwnerTeamId` through and then REMOVED it once the store refused every re-file and the
+    // precondition could never mismatch. The guard went; the shape of it stayed.
+    //
+    // A maintainer reading `authority: { expectedOwnerTeamId }` on a versioned-registry write reasonably
+    // infers an ownership check gates re-registration. None exists, and wiring a caller to pass it would
+    // silently no-op rather than authorize anything — which is worse than no guard, because it reads like
+    // one (rule `protocol`: an unreachable refusal is a claim that a window is closed, with nothing able to
+    // test it). Deleted rather than implemented: ownership is enforced where arch-review 119 put it, at the
+    // store's refusal to change an entity's owner, and `moveToTeam` is what transfers.
+    // Found by `pnpm scan` over `adapters`, 2026-09-11.
     // Non-empty version invariant (parity with VersionedStore) — a blank version sorts to the tail as non-semver and
     // silently becomes `latest`. Reject it before the write.
     if (item.version.trim().length === 0) {
