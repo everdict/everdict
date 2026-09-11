@@ -59,13 +59,35 @@ for (let i = 0; i < argv.length; i++) {
 // ── the ledger ───────────────────────────────────────────────────────────────────────────────────
 // One line per graded finding: date · source@key · `file` · **verdict** — why
 const LINE = /^- (\d{4}-\d{2}-\d{2}) · (review|scan)@(\S+) · `([^`]+)` · \*\*(real|false-positive|carried)\*\* — (.+)$/;
+// ── A LINE THAT LOOKS LIKE AN ENTRY AND DOES NOT PARSE IS AN ERROR, NOT SILENCE ──────────────────
+//
+// `.filter(Boolean)` used to drop an unparsed line, so an entry reading as a perfectly good grading to a
+// PERSON was invisible to the counter — and the counter is the whole point of this file. It happened: a
+// verdict written `**real**, and PREDICTIVE` (an adverb after the closing asterisks) graded a finding in the
+// reader's eyes and nowhere else, quietly lowering nothing and raising nothing. Found by `pnpm review`, which
+// read the regex; `pnpm findings` reported 88 graded over 89 entry-shaped lines and said nothing about the
+// difference. An entry-shaped line that fails the full form is now named and refused.
+const ENTRY_SHAPED = /^- \d{4}-\d{2}-\d{2} · /;
 const readLedger = () => {
   if (!existsSync(LEDGER)) return [];
-  return readFileSync(LEDGER, "utf8")
-    .split("\n")
-    .map((l) => LINE.exec(l.trim()))
-    .filter(Boolean)
-    .map((m) => ({ date: m[1], source: m[2], key: m[3], file: m[4], verdict: m[5], why: m[6] }));
+  const entries = [];
+  const malformed = [];
+  for (const raw of readFileSync(LEDGER, "utf8").split("\n")) {
+    const line = raw.trim();
+    const m = LINE.exec(line);
+    if (m) entries.push({ date: m[1], source: m[2], key: m[3], file: m[4], verdict: m[5], why: m[6] });
+    else if (ENTRY_SHAPED.test(line)) malformed.push(line);
+  }
+  if (malformed.length > 0) {
+    console.error(
+      `✖ findings: ${malformed.length} line(s) in ${path.relative(root, LEDGER)} look like entries and do not parse.
+  They grade a finding for a reader and for nothing else — the count below would silently omit them.
+  The form is:  - <date> · <review|scan>@<key> · \`<file>\` · **real|false-positive|carried** — <why>`,
+    );
+    for (const line of malformed) console.error(`    ${line.slice(0, 120)}`);
+    process.exit(1);
+  }
+  return entries;
 };
 
 if (opts.record) {
