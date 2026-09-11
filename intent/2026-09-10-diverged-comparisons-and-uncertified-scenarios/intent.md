@@ -95,10 +95,14 @@ holds the second half.
 
 Carried, and recorded where a reader meets them rather than resolved here:
 
-- **The real two-tree difference is not computed.** GitHub's comparison API is three-dot only; doing it by hand
-  means walking the trees API and writing a second diff the oracle would then have to trust. The merge-base
-  refusal is the bound this change chose, and a campaign whose branch is genuinely diverged has no way to get
-  a clean oracle except by rebasing and rebuilding.
+- ~~**The real two-tree difference is not computed.**~~ **CLOSED 2026-09-11.** It still is not — the compare
+  API is three-dot only and a hand-rolled trees diff is a second implementation the oracle would have to
+  trust — but the question it was blocking is answered by one more call to the SAME endpoint:
+  `files(M...B)` beside `files(M...C)` makes the union a superset of the two-tree difference, so a scope that
+  misses the union is genuinely clean. The refusal on ordinary diverged pull requests is gone, the live probe
+  now answers `touched: ["README"]` instead of declining, and the receipt records which question was answered
+  (`pathsCover`). What stays open is narrower: the 300-file cap is per comparison and either side reaching it
+  makes the listing incomplete, and that arithmetic is pinned only against constructed responses.
 - **Nothing counts the scenarios a push did NOT certify.** The cheap repair is a line in `ci:local`'s own
   output saying how many `*.trust.test.ts` scenarios were skipped and when the suite last ran green. It is not
   in this change because the number it would print is a property of a workflow that is off, and turning that

@@ -119,28 +119,48 @@ attested baseline and return unverifiable otherwise. Add a regression with basel
 protected changes in diverged history. Retain the existing ahead, identical,
 missing-attestation, rename, and cap cases.
 
-### Repair
+### Repair, in two stages
 
-The second of the two, because the first has no endpoint: GitHub's comparison API is
-three-dot only, and a real two-tree difference would mean walking the trees API and diffing
-by hand — a second implementation of a thing the oracle would then have to trust.
+**First (2026-09-10): a refusal.** `merge_base_commit.sha` was read from the comparison response
+and travelled as part of the attestation; `oracleCheck` refused anything but the evaluated
+baseline. Sound, and it fires on ORDINARY pull requests — a branch cut before its baseline was
+built is diverged by definition — so a campaign's only route to a clean oracle was
+rebase-and-rebuild. That cost was recorded here rather than softened, and it was the wrong
+place to stop: the check declined to answer a question it could answer.
 
-`merge_base_commit.sha` is read from the comparison response and travels as part of the
-attestation (`compared.mergeBaseSha`), through `listPullRequestChanges` and the composition
-untouched, exactly as the two commit SHAs do. `oracleCheck` refuses when it is not the
-evaluated baseline, and the reason names the repair an operator has to make rather than the
-mechanism: *rebase the candidate onto the evaluated baseline and build again*. A listing that
-names **no** starting point is refused for its own reason — not saying is a third answer, not
-a permission (rule `protocol` L2). The receipt is not written on either path, so nothing
-downstream can read a diverged comparison as evidence.
+**Second (2026-09-11): coverage.** The review's other option — compute the two-tree difference —
+has no endpoint, and doing it by hand off the trees API is a second diff implementation the
+oracle would then have to trust. But the same endpoint answers the real question with one more
+call. With merge base M, evaluated baseline B and candidate C:
 
-⚠️ **This refusal will fire on ordinary pull requests.** A branch cut before the baseline was
-built is diverged by definition, and that is the fail-closed direction: the oracle's claim is
-about two evaluated trees, and a merge-base listing cannot make it. The cost is real and is
-stated here rather than softened.
+    files(M...C)   what the candidate changed since the fork   (the call already being made)
+    files(M...B)   what the BASELINE changed since the fork    (the call that was missing)
 
-Both counterexamples were seen RED with the refusal removed — `comparable` came back `true`,
-i.e. a clean receipt over a diverged comparison, which is the finding.
+A path in **neither** list has the same bytes at M, at B and at C, so B and C agree on it. The
+union is therefore a **superset** of the true B↔C difference: a scope that misses the union is
+genuinely clean, and the union can only over-report — a path both arms changed to identical
+bytes — which is the direction an oracle is allowed to be wrong in.
+
+So the adapter makes the second call when and only when the history diverged, unions the two
+lists, and declares what its paths COVER:
+
+    evaluated-difference   the comparison started at the evaluated baseline; the paths are exact
+    fork-union             it did not, and both sides were unioned; the paths are a superset
+
+`oracleCheck` decides on that declaration, never on the three SHAs. A listing that declares
+neither a starting point nor a cover is unverifiable — not saying is a third answer, not a
+permission (rule `protocol` L2) — and a reader whose `pathsCover` contradicts its own merge base
+is unverifiable in either direction. The receipt records the cover, because a `clean` receipt is
+sound under both values while a `touched` one derived from a union may name a path both arms
+changed alike, and an auditor may not be left to infer that from three SHAs.
+
+⚠️ **The refusal for ordinary diverged pull requests is gone.** What remains refused is a reader
+that will not say what it looked at.
+
+Four counterexamples, each seen RED under a neutralization of its own half: removing the
+adapter's second comparison loses `datasets/tb.json` from the union (`expected [ Array(1) ] to
+deeply equal [ …(2) ]`), and removing the consumer's coherence checks lets a self-contradicting
+reader through (`expected true to be false`, twice).
 
 ### What the gate said about the same commit
 
@@ -160,21 +180,42 @@ sentence describing what that list contains was written from the endpoint's name
 
 ### Live verification of the repair
 
-The review's own probe, unchanged except for its exit condition, re-run against the fixed
-tree on 2026-09-10 with the same public commits:
+The review's own probe, unchanged except for its exit condition, re-run against the fixed tree
+with the same public commits.
+
+After the refusal (2026-09-10) it declined to answer, naming the merge base this review's own
+table had recorded from the live response:
+
+```text
+"kind": "unverifiable",
+"reason": "the oracle listing compares from 7fd1a60b01f91b314f59955a4e4d4e80d8edf11d rather than from the evaluated baseline b1b3f972…"
+```
+
+After coverage (2026-09-11) it answers the question instead, and the protected file the whole
+finding is about is the one it names:
 
 ```text
 protected README differs between the evaluated commits: true
 oracle: {
- "kind": "unverifiable",
- "reason": "the oracle listing compares from 7fd1a60b01f91b314f59955a4e4d4e80d8edf11d rather than from the evaluated baseline b1b3f9723831141a31a1a7252a213e216ea76e56, so its file list describes a common ancestor's difference and can omit a protected file the baseline changed — rebase the candidate onto the evaluated baseline and build again"
+ "kind": "touched",
+ "paths": [ "README" ],
+ "receipt": {
+  "repository": "octocat/Hello-World",
+  "baselineSha": "b1b3f9723831141a31a1a7252a213e216ea76e56",
+  "candidateSha": "b3cbd5bbd7e81436d2eee04537ea2b4c0cad4cdf",
+  "pathsDigest": "sha256:00d22db583cb405ef963d0177cd9184a0d99f050d1b7a337688a862bd12848c4",
+  "complete": true,
+  "pathsCover": "fork-union",
+  "commitProvenance": "everdict-build"
+ }
 }
-CLOSED: the diverged comparison is refused, and the reason names the repair.
+CLOSED: the diverged comparison is COVERED — the union of both sides of the fork names the protected README.
 ```
 
-The merge base it names is the one this review's own table recorded, read from the live
-response. Same limits as the reproduction: authentication stubbed, build ledger a fixture,
-the production oracle method driven directly rather than through a deployed campaign.
+Same limits as the reproduction: authentication stubbed, build ledger a fixture, the production
+oracle method driven directly rather than through a deployed campaign. ⚠️ The 300-file cap is
+now per COMPARISON and either side reaching it makes the listing incomplete; that arithmetic is
+pinned against constructed responses, not against a real 300-file fork.
 
 ## Verification and limits
 
