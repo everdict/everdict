@@ -230,9 +230,14 @@ export class GithubIssueSync {
     const github = githubOf(record);
     const writer = await this.writerFor(tenant, github.repository, { issues: "read" }, github.host);
     const remote = await writer.getIssue(github.repository, github.number);
+    // ⚠️ A FAILED LIST IS NOT AN EMPTY THREAD. This is a RE-SYNC over an issue that already has comments
+    // stored, and the domain REPLACES the stored thread with what arrives here — so `.catch(() => [])` erased
+    // five comments on a rate-limit blip, permanently, whenever the remote had also changed something else
+    // (the echo-suppression watermark only skips an issue GitHub has not touched). `undefined` keeps them.
+    // The import path a hundred lines up keeps its swallow on purpose: a fresh import has nothing to lose.
     const comments = await writer
       .listIssueComments(github.repository, github.number, { maxComments: ISSUE_GITHUB_COMMENT_LIMIT })
-      .catch(() => []);
+      .catch(() => undefined);
     return (await this.applyRemote(tenant, record, remote, comments, actor)).record;
   }
 
@@ -281,9 +286,11 @@ export class GithubIssueSync {
         continue;
       }
       try {
+        // Same as `pullIssue`: a re-sync replaces the stored thread, so a failed list may not arrive as an
+        // empty one. `undefined` keeps what is stored and the history records that it could not refresh.
         const comments = await writer
           .listIssueComments(github.repository, github.number, { maxComments: ISSUE_GITHUB_COMMENT_LIMIT })
-          .catch(() => []);
+          .catch(() => undefined);
         const applied = await this.applyRemote(tenant, record, found, comments, actor);
         outcomes.push({ id: record.id, number: github.number, changed: applied.changed });
       } catch (err) {
@@ -331,7 +338,9 @@ export class GithubIssueSync {
     tenant: string,
     record: IssueRecord,
     remote: GithubIssue,
-    comments: IssueGithub["comments"],
+    // `undefined` = the thread could not be READ (see the two re-sync callers). It is not the same as an
+    // empty thread, and the domain keeps what is stored rather than replacing it with nothing.
+    comments: IssueGithub["comments"] | undefined,
     actor: IssueActor,
   ): Promise<{ record: IssueRecord; changed: boolean }> {
     const github = githubOf(record);

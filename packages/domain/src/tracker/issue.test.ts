@@ -247,6 +247,42 @@ describe("Issue — the GitHub copy seams", () => {
     expect(transition.patch.history?.at(-1)).toMatchObject({ event: "github_pulled" });
   });
 
+  it("a comment thread that could not be READ keeps the stored one — and both directions are asserted", () => {
+    // ── [pnpm scan · application · 2026-09-11] A FAILED LIST IS NOT AN EMPTY THREAD ─────────────────
+    //
+    // The stored thread is REPLACED by this value, and `github-issue-sync` handed `[]` when GitHub's
+    // list-comments call threw. So a rate-limit blip during a re-sync of an issue whose title had ALSO
+    // changed erased the stored comments permanently — the write went through because echo suppression only
+    // skips an issue GitHub has not touched.
+    //
+    // Seen red before the fix: "expected [] to have a length of 2 but got +0".
+    const stored = [
+      { author: "kim", body: "one", createdAt: LATER, url: `${github.url}#1` },
+      { author: "ada", body: "two", createdAt: LATER, url: `${github.url}#2` },
+    ];
+    const record = newIssue({ github: { ...github, comments: stored } });
+    const remote = {
+      title: "Retry drops tool results",
+      labelIds: [],
+      state: "open" as const,
+      url: github.url,
+      updatedAt: "2026-08-02T10:00:00.000Z",
+    };
+
+    // ① unreadable — the rest of the pull still lands, and the thread survives
+    const unread = Issue.from(record).applyGithubPull(remote, "sync", LATER);
+    expect(unread.patch.github?.comments).toHaveLength(2);
+    expect(unread.patch.title).toBe("Retry drops tool results");
+    // …and it SAYS so, because a thread older than the title with no record of why is its own puzzle.
+    expect(unread.patch.history?.at(-1)).toMatchObject({ detail: { commentsUnavailable: true } });
+
+    // ② genuinely empty — a thread GitHub says is empty still empties the stored one. The residue of the
+    // predicate, asserted: absent and empty must not become the same answer in the other direction either.
+    const emptied = Issue.from(record).applyGithubPull({ ...remote, comments: [] }, "sync", LATER);
+    expect(emptied.patch.github?.comments).toEqual([]);
+    expect(emptied.patch.history?.at(-1)?.detail).not.toHaveProperty("commentsUnavailable");
+  });
+
   it("recordGithubPush annotates the outcome and never disturbs the committed local status", () => {
     const record = newIssue({ github });
     const ok = Issue.from(record).recordGithubPush({ ok: true, state: "closed" }, "dana", LATER);

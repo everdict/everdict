@@ -723,7 +723,16 @@ export class Issue {
       state: "open" | "closed";
       url: string;
       updatedAt: string;
-      comments: IssueGithubComment[];
+      // ── ABSENT MEANS "COULD NOT READ", NOT "THERE ARE NONE" (pnpm scan, application, 2026-09-11) ──
+      //
+      // The stored thread is REPLACED by this value, not merged into. The caller used to hand `[]` when
+      // GitHub's list-comments call threw, so a rate-limit blip during a re-sync of an issue whose title had
+      // also changed erased five stored comments permanently — the write went through because the
+      // echo-suppression watermark only skips an issue GitHub has NOT touched.
+      //
+      // So a read that did not happen is a third value here (rule `protocol` L2): absent keeps the stored
+      // thread, and the pull records that it could not refresh it rather than reporting a thread of zero.
+      comments?: IssueGithubComment[];
     },
     by: string,
     now: string,
@@ -743,7 +752,7 @@ export class Issue {
       url: remote.url,
       state: remote.state,
       syncedAt: remote.updatedAt,
-      comments: remote.comments.slice(-ISSUE_GITHUB_COMMENT_LIMIT),
+      comments: remote.comments === undefined ? github.comments : remote.comments.slice(-ISSUE_GITHUB_COMMENT_LIMIT),
     };
     return {
       patch: {
@@ -755,7 +764,14 @@ export class Issue {
           at: now,
           by,
           event: "github_pulled",
-          detail: { changed, remoteState: remote.state, remoteUpdatedAt: remote.updatedAt },
+          detail: {
+            changed,
+            remoteState: remote.state,
+            remoteUpdatedAt: remote.updatedAt,
+            // Visible rather than silent: a pull that could not refresh the thread kept the stored one, and
+            // the history is where somebody finds out why the comments are older than the title.
+            ...(remote.comments === undefined ? { commentsUnavailable: true } : {}),
+          },
         }),
         updatedAt: now,
       },

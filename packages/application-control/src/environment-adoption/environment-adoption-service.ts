@@ -1,7 +1,14 @@
 import type { CapabilityRecord, ImageRefClass, ImageRegistryCoordinates, WorkspaceSettings } from "@everdict/contracts";
-import { NotFoundError } from "@everdict/contracts";
+import { NotFoundError, UpstreamError } from "@everdict/contracts";
 import { canConsumeCapability, classifyImageRef, parseImageRef } from "@everdict/domain";
 import type { CapabilityStore } from "../ports/capability-store.js";
+
+// What `resolve` answers, three-valued: `absent` is a real fact about the capability (deleted, revoked,
+// someone else's private publish) and `unknown` is a fact about the STORE. They used to be one `undefined`.
+type ResolvedEnvironment =
+  | { kind: "resolved"; record: CapabilityRecord; spec: Extract<CapabilityRecord["spec"], { type: "environment" }> }
+  | { kind: "absent" }
+  | { kind: "unknown" };
 import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.js";
 
 // Environment-image adoption ("import") — a WORKSPACE-LEVEL inventory of environment capabilities a workspace has
@@ -73,28 +80,51 @@ export class EnvironmentAdoptionService {
     return (await this.deps.settings.get(workspace))?.adoptedEnvironments ?? [];
   }
 
-  // The capability record for a ref IF it exists, is an environment, AND is consumable by this workspace — else undefined.
+  // ── THE CAPABILITY RECORD FOR A REF — THREE ANSWERS, NOT TWO (pnpm scan, application, 2026-09-11) ──
+  //
+  // `resolved` (it exists, is an environment, and this workspace may consume it), `absent` (any of those is
+  // false — deleted, revoked, someone else's private publish), or `unknown` (the store could not be READ).
+  //
+  // It used to `.catch(() => undefined)`, which made a database blip indistinguishable from a deleted
+  // capability — so `adopt()` answered 404 "not available to adopt" about an environment that exists, which
+  // is the wrong ANSWER and not merely a worse one. A caller told something does not exist stops asking; a
+  // caller told the store is unreachable retries (rule `protocol` L2).
   private async resolve(
     ref: EnvironmentRef,
     consumer: { tenant: string; subject: string },
-  ): Promise<CapabilityRecord | undefined> {
-    const rec = await this.deps.capabilityStore.getVersion(ref.source, ref.id, ref.version).catch(() => undefined);
-    if (!rec || rec.spec.type !== "environment" || !canConsumeCapability(rec, consumer)) return undefined;
-    return rec;
+  ): Promise<ResolvedEnvironment> {
+    let rec: CapabilityRecord | undefined;
+    try {
+      rec = await this.deps.capabilityStore.getVersion(ref.source, ref.id, ref.version);
+    } catch {
+      return { kind: "unknown" };
+    }
+    if (!rec || rec.spec.type !== "environment" || !canConsumeCapability(rec, consumer)) return { kind: "absent" };
+    // The narrowed spec travels WITH the record: every caller needs it and re-checking `type === "environment"`
+    // at each one is a guard that can never fire, which rule `protocol` says is the worst kind to write.
+    return { kind: "resolved", record: rec, spec: rec.spec };
   }
 
   // Adopt (import) an environment into the workspace inventory: verify pull-usability (warn-not-block) + record the
   // ref + snapshot, replacing any prior adoption of the same (source,id). An unresolvable/non-consumable ref → 404
   // (never leak that a cross-tenant private capability exists).
   async adopt(workspace: string, subject: string, ref: EnvironmentRef): Promise<AdoptedEnvironmentView> {
-    const rec = await this.resolve(ref, { tenant: workspace, subject });
-    if (!rec || rec.spec.type !== "environment")
+    const resolved = await this.resolve(ref, { tenant: workspace, subject });
+    // "We could not find out" is not "it is not there". A 404 here told the caller to stop asking about an
+    // environment that exists, and the two answers need different repairs from whoever reads them.
+    if (resolved.kind === "unknown")
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { ...ref },
+        `the capability store could not be read, so whether ${ref.id}@${ref.version} can be adopted cannot be established — nothing was adopted; retry once it answers`,
+      );
+    if (resolved.kind === "absent")
       throw new NotFoundError(
         "NOT_FOUND",
         { ...ref },
         `environment ${ref.id}@${ref.version} is not available to adopt`,
       );
-    const v = await this.verify(workspace, rec.spec.image);
+    const v = await this.verify(workspace, resolved.spec.image);
     const entry: AdoptionEntry = {
       source: ref.source,
       id: ref.id,
@@ -107,7 +137,7 @@ export class EnvironmentAdoptionService {
       entry,
     ];
     await this.deps.settings.set(workspace, { adoptedEnvironments: next });
-    return this.toView(entry, rec, await this.deps.registryCoordinates(workspace), this.managed(workspace));
+    return this.toView(entry, resolved, await this.deps.registryCoordinates(workspace), this.managed(workspace));
   }
 
   // Pull-usability of the environment's image (M6). For a ref in everdict's OWN store the answer is POLICY, not a
@@ -133,15 +163,15 @@ export class EnvironmentAdoptionService {
     const entries = await this.entries(workspace);
     const entry = entries.find((e) => e.source === source && e.id === id);
     if (!entry) throw new NotFoundError("NOT_FOUND", { source, id }, `environment ${id} is not adopted`);
-    const rec = await this.resolve(entry, { tenant: workspace, subject });
+    const resolved = await this.resolve(entry, { tenant: workspace, subject });
     let updated = entry;
-    if (rec && rec.spec.type === "environment") {
-      updated = { ...entry, verify: await this.verify(workspace, rec.spec.image) };
+    if (resolved.kind === "resolved") {
+      updated = { ...entry, verify: await this.verify(workspace, resolved.spec.image) };
       await this.deps.settings.set(workspace, {
         adoptedEnvironments: entries.map((e) => (e.source === source && e.id === id ? updated : e)),
       });
     }
-    return this.toView(updated, rec, await this.deps.registryCoordinates(workspace), this.managed(workspace));
+    return this.toView(updated, resolved, await this.deps.registryCoordinates(workspace), this.managed(workspace));
   }
 
   // The workspace's environment inventory — each adoption merged with the live capability + fresh class + verify.
@@ -162,13 +192,23 @@ export class EnvironmentAdoptionService {
     }
   }
 
+  // ⚠️ `unknown` IS RENDERED AS `available: false` HERE, AND THAT IS A DECISION, NOT AN ACCIDENT.
+  //
+  // The view says "the source capability still resolves + is consumable for this workspace", and a store
+  // outage means nobody knows — so during one, this inventory labels every entry unavailable, which reads to
+  // a user exactly like a revocation. It is kept because the honest repair is a THIRD display state, which
+  // reaches the served schema, the web entity schema and a message catalog in two locales, and inventing
+  // that at the end of a scan triage is how the next defect gets written. Filed as
+  // `intent/2026-09-11-an-inventory-cannot-say-it-does-not-know/`. What the scan changed is that `adopt` no
+  // longer answers 404 about something that exists — a wrong ANSWER, where this is a wrong LABEL.
   private toView(
     entry: AdoptionEntry,
-    rec: CapabilityRecord | undefined,
+    resolved: ResolvedEnvironment,
     coords: ImageRegistryCoordinates[],
     managed?: ImageRegistryCoordinates,
   ): AdoptedEnvironmentView {
-    const spec = rec?.spec.type === "environment" ? rec.spec : undefined;
+    const rec = resolved.kind === "resolved" ? resolved.record : undefined;
+    const spec = resolved.kind === "resolved" ? resolved.spec : undefined;
     return {
       source: entry.source,
       id: entry.id,
