@@ -57,10 +57,32 @@ export function recordSnapshotTransition(
 
 // Keep-alive (touch): push the hard deadline OUT to now+ttl — never pull it in (a touch that could shorten
 // a long-remaining session would make a small ttl a foot-gun), and never announce (upkeep is not news).
+//
+// ── …AND `ttlSec` OBEYS THE SAME RULE, BECAUSE A DECISION READS IT (pnpm scan, domain, 2026-09-11) ──
+//
+// It used to take the caller's raw value on BOTH paths, so a touch that did not move the deadline still
+// rewrote the field: a session granted 3600s and touched at 60s kept `expiresAt` an hour out and reported
+// `ttlSec: 60`. Two fields on one record disagreeing about the same window.
+//
+// That is not cosmetic, because `ttlSec` is not a display value. `CampaignService`'s delegation budget
+// refuses a round whose session was granted more time than the frozen frame allows, and its own message says
+// "was granted ${n}s" — it reads THIS field. So a session with an hour left passed a two-minute budget, and
+// `POST /sandboxes/:id/touch` reaches it on both transports with `ttlSec` OPTIONAL, which means the plain
+// keep-alive path overwrites the grant with the deployment default without anybody asking for it.
+//
+// The field now says what the deadline says: the grant changes only when the deadline it implies WINS.
+// `Math.max` on the instant, and the ttl that produced it — one fact, not two (rule `protocol` L3).
+//
+// ⚠️ WHAT THIS DOES NOT CLOSE: repeated touches still extend a session indefinitely, so a frame's
+// `delegation.ttlSec` bounds the per-grant window and not the total time a delegate can hold one. That was
+// true before this change and is unchanged by it; it is a different question about what the budget MEANS,
+// and inventing an answer here would be a policy nobody declared.
 export function extendSessionTransition(record: RunRecord, ttlSec: number, now: string): RunTransition {
   assertRunNotTerminal(record, "extendSession");
   const session = assertRunSession(record, "extendSession");
   const proposed = new Date(now).getTime() + ttlSec * 1000;
-  const expiresAt = new Date(Math.max(new Date(session.expiresAt).getTime(), proposed)).toISOString();
-  return { patch: { session: { ...session, ttlSec, expiresAt }, updatedAt: now }, facts: [] };
+  const held = new Date(session.expiresAt).getTime();
+  const granted = proposed > held ? ttlSec : session.ttlSec;
+  const expiresAt = new Date(Math.max(held, proposed)).toISOString();
+  return { patch: { session: { ...session, ttlSec: granted, expiresAt }, updatedAt: now }, facts: [] };
 }

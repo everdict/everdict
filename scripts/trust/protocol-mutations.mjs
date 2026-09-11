@@ -3041,6 +3041,18 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── pnpm scan (domain, 2026-09-11) · a keep-alive may not rewrite the grant a budget reads ─────
+    //
+    // `session.ttlSec` is what `CampaignService`'s delegation budget refuses on ("was granted ${n}s"), and a
+    // touch that does not move the deadline may not move it either. Neutralizing the rule takes the caller's
+    // raw value on both paths, so a session with ten minutes left reports the keep-alive's ttl.
+    name: "Session — a keep-alive that does not move the deadline still rewrites the grant",
+    file: "packages/domain/src/run/session-run.ts",
+    from: "  const granted = proposed > held ? ttlSec : session.ttlSec;",
+    to: "  const granted = (void held, ttlSec);",
+    suite: ["--root", "packages/domain", "src/run/run.test.ts"],
+  },
+  {
     // ── review 2026-09-10 R1 · the oracle listing must SAY what it looked at ───────────────────────
     //
     // `/compare/A...B` is three-dot, so on a diverged history its files describe merge-base→B. Naming both

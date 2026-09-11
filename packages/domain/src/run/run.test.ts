@@ -494,8 +494,18 @@ describe("Run — agent worlds (W1): session snapshots and touch", () => {
     expect(extended.patch.session?.expiresAt).toBe("2026-08-03T00:35:00.000Z");
     expect(extended.facts).toEqual([]); // upkeep is not news
 
+    expect(extended.patch.session?.ttlSec).toBe(1800); // the deadline moved, so the grant is the new one
+
     const shorter = Run.from(record).extendSession(60, "2026-08-03T00:05:00.000Z"); // proposed 00:06 < 00:15
     expect(shorter.patch.session?.expiresAt).toBe("2026-08-03T00:15:00.000Z");
+    // ── `ttlSec` OBEYS THE SAME RULE (pnpm scan, domain, 2026-09-11) ──────────────────────────────
+    //
+    // It used to take the caller's raw value here too, so this record reported `ttlSec: 60` while holding a
+    // deadline ten minutes out. `CampaignService`'s delegation budget REFUSES on this field — its message
+    // says "was granted ${n}s" — so a session with ten minutes left passed a two-minute budget, and
+    // `POST /sandboxes/:id/touch` takes `ttlSec` as OPTIONAL, which means an ordinary keep-alive overwrote
+    // the grant with the deployment default. Seen red before the fix: "expected 60 to be 900".
+    expect(shorter.patch.session?.ttlSec).toBe(record.session?.ttlSec);
 
     expect(() => Run.from(queued()).recordSnapshot({ world: "w", version: "1", image: "i", now: "t" })).toThrow(
       ConflictError,
