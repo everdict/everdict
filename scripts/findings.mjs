@@ -30,6 +30,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readMarkedLedger } from "./marked-ledger.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const gitDir = path.join(root, ".git");
@@ -58,72 +59,19 @@ for (let i = 0; i < argv.length; i++) {
 
 // ── the ledger ───────────────────────────────────────────────────────────────────────────────────
 // One line per graded finding: date · source@key · `file` · **verdict** — why
+// The ledger's line form. Anchored, and handed to `readMarkedLedger` so the SAME regex decides both "is this
+// an entry" below the marker and "is this an entry in the wrong place" above it — see that module's header
+// for the four passes it took to learn that those must not be two predicates.
 const LINE = /^- (\d{4}-\d{2}-\d{2}) · (review|scan)@(\S+) · `([^`]+)` · \*\*(real|false-positive|carried)\*\* — (.+)$/;
-// ── EVERY LINE AFTER THE MARKER IS AN ENTRY, OR THE FILE IS REFUSED ─────────────────────────────
-//
-// `.filter(Boolean)` used to drop an unparsed line, so an entry reading as a perfectly good grading to a
-// PERSON was invisible to the counter — and the counter is the whole point of this file. It happened: a
-// verdict written `**real**, and PREDICTIVE` (an adverb after the closing asterisks) graded a finding in the
-// reader's eyes and nowhere else, quietly lowering nothing and raising nothing. `pnpm findings` reported 88
-// graded over 89 entry-shaped lines and said nothing about the difference.
-//
-// ⚠️ THE FIRST REPAIR GUESSED AT A SHAPE AND LEFT A RESIDUE. It flagged a line matching
-// `- <date> · `, which is the half of the space I had just removed — a line broken INSIDE that prefix (a
-// missing separator, a different date format) still vanished, reproducing the defect class in the diff that
-// closed it (found by `pnpm review`, and it is skill `code-review`'s residue rule exactly).
-//
-// So the rule is total instead: the file declares where its entries start, and EVERY non-empty line after
-// that marker must parse. No shape is guessed, so there is no other half to miss.
-const ENTRIES_MARKER = "<!-- entries below, newest last -->";
-const readLedger = () => {
-  if (!existsSync(LEDGER)) return [];
-  const text = readFileSync(LEDGER, "utf8");
-  const at = text.indexOf(ENTRIES_MARKER);
-  if (at < 0) {
-    console.error(
-      `✖ findings: ${path.relative(root, LEDGER)} has lost its \`${ENTRIES_MARKER}\` marker, so where the
-  entries begin cannot be established and every line below would be read as prose.`,
-    );
-    process.exit(1);
-  }
-  // ⚠️ …AND A WELL-FORMED ENTRY IN THE WRONG PLACE IS THE SAME DEFECT MOVED. The total rule below covers
-  // everything AFTER the marker, so a disposition pasted into the prose above it was invisible again — graded
-  // for a reader, counted by nothing. Found by `pnpm review` on the commit that wrote the total rule, which
-  // is twice in a row that a repair here covered the half it had just looked at.
-  const misplaced = text
-    .slice(0, at)
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => LINE.test(l));
-  if (misplaced.length > 0) {
-    console.error(
-      `✖ findings: ${misplaced.length} disposition line(s) in ${path.relative(root, LEDGER)} sit ABOVE the
-  \`${ENTRIES_MARKER}\` marker, where nothing reads them. Move them below it.`,
-    );
-    for (const line of misplaced) console.error(`    ${line.slice(0, 120)}`);
-    process.exit(1);
-  }
-  const entries = [];
-  const malformed = [];
-  for (const raw of text.slice(at + ENTRIES_MARKER.length).split("\n")) {
-    const line = raw.trim();
-    if (line === "") continue;
-    const m = LINE.exec(line);
-    if (m) entries.push({ date: m[1], source: m[2], key: m[3], file: m[4], verdict: m[5], why: m[6] });
-    else malformed.push(line);
-  }
-  if (malformed.length > 0) {
-    console.error(
-      `✖ findings: ${malformed.length} line(s) below the entries marker in ${path.relative(root, LEDGER)} do not parse.
-  Everything after that marker is an entry; a line that is not one grades a finding for a reader and for
-  nothing else, and the count below would silently omit it.
-  The form is:  - <date> · <review|scan>@<key> · \`<file>\` · **real|false-positive|carried** — <why>`,
-    );
-    for (const line of malformed) console.error(`    ${line.slice(0, 120)}`);
-    process.exit(1);
-  }
-  return entries;
-};
+const readLedger = () =>
+  readMarkedLedger({
+    file: LEDGER,
+    tool: "findings",
+    label: path.relative(root, LEDGER),
+    line: LINE,
+    what: "disposition",
+    cost: "The precision below would silently omit it — which is the one number this file exists to make un-moveable.",
+  }).map((m) => ({ date: m[1], source: m[2], key: m[3], file: m[4], verdict: m[5], why: m[6] }));
 
 if (opts.record) {
   for (const need of ["source", "key", "file", "verdict", "why"]) {

@@ -30,6 +30,7 @@ import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readMarkedLedger } from "../marked-ledger.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const LOG = path.join(root, ".git", "everdict-scan-log.jsonl");
@@ -134,48 +135,24 @@ if (opts.dismiss) {
   process.exit(0);
 }
 
-// ── WHAT HAS ALREADY BEEN DISMISSED, AND WHY A LINE IT CANNOT READ IS AN ERROR ───────────────────
+// What has already been dismissed, so a finding comes back MARKED rather than as new — which is the whole
+// pressure this ledger applies. A line silently skipped here UN-dismisses its finding: it returns as new,
+// nobody is told, and the findings-per-scan trend moves for a reason no one can see.
 //
-// A dismissed finding comes back MARKED rather than as new, which is the whole pressure this ledger applies.
-// A line this reader silently skipped therefore un-dismissed a finding: it returns as new, nobody is told,
-// and the findings-per-scan trend moves for a reason no one can see.
-//
-// It used to `.exec` a guessed shape and drop whatever missed — the identical defect `scripts/findings.mjs`
-// carried for its own ledger, found there first and only then here, because nothing asked how many readers
-// answer this same question (skill `code-review`, pass 4: count the siblings, not the callers). Same total
-// rule as its sibling now: the file declares where its entries begin and every non-empty line below must
-// parse.
-const DISMISSED_MARKER = "<!-- entries below, newest last -->";
+// Through the shared reader, not a second copy of the rule: this file had the identical defect
+// `scripts/findings.mjs` had, found there first and only then here, and then received HALF the repair. See
+// `scripts/marked-ledger.mjs` for the four passes that argument took.
 const DISMISSED_LINE = /^-\s+`[\d-]+`\s+·\s+\*\*([^*]+)\*\*\s+·\s+`([^`]+)`/;
-const dismissed = new Set();
-if (existsSync(DISMISSED)) {
-  const text = readFileSync(DISMISSED, "utf8");
-  const at = text.indexOf(DISMISSED_MARKER);
-  if (at < 0) {
-    console.error(
-      `✖ scan: ${DISMISSED} has lost its \`${DISMISSED_MARKER}\` marker, so where the dismissals begin cannot
-  be established — every dismissal below would read as prose and come back as a new finding.`,
-    );
-    process.exit(1);
-  }
-  const malformed = [];
-  for (const raw of text.slice(at + DISMISSED_MARKER.length).split("\n")) {
-    const line = raw.trim();
-    if (line === "") continue;
-    const m = DISMISSED_LINE.exec(line);
-    if (m) dismissed.add(`${m[1]}:${m[2]}`);
-    else malformed.push(line);
-  }
-  if (malformed.length > 0) {
-    console.error(
-      `✖ scan: ${malformed.length} line(s) below the entries marker in ${DISMISSED} do not parse.
-  Everything after that marker is a dismissal; a line that is not one dismisses a finding for a reader and
-  for nothing else, so the finding returns as NEW on the next run with nobody told why.`,
-    );
-    for (const line of malformed) console.error(`    ${line.slice(0, 120)}`);
-    process.exit(1);
-  }
-}
+const dismissed = new Set(
+  readMarkedLedger({
+    file: DISMISSED,
+    tool: "scan",
+    label: path.relative(root, DISMISSED),
+    line: DISMISSED_LINE,
+    what: "dismissal",
+    cost: "Its finding would return as NEW on the next run with nobody told why.",
+  }).map((m) => `${m[1]}:${m[2]}`),
+);
 
 // ── which scope ──────────────────────────────────────────────────────────────────────────────────
 // Both would be one instruction contradicting the other, and silently letting one win is how a flag teaches
