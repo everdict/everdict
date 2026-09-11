@@ -103,10 +103,10 @@ Carried, and recorded where a reader meets them rather than resolved here:
   now answers `touched: ["README"]` instead of declining, and the receipt records which question was answered
   (`pathsCover`). What stays open is narrower: the 300-file cap is per comparison and either side reaching it
   makes the listing incomplete, and that arithmetic is pinned only against constructed responses.
-- **Nothing counts the scenarios a push did NOT certify.** The cheap repair is a line in `ci:local`'s own
-  output saying how many `*.trust.test.ts` scenarios were skipped and when the suite last ran green. It is not
-  in this change because the number it would print is a property of a workflow that is off, and turning that
-  workflow back on is the repair this deployment actually owes (declared-limits C3). Written up in the lesson.
+- ~~**Nothing counts the scenarios a push did NOT certify.**~~ **CLOSED 2026-09-11** — `pnpm trust-certified`,
+  wired into `ci:local`: the scenario count in the required check's scope, the last certification's sha and
+  date, and which files in that scope have changed since. ⚠️ It is the FALLBACK and shipping it records that
+  C3 stays; the repair is still `gh workflow enable`, which is the maintainer's to run.
 - **The adapter's reading of a comparison response is pinned against constructed bodies**, plus one live probe
   of the diverged case. `base_commit`, `merge_base_commit`, `status` and `commits` are read from the documented
   shape, and no authenticated or GitHub Enterprise response has been seen.

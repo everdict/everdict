@@ -212,10 +212,26 @@ first-parent commits reached `main` between the last remote run and the audit wi
 and skill `ci` no longer instruct a session to watch a run that will not exist; they say to check the workflow
 state first.
 
+**What its absence DID mean, once, measured** — `trust-fast` is a required check this entry silenced, and
+`ci:local` cannot substitute for it: it boots no Postgres, object store or ClickHouse by design, so every
+`*.trust.test.ts` SKIPS and vitest reports a skip and a pass with the same exit code. On 2026-09-10 six
+certifications were found red — five asserting a whole `Score` against a shape that had grown a key, one
+sealing a receipt over bytes the row would never hold — after days in which `pnpm test`, `pnpm ci:commits`
+and `pnpm ci:local` were all green over them. Nothing anywhere could say how long it had been since anything
+ran them. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+
+**What now makes the gap visible** — `pnpm trust-certified`, wired into `ci:local`, prints the scenario count
+in the required check's scope (parsed out of `trust-fast.yml`, never copied beside it), the last
+certification's sha and date, and which files in that scope have CHANGED since. It does not run them and does
+not fail on them — three containers inside the push gate is the cost declined above, and a gate needing
+infrastructure it cannot start teaches people to bypass gates. It is red only on scope drift. ⚠️ **It is the
+fallback, not the repair, and shipping it is what records that this entry STAYS.** The repair is
+`gh workflow enable`.
+
 **Reopens if** — a red `main` reaches the remote that the local gate would have refused — which can only
 happen from a shell outside the tool (entry 2) — or the maintainer re-enables the workflows, at which point
-this entry is superseded and the "confirm green" instruction is unconditional again. `gh workflow enable` is
-one command per workflow.
+this entry is superseded, the "confirm green" instruction is unconditional again, and `pnpm trust-certified`
+becomes a redundant reader rather than the only one. `gh workflow enable` is one command per workflow.
 
 ## C4 · A dry run of the bands refuses; it does not file
 

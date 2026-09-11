@@ -51,7 +51,14 @@ The six scenarios were repaired to the shape production actually produces, and e
 stamped identity rather than tolerating it — a scenario that lets the field float has stopped certifying the
 thing that makes a metric name safe to carry. `trust-fast` was then run in full: 439 executed, 0 failed.
 
-What is not done is the counter. It is written here rather than shipped because the number it would print is a
-property of a workflow that is off, and turning that workflow back on is the repair this deployment actually
-owes — see `docs/architecture/harness-declared-limits.md` C3. A counter is the fallback for as long as C3
-stands, and it belongs in the same change that decides C3 stays.
+**The counter shipped on 2026-09-11 as `pnpm trust-certified`**, wired into `ci:local`. It prints the scenario
+count in the required check's scope, the last certification's sha and date, and which files in that scope have
+changed since — `trust-suite.mjs` writes `.git/everdict-trust-ok` on PASS only, so a failed or skipped run
+never moves the marker forward. It reads the scope OUT of `trust-fast.yml` rather than keeping a second copy,
+and that is the one thing it is red about: a count over the wrong population is worse than no count.
+
+It does not run the scenarios and does not fail on them, deliberately — three containers inside the push gate
+is the cost this deployment declined, and a gate needing infrastructure it cannot start teaches people to
+bypass gates. ⚠️ **So this is the fallback, and shipping it is what records that C3 STAYS**
+(`docs/architecture/harness-declared-limits.md`). The repair is still `gh workflow enable`, and it is one
+command per workflow.
