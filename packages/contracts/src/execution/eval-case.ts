@@ -529,7 +529,20 @@ export type CaseResult = z.infer<typeof CaseResultSchema>;
 // and `evidenceVersion` beside it exists to tell a producer that cannot vouch from a legacy row — that is a
 // vouch by design, not a stamp. This is a trust boundary, not a field sweep, and the counterexample asserts
 // the surviving field so it cannot decay into one.
-const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier", "judgmentsSealed"] as const;
+// ⚠️ `sourceTraceId` joined on 2026-09-11, found by `pnpm scan` over a scope nobody had touched. Its own
+// declaration says "The platform trace this result was scored FROM", both of its writers are control-plane
+// reads (`collect-trace.ts`'s pull, the topology backend's `fetchDetailed`), and it was sitting two fields
+// below the arch-review 122 comment that states this exact law. A producer could name any trace id and the
+// platform stored it as canonical AND exported it to four external observability sinks
+// (`everdict.sourceTraceId` on mlflow / phoenix / langsmith / langfuse) as the route back from a verdict to
+// the evidence it judged.
+//
+// ⚠️ AND NOTHING RE-ASKS THIS LIST. `pnpm untrusted-ingress` checks that a DOOR uses the untrusted schema;
+// no check asks whether the schema strips the right fields, which is why a field added after the lesson
+// never learned it. The exhaustive-classification repair is filed as
+// `intent/2026-09-11-every-case-result-field-declares-its-author/` — three of the nineteen fields could not
+// be classified by reading alone, and guessing at those would be worse than the gap.
+const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier", "judgmentsSealed", "sourceTraceId"] as const;
 
 // ── THE COLLECTION BOUNDARY THE CONTROL PLANE NEVER HAD ─────────────────────────────────────────────
 //

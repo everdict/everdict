@@ -45,6 +45,7 @@ const forged = () => ({
   traceSealed: true,
   judgmentsSealed: true,
   provenance: { ranOn: "self-hosted", by: "ws:victim-workspace", attestation: "managed" },
+  sourceTraceId: "trace-the-platform-never-observed",
   verifier: {
     planDigest: "sha256:p",
     workspaceDigest: "sha256:w",
@@ -80,6 +81,19 @@ describe("[R122 COUNTEREXAMPLE] the untrusted case result drops the platform's o
     expect(
       parsed.success ? parsed.data.judgmentsSealed : "unparsed",
       "a producer claimed its judgments were sealed",
+    ).toBeUndefined();
+  });
+
+  it("strips a producer-named source trace — the route back to the evidence is the platform's to draw", () => {
+    // Found by `pnpm scan` on 2026-09-11, over a scope nobody had touched, TWO FIELDS below the comment
+    // above that states this law. `sourceTraceId` is "the platform trace this result was scored FROM"; its
+    // only writers are the control plane's own pulls. A producer naming it points the judged result at
+    // evidence the platform never observed — and four external sinks export that id verbatim, so the wrong
+    // coordinate leaves the deployment.
+    const parsed = UntrustedCaseResultSchema.safeParse(forged());
+    expect(
+      parsed.success ? parsed.data.sourceTraceId : "unparsed",
+      "a producer named the trace its own verdict points back at",
     ).toBeUndefined();
   });
 
