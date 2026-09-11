@@ -3041,6 +3041,19 @@ const MUTATIONS = [
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
   },
   {
+    // ── pnpm scan (api, 2026-09-11) · every dataset-write door asks the constitutional question ─────
+    //
+    // `datasets:write` is a member action; declaring `ground_truth` is not. Three of four dataset-write
+    // surfaces called `assertDatasetConstitution`; the MCP bundle door called only the per-section gate, so a
+    // member could grant authority over what passing MEANS. Neutralizing the check restores that, and the
+    // parity counterexample must notice.
+    name: "Api — a member grants ground_truth authority through the bundle MCP door",
+    file: "apps/api/src/api/bundle/bundle.mcp.ts",
+    from: "          for (const dataset of result.data.datasets) assertDatasetConstitution(principal, dataset);",
+    to: "          void assertDatasetConstitution;",
+    suite: ["--root", "apps/api", "src/mcp.test.ts"],
+  },
+  {
     // ── pnpm scan (agent-runtime, 2026-09-11) · the permit gate follows the reach, like the envelope ──
     //
     // `send_message` reaches this run's own sub-agents (cognition) or, with the host seam wired, a real

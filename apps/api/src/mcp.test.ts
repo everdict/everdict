@@ -2026,6 +2026,51 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("FORBIDDEN");
   });
 
+  it("apply_bundle: a MEMBER cannot grant ground_truth authority through the bundle door — and an admin can", async () => {
+    // ── [pnpm scan · api · 2026-09-11] THE ONE DATASET-WRITE DOOR THAT DID NOT ASK ──────────────────
+    //
+    // `datasets:write` is a member action. Declaring `ground_truth` for a metric is not — it defines what
+    // passing means for every evaluation that ever runs the dataset, so `assertDatasetConstitution` requires
+    // admin. Four surfaces register a dataset; `POST /datasets`, `save_dataset` and `POST /bundles/apply` all
+    // called it, and this MCP twin called only the per-section gate. A plain member could grant the authority
+    // through the single door nobody checked. BFF↔MCP parity is structural (rule `api-layer`), and this was
+    // the half that never learned it.
+    //
+    // Seen red under neutralization: "expected undefined to be true" — the member's apply came back ok,
+    // with no error at all, which is the escalation in its own words.
+    const constitutional = JSON.stringify({
+      id: "authority-grab",
+      version: "1.0.0",
+      datasets: [
+        {
+          id: "authority-grab",
+          version: "1.0.0",
+          cases: [
+            {
+              id: "s1",
+              env: { kind: "repo", source: { files: {} } },
+              task: "t",
+              graders: [{ id: "g", authority: "ground_truth" }],
+              timeoutSec: 60,
+              tags: [],
+            },
+          ],
+          tags: [],
+        },
+      ],
+    });
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    const grabbed = await member.callTool({ name: "apply_bundle", arguments: { bundle: constitutional } });
+    expect(grabbed.isError).toBe(true);
+    expect(text(grabbed)).toContain("FORBIDDEN");
+
+    // …and the admin path still works, because this is a gate on WHO, not a ban on the declaration.
+    const admin = await connect(deps, ["admin"], "acme");
+    const allowed = await admin.callTool({ name: "apply_bundle", arguments: { bundle: constitutional } });
+    expect(allowed.isError).toBeFalsy();
+  });
+
   it("schedules: member creates·reads·pauses·deletes a schedule; viewer's create is a permission error; other ws is NOT_FOUND", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"], "acme");
