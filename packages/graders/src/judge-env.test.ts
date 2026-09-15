@@ -1,3 +1,4 @@
+import { safeGrade } from "@everdict/application-execution";
 import { type GradeContext, type TraceEvent, toScores } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { judgeFromEnv, makeGradersFromEnv } from "./judge-env.js";
@@ -42,6 +43,18 @@ describe("makeGradersFromEnv", () => {
       retryable: false,
       detail: expect.stringContaining("skipped"),
     });
+  });
+  // The dispatch path does not read the grader's own return value: every score passes the collection boundary
+  // (`safeGrade` → `sanitizeScore`), which refuses a judge-family metric from a producer that does not own the
+  // judge verdict. The skip grader stands in for the judge, so it must survive that boundary as the unmeasured
+  // row it wrote. Observed RED before the fix: the row arrived `status: "invalid"`, detail "'judge' belongs to
+  // the judge family, which only a judge may produce".
+  it("an unconfigured judge settles as unmeasured through the collection boundary, not as a forged metric", async () => {
+    const graders = makeGradersFromEnv([{ id: "judge", config: { rubric: "r" } }], {});
+    expect(graders).toHaveLength(1);
+    const scores = await safeGrade(graders[0] as (typeof graders)[number], ctx("hi"));
+    expect(scores).toHaveLength(1);
+    expect(scores[0]).toMatchObject({ graderId: "judge", metric: "judge", status: "unmeasured" });
   });
   it("judge configured: a real JudgeGrader with the injected Judge (transport made deterministic by fetch injection)", async () => {
     const fetchImpl = (async () => ({

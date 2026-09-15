@@ -51,7 +51,13 @@ export function makeGradersFromEnv(specs: GraderSpec[], env: Env = process.env):
   for (const s of specs) {
     if (s.id === "judge") {
       const id = typeof s.config?.id === "string" ? s.config.id : "judge";
-      out.push(skipGrader(id, "judge", "judge model not configured (EVERDICT_JUDGE_MODEL + key)"));
+      // It stands in for the judge grader and writes the judge's metric, so it carries the judge's intrinsic
+      // authority too — without it the collection boundary reads the row as a forged verdict and records the
+      // skip as `invalid` rather than the unmeasured row it is.
+      out.push({
+        ...skipGrader(id, "judge", "judge model not configured (EVERDICT_JUDGE_MODEL + key)"),
+        ownsJudgeVerdict: true,
+      });
     } else {
       out.push(...makeGraders([s]));
     }
