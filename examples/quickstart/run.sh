@@ -1,33 +1,57 @@
 #!/usr/bin/env bash
-# Register a harness and a dataset, run a scorecard, print the verdict.
-# Assumes the dev compose profile is up (no auth, tenant `default`).
+# Register a runtime, a harness and a dataset, run a scorecard, print the verdict.
+# Assumes the dev compose profile is up (no auth, tenant `default`). Safe to run again: a document that is
+# already registered answers 409 and is left as it is.
 set -euo pipefail
 
 API=${EVERDICT_API_URL:-http://localhost:8787}
-HDR=(-H 'content-type: application/json' -H 'x-everdict-tenant: default')
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+ROOT=$(cd "$HERE/../.." && pwd)
 
-echo "① registering harness   demo-agent@1.0.0"
-curl -fsS -XPOST "$API/harnesses" "${HDR[@]}" -d @"$HERE/harness.json" > /dev/null
+# POST a JSON body (a file with @path, or inline); 2xx and 409 are fine, anything else stops the script.
+post() {
+  local path=$1 body=$2 out code
+  out=$(mktemp)
+  code=$(curl -sS -o "$out" -w '%{http_code}' -XPOST "$API$path" \
+    -H 'content-type: application/json' -H 'x-everdict-tenant: default' -d "$body")
+  if [[ $code != 2* && $code != 409 ]]; then
+    echo "   ✗ POST $path → $code: $(cat "$out")" >&2
+    rm -f "$out"
+    exit 1
+  fi
+  cat "$out"
+  rm -f "$out"
+}
+field() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=process.argv[1].split(".").reduce((o,k)=>o?.[k],JSON.parse(s));process.stdout.write(v===undefined?"":typeof v==="string"?v:JSON.stringify(v))})' "$1"; }
 
-echo "② registering dataset   demo-smoke@1.0.0"
-curl -fsS -XPOST "$API/datasets" "${HDR[@]}" -d @"$HERE/dataset.json" > /dev/null
+echo "① registering runtime   local@1.0.0"
+post /runtimes @"$ROOT/examples/runtimes/local-1.0.0.json" > /dev/null
 
-echo "③ running scorecard"
-ID=$(curl -fsS -XPOST "$API/scorecards" "${HDR[@]}" -d '{
-  "dataset": { "id": "demo-smoke",  "version": "latest" },
-  "harness": { "id": "demo-agent",  "version": "latest" },
+echo "② registering harness   demo-agent@1.0.0 (template + instance)"
+post /harness-templates @"$HERE/harness.json" > /dev/null
+post /harnesses '{"template":{"id":"demo-agent","version":"1.0.0"},"id":"demo-agent","version":"1.0.0","pins":{}}' > /dev/null
+
+echo "③ registering dataset   demo-smoke@1.0.0"
+post /datasets @"$HERE/dataset.json" > /dev/null
+
+echo "④ running scorecard"
+ID=$(post /scorecards '{
+  "dataset": { "id": "demo-smoke", "version": "latest" },
+  "harness": { "id": "demo-agent", "version": "latest" },
+  "runtime": "local",
   "trials": 1
-}' | sed -n 's/.*"\(sc_[A-Za-z0-9_-]*\)".*/\1/p' | head -1)
+}' | field id)
 echo "   $ID"
 
-for _ in $(seq 1 60); do
-  BODY=$(curl -fsS "$API/scorecards/$ID" "${HDR[@]}")
-  case "$BODY" in
-    *'"status":"succeeded"'*|*'"status":"failed"'*) break ;;
-  esac
-  printf '   waiting …\r'; sleep 2
+STATUS=""
+for _ in $(seq 1 90); do
+  BODY=$(curl -fsS "$API/scorecards/$ID" -H 'x-everdict-tenant: default')
+  STATUS=$(printf '%s' "$BODY" | field status)
+  case "$STATUS" in succeeded | failed | cancelled) break ;; esac
+  printf '   waiting … %s\r' "$STATUS"
+  sleep 2
 done
 
-echo "④ verdict"
-echo "$BODY" | tr ',' '\n' | grep -E 'status|passed|failed|passRate' | sed 's/^/   /'
+echo "⑤ verdict               $STATUS"
+printf '%s' "$BODY" | field verdictSummary | sed 's/^/   /'
+echo

@@ -1,8 +1,8 @@
 # quickstart — a working evaluation you can clone
 
 Everything needed for a first result: one harness, one dataset, one script that runs them and prints
-the verdict. No API key required — the `scripted` harness replays a canned trajectory, so this measures
-the *plumbing*, not a model.
+the verdict. No API key required — the harness is a shell command and the graders are `grep`, so this
+measures the *plumbing*, not a model.
 
 ```bash
 docker compose -f deploy/compose/docker-compose.dev.yaml up --build -d
@@ -12,20 +12,24 @@ bash examples/quickstart/run.sh
 Expected output:
 
 ```
-① registering harness   demo-agent@1.0.0
-② registering dataset   demo-smoke@1.0.0
-③ running scorecard     sc_…
-   waiting … succeeded
-④ verdict               2/2 passed (passRate 1)
+① registering runtime   local@1.0.0
+② registering harness   demo-agent@1.0.0 (template + instance)
+③ registering dataset   demo-smoke@1.0.0
+④ running scorecard
+   <scorecard id>
+⑤ verdict               succeeded
+   {"verdicted":2,"passed":2,"failed":0,"passRate":1,"policyDigest":"sha256:…"}
 ```
+
+Running it again is fine: documents that are already registered answer 409 and are left as they are.
 
 ## Files
 
 | File | What it is |
 | --- | --- |
-| `harness.json` | a declarative `command` harness — the whole integration, no code |
+| `harness.json` | a declarative `command` harness template — the whole integration, no code; `run.sh` registers an instance of it |
 | `dataset.json` | two `repo` cases, graded deterministically by a shell command |
-| `run.sh` | register → submit → poll → print the verdict |
+| `run.sh` | register (runtime, template, instance, dataset) → submit → poll → print the verdict |
 
 ## Make it yours
 
