@@ -1836,6 +1836,8 @@ async function main(): Promise<void> {
   // Hoisted out of the deps literal because the skill library reads it: taking a store skill = copying it in.
   const capabilityService = new CapabilityService({
     store: capabilityStore,
+    // A subset reach may name only the author's own workspaces — the membership read that bounds it.
+    memberWorkspaces: async (subject) => (await workspaceService.listForSubject(subject)).map((w) => w.id),
     registryCoordinates: (workspace) => imageRegistryService.coordinates(workspace),
     managedCoordinates,
     allowMemberPublicPublish,

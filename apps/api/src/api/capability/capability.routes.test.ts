@@ -16,7 +16,10 @@ function build(withCaps: boolean, store = new InMemoryCapabilityStore()) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
   return buildServer({
     service,
-    ...(withCaps ? { capabilityService: new CapabilityService({ store }) } : {}),
+    // The caller in these tests belongs to `acme` and `beta`, never to `delta`.
+    ...(withCaps
+      ? { capabilityService: new CapabilityService({ store, memberWorkspaces: async () => ["acme", "beta"] }) }
+      : {}),
   });
 }
 
@@ -82,6 +85,24 @@ describe("capability routes", () => {
     });
     expect(patched.statusCode).toBe(200);
     expect(ids(await app.inject({ method: "GET", url: "/capabilities", headers: beta }))).toEqual(["t"]);
+    expect(ids(await app.inject({ method: "GET", url: "/capabilities", headers: delta }))).toEqual([]);
+  });
+
+  it("refuses a subset reach into a workspace the caller is not a member of (403), and shares nothing", async () => {
+    const app = build(true);
+    await app.inject({
+      method: "PUT",
+      url: "/capabilities/t",
+      headers: acme,
+      payload: { name: "t", description: "d", spec: skillSpec, visibility: "private" },
+    });
+    const patched = await app.inject({
+      method: "PATCH",
+      url: "/capabilities/t/visibility",
+      headers: acme,
+      payload: { visibility: "subset", sharedWith: ["delta"] },
+    });
+    expect(patched.statusCode).toBe(403);
     expect(ids(await app.inject({ method: "GET", url: "/capabilities", headers: delta }))).toEqual([]);
   });
 
@@ -241,7 +262,10 @@ describe("capability routes", () => {
     const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
     const app = buildServer({
       service,
-      capabilityService: new CapabilityService({ store: new InMemoryCapabilityStore() }),
+      capabilityService: new CapabilityService({
+        store: new InMemoryCapabilityStore(),
+        memberWorkspaces: async () => [],
+      }),
       probeCapabilityMcp: async (url: string, auth?: { token?: string }) => ({
         reachable: true,
         detail: `ok ${url}${auth?.token ? " (auth)" : ""}`,
@@ -303,6 +327,7 @@ describe("capability routes", () => {
     const app = buildServer({
       service,
       capabilityService: new CapabilityService({
+        memberWorkspaces: async () => [],
         store: new InMemoryCapabilityStore(),
         registryCoordinates: async () => [{ host: "ghcr.io", namespace: "acme" }],
       }),
@@ -386,6 +411,7 @@ describe("capability routes", () => {
     const app = buildServer({
       service,
       capabilityService: new CapabilityService({
+        memberWorkspaces: async () => [],
         store: new InMemoryCapabilityStore(),
         registryCoordinates: async () => [{ host: "ghcr.io", namespace: "acme" }],
       }),

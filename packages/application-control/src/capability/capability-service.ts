@@ -104,6 +104,11 @@ export interface CapabilityServiceDeps {
   // discoverable/adoptable alongside user-published ones. Injected (not imported) so the service stays test-isolable
   // and the operator can suppress the built-ins from the store. Unset = no built-ins merged.
   firstPartyCatalog?: () => CapabilityRecord[];
+  // The workspaces a subject is a member of. REQUIRED, because it bounds a `subset` reach: `sharedWith` names the
+  // author's OWN workspaces, and until this was read the service stored whatever list it was given — only the web
+  // picker limited it, so an API or MCP caller could push a capability into any workspace's store. A read that
+  // fails refuses the share (rule `protocol` L2); there is no fallback that allows it.
+  memberWorkspaces: (subject: string) => Promise<readonly string[]>;
   now?: () => string;
 }
 
@@ -147,6 +152,21 @@ export class CapabilityService {
   // (operator policy). The one authority for the public-reach gate — both save() and setVisibility() consult it.
   private mayPublishPublic(actor: CapabilityActor): boolean {
     return actor.isAdmin || this.deps.allowMemberPublicPublish === true;
+  }
+
+  // Every workspace a reach names must be one the actor belongs to. An admin of the owning workspace is not a member
+  // of another one, so there is no admin bypass. Checked before any write, on both paths that set a reach.
+  private async assertSharedWithMemberships(tenant: string, actor: CapabilityActor, sharedWith: readonly string[]) {
+    const targets = sharedWith.filter((ws) => ws !== tenant);
+    if (targets.length === 0) return;
+    const mine = new Set(await this.deps.memberWorkspaces(actor.subject));
+    const foreign = targets.filter((ws) => !mine.has(ws));
+    if (foreign.length > 0)
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { action: "capabilities:write", sharedWith: foreign },
+        `A capability can be shared only into workspaces you are a member of; not a member of: ${foreign.join(", ")}.`,
+      );
   }
 
   // Version-free upsert (the author "publish/edit" path). New id → 1.0.0; an owner's changed content → next patch
@@ -199,6 +219,7 @@ export class CapabilityService {
         { id, action: "capabilities:write" },
         "Publishing a capability publicly requires a workspace admin.",
       );
+    await this.assertSharedWithMemberships(tenant, actor, body.sharedWith ?? []);
     await this.deps.store.register({
       id,
       tenant,
@@ -345,6 +366,7 @@ export class CapabilityService {
         { id, action: "capabilities:write" },
         "Publishing a capability publicly requires a workspace admin.",
       );
+    await this.assertSharedWithMemberships(tenant, actor, next.sharedWith);
     await this.deps.store.setVisibility(tenant, id, next);
     return { ...latest, visibility: next.visibility, sharedWith: next.sharedWith };
   }

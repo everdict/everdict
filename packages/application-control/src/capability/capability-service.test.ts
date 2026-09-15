@@ -87,7 +87,10 @@ function fakeStore(): CapabilityStore {
   };
 }
 
-const svc = () => new CapabilityService({ store: fakeStore(), now: () => "2026-07-24T00:00:00.000Z" });
+// Every member used below belongs to `acme`; alice also belongs to `beta`, where the subset test shares.
+const memberWorkspaces = async (subject: string) => (subject === "alice" ? ["acme", "beta"] : ["acme"]);
+const svc = () =>
+  new CapabilityService({ store: fakeStore(), memberWorkspaces, now: () => "2026-07-24T00:00:00.000Z" });
 const skill = (over: { name?: string; description?: string } = {}) => ({
   name: over.name ?? "triage",
   description: over.description ?? "d",
@@ -170,6 +173,61 @@ describe("CapabilityService", () => {
     await s.setVisibility("acme", "t", { visibility: "subset", sharedWith: ["beta"] }, member("alice"));
     expect((await s.list("beta", "carol")).map((r) => r.id)).toEqual(["t"]);
     expect((await s.list("delta", "carol")).map((r) => r.id)).toEqual([]);
+  });
+
+  // ── A SUBSET REACH NAMES THE AUTHOR'S OWN WORKSPACES, AND THE SERVICE CHECKS THAT IT DOES ─────────────
+  //
+  // `sharedWith` was stored as given: only the web picker limited it to the author's memberships, so a member
+  // calling the API or MCP could list ANY workspace id and their capability — an MCP connection or a code tool
+  // included — appeared in that workspace's store as shared with it.
+  describe("sharing is bounded by the actor's memberships", () => {
+    const memberOf: Record<string, string[]> = { alice: ["acme", "beta"] };
+    const bounded = (memberWorkspaces = async (subject: string) => memberOf[subject] ?? []) =>
+      new CapabilityService({ store: fakeStore(), memberWorkspaces, now: () => "2026-07-24T00:00:00.000Z" });
+
+    it("refuses a subset reach into a workspace the actor is not a member of, and writes nothing", async () => {
+      const s = bounded();
+      await s.save("acme", member("alice"), "t", { ...skill(), visibility: "private" });
+      await expect(
+        s.setVisibility("acme", "t", { visibility: "subset", sharedWith: ["beta", "victim"] }, member("alice")),
+      ).rejects.toThrow(/victim/);
+      expect((await s.list("victim", "eve")).map((r) => r.id)).toEqual([]);
+      expect((await s.list("beta", "carol")).map((r) => r.id)).toEqual([]);
+    });
+
+    it("refuses the same reach on a brand-new capability, and registers nothing", async () => {
+      const s = bounded();
+      await expect(
+        s.save("acme", member("alice"), "t", { ...skill(), visibility: "subset", sharedWith: ["victim"] }),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+      expect((await s.list("acme", "alice")).map((r) => r.id)).toEqual([]);
+    });
+
+    it("an admin of this workspace is not a member of another one", async () => {
+      const s = bounded();
+      await s.save("acme", admin("alice"), "t", { ...skill(), visibility: "private" });
+      await expect(
+        s.setVisibility("acme", "t", { visibility: "subset", sharedWith: ["victim"] }, admin("alice")),
+      ).rejects.toBeInstanceOf(ForbiddenError);
+    });
+
+    it("a membership read that fails refuses the share instead of allowing it", async () => {
+      const s = bounded(async () => {
+        throw new Error("workspace store down");
+      });
+      await s.save("acme", member("alice"), "t", { ...skill(), visibility: "private" });
+      await expect(
+        s.setVisibility("acme", "t", { visibility: "subset", sharedWith: ["beta"] }, member("alice")),
+      ).rejects.toThrow(/workspace store down/);
+      expect((await s.list("beta", "carol")).map((r) => r.id)).toEqual([]);
+    });
+
+    it("still shares into the actor's own workspaces", async () => {
+      const s = bounded();
+      await s.save("acme", member("alice"), "t", { ...skill(), visibility: "private" });
+      await s.setVisibility("acme", "t", { visibility: "subset", sharedWith: ["beta"] }, member("alice"));
+      expect((await s.list("beta", "carol")).map((r) => r.id)).toEqual(["t"]);
+    });
   });
 
   it("deletes a version only for its creator or an admin, 404 for a missing version", async () => {
@@ -272,6 +330,7 @@ describe("CapabilityService", () => {
 describe("CapabilityService — member public-publish policy", () => {
   const open = () =>
     new CapabilityService({
+      memberWorkspaces,
       store: fakeStore(),
       allowMemberPublicPublish: true,
       now: () => "2026-07-27T00:00:00.000Z",
@@ -319,6 +378,7 @@ describe("CapabilityService — first-party built-ins in the public catalog", ()
   };
   const s = () =>
     new CapabilityService({
+      memberWorkspaces,
       store: fakeStore(),
       firstPartyCatalog: () => [builtIn],
       now: () => "2026-07-27T00:00:00.000Z",
@@ -347,6 +407,7 @@ describe("CapabilityService — environment image warnings", () => {
   });
   const registrySvc = (coordinates: () => Promise<ImageRegistryCoordinates[]>) =>
     new CapabilityService({
+      memberWorkspaces,
       store: fakeStore(),
       registryCoordinates: coordinates,
       now: () => "2026-07-27T00:00:00.000Z",
@@ -411,6 +472,7 @@ describe("CapabilityService — environment image warnings", () => {
     const store = fakeStore();
     const s = new CapabilityService({
       store,
+      memberWorkspaces,
       // only acme has the ghcr.io/acme registry registered — the classification is per-viewer
       registryCoordinates: async (workspace) => (workspace === "acme" ? [{ host: "ghcr.io", namespace: "acme" }] : []),
       now: () => "2026-07-27T00:00:00.000Z",

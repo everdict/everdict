@@ -29,6 +29,7 @@ const EXAMPLE: CapabilityRecord = {
 function build(withSkills: boolean) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
   const capabilityService = new CapabilityService({
+    memberWorkspaces: async () => [],
     store: new InMemoryCapabilityStore(),
     firstPartyCatalog: () => [EXAMPLE],
   });
