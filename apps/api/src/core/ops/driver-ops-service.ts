@@ -10,6 +10,15 @@ import { Client, Connection, WorkflowNotFoundError } from "@temporalio/client";
 export const DRIVER_WORKFLOW_FAMILIES = ["batch", "score", "approval", "reaper", "reaction"] as const;
 export type DriverWorkflowFamily = (typeof DRIVER_WORKFLOW_FAMILIES)[number];
 
+// What the wrap addresses. Every family but `score` has a deterministic id derived from its ledger id. A score
+// pass does not: the driver starts it as `everdict-score-<groupId>-<passId>` (PASS-scoped, arch-review 10) and
+// records that id on the pass marker, so the address carries the RECORDED workflow id. Rebuilding it here was a
+// second grammar, and it had already diverged — `everdict-score-<groupId>` names a workflow that never exists, so
+// describe/cancel/terminate on any real score pass answered NOT_FOUND (rule `protocol` L3).
+export type DriverWorkflowAddress =
+  | { family: "score"; ledgerId: string; workflowId: string }
+  | { family: Exclude<DriverWorkflowFamily, "score">; ledgerId: string };
+
 // The diagnostic slice an ops agent (or the web) needs to answer "where is this stuck, and why": lifecycle
 // status, history pressure, and each in-flight activity's retry state with its LAST FAILURE — the log-level
 // read that made the adoption gate pass (lesson 044: UI visibility = agent visibility, same public gRPC).
@@ -62,6 +71,9 @@ export function parseDriverWorkflowId(
     // A schedule fire's id carries the nominal fire time after the schedule id (Temporal Schedules append
     // it) — strip it so the ledger id addresses the schedule record: <uuid>-<ISO time>.
     if (family === "schedule") return { family, ledgerId: rest.length > 36 ? rest.slice(0, 36) : rest };
+    // A score pass is <groupId>-<passId>, and a group id is a UUID: the ledger id is the group.
+    if (family === "score" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-./.test(rest))
+      return { family, ledgerId: rest.slice(0, 36) };
     return { family, ledgerId: rest };
   }
   return undefined;
@@ -70,17 +82,20 @@ export function parseDriverWorkflowId(
 export class DriverOpsService {
   constructor(private readonly opts: { address: string; taskQueue?: string }) {}
 
-  // Ledger id → deterministic workflowId — the correlation grammar (orchestration.md expansion disciplines).
-  workflowIdFor(family: DriverWorkflowFamily, ledgerId: string): string {
+  // Address → workflowId — the correlation grammar (orchestration.md expansion disciplines), except for a score
+  // pass, whose id is the one its marker recorded (see DriverWorkflowAddress).
+  workflowIdFor(address: DriverWorkflowAddress): string {
+    const { family, ledgerId } = address;
+    if (address.family === "score") return address.workflowId;
     if (family === "batch") return `everdict-batch-${ledgerId}`;
-    if (family === "score") return `everdict-score-${ledgerId}`;
     if (family === "reaper") return `everdict-reaper-${ledgerId}`;
     if (family === "reaction") return `everdict-reaction-${ledgerId}`; // ledgerId = `<eventId>-<subscriptionId>`
     return `everdict-approval-${ledgerId}`;
   }
 
-  async describe(family: DriverWorkflowFamily, ledgerId: string): Promise<DriverWorkflowStatus> {
-    const workflowId = this.workflowIdFor(family, ledgerId);
+  async describe(address: DriverWorkflowAddress): Promise<DriverWorkflowStatus> {
+    const { family, ledgerId } = address;
+    const workflowId = this.workflowIdFor(address);
     const connection = await Connection.connect({ address: this.opts.address });
     try {
       const client = new Client({ connection });
@@ -110,8 +125,8 @@ export class DriverOpsService {
 
   // Cooperative cancellation — the ledger record settles through the CP's own guards (a cancelled workflow's
   // in-queue activities skip on the CP-side terminal checks), so this never writes the ledger directly.
-  async cancel(family: DriverWorkflowFamily, ledgerId: string): Promise<void> {
-    const workflowId = this.workflowIdFor(family, ledgerId);
+  async cancel(address: DriverWorkflowAddress): Promise<void> {
+    const workflowId = this.workflowIdFor(address);
     const connection = await Connection.connect({ address: this.opts.address });
     try {
       const client = new Client({ connection });
@@ -126,8 +141,8 @@ export class DriverOpsService {
   // Force-termination — for the workflow cancel cannot reach (a handler stuck before its first await, an
   // unbounded-retry activity looping against a gone record). The server stops the execution outright; like
   // cancel, this never writes the ledger — the sweeps settle any row the dead workflow was responsible for.
-  async terminate(family: DriverWorkflowFamily, ledgerId: string, reason?: string): Promise<void> {
-    await this.terminateRaw(this.workflowIdFor(family, ledgerId), reason);
+  async terminate(address: DriverWorkflowAddress, reason?: string): Promise<void> {
+    await this.terminateRaw(this.workflowIdFor(address), reason);
   }
 
   // Terminate by RAW workflowId — the operator's zombie killer (a leaked workflow may have no ledger record

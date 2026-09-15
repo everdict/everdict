@@ -372,7 +372,7 @@ are visible via `judgeModels` + the `judge:<id>` summary rows. The batch pipelin
 unchanged (conceptually the same operation; convergence is a later refactor).
 
 **Score-on-Temporal (T-c)**: with `EVERDICT_TEMPORAL_ADDRESS` configured, a runIds-backed group's scoring
-pass runs as a durable `scoreGroupWorkflow` (`everdict-score-<groupId>`) over the same internal bridge the
+pass runs as a durable `scoreGroupWorkflow` (`everdict-score-<groupId>-<passId>`) over the same internal bridge the
 batch uses (`/internal/groups/:id/score-prepare|score-plan|score-case|score-finalize`): `prepareScore` runs
 ONCE per pass (strip-first — clears the selected judges' prior rows through the child-run write-back, so the
 plan's id-only measured predicate means "judged in THIS pass"; without it a re-score at a NEW judge version

@@ -1,6 +1,10 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { DRIVER_WORKFLOW_FAMILIES, type DriverWorkflowFamily } from "../../core/ops/driver-ops-service.js";
+import {
+  DRIVER_WORKFLOW_FAMILIES,
+  type DriverWorkflowAddress,
+  type DriverWorkflowFamily,
+} from "../../core/ops/driver-ops-service.js";
 import { type McpToolContext, fail, ok, run } from "../mcp-context.js";
 
 // Driver ops MCP tools — the ops agent's read/control over the durable driver (lesson-044 adoption gate:
@@ -10,24 +14,35 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
   if (!deps.driverOps) return;
   const driverOps = deps.driverOps;
 
-  const owned = async (family: DriverWorkflowFamily, id: string): Promise<boolean> => {
+  // The family's OWN ledger decides both ownership and the address. A score pass is addressed by the workflow id its
+  // marker recorded when the driver started it; a record with no Temporal pass in flight has nothing to address.
+  const addressFor = async (family: DriverWorkflowFamily, id: string): Promise<DriverWorkflowAddress | undefined> => {
     if (family === "approval") {
       const approval = await deps.approvalService?.get(ws, id).catch(() => undefined);
-      return approval !== undefined;
+      return approval !== undefined ? { family, ledgerId: id } : undefined;
     }
     if (family === "reaper") {
       const run = await deps.service.get(id).catch(() => undefined);
-      return run !== undefined && run.tenant === ws && run.kind === "sandbox";
+      return run !== undefined && run.tenant === ws && run.kind === "sandbox" ? { family, ledgerId: id } : undefined;
     }
     if (family === "reaction") {
       // Ledger id = `<eventId>-<subscriptionId>`; the rule's row is the tenant's ownership proof (a deleted
       // rule hides its historical chains from the wrap — the coarse tradeoff of pointer-based scoping).
       const rule = await deps.subscriptionService?.get(ws, id.slice(-36)).catch(() => undefined);
-      return rule !== undefined;
+      return rule !== undefined ? { family, ledgerId: id } : undefined;
     }
     const record = await deps.scorecardService?.get(id);
-    return record !== undefined && record?.tenant === ws;
+    if (record === undefined || record.tenant !== ws) return undefined;
+    if (family === "batch") return { family, ledgerId: id };
+    const workflowId = record.scoringPass?.workflowId;
+    return workflowId !== undefined ? { family, ledgerId: id, workflowId } : undefined;
   };
+  const notFound = (family: DriverWorkflowFamily) =>
+    fail(
+      family === "score"
+        ? "NOT_FOUND: no such record in this workspace, or no Temporal scoring pass is in flight for it."
+        : "NOT_FOUND: no such record in this workspace.",
+    );
 
   server.registerTool(
     "describe_driver_workflow",
@@ -44,8 +59,9 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ family, id }: { family: DriverWorkflowFamily; id: string }) =>
       run(principal, "runtimes:read", async () => {
-        if (!(await owned(family, id))) return fail("NOT_FOUND: no such record in this workspace.");
-        return ok(await driverOps.describe(family, id));
+        const address = await addressFor(family, id);
+        if (!address) return notFound(family);
+        return ok(await driverOps.describe(address));
       }),
   );
 
@@ -63,8 +79,9 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ family, id }: { family: DriverWorkflowFamily; id: string }) =>
       run(principal, "runtimes:control", async () => {
-        if (!(await owned(family, id))) return fail("NOT_FOUND: no such record in this workspace.");
-        await driverOps.cancel(family, id);
+        const address = await addressFor(family, id);
+        if (!address) return notFound(family);
+        await driverOps.cancel(address);
         return ok({ ok: true });
       }),
   );
@@ -84,8 +101,9 @@ export function registerDriverOpsTools(server: McpServer, ctx: McpToolContext): 
     },
     ({ family, id }: { family: DriverWorkflowFamily; id: string }) =>
       run(principal, "runtimes:control", async () => {
-        if (!(await owned(family, id))) return fail("NOT_FOUND: no such record in this workspace.");
-        await driverOps.terminate(family, id);
+        const address = await addressFor(family, id);
+        if (!address) return notFound(family);
+        await driverOps.terminate(address);
         return ok({ ok: true });
       }),
   );

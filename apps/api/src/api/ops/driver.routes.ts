@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { DRIVER_WORKFLOW_FAMILIES, type DriverWorkflowFamily } from "../../core/ops/driver-ops-service.js";
+import {
+  DRIVER_WORKFLOW_FAMILIES,
+  type DriverWorkflowAddress,
+  type DriverWorkflowFamily,
+} from "../../core/ops/driver-ops-service.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { driverDocs } from "./driver.docs.js";
 
@@ -12,25 +16,43 @@ const familySchema = z.enum(DRIVER_WORKFLOW_FAMILIES);
 // as live-cluster runtime control). Ownership is checked against the family's OWN ledger (batch/score →
 // scorecard rows, approval → the approval store) BEFORE Temporal is asked (no existence leak).
 export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  const ownershipGuard = async (tenant: string, family: DriverWorkflowFamily, id: string): Promise<boolean> => {
+  // The family's OWN ledger decides both ownership and the address. A score pass is addressed by the workflow id its
+  // marker recorded when the driver started it; a record with no Temporal pass in flight has nothing to address.
+  const addressFor = async (
+    tenant: string,
+    family: DriverWorkflowFamily,
+    id: string,
+  ): Promise<DriverWorkflowAddress | undefined> => {
     // approval ledger ids live in the approval store; reaper ids are sandbox RUN rows; batch/score ids are scorecard rows.
     if (family === "approval") {
       const approval = await deps.approvalService?.get(tenant, id).catch(() => undefined);
-      return approval !== undefined;
+      return approval !== undefined ? { family, ledgerId: id } : undefined;
     }
     if (family === "reaper") {
       const run = await deps.service.get(id).catch(() => undefined);
-      return run !== undefined && run.tenant === tenant && run.kind === "sandbox";
+      return run !== undefined && run.tenant === tenant && run.kind === "sandbox"
+        ? { family, ledgerId: id }
+        : undefined;
     }
     if (family === "reaction") {
       // Ledger id = `<eventId>-<subscriptionId>`; the rule's row is the tenant's ownership proof (a deleted
       // rule hides its historical chains from the wrap — the coarse tradeoff of pointer-based scoping).
       const rule = await deps.subscriptionService?.get(tenant, id.slice(-36)).catch(() => undefined);
-      return rule !== undefined;
+      return rule !== undefined ? { family, ledgerId: id } : undefined;
     }
     const record = await deps.scorecardService?.get(id);
-    return record !== undefined && record?.tenant === tenant;
+    if (record === undefined || record.tenant !== tenant) return undefined;
+    if (family === "batch") return { family, ledgerId: id };
+    const workflowId = record.scoringPass?.workflowId;
+    return workflowId !== undefined ? { family, ledgerId: id, workflowId } : undefined;
   };
+  const notFound = (family: DriverWorkflowFamily) => ({
+    code: "NOT_FOUND",
+    message:
+      family === "score"
+        ? "no such record in this workspace, or no Temporal scoring pass is in flight for it."
+        : "no such record in this workspace.",
+  });
 
   app.get<{ Params: { family: string; id: string } }>(
     "/ops/driver/:family/:id",
@@ -43,9 +65,9 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
       try {
         gate(principal, "runtimes:read");
         const family = familySchema.parse(req.params.family) as DriverWorkflowFamily;
-        if (!(await ownershipGuard(principal.workspace, family, req.params.id)))
-          return reply.code(404).send({ code: "NOT_FOUND", message: "no such record in this workspace." });
-        return reply.send(await deps.driverOps.describe(family, req.params.id));
+        const address = await addressFor(principal.workspace, family, req.params.id);
+        if (!address) return reply.code(404).send(notFound(family));
+        return reply.send(await deps.driverOps.describe(address));
       } catch (err) {
         if (err instanceof z.ZodError)
           return reply
@@ -67,9 +89,9 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
       try {
         gate(principal, "runtimes:control");
         const family = familySchema.parse(req.params.family) as DriverWorkflowFamily;
-        if (!(await ownershipGuard(principal.workspace, family, req.params.id)))
-          return reply.code(404).send({ code: "NOT_FOUND", message: "no such record in this workspace." });
-        await deps.driverOps.cancel(family, req.params.id);
+        const address = await addressFor(principal.workspace, family, req.params.id);
+        if (!address) return reply.code(404).send(notFound(family));
+        await deps.driverOps.cancel(address);
         return reply.send({ ok: true });
       } catch (err) {
         if (err instanceof z.ZodError)
@@ -94,9 +116,9 @@ export function registerDriverOpsRoutes(app: FastifyInstance, deps: ServerDeps):
       try {
         gate(principal, "runtimes:control");
         const family = familySchema.parse(req.params.family) as DriverWorkflowFamily;
-        if (!(await ownershipGuard(principal.workspace, family, req.params.id)))
-          return reply.code(404).send({ code: "NOT_FOUND", message: "no such record in this workspace." });
-        await deps.driverOps.terminate(family, req.params.id);
+        const address = await addressFor(principal.workspace, family, req.params.id);
+        if (!address) return reply.code(404).send(notFound(family));
+        await deps.driverOps.terminate(address);
         return reply.send({ ok: true });
       } catch (err) {
         if (err instanceof z.ZodError)

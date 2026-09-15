@@ -127,8 +127,9 @@ fan-out (a cursor consumer) · the admission gate · a session's interactive I/O
   `terminate_driver_workflow`. Families `batch | score | approval | reaper | reaction`; addressed by ledger id,
   never a raw workflowId, and scoped by the family's own ledger (batch/score → scorecard row, approval →
   approval store, reaper → sandbox run row, reaction → the subscription rule of `<eventId>-<subscriptionId>`).
-  Read = `runtimes:read`; cancel/terminate = `runtimes:control`. Note that the `score` family resolves
-  `everdict-score-<id>`, while score passes start as `everdict-score-<groupId>-<passId>`.
+  Read = `runtimes:read`; cancel/terminate = `runtimes:control`. The `score` family addresses the pass in
+  flight by the workflow id its pass marker recorded (`scoringPass.workflowId`, which is
+  `everdict-score-<groupId>-<passId>`); a scorecard with no Temporal pass in flight answers 404.
   The OPERATOR plane (`x-internal-token`, deliberately outside workspace scoping because a leaked workflow's
   ledger record is gone by definition) has `GET /internal/driver/workflows` (every `everdict-*` workflow
   across tenants, family/ledger parsed back out of the id) + `POST /internal/driver/workflows/terminate` (raw

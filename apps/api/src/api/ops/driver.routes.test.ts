@@ -1,5 +1,6 @@
 import { RunService, ScorecardService, SubscriptionService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import type { ScoringPass } from "@everdict/contracts";
 import { InMemoryRunStore, InMemoryScorecardStore, InMemorySubscriptionStore } from "@everdict/db";
 import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
@@ -18,8 +19,7 @@ const unusedDispatcher: Dispatcher = {
 // ledger-ownership scoping, role gates and family validation, which is what these tests pin.
 function stubOps(calls: string[]): DriverOpsService {
   return {
-    workflowIdFor: (family: string, id: string) => `everdict-${family}-${id}`,
-    describe: async (family: string, id: string) => {
+    describe: async ({ family, ledgerId: id }: { family: string; ledgerId: string }) => {
       calls.push(`describe:${family}:${id}`);
       return {
         family,
@@ -31,10 +31,10 @@ function stubOps(calls: string[]): DriverOpsService {
         pendingActivities: [{ activityType: "scoreGroupCase", attempt: 3, lastFailure: "CP unreachable" }],
       };
     },
-    cancel: async (family: string, id: string) => {
+    cancel: async ({ family, ledgerId: id }: { family: string; ledgerId: string }) => {
       calls.push(`cancel:${family}:${id}`);
     },
-    terminate: async (family: string, id: string) => {
+    terminate: async ({ family, ledgerId: id }: { family: string; ledgerId: string }) => {
       calls.push(`terminate:${family}:${id}`);
     },
     terminateRaw: async (workflowId: string) => {
@@ -71,6 +71,91 @@ async function build(withOps = true) {
   return { app, calls };
 }
 
+// ── A SCORE PASS IS ADDRESSED BY THE WORKFLOW ITS MARKER RECORDED, NOT BY A SECOND GRAMMAR ─────────────
+//
+// The driver starts a score pass as `everdict-score-<groupId>-<passId>` and records that id on the pass marker.
+// The ops wrap rebuilt `everdict-score-<groupId>` instead — a workflow that never exists — so describe, cancel and
+// terminate on any real score pass answered NOT_FOUND from Temporal.
+async function buildWithPass(scoringPass: ScoringPass | undefined) {
+  const store = new InMemoryScorecardStore();
+  await store.create({
+    id: "sc-1",
+    tenant: "acme",
+    dataset: { id: "d", version: "1" },
+    harness: { id: "h", version: "1" },
+    status: "succeeded",
+    createdAt: "2026-07-30T00:00:00Z",
+    updatedAt: "2026-07-30T00:00:00Z",
+    ...(scoringPass !== undefined ? { scoringPass } : {}),
+  });
+  const asked: unknown[] = [];
+  const ops = {
+    describe: async (...args: unknown[]) => {
+      asked.push(["describe", ...args]);
+      return {
+        family: "score",
+        ledgerId: "sc-1",
+        workflowId: "x",
+        runId: "r",
+        status: "RUNNING",
+        pendingActivities: [],
+      };
+    },
+    cancel: async (...args: unknown[]) => {
+      asked.push(["cancel", ...args]);
+    },
+    terminate: async (...args: unknown[]) => {
+      asked.push(["terminate", ...args]);
+    },
+  } as unknown as DriverOpsService;
+  const app = buildServer({
+    service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
+    scorecardService: new ScorecardService({
+      dispatcher: unusedDispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+    }),
+    driverOps: ops,
+  });
+  return { app, asked };
+}
+
+const livePass: ScoringPass = {
+  passId: "pass-7",
+  targetRevision: 2,
+  baseRevision: 1,
+  judges: [],
+  startedAt: "2026-07-30T00:00:00Z",
+  workflowId: "everdict-score-sc-1-pass-7",
+  status: "running",
+};
+
+describe("Driver ops — a score pass is the workflow its marker recorded", () => {
+  it("describes, cancels and terminates the recorded score workflow", async () => {
+    const { app, asked } = await buildWithPass(livePass);
+    expect((await app.inject({ method: "GET", url: "/ops/driver/score/sc-1", headers: H })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: "/ops/driver/score/sc-1/cancel", headers: H })).statusCode).toBe(
+      200,
+    );
+    expect((await app.inject({ method: "POST", url: "/ops/driver/score/sc-1/terminate", headers: H })).statusCode).toBe(
+      200,
+    );
+    expect(JSON.stringify(asked)).toContain("everdict-score-sc-1-pass-7");
+    expect(asked).toHaveLength(3);
+    for (const call of asked) expect(JSON.stringify(call)).toContain("everdict-score-sc-1-pass-7");
+  });
+
+  it("answers 404 when no Temporal score pass is in flight, without asking Temporal", async () => {
+    const { workflowId: _inProcess, ...inProcessPass } = livePass;
+    for (const pass of [undefined, inProcessPass]) {
+      const { app, asked } = await buildWithPass(pass);
+      const res = await app.inject({ method: "GET", url: "/ops/driver/score/sc-1", headers: H });
+      expect(res.statusCode).toBe(404);
+      expect(asked).toEqual([]);
+    }
+  });
+});
+
 describe("Driver ops surface v0 (/ops/driver — ledger-vocabulary addressing)", () => {
   it("describes a workflow by ledger id — status, history pressure, pending activities with last failure", async () => {
     const { app, calls } = await build();
@@ -83,12 +168,12 @@ describe("Driver ops surface v0 (/ops/driver — ledger-vocabulary addressing)",
     expect(calls).toEqual(["describe:batch:sc-1"]);
   });
 
-  it("cancels through the wrap (score family) and never exposes a raw workflowId address", async () => {
+  it("cancels through the wrap by ledger id and never exposes a raw workflowId address", async () => {
     const { app, calls } = await build();
-    const res = await app.inject({ method: "POST", url: "/ops/driver/score/sc-1/cancel", headers: H });
+    const res = await app.inject({ method: "POST", url: "/ops/driver/batch/sc-1/cancel", headers: H });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({ ok: true });
-    expect(calls).toEqual(["cancel:score:sc-1"]);
+    expect(calls).toEqual(["cancel:batch:sc-1"]);
   });
 
   it("scopes by LEDGER ownership — another workspace's id reads 404 before Temporal is ever asked", async () => {
