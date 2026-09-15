@@ -243,6 +243,27 @@ describe("MCP file-revision tools (BFF↔MCP parity)", () => {
     expect(isError(await call(admin, "get_file_revision", { path: "notes.md", revision: 1 }))).toBe(true);
   });
 
+  // ── THE MCP WIPE WENT THROUGH THE MEMBER-SCOPED FILESYSTEM, AND STOPPED AT `memory/` ───────────────────
+  //
+  // `DELETE /fs` empties the tree through the UNSCOPED service on purpose; its MCP twin read through the handle
+  // every other tool uses, which refuses a recursive remove above the member areas. So on any workspace with a
+  // member's memory the wipe deleted the entries sorted before `memory/`, failed there, and left the history.
+  it("empties a tree that holds member memory, the same as DELETE /fs does", async () => {
+    // Given a workspace with a shared folder, a member's private memory and a file after both
+    const deps = makeDeps();
+    const member = await connect(deps);
+    await call(member, "write_file", { path: "artifacts/report.md", content: "r" });
+    await call(member, "write_file", { path: "memory/members/user-a/prefs.md", content: "p" });
+    await call(member, "write_file", { path: "notes.md", content: "n" });
+    // When an admin empties the filesystem
+    const admin = await connect(deps, { roles: ["admin"] });
+    const wiped = await call(admin, "delete_all_files");
+    // Then the wipe completes, the tree is empty, and the history went with it
+    expect(isError(wiped)).toBe(false);
+    expect(jsonOf(wiped)).toMatchObject({ purgedRevisions: 3 });
+    expect(await deps.fsService?.list("acme", "")).toEqual([]);
+  });
+
   it("reports what published history costs in the usage tool", async () => {
     const deps = makeDeps();
     const client = await connect(deps, { roles: ["admin"] });

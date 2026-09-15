@@ -11,11 +11,12 @@ import { memberFs } from "./member-scope.js";
 // every mutation gates on files:write and goes through the agent's permission flow.
 export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
   const { deps, principal, ws } = ctx;
-  if (!deps.fsService) return;
+  const workspaceFs = deps.fsService;
+  if (!workspaceFs) return;
   // The agent sees the filesystem as the MEMBER it is acting for does — its own credential IS theirs — so
   // list_files/search_files/get_file reach that member's memory and no other member's. One line, because every
   // tool below reads through this handle.
-  const fs = memberFs(deps.fsService, principal);
+  const fs = memberFs(workspaceFs, principal);
   // Every publish this session makes is attributed to the AGENT (with its conversation) acting for the member —
   // the same authorship the web writes, so one history explains both kinds of author.
   const actor = fsActorFor(principal, ctx.agent);
@@ -198,7 +199,10 @@ export function registerFsTools(server: McpServer, ctx: McpToolContext): void {
         "Empty the WHOLE workspace filesystem — removes every top-level entry recursively AND purges the workspace's publication history (every file's past revisions and their stored content go with it; deleting a single file keeps its history). The tree stays, ready for new writes. Destructive and workspace-wide; requires settings:write (admin).",
       inputSchema: {},
     },
-    () => run(principal, "settings:write", async () => ok(await fs.clear(ws))),
+    // Deliberately the UNSCOPED service, as `DELETE /fs` is: emptying a workspace has to mean emptying it. Through
+    // the member-scoped handle the recursive remove of `memory/` is refused, so the wipe deleted whatever sorted
+    // before it, failed there, and never reached the history purge.
+    () => run(principal, "settings:write", async () => ok(await workspaceFs.clear(ws))),
   );
 
   server.registerTool(
