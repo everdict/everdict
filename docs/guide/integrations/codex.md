@@ -2,7 +2,8 @@
 kind: wiki
 title: "Running Codex"
 status: current
-updated: 2026-08-13
+updated: 2026-09-15
+anchors: [examples/bundles/codex-pinch/bundle.json, plugin/.codex-plugin/plugin.json, plugin/.codex-plugin/mcp.json, apps/cli/src/runner-command.ts]
 ---
 # Running Codex
 
@@ -15,7 +16,8 @@ Codex meets Everdict from two directions, and they are independent:
 ## Codex as the agent under test
 
 The integration path is a declarative `command` harness, which is how any CLI agent joins Everdict.
-No adapter code, no package, just a spec:
+No adapter code, no package, just a spec — here the template, which the bundle below pins as the
+instance `codex@1.0.0`:
 
 ```json
 {
@@ -62,9 +64,10 @@ curl -XPOST localhost:8787/scorecards \
 ```
 
 `runtime: self:<id>` matters here: it runs Codex on **your** machine, so the ChatGPT login already on
-that machine pays for the tokens and the workspace budget is untouched.
+that machine pays for the tokens, and the run is own-pays rather than metered to the workspace.
 
-Pair a machine first — the desktop app has a one-click "Connect this device", or headless:
+Pair a machine first — in the web app, **Runtimes → Connect my machine** (one click inside the desktop
+app), or headless with a token from `POST /runners`:
 
 ```bash
 everdict runner --pair rnr_… --api-url http://localhost:8787
@@ -126,7 +129,7 @@ bundled `"url": "${EVERDICT_MCP_URL}"` would reach the client as that literal st
 explicit:
 
 ```bash
-export EVERDICT_API_KEY=ak_…    # web app → Account → API keys
+export EVERDICT_API_KEY=ak_…    # web app → Settings → API keys
 codex mcp add everdict --url https://everdict.your-company.com/mcp \
   --bearer-token-env-var EVERDICT_API_KEY
 ```

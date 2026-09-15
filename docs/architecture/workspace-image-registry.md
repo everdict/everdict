@@ -2,8 +2,8 @@
 kind: wiki
 title: "Workspace-scoped image registry — classify + publish harness images"
 status: current
-updated: 2026-08-11
-anchors: [packages/domain/src/image/image-ref.ts, packages/application-control/src/image-registry/image-registry-service.ts]
+updated: 2026-09-15
+anchors: [packages/domain/src/image/image-ref.ts, packages/application-control/src/image-registry/image-registry-service.ts, apps/api/src/api/image-registry/image-registry.routes.ts, apps/cli/src/image-push.ts]
 ---
 # Workspace-scoped image registry — classify + publish harness images
 
@@ -16,10 +16,10 @@ anchors: [packages/domain/src/image/image-ref.ts, packages/application-control/s
 > not operate can only be answered by asking it. **Only Docker Hub and REGISTERED registries are asked**
 > (arch-review 6 follow-up): the host comes out of a caller-supplied ref and the fetch runs from the control
 > plane's network position, so probing an arbitrary unregistered host — anonymously, http:// honored — was a
-> promptless reachability oracle for internal services. An unregistered host now classifies as
-> `unregistered-host` without any fetch; registration (credentials optional — anonymous entries are
+> promptless reachability oracle for internal services. For an unregistered host `verifyImage` now answers
+> `reason: "unregistered-host"` without any fetch; registration (credentials optional — anonymous entries are
 > supported) is the re-enable path, which is exactly this document's provenance model. Everything below
-> predates the managed store and remains true of the BYO path.
+> predates the managed store and describes the BYO path.
 
 > **Status:** ALL SLICES SHIPPED + LIVE-VERIFIED — S1 registration+classification `bd979a4` ·
 > S2 `everdict image push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch `9d14595`.
@@ -34,7 +34,7 @@ anchors: [packages/domain/src/image/image-ref.ts, packages/application-control/s
 
 ## Why
 
-Every image reference in Everdict today is a raw string with no provenance:
+Before this work, every image reference in Everdict was a raw string with no provenance:
 
 - `TopologyService.image` (service harnesses), `EvalCase.image` (portable env contract,
   `docs/architecture/portable-harness-runtime.md`), `CommandHarnessSpec.image` (dispatch image),
@@ -68,13 +68,14 @@ So two features, one axis:
   `imageRegistry` field is read as a `name: "default"` entry and cleared on the first write.
   External public images still need no registration to be classified `external`.
 - **The registry is BYO** (GHCR, Harbor, a plain `registry:2`, cloud artifact registries…).
-  Everdict stores coordinates + SecretStore **name-refs**; it never operates a registry.
+  Everdict stores coordinates + SecretStore **name-refs**; it does not operate these registries (the
+  registry it does operate is `docs/architecture/managed-image-store.md`).
 - **Secrets are NAME references** (`pullSecretName` / `pushSecretName`), values live in the
   workspace SecretStore — same discipline as `botTokenSecretName` / runtime `authSecret`
   (rule `workspace-integrations`).
-- **Classification is pure and lives in `@everdict/contracts`** (`classifyImageRef`) — no I/O, callers
-  pass the workspace registry coordinates. The web mirrors it with a loose client-side copy
-  (web is a pure HTTP client; precedent: `harnessInstanceSpecSchema` loose mirror).
+- **Classification is pure and lives in `@everdict/domain`** (`classifyImageRef`) — no I/O, callers
+  pass the workspace registry coordinates. The control plane classifies and sends the class down; the
+  web's former client-side mirror was deleted.
 - **Push happens on the user's machine, credentials minted by the control plane.** The control
   plane has no Docker; the image exists where it was built. `everdict image push` asks
   `POST /workspace/image-registries/push-credentials[?name=]` for `{name, host, namespace, username, password}`,
@@ -94,7 +95,7 @@ So two features, one axis:
 ## Data model
 
 ```ts
-// packages/db/src/workspace/workspace-settings.ts — WorkspaceSettingsSchema (JSONB, additive)
+// packages/contracts/src/records/workspace-settings.ts — WorkspaceSettingsSchema (JSONB, additive)
 imageRegistries: z.array(z.object({
   name: z.string().min(1),               // reference key — push selection points at this
   host: z.string().min(1),               // registry host[:port] — "ghcr.io", "registry.acme.dev:5000"
@@ -121,6 +122,9 @@ component is a **registry host iff** it contains `.` or `:` or equals `localhost
 | `local` | explicit loopback host — only exists where it was built/pushed | `localhost:5000/agent:dev`, `127.0.0.1/x` |
 | `unqualified` | bare single-segment name — a local daemon build **or** a Docker Hub library image; syntactically undecidable | `spreadsheetbench:v1`, `postgres:16-alpine` |
 
+A fifth class, `managed`, is checked first when the caller passes the managed store's coordinates — see
+`docs/architecture/managed-image-store.md`.
+
 `unqualified` is deliberately its own class (not folded into `local`): `postgres:16-alpine`
 pulls fine anywhere while `spreadsheetbench:v1` is a local build, and no parser can tell them
 apart. The class *names the ambiguity* — the UI nudges toward a fully-qualified ref (push to
@@ -134,8 +138,8 @@ instance/harness registration responses gain `imageWarnings` listing pins whose 
 
 ## Surface (BFF↔MCP parity, one service core)
 
-`packages/application-control/src/image-registry/image-registry-service.ts` (`ImageRegistryService`), routes in `server.ts`,
-tool twins in `mcp.ts`:
+`packages/application-control/src/image-registry/image-registry-service.ts` (`ImageRegistryService`), routes in
+`apps/api/src/api/image-registry/image-registry.routes.ts`, tool twins in `apps/api/src/api/image-registry/image-registry.mcp.ts`:
 
 | HTTP | MCP tool | Gate |
 |---|---|---|
@@ -144,6 +148,9 @@ tool twins in `mcp.ts`:
 | `POST /workspace/image-registries/probe` | `probe_workspace_image_registry` | `settings:write` (admin) |
 | `DELETE /workspace/image-registries/:name` | `remove_workspace_image_registry` | `settings:write` (admin) |
 | `POST /workspace/image-registries/push-credentials?name=` | `get_image_push_credentials` (`registry` arg) | `images:push` (member+) |
+| `GET /workspace/image-registries/tags` | `list_image_tags` | `harnesses:read` (viewer+) |
+| `GET /workspace/image-registries/manifest` | `inspect_image` | `harnesses:read` (viewer+) |
+| `GET /workspace/image-registries/verify?image=` | `verify_image` | `harnesses:read` (viewer+) |
 
 - The GET view returns `{host, namespace?, username?, pullSecretName?, pushSecretName?,
   imagePrefix}` — never secret values. `imagePrefix` = `host[/namespace]/` for client-side ref
@@ -202,8 +209,9 @@ everdict image push officeqa-env:v3 --register-environment officeqa-env \
   [--env-name N] [--env-description T] [--benchmark B] [--instructions file.md] [--visibility V]
 ```
 
-- **Digest-pinned when possible, and the tag rides along.** `docker image inspect` on the target reads back the
-  pushed `RepoDigests`; the registration pins `repo:tag@sha256:…` (the tag ref alone is the fallback, announced).
+- **Digest-pinned when possible, and the tag rides along.** On this BYO path `docker image inspect` on the
+  target reads back the pushed `RepoDigests` (a managed-store push asks the registry's manifest instead); the
+  registration pins `repo:tag@sha256:…` (the tag ref alone is the fallback, announced).
   This is the reproducibility answer to the store doc's digest-pinning open question for the CLI path. The tag half
   is not decoration: the digest is what resolves, but it is also the only thing a reader can get a VERSION from, and
   a digest-only pin renders every environment/topology view as an unidentifiable `repo@sha256:…`
@@ -218,32 +226,35 @@ everdict image push officeqa-env:v3 --register-environment officeqa-env \
 
 ## Pull wiring (S4 — shipped)
 
-One transient contract, consumed per runtime. `CaseJob.registryAuth` (`RegistryAuthSchema` =
-`{host, username?, password}`) follows the `repoToken` discipline exactly: the control plane
-resolves `pullSecretName` at dispatch (`executeCase` → `registryAuthFor`, wired for run AND
-scorecard), attaches it **only when a job image's explicit host matches the registry host**
-(`imageUsesRegistryHost` over `case.image` + service images with per-dispatch `imagePins`
-applied), and it is never persisted to any record/dataset.
+One transient contract, consumed per runtime. `CaseJob.registryAuths[]` (`RegistryAuthSchema` =
+`{host, username?, password}`; the singular `registryAuth` is still dual-written for older self-hosted
+runners, and every consumer reads through `registryAuthsOf`, which prefers the plural) follows the
+`repoToken` discipline exactly: the control plane resolves credentials at dispatch through ONE resolver,
+`buildImagePullAuths` (`apps/api/src/composition/images.ts` — managed-store grants first, BYO pull secrets
+second), wired as `registryAuthsFor(workspace, images)` into `executeCase` (run AND scorecard) and the
+`RuntimeDispatcher`. Only credentials covering an image in flight are attached (`registryAuthsForImages` /
+`imageUsesRegistryHost` over `case.image` + service images with per-dispatch `imagePins` applied), and
+they are never persisted to any record/dataset.
 
 Consumers (auth is always rendered **only** for host-matching images — no credential spray):
 
-- **Self-hosted runner, `case.image` path:** `runCaseJob` threads `job.registryAuth` into
-  `DockerDriver({registryAuth})` → authenticated pre-pull via a temp-`DOCKER_CONFIG`
+- **Self-hosted runner, `case.image` path:** `runCaseJob` threads `registryAuthsOf(job)` into
+  `DockerDriver({registryAuths})` → authenticated pre-pull via a temp-`DOCKER_CONFIG`
   (`pullWithRegistryAuth`, 0600, removed in `finally` — the host's `~/.docker/config.json` is
   never touched), then `docker run` uses the local image.
 - **Self-hosted runner, service path:** `runLeasedJob` pre-pulls `workspaceImagesToPull(spec,
-  imagePins, auth)` before topology deploy — the `TopologyRuntime` interface is unchanged
+  imagePins, auths)` before topology deploy — the `TopologyRuntime` interface is unchanged
   (its `docker run` finds the images locally).
 - **Nomad (topology + backend):** docker task `Config.auth = [{username, password}]` (HCL block
-  in JSON-API array form) — `buildNomadTopologyJob` (via `NomadTopologyRuntimeOptions.registryAuth`)
-  and `buildNomadJob` (from `job.registryAuth`).
-- **K8s (topology + backend):** a `kubernetes.io/dockerconfigjson` Secret named
-  `everdict-registry-auth` (per namespace, idempotent apply) + `imagePullSecrets` on matching pod
-  specs — `buildK8sManifests` (via `K8sTopologyRuntimeOptions.registryAuth`) and `buildK8sJob`
-  (the backend applies a `List` of Secret+Job).
-- **Wiring:** `RuntimeDispatcher.registryAuthFor(tenant)` resolves pull auth when building a
-  tenant's topology backend (`buildTopologyBackend({registryAuth})`); baked at first build like
-  `secretEnv` (rotation takes effect on backend rebuild/restart — same existing tradeoff).
+  in JSON-API array form) with the credential covering that task's image — `buildNomadTopologyJob` (via
+  `NomadTopologyRuntimeOptions.registryAuths`) and `buildNomadJob` (from `registryAuthsOf(job)`).
+- **K8s (topology + backend):** a `kubernetes.io/dockerconfigjson` Secret + `imagePullSecrets` on matching
+  pod specs. The topology lane names it by content (`registryAuthSecretName` → `everdict-registry-<digest>`),
+  so an apply can never re-credential another dispatch's pods — `buildK8sManifests` (via
+  `K8sTopologyRuntimeOptions.registryAuths`); the backend lane names it after the Job
+  (`workPullSecretName` → `<job>-pull`) — `buildK8sJob`.
+- **Wiring:** `RuntimeDispatcher` resolves pull auth per dispatch for the images in flight and hands it to
+  `buildTopologyBackend({registryAuths})`.
 
 **Placement gating — deliberately NOT a hard gate.** `local`/`unqualified` images cannot be
 *proven* un-pullable: kind's local-registry pattern uses `localhost:5001/...` refs that resolve
@@ -256,7 +267,7 @@ if a real footgun shows up that warnings don't catch.
 
 - **Building images** — Everdict references images, never builds them (locked in
   `portable-harness-runtime.md`).
-- **Operating a registry** — BYO only.
+- **Operating a registry** — not on this path; see `docs/architecture/managed-image-store.md`.
 - (retired non-goal) ~~Multiple registries per workspace~~ — shipped: name-keyed roster,
   per-push selection.
 - **Rewriting/aliasing image refs at dispatch** — refs stay verbatim in specs; the registry

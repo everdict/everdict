@@ -108,6 +108,33 @@ the two largest rules that did.
 - **`git log` over the moved paths** stops at the move unless asked to follow.
 - **The next push owes a fresh `pnpm agent-evals` run**, because the configuration digest changed.
 
+## The product documents, audited in the same change
+
+Every product page (`docs/guide/**`, the root reference pages, `docs/architecture/**`, runbooks, migration
+preflights — about 185) was read against the code by parallel agents and repaired in place: most had shipped
+plans still written as designs, and the user guide had wrong routes, field names and HTTP methods on nearly
+every page, including a budget page that said budgets never refuse (they answer 402). Each page now declares
+narrow `anchors:`, which `pnpm doc-anchors` reads (see `docs/sdlc/gates.md`).
+
+Removed, each readable at `a958dc36d772615a1de0dc81f59f4bb2f4b366d7`:
+
+    evolution-review-2026-09-09.md, -2026-09-10.md   every finding closed; the requests are in their intents
+    run-as-primitive.md                               a closed plan; docs/scorecards.md describes the result
+    execution-master-plan.md                          waves W1–W7 shipped; the results live in orchestration,
+                                                      event-plumbing, native-observability, execution-model
+    docs-quality-rubric.md                            it scored the published site docs-site-removal.md removed
+    migration/preflight/0023_connections_owner.md     the table was dropped by migration 0046
+    rearchitecture/domains/* (19 accepted records)    a catalogue of a layout that no longer exists; each page's
+                                                      reasoning was checked to survive in a live page, skill or
+                                                      code comment before removal. 00-target-architecture.md stays:
+                                                      three package barrels cite it and it alone holds the P4
+                                                      resolutions
+
+Deleting accepted decisions is the one move `document-kinds.md` warns against, and it is made here knowingly:
+the warning protects the only copy of an answer, and for these pages the audit named where each answer now
+lives. Labels code comments still cite ("master plan W2", "review 2026-09-09 R1") are historical names, like
+arch-review numbers, and resolve through the pinned commit.
+
 ## What would reopen it
 
 - **An agent-eval drill showing a corollary is no longer applied** because only its heading is pushed. That is

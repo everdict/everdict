@@ -1,9 +1,9 @@
 ---
 kind: spec
 title: "Benchmarks and evidence — finish the on-ramps, diagnose the agent, derive the round's evidence, export what is citable"
-status: accepted
-updated: 2026-09-02
-anchors: [packages/datasets/src/catalog.ts, packages/datasets/src/terminal-bench.ts, packages/contracts/src/execution/case-failure.ts, packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-service.ts, packages/application-control/src/scorecard/scorecard-observability.ts]
+status: landed
+updated: 2026-09-15
+anchors: [packages/datasets/src/catalog.ts, packages/datasets/src/terminal-bench.ts, packages/domain/src/evolution/diagnosis.ts, packages/domain/src/evolution/round-evidence.ts, packages/application-control/src/scorecard/scorecard-report.ts]
 ---
 # Benchmarks and evidence — finish the on-ramps, diagnose the agent, derive the round's evidence, export what is citable
 
@@ -31,6 +31,8 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 (`packages/domain/src/failure/case-failure.ts`; `infra | config | harness | agent`).
 
 ## §1 — Finish the on-ramps, and say what a fresh deployment has (G3.1)
+
+**Landed** — `packages/datasets/src/catalog.ts` (`swe-bench-verified`, `browsecomp`, `webarena`, `tau-bench`), `packages/datasets/src/terminal-bench.ts`, `apps/cli/src/tasks-prebuild.ts`.
 
 > **Landed 2026-09-02, the Terminal-Bench on-ramp and the first adapter:** slices 2-3 (`parseTerminalBenchTasks`
 > + the `terminal-bench` source kind on the import AND preview doors — see
@@ -96,6 +98,8 @@ never receives them) — the same assertion the mapper's tests already make, now
 
 ## §2 — Diagnose the agent, not only the platform (G3.2)
 
+**Landed** — `packages/domain/src/evolution/diagnosis.ts` (as a judge-family score detail, not a separate sealed document).
+
 > **Landed 2026-09-02, riding the judge family rather than a new sealed document:** `CaseDiagnosisSchema` with
 > the closed `DIAGNOSIS_KINDS` (`packages/contracts/src/records/evolution-campaign.ts`); a judge whose rubric asks
 > for one writes it as its score `detail` (or under a `diagnosis` key beside its rationale), and `diagnosesOf`
@@ -136,6 +140,8 @@ the scoring pass; a diagnosis whose `kind` is outside the vocabulary is refused 
 
 ## §3 — The round's evidence is platform-derived, immutable, and the input to the next step (G3.3)
 
+**Landed** — `packages/domain/src/evolution/round-evidence.ts`, `packages/db/src/evolution/campaign-evidence-store.ts`, `packages/domain/src/evolution/round-brief.ts`.
+
 > **Landed 2026-09-02 (without diagnoses, which are §2):** `RoundEvidenceSchema`
 > (`packages/contracts/src/records/evolution-campaign.ts`), the pure builder `roundEvidenceOf` + the
 > content-addressed `roundEvidenceKey` (`packages/domain/src/evolution/round-evidence.ts`), an insert-once
@@ -143,8 +149,8 @@ the scoring pass; a diagnosis whose `kind` is outside the vocabulary is refused 
 > table rather than the object store, because the object store is optional per deployment and the evidence
 > may not be), `CampaignService.logRound` staging the object BEFORE the round is appended and naming it as
 > `verdict.evidence { key, digest }`, and the read on both transports — `GET /campaigns/:id/rounds/:seq/evidence`
-> and `get_campaign_round_evidence` — which refuses bytes that no longer digest to the seal. `diagnoses` joins the
-> record when §2 lands; a field with no producer is a plan.
+> and `get_campaign_round_evidence` — which refuses bytes that no longer digest to the seal. `diagnoses` joined the
+> record with §2 (the per-case `diagnoses` on `RoundEvidenceSchema`).
 
 **The gap.** A round carries a verdict — counts, axes, `candidateSource` — and `learned`, the driver's prose,
 which the design correctly calls advice (`packages/contracts/src/records/evolution-campaign.ts`). Nothing
@@ -176,6 +182,8 @@ per-pass and durable, but nothing on the round names a pass, so a reader re-deri
 picks whichever pass is current (the L4 shape this section exists to avoid).
 
 ## §4 — Export what is citable, refuse to export what is not (G3.4)
+
+**Landed** — `packages/application-control/src/scorecard/scorecard-report.ts` (a generic citable report; no per-benchmark `reportFormat`).
 
 > **Landed 2026-09-02, as a generic citable report rather than per-benchmark submission files:**
 > `citableReport` (`packages/application-control/src/scorecard/scorecard-report.ts`) — the dataset version and

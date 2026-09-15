@@ -2,89 +2,90 @@
 kind: wiki
 title: "Agent execution auth — a credential for request-less agent turns"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/auth/src/agent-token.ts, packages/db/src/workspace/tenant-auth.ts, apps/api/src/composition/authenticator.ts, apps/agent/src/teammate-turn.ts]
 ---
 # Agent execution auth — a credential for request-less agent turns
 
-> **Status: doc-first SSOT (2026-07-24).** The crux dependency of
-> [agent-teams.md](./agent-teams.md) S3 (teammates) / S4 (event bridge) / S5 (proactive): a teammate or a
-> proactively-woken agent runs **without a live HTTP request**, so there is no forwarded user bearer for the
-> control-plane MCP tools it calls. It needs its own credential. Builds on [auth.md](../auth.md) (the control
-> plane owns all auth; every credential resolves to a `Principal`).
+> A teammate ([agent-teams.md](./agent-teams.md)), a trigger-activated agent
+> ([agent-automation.md](./agent-automation.md)), or any other headless agent turn runs **without a live HTTP
+> request**, so there is no forwarded user bearer for the control-plane MCP tools it calls. It carries its own
+> credential. Builds on [auth.md](../auth.md) (the control plane owns all auth; every credential resolves to a
+> `Principal`).
 
 ## Problem
 
-Today the conversational agent (`apps/agent`) authenticates by **forwarding the caller's bearer**: the base
-MCP client sends the user's token to the control plane, so every tool call runs as that human (their role,
-their tenancy). That is exactly right for interactive chat — but a **teammate** (S3) or a **proactively-woken**
-agent (S5) has no request, no header, no bearer. It still needs to call `get_scorecard` / `run_scorecard` /
-`send_message` as *some* authenticated principal, scoped to its workspace and bounded in what it may do.
+An interactive chat in `apps/agent` authenticates by **forwarding the caller's bearer**: the MCP client sends the
+member's token to the control plane, so every tool call runs as that human (their role, their tenancy). A request-less
+turn has no request, no header, no bearer — yet it still calls `get_scorecard` / `run_scorecard` / `create_task` as
+*some* authenticated principal, scoped to its workspace and bounded in what it may do.
 
 ## Principles
 
-1. **A new credential kind, not a route special-case.** Everdict already resolves several credential kinds to
-   one `Principal` behind `compositeAuthenticator` (oidc · api-key `ak_` · runner `rnr_` · github-actions). An
-   autonomous agent credential is another kind — `via: "agent"`, an `agt_…` token, one more `Authenticator`
-   (the `runnerAuthenticator` least-privilege pattern is the template). No new tenancy axis, no bypass.
-2. **Acts AS its creator, never above.** The token's `subject` is the human who created the teammate/proactive
-   agent. Through the usual membership resolution (`applyActiveWorkspace`) it gets **that person's current
-   workspace role** — so it can never exceed the creator, and a role change/removal takes effect immediately
-   (no baked-in privilege).
-3. **Scoped tighter than a person.** The token carries `scopes` (the existing per-key scope: `read|write|admin`,
-   intersected with the role by `can()`). Default = **`write`**, which by the matrix excludes secrets, members,
-   settings, keys, and destructive live-cluster control — an autonomous agent authors/runs eval content but
-   never touches governance. (S6's eval-driving surface fits inside `write`.)
-4. **Fail-closed, hashed, revocable, audited.** Only the SHA-256 hash is stored (plaintext returned once at
-   issuance, like `ak_`). Unknown/expired ⇒ `undefined` ⇒ 401. Revoked when the teammate stops. `via:"agent"`
-   makes every autonomous action distinguishable in logs from a human's.
+1. **A credential kind, not a route special-case.** The control plane resolves every credential kind to one
+   `Principal` behind `compositeAuthenticator` (`via`: `oidc` · `api-key` (`ak_`) · `runner` (`rnr_`) ·
+   `github-actions` · `agent`). The autonomous agent credential is the `agt_` token with `via: "agent"` — one more
+   `Authenticator`. No new tenancy axis, no bypass.
+2. **Acts AS its creator, never above.** The token's `subject` is the member the agent acts for. Through the usual
+   membership resolution (`applyActiveWorkspace`) it gets **that person's current workspace role** — it can never
+   exceed them, and a role change or removal takes effect immediately.
+3. **Scoped tighter than a person.** The token carries `scopes` (the per-key `read|write|admin` scope, intersected
+   with the role by `can()`). Default = **`write`**, which excludes secrets, members, settings, keys and other
+   governance — an autonomous agent authors and runs eval content but does not touch governance.
+4. **Fail-closed, hashed, revocable, attributable.** Only the SHA-256 hash is stored (plaintext returned once at
+   issuance). Unknown or revoked ⇒ `undefined` ⇒ 401. `via: "agent"` distinguishes autonomous actions from a
+   human's.
 
 ## Design
 
 ```
-request-less turn (teammate wake / proactive event)
+request-less turn (teammate wake / trigger activation / scheduled report / …)
   → agent forwards  Authorization: Bearer agt_…   to /me + the MCP tools
-      → agentTokenAuthenticator: agt_ prefix + hash → store → { workspace, subject(creator), scopes }
-      → Principal{ via:"agent", subject:creator, workspace, scopes:["write"] }
-      → applyActiveWorkspace → creator's membership role
-      → can(principal, action) = role ∩ scopes   (≤ creator, ≤ write)
+      → agentTokenAuthenticator: agt_ prefix + hash → TenantKeyStore → { tenant, owner (creator), scopes }
+      → Principal{ via:"agent", subject:owner, workspace, roles:["member"], scopes }
+      → applyActiveWorkspace → the owner's membership role
+      → can(principal, action) = role ∩ scopes
 ```
 
-- **Token** — `agt_<random>`; SHA-256 hash in an `AgentTokenStore` (reuses the `TenantKeyStore` shape:
-  `resolveByHash(hash) → { tenant, owner=creator, scopes }`). Immutable (rotate = revoke + reissue).
-- **Authenticator** — `agentTokenAuthenticator({ resolve })`: `agt_` prefix, `hashKey`, injected `resolve`,
-  fail-closed. Returns `Principal{ via:"agent", subject, workspace, roles:["member"] (bootstrap default),
-  scopes: resolved.scopes ?? ["write"] }`. Placed in the composite chain. **A1 = this slice.**
-- **Membership** — `via:"agent"` is **NOT** excluded from `applyActiveWorkspace` bootstrap (unlike
-  runner/github-actions): the agent IS the creator, a real member, so it takes the creator's live role. (Its
-  `subject` already has a member row; nothing new is bootstrapped.)
+- **Authenticator** — `agentTokenAuthenticator({ resolve })` (`packages/auth/src/agent-token.ts`): matches the `agt_`
+  prefix, hashes with `hashKey`, calls the injected `resolve`, fails closed. Returns `roles: ["member"]` as a
+  bootstrap default and `scopes: resolved.scopes` or `["write"]` when none are stored.
+- **Composition** — `buildAuthenticator` (`apps/api/src/composition/authenticator.ts`) places it in the composite
+  chain, resolving through the same `TenantKeyStore` as `ak_` keys. The prefix check keeps `ak_` and `agt_` from
+  cross-claiming a row.
+- **Issuance** — `issueAgentToken(store, tenant, owner, scopes = ["write"], label?)`
+  (`packages/db/src/workspace/tenant-auth.ts`) mints the token, stores its hash with the `agt_` prefix, and returns
+  `{ token, id }` so the owning lifecycle can revoke by id. Token generation is in
+  `packages/application-control/src/credential/credentials.ts`. Tokens are immutable (rotate = revoke + reissue).
+- **Key list** — the personal key surface (`GET /keys` + `list_api_keys`) hides agent tokens via
+  `isAgentTokenPrefix`; an `agt_` token is not a user-managed API key.
+- **Membership** — `via: "agent"` is **not** excluded from `applyActiveWorkspace` (unlike `runner` and
+  `github-actions`): the owner is a real member, so the token takes the owner's live role.
 
-## Stages
+## Who mints a token, with what scope
 
-- **A1 — auth core.** `Principal.via += "agent"`; `agentTokenAuthenticator` (pure, injected resolver);
-  export + ready for the composite. Unit-tested (prefix match, fail-closed, scope default, bounded). **← this slice.**
-- **A2 — token store + issuance. LANDED.** `agentTokenAuthenticator` is wired into `buildAuthenticator`
-  (resolving `agt_` via the shared `TenantKeyStore`); `issueAgentToken(store, tenant, owner, scopes=["write"])`
-  mints + stores the hash (owner = creator, `agt_` prefix); the personal key list (`GET /keys` +
-  `list_api_keys`) filters out `agt_` via `isAgentTokenPrefix`. The control plane now ACCEPTS an `agt_` bearer as
-  a `via:"agent"` principal. Chosen store approach (a) below (reuse, no migration). **Store decision (resolved → a):**
-  - *(a) reuse `TenantKeyStore`* — `add(tenant, hash, { owner: creator, scopes: ["write"], prefix: "agt_" })`;
-    `agentTokenAuthenticator({ resolve: h => keyStore.resolveByHash(h) })`. No migration. The prefix check keeps
-    `ak_`/`agt_` from cross-claiming (same hash table, different authenticator). **Caveat:** an `agt_` row would
-    surface in the owner's `list_api_keys` unless that list filters `prefix !== "agt_"` — do that filter.
-  - *(b) dedicated `AgentTokenStore`* (new table + migration) — clean separation + teammate-tied lifecycle, no
-    key-list leak, at the cost of a migration + a parallel store.
-  Lean (a) + the list filter for the first cut (no migration); revisit (b) if agent-token lifecycle diverges.
-- **A3 — request-less turn auth. CORE LANDED.** `apps/agent` `runTeammateTurn(deps, authenticate, mailbox,
-  sessionId, agentToken)`: authenticates via the `agt_` token (→ the agent principal), drains the teammate's
-  mailbox, and runs the agent loop over the incoming messages — forwarding the SAME token to the MCP tools, so
-  every tool call is authenticated + RBAC-bounded as the creator. Best-effort (a failed turn is logged, never
-  thrown). Unit-tested (authenticated turn over an incoming message; empty-mailbox no-op). **Last mile:** wire
-  `runTeammateTurn` as the `TeammateSupervisor`'s `runTurn` + a `spawn_teammate` path that issues the token
-  (`issueAgentToken`), creates the teammate session, and registers it — then S3 (peer collaboration) and S5
-  (proactive: an event wakes the same turn) are live end-to-end.
+Every issuer in `apps/agent` ties the token to the work's lifecycle and revokes it by id when that work ends.
+
+| Turn | Owner | Scopes | Where |
+|---|---|---|---|
+| Teammate (spawn + boot restore) | the creator | `write` | `apps/agent/src/server.ts` |
+| Trigger / subscription activation | the agent's creator | `write` | `apps/agent/src/agent-activation.ts` |
+| Discussion turn (`@everdict` in a comment) | the asker | `read`, `write` | `apps/agent/src/discussion-turn.ts` |
+| Scheduled report | the schedule's creator | `read` | `apps/agent/src/report-turn.ts` |
+| Verification turn | the member acted for | `read` | `apps/agent/src/verification-turn.ts` |
+| Wake-resume of a parked conversation | the session owner | `write` | `apps/agent/src/wake-resume.ts` |
+| Try-drive (`POST /internal/try`) | the named member | `read` | `apps/agent/src/server.ts` |
+
+## The request-less turn
+
+`runTeammateTurn(deps, authenticate, mailbox, sessionId, agentToken, signal?, permit?, ledger?, envelope?)`
+(`apps/agent/src/teammate-turn.ts`) authenticates with the `agt_` token, drains the session's mailbox, and runs the
+agent loop over the incoming messages — forwarding the SAME token to the MCP tools, so every tool call is
+authenticated and RBAC-bounded as the owner. It is the `TeammateSupervisor`'s turn function and the default
+activation turn. Best-effort: a failed turn is logged and returns `undefined`, never thrown.
 
 ## Non-goals / guardrails
 
-- Not a super-user token — bounded by the creator's role AND the `write` scope; never secrets/governance.
+- Not a super-user token — bounded by the owner's role AND the token's scope.
 - Not a second tenancy axis — `workspace` stays the one trust-zone key; the token is workspace-scoped.
 - Not decode-without-verify — resolved only via the hashed store; unknown ⇒ 401.

@@ -2,7 +2,8 @@
 kind: wiki
 title: "Module collaboration diagrams"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/backends/package.json, packages/job-runner/package.json, packages/contracts/src/execution/compute.ts, packages/application-control/src/ports/dispatcher.ts, packages/orchestrator/src/orchestrator.ts]
 ---
 # Module collaboration diagrams
 
@@ -10,19 +11,19 @@ How the `packages/*` and `apps/*` modules cooperate — first at low zoom (the w
 then at high zoom (one diagram per module). Companion to
 [`overview.md`](overview.md) (the narrative map). Diagrams are Mermaid; GitHub renders them inline.
 
-> **Re-architecture note.** The layer spine is now `@everdict/contracts ← @everdict/domain ←
-> @everdict/application-{execution,control}`. The former packages this doc names map as: `@everdict/core`
-> → `@everdict/contracts` (types/schemas/errors) + `@everdict/domain` (the pure kernel); `@everdict/run-case`
-> → `@everdict/application-execution` (`runCase`); `@everdict/suite` → `@everdict/domain` (the pure
-> aggregation fns `summarizeScorecard`/`diffScorecards`/`caseVerdict`/`leaderboard`) + `@everdict/application-control`
-> (`runSuite`). The **collaboration relationships** below are unchanged; only the package homes moved.
+> **Re-architecture note.** The layer spine is `@everdict/contracts ← @everdict/domain ←
+> @everdict/application-{execution,control}`. The pre-re-architecture packages `@everdict/core`, `@everdict/run-case`,
+> `@everdict/suite` and `@everdict/billing` no longer exist: types/schemas/errors are in `@everdict/contracts`, the pure
+> kernel (scorecard aggregation, placement policy, budgets, authz) in `@everdict/domain`, `runCase` in
+> `@everdict/application-execution`, and `runSuite` plus the store/registry/dispatcher ports in
+> `@everdict/application-control`. Every name below is a current home.
 
 ## How to read these
 
 - **Arrow = "uses / depends on / calls"**, pointing from the consumer to the provider — the same
   direction as the `import`. Reverse imports are bugs (one-way dependency rule).
-- `<<interface>>` = a contract from `@everdict/contracts` (the dependency root). Concrete classes live in
-  outer packages and **realize** those contracts (`..|>`).
+- `<<interface>>` = a contract. Most live in `@everdict/contracts` (the dependency root); ports live in
+  `@everdict/application-control`, and `Backend` in `@everdict/backends`. Concrete classes **realize** them (`..|>`).
 - Two cooperating planes share the same `(job) → CaseResult` seam:
   - **in-sandbox eval loop** — `runCase` drives Driver · Environment · Harness · Grader.
   - **placement / control plane** — Backend · Scheduler · Orchestrator · the HTTP/MCP surface dispatch
@@ -36,106 +37,129 @@ then at high zoom (one diagram per module). Companion to
 
 ## 1.1 The dependency spine (static, one-way)
 
-Every module depends only inward. `core` is contracts only; the product is the *pluggable adapters*
-hanging off it (many Drivers / Harnesses / Graders / Backends / Registries).
+Every module depends only inward. `@everdict/contracts` is interfaces + schemas + errors; `@everdict/domain` is the
+pure kernel; the two application layers hold the use-cases and ports; the product is the *pluggable adapters*
+hanging off them (many Drivers / Environments / Harnesses / Graders / Backends / Registries).
+
+The edges are the runtime `dependencies` in each `package.json`. To keep the picture readable, **edges into
+`@everdict/contracts` and `@everdict/domain` are drawn only for the spine** — nearly every package imports
+contracts, and most import domain.
 
 ```mermaid
 flowchart TD
-  subgraph L0["contracts (root)"]
-    core["@everdict/contracts<br/><i>interfaces + Zod + errors</i>"]
+  subgraph SPINE["layer spine"]
+    contracts["@everdict/contracts<br/><i>interfaces + Zod + errors</i>"]
+    domain["@everdict/domain<br/><i>pure kernel</i>"]
+    appexec["@everdict/application-execution<br/><i>runCase</i>"]
+    appctl["@everdict/application-control<br/><i>use-cases + ports</i>"]
   end
 
-  subgraph L1["in-sandbox adapters + trace"]
+  subgraph ADAPTERS["adapters"]
     drivers["@everdict/drivers"]
     environments["@everdict/environments"]
     harnesses["@everdict/harnesses"]
     graders["@everdict/graders"]
     trace["@everdict/trace"]
-  end
-
-  subgraph L2["eval loop"]
-    runner["@everdict/application-execution"]
-  end
-
-  subgraph L3["dispatched unit (self-contained worker)"]
-    agent["@everdict/job-runner"]
-  end
-
-  subgraph L4["placement"]
-    backends["@everdict/backends"]
-  end
-
-  subgraph L5["control / execution"]
-    orchestrator["@everdict/orchestrator"]
-    topology["@everdict/topology"]
-    suite["@everdict/domain"]
-  end
-
-  subgraph CP["control-plane stores"]
+    llm["@everdict/llm"]
+    datasets["@everdict/datasets"]
     db["@everdict/db"]
     registry["@everdict/registry"]
     auth["@everdict/auth"]
+    storage["@everdict/storage"]
+    images["@everdict/images"]
   end
+
+  jobrunner["@everdict/job-runner<br/><i>dispatched unit</i>"]
+  backends["@everdict/backends<br/><i>placement</i>"]
+
+  subgraph CONTROL["control / execution"]
+    orchestrator["@everdict/orchestrator"]
+    topology["@everdict/topology"]
+  end
+
+  shr["@everdict/self-hosted-runner"]
+  agentruntime["@everdict/agent-runtime"]
 
   subgraph APPS["apps"]
     api["apps/api<br/><i>BFF + MCP</i>"]
     cli["apps/cli"]
+    desktop["apps/desktop"]
+    agentapp["apps/agent<br/><i>owner runtime</i>"]
     web["apps/web<br/><i>pure HTTP client</i>"]
   end
 
-  drivers --> core
-  environments --> core
-  graders --> core
-  trace --> core
-  harnesses --> core
+  domain --> contracts
+  appexec --> domain
+  appctl --> appexec
+
   harnesses --> trace
+  graders --> appexec
+  graders --> llm
+  db --> appctl
+  registry --> appctl
+  registry --> db
+  registry --> datasets
+  auth --> db
+  storage --> appctl
+  images --> appctl
 
-  runner --> core
-  runner --> drivers
-  runner --> environments
-  runner --> graders
-  runner --> harnesses
+  jobrunner --> appexec
+  jobrunner --> drivers
+  jobrunner --> environments
+  jobrunner --> harnesses
+  jobrunner --> graders
 
-  agent --> runner
-  agent --> drivers
-  agent --> environments
-  agent --> graders
-  agent --> harnesses
-  agent --> core
-
-  backends --> agent
-  backends --> core
+  backends --> jobrunner
+  backends --> appctl
+  backends --> drivers
 
   orchestrator --> backends
-  orchestrator --> agent
-  orchestrator --> core
+  orchestrator --> jobrunner
   topology --> backends
+  topology --> appctl
+  topology --> appexec
   topology --> graders
   topology --> trace
-  topology --> core
-  suite --> core
 
-  db --> core
-  registry --> db
-  registry --> core
-  auth --> db
-  auth --> core
+  shr --> jobrunner
+  shr --> topology
+  shr --> trace
+  agentruntime --> llm
 
-  api --> agent
-  api --> backends
-  api --> suite
-  api --> graders
-  api --> registry
-  api --> db
+  api --> appctl
   api --> auth
-  api --> core
-  cli --> orchestrator
+  api --> backends
+  api --> datasets
+  api --> db
+  api --> drivers
+  api --> graders
+  api --> images
+  api --> jobrunner
+  api --> llm
+  api --> registry
+  api --> storage
+  api --> topology
+  api --> trace
+  cli --> appctl
   cli --> backends
-  cli --> agent
-  cli --> suite
-  cli --> core
+  cli --> datasets
+  cli --> jobrunner
+  cli --> orchestrator
+  cli --> shr
+  cli --> topology
+  desktop --> shr
+  agentapp --> agentruntime
+  agentapp --> appctl
+  agentapp --> db
+  agentapp --> drivers
+  agentapp --> llm
+  agentapp --> registry
+  web -.->|type-only| contracts
   web -.->|HTTP only| api
 ```
+
+`@everdict/sdk` (HTTP client of the public routes) and `@everdict/otel` (OTLP-door helpers) are user-facing
+surfaces with no runtime `@everdict/*` dependency, and nothing in the monorepo depends on them.
 
 ## 1.2 The eval loop (runtime collaboration, end-to-end)
 
@@ -148,14 +172,14 @@ sequenceDiagram
   participant Backend
   participant Agent as @everdict/job-runner
   participant Runner as @everdict/application-execution
-  participant Driver as LocalDriver
+  participant Driver as LocalDriver or DockerDriver
   participant Compute as ComputeHandle
-  participant Env as RepoEnvironment
+  participant Env as Repo / Prompt / OsUse Environment
   participant Harness as EvaluableHarness
   participant Grader as Grader[]
 
   Caller->>Backend: dispatch(CaseJob)
-  Note over Backend: LocalBackend runs in-process.<br/>Nomad/K8s submit a Job, then parse<br/>the EVERDICT_RESULT stdout sentinel
+  Note over Backend: LocalBackend / DockerBackend run in-process.<br/>Nomad/K8s submit a Job, then parse<br/>the __EVERDICT_RESULT__ stdout sentinel
   Backend->>Agent: runCaseJob(job)
   Agent->>Agent: makeHarness(id, ver, spec?) and makeGraders(specs)
   Agent->>Runner: runCase(evalCase, deps)
@@ -167,11 +191,15 @@ sequenceDiagram
   Harness-->>Runner: TraceEvent stream
   Runner->>Env: snapshot(compute)
   Env-->>Runner: EnvSnapshot
-  loop each grader
-    Runner->>Grader: grade(case, trace, snapshot, compute)
-    Grader-->>Runner: Score
+  loop each compute-bound grader (needsCompute)
+    Runner->>Grader: grade(GradeContext with compute)
+    Grader-->>Runner: Score or Score[]
   end
   Runner->>Compute: dispose()  (finally — always)
+  loop each observation-only grader
+    Runner->>Grader: grade(GradeContext: trace, snapshot)
+    Grader-->>Runner: Score or Score[]
+  end
   Runner-->>Agent: CaseResult
   Agent-->>Backend: CaseResult
   Backend-->>Caller: CaseResult
@@ -180,7 +208,9 @@ sequenceDiagram
 ## 1.3 The control plane (multi-tenant request → result)
 
 How `apps/api` turns "run one case / one batch" into a tenant-scoped, budgeted, isolated dispatch.
-Humans reach it through `apps/web` (Keycloak token courier); agents through API keys / MCP.
+Humans reach it through `apps/web` (Keycloak token courier); agents through API keys / MCP. `RunService` and
+`ScorecardService` are use-cases from `@everdict/application-control`; `RuntimeDispatcher` and the default
+`JudgeRunner` (`defaultJudgeRunner`) are `apps/api` glue.
 
 ```mermaid
 flowchart TD
@@ -205,12 +235,12 @@ flowchart TD
   rtd -->|placement.target| RuntimeReg["RuntimeRegistry"]
   rtd -->|buildRuntimeBackend| Scheduler
   Scheduler -->|capacity-aware + WFQ| Backend["Backend (local/nomad/k8s)"]
-  scoresvc -->|runSuite fan-out| Scheduler
+  scoresvc -->|"batch fan-out (in-process runSuite or Temporal workflow)"| Scheduler
 
   runsvc --> budget["BudgetTracker.admit/settle"]
   runsvc --> RunStore
   scoresvc --> ScorecardStore
-  runsvc --> HarnessReg["HarnessRegistry"]
+  runsvc --> HarnessReg["HarnessInstanceRegistry"]
   scoresvc --> DatasetReg["DatasetRegistry"]
   scoresvc --> JudgeReg["JudgeRegistry"]
   jr --> SecretStore["SecretStore (model-judge keys)"]
@@ -230,8 +260,8 @@ in/out edges that matter.
 
 ## `@everdict/contracts` — contracts (the dependency root)
 
-**Role.** Interfaces + Zod schemas + the `AppError` hierarchy. No I/O, no SDKs. Every other module
-realizes or consumes these. Schema is the source of truth; types are `z.infer`.
+**Role.** Interfaces + Zod schemas + the `AppError` hierarchy + the job-result wire codec. No I/O, no SDKs.
+Every other module realizes or consumes these. Schema is the source of truth; types are `z.infer`.
 
 ```mermaid
 classDiagram
@@ -260,14 +290,9 @@ classDiagram
     <<interface>>
     +grade(GradeContext) Score
   }
-  class Backend {
+  class TraceSource {
     <<interface>>
-    +capacity() BackendCapacity
-    +dispatch(CaseJob) CaseResult
-  }
-  class Dispatcher {
-    <<interface>>
-    +dispatch(CaseJob) CaseResult
+    +fetch(runId) TraceEvents
   }
   class CaseJob {
     +evalCase
@@ -305,21 +330,26 @@ classDiagram
   CaseJob *-- EvalCase
   CaseJob *-- HarnessSpec
   CaseResult *-- TraceEvent
-  note for TraceEvent "kind = message · llm_call · tool_call · tool_result · env_action · error"
+  TraceSource ..> TraceEvent
+  note for TraceEvent "kind = message · llm_call · tool_call · tool_result · env_action · error · log · artifact · span · infra"
   note for HarnessSpec "kind = process · service · command"
 ```
 
-- **Consumed by:** literally every module. `usageFromTrace(trace) → RunUsageSummary` and
-  `assertHardenedIsolation(zone)` are the only behavior here; the rest is types + schemas.
-- **Other contracts:** `Suite`, `Dataset`, `JudgeSpec`, `RuntimeSpec`, `Score`, `Cost`, `EnvSpec`/`EnvSnapshot`
-  (repo · browser discriminated unions), `Placement`, `TrustZone`.
+- **Consumed by:** every module except `@everdict/sdk`/`@everdict/otel` at runtime (the web imports it type-only).
+  Pure behavior over these types — `usageFromTrace`, `assertHardenedIsolation`, scorecard aggregation — lives in
+  `@everdict/domain`.
+- **Not here:** `Backend` is declared in `@everdict/backends` (`packages/backends/src/backend.ts`); the `Dispatcher`
+  port and the store/registry ports in `@everdict/application-control` (`packages/application-control/src/ports/`).
+- **Other contracts:** `Suite`, `Dataset`, `JudgeSpec`, `RuntimeSpec`, `Score`, `EnvSpec`/`EnvSnapshot`
+  (repo · browser · prompt · os-use discriminated unions), `Placement`, `TrustZone`.
 
 ---
 
 ## `@everdict/drivers` — in-sandbox compute
 
 **Role.** `LocalDriver` realizes `Driver`: a `ComputeHandle` backed by a tmp dir + `child_process`.
-Used by the agent *inside* an already-isolated job (isolation is the Backend's job, not the Driver's).
+`DockerDriver` (the other realization, not drawn) backs the handle with a container of `case.image`.
+Used by the job-runner *inside* an already-isolated job (isolation is the Backend's job, not the Driver's).
 
 ```mermaid
 classDiagram
@@ -345,15 +375,18 @@ classDiagram
   LocalDriver ..> LocalComputeHandle : creates
 ```
 
-- **`provision`** → `mkdtemp(/tmp/everdict-…)` → `LocalComputeHandle(root)`.
-- **`exec`** runs via `child_process` (non-zero exit ≠ throw); **`dispose`** = `rm -rf root`.
-- **Called by:** `@everdict/application-execution` (`runCase`) and therefore `@everdict/job-runner`.
+- **`provision`** → `mkdtemp(<tmpdir>/everdict-…)` → `LocalComputeHandle(root)`.
+- **`exec`** runs via `child_process` (non-zero exit ≠ throw); **`dispose`** = `rm -rf root` (when the handle owns it).
+- **Called by:** `@everdict/application-execution` (`runCase`); instantiated by `@everdict/job-runner` (`DockerDriver`
+  when the job is containerized, else `LocalDriver`) and by `DockerBackend`.
 
 ---
 
 ## `@everdict/environments` — the world acted on
 
 **Role.** `RepoEnvironment` realizes `Environment<RepoSnapshot>`: seed a repo, capture the git diff.
+`PromptEnvironment` (QA, `env.kind: prompt`) and `OsUseEnvironment` (desktop, `os-use`) are the other two
+realizations; a `browser` env is a service-topology target, never run here.
 
 ```mermaid
 classDiagram
@@ -371,16 +404,18 @@ classDiagram
   RepoEnvironment ..> ComputeHandle : exec git
 ```
 
-- **`seed`** — inline `files` map (`git init` + commit a baseline) **or** `git clone --depth 1` + `checkout ref` + run `setup[]`.
+- **`seed`** — a local `path` (symlinked), an inline `files` map (`git init` + commit a baseline), **or** `git clone --depth 1` + `checkout ref`; then run `setup[]`.
 - **`snapshot`** — `git add -A` → `git diff --cached HEAD` (+ `--name-only`, + `rev-parse HEAD`) → `RepoSnapshot{diff, changedFiles, headSha}`.
-- **Called by:** `@everdict/application-execution`; instantiated by `@everdict/job-runner`. Browser/os-use add a new `Environment` variant, no core rewrite.
+- **Called by:** `@everdict/application-execution`; instantiated by `@everdict/job-runner` by `env.kind`. A new world kind adds an `Environment` variant, no core rewrite.
 
 ---
 
 ## `@everdict/trace` — trace ingestion + usage metering
 
-**Role.** Pull a service harness's native trace from OTel/MLflow and normalize to `TraceEvent[]`; plus a
-**usage-proxy** sidecar that recovers token usage from black-box harnesses.
+**Role.** Pull a harness's native trace from an observability platform and normalize to `TraceEvent[]`; plus a
+**usage-proxy** sidecar that recovers token usage from black-box harnesses. The `TraceSource` interface is declared
+in `@everdict/contracts`; this package holds the sources (OTel, MLflow, Langfuse, LangSmith, Phoenix) and the
+outbound sinks. Only the first two are drawn.
 
 ```mermaid
 classDiagram
@@ -411,8 +446,9 @@ classDiagram
 - **usage-proxy** (`startUsageProxy`, `extractUsage`, `costFromHeaders`, `inMemoryUsageTally`): a reverse
   proxy in front of a BYO model gateway; reads `usage` from the response + `x-litellm-response-cost`, keyed
   by an `x-everdict-run` header → per-run `RunUsage`.
-- **Consumed by:** `@everdict/harnesses` (`CommandHarness` for trace pull + metering) and `@everdict/topology`
-  (`ServiceTopologyBackend` for trace pull). See `docs/usage-metering.md`, `docs/service-harness.md`.
+- **Consumed by:** `@everdict/harnesses` (`CommandHarness` for trace pull + metering), `@everdict/topology`
+  (`ServiceTopologyBackend` for trace pull), `@everdict/self-hosted-runner` and `apps/api`. See
+  `docs/usage-metering.md`, `docs/service-harness.md`.
 
 ---
 
@@ -443,14 +479,15 @@ classDiagram
   EvaluableHarness <|.. CommandHarness
   EvaluableHarness <|.. ScriptedHarness
   ClaudeCodeHarness ..> mapClaudeStreamJson : native to TraceEvent
-  CommandHarness ..> TraceSource : trace otel or mlflow
+  CommandHarness ..> TraceSource : trace pull
   CommandHarness ..> UsageProxy : meterUsage and trace none
 ```
 
 - **ClaudeCodeHarness** — runs `claude -p … --output-format stream-json`; `mapClaudeStreamJson` normalizes
   each line; cost captured from the final `result.total_cost_usd`.
 - **CommandHarness** — interprets a `CommandHarnessSpec`: `setup[]` (install) → `command` template
-  (`{{task}}`/`{{model}}`/`{{run_id}}`) → trace extraction (`none` · `otel` · `mlflow` via `@everdict/trace`).
+  (`{{task}}`/`{{model}}`/`{{run_id}}`) → trace extraction (`none` · `file` · `otel` · `mlflow` · `langfuse` ·
+  `langsmith` · `phoenix`, pulled via `@everdict/trace`).
   When `meterUsage` and `trace.kind="none"`, it spins a usage-proxy and emits a synthetic `llm_call`
   carrying the recovered tokens/USD.
 - **ScriptedHarness** — deterministic steps; lets the whole eval loop run with no LLM/key.
@@ -488,16 +525,20 @@ classDiagram
   UrlMatchesGrader ..> EnvSnapshot : url
   JudgeGrader ..> Judge
   Judge <|.. modelJudge
-  modelJudge ..> anthropicComplete
-  modelJudge ..> openaiComplete
+  modelJudge ..> transportComplete
   modelJudge ..> harnessComplete
+  transportComplete ..> LlmTransport : @everdict/llm
 ```
 
-- **`GradeContext`** = `{case, trace, snapshot, compute?, baseline?}`. Each grader reads only what it needs.
-- **`makeGraders(GraderSpec[]) → Grader[]`** switches on `spec.id` (`tests-pass`/`steps`/`cost`/`latency`/`dom-contains`/`url-matches`).
-- **Agent Judge** — `JudgeGrader` delegates to a `Judge`; `modelJudge(JudgeCompletion)` builds the prompt +
-  parses the verdict, over a pluggable transport: `anthropicComplete` / `openaiComplete` (→LiteLLM) /
-  `harnessComplete` (dispatch an agent, verdict via `traceToText`). See `docs/judges.md`.
+- **`GradeContext`** = `{case, deadlineAt, trace, snapshot, observations, compute?, provision?, readStore?, evidence?, baseline?, signal?}`.
+  Each grader reads only what it needs; a grader that declares `needsCompute` runs before the compute is released.
+- **`makeGraders(GraderSpec[]) → Grader[]`** switches on `spec.id` — `tests-pass`, `state-check`, `command`, `script`,
+  `script-score`, `reward-file`, `swe-bench`, `world-state`, `steps`, `cost`, `latency`, `dom-contains`, `url-matches`,
+  `answer-match`, `store-state`, `text-metric`, `judge` (`packages/graders/src/make-graders.ts`). The diagram draws a subset.
+- **Agent Judge** — `JudgeGrader` delegates to a `Judge` (declared in `@everdict/graders`); `modelJudge(JudgeCompletion)`
+  builds the prompt + parses the verdict, over a pluggable completion: `transportComplete` (a provider-native
+  `LlmTransport` from `@everdict/llm` — Anthropic Messages / OpenAI / OpenAI-compatible) or `harnessComplete`
+  (dispatch an agent, verdict via `traceToText`). See `docs/judges.md`.
 
 ---
 
@@ -509,25 +550,24 @@ guaranteed `compute.dispose()` in `finally`. No placement, no tenancy.
 ```mermaid
 flowchart LR
   subgraph deps["RunCaseDeps (injected)"]
-    d[Driver] & e[Environment] & h[EvaluableHarness] & g["Grader list"] & c[RunContext]
+    d[Driver] & e[Environment] & h[EvaluableHarness] & g["Grader list"] & c["runCtx: RunContext"]
   end
   runCase --> d
   runCase --> e
   runCase --> h
   runCase --> g
-  runCase -->|"provision → seed → install → run → snapshot → grade → dispose"| out[CaseResult]
+  runCase -->|"provision → seed → install → run → snapshot → compute-bound grade → dispose → observation grade"| out[CaseResult]
 ```
 
-- **Imports** the `@everdict/contracts` interfaces plus the concrete adapter *types*; the *instances* are injected
-  by the caller (`@everdict/job-runner`). This keeps the runner adapter-agnostic.
-- **Becomes** a Temporal activity unchanged later (pure async, no shared state).
+- **Imports** only `@everdict/contracts` and `@everdict/domain`; every adapter *instance* is injected by the caller
+  (`@everdict/job-runner`). This keeps the runner adapter-agnostic.
 
 ---
 
 ## `@everdict/job-runner` — the dispatched unit (self-contained worker)
 
 **Role.** `runCaseJob(CaseJob) → CaseResult`: assemble concrete adapters from the job, run `runCase`,
-emit the result behind the `EVERDICT_RESULT` stdout sentinel.
+emit the result behind the `__EVERDICT_RESULT__` stdout sentinel.
 
 ```mermaid
 flowchart TD
@@ -537,8 +577,8 @@ flowchart TD
   makeHarness --> H["@everdict/harnesses<br/>Claude / Command / Scripted"]
   makeGraders --> G["@everdict/graders"]
   runCaseJob --> runCase["@everdict/application-execution.runCase"]
-  runCase --> LD["new LocalDriver()"]
-  runCase --> RE["new RepoEnvironment()"]
+  runCase --> LD["LocalDriver, or DockerDriver when containerized"]
+  runCase --> RE["Environment by env.kind<br/>Repo / Prompt / OsUse"]
   runCase --> H
   runCase --> G
   runCaseJob -->|"runContextFromEnv / collectAuthEnv"| ctx[RunContext]
@@ -549,16 +589,21 @@ flowchart TD
   else branches on built-in `id` (`claude-code`/`scripted`). `meterUsage` flows from `job.meterUsage`
   (control-plane policy) with an `EVERDICT_METER_USAGE` env dev-fallback.
 - **Auth env:** `collectAuthEnv` / `hasClaudeAuth` gather the machine's existing `claude` login (no API key
-  for `LocalDriver`); `RESULT_SENTINEL` is the contract every non-local Backend parses.
-- **Called by:** `LocalBackend` (in-process) and the Nomad/K8s images (as the job entrypoint).
+  for `LocalDriver`); `RESULT_SENTINEL` (declared in `@everdict/contracts`) is the contract every non-local Backend parses.
+- **Called by:** `LocalBackend` and `DockerBackend` (in-process), `@everdict/self-hosted-runner` (a leased
+  process job), and the Nomad/K8s images (`packages/job-runner/src/main.ts` as the job entrypoint).
 
 ---
 
 ## `@everdict/backends` — placement
 
-**Role.** Dispatch the agent job to an execution target and return `CaseResult`. Backends *never run the
-harness themselves* (except `LocalBackend`, in-process) — they submit a Job and parse the sentinel.
-Plus the SaaS placement machinery: scheduling, fairness, trust zones, budgets, autoscaling.
+**Role.** Dispatch the job-runner job to an execution target and return `CaseResult`. Backends *never run the
+harness themselves* (except `LocalBackend` and `DockerBackend`, which call `runCaseJob` in-process) — they submit a Job
+and parse the sentinel. Plus the SaaS placement machinery: scheduling, fairness, trust zones. The `Backend`
+interface (`Backend extends Dispatcher`) is declared here; the `Dispatcher` port comes from
+`@everdict/application-control`, and `TrustZonePolicy`, `BudgetTracker`, `FairQueue` and `Autoscaler` are pure
+`@everdict/domain` types the Scheduler and backends consume. Other `Backend` realizations live outside this
+package: `ServiceTopologyBackend` (`@everdict/topology`) and `SelfHostedBackend` (`apps/api`).
 
 ```mermaid
 classDiagram
@@ -584,7 +629,9 @@ classDiagram
     <<interface>>
     +secretsFor(tenant) Secrets
   }
+  Dispatcher <|-- Backend
   Backend <|.. LocalBackend
+  Backend <|.. DockerBackend
   Backend <|.. NomadBackend
   Backend <|.. K8sBackend
   Dispatcher <|.. Scheduler
@@ -594,7 +641,8 @@ classDiagram
   Scheduler --> BudgetTracker
   Router --> BackendRegistry
   Autoscaler --> Scheduler
-  LocalBackend ..> agent : runCaseJob in-process
+  LocalBackend ..> jobrunner : runCaseJob in-process
+  DockerBackend ..> jobrunner : runCaseJob via DockerDriver
   NomadBackend ..> TrustZonePolicy
   NomadBackend ..> SecretProvider
   K8sBackend ..> TrustZonePolicy
@@ -630,7 +678,8 @@ sequenceDiagram
   pools are keyed by zone and never shared across tenants.
 - **`buildRuntimeBackend(RuntimeSpec, {secretEnv})`** turns a tenant-registered runtime into a live Backend
   (credentials injected via `secretEnv`, never in the spec). `buildRegistry(BackendsConfig)` builds the static set.
-- **Calls:** `@everdict/job-runner` (`LocalBackend`). **Called by:** `@everdict/orchestrator`, `apps/api`, `apps/cli`.
+- **Calls:** `@everdict/job-runner` (`LocalBackend`, `DockerBackend`). **Called by:** `@everdict/orchestrator`,
+  `@everdict/topology`, `apps/api`, `apps/cli`.
 
 ---
 
@@ -666,7 +715,7 @@ flowchart LR
   TemporalOrchestrator -->|"start by name"| WF["evalCaseWorkflow<br/>(deterministic, no I/O)"]
   Worker["runWorker()"] -->|builds| Scheduler["Scheduler(buildRegistry(config))"]
   Worker -->|register| WF
-  Worker -->|register| Act["createActivities(scheduler)"]
+  Worker -->|register| Act["createActivities(scheduler, scheduleApi?)"]
   WF -->|calls| Act
   Act -->|dispatch| Scheduler
 ```
@@ -675,15 +724,19 @@ flowchart LR
 - **`TemporalOrchestrator`** — client side; starts `evalCaseWorkflow` *by name* so the client never imports
   workflow sandbox code. **Workflow code must stay deterministic** — all I/O lives in the activity.
 - **`runWorker(opts)`** — long-running; builds the `Scheduler` from `BackendsConfig` (auth env via
-  `collectAuthEnv`), registers the workflow + `dispatchCase`. **Called by:** `apps/cli` (`everdict worker`).
+  `collectAuthEnv`), registers every workflow in `packages/orchestrator/src/workflows.ts` (`evalCaseWorkflow`,
+  `suiteWorkflow`, `scorecardBatchWorkflow`, `scheduledScorecardWorkflow`, …) and the activities (`dispatchCase`,
+  `runBatchCase`, …). **Called by:** `apps/cli` (`everdict worker`).
 
 ---
 
-## `@everdict/domain` — suites & version regression
+## `@everdict/application-control` + `@everdict/domain` — suites & version regression
 
 **Role.** Fan a `Suite` out over its cases at a given harness version → `Scorecard`; summarize and diff
-scorecards for regression. Depends on `@everdict/contracts` *only* — `Dispatch` is just `(job) → CaseResult`, so any
-Backend/Router/Scheduler/Orchestrator plugs in.
+scorecards for regression. The fan-out, `runSuite`, is a use-case in `@everdict/application-control`
+(`packages/application-control/src/run-suite.ts`); the aggregation — `summarizeScorecard`, `diffScorecards`,
+`caseVerdict`, `leaderboard` — is pure `@everdict/domain` (`packages/domain/src/scorecard/`). `Dispatch` is just
+`(job) → CaseResult`, so any Backend/Router/Scheduler/Orchestrator plugs in.
 
 ```mermaid
 flowchart LR
@@ -697,16 +750,18 @@ flowchart LR
   diffScorecards --> ScorecardDiff["regressions / improvements"]
 ```
 
-- **`runSuite(suite, version, dispatch, {concurrency})`** — bounded fan-out (`mapLimit`).
-- **Called by:** `apps/cli` (`everdict suite`) and `apps/api` (`ScorecardService` batch eval, with the
-  Scheduler as `dispatch`).
+- **`runSuite(suite, version, dispatch, {concurrency, onResult, signal, retries})`** — bounded fan-out (`mapLimit`).
+- **Called by:** `apps/cli` (`everdict suite`) and the in-process scorecard batch driver
+  (`InProcessBatchDriver`, behind `ScorecardService`). The durable batch path runs the same per-case dispatch
+  as the Temporal `scorecardBatchWorkflow` instead. `diffScorecards` also backs `GET /scorecards/diff`.
 
 ---
 
 ## `@everdict/topology` — service-topology harnesses
 
 **Role.** `ServiceTopologyBackend` realizes `Backend` for multi-service harnesses + a browser/OS target env.
-Orchestrator-agnostic: a `TopologyRuntime` (Nomad or K8s) deploys the topology; trace comes from `@everdict/trace`.
+Orchestrator-agnostic: a `TopologyRuntime` (Nomad, K8s, or Docker for a self-hosted runner) deploys the topology;
+trace comes from `@everdict/trace`.
 
 ```mermaid
 classDiagram
@@ -716,7 +771,7 @@ classDiagram
   class TopologyRuntime {
     <<interface>>
     +ensureTopology(spec, zone) TopologyHandle
-    +provisionBrowserEnv(spec, runId, zone) BrowserEnvHandle
+    +provisionBrowserEnv(spec, runId, zone) TargetEnvHandle
   }
   class ServiceTopologyBackend {
     +dispatch(job) CaseResult
@@ -731,6 +786,7 @@ classDiagram
   Backend <|.. ServiceTopologyBackend
   TopologyRuntime <|.. NomadTopologyRuntime
   TopologyRuntime <|.. K8sTopologyRuntime
+  TopologyRuntime <|.. DockerTopologyRuntime
   ServiceTopologyBackend --> TopologyRuntime
   ServiceTopologyBackend --> TraceSource
   ServiceTopologyBackend ..> Grader : grade
@@ -749,27 +805,31 @@ sequenceDiagram
   Reg-->>STB: ServiceHarnessSpec
   STB->>STB: keysFor(runId) for threadId / streamChannel / minioPrefix
   STB->>RT: ensureTopology(spec, zone) warm pool spec@ver@zone
-  STB->>RT: provisionBrowserEnv(spec, runId, zone) per-case
-  STB->>FD: submit(task, thread_id, browser_cdp_url)
+  STB->>RT: seedFixtures(spec, runId, plans, zone) when the case declares fixtures
+  STB->>RT: acquire target per case (provisionBrowserEnv, or a service session)
+  STB->>FD: submit(task, per-run wiring, target CDP url)
   STB->>TS: fetch(runId)
   TS-->>STB: TraceEvent list
-  STB->>Gr: grade(case, trace, browser snapshot)
-  STB->>RT: browser dispose (finally)
+  STB->>Gr: grade(case, trace, target snapshot)
+  STB->>RT: target dispose (finally)
 ```
 
-- **`TopologyRuntime`** — `NomadTopologyRuntime` / `K8sTopologyRuntime`; warm topology pool keyed by
-  `spec@version@zoneId` (no cross-tenant sharing), per-case browser env (`cdpUrl` + `snapshot`/`dispose`).
+- **`TopologyRuntime`** — `NomadTopologyRuntime` / `K8sTopologyRuntime` / `DockerTopologyRuntime`; warm topology pool
+  keyed by `spec@version@zoneId` (no cross-tenant sharing), per-case target env (`TargetEnvHandle`: `cdpBase?` +
+  `snapshot`/`dispose`), acquired through `targetAcquirerFor`.
 - **`EnvironmentManager` / `keysFor(runId)`** — deterministic per-run isolation keys mapped onto
-  `TopologyDependency.isolateBy` (`thread_id` / `key-prefix` / `object-prefix` / `schema`).
-- **Builders:** `buildNomadTopologyJob` / `buildK8sManifests` (+ browser variants), `resolvePort`.
+  `TopologyDependency.isolateBy` (`thread_id` / `key-prefix` / `object-prefix` / `schema` / `external`).
+- **Builders:** `buildNomadTopologyJob` / `buildK8sManifests` (+ browser variants such as `buildBrowserJob`), `resolvePort`.
   See `docs/service-harness.md`.
 
 ---
 
 ## `@everdict/db` — result & secret stores
 
-**Role.** Persistence behind interfaces: `RunStore`, `ScorecardStore`, `TenantKeyStore`, `SecretStore`.
-Each has an `InMemory*` (dev/test) and a `Pg*` (Postgres) variant over a shared `SqlClient`.
+**Role.** Persistence behind ports: `RunStore`, `ScorecardStore`, `TenantKeyStore`, `SecretStore` (and many more
+stores not drawn). The port interfaces are declared in `@everdict/application-control` (`packages/application-control/src/ports/`)
+and re-exported here beside the implementations. Each has an `InMemory*` (dev/test) and a `Pg*` (Postgres) variant
+over a shared `SqlClient`.
 
 ```mermaid
 classDiagram
@@ -822,26 +882,29 @@ classDiagram
   PgSecretStore --> SecretCipher
 ```
 
-- **`RunRecord`** carries `status` (queued/running/succeeded/failed), the `CaseResult`, and a derived
-  `RunUsageSummary`. **`ScorecardStore.list`** omits the heavy per-case `scorecard` column.
+- **`RunRecord`** carries `status` (queued/running/suspended/succeeded/failed), the `CaseResult` (`result`), and a derived
+  `RunUsageSummary` (`usage`). **`ScorecardStore.list`** omits the heavy per-case `scorecard` column.
 - **`TenantKeyStore`** stores only `hashKey(ak_…)`; `issueKey` returns plaintext once → backs API-key auth.
 - **`SecretStore`** encrypts at rest (`aesGcmCipher`, `cipherFromEnv(EVERDICT_SECRETS_KEY)`); `entries(tenant)`
   returns decrypted env for model-judge keys / runtime credentials.
 - **`migrate` / `preflight`** — idempotent numbered SQL migrations (expand→contract). See `docs/migration/`.
-- **Consumed by:** `@everdict/registry` (Pg registries reuse `SqlClient`), `@everdict/auth` (`TenantKeyStore`), `apps/api`.
+- **Consumed by:** `@everdict/registry` (Pg registries reuse `SqlClient`), `@everdict/auth` (`TenantKeyStore`), `apps/api`, `apps/agent`.
 
 ---
 
 ## `@everdict/registry` — versioned SSOT
 
-**Role.** `(tenant, id, version) → spec` for four first-class entity families, immutable versions, semver
-`latest`, tenant-owned with `_shared` fallback. The same shape four times.
+**Role.** `(tenant, id, version) → spec` for every versioned entity family — harness templates and instances,
+datasets, judges, rubrics, models, agents, runtimes, environments, benchmarks — with immutable versions, semver
+`latest`, tenant-owned with `_shared` fallback. The same shape each time; the diagram draws four. The registry
+port interfaces are declared in `@everdict/application-control` and re-exported here beside the implementations.
+The harness split into template + instance is [harness-taxonomy.md](harness-taxonomy.md).
 
 ```mermaid
 classDiagram
-  class HarnessRegistry {
+  class HarnessInstanceRegistry {
     <<interface>>
-    +register(tenant, spec)
+    +register(tenant, instance)
     +get(tenant, id, ref) HarnessSpec
     +versions(tenant, id) versions
     +list(tenant) entries
@@ -855,32 +918,35 @@ classDiagram
   class RuntimeRegistry {
     <<interface>>
   }
-  HarnessRegistry <|.. InMemoryHarnessRegistry
-  HarnessRegistry <|.. PgHarnessRegistry
+  HarnessInstanceRegistry <|.. InMemoryHarnessInstanceRegistry
+  HarnessInstanceRegistry <|.. PgHarnessInstanceRegistry
   DatasetRegistry <|.. InMemoryDatasetRegistry
   DatasetRegistry <|.. PgDatasetRegistry
   JudgeRegistry <|.. InMemoryJudgeRegistry
   JudgeRegistry <|.. PgJudgeRegistry
   RuntimeRegistry <|.. InMemoryRuntimeRegistry
   RuntimeRegistry <|.. PgRuntimeRegistry
-  PgHarnessRegistry --> SqlClient
+  PgHarnessInstanceRegistry --> SqlClient
   PgDatasetRegistry --> SqlClient
   PgJudgeRegistry --> SqlClient
   PgRuntimeRegistry --> SqlClient
 ```
 
-- **Version resolution** — `compareVersions` / `sortVersions`; `latest` = highest semver; `specsEqual`
-  guards immutability (re-registering a version with a different spec → conflict).
-- **GitOps source** — `loadHarnessDir` / `loadDatasetDir` / `loadJudgeDir` / `loadRuntimeDir` seed from files.
-- **Consumed by:** `apps/api` (route + service resolution), `@everdict/topology` (`ServiceTopologyBackend.specFor`
-  wires to the harness registry). See `docs/registry.md`, `docs/datasets.md`, `docs/judges.md`, `docs/runtimes.md`.
+- **Version resolution** — `compareVersions` / `sortVersions` (the version algebra is `@everdict/domain`); `latest` =
+  highest semver; `specsEqual` guards immutability (re-registering a version with a different spec → conflict).
+- **GitOps source** — `loadHarnessTaxonomyDir` / `loadDatasetDir` / `loadJudgeDir` / `loadRubricDir` / `loadModelDir` /
+  `loadRuntimeDir` seed from files.
+- **Consumed by:** `apps/api` (route + service resolution; it also wires `ServiceTopologyBackend.specFor` to the
+  harness instance registry — `@everdict/topology` never imports the registry) and `apps/agent`. See `docs/registry.md`, `docs/datasets.md`, `docs/judges.md`, `docs/runtimes.md`.
 
 ---
 
 ## `@everdict/auth` — control-plane auth core
 
 **Role.** Resolve any credential to a `Principal{subject, workspace, roles, via}`, then gate actions by role.
-`workspace = tenant = trust-zone`. Owned by `apps/api`; the web is a courier, not an authority.
+`workspace = tenant = trust-zone`. Consumed by `apps/api`; the web is a courier, not an authority. `Principal` and the
+role→action matrix are `@everdict/domain` (`packages/domain/src/auth/`); this package holds the authenticators and
+re-exports `can`/`authorize` beside them.
 
 ```mermaid
 classDiagram
@@ -901,6 +967,9 @@ classDiagram
   Authenticator <|.. compositeAuthenticator
   Authenticator <|.. oidcAuthenticator
   Authenticator <|.. apiKeyAuthenticator
+  Authenticator <|.. runnerAuthenticator
+  Authenticator <|.. githubActionsAuthenticator
+  Authenticator <|.. agentTokenAuthenticator
   compositeAuthenticator o-- oidcAuthenticator
   compositeAuthenticator o-- apiKeyAuthenticator
   apiKeyAuthenticator ..> TenantKeyStore
@@ -910,6 +979,8 @@ classDiagram
 
 - **`oidcAuthenticator`** — verifies Keycloak JWT via `jose` JWKS, extracts `workspace` + roles (fail-closed → `undefined`).
 - **`apiKeyAuthenticator`** — `ak_…` → `TenantKeyStore.resolveByHash(hashKey(...))` (`@everdict/db`) → `{ workspace, scopes? }`.
+- **`runnerAuthenticator` / `githubActionsAuthenticator` / `agentTokenAuthenticator`** — self-hosted runner tokens,
+  GitHub Actions OIDC and agent tokens; `buildAuthenticator` (`apps/api`) composes them, OIDC only when it is configured.
 - **`authz`** — `EVERDICT_ROLES = viewer ⊂ member ⊂ admin`; `authorize` throws `ForbiddenError` (403); per-key `scopes` (`read|write|admin`) intersect the role matrix. See `docs/auth.md`.
 - **Consumed by:** `apps/api` (every route guard + `/me` + MCP). See `docs/tenancy.md`.
 
@@ -918,18 +989,19 @@ classDiagram
 ## `apps/api` — control-plane HTTP surface (BFF + MCP)
 
 **Role.** The multi-tenant Fastify control plane: it composes *all* of the above into auth → service →
-dispatch → store. `RunService`, `ScorecardService`, `RuntimeDispatcher`, `JudgeRunner` are the local glue.
+dispatch → store. `RunService` and `ScorecardService` come from `@everdict/application-control`;
+`RuntimeDispatcher` and `defaultJudgeRunner` are the local glue (`apps/api/src/core/execution/`).
 
 ```mermaid
 flowchart TD
-  subgraph wiring["startup wiring (main.ts)"]
+  subgraph wiring["startup wiring (main.ts → composition/*)"]
     persistence["Pg* or InMemory stores + registries"]
-    sched["BackendRegistry → Scheduler + inMemoryBudget"]
-    rtd["RuntimeDispatcher(inner=Scheduler, runtimes, secretsFor)"]
-    jr["defaultJudgeRunner(secretsFor, dispatch, harnesses)"]
-    runsvc["RunService(dispatch, RunStore, budget, resolveHarness)"]
-    scoresvc["ScorecardService(dispatch, ScorecardStore, datasets, harnesses, judges, jr)"]
-    authn["buildAuthenticator → composite(oidc, apiKey)"]
+    sched["BackendRegistry → Scheduler + persistentBudget"]
+    rtd["RuntimeDispatcher {inner: Scheduler, backends, runtimes, secretsFor}"]
+    jr["defaultJudgeRunner {secretsFor, dispatch, harnesses, models, rubrics}"]
+    runsvc["RunService {dispatcher, store, budget, resolveHarness}"]
+    scoresvc["ScorecardService {dispatcher, stores, registries, judge runner}"]
+    authn["buildAuthenticator → composite(github-actions, oidc, apiKey, agent token, runner)"]
   end
 
   authn --> server["buildServer / buildMcpServer (parity)"]
@@ -946,24 +1018,27 @@ flowchart TD
   jr -->|"harness judge"| dispatch2["dispatch (Scheduler)"]
 ```
 
-- **`POST /runs`** → `authorize(principal,'runs:submit')` → `RunService.submit`: `budget.admit` →
+- **`POST /runs`** → gated by `runs:submit` → `RunService.submit`: `budget.admit` →
   `RunStore.create(queued)` → fire-and-forget `track` (resolve `HarnessSpec`, build `CaseJob`,
   `dispatch`, `budget.settle`, `RunStore.update`) → 202 + run id. Optional webhook.
-- **`POST /scorecards`** → `ScorecardService`: resolve `Dataset` + harness → `runSuite(…, dispatch)` →
-  `applyJudges` (per trace, via `JudgeRunner`: model judges call the provider with the tenant's
-  `SecretStore` key; harness judges `dispatch` an agent) → `summarizeScorecard` → `ScorecardStore`.
-  `GET /scorecards/diff` = `diffScorecards`; **`POST /scorecards/ingest`** scores externally-run
-  `TraceEvent[]` with no harness run (judges-only path).
+- **`POST /scorecards`** → `ScorecardService.submit` (202) → `ScorecardBatchService` tracks the batch through the
+  `InProcessBatchDriver` (`runSuite(…, dispatch)`) or the `WorkflowBatchDriver` (Temporal) → `ScoringService.applyJudges`
+  (per case, via `JudgeRunner`: model judges call the provider with the tenant's `SecretStore` key; harness judges
+  `dispatch` an agent) → `ScorecardStore`. `GET /scorecards/diff` = `diffScorecards`; **`POST /scorecards/ingest`**
+  scores externally-run `TraceEvent[]` with no harness run (judges-only path), and `POST /scorecards/ingest/pull`
+  pulls them from a trace source first.
 - **`RuntimeDispatcher`** — reads `placement.target`, resolves the tenant `RuntimeSpec`
   (`RuntimeRegistry`), `buildRuntimeBackend` (with tenant secrets), routes through the inner `Scheduler`.
-- **`/mcp`** — Streamable HTTP, OAuth (Keycloak) + API keys; tools mirror the BFF routes 1:1, each gated by
-  `authorize(principal, action)`. See `docs/api.md`, `docs/mcp.md`, `docs/scorecards.md`.
+- **`/mcp`** — Streamable HTTP (`apps/api/src/mcp.routes.ts`), OAuth (Keycloak) + API keys; tools mirror the BFF
+  routes, each gated by the same role→action matrix. See `docs/api.md`, `docs/mcp.md`, `docs/scorecards.md`.
 
 ---
 
 ## `apps/cli` — dev / single-run control plane
 
-**Role.** Thin wiring for local runs: pick an orchestrator, build a Backend set, dispatch.
+**Role.** Thin wiring for local runs: pick an orchestrator, build a Backend set, dispatch. It also carries the
+self-hosted runner (`everdict runner`, over `@everdict/self-hosted-runner`) and image/task-set helpers
+(`everdict image push|bake`, `everdict tasks prebuild`), not drawn.
 
 ```mermaid
 flowchart LR
@@ -981,14 +1056,15 @@ flowchart LR
 
 - **`everdict run`** builds an `CaseJob` and an `Orchestrator` (Direct over `Router`, or Temporal), calls `run(job)`.
 - **`everdict worker`** → `runWorker` (the durable side). **`everdict suite`** → `runSuite` (+ regression diff).
-- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/job-runner`, `@everdict/domain`, `@everdict/contracts`.
+- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/job-runner`, `@everdict/application-control`,
+  `@everdict/domain`, `@everdict/contracts`, `@everdict/self-hosted-runner`, `@everdict/topology`, `@everdict/datasets`.
 
 ---
 
 ## `apps/web` — SaaS dashboard (pure HTTP client)
 
-**Role.** Next.js dashboard. **No `@everdict/*` dependencies** — it talks to `apps/api` over HTTP only. A
-token courier: Auth.js (Keycloak) puts the access token in a server-only cookie and forwards it as `Bearer`;
+**Role.** Next.js dashboard. Its only `@everdict/*` dependency is **type-only** `@everdict/contracts` (enforced by
+`pnpm web-imports`, `scripts/check-web-imports.mjs`) — it talks to `apps/api` over HTTP only. A token courier: Auth.js (Keycloak) puts the access token in a server-only cookie and forwards it as `Bearer`;
 `GET /me` returns workspace + roles (UI gating mirrors the control plane, which enforces).
 
 ```mermaid
@@ -998,8 +1074,8 @@ flowchart LR
   cookie --> controlPlane["controlPlane fetch wrapper (Bearer)"]
   controlPlane -->|"GET /me"| api["apps/api"]
   controlPlane -->|"runs · harnesses · datasets · judges · runtimes · scorecards"| api
-  subgraph fsd["FSD slices"]
-    entities --> features --> widgets --> pages["/dashboard/*"]
+  subgraph fsd["FSD layers"]
+    pages["app/[workspace]/*"] --> widgets --> features --> entities
   end
   pages --> controlPlane
 ```
@@ -1008,6 +1084,16 @@ flowchart LR
   See `docs/web.md`, `docs/auth.md`.
 
 ---
+
+## Not zoomed here
+
+These modules appear in 1.1 but have no high-zoom section on this page:
+`@everdict/application-control` beyond `runSuite` (use-cases + ports), `@everdict/llm` (provider-native transports),
+`@everdict/datasets` (task-format on-ramps), `@everdict/storage` (`ArtifactStore` impls), `@everdict/images`
+(managed image store adapters), `@everdict/self-hosted-runner` and `apps/desktop` ([self-hosted-runner.md](self-hosted-runner.md),
+[desktop-app.md](desktop-app.md)), `@everdict/agent-runtime` and `apps/agent` (skill `agent-runtime`), and the user-facing
+`@everdict/sdk` ([one-call-sdk.md](one-call-sdk.md)) and `@everdict/otel`. The per-package role table is
+`.claude/skills/foundation/references/architecture.md`.
 
 ## Where to go next
 

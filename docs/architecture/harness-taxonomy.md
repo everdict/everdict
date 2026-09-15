@@ -2,63 +2,50 @@
 kind: wiki
 title: "Harness taxonomy — Template (category) + Instance (design)"
 status: current
-updated: 2026-08-11
-anchors: [packages/application-control/src/run/run-service.ts, apps/api/src/core/execution/topology-backend.ts, apps/api/src/core/execution/judge-runner.ts, apps/api/src/server.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/harness-template.ts, packages/registry/src/harness/harness-instance-registry.ts, apps/api/src/api/harness/harness-template.routes.ts, packages/domain/src/harness/instance-variation.ts]
 ---
 # Harness taxonomy — Template (category) + Instance (design)
 
-> **Status: design / not yet implemented.** Track A of the harness rework. Track B (image-source
-> integrations: GHCR / generic Docker / artifact registry) is a separate, later effort — see the end.
->
-> **Clean break — no backward compatibility.** The old flat full-`HarnessSpec` *registration* path is removed
-> outright; every harness is authored as Template + Instance. The resolved `HarnessSpec` survives only as the
-> internal dispatch artifact produced by `resolve()`, never as a registration input. Existing examples/tests are
-> converted in the same change set; there is no dual path and no migration of old flat entries.
+Every harness is authored as a **template** (the shape) plus an **instance** (pins and overrides on that shape).
+There is no flat full-`HarnessSpec` registration path: the resolved `HarnessSpec` exists only as the dispatch
+artifact `resolveHarnessInstance` produces.
 
-## Problem
-
-Today a harness is a single self-contained `HarnessSpec` keyed `(tenant, id, version)` in `@everdict/registry`.
-There is **no concept of a family/template**: a browser-agent topology and "the same topology with one service
-bumped for PR #123 / sha abc" are two *unrelated, flat* harness entries. CI that registers a harness per PR/SHA
-produces an explosion of look-alike entries, and the web lists each as an independent harness — impossible to
-grasp which belong together or how they differ.
+Why: a harness used to be one self-contained spec keyed `(tenant, id, version)`. A topology and "the same topology
+with one service bumped for PR #123" were two unrelated entries, so CI that registers per PR/SHA produced an
+explosion of look-alike harnesses nobody could group.
 
 ## Model — two authoring concepts, one resolved spec
 
-We split *authoring* into two levels but keep the *resolved* artifact (what backends consume) unchanged.
-
 ```
 Template (category)         "the shape"          versions unpinned, declares slots
-   └── Instance (harness)   "shape + pins"       pins each slot to a concrete version/image
-            └── resolve()  →  HarnessSpec (existing process|service|command)  →  dispatch
+   └── Instance (harness)   "shape + pins"       pins each slot, may override knobs
+            └── resolveHarnessInstance()  →  HarnessSpec (process|service|command)  →  dispatch
 ```
 
-- **Template (category)** — the structural skeleton: for a topology, *which* services + dependencies + target +
-  frontDoor + traceSource are involved, **without** image versions. Each versionable thing is a named **slot**.
-  Example `bu` (browser-agent): services `{planner, browser, action-stream}` + dep `{redis}`, each service a
-  slot. A template is itself **versioned** — changing the *shape* (add/remove a service, change wiring) is a new
-  template version (e.g. `bu` structure `v1` → `v2`). Pinning a service version is **not** a template change.
-- **Instance (individual harness)** — a template reference + **pins** (the delta): the concrete image/version for each
-  slot. Typically one per PR/SHA, created by CI. Stored as pins only, never a full copy of the structure. May
-  carry an optional free-text **`description`** — this version's changelog note ("what changed"), entered when
-  deploying a new version and shown on the harness detail. It is part of the version's immutable content
-  (`specsEqual`), but runtime-irrelevant so `resolve()` does not carry it into the resolved `HarnessSpec`.
-- **Resolved `HarnessSpec`** — `template structure (at the referenced template version) + pins`. This is the
-  existing `process | service | command` spec the backends/runtime already consume. **Nothing downstream of
-  resolution changes** — `CaseJob.harness:{id,version}` still names a concrete, runnable thing.
+- **Template** — the structural skeleton: for a topology, which services + dependencies + target + frontDoor +
+  traceSource, each versionable service a named **slot**. A template is versioned by **shape**: adding/removing a
+  service or rewiring is a new template version; pinning an image is not. A service may carry a default `image`
+  (`TemplateService.image`), so an instance pins only the slots it changes.
+- **Instance** — a template reference + **pins** (slot → image; `image`/`model` for command templates) + optional
+  structured **`overrides`**, plus an optional `description` (this version's changelog note, part of the
+  version's immutable content, not carried into the resolved spec).
+- **Resolved `HarnessSpec`** — template structure at the referenced version + pins + overrides. Nothing downstream
+  of resolution knows about templates: `CaseJob.harness:{id,version}` still names a concrete, runnable thing.
 
 ## Schemas (`@everdict/contracts`)
 
-New authoring schemas. The existing `HarnessSpecSchema` (`process|service|command`) is **demoted to the resolved
-form only** — produced by `resolve()`, consumed by backends/runtime, and no longer accepted as a registration
-input.
+`packages/contracts/src/harness/harness-template.ts` defines `HarnessTemplateSpecSchema` (a `kind`-discriminated
+union of service / command / process templates; `category` is a free label such as `topology`, `cli-agent`,
+`desktop`) and `HarnessInstanceSpecSchema`. Examples live in `examples/harness-templates/` as
+`*.template.json` + `*.instance.json` pairs; they are not seeded on boot (`apps/api/src/core/harness/harness-seed.test.ts`
+guards their validity).
 
 ```jsonc
-// Template (category) — structure once, slots instead of versions. Versioned by SHAPE.
+// Template — structure once, slots instead of versions. Versioned by SHAPE.
 {
-  "category": "topology",            // category type label (topology|claude-code|codex|command|os-use-app|custom)
-  "kind": "service",                 // which resolved kind it compiles to
-  "id": "bu", "version": "1",        // template id + STRUCTURE version
+  "category": "topology", "kind": "service",
+  "id": "bu", "version": "1",
   "services": [
     { "name": "planner",       "slot": "planner",       "needs": [] },
     { "name": "browser",       "slot": "browser" },
@@ -69,216 +56,89 @@ input.
   "traceSource": { "kind": "otel", "endpoint": "..." }
 }
 
-// Instance (individual harness) — template ref + pins (delta only). One per PR/SHA.
+// Instance — template ref + pins (delta only). Typically one per PR/SHA.
 {
   "template": { "id": "bu", "version": "1" },
   "id": "bu", "version": "pr-123-sha-abc",
-  "description": "planner prompt rework + bump browser to 119", // optional — this version's changelog (shown on detail)
+  "description": "planner prompt rework + bump browser to 119",
   "pins": {
     "planner":       "ghcr.io/acme/bu-planner:abc123",
     "browser":       "chromedp/headless-shell:119",
     "action-stream": "ghcr.io/acme/bu-action:abc123"
   }
 }
-// resolve(bu@pr-123-sha-abc) = template bu@1 structure, each service.image := pins[slot]  →  ServiceHarnessSpec
 ```
-
-For `command`/`process` templates the slots are the versionable params (image, `model`, a skills/workflow set);
-the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. Topology is the driving case.
 
 ## Registry & resolution (`@everdict/registry`)
 
-- **Template registry**: `(tenant, templateId, templateVersion) → TemplateSpec`. Immutable versions (re-register
-  different shape → `ConflictError`), tenant-owned + `_shared` fallback — identical discipline to harnesses today.
-- **Instance** lives in the existing harness registry keyed `(tenant, id, version)` where `id` = the template id
-  and `version` = the instance tag (`pr-123-sha-abc`, or semver). It stores `{template:{id,version}, pins}`.
-- **`get(tenant, id, ref)`** resolves: load instance → load `template@instance.template.version` → merge
-  structure + pins → validate against `HarnessSpecSchema` → return the resolved spec. `latest` on the id = latest
-  instance (semver, else last-registered — unchanged).
-- **No legacy path.** `register()` accepts a template or an instance — never a raw full `HarnessSpec`. The
-  `_shared` example harnesses (`examples/harness-templates/bu-1.1.0.instance.json` etc.), `loadHarnessDir`, `RunService`'s
-  `resolveHarness`, `ServiceTopologyBackend.specFor`, and the In-memory/Pg registries are all converted to the
-  template/instance shape in the same change set.
+- **Template registry** (`HarnessTemplateRegistry`, in-memory + Pg): `(tenant, id, version) → HarnessTemplateSpec`.
+  Immutable versions (re-registering a different shape → `ConflictError`), tenant-owned with `_shared` fallback.
+- **Instance registry** (`HarnessInstanceRegistry`, in-memory + Pg): `(tenant, id, version) → HarnessInstanceSpec`.
+  `register` loads the template and refuses an instance that does not resolve. `get(tenant, id, ref)` loads the
+  instance, loads its template, and returns `resolveHarnessInstance(template, instance)`; `getInstance` returns the
+  raw instance. `latest` = semver order, else last-registered.
+- `HarnessInstanceSpec.id` is free: several harnesses can ride one template ("same shape, different env"), and
+  the list carries derived `templateId`/`templateVersion` (`enrichHarnessList`) to group them.
 
-## Permissions (`@everdict/auth`) — "category, not role" governance
+## Permissions — "category, not role"
 
-| Action | Role | What |
-|---|---|---|
-| `templates:write` | **viewer+ (no gate)** | define/version a template **structure** (services/deps shape) |
-| `harnesses:register` (instances) | **viewer+ (no gate)** | register an **instance** (pins) under a template — CI/users |
-| `harnesses:read` | viewer | read |
-
-**No role gate (equal use regardless of role).** Harnesses — both templates (category) and instances — are collaborative
-eval content (like datasets/judges), not admin-gated infra. Every workspace member uses them equally: anyone can
-define a template and register instances; reads are open. (This matches `harnesses:register` already being
-viewer+ in `authz.ts`; `templates:write` joins it.) Isolation is still per-workspace — `templates:write` only
-shapes harness *structure*, never credentials (those stay `secrets:write` = admin).
+`packages/domain/src/auth/authz.ts`: `harnesses:read`, `harnesses:register` (instances) and `templates:write`
+(templates) are all **viewer+** — harnesses are collaborative eval content like datasets and judges, not
+admin-gated infra. Isolation is still per workspace; credentials stay behind `secrets:write`.
+`harnesses:delete` (version soft-delete) is admin with a creator exception in the service.
 
 ## Surface — BFF↔MCP parity
 
-One service core, three transports (HTTP route + MCP tool + web), per the parity rule.
-
-- **API/MCP**: `POST/GET /harness-templates` (admin write) + `POST/GET /harnesses` now = instances
-  (member write, body = `{template, pins}`); validate (dry-run) mirrors. `GET /harnesses` returns instances
-  **grouped by template** with the resolved diff. MCP: `register_template`/`list_templates` +
-  `register_harness`(instance)/`list_harnesses`.
-  - **Raw config reads** (pre-resolve originals): `GET /harness-templates/:id/:version` → `HarnessTemplateSpec`
-    (structure/slots) and `GET /harnesses/:id/:version/instance` → `HarnessInstanceSpec` (template ref + pins).
-    Distinct from `GET /harnesses/:id/:version` (the **resolved** spec). MCP parity:
-    `get_harness_template` / `get_harness_instance` (`harnesses:read`). These power the web Config panel + the
-    edit-and-new-version prefill below.
-- **Web** (fixes the flat-explosion pain directly):
-  - `/dashboard/harnesses` — top level lists **templates (category)** as cards: category, name, # instances,
-    latest instance. The per-PR/SHA entries are **collapsed under their template**, not flat.
-  - `/dashboard/harnesses/[template]` — the structure (services/deps) shown **once** + a table of instances
-    (version, **pin diff**, created at, who).
-  - **Instance registration** form (member): pick a template → fill the image/version per slot → register.
-  - **Template registration** form (admin): define structure + slots.
-  - **Harness detail → Config panel + Create new version**: the detail page shows the active version's raw config
-    (template ref + slot→value pins) and a "Create new version" entry. Because versions are **immutable**, editing =
-    registering a new version: the register-wizard forms (`InstanceForm`/`TemplateForm`) are reused **prefilled**
-    from the current config (`instanceStateFromSpec` / `templateStateFromSpec`), with `id`/`kind` locked. Two axes:
-    re-pin instance pins → new instance tag (→ detail of the new version); template structure change → new template semver,
-    then the page returns to the instance tab (`?tplVersion=`) to re-pin an instance on the new structure.
+- **HTTP** (`apps/api/src/api/harness/`): `POST/GET /harness-templates`, `POST /harness-templates/validate`,
+  `GET /harness-templates/:id`, `GET /harness-templates/:id/:version` (raw template);
+  `POST/GET /harnesses` (instances), `POST /harnesses/validate`, `GET /harnesses/:id` (versions),
+  `GET /harnesses/:id/:version` (the **resolved** spec), `GET /harnesses/:id/:version/instance` (raw instance),
+  plus `diff`, `lineage`, `delegate`, version tags, soft delete and `POST /harnesses/:id/pins` (re-pin).
+- **MCP**: `register_harness_template` / `list_harness_templates` / `get_harness_template` and
+  `register_harness` / `list_harnesses` / `get_harness_instance` / `diff_harness_versions` /
+  `get_harness_lineage` / `pin_harness_images` / `set_harness_version_tags` / `delete_harness`.
+- **Web**: `/{ws}/harnesses` lists harnesses with variations grouped under their shape; `/{ws}/harness/[id]` is the
+  detail (Config panel with the raw config, "new version", "new harness on this shape");
+  `/{ws}/harness/[id]/new-version` and `/{ws}/harnesses/new` reuse the register-wizard forms
+  (`InstanceForm`/`TemplateForm`) prefilled from the current config; `/{ws}/harness-templates` is the shape
+  catalog. Versions are immutable, so editing = registering a new version: re-pinning makes a new instance tag,
+  a structure change makes a new template version and returns to the instance tab (`?tplVersion=`).
 
 ## Scorecards / regression
 
-Instances still resolve to `id@version`, so scorecards and `diffScorecards` name exact instances unchanged. A
-natural new comparison: two **instances of the same template** (e.g. `bu@main` vs `bu@pr-123`) = a clean,
-apples-to-apples regression where only pinned versions differ.
+Instances resolve to `id@version`, so scorecards and `diffScorecards` name exact instances. Two instances of
+the same template (`bu@main` vs `bu@pr-123`) are an apples-to-apples regression where only pins/overrides differ.
 
-## Relationship to Track B (image-source integrations)
+## Image sources
 
-A pin value is an image reference. Today that is a raw string. Track B lets a pin be **sourced from a workspace
-image-source integration** (GHCR / generic Docker / internal artifact registry; GitHub = *reference* a prebuilt
-image, not build-from-source) — credentials via `SecretStore` (name-not-value, like runtime `authSecret`),
-injected as a k8s/nomad `imagePullSecret` at dispatch. The instance form's per-slot picker then chooses
-`connection + coordinate` instead of a raw string. Track B is designed separately once Track A lands.
-
-## Phasing
-
-All Track A phases land together as the clean break (no dual path is ever shipped):
-
-1. **Core**: `TemplateSpec` + instance schema; `resolve(template, pins) → HarnessSpec`; demote `HarnessSpecSchema`
-   to resolved-only (remove it as a registration input).
-2. **Registry**: template store (in-memory + Pg, migration) + instance resolution; **convert** `examples/harness-templates`
-   + `loadHarnessDir` + seeds to template/instance; delete the flat full-spec registration path.
-3. **Auth**: `templates:write` (admin) vs instance `harnesses:register` (member).
-4. **API + MCP**: template routes/tools + instance register (pins) + grouped list; update every caller
-   (`RunService.resolveHarness`, `ServiceTopologyBackend.specFor`); parity tests.
-5. **Web**: replace the register-harness wizard with template-grouped list + template detail (structure +
-   instance table w/ pin diff) + the two forms.
-6. (later) **Track B**: image-source integrations feeding the per-slot pin picker.
-
-> Blast radius (single change set): `@everdict/contracts` harness-spec, `@everdict/registry` (in-memory + Pg + loaders +
-> migration), `@everdict/auth` authz matrix, `apps/api` (server + mcp + run-service), `apps/web` register-harness +
-> harnesses pages, `examples/harness-templates/*`, and the tests across all of them.
-
-## Cutover map (current state → target) — surveyed Phase 1/2 done
-
-Every consumer of the flat `HarnessRegistry` (returns/accepts a full `HarnessSpec`) falls into **two buckets**.
-The in-memory + Pg `HarnessInstanceRegistry` (Phase 2) already exposes `get()/getService()` that return a
-**resolved** `HarnessSpec`, so the read bucket is a **zero-signature drop-in**.
-
-**Bucket A — read-only `.get()/.getService()` → swap the injected registry to `HarnessInstanceRegistry` (no code change at the call site):**
-- `packages/application-control/src/run/run-service.ts` `resolveHarness(tenant,id,version)` — wired in `main.ts:165` to `registry.get`.
-- `packages/application-control/src/scorecard/scorecard-service.ts:127,431` — `this.deps.harnesses.get(...)` (`harnesses: HarnessRegistry`).
-- `apps/api/src/core/execution/topology-backend.ts` `ServiceTopologyBackend.specFor` — `deps.harnesses.get(...)` → must be `kind:service`.
-- `apps/api/src/core/execution/judge-runner.ts` — harness-judge resolution via the injected harness registry.
-  (RuntimeDispatcher reaches topology via `buildTopologyBackend({harnesses})`.)
-
-**Bucket B — write/list/validate surface → re-shaped (this is the real work + the auth change):**
-- `apps/api/src/server.ts`: `POST /harnesses` (register a full spec, gate `harnesses:register`=admin) →
-  becomes **instance** register (`{template,pins}`, gate `harnesses:register`=**member**); `POST /harnesses/validate`
-  (`ownVersions`) → instance validate (template exists + pins resolve); `GET /harnesses` (`list`) → instances
-  grouped by template; `GET /harnesses/:id` (`versions`) → instance versions. **NEW**: `POST/GET /harness-templates`
-  (+ `/validate`), gate `templates:write`=admin.
-- `apps/api/src/mcp.ts`: `register_harness`/`validate_harness`/`list_harnesses` → instance semantics; **NEW**
-  `register_template`/`list_templates`. (BFF↔MCP parity — same service core.)
-
-**Wiring (`apps/api/src/main.ts`):** replace the single `registry` with `templateRegistry` + `instanceRegistry`
-(InMemory or Pg by `DATABASE_URL`); `seedSharedHarnesses` → `loadHarnessTaxonomyDir(examples/harness-templates)`; pass
-`instanceRegistry` to Bucket-A consumers, both to `buildServer`/MCP.
-
-**Examples to convert** (`examples/harness-templates/*`, flat → `*.template.json` + `*.instance.json`): `bu-1.0.0`,
-`bu-1.1.0` (one `bu.template` + two instances), `aider-0.74.0`, `aider-litellm`, `desktop-osworld-agent`,
-`desktop-ssh-agent`, `desktop-ssh-settings-agent`.
-
-**Delete (clean break):** the flat `HarnessRegistry`/`InMemoryHarnessRegistry`/`PgHarnessRegistry` +
-`loadHarnessDir` (+ their tests) once Bucket A is on the instance registry — nothing registers a raw `HarnessSpec`
-anymore. Keep shared helpers (`asService`, `compareVersions`, `resolveRef`, `SHARED_TENANT`, `LATEST`).
-
-**Collision note:** Bucket B + wiring + examples touch `apps/api/src/server.ts`/`mcp.ts`/`scorecard-service.ts`/
-`main.ts` + `apps/web` harness pages + `packages/domain/src/auth/authz.ts` — all in the **active concurrent-edit zone**
-(member-management + models, which currently leaves the tree RED). Cutover is one atomic change set; run
-it when that work has landed and the tree is green. Bucket A swaps are mechanical once the wiring flips.
+A pin value stays a verbatim image reference; resolution never rewrites it. Pull credentials are attached at
+dispatch from the workspace's registered registries and the managed image store (`docs/architecture/workspace-image-registry.md`,
+`docs/architecture/managed-image-store.md`). A pin filled from a store environment carries a `pinSources`
+annotation the web renders as a chip; `resolveHarnessInstance` ignores it.
 
 ---
 
-# Instance variation — richer overrides (beyond image)
+# Instance variation — overrides beyond the image
 
-> **Status: design + Phases 1–3 implemented (web/MCP UI is the remaining follow-up).** Track A landed
-> templates/instances, but an instance can pin only the
-> **image** per slot (and `image`/`model` for command). That is too thin to express a *variation* of the same
-> template — same shape, different behavior (model, sampling temperature, feature flags, CLI flags, submit-payload
-> knobs, replicas, resources). Today every such variation forces a **new template version**, even though the shape
-> is unchanged → template proliferation, or everyone is stuck on identical non-image config.
+Template = **shape**; instance = a delta that **does not change the shape**. A change belongs on the instance
+when it yields a behaviorally different but structurally identical harness (same services, wiring, endpoints;
+different knobs). It needs a new template version when it adds/removes a service or rewires (`needs`,
+`dependencies`, `frontDoor.service`/`submit`, `traceSource.kind`, `target.kind`/`acquire`, ports).
 
-## Problem
-
-`HarnessInstanceSpec.pins` is a **`Record<string, string>`** — slot → image (service), or `image`/`model`
-(command). The value is a bare string, so even conceptually a pin cannot carry a structured delta (an env map, a
-number, a nested body field). `resolveHarnessInstance` therefore copies *everything else* (`env`, `replicas`,
-`volumes`, `readiness`, `dependencies`, `frontDoor`, `target`, `traceSource`; command `setup`/`command`/`env`/
-`trace`) verbatim from the template. The only instance axis is "swap the image."
-
-## Principle — what is an instance delta vs a template change
-
-Template = **shape**; instance = a delta that **does not change the shape**. A change is instance-appropriate
-when it yields a *behaviorally different but structurally identical* harness — same services, same wiring, same
-endpoints; different knobs. It is template-appropriate when it adds/removes a service or rewires (`needs`,
-`dependencies`, `frontDoor.service`/`submit`, `traceSource.kind`, `target.kind`/`acquire`, `port` topology).
-
-## Runtime support is the gating fact (nomad · k8s · docker self-hosted)
-
-What an instance can *meaningfully* vary depends on what the three runtimes honor. Surveyed from the runtime
-builders:
-
-| Knob | nomad | k8s | docker (self-hosted) | notes |
-|---|---|---|---|---|
-| `image` | ✅ | ✅ | ✅ | the only pin today |
-| service `env` | ✅ | ✅ | ✅ | all three inject; precedence `connEnv < svc.env < storeEnv` |
-| `replicas` | ✅ `Count` | ✅ `replicas` | ⚠️ single-host = 1 | |
-| `resources` (cpu/mem) | ❌ hardcoded `1000/1024` | ❌ none | ❌ | **no knob anywhere — a gap** |
-| `readiness` | ❌ | ❌ | ✅ | docker-only today |
-| `volumes` | ❌ | ❌ (PVC later) | ✅ | docker-only today |
-| front-door `request`/`completion`/`correlate` | ✅ | ✅ | ✅ | **runtime-agnostic** — the FrontDoorDriver/control plane interpret it, not the orchestrator |
-| model (registry id) | ✅ | ✅ | ✅ | flows via env/body or command `{{model}}` → resolved by `ModelResolvingDispatcher` |
-
-**Key insight:** the highest-leverage, most uniform knobs — service `env`, the front-door submit payload, model —
-are **runtime-agnostic**, resolved purely at `resolve()` time (or by the driver), so they work identically on all
-three runtimes with **zero runtime change**. `resources`/`replicas`/`volumes`/`readiness` are orchestrator-specific
-and only partially supported, so they are later phases.
-
-## Model — `pins` (images) + structured `overrides`
-
-Keep `pins` (slot → image string) for the common case and back-compat. Add an optional, kind-aware
-**`overrides`** object carrying structured deltas, deep-merged onto the template by `resolveHarnessInstance`.
+## `overrides` (`InstanceOverridesSchema`)
 
 ```jsonc
-// service instance — same template "bu@2", three behavioral variations differ only by overrides
+// service instance — same template, a behavioral variation
 {
   "template": { "id": "bu", "version": "2" },
   "id": "bu", "version": "main-opus-temp02",
-  "pins": { "planner": "ghcr.io/acme/bu-planner:abc", "browser": "chromedp/headless-shell:119" },
+  "pins": { "planner": "ghcr.io/acme/bu-planner:abc" },
   "overrides": {
-    "services": { "planner": { "env": { "MODEL": "claude-opus-4-8", "TEMPERATURE": "0.2" } } },
+    "services": { "planner": { "env": { "TEMPERATURE": "0.2" }, "model": "claude-opus-4-8" } },
     "frontDoor": { "request": { "bodyTemplate": { "max_steps": 30 } } }
   }
 }
-```
-```jsonc
-// command instance — same template, different CLI flags via {{var}} params + env
+// command instance — CLI flags via {{var}} params + env
 {
   "template": { "id": "aider", "version": "1" },
   "id": "aider", "version": "weak-model",
@@ -287,136 +147,65 @@ Keep `pins` (slot → image string) for the common case and back-compat. Add an 
 }
 ```
 
-### Merge semantics (must be exact — env precedence matters across the 3 runtimes)
-
-- **service env**: resolved `service.env = { ...template.service.env, ...overrides.services[name].env }` (instance
-  wins). The runtime then applies its existing `connEnv < service.env < storeEnv` — i.e. instance env sits **above
-  template defaults, below operational `storeEnv`** (cluster wiring stays authoritative for connection correctness).
-- **front-door body**: shallow-merge `bodyTemplate` values over the template's (`{ ...template.bodyTemplate,
-  ...overrides.bodyTemplate }`); the `FrontDoorDriver` already `{{var}}`-interpolates the result.
-- **command env / params**: `env`/`params` each merge over the template's; `params` feed generic `{{key}}`
-  substitution in `CommandHarness` (generalizing the reserved `{{task}}`/`{{model}}`/`{{run_id}}`). `params` values
-  are **not** shell-escaped (author-trusted, like `{{model}}`); only `{{task}}` (the untrusted eval input) is.
-- **command prompt**: `overrides.prompt` is the standing prompt, and it is an AXIS rather than another env key
-  (`evolution-program-gap-map.md` G4.9). The template declares the delivery — `promptChannel: { kind: "env",
-  name }` — because the answer differs per CLI and a campaign driver cannot guess it; `resolveHarnessInstance`
-  writes the text into that env key AND onto the resolved spec's own `prompt` field, from one value, so
-  `specDigest` seals it and `diffHarnessSpecs` reports `prompt` instead of `env.SOME_KEY`. Two refusals, both
-  because a silently-ignored variation registers a version that never varied: a `prompt` override with no
-  declared channel, and a `prompt` override beside a hand-written `env` entry for the same key. A template with
-  no channel is unchanged, and a template whose own `env` holds the channel key ships a DEFAULT prompt that the
-  resolved field reports.
-- scalars added later (`replicas`/`resources`/`readiness`/`volumes`) = **replace**, not merge.
-- **Unknown target** (a service name in `overrides.services` that the template lacks) → `BadRequestError`, the same
-  discipline as image pins / `applyImagePins`.
-
-### Warm-pool identity
-
-Overrides are baked into the resolved `id@version` (the instance version tag), so warm pools key correctly and
-never mix variants — the same mechanism `applyImagePins` uses (`-pin-<hash>`). No runtime change needed for
-isolation.
-
-## Phasing
-
-- **Phase 1 — runtime-agnostic, `resolve()`-time only (implemented now):** per-service `env` overlay (service) +
-  front-door `request.bodyTemplate` value override (service) + command `env` overlay + command `params` (`{{var}}`).
-  Pure `@everdict/contracts` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
-  end-to-end through API/MCP immediately (they validate `HarnessInstanceSpecSchema`, which now accepts `overrides`).
-- **Phase 2 — orchestrator knobs (implemented):** `resources { cpu, memoryMb }` added to `TopologyService` and
-  honored by all three runtimes — nomad `Resources.CPU/MemoryMB` (replacing the hardcoded `1000/1024`), k8s
-  container `resources.requests=limits` (`${cpu}m` / `${memoryMb}Mi`), docker `--cpus` (`cpu/1000`) / `--memory`
-  (`${memoryMb}m`). `cpu` is `1000 = 1 vCPU` (k8s millicores convention). `resources` + the already-honored
-  `replicas` are instance-overridable (`overrides.services[name].{resources,replicas}`, scalar replace).
-- **Phase 3 — instance overrides + all-runtime volumes/readiness (implemented):**
-  `overrides.services[name].{volumes,readiness}` (scalar replace) + `overrides.target.extension.ref` (browser
-  extension pin; `BadRequest` if the template has no `target`) + `overrides.frontDoor.completion.{timeoutMs,
-  intervalMs}` (spread onto the template's completion; mode-mismatched keys are stripped by the schema re-parse,
-  so e.g. `intervalMs` is dropped on a non-`poll` completion). **All three runtimes now honor `volumes`/`readiness`
-  (no longer docker-only):** k8s renders `volumes`+`volumeMounts` (named→`emptyDir`, bind→`hostPath`) and a
-  `readinessProbe` (httpGet `/`, `periodSeconds`=interval, `failureThreshold`=⌈timeout/interval⌉); nomad sets the
-  docker driver `Config.volumes` and threads `svc.readiness` into the runtime's per-endpoint HTTP wait; docker as
-  before.
-- **Web UI — structured override editors (implemented):** the instance register/new-version form has a collapsible
-  "variations (overrides)" disclosure with per-service rows (env/replicas/resources/volumes/readiness), a front-door block
-  (submit-body JSON + completion timeouts), a target-extension field, and command env/params — `buildOverrides`
-  assembles the spec, `instanceStateFromSpec` round-trips existing overrides back into the fields for
-  edit→new-version; the Config panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
-
----
-
-# The instance form edits EFFECTIVE config, and a variation is a NAMED harness
-
-> **Status: implemented (web only — no contract/API change beyond two derived list fields).** Two authoring
-> defects made the override channel above unreachable in practice, so authors changed the TEMPLATE to change an
-> env var — exactly what templates/instances were built to avoid.
-
-## Defect 1 — a delta editor cannot be operated without seeing the effective value
-
-`instanceStateFromSpec` prefilled the **delta only**, so opening "new version" showed an EMPTY env editor,
-collapsed inside a "variations (overrides)" disclosure, while the template tab showed the same env **filled
-in**. The screen that showed values was the one that required a new shape version, so that is the one people
-used. The fix inverts the direction: the form is seeded with a **baseline** derived from the template
-(`baselineFromTemplate` → `OverrideBaseline`), renders inherited values with an `inherited`/`overridden` badge,
-and `buildOverrides(state, baseline)` **diffs** — only what differs from the template is stored. Rules:
-
-- Per-service rows come from the template's service list; the name is not typed (a typo was a 400).
-- An inherited env key is **not deletable** — overrides merge, so removal cannot be expressed. The key is
-  locked and offers "revert to the template value" instead of a trash can. Never render an affordance whose
-  promise the merge cannot keep; a delete channel is a contract change (`unsetEnv`), not a UI decision.
-- With no baseline (`EMPTY_BASELINE`, the free-form path) every entered value is a delta — the previous
-  behavior, unchanged.
-
-## Defect 2 — variation and version shared one axis
-
-The web hardcoded `id: templateId`, so a second harness on the same shape was impossible: "same template,
-different env" could only become **another version of the same id**, mixing *newer* and *different* in one
-version list (and a new-version save on an API-registered `id != template.id` instance silently re-registered
-it under the template id). `HarnessInstanceSpec.id` was always free — only the web was not. Now:
-
-- The instance form takes a **harness name** (empty = the template id, the old convention).
-- The template is **picked**, not typed: `?template=&tplVersion=` on `/{ws}/harnesses/new` carries the choice
-  and the SERVER builds that template's baseline, so no client-side control-plane call is needed.
-- The harness detail offers "new harness on this shape" beside "new version" — the two axes, side by side.
-- `HarnessListEntry` gained derived `templateId`/`templateVersion` (from the latest instance, in
-  `enrichHarnessList`) so the list **groups variations under their shape** instead of showing siblings as
-  unrelated harnesses.
-
-## The remaining override holes (contract additions)
-
-Four knobs still forced a template edit even though the shape never changed. Each is now an instance delta:
-
-| Knob | Where | Note |
+| Knob | Where | Merge |
 |---|---|---|
-| per-service `model` | `InstanceServiceOverride.model` | "same topology, different model" is the single most common variation there is |
-| command `resources` | `InstanceOverrides.resources` | a heavier run of the same CLI agent no longer forks the shape |
-| env **removal** | `unsetEnv: string[]` (per-service and command) | applied AFTER the merge; naming a key the template never set is a no-op, not an error |
-| service default `image` | `TemplateService.image` | the slot's default, so an instance pins only the services it actually changes (a pin still wins) |
+| service `env` / `unsetEnv` | `overrides.services[name]` | env merged over the template's (instance wins), then `unsetEnv` drops keys; the runtime applies `connEnv < service.env < storeEnv` |
+| service `replicas` / `resources` / `volumes` / `readiness` / `model` | `overrides.services[name]` | scalar replace |
+| front-door body | `overrides.frontDoor.request.bodyTemplate` | shallow merge over the template's `bodyTemplate` |
+| front-door completion timing | `overrides.frontDoor.completion.{timeoutMs,intervalMs}` | spread over the template's completion; keys the mode does not accept are dropped by the schema re-parse |
+| browser extension | `overrides.target.extension.ref` | replace; `BadRequestError` if the template has no `target` |
+| command `env` / `unsetEnv` / `params` | `overrides` | merged over the template's, then `unsetEnv`; `params` feed `{{key}}` substitution in `CommandHarness` (not shell-escaped — author-trusted; only `{{task}}` is quoted) |
+| command `resources` | `overrides.resources` | scalar replace |
+| command `prompt` | `overrides.prompt` | delivered through the template's `promptChannel` (see below) |
 
-Two traps the merge semantics set, both now covered by tests:
+- **Unknown target** — a service name in `overrides.services` the template lacks → `BadRequestError`, the same
+  discipline as image pins.
+- **Command prompt** — `overrides.prompt` is an axis, not another env key (`evolution-program-gap-map.md` G4.9).
+  The template declares the delivery (`promptChannel: { kind: "env", name }`); `resolveHarnessInstance` writes the
+  text into that env key AND onto the resolved spec's `prompt` field from one value, so `specDigest` seals it and
+  `diffHarnessSpecs` reports `prompt`. Refused: a `prompt` override with no declared channel, and a `prompt`
+  override beside a hand-written `env` entry for the same key.
+- **`resources` is a scalar REPLACE**, so an editor that emits only the changed half silently unsets the other;
+  the web form re-states the inherited half whenever either changes.
 
-- **`resources` is a scalar REPLACE**, so a form that emits only the changed half silently unsets the other.
-  The editor re-states the inherited half whenever either changes.
-- **Deleting an env row means `unsetEnv`, not "no override"** — and the prefill must drop the unset key again, or
-  a key the user removed reappears on the next edit.
+## Runtime support (nomad · k8s · docker self-hosted)
 
-## "Which harness is this?" is answered by the delta, not by prose
+| Knob | nomad | k8s | docker |
+|---|---|---|---|
+| `image`, service `env`, front-door request/completion, model | ✅ | ✅ | ✅ |
+| `replicas` | `Count` | `replicas` | single host = 1 |
+| `resources` (`cpu` 1000 = 1 vCPU, `memoryMb`) | `Resources.CPU/MemoryMB` (default 1000/1024) | `resources.requests=limits` | `--cpus` / `--memory` |
+| `volumes` | docker driver `Config.volumes` | named → `emptyDir`, bind → `hostPath` | `-v` |
+| `readiness` | per-endpoint HTTP wait | `readinessProbe` (httpGet `/`) | readiness poll |
 
-`summarizeInstanceVariation` (`@everdict/domain`) projects an instance's own delta into display chips
-(`model=claude-opus-4-8` · `−OPENAI_BASE_URL` · `cpu 4000`), carried on `HarnessListEntry.variation`. A
-hand-written description answers the question only until someone re-pins and forgets the prose; the delta **is**
-what the resolver applies, so it cannot drift. A pin equal to the template's default is not a difference and is
-dropped; a secret-backed env shows the secret NAME (the spec holds no value).
+Front-door and model knobs are runtime-agnostic (interpreted by the `FrontDoorDriver` / `ModelResolvingDispatcher`,
+not the orchestrator). Overrides are baked into the resolved `id@version`, so warm pools key correctly and never
+mix variants (the same mechanism `applyImagePins` uses, `-pin-<hash>`).
 
-## The shape catalog is a separate screen
+## The instance form edits EFFECTIVE config
+
+A delta editor cannot be operated without seeing the effective value. The web seeds the form with a **baseline**
+derived from the template (`baselineFromTemplate` → `OverrideBaseline`), renders inherited values with an
+`inherited`/`overridden` badge, and `buildOverrides(state, baseline)` **diffs** — only what differs from the
+template is stored.
+
+- Per-service rows come from the template's service list; the name is not typed.
+- An inherited env key cannot be deleted in place (overrides merge); deleting a row means `unsetEnv`, and the
+  prefill drops an unset key again so it does not reappear on the next edit.
+- With no baseline (`EMPTY_BASELINE`, the free-form path) every entered value is a delta.
+- The template is **picked**, not typed: `?template=&tplVersion=` on `/{ws}/harnesses/new` carries the choice and
+  the server builds that template's baseline.
+
+## "Which harness is this?" is answered by the delta
+
+`summarizeInstanceVariation` (`@everdict/domain`) projects an instance's delta into display chips
+(`model=claude-opus-4-8` · `−OPENAI_BASE_URL` · `cpu 4000`), carried on `HarnessListEntry.variation`. The delta is
+what the resolver applies, so it cannot drift the way prose does. A pin equal to the template default is dropped;
+a secret-backed env shows the secret NAME.
+
+## The shape catalog
 
 `/{ws}/harness-templates` lists shapes — kind · category · service count · versions · which harnesses ride each ·
-"new harness on this shape". It exists for two things the harness list structurally cannot do: show a shape
-**nothing rides yet** (no instance carries it, so it appears nowhere else), and answer "what shapes do we have"
-without the eval-time harnesses mixed in. `HarnessTemplateListEntry` therefore carries the shape's own identity
-(`latestVersion`/`kind`/`category`/`serviceCount`, derived in `enrichTemplateList`); the rider count is a join of
-two reads the page already makes, not a new endpoint.
-
-> Blast radius: `@everdict/contracts` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
-> `harness-template` `overrides` + resolve), `@everdict/harnesses` (`CommandHarness` `{{var}}`), `@everdict/topology`
-> (nomad/k8s/docker resources + volumes + readiness honoring), `apps/web` (structured override editor), + tests.
-> No registry, auth, or API route changes (the instance JSON round-trips through the validated schema).
+"new harness on this shape". It shows shapes nothing rides yet and answers "what shapes do we have" without the
+harness list mixed in. `HarnessTemplateListEntry` carries `latestVersion`/`kind`/`category`/`serviceCount`
+(derived in `enrichTemplateList`); the rider count is a join of two reads the page already makes.

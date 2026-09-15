@@ -2,14 +2,17 @@
 kind: wiki
 title: "The scoring plane as revisions (MVCC)"
 status: current
-updated: 2026-08-15
-anchors: [apps/api/src/trust/pass-ownership.trust.test.ts, packages/db/src/results/scoring-stage-round-trip.scenario.test.ts]
+updated: 2026-09-15
+anchors: [packages/application-control/src/ports/scoring-stage-store.ts, packages/domain/src/scorecard/stage-promotion.ts, packages/db/src/results/scoring-stage-store.ts]
 ---
 # The scoring plane as revisions (MVCC)
 
-> **Status:** DESIGN — arch-review 8 P2. The ownership work (P0, `fc6e4a19`) made concurrent scoring SAFE;
-> this makes it SIMPLE. Nothing here is a fix: it removes the machinery the fix needed.
-> Prerequisite reading: `docs/trust-certification.md` (the scoring revision ledger).
+> **Status:** steps 1–3 of the migration below are in place — the stage table, dual-write with a durable parity
+> observation per settled pass, the readiness gate, and the opt-in read-side rehearsal. Step 4 (contract) has
+> not been taken: the carriers are still the source of truth for score bytes, and `prepareScore`'s strip still
+> runs (`packages/orchestrator/src/activities.ts`). The stage's write CLAIM is already authoritative.
+> Origin: arch-review 8 P2 — the ownership work (P0, `fc6e4a19`) made concurrent scoring SAFE; this makes it
+> SIMPLE. Prerequisite reading: `docs/trust-certification.md` (the scoring revision ledger).
 
 ## Why this is P2 and not P0
 
@@ -49,7 +52,7 @@ revision N+1 ← readers
 The pointer switch already exists — the scoring ledger's guarded append IS the switch. What changes is where
 the judgments live before it.
 
-## Where the scores actually live today (the cost driver)
+## Where the scores live (the cost driver)
 
 This is the part that makes the change non-trivial, and the reason it is scheduled rather than folded into
 the ownership work:
@@ -75,6 +78,8 @@ CREATE TABLE everdict_scoring_stage (
   judge_id     text NOT NULL,   -- mig 0153 — the unit that independently retries and goes terminal
   scores       jsonb NOT NULL,
   written_at   timestamptz NOT NULL DEFAULT now(),
+  attempt      integer NOT NULL DEFAULT 1,   -- mig 0158 — the claim: Temporal's activity attempt
+  generation   integer NOT NULL DEFAULT 0,   -- mig 0159 — the claim: the pass's logical round ordinal
   PRIMARY KEY (scorecard_id, pass_id, case_key, judge_id)
 );
 ```
@@ -99,7 +104,8 @@ Stage WRITE-CLAIM authority  already PRODUCTION — it decides which invocation 
 While it was purely shadow, swallowing a stage failure and writing anyway was the rollback-safe choice. It
 stopped being that the moment it became the arbiter: an arbiter that cannot answer must never be read as "you
 won", or the race it settles is restored at exactly the moment it is least observable. The claim call is
-therefore fail-closed — the activity fails, Temporal retries, the carrier is untouched.
+therefore fail-closed — the activity fails, Temporal retries, the carrier is untouched. The two store
+implementations share one ordering, `claimSupersedes` (`packages/application-control/src/ports/scoring-stage-store.ts`).
 
 **The claim spans the PASS, not one activity execution.** The first version used Temporal's `attempt` alone,
 reasoning that it is monotonic. It is — per ACTIVITY EXECUTION, while a stage row lives for the whole pass.
@@ -154,21 +160,23 @@ inherited rows quietly becomes a full-plane snapshot whose correctness depends o
 rows at exactly the right moment. Staged as a delta, the merge is explicit — inherited evidence stays on the
 carrier, produced evidence comes from the stage — which is the distinction the promotion has to make anyway.
 
+The end state, once the contract step is taken:
+
 - `scoreCase` writes here (keyed by its own pass) instead of onto the child row.
 - `planScore`'s "already judged in THIS pass" predicate reads the stage — which is what the id-only predicate
   was always trying to approximate, so the strip-first step **disappears entirely**.
 - `finalizeScore` promotes stage → carriers and appends the revision in one statement. A loser's rows are
-  never promoted; a cleanup sweep drops stage rows for settled/abandoned passes.
+  never promoted.
 
-What this buys beyond simplicity: **the live plane is never half-written**. Today a pass strips first, so a
+What that buys beyond simplicity: **the live plane is never half-written**. While a pass still strips first, a
 crash leaves the record advertising judgments that no longer exist — which is why a failed marker has to keep
-readers out. With staging there is no in-between state to guard, so `scoringPass` narrows from "the plane is
-unreadable" to what it should have been all along: a lease saying who may promote next.
+readers out. With staging authoritative there is no in-between state to guard, so `scoringPass` narrows from
+"the plane is unreadable" to a lease saying who may promote next.
 
 ## Migration (expand → deploy → contract, per the db rules)
 
-1. **Expand** — add the table (mig 0149). Writers dual-write (stage + carrier) so a rollback loses nothing.
-2. **Deploy** — readers unchanged (carriers are still the truth). The stage is **observed**, and observed
+1. **Expand** (done) — add the table (mig 0149). Writers dual-write (stage + carrier) so a rollback loses nothing.
+2. **Deploy** (done) — readers unchanged (carriers are still the truth). The stage is **observed**, and observed
    means *measured*: every settled pass compares its stage against the plane it wrote and reports
    `everdict_scoring_stage_parity_total{result=matched|mismatched|orphaned|missing_from_stage}`
    (`ScoringStageParity`). A week of dual-writing that nobody compared is not evidence that the two agree — it
@@ -221,7 +229,7 @@ unreadable" to what it should have been all along: a lease saying who may promot
    as a sample. The counts make the promotion decision; the ids make it diagnosable — and since the rows are
    collected immediately afterwards, a `promotionSafe: false` investigated later would otherwise know that N
    judgments disagreed with no way left to learn which.
-3. **Rehearse the read side** — `EVERDICT_SCORING_STAGE_AUTHORITATIVE=1`, off by default (arch-review 43 ①).
+3. **Rehearse the read side** (done) — `EVERDICT_SCORING_STAGE_AUTHORITATIVE=1`, off by default (arch-review 43 ①).
    A settled pass builds the plane it certifies by PROMOTING its staged delta onto the carriers
    (`promoteStagedJudgments`) instead of taking the carriers as written.
 
@@ -278,11 +286,11 @@ unreadable" to what it should have been all along: a lease saying who may promot
    design (`ScoreSchema.parse` defaults and declaration key order on one side, raw jsonb on the other), which
    is the difference that made the comparison wrong for essentially every pass once before.
 
-4. **Contract** — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is deleted,
-   and with it the reason `prepareScore` exists at all.
+4. **Contract** (not taken) — `scoreCase` stops writing carriers; `finalizeScore` promotes. The strip step is
+   deleted, and with it the reason `prepareScore` exists at all.
 
 Each step ships alone. Step 4 is the one that changes behavior, and its precondition is code rather than
-prose — `stagePromotionSafe(parity)`:
+prose — `stagePromotionSafe(parity)` (`packages/domain/src/scorecard/stage-promotion.ts`):
 
 ```
 expectedJudged === staged && staged === matched
@@ -309,8 +317,6 @@ describe would be the one the stage produced (arch-review 44 ②).
 
 ## Open questions
 
-- **Stage lifetime.** An abandoned pass's rows are evidence of what it was doing (the same argument that kept
-  the loser's analysis artifact). Sweep on a schedule, or keep them addressable as pass history?
 - **Embed groups.** They have no child rows, so the stage promotes into the embedded scorecard. They now
   reach the stage write (arch-review 44 ①, see step 3), which is what makes them observable at all; what is
   still open is the contract-step shape — the settle already writes the whole embedded plane in one patch, so

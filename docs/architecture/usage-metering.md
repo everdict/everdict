@@ -2,8 +2,8 @@
 kind: wiki
 title: "Usage metering — the billing surface (meter-only, durable)"
 status: current
-updated: 2026-08-07
-anchors: [apps/api/src/common/usage-meter.ts]
+updated: 2026-09-15
+anchors: [apps/api/src/common/usage-meter.ts, packages/domain/src/billing/usage.ts, packages/domain/src/billing/cost.ts, apps/agent/src/usage.ts, apps/api/src/api/billing/billing.routes.ts]
 ---
 # Usage metering — the billing surface (meter-only, durable)
 
@@ -35,9 +35,10 @@ only** — it **never blocks** a run (distinct from the enforcement `BudgetTrack
   per-`(day × source × model)` series (oldest first; the pre-itemization legacy bucket is in the totals but not the
   series). Synchronous (fast reads for `GET /usage`).
 
-Every settle site (`ScorecardService` per case + `RunService` per single run) loops `billingCharges` and, for each
-line, records it (meter, best-effort — `.catch(() => {})`, never blocks) **and** settles the enforcement budget — so
-the meter and the 402-cap always agree. `GET /usage` + `get_usage` (MCP) expose it (viewer+, reuses `scorecards:read`).
+Every settle site — `RunService` per single run, both batch drivers (in-process and Temporal) per case, a
+speculation loser's spent cost (billed with zero evaluations), and session/front-door turns — loops
+`billingCharges` and, for each line, records it on the meter **and** settles the enforcement budget, so the meter
+and the 402-cap always agree. `GET /usage` + `get_usage` (MCP) expose it (viewer+, reuses `scorecards:read`).
 
 **Source `judge` is produced by the judge runner** (`defaultJudgeRunner` `meterJudgeCost`, wired in
 `composition/run.ts`): a model judge's verdict call is teed at the transport (usage → USD via `priceUsd`, the same
@@ -56,11 +57,12 @@ made durable by a **write-through** to a `UsageStore`:
   dimension added in mig 0081; the `day` dimension in mig 0088 — pre-existing lifetime rows keep the `1970-01-01`
   sentinel, so totals stay correct and the daily chart simply starts at the migration; all additive).
 - `persistentUsageMeter(store)` (`apps/api/src/common/usage-meter.ts`) wraps the in-memory meter: every `record`
-  also fires a **best-effort** `store.record` (a failed persist never blocks or fails metering) with the day
-  **stamped once** (meter and store agree across a midnight boundary), and `hydrate()` loads all rows back into
-  memory at boot so usage **survives a restart**.
-- `main.ts` uses `persistentUsageMeter(new PgUsageStore(client))` (or `InMemoryUsageStore` with no `DATABASE_URL`)
-  and `await usageMeter.hydrate()` at startup.
+  also fires a **best-effort** `store.record(...).catch(() => {})` (a failed persist never blocks or fails
+  metering) with the day **stamped once** (meter and store agree across a midnight boundary), and `hydrate()` loads
+  all rows back into memory at boot so usage **survives a restart**.
+- Wiring: `apps/api/src/composition/persistence.ts` picks `PgUsageStore` (or `InMemoryUsageStore` with no
+  `DATABASE_URL`), and `buildBudgets` in `apps/api/src/composition/execution-scheduling.ts` wraps it in
+  `persistentUsageMeter` and awaits `hydrate()` at startup.
 
 ## Agent conversations (source `agent`)
 
@@ -90,13 +92,12 @@ metered over a small bridge:
 - **Best-effort persistence**: a crash between the last `store.record` and the next can lose a few increments.
   Acceptable for meter-only usage; upgrade to transactional settle if strict billing is required.
 
-## Follow-ups
-- ~~Judge-model cost capture~~ — shipped: the judge runner tees the transport's usage (no `JudgeCompletion`
-  signature change needed — the tee wraps the `LlmTransport` beneath it) and meters source `judge`; see above.
-  Remaining gap: a CODE judge's own in-sandbox LLM call (the script talking to the provider via the
+- **Code-judge blind spot**: a CODE judge's own in-sandbox LLM call (the script talking to the provider via the
   `EVERDICT_JUDGE_MODEL` env channel) is invisible unless it lands in the wrapper job's trace — only the script
   knows it happened.
-- The web billing view lives on Settings › Budget (`/[workspace]/settings/budget`; the old `/usage` route
-  redirects there): metered usage first — month-to-date + all-time tiles, a **daily-spend stacked-column chart**
-  (7/30/90-day range, grouped by activity or by model, fed by `daily`) and the all-time (source × model) breakdown
-  table — with the enforcement caps below.
+
+## Web view
+The billing view lives on Settings › Budget (`/[workspace]/settings/budget`; the old `/usage` route redirects
+there): metered usage first — month-to-date + all-time tiles, a **daily-spend stacked-column chart** (7/30/90-day
+range, grouped by activity or by model, fed by `daily`) and the all-time (source × model) breakdown table — with
+the enforcement caps below.

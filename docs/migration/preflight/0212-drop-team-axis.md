@@ -1,13 +1,15 @@
 ---
-kind: wiki
+kind: runbook
 title: "Preflight — 0212 drop the team axis"
 status: current
-updated: 2026-09-03
+updated: 2026-09-15
+anchors: [packages/db/migrations/0212_drop_team_axis.sql, scripts/live/migrate-teams-to-workspace.mjs]
 ---
 # Preflight — `0212_drop_team_axis`
 
-`0212` is the CONTRACT half of removing the team concept. It drops fourteen `team_id` columns, the
-`team_ids` list on projects, the cycle table and column, and `everdict_teams` / `everdict_team_members`.
+`0212` is the CONTRACT half of removing the team concept. It drops fifteen `team_id` columns, the
+`team_ids` list on projects, `everdict_cycles` with the issue `cycle_id` / `in_triage` columns, and
+`everdict_teams` / `everdict_team_members`.
 All of it is irreversible.
 
 ## OK_TO_APPLY when all three hold
@@ -33,8 +35,8 @@ All of it is irreversible.
 
 ## BLOCKED
 
-Any of the three queries above returning rows. Run the script (or finish it — it is idempotent and resumable
-per workspace) before applying.
+Either query above returning rows, or the exposure count not yet read and accepted. Run the script (or finish
+it — it is idempotent and resumable per workspace) before applying.
 
 ## What is deliberately NOT preserved
 

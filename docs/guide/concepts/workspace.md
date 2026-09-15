@@ -2,7 +2,8 @@
 kind: wiki
 title: "Workspace"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/domain/src/auth/principal.ts, packages/domain/src/auth/authz.ts, packages/domain/src/placement/trust-zone.ts, packages/storage/src/s3-fs.ts, packages/registry/src/versioned-store.ts]
 ---
 # Workspace
 
@@ -22,12 +23,13 @@ curl https://everdict.internal/me -H 'authorization: Bearer ak_…'
 ```
 
 ```json
-{ "subject": "user:jimin", "workspace": "acme", "roles": ["member"], "via": "api-key" }
+{ "subject": "user:jimin", "workspace": "acme", "roles": ["member"], "via": "api-key", "…": "…" }
 ```
 
-That `Principal` is the same object whether it came from an OIDC token (people, through Keycloak) or an
-API key (`ak_…`, for agents and CI). `via` records which. Everything downstream — reads, writes, budget,
-isolation — is scoped by `workspace`.
+That `Principal` is the same object whether it came from an OIDC token (people, through Keycloak), an
+API key (`ak_…`, for agents and CI), GitHub Actions federation, or a self-hosted runner's pairing token.
+`via` records which. Everything downstream — reads, writes, budget, isolation — is scoped by
+`workspace`.
 
 ## What the boundary actually enforces
 
@@ -62,25 +64,16 @@ comprehensible while the product grew.
 The control plane enforces this. The web app role-gates its UI too, but that is a courtesy; the answer
 that matters is the server's.
 
-## `_shared` — the seeded fallback
+## `_shared` — the fallback
 
-Reference datasets, example harness templates and first-party judges ship with the product rather than
-belonging to a tenant. They live under the pseudo-workspace `_shared`, and a lookup that misses in your
-workspace falls back to it.
+Documents that belong to no tenant live under the pseudo-workspace `_shared`, and a registry lookup that
+misses in your workspace falls back to it. A fresh install registers almost nothing there — only the
+first-party agent templates (`scorecard-sentinel`, `failure-fix-pr`), disabled until a workspace adopts
+a copy. Reference datasets, harness templates and runtimes under `examples/` are **not** pre-registered;
+apply the ones you want into your own workspace.
 
-```bash
-curl localhost:8787/datasets -H 'x-everdict-tenant: acme'
-# → your datasets, plus the _shared ones you did not have to create
-```
-
-A workspace can **shadow** a `_shared` id by registering its own document with the same id. That is
-intended, and the resolution is recorded, so a result can always be traced to the document that
-actually produced it.
-
-:::tip
-Shadowing is the supported way to customize a bundled dataset: register your own under the same id,
-and everything that referenced it now resolves to yours — with the scorecard recording which one ran.
-:::
+A workspace can **shadow** a `_shared` id by registering its own document with the same id: your
+workspace's document always wins the lookup, and the scorecard records the version that ran.
 
 ## Machines are members too
 

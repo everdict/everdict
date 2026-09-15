@@ -2,8 +2,8 @@
 kind: wiki
 title: "The workspace filesystem"
 status: current
-updated: 2026-08-11
-anchors: [packages/storage/src/s3-fs.scenario.test.ts, packages/contracts/src/records/workspace-file.ts]
+updated: 2026-09-15
+anchors: [apps/api/src/api/fs/fs.routes.ts, packages/contracts/src/records/workspace-file.ts, packages/application-control/src/ports/workspace-fs.ts, packages/storage/src/s3-fs.ts, packages/application-control/src/fs/revisioned-workspace-fs.ts]
 ---
 # The workspace filesystem
 
@@ -13,12 +13,10 @@ anchors: [packages/storage/src/s3-fs.scenario.test.ts, packages/contracts/src/re
 
 ## Why
 
-Agent work products used to evaporate with the conversation (chat text, session-scoped artifacts).
-Skills already smuggled a proto-filesystem into a jsonb column (`files[{path,content}]`), knowledge
-bodies lived only in rows, and nothing gave the workspace a durable, browsable place where "the
-agent wrote me a report" produces an actual file. The workspace filesystem makes that place
-first-class — with the same tenancy guarantee as every other store: **a workspace can never see
-another workspace's tree.**
+Without it, agent work products evaporate with the conversation, and nothing gives the workspace a
+durable, browsable place where "the agent wrote me a report" produces an actual file. The workspace
+filesystem is that place — with the same tenancy guarantee as every other store: **a workspace can
+never see another workspace's tree.**
 
 ## The port and its implementations
 
@@ -28,11 +26,15 @@ another workspace's tree.**
 list(tenant, dir)      → FsEntry[]          // immediate children; dirs first, name-sorted
 stat(tenant, path)     → FsEntry | undefined
 read(tenant, path)     → { entry, data } | undefined
-write(tenant, path, data, contentType?) → FsEntry   // create-or-replace; parents implicit; 5 MiB cap
+write(tenant, path, data, contentType?, opts?) → FsEntry   // create-or-replace; parents implicit; 5 MiB cap
 mkdir(tenant, path)    → FsEntry            // idempotent (mkdir -p); marker object keeps empty dirs
 remove(tenant, path, {recursive?}) → number // objects removed; non-empty dir demands recursive
 move(tenant, from, to) → FsEntry            // file rename or whole-subtree move; no overwrite
+writeRevisionBlob / readRevisionBlob / removeRevisionBlobs   // the immutable per-revision copies (see Revisions)
 ```
+
+`opts` (`FsWriteOptions`) carries the publishing `actor`, the optimistic `baseRevision`, a `message` and
+`restoredFrom`.
 
 - **Isolation lives INSIDE the adapters, never in caller discipline.** Every operation funnels
   through `normalizeFsPath` (`@everdict/contracts` `records/workspace-file.ts`) — traversal (`..`)
@@ -61,11 +63,11 @@ move(tenant, from, to) → FsEntry            // file rename or whole-subtree mo
 
 | Surface                     | What                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET /fs/search` (glob and/or content-regex grep — the budgeted, index-free recall primitive; caps report `truncated`) · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `POST /fs/executions` (see **Running a file**) · `DELETE /fs/entry` — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404.                                                                                                                                  |
-| MCP (parity)                | `list_files` / `get_file` / `search_files` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `run_file` / `delete_file` (permission-gated; `delete_` is additionally guarded in auto mode).                                                                                                                                                                                                                                                                                                                            |
+| HTTP (`apps/api` `api/fs/`) | `GET /fs/entries` · `GET /fs/search` (glob and/or content-regex grep — the budgeted, index-free recall primitive; caps report `truncated`) · `GET/PUT /fs/file` · `POST /fs/directories` · `POST /fs/move` · `POST /fs/executions` (see **Running a file**) · `DELETE /fs/entry` · `GET /fs/usage` (`files:read`) · `DELETE /fs` (`settings:write`) · the revision routes (see **Revisions**) — thin routes over `FsService` (application-control): utf8-vs-base64 shaping on read, strict base64 decode on write, miss → 404. Every route 404s when no filesystem is composed. |
+| MCP (parity)                | `list_files` / `get_file` / `search_files` / `get_fs_usage` (read-classified by prefix) · `write_file` / `make_directory` / `move_file` / `run_file` / `delete_file` / `delete_all_files` (permission-gated; `delete_` is additionally guarded in auto mode).                                                                                                                                                                                                                                                                                       |
 | Conversational agent        | Bridge-all picks the tools up with no extra wiring; the system prompt's **Files** section sets the convention and the per-turn Environment names the conversation's **task directory** (`tasks/<conversation-id>/`) — each task's working files land in its own area, and finished deliverables get promoted to the shared library (`reports/` · `data/` · `artifacts/`).                                                                                                                                                                          |
-| Web (`/[workspace]/files`)  | Lazy tree + viewer/editor (every class in **File types** below — prose, tables, code, media, download) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache.                                                                                                                                                                                                                                                                                                                                          |
-| Settings › Files            | The workspace filesystem browsed in-service (never the object-storage console): the page is the folder tree ALONE, and a selected file renders interactively in the right-hand split-view panel (the infra panel's purpose-built `files` tab — the full **File types** matrix below, member editing; a panel-side mutation bumps `fsRevision` so the tree refetches in place). No shell and no storage/cleanup surface here. `GET /fs/usage` + `DELETE /fs` (settings:write) stay API/MCP-only ops surfaces (`get_fs_usage` / `delete_all_files`). |
+| Web (`/[workspace]/files`)  | Lazy tree + viewer/editor (every class in **File types** below — prose, tables, code, media, download) + a bash-style shell (`ls cd cat tree mkdir touch echo>/>> cp mv rm`) sharing one directory cache, plus file search, a usage line (`GET /fs/usage`) and an admin-only "empty the filesystem" action (`DELETE /fs`, confirmed by typing the workspace name).                                                                                                                                                                                  |
+| Settings › Files            | The workspace filesystem browsed in-service (never the object-storage console): the page is the folder tree ALONE, and a selected file renders interactively in the right-hand split-view panel (the infra panel's `files` tab — the full **File types** matrix below, member editing; a panel-side mutation bumps `fsRevision` so the tree refetches in place). No shell, search, usage or cleanup surface here.                                                                                                                                  |
 
 **The tree owns the entry actions** (both web surfaces); the viewer only reads and edits the open document —
 it has neither a Move nor a Delete button, because acting on a file belongs where the folder context and the
@@ -103,9 +105,9 @@ into every turn — see the agent system prompt's Memory section and `workspaceM
 `apps/agent`). Deliberately ON the workspace filesystem, never the agent host's local disk:
 multi-tenant isolation is the bucket, and memory writes get the same attributed revisions
 (member or agent + conversation) as every other file. Because memory is workspace-shared
-prose replayed into future agent contexts, `FsService.writeFile` refuses credential-shaped
-tokens under `memory/` (a conservative named-pattern guard at the one choke point every
-surface shares) — reference secrets by NAME, never by value. Upkeep is the
+prose replayed into future agent contexts, `RevisionedWorkspaceFs` refuses credential-shaped
+tokens written or moved under `memory/` (`memory-secret-guard.ts`, a conservative named-pattern
+guard in the decorator every surface publishes through) — reference secrets by NAME, never by value. Upkeep is the
 `memory_consolidation` first-party skill example (store → import → optionally a crafted
 agent triggered on `schedule.fired`): merge overlaps, fix stale dates, move entity facts
 to the knowledge layer, prune the index every conversation pays for. Behind the inline
@@ -123,7 +125,7 @@ over any `WorkspaceFs` composed once in `main.ts`. Nothing downstream opts in: t
 `write_file`, the shell and the skill/knowledge projections all publish through it.
 
 ```
-FsRevision = { path, revision, size, contentType, hash, actor, message?, restoredFrom?, createdAt }
+FsRevision = { tenant, path, revision, size, contentType, hash, actor, message?, restoredFrom?, createdAt }
 FsActor    = { kind: member|agent|system, subject, agentId?, agentName?, conversationId?, onBehalfOf? }
 ```
 
@@ -133,9 +135,11 @@ FsActor    = { kind: member|agent|system, subject, agentId?, agentName?, convers
   (`fsRevisionBucketFor`) — a separate bucket rather than a reserved prefix, so no tree operation ever has to
   filter the internals out of a listing.
 - **The uniqueness constraint IS the allocator.** `append` writes `(tenant, path, revision)` under a primary
-  key; a duplicate is a lost race and throws `ConflictError` instead of overwriting. Write order is blob →
-  ledger row → head object, so a crash can strand an unreferenced blob but never publish a file whose
-  authorship went unrecorded.
+  key; a duplicate is a lost race and throws `ConflictError` instead of overwriting. Write order is ledger row
+  → blob → head object: the append is the compare-and-set that decides who owns the number, so no bytes are
+  written before it returns — a losing racer can never overwrite the winner's blob at the shared
+  `(path, revision)` key. A failure after the claim leaves a revision the ledger lists but cannot serve —
+  visible, and the caller's write fails — never one that serves another author's bytes.
 - **Optimistic writes.** A writer states `baseRevision` (the revision it edited; `0` = "this file should not
   exist yet"). If the head moved on, the write is refused — `PUT /fs/file` → **409** whose `data` is the full
   resolution kit: the live content plus a three-way merge (`mergeThreeWay`, the pure line-based diff3 in
@@ -174,14 +178,16 @@ FsActor    = { kind: member|agent|system, subject, agentId?, agentName?, convers
 - **Paging** uses the revision NUMBER as a keyset cursor (`before=`), not an opaque token: it is already a
   dense, monotonic, per-path sequence, and the `(tenant, path, revision DESC)` index makes page 100 cost what
   page 1 costs.
-- **Reads self-heal the one gap the write ordering can leave.** If a process dies between the ledger append and
-  the head write, the file holds older bytes than its published revision. A read compares the live object to the
-  head revision's recorded SIZE and, on a mismatch, serves the published blob and writes it back. Size (not
+- **Reads self-heal the gap between the blob and the head write.** If a process dies after the revision blob is
+  written but before the head object, the file holds older bytes than its published revision. A read compares the
+  live object to the head revision's recorded SIZE and, on a mismatch, serves the published blob (when it exists)
+  and writes it back. Size (not
   hash) because both numbers are already in hand — two same-size revisions slip through, the accepted limit of
   not hashing every read forever.
-- **Anywhere a file backs an entity, its history shows there too**: Settings › Skills detail renders the
-  history of `skills/<id>/SKILL.md`, and a knowledge entry's detail renders `knowledge/<id>.md` — same panel,
-  same component, so an edit made in Settings, in the shell or by an agent is one comparable list. An agent's
+- **Anywhere a file backs an entity, its history shows there too**: a skill's page (`/[workspace]/skill/<id>`)
+  renders the history of `skills/<id>/SKILL.md`, and a knowledge entry's detail (`/[workspace]/knowledge`) renders
+  `knowledge/<id>.md` — same panel, same component, so an edit made on the entity's page, in the shell or by an
+  agent is one comparable list. An agent's
   author line OPENS the conversation it ran in (postMessage `everdict:open-agent-session`, the same channel the
   comment threads use), because "why did this change?" is answered by the thread, not by the file.
 - Listings deliberately carry no revision (that would be a ledger query per row); `stat`/`read`/`write` do.
@@ -210,7 +216,7 @@ document today, with no migration and no rewrite. A type that was an actual deci
 | ------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | prose         | `.md` `.markdown` `.mdx`                                                           | rendered Markdown + a **Raw** toggle                     |
 | tabular       | `.csv` `.tsv`                                                                      | grid (first 200 rows, quoted fields honoured) + Raw      |
-| code / text   | ~110 extensions + named files + dotfiles                                           | CodeMirror, ~35 highlighted languages, member-editable   |
+| code / text   | every other text type: source, config, data, logs + named files + dotfiles         | CodeMirror, ~35 highlighted languages, member-editable   |
 | image         | `png` `jpg` `gif` `webp` `bmp` `ico` `tiff` `avif` `heic` `svg`                    | inline; svg also opens as editable markup                |
 | pdf           | `.pdf`                                                                             | embedded `<object>` viewer                               |
 | audio / video | `mp3` `wav` `ogg` `flac` `m4a` `aac` / `mp4` `webm` `mov` `avi` `mkv`              | native player                                            |
@@ -223,13 +229,14 @@ response, so the browser builds a blob URL client-side (`lib/file-bytes.ts`) —
 presigned-URL surface to secure. Office documents are classified apart from opaque binaries on purpose: an
 `.xlsx` is a readable deliverable, so the state names what it is instead of shrugging.
 
-Adding a format is **two edits**: a row in the contracts table, and a branch in `DocumentPreview`. The web keeps
-its own mirror of the class tables (`lib/file-kind.ts`) because runtime-decoupling forbids importing contracts
-values — keep the two in step.
+Adding a format is a row in the contracts table plus its mirror in the web's `lib/file-kind.ts` (the web keeps its
+own copy of the class tables because runtime-decoupling forbids importing contracts values — keep the two in
+step), and a branch in `DocumentPreview` only when the format needs a new rendering.
 
 ## Running a file
 
-The viewer's **Run** — a `.py`/`.sh`/`.js`/`.ts` file executed in a sandbox that exists for that one command.
+The viewer's **Run** — a `.py`, `.sh`/`.bash`, `.js`/`.mjs`/`.cjs` or `.ts`/`.mts`/`.cts` file executed in a sandbox
+that exists for that one command.
 Deliberately NOT an eval: no harness, no grading. `POST /fs/executions` (+ MCP `run_file`, `files:write`) →
 `FileExecutionService` (application-control) over the `Driver` port.
 
@@ -275,40 +282,14 @@ read the file → provision a container (the language's image, or a caller-chose
   to ours: a script is arbitrary code, so "on whose machine" is an answer, not a default. A control plane with
   no docker socket can still offer Run — it has runtimes.
 
-### Where each type can go next
+### Limits and uploads
 
-The registry answers "does it open". These are the openings for "does it _work_", roughly in ascending cost.
-None is committed; the point is that each one is a branch in one switch, not a new subsystem.
-
-- **Code → run it. SHIPPED** — see **Running a file** below. What is still open on this axis: streaming the
-  output while it runs (today the whole run happens inside one request), an execution record to poll or cancel,
-  and placement beyond the control plane's own container runtime (dispatch to Nomad/K8s or a self-hosted runner,
-  reusing the same service behind a different `Driver`).
-- **Notebooks (`.ipynb`).** Today they render as JSON. Cell-wise rendering (markdown cells + code + stored
-  outputs) is presentation-only; executing them is the same unlock as running code, one step later.
-- **Spreadsheets.** The CSV grid is the seed — sorting, column stats and a row count are cheap follow-ons.
-  `.xlsx` needs a parser (SheetJS-class dependency); worth it only when someone asks. The eval-native move
-  beyond preview is **"open as dataset"**: datasets are already a first-class entity, and a sheet of cases is
-  exactly that shape.
-- **Office documents.** Inline preview means server-side conversion (headless LibreOffice or a converter
-  service) — a real dependency and its own sandbox. The cheap intermediate is text extraction for the agent and
-  the knowledge layer, so a `.docx` becomes searchable without becoming viewable.
-- **Markdown.** Rendered already; the openings are in-place authoring and the link graph the knowledge/skill
-  bodies already live on (`knowledge/<id>.md`).
-- **Images.** Annotation and image-to-image diff — screenshot regression across runs is an eval-native use, not
-  a generic viewer feature.
-- **Media.** Trace-aligned playback: a browser run's recording scrubbed against its trace events (see
-  `docs/architecture/replay.md`).
-- **Diffs/patches.** A side-by-side view now has a natural home next to the revision history.
-- **Archives / columnar data.** Listing a `.zip`'s entries without extracting, or a schema + head for
-  `.parquet`/`.sqlite`, both want a runtime probe rather than in-browser parsing.
-
-Two ceilings bound all of it: the **5 MiB per-file cap** and the fact that a read inlines the whole payload
-(base64 for binaries). Large media and real datasets need range reads or presigned URLs before any of the above
-is worth building on. Files arrive by agent write, the shell, or a browser upload — the tree's upload button and
-OS-file drop go through the BFF's multipart door (`POST /api/fs/file`, sibling of the attachment door
-`/api/fs/uploads`: multipart because a JSON action body would base64-inflate the bytes), write create-only
-(`baseRevision: 0`, a name collision is a 409 shown as such), and are subject to the same cap.
+Two ceilings bound every surface: the **5 MiB per-file cap** and the fact that a read inlines the whole payload
+(base64 for binaries). A file run happens inside one request; its output arrives when it ends. Files arrive
+by agent write, the shell, a file run, or a browser upload — the tree's upload button and OS-file drop go through
+the BFF's multipart door (`POST /api/fs/file`, sibling of the attachment door `/api/fs/uploads`: multipart because a
+JSON action body would base64-inflate the bytes), write create-only (`baseRevision: 0`, a name collision is a 409
+shown as such), and are subject to the same cap.
 
 ## Memory has two scopes, and one of them is per member
 
@@ -342,7 +323,8 @@ Rules that hold at every door:
   who has memory here.
 - **A recursive delete from ABOVE the member areas is refused** (`memory/`, the tree root): the scope must not be
   walkable through a parent. `DELETE /fs` (the admin "empty the filesystem" action) deliberately uses the
-  UNSCOPED service — emptying a workspace has to mean emptying it.
+  UNSCOPED service — emptying a workspace has to mean emptying it. Its MCP twin `delete_all_files` reads through
+  the member-scoped view instead, so on a tree that holds `memory/` it stops with NOT FOUND at that directory.
 - **A caller who is nobody in particular** (an unattributed job, a scheduled agent) sees the shared tree and **no**
   member area. Forgetting to pass an identity must hide memory, not expose it.
 - The slug is the subject when the subject is already a legal path segment (the Keycloak-uuid case, which keeps
@@ -405,5 +387,5 @@ grows into a time series rather than converging on one file.
 
 - The filesystem is control-plane state, not the eval sandbox: a running case's working directory
   is the Driver/Environment's concern; `RepoEnvironment` snapshots stay on the artifact path.
-- No per-file ACLs in v1 — the tree is workspace-shared (`files:*` gates the surface).
+- No per-file ACLs — the tree is workspace-shared apart from members' memory areas (`files:*` gates the surface).
 - 5 MiB per file, 512-char/24-segment paths, strict `[A-Za-z0-9._-]` segments.

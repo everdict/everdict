@@ -2,21 +2,24 @@
 kind: wiki
 title: "Replay — record a run so the analysis phase can re-watch it"
 status: current
-updated: 2026-08-14
-anchors: [apps/api/src/common/live-frame-store.ts, apps/api/src/common/live-log-store.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/execution/recording.ts, packages/application-control/src/ports/recording-store.ts, apps/api/src/common/case-recorder.ts, apps/web/src/widgets/replay-player/ui/replay-player.tsx]
 ---
 # Replay — record a run so the analysis phase can re-watch it
 
-> **Status: S1–S5 shipped; the player is being corrected to agent-trace-first (see "Current state" below).**
+> **Status: S1–S6 shipped, including S4c (the agent-trace lane is the player's primary plane) and the Nomad
+> runtime plane. Not built: the per-plane `record` knob (D3 — a recorder is on whenever the control plane
+> composes one), the DOM-mutation (rrweb) semantic track, a driven `EnvironmentRecorder`
+> start/checkpoint/stop seam, and D7's continuous screen capture for managed jobs (the in-job frame loop still
+> runs only where a self-hosted runner supplies `reportScreen`).**
 > The durable successor to [live-observability](./live-observability.md) (watch a run *while* it runs —
 > ephemeral). Replay is built on the **agent trace** — the one timeline *every* harness produces — with the
 > recorded live streams (screen frames + log lines) aligned to it as a per-environment addition, teed into
-> time-indexed durable storage so an analyst can re-watch a case long after it settled. Related: [run-as-primitive](./run-as-primitive.md)
-> (the run is the addressable unit replay attaches to), [streaming-case-pipeline](./streaming-case-pipeline.md)
+> time-indexed durable storage so an analyst can re-watch a case long after it settled. Related: [streaming-case-pipeline](./streaming-case-pipeline.md)
 > (the 2-phase collect shape this mirrors), [judge-input-contract](./judge-input-contract.md) (evidence
 > channels a replay can also feed).
 
-## Current state & the agent-trace-first correction (2026-07)
+## The agent-trace-first correction (2026-07)
 
 Slices **S1–S5 shipped** and are on `everdict/main`: wall-clock trace timestamps (S1) · the `CaseRecording`
 contract + `EnvironmentRecorder` seam + `RecordingStore` (S2) · the tee/seal pipeline (S3) ·
@@ -30,7 +33,7 @@ But two things made replay look like a **browser-only feature** even though the 
 2. **The only wired producer was the `report_case_screen` live-screen tee**, which fires *solely* for
    `liveScreen` harnesses (browser-use / os-use). *(Update: the repo plane [S5a] and the **browser CDP
    environment recorder** [S5b, below] have since landed — repo git-diff, and browser network/console/nav +
-   screencast, now stream into the recording. The runtime/system plane [S6] remains the open producer.)*
+   screencast, now stream into the recording, and the runtime/system plane [S6] samples managed Nomad work.)*
 
 Net effect: a **Claude Code / Codex run records a trace but the player is empty**. That is a player+producer
 gap, *not* an architecture problem — the `EnvironmentRecorder` seam, the `repo-diff`/`os-windows`
@@ -45,7 +48,7 @@ universal, instead of being the thing that makes replay work at all. The **repo 
 this same pass** (S5a below): non-intrusive git-diff checkpoints ride `CaseResult.envDeltas` and fold into the
 recording at seal, so a coding-harness replay now shows how the repo evolved — self-hosted and managed alike.
 
-## Problem — what survives a run today, and what doesn't
+## Problem — what survived a run before replay, and what didn't
 
 Evaluating a harness over a dataset produces a verdict, but an analyst routinely needs to answer *how*
 the agent got there: what it decided, how it acted on the environment, and — the part the agent's own
@@ -54,9 +57,9 @@ verdict (final trace + final snapshot), not for reconstructing the execution.
 
 **Persisted on `CaseResult` (survives the run):**
 - `trace: TraceEvent[]` — the agent-decision timeline, 9 kinds (`message`/`llm_call`/`tool_call`/
-  `tool_result`/`env_action`/`error`/`log`/`artifact`/`span`), each with a `t` (`contracts/src/execution/trace.ts:13`).
+  `tool_result`/`env_action`/`error`/`log`/`artifact`/`span`), each with a `t` (`packages/contracts/src/execution/trace.ts`).
 - `snapshot: EnvSnapshot` — a **single final state**: repo `diff`/`changedFiles`/`headSha`, browser
-  `dom`+`screenshot`+`url`, os-use `screenshot`+`windows` (`contracts/src/execution/environment.ts:5`).
+  `dom`+`screenshot`+`url`, os-use `screenshot`+`windows` (`packages/contracts/src/execution/environment.ts`).
 - `evidence?` — slots extracted from a pulled platform trace (`finalAnswer`/`dom`/`screenshot`/`custom`).
 
 **Ephemeral — dies with the run (live-observability only):**
@@ -68,8 +71,8 @@ verdict (final trace + final snapshot), not for reconstructing the execution.
 1. **No frame history.** The screen capture loop keeps only the newest frame (overwrite-only); the
    time series is never accumulated.
 2. **No intermediate environment state.** The snapshot is captured once, at case end
-   (`application-execution/src/run-case.ts:154`). "The DOM right after step 3" requires a re-run.
-3. **Claude Code trace `t` is a synthetic counter** (`harnesses/src/stream-json.ts` `nextT = () => t++`),
+   (`packages/application-execution/src/run-case.ts`). "The DOM right after step 3" requires a re-run.
+3. **Claude Code trace `t` was a synthetic counter** (`packages/harnesses/src/stream-json.ts`, fixed by D1),
    not wall-clock — it can't align to frames, and it silently breaks the `latency` trace-grader
    (`graders/src/trace-graders.ts`, `trace[last].t - trace[0].t` ≈ event count for Claude Code).
 4. **No console/network capture** (`BrowserSnapshot.console` is a constant `[]`).
@@ -145,7 +148,7 @@ on/off. This is the "more than agent-level trace" the design is about.
 - **os-use (desktop)** — no `screencast` analog; the screen-frame series (scrot / Xvfb capture) is the
   track, window-title deltas alongside.
 - **repo** — the filesystem *is* the world: `git diff` checkpoints on write-boundaries (a series of diffs),
-  not one final diff (`environments/src/repo.ts:57`).
+  not one final diff (`packages/environments/src/repo.ts`).
 
 **③ Runtime/system plane** — the sandbox itself (extends [runtime-inspection](./runtime-inspection.md)):
 resource usage (CPU / memory / network I/O) sampled over time from the orchestrator (Nomad alloc stats /
@@ -249,19 +252,19 @@ type CustomEntry    = { t: number; name: string; ref?: string; text?: string }; 
 type RecordingRef = { ref: string };  // object-store pointer to the CaseRecording manifest
 ```
 
-`CaseResult` (`contracts/src/execution/eval-case.ts:84`) gains `recordingRef?: RecordingRef`. The trace
+`CaseResult` (`packages/contracts/src/execution/eval-case.ts`) gains `recordingRef?: RecordingRef`. The trace
 stays the agent track — it is **not** duplicated into the manifest; the player reads `result.trace`
 (or the pulled trace) and the manifest side-by-side on the shared `t0` clock. Zod schema + `core-contracts`
 skill update in the same PR.
 
 ### D3 — recording pipeline (reuse the live push channel; 2-phase, mirrors `traceRef`)
 
-The frame producer already exists: the `startLiveScreenCapture` loop (`run-case.ts:72`, overlap-guarded,
+The frame producer already exists: the `startLiveScreenCapture` loop (`run-case.ts`, overlap-guarded,
 default 2 s). Today its `report` callback pushes the latest frame to the ephemeral store. The change:
 **tee the same stream into a durable recorder**, and stamp the capture `t`.
 
 - **Ingestion point = the existing MCP tools.** `report_case_screen` / `report_case_log`
-  (`apps/api/src/api/runner/runner-lease.mcp.ts:116`) already carry the frames/lines to the control plane.
+  (`apps/api/src/api/runner/runner-lease.mcp.ts`) already carry the frames/lines to the control plane.
   Their handlers append to a new `RecordingStore` **in addition to** `LiveFrameStore`/`LiveLogStore` — the
   live view keeps its 30 s / 15 min ephemeral fast-path; the recorder accumulates the full series and
   offloads each frame to `ArtifactStore` (consecutive-identical frames deduped by hash → one ref reused).
@@ -334,7 +337,7 @@ behind the same seam). It attaches to the **CDP connection** the runtime already
   it stays the terminal keyframe.
 - **The sibling adapters** (Extensibility) have no CDP and record at their own ceiling: the **repo**
   recorder emits `git diff` checkpoints on write-boundaries (reuse `git diff --cached`,
-  `environments/src/repo.ts:57`), the **os-use** recorder emits the periodic scrot series + window deltas.
+  `packages/environments/src/repo.ts`), the **os-use** recorder emits the periodic scrot series + window deltas.
   Same seam, different `capabilities()`.
 
 All byte-heavy events offload to `ArtifactStore` and record a `{t, …, ref}` entry; gated by the `record`
@@ -343,10 +346,11 @@ All byte-heavy events offload to `ArtifactStore` and record a `{t, …, ref}` en
 ### D5b — runtime/system plane: track the sandbox, not just the agent
 
 The runtime plane is captured by the **control plane / backend**, not in-sandbox (the sandbox can't
-measure itself neutrally). Extend the `Backend` seam (sibling of `captureScreen`/`logs`, live-observability
-④/⑤) with a periodic sampler: **`Backend.sampleRuntime(caseId)`** → `RuntimeSample` from the orchestrator
-(Nomad alloc stats API / K8s metrics / `docker stats`), plus lifecycle events from the existing adopt
-lookup. Samples stream into the recorder like frames. This is the natural home of
+measure itself neutrally). The `Backend` work-control seam (sibling of `captureScreen`/`logsForWork`,
+live-observability ④/⑤) carries a sampler: **`ManagedWorkControl.sampleWork(work)`** → `CaseRuntimeSample` from
+the orchestrator, polled while a managed dispatch is in flight by `RuntimeSamplingDispatcher`
+(`apps/api/src/core/execution/runtime-sampling-dispatcher.ts`). Nomad's client stats API answers today; a
+backend that cannot sample produces nothing. Samples stream into the recorder like frames. This is the natural home of
 [runtime-inspection](./runtime-inspection.md) telemetry, now time-series and per-case rather than a point
 probe. Gated by the `record` `runtime` rung (`stats`/`full`); `off` by default.
 
@@ -426,8 +430,8 @@ the manifest says so; the trace + final snapshot + deltas still make a usable re
   repo recording works **self-hosted AND managed**. The player renders the repo-diff lane at the playhead.
   Follow-ups: promote large diffs to a `stateDeltas` ref (offload) when they outgrow inline; the browser/CDP
   and os-use adapters still want the streaming seam (they have no cheap pull equivalent).
-- **S6 — runtime/system plane** (D5b). `Backend.sampleRuntime` time-series + the runtime lane in the
-  player. The most orchestrator-specific slice, last.
+- **S6 — runtime/system plane (shipped)** (D5b). `sampleWork` time-series via `RuntimeSamplingDispatcher` + the
+  runtime lane in the player (CPU sparkline). The most orchestrator-specific slice, last.
 
 S1 is the cheapest, self-contained entry point (alignment + an existing grader bug), so it leads. S2–S4
 delivered a working *frame-level* replay — but frames only exist for browser/os-use, so **S4c makes the

@@ -1,17 +1,18 @@
 ---
 kind: spec
 title: "Harness identity and seeds — forks are recorded, seeds hang off the version, lineage is one read, a seeded finding is a leak"
-status: accepted
-updated: 2026-09-02
-anchors: [packages/contracts/src/harness/harness-template.ts, packages/contracts/src/knowledge/predicate.ts, packages/contracts/src/knowledge/knowledge-node.ts, packages/contracts/src/records/skill.ts, packages/contracts/src/records/knowledge-entry.ts, packages/application-control/src/evolution/campaign-service.ts]
+status: landed
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/capability-origin.ts, packages/application-control/src/harness/harness-seeds.ts, packages/domain/src/harness/harness-seeds.ts, packages/application-control/src/harness/harness-lineage-service.ts, packages/domain/src/evolution/seed-leak.ts]
 ---
 # Harness identity and seeds — forks are recorded, seeds hang off the version, lineage is one read, a seeded finding is a leak
 
-> **Status:** spec for Pillar 2 of `docs/architecture/evolution-program-gap-map.md` (gaps G2.1–G2.4). Nothing
-> below is implemented. §2 and §4 land in ONE change or not at all: a seed that is part of the digest is a seed
-> the leak rule can read, and a seed outside the digest is one the rule cannot.
+> **Status:** spec for Pillar 2 of `docs/architecture/evolution-program-gap-map.md` (gaps G2.1–G2.4). All four
+> sections are **Landed** (2026-09-02); each note says what shipped and where it differs from the decision text,
+> which is kept as written. §2 and §4 had to land together: a seed that is part of the digest is a seed the leak
+> rule can read, and a seed outside the digest is one the rule cannot.
 
-## What holds, and what this spec must not restate
+## What held when this was written (2026-09-02), and what this spec must not restate
 
 Instance versions are immutable; a version resolves (`resolveHarnessInstance`) to a document whose digest a
 scorecard manifest seals (`packages/contracts/src/records/scorecard.ts`), so "which harness ran" is a
@@ -62,14 +63,16 @@ edge exists. Today the field is unknown and both register cleanly with nothing r
 > version's instructions + files) and `knowledgeSeedDigest` (an entry's title + body) in
 > `packages/domain/src/harness/harness-seeds.ts`, exposed on `GET /skills/:id/versions/:version` and
 > `GET /knowledge/entries/:id` as `seedDigest`; the dispatch chain's `SeedingDispatcher`
-> (`apps/api/src/core/execution/seeding-dispatcher.ts`) reads the bytes from the workspace's skill-version and
-> knowledge-entry stores, refuses a mismatch (409) or a missing seed (404), and attaches them to the job as
+> (`apps/api/src/core/execution/seeding-dispatcher.ts`) calls `materializeSeeds`
+> (`packages/application-control/src/harness/harness-seeds.ts`), which reads the bytes from the workspace's
+> skill-version and knowledge-entry stores, refuses a mismatch (409) or a missing seed (404), and attaches them to the job as
 > `seedFiles`; the runner writes them at `HARNESS_SEED_MOUNT` (`/everdict/seeds`) before the harness installs
 > (`packages/application-execution/src/run-case.ts`); a command reaches the mount through `{{seeds}}`.
 > Verification happens at DISPATCH, not at register: a version naming a stale digest registers and then refuses
 > every run by name until a version naming the current digest is registered — visible, never silent. A PRIVATE
 > skill or entry is materialized only into a run its author submitted (404 for anyone else, never 403): a seed is
-> not a way to read another member's private bytes out of a sandbox.
+> not a way to read another member's private bytes out of a sandbox. A knowledge seed is `{ id, digest }` — there is
+> no `revision`: the entry's current bytes must digest to the named value, or the run is refused.
 
 **The gap.** The program says a harness version SHIPS with its skill seeds and wiki seeds. Today a skill or
 a knowledge entry can be pinned ABOUT a harness version (`KnowledgePin`), which is a claim about an interval

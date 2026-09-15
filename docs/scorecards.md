@@ -2,20 +2,20 @@
 kind: wiki
 title: "Scorecards (batch eval: dataset × harness → aggregated result)"
 status: current
-updated: 2026-08-17
-anchors: [apps/api/src/api/scorecard/serve.ts]
+updated: 2026-09-15
+anchors: [apps/api/src/api/scorecard/serve.ts, apps/api/src/api/scorecard/scorecard.docs.ts, apps/api/src/api/scorecard/request/run-scorecard.ts]
 ---
 # Scorecards (batch eval: dataset × harness → aggregated result)
 
 A **scorecard run** evaluates a whole **dataset** (N cases) against one `harness@version` and aggregates the
 per-case results into a `Scorecard` + a per-metric `summary`. It's the eval payoff — the second step of the
-pipeline and the input to baseline comparison (next increment):
+pipeline and the input to baseline comparison:
 
 ```
 Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboard / baseline-compare
 ```
 
-## How it works (`apps/api` `ScorecardService`)
+## How it works (`@everdict/application-control` `ScorecardService`)
 1. Resolve the **dataset** (`DatasetRegistry`, owner-first/`_shared` fallback) → its cases. Missing → `404`.
    The request's optional **`cases`** selects a **subset** (partial run — cost control / smoke): `ids`
    (explicit; unknown id ⇒ `400`, never a silent partial) → `tags` (any-match) → `limit` (first N), applied in
@@ -26,8 +26,9 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
 2. Resolve the **harness version** (`latest → concrete`) via the registry; embed the `HarnessSpec` for
    declarative harnesses (builtins fall back to id). The record stores the **resolved** `harness@version`.
 3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@everdict/application-control`'s
-   `runSuite` over the **same dispatcher** single runs use — each case becomes one job (tenant + budget
-   admit/settle per case, concurrency-limited). The request's optional **`concurrency`** (1–64) sets how many
+   `runSuite` over the **same dispatcher** single runs use (`scorecard/in-process-batch-driver.ts`; with Temporal
+   configured, `scorecard/workflow-batch-driver.ts` drives the same plan durably) — each case becomes one job
+   (tenant + budget admit/settle per case, concurrency-limited). The request's optional **`concurrency`** (1–512) sets how many
    cases dispatch at once (`runSuite` fan-out); omitted ⇒ service default (4). For a **self-hosted** runtime
    the parked jobs only run as fast as the runner leases them — match it with `everdict runner --max-concurrent N`
    (effective case-level parallel = `min(concurrency, runner workers)`).
@@ -53,7 +54,7 @@ children under their scorecard. The scorecard is the eval lens; the run list is 
 **Storage is deduped**: a dispatched scorecard stores `runIds` only (not the heavy `scorecard` embed) — `track`
 writes the final (post-judge/offload) results back to the child runs, and `ScorecardService.get` **hydrates**
 the `scorecard` from them, so the response shape, web, and diff are unchanged. `no-runStore` runs, ingest paths, and
-old records keep the embed. See `docs/architecture/run-as-primitive.md`.
+old records keep the embed.
 
 Runs are **async**: submit returns a `queued` record; poll until terminal. Normal eval failures produce
 `CaseResult`s (the batch still succeeds); only infra/budget errors fail the whole run.
@@ -184,7 +185,7 @@ admin-gated submit paths.
 
 ## Scoring revisions — the JUDGMENT axis of identity (mig 0144)
 The manifest pins what was **evaluated**; nothing pinned what was **judged, and when** — a re-score
-(`POST /scorecards/:id/score`) legally rewrites the score plane in place, so the same scorecard id could
+(`POST /groups/:id/score`, `POST /scorecards/:id/rescore-unmeasured`) legally rewrites the score plane in place, so the same scorecard id could
 mean different judgments over time with no record of the change. Every judged settle now appends a
 `ScoringRevision` to `ScorecardRecord.scoring[]` (append-only): `{revision, kind: initial|rescore, judges
 [with sealed model closures — the same `sealJudgeClosure` submit uses], judgeRun?, scorePlaneDigest,
@@ -432,8 +433,10 @@ share one `stopInFlight` helper. The steps:
    domain rejects the transition); another workspace's / a missing id → `404` (no existence leak).
 2. **Stop the live work** (`stopInFlight`): cooperative `AbortSignal` so `runSuite` fires no more cases; cancel a
    Temporal-owned workflow; drop still-queued scheduler entries (`cancelQueued`) **and** self-hosted lease jobs
-   (`cancelLeased`); force-kill the already-fired **managed** backend jobs (`killCase` → Nomad alloc-stop / K8s
-   Job-delete) so a 601-case batch stops burning cluster compute.
+   (`cancelLeased`); force-kill the already-fired **managed** backend jobs by the exact work handle each child
+   placed (read from the batch's attempt ledger → Nomad alloc-stop / K8s Job-delete) so a 601-case batch stops
+   burning cluster compute. The stop returns a `CancellationCertificate`; a kill that failed or whose outcome is
+   `unknown` fails the cancel and keeps it owed rather than reporting a teardown nobody observed.
 3. **Free the runtime mid-case** — the self-hosted path: `cancelLeased` = `RunnerHub.requestCancel`, which rejects
    the parked/leased dispatch (the batch settles without waiting on the runner) and marks the lease
    `cancelRequested`; the runner learns of it on its next `heartbeat_job` reply (`{cancelled:true}`), aborts the
@@ -501,10 +504,11 @@ non-2xx surfaces as the run going `failed` (`UpstreamError`); a `404` (trace not
 trace. MLflow uses the 3.x tracing REST (`GET /api/3.0/mlflow/traces/get`, OTLP-style spans).
 
 ### Trace sink (export judged detail to the team's observability platform)
-The outbound mirror of pull-ingest. The workspace registers **named sinks**
-(`GET/PUT /workspace/trace-sinks` + `DELETE /workspace/trace-sinks/:name` — kind
-`mlflow|langfuse|langsmith|phoenix` + endpoint + `authSecretName` name-ref + per-kind `project`),
-and each **harness opts in** by selecting one (`PUT /harnesses/:id/trace-sink`, member+). A
+The outbound mirror of pull-ingest. There is no separate sink registration: the workspace registers **trace
+sources** once (`GET/PUT /workspace/trace-sources` + `DELETE /workspace/trace-sources/:name`, `settings:write` —
+`WorkspaceSettings.traceSources[]`: name, kind, endpoint, `authSecretName` name-ref, per-kind `project`), and each
+**harness opts in** to exporting by selecting one of those sources (`PUT /harnesses/:id/trace-sink {source}`,
+`harnesses:register`; `otel` is pull-only and cannot be selected; stored as `traceSinkByHarness`). A
 scorecard (live batch **and** ingest) whose harness selected a sink exports each case's
 trace+scores to that platform right after judging, and the record carries the outcome in
 **`export`** (`{sink, status: succeeded|partial|failed, url?, message?, cases[{caseId, externalId, url?,
@@ -518,14 +522,16 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.
 
 ## Web (`apps/web`)
-- **Scorecards `/dashboard/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips).
-- **Detail `/dashboard/scorecards/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
+- **Scorecards `/[workspace]/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips);
+  sibling views `analyze`, `trend`, `leaderboard` and `by-harness` live under the same path.
+- **Detail `/[workspace]/scorecard/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
   scores, error.
-- **Create `/dashboard/scorecards/new`** (`widgets/scorecard-create`) — one entry, a **mode switch** for the two ways
+- **Create `/[workspace]/scorecards/new`** (`widgets/scorecard-create`) — one entry, a **mode switch** for the two ways
   to make a scorecard (judging is common; only where the traces come from differs):
   - **Run harness** — pick **harness × dataset × judge(s)**: dataset + harness comboboxes (with a version picker each)
-    and an optional **judge multi-select** (a combobox that appends registered Agent Judges as removable chips, each at
-    `latest`) → `runScorecardAction` → `POST /scorecards` `{dataset, harness, judges?}`. The selected judges score each
+    , a required **runtime** selector, and an optional **judge multi-select** (a combobox that appends registered Agent
+    Judges as removable chips, each at `latest`) → `runScorecardAction` → `POST /scorecards` `{dataset, harness, runtime,
+    judges?}`. The selected judges score each
     case's trace, so the detail page's per-metric stat cards gain a `judge:<id>` metric (mean + pass-rate) alongside the
     dataset's own graders. No judges picked = the dataset's graders only.
   - **Evaluate traces** — no dataset, no harness run: pick a registered observability trace source, filter by a time
@@ -533,11 +539,11 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
     `TraceBrowser` in selection mode), and pick judges → `evaluateTracesAction` → `POST /scorecards/ingest/pull` with
     `dataset`/`harness` omitted (the trace-eval sentinel) and `source:{name, correlate:"id"}`.
   Role-gated off `/me` (`scorecards:run` = member+).
-- **Compare `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
+- **Compare `/[workspace]/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
   mean Δ table + **regressed/improved CASES (case-verdict transitions, `diff.caseTransitions`)** via
   `diffScorecards`, with each case's flipped metrics riding as diagnosis chips. This is the
   baseline-vs-candidate payoff. `scorecards:read`.
-- **Ingest `/dashboard/scorecards/ingest`** — a push|pull mode toggle. **push**: upload `TraceEvent[]` →
+- **Ingest `/[workspace]/scorecards/ingest`** — a push|pull mode toggle. **push**: upload `TraceEvent[]` →
   `POST /scorecards/ingest`. **pull**: pick a `source` (OTel/MLflow endpoint + optional auth-secret name) + a
   `runs:[{caseId, runId}]` mapping → `POST /scorecards/ingest/pull`. Both add dataset + harness label + judges.
   `scorecards:run` (member+).

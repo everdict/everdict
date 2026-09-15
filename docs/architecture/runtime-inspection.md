@@ -2,7 +2,8 @@
 kind: wiki
 title: "Runtime inspection — a live cluster read model"
 status: current
-updated: 2026-07-17
+updated: 2026-09-15
+anchors: [packages/contracts/src/wire/runtime/inspect-runtime-result.ts, packages/backends/src/orchestrators/inspect-common.ts, apps/api/src/core/ops/runtime-inspect.ts, apps/api/src/core/ops/runtime-control.ts]
 ---
 # Runtime inspection — a live cluster read model
 

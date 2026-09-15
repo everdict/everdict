@@ -2,7 +2,8 @@
 kind: wiki
 title: "SaaS web (apps/web)"
 status: current
-updated: 2026-08-05
+updated: 2026-09-15
+anchors: [apps/web/src/widgets/app-shell/ui/nav-config.ts, apps/web/src/widgets/app-shell/ui/settings-nav-config.ts, apps/web/src/middleware.ts, apps/web/src/shared/auth/can.ts, apps/web/src/widgets/infra-panel/model/infra-panel-context.tsx]
 ---
 # SaaS web (`apps/web`)
 
@@ -55,16 +56,18 @@ compose-internal service names to `NO_PROXY` so web→api never routes through t
 
 ## FSD layout (`src/`)
 ```
-app/        Next App Router — landing(/), [workspace]/{layout(shell+membership validation), page(overview), runs, runs/[id],
-            harnesses, datasets(+[id],new), scorecards(+[id],new,compare), judges(+[id],new), runtimes(+[id],new),
-            account, settings} — Linear-style /{workspaceSlug}/... ; top-level entry points without a workspace slug
-            onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(first URL segment → injects x-everdict-active-workspace header)
-widgets/    page-level composition: app-shell (sidebar+topbar), workspace-switcher (Linear-style sidebar dropdown:
-            current workspace + switch (= navigate to /{workspace}) + "new workspace"), scorecard-summary, runs-table
+app/        Next App Router — landing(/), [workspace]/{layout(shell+membership validation), page(overview),
+            plural list routes (runs, harnesses, datasets, judges, scorecards, runtimes, schedules, issues, …, most with
+            a `new` child), singular detail routes (run/[id], harness/[id], dataset/[id], judge/[id], scorecard/[id],
+            runtime/[id], issue/[id], …), settings/*} — Linear-style /{workspaceSlug}/... ; top-level entry points without
+            a workspace slug onboarding·new-workspace·invite ; api/* (BFF routes incl. auth/[...nextauth]) ;
+            src/middleware.ts (first URL segment → injects x-everdict-active-workspace header)
+widgets/    page-level composition: app-shell (sidebar+topbar+settings nav), workspace-switcher (Linear-style sidebar dropdown:
+            current workspace + switch (= navigate to /{workspace}) + "new workspace"), infra-panel, scorecard-summary, …
             (trace reading is NOT a widget — the one surface is features/browse-traces TrajectoryView, whose
              SpanWaterfall is shared with the external platform's trace dialog; see Run detail)
-features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-github-app + manage-mattermost (workspace-owned integrations: GitHub App org install→selected repos, Mattermost notifications/slash commands) (client form/action → control plane; workspace switching is a URL navigation, so there is no separate action)
-entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, github-app, mattermost)
+features/   business actions, e.g.: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-github-app + manage-mattermost (workspace-owned integrations: GitHub App org install→selected repos, Mattermost notifications/slash commands) (client form/action → control plane; workspace switching is a URL navigation, so there is no separate action)
+entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, workflow-state, …)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/callout/section-header/theme-toggle), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
             authContext + currentPrincipal + can, workspace-scope(URL↔cookie↔header constants) + active-workspace cookie → x-everdict-workspace)
@@ -96,7 +99,7 @@ panel/list guidance is not.
 - **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not linked
   from the UI at all — the infra panel is THE surface for infra concerns (sidebar is eval-only, the palette's
   infra group opens the panel); the route remains URL-reachable only.
-- **Run detail `/{workspace}/runs/[id]`** — the ledger holds five executable families, so the page is a shared
+- **Run detail `/{workspace}/run/[id]`** — the ledger holds five executable families, so the page is a shared
   skeleton with ONE slot that swaps per `kind`: identity meta (whose two axes are relabelled per kind — an agent
   turn's harness column IS its agent spec, a sandbox's caseId IS its image) · request (`caseSpec.task`) ·
   **outcome** (eval = the served `verdict` + a metric table whose rows expand to the grader's reasoning, failures
@@ -106,10 +109,10 @@ panel/list guidance is not.
   Every section hides entirely when empty — "no scores yet" on a run family that can never have scores was the
   bug this replaced. Causation (`origin.causedByRunId`) and the group (scorecard/conversation/session) link out.
 - **Harnesses `/{workspace}/harnesses`** — owned vs `_shared` harnesses with versions. **Detail
-  `/{workspace}/harnesses/[id]`** shows the active version's **Config panel** — the raw, editable config
+  `/{workspace}/harness/[id]`** shows the active version's **Config panel** — the raw, editable config
   (template-category ref `id@version` + slot→value pins, via `GET /harnesses/:id/:version/instance` +
   `GET /harness-templates/:id/:version`) above the resolved spec views (diagram / structure / JSON). A **"new
-  version"** action (`/{workspace}/harnesses/[id]/new-version`) prefills the current config into the register
+  version"** action (`/{workspace}/harness/[id]/new-version`) prefills the current config into the register
   wizard — versions are immutable, so editing = registering a new version (re-pin the instance pins → new instance tag,
   or a template structure → new template semver, then re-pin an instance on it).
 - **Datasets `/{workspace}/datasets`** — a **searchable, metadata-rich** list: each row shows description, all
@@ -117,24 +120,25 @@ panel/list guidance is not.
   (`createdBy` resolved to a member name) and created/updated times, plus an owned/shared badge. A client widget
   adds **search** (id/description/tags), an **owner filter** (all/owned/shared), and **sort** over a stat strip
   (first-party example datasets are no longer auto-seeded, so the list is the workspace's own datasets). **Detail
-  `/{workspace}/datasets/[id]`** shows a **meta panel** (case/version/scorecard counts, created/updated, author
+  `/{workspace}/dataset/[id]`** shows a **meta panel** (case/version/scorecard counts, created/updated, author
   avatar, tag chips — not a bare dl grid) above the eval-case table, plus a **"new version"** action
-  (`/{workspace}/datasets/[id]/new-version`, owned datasets + `datasets:write` only) that prefills the current
+  (`/{workspace}/dataset/[id]/new-version`, owned datasets + `datasets:write` only) that prefills the current
   version's description/tags/cases into the register form — versions are immutable, so **editing = publishing a
   new semver** (same pattern as harness new-version). **Dataset registration `/{workspace}/datasets/new`** —
   id/version/description/tags + cases-JSON with a **validate (dry-run)** step then register (`POST /datasets`;
   server-action body limit raised to 8MB — embedded repo-seed cases easily exceed 1MB). Role-gated off `/me`
   (`datasets:write` = member+). See `docs/datasets.md`.
 - **Scorecards `/{workspace}/scorecards`** — batch-eval runs (dataset@v → harness@v, status, per-metric summary
-  chips; rows link to detail). **Detail `/{workspace}/scorecards/[id]`** shows per-metric stat cards + per-case
-  scores. **Run `/{workspace}/scorecards/new`** — pick dataset + harness (+ optional judges) → `POST /scorecards`.
+  chips; rows link to detail; sibling views `analyze`, `trend`, `leaderboard`, `by-harness`). **Detail
+  `/{workspace}/scorecard/[id]`** shows per-metric stat cards + per-case scores. **Run `/{workspace}/scorecards/new`** —
+  pick dataset + harness + runtime (+ optional judges) → `POST /scorecards`.
   **Compare `/{workspace}/scorecards/compare`** — two scorecard pickers → metric Δ table + regressions/improvements
   (`diffScorecards`). **Ingest `/{workspace}/scorecards/ingest`** — push|pull toggle: **push** uploads externally-run
   `TraceEvent[]`; **pull** fetches from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, auth-secret name).
   Both produce a scorecard with no harness run. Role-gated off `/me` (run/ingest = member+, read/compare = viewer+).
   See `docs/scorecards.md`.
 - **Infra panel (split view, `widgets/infra-panel`)** — infra concerns (schedules · runtimes · runs · work
-  queue) don't live on the left with the eval pages: a **vertical rail** of toggle buttons (vertically centered,
+  queue, plus the agent, files, knowledge and playground tabs) don't live on the left with the eval pages: a **vertical rail** of toggle buttons (vertically centered,
   the divider between the eval half and the infra half) opens a **floating right panel** (rounded, gapped,
   pop-shadow card — not a flush docked column) as a flex sibling of `main`, so the two sides split the space
   half-and-half on md+; on mobile the rail floats on the right edge and the panel becomes a floating sheet.
@@ -183,55 +187,47 @@ panel/list guidance is not.
   from the graph the screen published, so map and detail always agree; picking a neighbour there re-centres the map
   (see `docs/architecture/knowledge-graph.md`).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
-  **Detail `/{workspace}/judges/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`** — a
-  **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
+  **Detail `/{workspace}/judge/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`**
+  (`features/register-judge`) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
   (`judges:write` = member+). See `docs/judges.md`.
 - **Runtimes `/{workspace}/runtimes`** — the single **"where evals run"** surface (opened from the infra rail's
   runtimes tab / palette — not a sidebar entry):
   ① **registered infra** — tenant execution infra (nomad | k8s; push — the control plane connects),
   no auto-seeded defaults; ② **connect my machine (self-hosted runner)** — the personal self-hosted runners section
-  (RunnersManager moved here from the account page: desktop one-click pairing, presence, revoke, download CTA;
-  runners stay subject-owned — only the management entry point moved). **Register
-  `/{workspace}/runtimes/new`** — kind-toggle form → `POST /runtimes` (role-independent — any member registers; credentials
+  (`RunnersManager`: desktop one-click pairing, presence, revoke, download CTA; runners stay subject-owned; the old
+  Settings › Runners route redirects here), plus the workspace-shared runners for admins. Detail
+  `/{workspace}/runtime/[id]` (edit `/{workspace}/runtime/[id]/edit`; a runner is `/{workspace}/runtime/self/[id]`).
+  **Register `/{workspace}/runtimes/new`** — kind-toggle form → `POST /runtimes` (role-independent — any member registers; credentials
   via secrets, not the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **test connection** button (nomad/k8s) that runs
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
-  run form gains a runtime selector. See `docs/runtimes.md`.
-- **Workspace settings `/{workspace}/settings`** — admin-gated tabs: General · **Secrets** ·
-  **Integrations**(GitHub App · Mattermost) · CI · Shared runners · Members · **Workflow**.
-  **Workflow tab** (`issues:read` to see / `settings:write` = admin to change): the workspace's board.
-  **The board is grouped BY CANONICAL STATUS, and the add button lives in the group's header** — the canonical status
-  is the position, the states are the names given to that position, so pressing `+` on *Backlog* already says what
-  the new state is (the old flat list re-printed the status per row — "Backlog · Backlog" — and floated an add form at
-  the page root that asked for the status again in a combobox). Rows rename in place and recolour through the same
-  `LabelColorPicker` the labels use; ↑/↓ appear only where a status holds more than one state and swap position WITHIN
-  it, so "Done" can never be dragged above "Backlog". Because a new state is appended at the end of the whole board,
-  every flat rendering of the states goes through `orderWorkflowStates` (canonical order, then position) — otherwise the
-  issue's status dropdown shows a fresh review column below "Cancelled" while settings shows it under "In review".
-  Deleting a column the server refuses while it still holds issues, or when it is the last one — the reason is
-  surfaced verbatim rather than pre-hidden. Reading the list is also the invariant's repair point: a workspace that
-  has never opened this tab gets its default board from that read. See `docs/tracker.md`. **Secrets tab**: provider-token curation +
-  a **single list** of directly-added secrets — the SecretStore is one flat namespace, so one list (splitting by purpose
-  showed the same secrets twice); multi-line values (kubeconfig) are a toggle on the add form, and legacy
-  `?tab=model|cluster` deep links land on this tab. **General tab**: the workspace card (`features/workspace-settings`
-  `WorkspaceInfoCard`) — logo **file upload** (256px data URL via `shared/lib/image-resize`, same as the user
-  avatar) · name edit + **URL(slug) read-only** (copyable; slug=tenant key so immutable) → `PATCH /workspace`. Below it, the usage-metering
-  policy (`SettingsForm`), and **owner-only** a danger zone (`features/delete-workspace` `DeleteWorkspaceCard`):
-  a hard delete that only enables once you type the workspace name to confirm → `DELETE /workspace` then navigate home (`/`) (the server
-  decides visibility by `getWorkspace.owner === principal.subject`; final enforcement is the control plane). The Integrations
-  tab (`features/manage-github-app` + `features/manage-mattermost`) manages workspace-owned external integrations as an
-  **icon tile grid** (the roster keeps growing, so each integration is a brand-tinted glyph + name + connection count;
-  clicking a tile expands its manager in place below the grid — never a drill-in route):
-  **GitHub App** (org install → selected repos → workspace-owned installation tokens: private-repo clone · CI setup-PR · runner
-  registration; `GET/POST/DELETE /workspace/github-app*`, repo picker `GET /workspace/github-app/repos`) + **Mattermost**
-  (MULTIPLE connections — one bot + channel per purpose, list + add/edit form keyed by name; completion/regression
-  notifications go to every connection that has a channel, plus slash commands/buttons;
-  `GET/PUT /workspace/mattermost` + `DELETE /workspace/mattermost/:name`. The server URL is operator env and is never
-  shown or entered — it only decides whether the integration is available at all). `settings:*`=admin.
-  See `architecture/workspace-scoped-integrations.md`.
-- **Account `/{workspace}/account`** (personal — self-scoped, no role gate) — Profile · **Personal secrets** ·
-  **API keys** tabs (`account-tabs.tsx`). Personal outbound-OAuth "connected accounts" was removed (S6c) — external integrations are
-  unified into the workspace-owned GitHub App/Mattermost (Settings › Integrations, See `architecture/workspace-scoped-integrations.md`);
-  personal runner management (`features/manage-runners`) moved to the runtimes page (see above).
+  run form has a required runtime selector. See `docs/runtimes.md`.
+- **Settings `/{workspace}/settings/*`** — a settings takeover of the sidebar (`widgets/app-shell`
+  `settings-nav-config.ts`), one route per section, each gated by its own action: **Account** — Profile ·
+  Preferences · API keys · Personal secrets; **Workspace** — General (the index route) · Members · Labels · Secrets ·
+  Models · Integrations · Observability · Environments · Images · Files · CI · Budget; **Agent** — Agent ·
+  Subscriptions; **Browser** — Browser profiles · Proxies. Legacy `?tab=` links on the index redirect to the matching
+  section. **General**: the workspace card (`features/workspace-settings` `WorkspaceInfoCard`) — logo **file upload**
+  (256px data URL via `shared/lib/image-resize`, same as the user avatar) · name edit + **URL(slug) read-only**
+  (copyable; slug=tenant key so immutable) → `PATCH /workspace`; below it, **owner-only**, a danger zone
+  (`features/delete-workspace` `DeleteWorkspaceCard`): a hard delete that only enables once you type the workspace
+  name to confirm → `DELETE /workspace` then navigate home (`/`) (the server decides visibility by
+  `getWorkspace.owner === principal.subject`; final enforcement is the control plane). **Secrets**: provider-token
+  curation + a **single list** of directly-added secrets — the SecretStore is one flat namespace, so one list;
+  multi-line values (kubeconfig) are a toggle on the add form, and legacy `?tab=model|cluster` deep links land here.
+  **Integrations** (`features/manage-github-app` + `features/manage-mattermost`) manages workspace-owned external
+  integrations as an **icon tile grid** (each integration is a brand-tinted glyph + name + connection count;
+  clicking a tile expands its manager in place below the grid — never a drill-in route): **GitHub App** (org install →
+  selected repos → workspace-owned installation tokens: private-repo clone · CI setup-PR · runner registration;
+  `GET/POST/DELETE /workspace/github-app*`, repo picker `GET /workspace/github-app/repos`) + **Mattermost** (MULTIPLE
+  connections — one bot + channel per purpose; completion/regression notifications go to every connection that has
+  a channel, plus slash commands/buttons; `GET/PUT /workspace/mattermost` + `DELETE /workspace/mattermost/:name`. The
+  server URL is operator env and is never shown or entered). See `architecture/workspace-scoped-integrations.md`.
+  The workspace's issue board (`/workflow-states`) has no settings screen: the web reads it for the issue status
+  control (`entities/workflow-state` `orderWorkflowStates`), and renaming/adding states is HTTP-only
+  (`/workflow-states`; there are no MCP tools for it). The
+  usage-metering toggle (`SettingsForm`) is exported by `features/workspace-settings` but mounted on no page.
+- **Account `/{workspace}/account`** — a redirect into Settings (`?tab=secrets` → Personal secrets, `?tab=keys` →
+  API keys, otherwise Profile), kept so old links still land.
 - **Download `/{workspace}/download`** (`features/download-desktop`) — the desktop-installer download page.
   The server reads GitHub releases (kept private) via a server-only PAT (`DESKTOP_RELEASES_REPO`/`DESKTOP_RELEASES_TOKEN`,
   5-min cache) and renders an OS-detected (UA) recommended button + a list of all platforms + post-install guidance (including an unsigned caveat).
@@ -253,7 +249,8 @@ panel/list guidance is not.
   (`registerHarnessAction` → `POST /harnesses`, 409 on the immutable-version violation). Validate + register are
   the same operations exposed on the API and MCP (`docs/mcp.md`).
 The **New run** and **Harness registration** pages (and their list-page CTAs) are role-gated off `/me`: a viewer sees a
-"You don't have permission" notice instead of the form, a member can submit runs, only an admin can register harnesses.
+"You don't have permission" notice instead of the form; a member can submit runs, and every role can register harnesses
+(`harnesses:register` is viewer+).
 All under a shared app shell (sidebar nav + topbar **workspace + role** chip / sign-in-out). Mutations are
 **server actions** (`'use server'`) that forward the user's token and call the control plane server-side; the
 screen is then refreshed by the CALLER's `router.refresh()`.
@@ -332,11 +329,12 @@ throws **`UntrustedHost`** 500 on every `/api/auth/*`). For real Keycloak login 
 dev secret so it doesn't 500.
 
 ## Verified
-`next build` compiles + type-checks (9 routes); root gate (Biome / turbo typecheck / test) stays green with
+`next build` compiles + type-checks; root gate (Biome / turbo typecheck / test) stays green with
 `apps/web` self-contained. **Live (headless OAuth, real Keycloak)** via `scripts/live/web-auth-flow.py`: drives
 the Auth.js + Keycloak authorization-code flow with a cookie jar (no browser) for `alice` (member) and `carol`
 (admin) → the web forwards each user's token → `/{workspace}` (=`/acme`) shows `workspace=acme` (from `/me`);
-`/acme/runs/new` is allowed for both; `/acme/harnesses/new` is gated for the member and allowed for the admin.
+`/acme/runs/new` is allowed for both. The script still expects `/acme/harnesses/new` to be gated for the member,
+which predates open harness registration and no longer matches `can.ts`.
 **BFF hardening proven**: the
 same script asserts `/api/auth/session` carries **no** access token (no `eyJ…`/`accessToken` leak) while the
 server-side path still works — the token lives only in the httpOnly cookie.

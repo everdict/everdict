@@ -2,7 +2,8 @@
 kind: wiki
 title: "Agent worlds — persistent environments over ephemeral sandboxes"
 status: current
-updated: 2026-08-06
+updated: 2026-09-15
+anchors: [apps/api/src/api/sandbox/sandbox.routes.ts, apps/api/src/api/sandbox/sandbox.mcp.ts, packages/domain/src/run/session-run.ts, packages/images/src/layer-append.ts]
 ---
 # Agent worlds — persistent environments over ephemeral sandboxes
 

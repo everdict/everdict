@@ -2,12 +2,12 @@
 kind: wiki
 title: "Trace sink — export judged results to the team's observability platform"
 status: current
-updated: 2026-08-19
-anchors: [packages/application-control/src/trace-sink/trace-sink-service.ts, packages/trace/src/discovery/probe-connection.ts]
+updated: 2026-09-15
+anchors: [packages/application-control/src/trace-sink/trace-sink-service.ts, packages/contracts/src/execution/trace-sink.ts, packages/trace/src/sinks/build-sink.ts, packages/trace/src/discovery/probe-connection.ts, apps/api/src/api/trace-source/trace-source.routes.ts]
 ---
 # Trace sink — export judged results to the team's observability platform
 
-> **Status:** design (S0) → implementation. SSOT for the **outbound** half of the eval pipeline:
+> **Status:** SHIPPED (S1–S4, F1, F5, F6, per-scorecard override). SSOT for the **outbound** half of the eval pipeline:
 > after Everdict judges a scorecard's traces, the detailed per-case results are **exported to the
 > tenant's own observability platform** (MLflow / Langfuse / LangSmith / Phoenix), and the
 > scorecard becomes the **summary + deep links** surface. Mirror of the inbound `TraceSource`
@@ -35,7 +35,7 @@ integration that configures it and the pipeline step that drives it.
 
 > **Update — registration unified into the Trace Source pool.** There is no longer a separate "trace sink"
 > registration. A workspace registers ONE pool of observability platforms — `WorkspaceSettings.traceSources[]`,
-> owned by `TraceSourceService` (Settings › **Observability**, `POST/GET/PUT /workspace/trace-sources` + `…/probe`).
+> owned by `TraceSourceService` (Settings › **Traces**, `GET/PUT /workspace/trace-sources` + `…/probe`).
 > Whether a harness uses a source to **pull** its trace (`traceSourceByHarness`, `PUT /harnesses/:id/trace-source`)
 > or to **export** judged results (`traceSinkByHarness`, `PUT /harnesses/:id/trace-sink`) is a per-harness use-site
 > choice — the "sink" is a trace source used as an export target (otel excluded, pull-only). `TraceSinkService`
@@ -50,7 +50,7 @@ integration that configures it and the pipeline step that drives it.
   harness id → sink name, `PUT /harnesses/:id/trace-sink`, `harnesses:register` = member+;
   no selection = no export, opt-in). Removing a sink also clears assignments pointing at it
   (no dangling refs). Reads are `harnesses:read` (viewer+ — the harness detail shows the
-  selection; views carry name-refs only). A per-scorecard override remains a non-goal.
+  selection; views carry name-refs only). A per-scorecard override exists (see the last section).
 - **Two modes, decided per case:**
   - **create** (flow ①): the trace was born in Everdict → create the trace in the platform, then
     attach the scores. Used by live batch and push-ingest.
@@ -77,7 +77,10 @@ integration that configures it and the pipeline step that drives it.
 
 ## Data model
 
-### `WorkspaceSettings.traceSinks` + `traceSinkByHarness` (packages/db, JSONB — additive, no migration)
+### `WorkspaceSettings.traceSinks` + `traceSinkByHarness` (JSONB — additive, no migration)
+
+`traceSinks[]` is the RETIRED roster: registrations now live in `traceSources[]`, and `unifiedTraceSources`
+legacy-merges any `traceSinks[]` entries still present. `traceSinkByHarness` is live. The historical shape:
 
 ```ts
 traceSinks: z.array(z.object({
@@ -116,7 +119,9 @@ Heavy-ish detail → returned by `get`, **omitted from `list`** (like `steps`/`r
 (finally) **persists the external trace id per case** for pull-ingest — the `runs[{caseId,runId}]`
 mapping used to vanish after ingest.
 
-## `TraceSink` contract (packages/trace) — outbound mirror of `TraceSource`
+## `TraceSink` contract (`packages/contracts/src/execution/trace-sink.ts`) — outbound mirror of `TraceSource`
+
+The shape as first built (the contract has since gained fields, e.g. judge attribution on the context):
 
 ```ts
 export interface TraceSinkScore { name: string; value: number; pass?: boolean; comment?: string }
@@ -165,14 +170,15 @@ Verified against official docs / OpenAPI / proto / source (2026-07):
 The **TraceEvent → platform-native** mapping is the inverse of `spansToTraceEvents`: `llm_call` →
 generation/LLM span (model, tokens, cost, latency), `tool_call`+`tool_result` → tool span (ok →
 level/status), first user / last assistant `message` → input/output previews. Payload builders are
-pure and unit-tested per adapter (`packages/trace/src/*-sink.ts`).
+pure and unit-tested per adapter (`packages/trace/src/sinks/*-sink.ts`; `buildTraceSink` in
+`packages/trace/src/sinks/build-sink.ts`).
 
 ## Pipeline wiring (apps/api)
 
 One service core, `TraceSinkService` (`packages/application-control/src/trace-sink/trace-sink-service.ts`):
 
-- **Settings CRUD** — `get/set/clear(workspace)`, mirror of `MattermostService` (view = name-refs
-  only, safe to expose).
+- **Settings CRUD** — moved to `TraceSourceService` with the registration pool; `TraceSinkService` keeps
+  only the export executor.
 - **Export core** — `exportStream(tenant, ctx, attach?)` → `{push, settle}` (**streaming, D5** —
   `docs/architecture/streaming-case-pipeline.md`): setup once at creation (read settings → no sink
   configured = no-op (undefined) → resolve `authSecretName` via `secretsFor` → `buildTraceSink`);
@@ -185,8 +191,8 @@ One service core, `TraceSinkService` (`packages/application-control/src/trace-si
 
 Call sites (both share it — same seam as `ScoringService`):
 
-- **Live batch** — `ScorecardService.track()` **streams**: each case is pushed the moment its judging
-  completes (`JudgeStream.push` returns the per-case completion promise; the orchestrator chains
+- **Live batch** — the in-process batch driver (`packages/application-control/src/scorecard/in-process-batch-driver.ts`)
+  **streams**: each case is pushed the moment its judging completes (`JudgeStream.push` returns the per-case completion promise; the orchestrator chains
   `judged.then(push)`), so cases appear on the team's platform while the batch runs and a mid-batch
   death keeps what already exported. After offload, `settle()` joins and the outcome lands in the same
   terminal `store.update`; a superseded batch records a partial outcome for already-exported cases.
@@ -200,14 +206,12 @@ Call sites (both share it — same seam as `ScoringService`):
 
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `GET /workspace/trace-sinks` → `{sinks, assignments}` | `list_workspace_trace_sinks` | `harnesses:read` (viewer+) |
-| `PUT /workspace/trace-sinks` (name upsert) | `set_workspace_trace_sink` | `settings:write` (admin) |
-| `DELETE /workspace/trace-sinks/:name` | `remove_workspace_trace_sink` | `settings:write` (admin) |
-| `POST /workspace/trace-sinks/probe` → `TraceProbeResult` | `probe_workspace_trace_sink` | `settings:write` (admin) |
 | `PUT /harnesses/:id/trace-sink` `{sink\|null}` | `assign_harness_trace_sink` | `harnesses:register` (member+) |
 
-The trace-source slice mirrors these exactly (`…/trace-sources`, `…_trace_source`, `otel` added to the kind
-enum), including `POST /workspace/trace-sources/probe` / `probe_workspace_trace_source`.
+Registration, removal and the probe are the trace-source pool's routes (`apps/api/src/api/trace-source/trace-source.routes.ts`:
+`GET/PUT /workspace/trace-sources`, `DELETE /workspace/trace-sources/:name`, `POST /workspace/trace-sources/probe`,
+MCP `…_workspace_trace_source`). The
+separate `/workspace/trace-sinks` routes and `…_workspace_trace_sink` tools no longer exist.
 
 The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` /
 `get_scorecard`) — no new read route.
@@ -239,10 +243,9 @@ the platform's selectable scopes, so the scope field is a **picker over real dat
 
 ## Web (apps/web)
 
-- **Settings → Integrations**: the integrations tab is a **summary list** (row per integration:
-  connected/registered-count badge + management entry) — clicking Trace sinks opens the sink list manager
-  (name-keyed add/edit/remove; kind select + endpoint + `authSecretName` SecretPicker + per-kind
-  project + webUrl; InfoTip guide). **Harness detail** gains a sink-select selector
+- **Settings › Traces** (`/[workspace]/settings/observability`): the one trace-source pool manager
+  (`features/manage-trace-source` — name-keyed add/edit/remove; kind select + endpoint + `authSecretName`
+  SecretPicker + per-kind project + webUrl). **Harness detail** carries a sink-select selector
   (`HarnessSinkSelect`, member+) — this is where export is turned on per harness.
 - **Scorecard detail**: an export strip — sink kind badge + status + top-level link + per-case
   external links in the cases table; failure shows the recorded message. No section when the
@@ -252,8 +255,7 @@ the platform's selectable scopes, so the scope field is a **picker over real dat
 
 - **S0 — this doc.**
 - **S1 — `packages/trace` sink core:** `TraceSink` contract + `buildTraceSink` + 4 adapters +
-  shared `TraceEvent→OTLP` mapping; pure builders unit-tested per adapter (injected fetch),
-  Korean BDD.
+  shared `TraceEvent→OTLP` mapping; pure builders unit-tested per adapter (injected fetch).
 - **S2 — workspace integration:** `WorkspaceSettings.traceSinks` + `TraceSinkService` (CRUD) +
   routes + MCP tools + tests (server inject + MCP client).
 - **S3 — pipeline export:** `ScorecardRecord.export` (+ mig 0048 `sink_export jsonb`, additive) +
@@ -295,14 +297,13 @@ the platform's selectable scopes, so the scope field is a **picker over real dat
   3.11.1 (infra stack, Basic auth): create + attach verified by assessment read-back, span upload
   degrades (documented; `traces/get` 500s span-less traces); MLflow 3.14.0 (sqlite): full span
   round-trip (sink OTLP/JSON → source → 4 normalized events, model/tokens intact).
-- **Remaining follow-ups:** live e2e for Langfuse/LangSmith/Phoenix (needs real accounts/servers);
-  per-scorecard sink override if demanded.
+- **Remaining follow-up:** live e2e for LangSmith (needs a real account; Langfuse and Phoenix are verified —
+  see below).
 
 ## Non-goals
 
-- Streaming/incremental export (per-case as it completes) — v1 exports once at finalize.
 - Everdict as a *proxy* for the platform UI (we link out; we don't re-render their trace viewer).
-- Multi-sink fan-out (one workspace = one sink).
+- Multi-sink fan-out — one batch exports to ONE sink (batch override → harness selection).
 
 ## Live verification status
 

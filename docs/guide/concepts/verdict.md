@@ -2,7 +2,8 @@
 kind: wiki
 title: "Verdict"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/domain/src/scorecard/scorecard.ts, packages/contracts/src/execution/verdict-policy.ts, scripts/trust/trust-suite.mjs]
 ---
 # Verdict
 
@@ -93,11 +94,12 @@ And a comparison between two versions has to clear the noise floor before you ca
 Measure the noise first — run the same version twice and look at the spread — then decide what size of
 movement you are willing to believe. A single run moving a point or two is usually the dice.
 
-## Everything above is tested, nightly
+## Everything above is tested
 
 These are not conventions someone is expected to remember. They are pinned by the **trust
-certification suite**, which runs every night over the whole evaluation path and emits a plain `PASS`
-or the name of the invariant that broke.
+certification suite**, which drives the evaluation path end to end and reports a
+plain `PASS` or the name of the invariant that broke. Nothing runs it on a schedule: a maintainer runs
+it (`pnpm trust-fast`, `pnpm trust-full`), so check when it last certified before leaning on it.
 
 If you want to know whether to believe a verdict this system produced, that suite is the artifact to
 read: [`../../trust-certification.md`](../../trust-certification.md).

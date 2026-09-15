@@ -1,23 +1,28 @@
 ---
 kind: wiki
-title: "Workspace pulse — the home screen's one read"
+title: "Workspace pulse — how the workspace is doing, in one read"
 status: current
-updated: 2026-08-05
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/workspace-pulse.ts, apps/api/src/core/workspace/workspace-pulse-service.ts, apps/api/src/api/workspace/pulse.routes.ts]
 ---
-# Workspace pulse — the home screen's one read
+# Workspace pulse — how the workspace is doing, in one read
 
 > How is this workspace doing, and which way is it moving?
 
-`GET /workspace/pulse?days=30` · MCP `get_workspace_pulse` · web `/{workspace}`
+`GET /workspace/pulse?days=30` (1–90) · MCP `get_workspace_pulse` · web widget `apps/web/src/widgets/workspace-pulse`
+
+**The pulse is no longer the home screen.** On 2026-08-08 the web home `/{workspace}` became the product
+timeline (`apps/web/src/app/[workspace]/page.tsx`); the read and its MCP tool remain, but no web page currently
+mounts `WorkspacePulseView`.
 
 ## Why it exists
 
-Everdict's home used to answer one question — "what did we evaluate" — with initiative readiness cards, a
+Before the pulse, Everdict's home answered one question — "what did we evaluate" — with initiative readiness cards, a
 regression list, a scorecard leaderboard and a recent-runs table. Every one of those is a true answer to a
 question most people did not arrive with. A workspace here also files issues, runs iterations, chases goals,
 keeps agents working and publishes knowledge, and none of that was visible on the screen people open first.
 
-The pulse replaces it with two halves and nothing else:
+The pulse replaced it with two halves and nothing else:
 
 - **the state right now** — the counts a person scans before deciding what to do;
 - **the trend** — the same workspace over the last N days, so "we have 42 open issues" comes with "and that
@@ -31,7 +36,7 @@ each other becomes a scoreboard, and the question it was built to answer disappe
 The web could assemble this from eight list endpoints. It should not, for two reasons:
 
 1. **The arithmetic is the control plane's.** What counts as an OPEN issue (`regressed` is open — it is work in
-   flight), what an active cycle COMMITTED to, which metric is the headline pass rate (`headlinePassRate`, the
+   flight), which metric is the headline pass rate (`headlinePassRate`, the
    same ranking `caseVerdict` uses), when a goal is AT RISK (somebody reported it; silence is not an alarm) —
    each of those is a domain decision with exactly one right answer. A web that re-derives them is a second
    answer waiting to drift from the first.
@@ -43,11 +48,10 @@ The web could assemble this from eight list endpoints. It should not, for two re
 
 | Band | Source | Note |
 | --- | --- | --- |
-| `work` | `IssueStore.countByGroup(status)` | scoped to the teams the caller may read |
-| `cycles` | `CycleStore.list({open})` + `countByGroup(cycle)` twice (all / open statuses) | commitment and completion from ONE aggregate, so the halves cannot disagree |
-| `goals` | `ProjectStore.list` + `InitiativeStore.list({active})` | `atRisk` = posted health `at_risk`/`off_track`; a paused project is still in flight |
-| `agents` | `AgentTaskStore` (pending + in progress) · `ApprovalStore({pending})` · the log | |
-| `evaluation` | `ScorecardStore.list` (window + preceding window) · the log | `passRate` absent when nothing reported one — never zero |
+| `work` | `IssueStore.countByGroup(status)` | workspace-wide |
+| `goals` | `ProjectStore.list({statuses})` + `InitiativeStore.list({statuses})` — the live statuses only | `atRisk` = posted health `at_risk`/`off_track`; a paused project is still in flight |
+| `agents` | the agent task store (pending + in progress) · the approval store (pending) · the log | |
+| `evaluation` | `ScorecardStore.list({createdSince})` (window + preceding window) · the log | `passRate` absent when nothing reported one — never zero |
 | `trend.*` | `PlatformEventStore.dailyCounts` | one `(day × kind × outcome)` grouped query |
 
 ## The trend is the event log

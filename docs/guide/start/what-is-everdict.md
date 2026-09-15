@@ -2,7 +2,8 @@
 kind: wiki
 title: "What is Everdict"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/harness-template.ts, packages/contracts/src/infra/runtime-spec.ts, packages/contracts/src/execution/grader.ts, apps/api/src/mcp.routes.ts]
 ---
 # What is Everdict
 
@@ -29,8 +30,8 @@ The name is the job: **eval + verdict**.
 **Any agent, over a process boundary.** Everdict does not ask you to rewrite your agent inside a
 framework — it starts whatever you already built and observes it:
 
-- **Claude Code, Codex, or any CLI agent** — declared as JSON, not coded. See
-  [Bring your own agent](bring-your-agent.md).
+- **Codex or any CLI agent** — declared as JSON, not coded; Claude Code additionally has a built-in
+  adapter that parses its output into a trace. See [Bring your own agent](bring-your-agent.md).
 - **Multi-service systems** — an agent that is really a stack runs as a `service` topology on Nomad or
   Kubernetes.
 - **Runs that already happened** — push or pull a trace from OTel, MLflow, Langfuse, LangSmith or
@@ -76,8 +77,8 @@ the same code, which is the only reason their numbers can be compared.
 ## Who drives it
 
 **People** use the web app — Keycloak login, a workspace dashboard, scorecards and trends.
-**Agents and CI** use the MCP server and API keys. Both surfaces expose the same capabilities, at
-parity by construction: a tool exists on both or on neither.
+**Agents and CI** use the HTTP API and the MCP server with API keys. Each API resource registers its HTTP
+routes and its MCP tools side by side over the same service, so the two surfaces answer alike.
 
 ## Next
 

@@ -2,7 +2,7 @@
 kind: runbook
 title: "Runbook — deploying behind a corporate proxy"
 status: current
-updated: 2026-07-28
+updated: 2026-09-15
 ---
 # Runbook — deploying behind a corporate proxy
 
@@ -42,9 +42,10 @@ The three stacks pass the trio at **build** time (`x-build-args`, for apt/corepa
 builds) and at **runtime** (`x-runtime-proxy-env`, merged into the services above). Two things are
 automatic:
 
-- **Internal names never touch the proxy**: compose service names (`api`, `agent`, `postgres`,
-  `temporal`, …) are appended to `NO_PROXY` unconditionally, so web→api or api→agent traffic can't
-  be misrouted through the corporate proxy even if you forget to list them.
+- **Internal names never touch the proxy**: compose service names (`api`, `agent`, `web` in every
+  stack; `postgres`, `temporal`, `keycloak`, … in the full and prod stacks) plus `localhost` /
+  `host.docker.internal` are appended to `NO_PROXY` unconditionally, so web→api or api→agent traffic
+  can't be misrouted through the corporate proxy even if you forget to list them.
 - **The corp CA works at runtime too**: when `CA_CERT` is set in the deploy env at `up` time,
   `NODE_EXTRA_CA_CERTS` points Node at the CA the Dockerfiles baked in the image base stage.
 
@@ -57,11 +58,12 @@ So the whole setup is: put `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`/`CA_CERT` in th
   `net.request`), which follows the **OS proxy settings** — not the env trio. A machine whose
   browser works will update fine. For an internal mirror, set `EVERDICT_UPDATE_FEED_URL` to a
   generic feed URL.
-- **Installer download page** (`/connect/desktop`) is served by `apps/web` (see the table above).
+- **Installer download page** (`/<workspace>/connect/desktop`) is served by `apps/web` (see the table above).
   Knobs, in escalation order:
   - proxy env on the web service → the default `api.github.com` fetch works through the proxy;
   - `DESKTOP_RELEASES_TOKEN` (fine-grained PAT, `contents:read`) → lifts the 60 req/h
-    unauthenticated rate limit, which a whole company NATed behind one egress IP exhausts quickly;
+    unauthenticated rate limit, which a whole company NATed behind one egress IP exhausts quickly
+    (release metadata is cached for 5 minutes); required when the releases repo is private;
   - `DESKTOP_RELEASES_API_URL` + `DESKTOP_RELEASES_REPO` → point at a GitHub Enterprise mirror of
     the releases repo (`https://<ghe-host>/api/v3`) when github.com is unreachable even via proxy;
   - `DESKTOP_DOWNLOAD_URL` → last-resort external link shown when the list can't be fetched at all.

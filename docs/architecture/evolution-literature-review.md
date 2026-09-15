@@ -2,7 +2,8 @@
 kind: wiki
 title: "Evolution literature: WikiSkill, its references, and implications for Everdict"
 status: current
-updated: 2026-09-13
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/knowledge-entry.ts, packages/domain/src/evolution/round-brief.ts, apps/api/src/infrastructure/github/repo-writer.ts]
 ---
 # Evolution literature: WikiSkill and the research around it
 
@@ -278,7 +279,8 @@ version pins identify what a claim concerns, which is different from freezing th
 The earlier research-citation issue is now corrected in the [campaign contract at the September 13 revision](https://github.com/everdict/everdict/blob/d33dfd3866c9bb8556649659d95a8c8101e45535/packages/contracts/src/records/evolution-campaign.ts): the matched WikiSkill average is **48.7% → 63.7%**, and the comment distinguishes the old 43.8% error and limits of the runtime-memory interpretation. This is a closed correction, not a new source-code task.
 
 The previously documented diverged-comparison defect is already repaired at the inspected repository
-revision. Its [review record](evolution-review-2026-09-10.md) now records the merge-base refusal and closure.
+revision: a merge-base refusal came first and was replaced by a fork-union listing that covers both sides of a
+diverged history (see D3 of the [code evolution loop](code-evolution-loop.md)).
 It is an existing evaluation prerequisite, not a newly proposed evolution feature or an open finding here.
 
 The later [first-loop proposal](evolution-first-loop.md) narrows implementation order to the selection/confirmation split, declared edits and advice digests, then the curator comparison. The append-only round ledger remains evidence; its curated projection is driver-owned advice. Platform ownership concerns evidence integrity, disclosure, accounting, and artifact identity. That document remains proposed; this literature update does not claim these mechanisms have shipped.

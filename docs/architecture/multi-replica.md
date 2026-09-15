@@ -2,18 +2,17 @@
 kind: wiki
 title: "Running more than one control-plane replica"
 status: current
-updated: 2026-08-08
-anchors: [packages/orchestrator/src/worker.ts]
+updated: 2026-09-15
+anchors: [packages/application-control/src/ops/startup-recovery.ts, packages/application-control/src/ops/leadership.ts, packages/application-control/src/ports/admission-ledger.ts, packages/db/src/ops/leader-elector.ts, packages/db/src/ops/replica-registry.ts]
 ---
 # Running more than one control-plane replica
 
 The control plane (`apps/api`) was written against a **single-process assumption**: in-flight work lived in
 process memory, singleton loops ran because the process ran, and boot recovery reclaimed everything it found
-in flight because nobody else could be holding it. That assumption is written down in several places — the
-scheduler's admission maps, `startup-recovery.ts`'s own header, the store-backed runner hub's "pin
-self-hosted dispatch to one replica" error text — and every one of them silently degrades when a deployment
-scales to N replicas: quotas multiply by N, cron-shaped loops fire N times, and a booting replica reclaims a
-living replica's work.
+in flight because nobody else could be holding it. Left alone, that assumption degrades silently when a
+deployment scales to N replicas: quotas multiply by N, cron-shaped loops fire N times, and a booting replica
+reclaims a living replica's work. Traces of it remain where it is still true — the scheduler's per-process
+maps, and the in-process runner hub's "pin self-hosted dispatch to one replica" error text.
 
 This document is the **deployment contract**: what is replica-global, what is deliberately per-replica, and
 what an operator must set to run more than one.
@@ -112,6 +111,7 @@ What is gated, and what deliberately is not:
 | `TopologyPoolAutoscaler` (15 s, scales a shared service) | **gated** — read-then-act on shared infrastructure |
 | `CommentService.sweepStuckAgentAnswers` | **gated** — it pings the asker; N replicas = N notifications |
 | `sweepOrphans` (sandbox · browser) + `settleOrphanSessionRuns` | **gated** — settles rows other replicas wrote, and emits a fact per settle |
+| The reconcilers — cancellation, publication, owed worlds, intermediate cleanup, retained migration, adoption completion — and the one-shot aborted-teardown gap sweep | **gated** — each acts on durable debts any replica may have written; N replicas = one effect and N−1 races |
 | `browserSessionService.sweep()` · `sandboxSessions.sweep()` | not gated — they reap the compute THIS process holds |
 | MCP idle-session sweep (`mcp.routes.ts`) | not gated — it evicts this process's own transports |
 | Trajectory / event retention | not gated — one atomic `DELETE … WHERE cutoff`; a second replica's pass finds nothing |
@@ -119,23 +119,33 @@ What is gated, and what deliberately is not:
 
 ### Recovery (S3)
 
-`recoverInterrupted` resumes or tombstones every `queued`/`running` record it finds, on the single-control-plane
-assumption its own header used to state. Across replicas that is a boot settling work another replica is
-actively driving, which is the sharpest hazard on this list: it kills live batches.
+`recoverInterrupted` (`startup-recovery.ts`) resumes or tombstones the `queued`/`running` records it finds.
+Across replicas, an unconditional sweep would be a boot settling work another replica is actively driving —
+the sharpest hazard on this list, because it kills live batches.
 
-Two facts make it decidable. Records carry `ownerReplica`, stamped by the STORE at insert — the process that
-writes the row is the process about to drive it, so ownership needs no submit path to thread it and no caller
-can forge it — and every replica writes a heartbeat into `everdict_control_plane_replicas`. Recovery reclaims
-a record only when its owner is absent from the live set, re-stamps whatever it claims as its own (or the next
-boot would take it back from the replica now driving it), and reports what it deliberately left alone. A record
-with no owner — written before the column existed, or by the in-memory store — keeps the old unconditional
-behavior. An unreadable heartbeat set is treated as "everyone may be alive": leaving a stale record for the
-next boot is recoverable, killing a live batch is not.
+Two facts make it decidable. Records carry `ownerReplica`, stamped by the STORE at insert (mig 0135) — the
+process that writes the row is the process about to drive it, so ownership needs no submit path to thread it
+and no caller can forge it — and every replica writes a heartbeat into `everdict_control_plane_replicas`.
+Recovery reclaims a record only when its owner is absent from the live set, and reports what it deliberately
+left alone (`live`). A record with no owner — written before the column existed, or by the in-memory store —
+keeps the unconditional behavior. An unreadable heartbeat set is treated as "everyone may be alive": leaving a
+stale record for the next boot is recoverable, killing a live batch is not.
+
+**The claim is exclusive and fenced.** Taking a record over is one conditional update: the owner must still
+be the one recovery observed, the record must still be open, and the same statement raises the record's
+`ownerEpoch` (migs 0166 scorecards, 0170 runs). When two replicas boot together over the same dead owner's
+record, exactly one claim succeeds; the loser counts the record as `live` and leaves it. The winner carries the
+epoch it won as a `DriverAuthority` into every write that drives the record, so a displaced replica that wakes
+up later is refused rather than driving beside its successor. A Temporal-owned batch is left to its workflow
+(`resume` answers `resumed` without driving it).
+
+A resume that cannot decide — an unreadable ledger, a cluster that will not say whether a job is live —
+answers `retry_later`. The record stays open and claimed, and lands on the `owed` worklist that
+`retryDeferredRecovery` retries. It is never tombstoned on a transient failure.
 
 Recovery deliberately runs on EVERY replica rather than only the leader: it is what reclaims a dead
 predecessor's work, and gating it on leadership would leave that work stranded until the leader happened to
-restart. Ownership is the precise guard; leadership would only have been a coarse one. The residual race is
-narrow and documented — two replicas booting in the same instant can both claim the same dead owner's record.
+restart. Ownership plus the fenced claim is the precise guard; leadership would only have been a coarse one.
 
 ## Deliberately per-replica
 
@@ -162,7 +172,9 @@ narrow and documented — two replicas booting in the same instant can both clai
    one replica is invisible to a runner leasing from another.
 3. `EVERDICT_CALLBACK_BASE_URL` — front-door callbacks already rendezvous through the store; the URL must
    address the load balancer, not one replica.
-4. Migrations run once (they are idempotent and tracked), not per replica boot.
+4. Every replica runs `migrate` at boot (`packages/db/src/migrate.ts`): applied migrations are tracked and
+   skipped, but nothing locks the run, so let one replica finish booting before starting the others when a
+   release carries new migrations.
 
 ## Out of scope
 

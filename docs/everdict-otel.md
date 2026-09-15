@@ -2,7 +2,8 @@
 kind: wiki
 title: "everdict-otel — sending traces to everdict (migration recipes)"
 status: current
-updated: 2026-07-31
+updated: 2026-09-15
+anchors: [packages/otel/src/index.ts, apps/api/src/api/otlp/otlp.routes.ts, apps/api/src/core/observability/otlp-ingest-service.ts]
 ---
 # everdict-otel — sending traces to everdict (migration recipes)
 
@@ -12,10 +13,10 @@ speaks OpenTelemetry — the OTel SDKs, Langfuse/LangSmith SDKs in OTLP mode, mo
 pointing it at everdict is **configuration, not code**. `@everdict/otel` (`packages/otel`) is a tiny,
 dependency-free TS helper for assembling that configuration; Python users need only the env vars below.
 
-Two things make a trace land correctly:
+Three things make a trace land correctly:
 
-1. **The door**: `OTEL_EXPORTER_OTLP_ENDPOINT` = your control plane, with a tenant API key (`ak_…`) as a
-   Bearer header. Protocol `http/json`.
+1. **The door**: `OTEL_EXPORTER_OTLP_ENDPOINT` = your control plane, with an API key (`ak_…`) whose role carries
+   `runs:submit` as a Bearer header. Protocol `http/json`.
 2. **The correlation**: the resource attribute `everdict.run_id` — spans without one are refused
    *visibly* (OTLP `partialSuccess`), never dropped silently. Each **emitter** seals **once**: the first
    export from a given emitter wins, a re-export is visibly rejected (evidence is never rewritten).
@@ -108,9 +109,9 @@ provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(
 )))
 ```
 
-> Note: the door speaks OTLP/HTTP **JSON** today; the stock Python exporter sends protobuf. Until the
-> door grows protobuf (a later rung), Python users should front it with an OTel Collector (protobuf in →
-> `otlphttp` JSON out) or use env-configured SDKs that support `http/json`.
+> Note: the door speaks OTLP/HTTP **JSON** only; the stock Python exporter sends protobuf. Python users should
+> front it with an OTel Collector (protobuf in → `otlphttp` JSON out) or use env-configured SDKs that support
+> `http/json`.
 
 ## Migrating from Langfuse / LangSmith SDKs
 

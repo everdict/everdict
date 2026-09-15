@@ -2,8 +2,8 @@
 kind: wiki
 title: "Authenticated browser profiles — a real interactive remote browser, cookies reused in eval (design)"
 status: current
-updated: 2026-08-11
-anchors: [packages/topology/src/front-door/browser-session.ts, apps/api/src/common/terminal-ticket.ts, packages/auth/src/authz.ts, packages/topology/src/deploy/browser-image.ts]
+updated: 2026-09-15
+anchors: [packages/topology/src/front-door/browser-session.ts, apps/api/src/api/browser-session/browser-session-ws.ts, packages/application-control/src/browser-profile/browser-profile-service.ts, packages/topology/src/deploy/browser-image.ts]
 ---
 
 > Same subject, other audience: [the product page](../guide/workspace/browser-profiles.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
@@ -18,9 +18,8 @@ anchors: [packages/topology/src/front-door/browser-session.ts, apps/api/src/comm
 > a host Chrome on the reachable local path; env-gated `EVERDICT_BROWSER_SESSIONS`), a WS relay
 > `/browser-sessions/:id?ticket=…` (generic `TicketStore` + the terminal-WS upgrade pattern; frames OUT + validated
 > input IN via `browser-session-ws.ts`), BFF↔MCP parity, and the `apps/web` canvas
-> (`features/interactive-browser`, Settings › Account › Browser sessions). The reachable CDP base is **server-only**
-> (never crosses the wire — the client gets a one-shot ticket). What remains: the profile entity, cookie capture,
-> geo proxy, injection into eval runs, and managed-runtime (Docker/K8s) provisioners.
+> (`features/interactive-browser`; the standalone Browser-sessions settings page it first shipped with was removed in
+> S7). The reachable CDP base is **server-only** (never crosses the wire — the client gets a one-shot ticket).
 
 ## The feature (browser-use cloud parity)
 
@@ -67,7 +66,7 @@ Browser-sessions settings tab), but proxies now have their own **Settings › Br
 ## Why it fits Everdict (current state — verified file:line)
 
 - **Per-case browser already provisioned.** `TopologyRuntime.provisionBrowserEnv(spec, runId, zone)`
-  (`packages/topology/src/deploy/topology-runtime.ts:24`) brings up `chromedp/headless-shell` with CDP on 9222 and
+  (`packages/topology/src/deploy/topology-runtime.ts`) brings up `chromedp/headless-shell` with CDP on 9222 and
   returns a `cdpUrl` + `snapshot()` (docker/nomad/k8s impls). The browser + CDP endpoint already exist per case.
 - **CDP is already how we talk to the browser.** `capture-cdp.ts` opens a page target's CDP WebSocket and issues
   commands (`Page.captureScreenshot`) — a proven, transport-injectable pattern.
@@ -76,8 +75,8 @@ Browser-sessions settings tab), but proxies now have their own **Settings › Br
   `Page.screencastFrame` (acked — an unacked frame stalls the stream) for frames OUT; `Input.dispatchMouseEvent` /
   `dispatchKeyEvent` / `Page.navigate` for input IN. Commands issued before the socket opens are queued then flushed.
 - **A WS-relay-to-the-web precedent already exists.** The sandbox web terminal: `Shellable.execStream` →
-  `ExecStreamHandle` (`packages/backends/src/backend.ts:111`) relayed over a `noServer` `WebSocketServer`
-  (`apps/api/src/server.ts:3583`), authed by a short-lived single-use **ticket** (`TerminalTicketStore`,
+  `ExecStreamHandle` (`packages/backends/src/backend.ts`) relayed over a `noServer` `WebSocketServer`
+  (`apps/api/src/server.ts`), authed by a short-lived single-use **ticket** (`TerminalTicketStore`,
   `apps/api/src/common/terminal-ticket.ts`) because a browser can't set an `Authorization` header on a WebSocket. The
   browser session route is the same shape with CDP frames/input instead of PTY bytes.
 - **Object storage + encryption for the cookie blob.** `packages/storage` (artifact-store + s3) for the
@@ -102,7 +101,8 @@ browser in a runtime  (dedicated interactive browser for login, OR an attached p
   Reuse/generalize `TerminalTicketStore` (it is `(runId, subject)` today → make the key generic).
 - **Relay** — on upgrade: `openBrowserSession(cdpHttpBase)`; pipe `session.onFrame → ws.send(frame)` and
   `ws.onmessage(input) → session.mouse/key/navigate`. (`scripts/live/interactive-browser.mjs --serve` is the
-  reference relay, over SSE+POST; the productized version is one WS.)
+  reference relay, over SSE+POST; the productized version is one WS.) The browser path uses the generic
+  `TicketStore` (`apps/api/src/common/ticket-store.ts`); the terminal keeps its own `TerminalTicketStore`.
 
 ### The genuinely hard part: control-plane → browser CDP reachability
 
@@ -163,8 +163,8 @@ short-lived container/pod per active login; self-hosted = the user's own local b
   the `--proxy-server` value, folding the auth secret into the URL). Routes `GET /workspace/proxies` (workspace read,
   no role gate — the session geo picker consumes it) + `PUT`/`DELETE` (admin) + MCP parity. The interactive session
   (`BrowserSessionService.create({country})`) resolves the country → the `LocalChromeProvisioner` launches Chrome
-  with `--proxy-server`; the web geo picker + inline proxy-pool management live in the S7 wizard's setup step (the
-  standalone Settings › Proxies page was removed with S7). **Eval-browser proxy is S5.** Known limit: headless
+  with `--proxy-server`; the web geo picker + inline proxy-pool management live in the S7 wizard's setup step, and
+  the pool also has its own Settings › Browser › Proxies page. **Eval-browser proxy is S5.** Known limit: headless
   Chrome doesn't honor inline proxy *auth* — full authed-proxy support needs CDP `Fetch.continueWithAuth`
   (a follow-up); open proxies + inline-cred setups work today.
 - **Injection** (S5): ✅ SHIPPED (cookies). A service harness's `target.profile` (an id) → `seedStorageState(cdpBase,
@@ -272,9 +272,9 @@ short-lived container/pod per active login; self-hosted = the user's own local b
    cross the wire) + MCP parity `preview_browser_session_state`. `BrowserProfileRecord.country` (migration `0061`)
    records the creation geo. Web: `features/manage-browser-profiles` gained the `ProfileLoginWizard`
    (name + geo → live canvas + polled chips → save = create+capture+close); `features/interactive-browser` slims to
-   the `BrowserCanvas` (the launcher panel is gone); the Settings › Browser-sessions and Settings › Proxies pages +
-   nav entries are REMOVED — proxy pool management (`features/manage-proxies`, still `settings:write`) is embedded
-   in the wizard's geo step. The `/workspace/proxies` and `/browser-sessions` APIs are unchanged (minus the new
+   the `BrowserCanvas` (the launcher panel is gone); the Settings › Browser-sessions page + nav entry is REMOVED —
+   proxy pool management (`features/manage-proxies`, still `settings:write`) is embedded in the wizard's geo step
+   (the standalone Proxies page, removed here, later returned under Settings › Browser › Proxies). The `/workspace/proxies` and `/browser-sessions` APIs are unchanged (minus the new
    preview route).
 10. **S8 — concurrent-session caps (multi-tenant capacity).** ✅ SHIPPED. Each live session is a real browser
     process/container on the control-plane node, so `BrowserSessionService` bounds the concurrent live count:

@@ -2,15 +2,15 @@
 kind: wiki
 title: "The managed image store"
 status: current
-updated: 2026-08-11
-anchors: [packages/application-control/src/ports/workspace-images.ts]
+updated: 2026-09-15
+anchors: [packages/application-control/src/ports/workspace-images.ts, packages/contracts/src/infra/image-store.ts, apps/api/src/api/images/images.routes.ts, packages/images/src/managed-image-store.ts]
 ---
 # The managed image store
 
-> **Status:** DESIGN — direction confirmed with the maintainer (2026-07-29): Everdict should OWN the
+> **Status:** SHIPPED (M1–M8) — direction confirmed with the maintainer (2026-07-29): Everdict should OWN the
 > image interface the way it owns the workspace filesystem, so self-hosters plug an adapter instead of
 > bringing a registry. Supersedes the BYO-only model of `docs/architecture/workspace-image-registry.md`
-> (which becomes ONE adapter under this port) and completes
+> (which remains the path for registries the workspace runs elsewhere) and completes
 > `docs/architecture/environment-image-store.md` (the entity this serves).
 
 ## Why
@@ -34,7 +34,7 @@ consequence of that split is a symptom, not a design:
 - **One credential per job.** `CaseJob.registryAuth` is singular because BYO credentials are per-host
   and unmergeable; a topology pulling from two BYO registries authenticates only the first match.
 
-Owning the interface removes the suture. The same argument that made the filesystem ours applies with
+(The four bullets above describe the BYO-only model this store replaced.) Owning the interface removes the suture. The same argument that made the filesystem ours applies with
 more force here, because the entity does not exist in the OCI world at all — no registry stores a
 topology preset or agent instructions, so a registry can never be the SSOT for what we are actually
 publishing.
@@ -45,17 +45,20 @@ publishing.
 tenant FIRST on every method, isolation enforced INSIDE the adapter, never by caller discipline.
 
 ```
+endpoint                                  // operator-configured registry host, reachable from every node
+namespaceFor(tenant)                    → string
 listRepositories(tenant)                → ImageRepo[]
 listTags(tenant, repository)            → string[]
 inspect(tenant, repository, reference)  → ImageManifestInfo
 mintPushGrant(tenant, repository)       → ImageGrant   // short-lived, scoped to that one repo
 mintPullGrant(tenant, refs[])           → ImageGrant[] // MANY repo scopes, one grant per endpoint
 remove(tenant, repository, reference?)  → number
-usage(tenant)                           → { bytes, repositories }
+usage(tenant)                           → { repositories, bytes? }
 ```
 
-The existing `RegistryReader` port is not retired — it becomes the read adapter *underneath* this port
-(the BYO adapter and the managed adapter both speak Docker Registry v2 over it).
+The existing `RegistryReader` port (`packages/application-control/src/ports/registry-reader.ts`) is not
+retired: it stays the BYO guest read path. The managed store reads its own registry as the namespace owner
+through `ManagedRegistryApi` (`packages/images/src/registry-api.ts`) instead.
 
 ## Isolation — the boundary moves from the bucket to the token
 
@@ -82,9 +85,14 @@ bucket per tenant.
 
 | Adapter | Backing | Role |
 | --- | --- | --- |
-| `ManagedImageStore` | bundled CNCF `distribution` (`registry:2`) + our token server | The default. Storage driver `s3` against the MinIO that already backs the filesystem and the artifact store (`EVERDICT_S3_*`), or driver `filesystem` for a self-hoster with their own volume — the same "swap the adapter to fit your infra" story as `S3WorkspaceFs` vs `InMemoryWorkspaceFs`. |
-| `ByoImageStore` | the tenant's own registry (`WorkspaceSettings.imageRegistries[]`) | Today's model, demoted from *the* model to *an* adapter. Kept because an enterprise with a mandated Harbor/ECR must not be forced to duplicate images into ours. `probe` / `verifyImage` / push-credential minting stay here — they are BYO concerns. |
-| `InMemoryImageStore` | in-process map | dev/test, mirrors the semantics exactly. |
+| `ManagedImageStore` (`packages/images/src/managed-image-store.ts`) | bundled CNCF `distribution` (`registry:2`) + our token server | The default. Storage driver `s3` against the MinIO that already backs the filesystem and the artifact store (`EVERDICT_S3_*`), or driver `filesystem` for a self-hoster with their own volume — the same "swap the adapter to fit your infra" story as `S3WorkspaceFs` vs `InMemoryWorkspaceFs`. |
+| `InMemoryImageStore` (`packages/images/src/in-memory-image-store.ts`) | in-process map | dev/test, mirrors the semantics exactly. |
+
+The tenant's own registries (`WorkspaceSettings.imageRegistries[]`) are NOT an adapter of this port, although
+the port's header comment still names a `ByoImageStore`: no such class exists. That path stays
+`ImageRegistryService` + `RegistryReader` (`docs/architecture/workspace-image-registry.md`), kept because an
+enterprise with a mandated Harbor/ECR must not be forced to duplicate images into ours; `probe` /
+`verifyImage` / push-credential minting live there.
 
 Deployment constraints worth stating up front, because they bite in self-hosted compose:
 
@@ -147,7 +155,8 @@ grant at an arbitrary repository in someone else's namespace is not a request we
 - `classifyImageRef` gains a **`managed`** class ahead of `workspace`: a ref inside the tenant's own
   managed namespace is not merely "a registry you registered", it is ours — the web renders it as the
   provenance-clean case and harness validation stops warning about it.
-- `ImageGrant` (new wire type): `{ endpoint, repositories[], token, expiresAt }`. Transient like
+- `ImageGrant` (`packages/contracts/src/infra/image-store.ts`): `{ endpoint, repositories[], actions[], token,
+  expiresAt }`. Transient like
   `repoToken` — never persisted, never logged, stripped from allocation env.
 - `WorkspaceSettings.imageRegistries[]` is untouched; it is now the `ByoImageStore` adapter's config.
 
@@ -155,15 +164,15 @@ grant at an arbitrary repository in someone else's namespace is not a request we
 
 | Surface | What |
 | --- | --- |
-| HTTP (`apps/api` `api/images/`) | `GET /workspace/images` (repositories + usage) · `GET /workspace/images/:repo/tags` · `GET /workspace/images/manifest?repository&reference` (inspect: the pin digest **plus, best-effort, the OCI config blob** — build history, runtime config, size, os/arch; `ImageInspectResponseSchema`) · `POST /workspace/images/push-grant` (`images:push`) · `DELETE /workspace/images/:repo` · `GET /v2/token` (the registry's auth realm — unauthenticated by Fastify's normal chain, it authenticates the docker client's basic credentials itself) |
-| MCP (parity) | `list_workspace_images` · `list_managed_image_tags` · `inspect_managed_image` · `push_image_grant` · `remove_workspace_image`. **Managed-specific names, not a managed-aware overload of the BYO `list_image_tags`/`inspect_image`**: the two read different stores ("ours, we mint the grant" vs "a registry you told us about"), a tool name is unique across the server, and a single tool would have had to guess between them from a bare repository name. Distinct names let each description say which store it reads. |
+| HTTP (`apps/api` `api/images/`) | `GET /workspace/images` (repositories + usage) · `GET /workspace/images/:repo/tags` · `GET /workspace/images/manifest?repository&reference` (inspect: the pin digest **plus, best-effort, the OCI config blob** — build history, runtime config, size, os/arch; `ImageInspectResponseSchema`) · `POST /workspace/images/push-grant` (`images:push`) · `POST /workspace/images/mirror` (`images:push` — copy an external image into the workspace's namespace, digest-pinned) · `POST /internal/images/mirror` (internal token — the operator's copy of everdict's own images into the platform namespace) · `DELETE /workspace/images/:repo` · `GET /v2/token` (the registry's auth realm — unauthenticated by Fastify's normal chain, it authenticates the docker client's basic credentials itself) |
+| MCP (parity) | `list_workspace_images` · `list_managed_image_tags` · `inspect_managed_image` · `push_image_grant` · `remove_workspace_image` · `mirror_image`. **Managed-specific names, not a managed-aware overload of the BYO `list_image_tags`/`inspect_image`**: the two read different stores ("ours, we mint the grant" vs "a registry you told us about"), a tool name is unique across the server, and a single tool would have had to guess between them from a bare repository name. Distinct names let each description say which store it reads. |
 | CLI | `everdict image push <ref>` mints a push grant instead of push credentials; `--register-environment <id>` registers with the registry-reported digest in the same call |
 | Web | Settings › Images — a registry UI in the JFrog grammar: the LIST is repositories (row name = drill-in, delete), and the routed DETAIL `settings/images/[name]` answers everything else — versions (tags, latest→semver-desc), the selected version's digest/size/platforms, the build recipe (OCI config history rendered as Dockerfile steps, metadata-only steps dimmed), the runtime contract (entrypoint/cmd/env/ports/labels), and the **everdict context**: the environment capabilities that declare this image (matched repository-wise, tag-insensitive), each with its agent instructions. BYO registries stay under Settings › Integrations |
 | Agent | unchanged tool names; the system prompt's authoring recipe loses the "register a registry first" precondition |
 
 ## Slices
 
-- **M1 — port + contracts.** `WorkspaceImages` port, `ImageGrant`/`ImageRepo` wire types,
+- **M1 — port + contracts.** ✅ `WorkspaceImages` port, `ImageGrant`/`ImageRepo` wire types,
   `imageRepoFor` + `classifyImageRef` `managed` class in `@everdict/domain`, `registryAuths[]` on
   `CaseJob` with every consumer fanned out. No behavior change yet (managed store absent = today).
 - **M2 — `ManagedImageStore`.** ✅ New `packages/images` (a registry client is not object storage, so it
@@ -249,8 +258,9 @@ grant at an arbitrary repository in someone else's namespace is not a request we
     classify an image. `main.ts` binds the predicate through a holder AFTER the adoption service exists; until then
     it denies, which is the same answer as running without M6.
 - **M7 — web.** ✅ Settings › Images (`/[workspace]/settings/images`) lists the workspace's managed repositories
-  with the endpoint/namespace their refs are built from, expands a row to resolve its tags on demand, and retracts
-  one with `images:push` (added to the web's `WebAction` mirror). A deployment with no managed store answers 404 on
+  with the endpoint/namespace their refs are built from, drills into the routed detail
+  (`/[workspace]/settings/images/[name]`, described in the Surfaces table), and retracts one with `images:push`
+  (added to the web's `WebAction` mirror). A deployment with no managed store answers 404 on
   the route, and the panel says "not configured" rather than showing an empty list — nothing published and no store
   are different states. BYO is reframed as "external image registries" in Settings › Integrations, pointing here.
   The environment workbench now badges a `managed` image; `external` deliberately stays unbadged, since it is the

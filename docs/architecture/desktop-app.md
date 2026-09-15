@@ -2,14 +2,15 @@
 kind: wiki
 title: "Desktop app — full web parity + resident self-hosted runner"
 status: current
-updated: 2026-08-11
-anchors: [packages/self-hosted-runner/src/runner-loop.ts]
+updated: 2026-09-15
+anchors: [apps/desktop/src/bridge.ts, apps/desktop/src/preload.cts, apps/desktop/src/runner-supervisor.ts, apps/desktop/src/updater.ts, packages/self-hosted-runner/src/runner-host.ts]
 ---
 
 > Same subject, other audience: [the product page](../guide/integrations/desktop-app.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
 # Desktop app — full web parity + resident self-hosted runner
 
-> **Status: decisions D1–D5 LOCKED with the user (2026-07-03) — implementation in progress.**
+> **Status: decisions D1–D13 locked with the user (2026-07-03 → 2026-07-17) and implemented** in `apps/desktop` +
+> `packages/self-hosted-runner`; open items are listed per slice below.
 > Supersedes the "tray-only companion" idea: the user requirement is **perform identically to the web via
 > the desktop app too** — the desktop must do *everything the web does*, plus what only a native app can do (resident
 > runner, one-click pairing, tray/notifications/autostart).
@@ -28,20 +29,20 @@ anchors: [packages/self-hosted-runner/src/runner-loop.ts]
 >   config injected through `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater
 >   reads the on-disk config during download). **Feed = GitHub Releases of the public `everdict/everdict` repo**
 >   (`electron-builder.yml` `publish: {provider: github, owner: everdict, repo: everdict}`; public repo →
->   read without a token). Ship an update by pushing a `desktop-v*` tag (release workflow attaches the
->   installers + `latest*.yml`). mac auto-update stays inert until code signing exists. **Linux non-AppImage
+>   read without a token). An update ships as a GitHub Release tagged `desktop-v*` carrying the installers +
+>   `latest*.yml`; since the release workflow was deleted (slice 6) that release is built by hand. mac auto-update stays inert until code signing exists. **Linux non-AppImage
 >   (deb/rpm) can't be swapped in place** → `autoDownload:false` (detect-only) + an `onAvailable` "Download"
 >   dialog that opens the releases page (AppImage/NSIS/mac-zip do apply in place).
 > - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
 >   offers manual device pairing (the token-shown-once modal is removed): personal-machine pairing is the
->   desktop's one-click only, and the browser account page becomes **manage-only** (list · live status ·
->   revoke) + a "Get the desktop app" CTA (`DESKTOP_DOWNLOAD_URL`). The server surface is unchanged —
+>   desktop's one-click only, and the browser's personal runner list on the runtimes page is **manage-only**
+>   (list · live status · revoke) + a "Get the desktop app" CTA linking to `/<ws>/connect/desktop`. The server surface is unchanged —
 >   `POST /runners` (BFF+MCP `pair_runner`) stays, which is also the **headless path**: on a server/CI box,
 >   create the pairing with an API key (`curl -H "Authorization: Bearer ak_…" -X POST /runners`) and feed
 >   the returned `rnr_` token to `everdict runner --pair`.
 > - **D8 — the packaged app must know its server (LOCKED 2026-07-03).** Web URL resolution:
->   `EVERDICT_WEB_URL` env (dev/e2e) > `config.json webUrl` (user-saved) > CI-baked default
->   (`EVERDICT_DESKTOP_DEFAULT_WEB_URL` repo Variable → esbuild `define` at package time). None → a local
+>   `EVERDICT_WEB_URL` env (dev/e2e) > `config.json webUrl` (user-saved) > a package-time default
+>   (`EVERDICT_DESKTOP_DEFAULT_WEB_URL` in the packaging environment → esbuild `define`). None → a local
 >   **first-run setup screen** (`assets/setup.html`) asks for the server address; also reachable from the
 >   tray ("Change server address…"). The setup window gets its own 2-method bridge (`window.everdictSetup`:
 >   get/setServerUrl) behind a `--everdict-setup` argv flag, and the main-side IPC only accepts calls whose
@@ -49,8 +50,8 @@ anchors: [packages/self-hosted-runner/src/runner-loop.ts]
 >   window (old preload origin args are stale) and the runner bridge origin-guard reads the *current*
 >   origin (getter, not a captured value). **Login/auth status**: with D8 in place the auth story is
 >   closed — Keycloak OIDC runs inside the webview (D5, cookies persist like a browser), the runner
->   authenticates independently via its `rnr_` keychain token, and an account-switch mismatch shows a
->   re-pair callout on the account page. Live-verified end-to-end vs real Keycloak
+>   authenticates independently via its `rnr_` keychain token, and a device pairing that is no longer in the
+>   signed-in account's roster shows a "Clean up" callout on the runtimes page. Live-verified end-to-end vs real Keycloak
 >   (`scripts/live/desktop-keycloak.mjs`): fresh machine → setup screen → server saved → OIDC login
 >   (alice) → one-click pair → runner online, against the real-auth control plane.
 >   **Wrong-address recovery**: a mistyped/unreachable server would otherwise strand the app on a dead
@@ -62,9 +63,10 @@ anchors: [packages/self-hosted-runner/src/runner-loop.ts]
 > - **D9 — one device, several runners (LOCKED 2026-07-15).** The desktop supervises *multiple* independent runner
 >   registrations, not one. The server already models a personal `self` pool keyed by `(owner, runnerId)` — several
 >   runners under one account simply widen that pool — so this is purely a client change. Each pairing is its own `rnr_`
->   identity; the account page's "Connect this device as a runner" becomes **additive** ("Connect another runner"), and
->   every runner is an independent row (own live status, own revoke). Per-runner concurrency stays 1 (`maxConcurrent`
->   unchanged) — **adding runners is how a user widens their pool**; the scorecard's own concurrency drives parallelism.
+>   identity; the runtimes page's "Connect this device as a runner" becomes **additive** ("Connect another runner"), and
+>   every runner is an independent row (own live status, own revoke). A user widens their pool on two composing axes:
+>   **adding runners**, and each runner's `maxConcurrent` (chosen at pair time, 1–64, default 1, desktop-local — never
+>   sent to the control plane).
 >   Resource guard = **soft cap + warning**: the bridge reports `appInfo().cpuCount` and the web warns once this device
 >   hosts ≥ cores runners, but never blocks (the user opts in). Persistence moves from a single `runner-token.bin` +
 >   scalar config meta to an encrypted **token map** (`runner-tokens.bin`, `{ runnerId: rnr_token }`) + a config
@@ -160,7 +162,7 @@ anchors: [packages/self-hosted-runner/src/runner-loop.ts]
 > - **D3 — the runner rides along, paired one-click from the logged-in session.** The desktop's native
 >   payload is the [self-hosted runner](./self-hosted-runner.md): the runner loop (extracted to
 >   `packages/self-hosted-runner`) runs in the Electron main process. Pairing needs **zero token copy-paste**:
->   the account page, when it detects the desktop bridge, offers "Connect this device as a runner" → the web (already
+>   the runtimes page, when it detects the desktop bridge, offers "Connect this device as a runner" → the web (already
 >   authenticated as the user) calls the existing pair API → hands the `rnr_` token to the bridge → main
 >   process stores it in the OS keychain and starts the runner. Ownership stays personal (self-hosted-runner
 >   D1) — the desktop just removes the friction.
@@ -172,8 +174,6 @@ anchors: [packages/self-hosted-runner/src/runner-loop.ts]
 >   the webview via Auth.js, the access token lives where it does in a browser — the **web origin's
 >   server-side httpOnly cookie session** (the web is a BFF token courier, `docs/web.md`). The only
 >   secret the desktop itself persists is the `rnr_` pairing token (keychain via `safeStorage`).
->   Outbound OAuth (connected accounts) also works unchanged: `authorizeUrl` → provider → 302 back to
->   `/<ws>/account` — all inside the webview, same as a browser tab.
 
 Like [self-hosted-runner](./self-hosted-runner.md): **strict generalization, not a clean break.** The web,
 the control plane, the MCP runner protocol (`lease_job`/`submit_job_result`/`heartbeat_job`), and the
@@ -200,12 +200,12 @@ requirement structurally: parity is not a feature to build, it's a property of r
 
 - **Web = BFF token courier** (`docs/web.md`) — Next.js 16 App Router; Auth.js keeps the Keycloak access
   token in a server-only httpOnly cookie; `control-plane.ts` forwards `Bearer` to `@everdict/api`; identity
-  from `GET /me`. Pure HTTP client, **no `@everdict/*` deps**. Nothing about it assumes a browser tab — a
+  from `GET /me`. Pure HTTP client whose only `@everdict/*` dependency is `@everdict/contracts`, for types. Nothing about it assumes a browser tab — a
   webview holding the same cookies behaves identically.
-- **Runner loop is already transport-clean** — `packages/self-hosted-runner/src/runner-loop.ts` (`runLeaseWorkers`, N lease
+- **Runner loop is transport-clean** — `packages/self-hosted-runner/src/runner-loop.ts` (`runLeaseWorkers`, N lease
   workers over one MCP session) + `runner-session.ts` (`ResilientMcpSession` — reconnect-on-stale-session)
-  + `run-leased-job.ts`, driving `runCaseJob` (`@everdict/job-runner`). It depends on flags + a token, not on
-  being a CLI — extraction to a package is mechanical.
+  + `run-leased-job.ts`, driving `runCaseJob` (`@everdict/job-runner`). It depends on a token and options, not on
+  being a CLI.
 - **Pairing is a personal API** — `rnr_` token minted from the account page (BFF + MCP parity,
   self-hosted-runner slice 1), SHA-256-hashed at rest, owner = `principal.subject`, no role gate. A
   desktop bridge can drive the *same* endpoint from the logged-in web session.
@@ -229,24 +229,23 @@ requirement structurally: parity is not a feature to build, it's a property of r
    control plane (@everdict/api) ◄──── Bearer (web BFF) ──── deployed apps/web
 ```
 
-### `packages/self-hosted-runner` — one runner, three consumers
+### `packages/self-hosted-runner` — one runner, two consumers
 
-Move `runner-loop.ts` / `runner-session.ts` / `run-leased-job.ts` (+ their tests) from `apps/cli` into
-`packages/self-hosted-runner` (depends on `@everdict/job-runner`, `@modelcontextprotocol/sdk`; sits at the same layer as
-`apps/*` consumers of `job-runner`). Exports: `runLeaseWorkers(opts)`, `ResilientMcpSession`, `mcpConnect`,
-plus a small `RunnerHost` facade (start/stop/status events) for GUI embedding. `apps/cli` re-imports and
-behaves identically (pure refactor slice); `apps/desktop` main process embeds `RunnerHost`. (A future CI
-runner would be the third consumer.)
+`runner-loop.ts` / `runner-session.ts` / `run-leased-job.ts` (+ their tests) live in `packages/self-hosted-runner`
+(depends on `@everdict/job-runner` and `@modelcontextprotocol/sdk`, among others). Exports include `runLeaseWorkers`,
+`ResilientMcpSession`, `mcpConnect`, and the `RunnerHost` facade (start/stop/restart/status events) for GUI embedding.
+`apps/cli` (`everdict runner`) is a thin wrapper over it; the `apps/desktop` main process embeds one `RunnerHost` per
+paired runner.
 
 ### The bridge (`window.everdictDesktop`) — smallest possible surface
 
 Preload-exposed, only when `new URL(window.location).origin === configuredWebOrigin`:
 
-- `pairRunner({ token, runnerId?, apiUrl? }): Promise<void>` — web hands a freshly-minted `rnr_` token down;
+- `pairRunner({ token, runnerId?, apiUrl?, maxConcurrent? }): Promise<void>` — web hands a freshly-minted `rnr_` token down;
   main stores it (keychain token map, keyed by `runnerId`) and starts that runner. **Additive** (D9): each call
   registers one more runner; a re-pair of the same `runnerId` replaces just its host. The token crosses the bridge
   once, is never persisted by the web, and never comes *back* up.
-- `runnerStatus(): Promise<{ runners: DesktopRunnerStatus[] }>` + a `subscribe` event for live updates — the
+- `runnerStatus(): Promise<{ runners: DesktopRunnerStatus[] }>` + `onRunnerStatus(cb)` for live updates — the
   aggregate over **every** runner paired on this device (D9), so the roster shows each *this device* row truthfully
   instead of `lastSeenAt` guessing. (An older desktop returns a bare `DesktopRunnerStatus`; the web normalizes it.)
 - `unpairRunner(runnerId?): Promise<void>` — stop + forget one runner's keychain entry, or (omitted) all of them
@@ -271,22 +270,22 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
 ### One-click pairing flow (D3)
 
 1. Member opens the desktop app → logs into Keycloak in the webview (first run only; cookies persist).
-2. Account page (`/<ws>/account`) sees `window.everdictDesktop` → the connected-runners section shows
+2. The runtimes page (`/<ws>/runtimes`, personal runners) sees `window.everdictDesktop` → it shows
    **"Connect this device as a runner"** (prefilled label = hostname from `appInfo`).
 3. Click → web calls the **existing** pair endpoint (BFF, user session) → gets the shown-once `rnr_`
-   token → `everdictDesktop.pairRunner({ token, apiUrl, label })` → main stores in keychain, starts
+   token → `everdictDesktop.pairRunner({ token, runnerId, apiUrl, maxConcurrent })` → main stores in keychain, starts
    `RunnerHost`, long-poll begins → presence dot goes green.
-4. Web-side change is one small desktop-aware branch in the existing account/runner feature — no new
+4. Web-side change is one desktop-aware branch in the runner feature (`manage-runners`) — no new
    endpoints, no new auth path.
 
 ### Runner lifecycle in the desktop
 
-- **Start/stop** — auto-start the runner on app launch when paired (toggle in tray + account page);
-  tray shows `idle / running (n) / off`.
+- **Start/stop** — every paired runner starts on app launch; the tray shows `idle / running (n) / off`.
 - **Capabilities** — same detection as the CLI (docker present → `service` harnesses allowed;
   auto-advertise per self-hosted-service-runner); surfaced as a status row, not a log-line banner.
-- **OS notifications** — job/scorecard completion notifies locally (the local analog of the Mattermost
-  notify path); click → deep-link the window to the run/scorecard page.
+- **OS notifications** — a drain notification when the device's runners go idle, plus a notification watcher
+  that polls the control plane's notification feed with the runner token (so it works with no web session);
+  click → deep-link the window to the linked page.
 - **Autostart** — OS login item (Electron `setLoginItemSettings`), so "a runner that's up at boot" holds.
 - **Updates** — electron-updater for the shell; **UI updates need no desktop release** (D1 payoff — the
   web deploys, the desktop just renders it).
@@ -301,7 +300,7 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
 | `everdict runner` CLI | **kept** — thin wrapper over `self-hosted-runner`, headless/CI answer |
 | `apps/desktop` (Electron shell: window, tray, keychain, autostart, updater, IPC) | **new** |
 | `window.everdictDesktop` preload bridge + web desktop-aware pairing branch | **new** (bridge) + **small web edit** |
-| Packaging/signing (linux AppImage/deb · mac dmg+notarize · win nsis) + download links on the account page | **new** |
+| Packaging (linux AppImage/deb · mac dmg+zip · win nsis; signing not yet) + the download tab `/<ws>/connect/desktop` | **new** |
 
 ## Slices (each lands green: format/lint/typecheck/test/build)
 
@@ -327,8 +326,8 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
    `electron` external — avoids packing pnpm-symlinked `node_modules` into asar; `extraMetadata.main`
    swaps the entry only in the package) + electron-builder AppImage (`pnpm -F @everdict/desktop package`,
    NOT in turbo gates), packaged binary smoke-verified. **Download link**: `DESKTOP_DOWNLOAD_URL`
-   (web env, optional) → Account > Connected runners shows an "Install the desktop app" link to browser users only
-   (hidden inside the desktop). **Live e2e PASS** (`scripts/live/desktop-runner.mjs`, 2026-07-03):
+   (web env, optional) → an "Install the desktop app" link for browser users only (hidden inside the desktop);
+   today that link goes to the download tab (slice 7) and `DESKTOP_DOWNLOAD_URL` is its fallback. **Live e2e PASS** (`scripts/live/desktop-runner.mjs`, 2026-07-03):
    Playwright drives the real Electron shell (clean `XDG_CONFIG_HOME` = fresh machine) → account page
    one-click "Connect this device as a runner" → runner online with live "this device" row → run pinned to
    `self:<id>` executes on the desktop → `provenance{ranOn:self-hosted, runner, by}` verified.
@@ -345,14 +344,14 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
    **Remaining**: signing certs (mac notarize / win Authenticode) — config hooks noted in
    `electron-builder.yml`.
 7. ✅ **Download page** (D7 follow-up — the `everdict/everdict` repo is public, same feed as the auto-updater) —
-   `/{workspace}/download`: the web **server** reads the latest `desktop-v*` release from GitHub. The public repo
+   now the desktop tab of the connect hub, `/{workspace}/connect/desktop` (`/{workspace}/download` redirects there): the web **server** reads the latest `desktop-v*` release from GitHub. The public repo
    reads **unauthenticated** (`DESKTOP_RELEASES_REPO`, 5-min cached, `features/download-desktop`);
    `DESKTOP_RELEASES_TOKEN` is **optional** — only a private releases repo needs it (it also lifts the rate limit).
    Renders OS-detected recommended buttons (UA → linux/mac/win; mac shows arm64+x64 — arch is not UA-reliable)
    + an all-platforms list + post-install steps + unsigned caveats. Actual downloads go through
    `GET /api/desktop/download?id=…`: session-checked (`currentPrincipal`), asset id validated against **our**
    desktop release only, then GitHub's octet-stream 302 → **signed temporary URL** is passed to the browser
-   (big files never stream through the web server). The Runners tab CTA links here (internal) instead of an
+   (big files never stream through the web server). The runtimes page CTA links here (internal) instead of an
    external URL; `DESKTOP_DOWNLOAD_URL` remains as the page's fallback when release metadata can't be fetched
    (a private repo with no token). Live-verified: page renders v0.1.0 assets; valid id → 302 to
    `release-assets.githubusercontent.com`; foreign id → 404.
@@ -363,8 +362,7 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
    local generic feed): idle → checking → found 0.2.0 → downloading (126MB fresh) → sha512 verify →
    ready. Finding: `setFeedURL` alone breaks at download (AppImageUpdater reads on-disk config) —
    env activation writes `userData/app-update.yml` and injects it via `updateConfigPath`.
-   **Open**: flip the feed on — user decision (a) public `everdict-releases` + CI PAT vs (b) repo
-   public; then add the `publish` block to `electron-builder.yml` (nothing else changes).
+   The feed is on: the repo is public and `electron-builder.yml` carries the `publish` block (D6).
 9. ✅ **Multiple runners per device** (D9) — the single-runner client became a **supervisor** of many. Persistence:
    `token-store` gained an encrypted map (`runner-tokens.bin`, `{ runnerId: rnr_token }`) + `config.runners[]`, with a
    one-time startup migration of the legacy `runner-token.bin` + scalar meta. `RunnerSupervisor` (replaces
@@ -387,7 +385,7 @@ exact `file://` senderFrame match (never the web, never an external page): `wind
 - **CLI stays first-class.** Headless boxes, CI, and servers keep `everdict runner`; the desktop is the
   human-machine answer, not a replacement.
 - **Renderer gets no Node.** `contextIsolation` on, `nodeIntegration` off, bridge origin-gated —
-  the remote web app must never gain local power beyond the four bridge methods.
+  the remote web app must never gain local power beyond the bridge methods listed above.
 - **Electron vs Tauri** — D2 locked Electron (all-TS, in-process runner, rendering consistency);
   revisit Tauri only if footprint becomes a real complaint, since D1/D3/D4/D5 are shell-agnostic.
 

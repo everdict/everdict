@@ -2,59 +2,69 @@
 kind: runbook
 title: "Runbook — GitHub self-hosted runner co-registration (real GitHub)"
 status: current
-updated: 2026-07-07
+updated: 2026-09-15
+anchors: [packages/application-control/src/runner/github-runner-install.ts, apps/api/src/api/runner/workspace-runner.routes.ts]
 ---
 # Runbook — GitHub self-hosted runner co-registration (real GitHub)
 
 Stand up a **GitHub Actions self-hosted runner + an Everdict workspace-shared runner** on one build server, so CI
 builds the image and the co-resident Everdict runner (`self:ws:<id>`) evaluates it. This is the real-infrastructure
-verification of `docs/architecture/self-hosted-runtime-and-runners.md` §4–5 — it needs a real GitHub org/repo, a
-build server, and a live GitHub connection, so it is a **manual runbook**, not an automated CI test.
+verification of [self-hosted runtime and runners](../architecture/self-hosted-runtime-and-runners.md) §4 — it needs a
+real GitHub org/repo, a build server, and the workspace GitHub App, so it is a **manual runbook**, not an automated
+CI test.
 
 ## Prerequisites
 
 - A deployed Everdict control plane you can authenticate to (Keycloak login **or** an `ak_…` API key).
-- A **GitHub connection** on your account (Account → Connected accounts → GitHub). For **org-level** runners,
-  connect with elevated scope: Settings › Shared runners › "GitHub Actions runner" › Organization (org) › "Reconnect with admin:org scope".
-- A build server (Linux x64) with `curl`, `tar`, and the `everdict` CLI available (or `npm i -g @everdict/cli`).
+- The **workspace GitHub App** installed on the target repo or org (Settings › Integrations), with `administration`
+  permission — the runner registration token is minted through that installation, not through a personal account.
+- A build server (Linux x64) with `curl` and `tar`. The install script downloads `actions/runner` and starts
+  `everdict runner`, so the `everdict` CLI must be on the PATH (`npm i -g @everdict/cli`).
 - Admin (`settings:write`) in the target workspace.
 
 ## Steps
 
-1. **Generate the install script (Everdict side — automated).** Run the helper against your deployment:
+1. **Generate the install script (Everdict side).** Any of three equivalent entry points, all backed by
+   `installGithubWorkspaceRunner`:
+   - UI: Settings › Shared runners › "GitHub Actions runner" — pick a repo or org the App can see.
+   - MCP tool: `github_install_workspace_runner`.
+   - HTTP:
 
-   ```bash
-   EVERDICT_API_URL=https://everdict.example.com \
-   EVERDICT_TOKEN=<Keycloak JWT or ak_… API key> \
-   REPO=acme/app \
-   node scripts/live/github-self-hosted-runner.mjs
-   # org-level:  ORG=acme-inc  RUNNER_GROUP=everdict-pool  (instead of REPO)
-   ```
+     ```bash
+     curl -sS -X POST "$EVERDICT_API_URL/workspace/runners/github-install" \
+       -H "authorization: Bearer $EVERDICT_TOKEN" -H 'content-type: application/json' \
+       -d '{"repository":"acme/app"}'
+     # org-level: {"org":"acme-inc","runnerGroup":"everdict-pool"}   GHE: add "host":"https://<ghe-host>"
+     ```
 
-   It pairs a workspace-shared Everdict runner, mints a **short-lived** GitHub registration token via your
-   connection, and prints (a) the **install script** and (b) the **workflow hint** (`runs-on` label + run-eval
-   `runtime`). Equivalent UI path: Settings › Shared runners › "GitHub Actions runner". Equivalent MCP tool:
-   `github_install_workspace_runner`.
+   It pairs a new workspace-shared Everdict runner, mints a **short-lived** GitHub registration token via the App
+   installation, and returns `installScript`, `workflowHint` (`runs-on` label + run-eval `runtime`),
+   `runtimeTarget` and `registrationExpiresAt`. The App not being installed on the owner is a `404`.
+   `scripts/live/github-self-hosted-runner.mjs` predates the App and still calls the removed Connected-accounts
+   API (`GET /connections`), so it fails at its first request — use one of the entry points above.
 
 2. **Run the install script on the build server (GitHub side — manual).** It configures `actions/runner`
    (`config.sh`, with `--runnergroup` for org runners) **and** starts `everdict runner --pair …` — both workers on
    one host. The GitHub runner registers to the repo (or org); the Everdict runner joins the `self:ws:<id>` pool.
 
-3. **Wire the workflow (manual).** Either paste the printed `runs-on`/`runtime` hint into your workflow, or use
-   the zero-input path: Settings › CI integration › connect the repo, fill "5. Self-hosted runner" with the same
-   `runs-on` label and `runtime: self:ws:<id>`, then "Open setup PR" — Everdict generates the workflow file.
+3. **Wire the workflow (manual).** Either paste the returned `runs-on`/`runtime` hint into your workflow, or use
+   the zero-input path: open a harness's **CI integration** panel › "Connect GitHub repo", fill step "5. Runner"
+   with the same `runs-on` label and `runtime: self:ws:<id>` (blank = any runner in the pool), save the link, then
+   "Setup PR" — Everdict opens a PR adding the workflow file.
 
 4. **Fire and verify (manual).** Open/merge a PR. GitHub Actions runs on your self-hosted runner, builds the
    image, and calls the Everdict run-eval action with `runtime: self:ws:<id>`; the co-resident Everdict runner executes
    the evaluation. Confirm: the scorecard's `origin` records `repo`/`sha`; the eval result posts back to the PR
-   check; `provenance.by` on the run is `ws:<workspace>` (workspace-pays) and `provenance.runner` is the runner id.
+   check; the run's `provenance.ranOn` is `self-hosted`, `provenance.by` is `ws:<workspace>` (workspace-pays) and
+   `provenance.runner` is the runner id.
 
 ## Live-verified (repo-level, 2026-07-05)
 
-The full loop was run for real against GitHub Actions: this machine acted as the build server (local control
-plane + Everdict runner + a real GitHub Actions **self-hosted runner** registered to a throwaway repo via the exact
-`mintRunnerToken` API call). A `workflow_dispatch` job dispatched to the self-hosted runner drove an Everdict run on
-`self:ws`; the workflow log showed:
+The full loop was run for real against GitHub Actions, at a time when the registration token was still minted through
+a personal GitHub connection rather than the workspace App: this machine acted as the build server (local control
+plane + Everdict runner + a real GitHub Actions **self-hosted runner** registered to a throwaway repo). A
+`workflow_dispatch` job dispatched to the self-hosted runner drove an Everdict run on `self:ws`; the workflow log
+showed:
 
 ```
 submitted run … -> self:ws
@@ -65,13 +75,13 @@ OK: Everdict eval ran on self:ws (self-hosted, workspace-pays)
 ```
 
 Workflow conclusion: **success**. The runner was registered `--ephemeral`, so it auto-deregistered after the one
-job (no lingering runner). **Org-level** (`admin:org`) was not exercised — the test account's token had
-`repo`+`workflow` only; org-level remains verified by unit tests + this runbook.
+job (no lingering runner). **Org-level** was not exercised; it is covered by unit tests only.
 
 ## Notes
 
-- Registration tokens are short-lived — run the install script promptly (re-run the helper to mint a fresh one).
+- Registration tokens are short-lived (about one hour) — run the install script promptly, or generate a fresh one.
 - Everdict never stores a long-lived GitHub runner token; the runner holds its own GitHub credential after config.
 - The GitHub-side end-to-end (Actions firing) is intentionally out of scope for automated tests — this runbook is
   how you verify it against real GitHub. The Everdict-side plumbing is covered by unit/integration tests and the
-  `scripts/live/{workspace-shared,multi-runner,personal}-pool.mjs` live checks.
+  `scripts/live/workspace-shared-runner.mjs`, `scripts/live/multi-runner-pool.mjs` and
+  `scripts/live/personal-pool.mjs` live checks.

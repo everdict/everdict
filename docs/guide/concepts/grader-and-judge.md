@@ -2,7 +2,8 @@
 kind: wiki
 title: "Grader & Judge"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/contracts/src/execution/grader.ts, packages/contracts/src/execution/eval-case.ts, packages/graders/src/make-graders.ts, packages/graders/src/script-grader.ts, packages/contracts/src/harness/judge-spec.ts]
 ---
 # Grader & Judge
 
@@ -26,11 +27,13 @@ curl -XPOST localhost:8787/scorecards \
   -H 'content-type: application/json' -d '{
   "dataset": { "id": "support-replies", "version": "latest" },
   "harness": { "id": "my-agent", "version": "latest" },
+  "runtime": "local",
   "judges":  [{ "id": "tone-rubric", "version": "latest" }]
 }'
 ```
 
-Each judge contributes scores under `judge:<id>`.
+Each judge contributes its verdict under the metric `judge:<id>`, and one `judge:<id>:<criterion>` per
+criterion it declares.
 
 ## Which one to reach for
 
@@ -45,10 +48,15 @@ because it has one right answer and adds no variance of its own.
 ]
 ```
 
+Other built-in graders include `command` (a command with a pass pattern or custom metric),
+`script-score` (a numeric score a script prints), `state-check`, `answer-match`, `latency`,
+`dom-contains` and `url-matches`.
+
 Use a judge when the thing you care about genuinely cannot be checked — prose quality, whether a plan
-is sound, whether a screenshot shows the right screen. A `model` judge calls an LLM or VLM with a
-rubric using your workspace's own provider key; a `harness` judge delegates to an actual agent and
-takes the verdict from *its* trace.
+is sound, whether a screenshot shows the right screen. Judges come in three kinds: a `code` judge runs
+your Python or Node script over the case, trace and snapshot (and may call a model); a `model` judge
+calls an LLM or VLM with a rubric, through a model registered in your workspace or a raw model name; a
+`harness` judge delegates to an actual agent and takes the verdict from *its* trace.
 
 :::warning
 Every judge you add is another source of variance in the number you are about to compare week over
@@ -65,15 +73,16 @@ This is the part worth reading twice, because it is where most eval tooling quie
 { "graderId": "tests-pass", "metric": "tests_pass", "value": 1, "pass": true }
 ```
 
-A non-measurement carries **no value at all** — only a reason:
+A non-measurement carries **no value at all** — only a reason, and whether re-scoring can recover it:
 
 ```json
-{ "graderId": "judge:tone-rubric", "metric": "tone",
-  "status": "unmeasured", "reason": "missing_secret" }
+{ "graderId": "tone-rubric", "metric": "judge:tone-rubric",
+  "status": "unmeasured", "reason": "missing_secret", "retryable": true }
 ```
 
-The reasons are closed: `grader_error`, `missing_evidence`, `missing_secret`, `unsupported`,
-`policy_skip`, `contract_violation`.
+The reasons are closed: `grader_error`, `grader_timeout`, `missing_evidence`, `missing_secret`,
+`unsupported`, `policy_skip`. A grader that *returns* something the contract forbids (a `NaN` value, an
+empty id) gets its own status, `invalid`, with reason `contract_violation`.
 
 The shape *is* the enforcement. When a non-measurement has no `value` field, a dead grader has no `0`
 to leak into a mean, and code that reads `.value` without narrowing **fails to compile**. Before this,
@@ -82,23 +91,26 @@ the truth was "we did not measure."
 
 So when you see an unmeasured score, the question is never "why did it score low". It is "why was
 nothing measured", and the reason tells you: `missing_secret` is re-scorable once you configure the
-key; `contract_violation` is a bug in the grader and is never retried.
+key (`POST /scorecards/:id/rescore-unmeasured`); an `invalid` score is a bug in the grader and is never
+retried.
 
 ## Writing your own
 
-A grader is named by a spec, so a case declares scoring without depending on grader code:
+A grader is named by a spec, so a case declares scoring without depending on grader code. The `script`
+grader runs your own Python or Node code:
 
 ```json
-{ "id": "script", "config": { "id": "business-check", "cmd": "./check.sh" } }
+{ "id": "script", "config": { "id": "business-check", "language": "python", "entrypoint": "check.py" } }
 ```
 
-The script prints a score line; the id in `config` names *which* check this is. Note that three
-different names are in play — the implementation (`script`), the check (`business-check`) and the
-metric it emits (`quality`). Say the last one explicitly:
+The script receives the serialized grading context (case, trace, snapshot) as its first argument and
+prints a Score JSON as the last thing on stdout; `config.code` takes inline source instead of
+`entrypoint`. Note that three different names are in play — the implementation (`script`), the check
+(`business-check`) and the metric it emits (`quality`). Say the last one explicitly:
 
 ```json
 { "id": "script",
-  "config": { "id": "business-check", "cmd": "./check.sh" },
+  "config": { "id": "business-check", "language": "python", "entrypoint": "check.py" },
   "metrics": [{ "id": "quality", "direction": "higher_is_better" }] }
 ```
 
@@ -111,7 +123,8 @@ the measurement end up being about different names.
 A grader can declare that its metric is **ground truth** — the thing a verdict ultimately rests on:
 
 ```json
-{ "id": "script", "config": { "cmd": "./check.sh" },
+{ "id": "script",
+  "config": { "language": "python", "entrypoint": "check.py" },
   "metrics": [{ "id": "quality", "authority": "ground_truth" }] }
 ```
 

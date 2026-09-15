@@ -2,8 +2,8 @@
 kind: wiki
 title: "Runtimes (tenant-defined execution infrastructure)"
 status: current
-updated: 2026-08-21
-anchors: [apps/api/src/composition/runtime-compute.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/infra/runtime-spec.ts, packages/backends/src/placement/build-runtime-backend.ts, apps/api/src/core/execution/runtime-dispatcher.ts, apps/api/src/composition/runtime-compute.ts, apps/web/src/features/register-runtime/ui/register-runtime-form.tsx]
 ---
 # Runtimes (tenant-defined execution infrastructure)
 
@@ -24,7 +24,8 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 > account page (no token copy); headless boxes use `everdict runner --pair <rnr_…>`.
 
 ## Contract (`@everdict/contracts`)
-`RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
+`RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`, `packages/contracts/src/infra/runtime-spec.ts`)
+with `id, version, description?, tags, capabilities?` plus the admission envelope below:
 - **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
   self-hosted runner callout above).
 - **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret?, gpu?, constraints?, cpuMhzPerCore? }`.
@@ -37,10 +38,10 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   declares a cpu box rather than placing it smaller than it asked for; cases that declare no cpu are
   unaffected and keep using the lane's own MHz default.
 - **k8s** — `{ image, context?, namespace?, runtimeClass?, server?, authSecret?, kubeconfigSecret?, gpu?, nodeSelector?, tolerations? }`.
-- shared admission envelope (nomad/k8s) — `maxConcurrent?` (slot cap the Scheduler admits; absent → backend
+- shared admission envelope — `maxConcurrent?` (slot cap the Scheduler admits; absent → nomad/k8s backend
   default 20) + `memoryBudgetMb?` (cap on the SUM of in-flight harness-declared `resources.memoryMb`; heavy
   harnesses queue when the envelope is full even with slots free — harnesses that declare no memory are admitted
-  outside it). The cluster's own scheduler still bin-packs nodes; the envelope keeps the control plane from
+  outside it) + `cpuBudget?` (the CPU twin over `resources.cpu`, same opt-in). The cluster's own scheduler still bin-packs nodes; the envelope keeps the control plane from
   over-committing the cluster in the first place. On a **topology-capable** runtime (nomad/k8s + `traceSource`)
   `maxConcurrent` is the operator ceiling over the topology lane (absent → backend default 8), and when the
   harness declares a session pool (`target.acquire.capacity`) the lane's capacity follows the LIVE pool under
@@ -59,8 +60,11 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
   capability so the run auto-routes to a gpu-capable runtime (fail-fast on a non-gpu one) and reserves the device —
   the harness count wins over the runtime binding's blanket default.
 - **topology-capable (nomad/k8s + `traceSource`)** — not a kind of its own: a nomad or k8s runtime that also
-  carries `{ traceSource, browserImage? }` hosts `kind:"service"` topology harnesses (e.g. browser-use) —
-  a warm service pool + per-case browser on that orchestrator, trace pulled from `traceSource`.
+  carries `{ traceSource, browserImage?, hostGatewayAddr?, provisionDependencies? }` hosts `kind:"service"`
+  topology harnesses (e.g. browser-use) — a warm service pool + per-case browser on that orchestrator, trace pulled
+  from `traceSource`. `hostGatewayAddr` is the IP `host.docker.internal` maps to inside topology services (required
+  where the keyword is rejected — Nomad bridge networking, K8s `hostAliases`); `provisionDependencies` deploys the
+  topology's declared stores as a dedicated silo when there is no trust zone.
 
 ⚠️ **No secrets in the spec** (it's an immutable, readable SSOT). Credentials and the agent's model keys come from
 the tenant's **SecretStore**, injected at dispatch time. `authSecret` is the *name* of the SecretStore entry that
@@ -90,13 +94,19 @@ registration doesn't expose cluster tokens.
 The `RuntimeDispatcher` wraps the global `Scheduler` (a `Dispatcher`):
 1. If a job's `placement.target` names a **tenant runtime** (not an existing global backend), resolve the
    `RuntimeSpec` via the registry.
-2. `buildRuntimeBackend(spec, { secretEnv })` (`@everdict/backends`) constructs the live `Backend`
-   (`LocalBackend`/`NomadBackend`/`K8sBackend`); `secretEnv` = the tenant's SecretStore entries.
+2. `buildRuntimeBackend(spec, { secretEnv, trustZones? })` (`@everdict/backends`) constructs the live `Backend`
+   (`LocalBackend`/`NomadBackend`/`K8sBackend`); `secretEnv` = the tenant's SecretStore entries, `trustZones` the
+   operator's isolation policy when one is configured.
 3. Register it in the Scheduler's `BackendRegistry` under `rt:<tenant>:<id>@<version>` (built once, reused),
    rewrite `placement.target` to that name, and dispatch via the Scheduler — so **fairness, budget, capacity,
    and isolation are preserved**. No tenant runtime registered → falls through to the default global backend.
+   A cached backend is dropped on a tenant secret change (`invalidateTenant`) so the next dispatch rebuilds it.
 
-A scorecard run selects a runtime: `POST /scorecards` `{…, runtime }` sets `placement.target` on every case.
+Self-hosted targets go through the same dispatcher: `self` (personal pool), `self:ws` (workspace pool) and
+`self:<runnerId>` (one runner) route to the runner lease queue instead of a cluster.
+
+A scorecard run selects a runtime: `POST /scorecards` `{…, runtime }` sets `placement.target` on every case; a
+comma-separated list shards the batch round-robin across runtimes and `"auto"` expands to every registered runtime.
 (Single runs carry `placement.target` on the `EvalCase`.)
 
 ## A runtime is not only where evals run
@@ -143,11 +153,12 @@ unreachable address. The credential is used only for the probe's auth header (ne
 `makeRuntimeProber` is the single service core behind both transports.
 
 ## Web (`apps/web`)
-- **Runtimes `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
-- **Detail `/dashboard/runtimes/[id]`** — kind + connection fields, plus the live **Cluster status** panel
+- **Runtimes `/[workspace]/runtimes`** — owned vs `_shared` runtimes (owner badge + version count), plus the
+  workspace's self-hosted runners for admins.
+- **Detail `/[workspace]/runtime/[id]`** — kind + connection fields, plus the live **Cluster status** panel
   (`docs/architecture/runtime-inspection.md`). The detail screen carries **no** connection-test / dry-run buttons —
   those belong on the register/edit form, where they gate saving.
-- **Register `/dashboard/runtimes/new`** (and **Edit**) — a **kind-toggle form** (local | nomad | k8s) with a
+- **Register `/[workspace]/runtimes/new`** (and **Edit** `/[workspace]/runtime/[id]/edit`) — a **kind-toggle form** (local | nomad | k8s) with a
   **Connection test** (live probe, `POST /runtimes/probe`) and a **Dry run** (validate, `POST /runtimes/validate`)
   → `POST /runtimes` (role-agnostic — any member can register). The form takes secret **names**
   (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets` (names referenced but not yet
@@ -155,7 +166,8 @@ unreachable address. The credential is used only for the probe's auth header (ne
   gated**: the submit/save button stays disabled until either the connection test reports reachable **or** the dry
   run passes, and any field edit clears the gate (so the tested spec always equals the saved one) — you cannot
   register/save a runtime that was never checked.
-- The scorecard **Run** form gains a **Runtime** selector (defaults to the global backend).
+- The scorecard **Run** form has a required **Runtime** selector (a registered runtime or a self-hosted runner
+  target) with a capability-fit preview per runtime.
 
 ## Sizing a Nomad runtime for eval batch churn (live-verified)
 A 100+-case batch leaves that many dead jobs/allocs behind per run. Two operational facts, both hit live

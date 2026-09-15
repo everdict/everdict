@@ -2,8 +2,8 @@
 kind: wiki
 title: "Workspace secrets (model/provider keys)"
 status: current
-updated: 2026-08-11
-anchors: [packages/db/src/workspace/secret-store.test.ts, apps/api/src/api/secret/offline-token.routes.test.ts, apps/api/src/main.ts, packages/domain/src/harness/harness-secrets.test.ts]
+updated: 2026-09-15
+anchors: [packages/db/src/workspace/secret-store.ts, apps/api/src/api/secret/secret.routes.ts, apps/api/src/api/secret/secret.mcp.ts, packages/domain/src/harness/harness-secrets.ts, packages/db/src/workspace/offline-token.ts]
 ---
 # Workspace secrets (model/provider keys)
 
@@ -21,7 +21,8 @@ into that workspace's runs.
   - **user** (`owner=subject`) — personal, **self-managed** by any member (no admin gate; owner = `principal.subject`).
     Other members never see or use them. A harness that references a user secret is **private to that user** (below).
 - **Encrypted at rest** (`@everdict/db` `SecretStore`): AES-256-GCM, KEK from **`EVERDICT_SECRETS_KEY`** (base64 32B;
-  `openssl rand -base64 32`). DB holds only ciphertext/iv/tag. Prod should use Vault/KMS for the KEK.
+  `openssl rand -base64 32`). DB holds only ciphertext/iv/tag. Prod should use Vault/KMS for the KEK. The same cipher
+  also seals browser-profile login blobs.
 - **Two kinds (`SecretMeta.kind`, migration `0065_secret_offline_token.sql`):** `plain` (default — an opaque string)
   and `offline_token` — a stored long-lived OAuth refresh token exchanged for a short-lived **access token** on read
   (see [Offline tokens](#offline-tokens-auto-refreshed-access-tokens)). Both kinds share the one namespace/table, so a
@@ -31,7 +32,9 @@ into that workspace's runs.
   run (`entries` = workspace-only for legacy consumers; `scopedEntries(ws, subject)` = `{workspace, user}` for
   run/scorecard harness resolution). For an `offline_token`, `entries`/`scopedEntries` yield a *freshly-minted access
   token* (auto-refreshed before expiry), never the refresh token.
-- **Fail-closed**: no `EVERDICT_SECRETS_KEY` → no secret store → the routes/tools 404 (feature off).
+- **On by default**: with no `EVERDICT_SECRETS_KEY` the control plane generates an **ephemeral** KEK at boot and
+  warns (`apps/api/src/composition/persistence.ts`). That is fine in memory, but on Postgres the key changes every
+  restart and existing secrets can no longer be decrypted — pin `EVERDICT_SECRETS_KEY` for persistent operation.
 
 ## Manage (API + MCP, same core) — scope-aware authz
 `GET /secrets` is open to any authenticated member and returns **your own user secrets always** + **workspace
@@ -41,6 +44,10 @@ workspace scope requires admin (`secrets:write`); user scope is self (no gate, `
 |---|---|---|---|---|
 | HTTP | `PUT /secrets/:name` `{value, scope?}` → 204 | `PUT /secrets/:name/offline-token` `{grant, scope?}` → 200 meta | `GET /secrets` | `DELETE /secrets/:name?scope=` → 204 |
 | MCP | `set_secret {name,value,scope?}` | `set_offline_token {name,tokenUrl,clientId,clientSecret?,refreshToken,oauthScope?,scope?}` | `list_secrets` | `delete_secret {name,scope?}` |
+
+`GET /secrets/usage` (`secrets:read`, admin) is the reverse index: each workspace secret with the live sites that
+reference it (harness env/trace, runtime auth, model API key, settings integrations); unused secrets come back with
+`refs: []`.
 
 The offline-token set is the only secret write that returns a body (200) — the resulting metadata incl.
 `accessTokenExpiresAt` — because registration performs a live grant (below); the token values are still never returned.
@@ -75,10 +82,11 @@ fresh access token on demand — a consumer referencing the secret never deals w
   `apps/api/src/api/secret/offline-token.routes.test.ts` (register→meta, 502 on bad grant, name/body validation).
 
 ## Injection into runs
-At dispatch, a store-backed `SecretProvider` gives the backend **only that tenant's** secrets, which are injected
-into the job env (Nomad alloc / K8s Job) — never crossing tenants. So a harness (e.g. aider) sees
-`OPENAI_API_KEY` etc. as env. Wired in `apps/api/src/main.ts` (`secretsFor: (t) => secretStore.entries(t)`), reusing
-the existing per-tenant `SecretProvider` path (now async).
+At dispatch, a store-backed `SecretProvider` gives the backend **only that tenant's** workspace secrets, which are
+injected into the job env (Nomad alloc / K8s Job) — never crossing tenants. So a harness (e.g. aider) sees
+`OPENAI_API_KEY` etc. as env. Wired in `apps/api/src/composition/execution-scheduling.ts` and
+`apps/api/src/composition/dispatch.ts` (`secretsFor: (tenant) => secretStore.entries(tenant)`). A workspace secret
+change drops the tenant's cached runtime backends so the next dispatch picks up the new value.
 
 ## Referencing a secret from harness `env` (`{secretRef}`)
 A harness's `env` values are **`string | { secretRef: "NAME", scope?: "user"|"workspace" }`** (`EnvValueSchema`,
@@ -90,7 +98,7 @@ a union until resolution).
 
 ### Private harnesses (referencing a `user` secret)
 A harness whose resolved env references a **`user`-scoped** secret is **private to its creator** — only they can see
-or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@everdict/contracts`)
+or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@everdict/domain`)
 + the instance's `createdBy`.
 - **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries for non-owners; `GET /harnesses/:id[/:version]`
   (and the raw `/instance` read) 404 a non-owner. The **owner** is the creator of the *latest* version — the version
@@ -101,9 +109,10 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
 - **Can't run** — even if guessed, `resolveHarnessSecrets` for a non-owner fails: a `user` ref resolves against
   **that submitter's** `user` tier only, which lacks the creator's personal secret → `BadRequestError` (the case
   fails with a clear reason). So privacy is enforced by the secret resolution itself, not just the read filter.
-- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@everdict/contracts`, pure): just before dispatch,
-  both `RunService.track` (single runs) and `ScorecardService.track` (batches, resolved once per batch) swap every
-  `{secretRef, scope}` for its value from the matching tier of `scopedSecretsFor(tenant, submitter)`
+- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@everdict/domain`, pure): just before dispatch,
+  `RunService` (single runs), the scorecard batch drivers (`in-process-batch-driver.ts` / `workflow-batch-driver.ts`,
+  resolved once per batch) and the sandbox lanes swap every `{secretRef, scope}` for its value from the matching tier
+  of `scopedSecretsFor(tenant, submitter)`
   (= `secretStore.scopedEntries` = `{workspace: entries(''), user: entries(submitter)}`), for **all** backends
   including self-hosted (resolved before the job is enqueued). A referenced secret that isn't set in its tier →
   `BadRequestError` listing the missing names (`user:` prefix for a missing personal secret), so the run/case fails
@@ -111,21 +120,23 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
 - **Consumers** (`CommandHarness`, topology runtimes) call `flattenEnv(env, lookup?)` to coerce to `Record<string,
   string>` — post-dispatch the values are already literals; any residual ref is dropped (never emitted as
   `[object Object]`).
-- **Web** — the harness-register env editor is a structured **`KEY + [value | secret]`** row list (not raw text): a
-  "Secret" row picks a workspace secret name from a dropdown (loaded from `GET /secrets`, names-only) or creates one
-  **inline** (`createWorkspaceSecretAction` → `PUT /secrets/:name`). So a first-time user never pastes a raw key into
+- **Web** — the harness-register env editor (`apps/web/src/features/register-harness/ui/env-editor.tsx`) is a
+  structured **`KEY + [value | secret]`** row list (not raw text): a "Secret" row picks a shared or personal secret
+  name (`SecretPicker`, loaded from `GET /secrets`, names-only) or creates one **inline** (`createSecretAction` →
+  `PUT /secrets/:name`). So a first-time user never pastes a raw key into
   a spec. Detail views show a secret-backed var as `NAME · secret` (`envValueText`), never the value.
 - Verified: `packages/domain/src/harness/harness-secrets.test.ts` (literal passthrough, ref resolution, missing-secret throw,
   per-service resolution, process no-op).
 
 ## Example: aider on a LiteLLM-served model
 aider uses LiteLLM internally, so any LiteLLM-served model works — including a **LiteLLM proxy**
-(OpenAI-compatible). Register `examples/harness-templates/aider-litellm.template.json`:
+(OpenAI-compatible). Register the template `examples/harness-templates/aider-litellm.template.json` and its instance
+`examples/harness-templates/aider-litellm-0.74.0.instance.json`; the template (abridged):
 ```jsonc
-{ "kind": "command", "id": "aider-litellm", "version": "0.74.0",
+{ "kind": "command", "category": "cli-agent", "id": "aider-litellm", "version": "1",
   "setup": ["pip install --quiet aider-chat==0.74.0"],
-  "command": "aider --yes --no-git --no-show-model-warnings --message {{task}} --model openai/{{model}} .",
-  "model": "my-model",
+  "command": "aider --yes --no-git … --message {{task}} --model openai/{{model}} .",
+  "model": "chatgpt/gpt-5.4-mini",
   "env": { "OPENAI_API_BASE": "http://litellm.internal:4000" },   // proxy URL (non-secret)
   "trace": { "kind": "none" } }
 ```
@@ -142,8 +153,8 @@ have LiteLLM emit OTel and use the harness `trace: otel`.
 ## Verified
 - Deterministic (`packages/db/src/workspace/secret-store.test.ts`): AES-GCM round-trip + ciphertext≠plaintext;
   set/list(names-only)/entries(decrypted)/delete + cross-workspace isolation + upsert.
-- API (`apps/api/src/server.test.ts`): admin set/list/delete, **value never returned**, bad name → 400,
-  member → 403.
+- API (`apps/api/src/server.test.ts`): member cannot manage workspace (shared) secrets (403) but self-manages
+  personal (user) secrets; a workspace secret change invalidates the tenant's cached runtime backends.
 - **Live LiteLLM** (`scripts/live/litellm-gpt54mini.mjs`): connected the real LiteLLM proxy serving
   `chatgpt/gpt-5.4-mini` (workclaw `infra/litellm`). A declarative `command` harness (zero code) called
   `/v1/chat/completions` with the eval task → the real model's answer was captured in the run's git-diff

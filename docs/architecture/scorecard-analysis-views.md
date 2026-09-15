@@ -2,219 +2,117 @@
 kind: wiki
 title: "Scorecard Analysis + Views (SSOT)"
 status: current
-updated: 2026-07-31
+updated: 2026-09-15
+anchors: [packages/domain/src/scorecard/analysis.ts, apps/web/src/features/analyze-scorecards/model/analysis.ts, packages/application-control/src/view/view-service.ts, packages/contracts/src/records/view.ts]
 ---
 # Scorecard Analysis + Views (SSOT)
 
-> One flexible analysis dashboard over scorecards (filter · group · aggregate · search) that **subsumes** the
-> four scattered lenses (leaderboard / by-harness / trend / compare), plus a saved **`View`** entity that a
-> member creates, keeps **live** (re-runs against current data, not a snapshot), and **shares** with the
-> workspace. Design confirmed with the user (2026-07-03): single dashboard (no panels/versions), private + explicit
-> share, doc-first.
+One flexible pivot over scorecards (filter · group · pivot · measure · sort · search), and a saved **`View`**
+entity: a named pivot recipe a member keeps **live** (it re-runs against current data, never a snapshot) and can
+**share** with the workspace. The conversational surface that drives it — the studio canvas, the agent's
+`apply_view_config`, artifacts and scheduled reports — is [analysis-studio.md](./analysis-studio.md).
 
-## Problem
+## The four lenses are pivots over one dataset
 
-Scorecard analysis is fragmented across four routes, each with its own page, picker, and endpoint:
-
-| Lens | Route | Data source | What it is |
-| --- | --- | --- | --- |
-| Leaderboard | `/scorecards/leaderboard` | `GET /scorecards/leaderboard?dataset` | rank harness×model by score, per benchmark |
-| By harness | `/scorecards/by-harness` | client group of `listScorecards` | each harness's score per benchmark |
-| Trend | `/scorecards/trend` | `GET /scorecards/trend?dataset&harness` | score over time |
-| Compare | `/scorecards/compare` | `GET /scorecards/diff?baseline&candidate` | regressions/improvements between two |
-
-Each is a **fixed** slice. The user wants a **stock-analysis-style** dashboard: flexible filters, flexible
-grouping, and search — one surface where any of those four (and combinations) are just *configurations* — and the
-ability to **save** a configuration as a shareable `View`.
-
-## Key insight: the four lenses are pivots over one dataset
-
-`GET /scorecards` (`listScorecards`) already returns every record with the dimensions needed to pivot
-(`ScorecardRecord`, per-case results omitted — light):
+The scorecard list record carries every dimension a pivot needs without per-case results:
 
 - **dimensions**: `dataset.{id,version}` · `harness.{id,version}` · `models.primary`/`observed` · `judgeModels` ·
-  `status` · `origin.{source,repo,sha,ref}` · `createdBy` · `createdAt`
-- **measures**: `summary[]` = per-metric `{metric, count, mean, passRate}` (the score) · row `count`
+  `status` · `origin.{source,repo}` · `createdBy` · `createdAt`
+- **measures**: `summary[]` = per-metric `{metric, count, mean, passRate}` · the row count
 
-So the whole analysis is a **client-side pivot** over that array — no new heavy backend for the dashboard itself:
-
-| Lens | = configuration of the pivot |
-| --- | --- |
-| Leaderboard | filter `dataset=X` · group by `[harness, model]` · measure `passRate` · sort desc |
-| By harness | group rows by `harness` · pivot columns by `dataset` · measure `passRate` |
-| Trend | filter `dataset=X, harness=Y` · group by `time bucket(createdAt)` · measure `passRate` → line |
-| Compare | pick two groups (e.g. two `harness.version`s, or two time buckets) · show **Δ** of `passRate` |
+So a leaderboard (filter one dataset, group by `[harness, model]`, `passRate`, sort desc), a by-harness matrix
+(group by `harness`, pivot by `dataset`) and a trend (group by a time bucket, `line`) are configurations of one
+engine. The dedicated `/scorecards/leaderboard`, `/scorecards/by-harness`, `/scorecards/trend` and
+`/scorecards/compare` web pages, and the `GET /scorecards/leaderboard` · `/trend` · `/diff` endpoints, remain as
+separate surfaces.
 
 ## The analysis model
 
-A single **AnalysisConfig** drives the dashboard. It is also exactly what a `View` persists.
+`AnalysisConfig` (`packages/domain/src/scorecard/analysis.ts`) drives the pivot and is exactly what a `View`
+persists:
 
 ```ts
-type Dimension =
-  | 'dataset' | 'datasetVersion'
-  | 'harness' | 'harnessVersion'
-  | 'model' | 'judgeModel'
-  | 'status' | 'originSource' | 'repo' | 'owner'
-  | 'day' | 'week' | 'month'          // time buckets over createdAt
+type AnalysisDimension =
+  | "dataset" | "datasetVersion" | "harness" | "harnessVersion" | "model" | "judgeModel"
+  | "status" | "originSource" | "repo" | "owner" | "day" | "week" | "month";   // time buckets over createdAt
 
 interface AnalysisConfig {
-  filters: {                          // AND of these; each value list is OR
-    dataset?: string[]; harness?: string[]; model?: string[]; status?: string[]
-    originSource?: string[]; owner?: string[]; repo?: string[]
-    from?: string; to?: string        // createdAt range (ISO)
-    tags?: string[]
-  }
-  groupBy: Dimension[]                // 0..2 dims → grouped rows (e.g. [harness, model])
-  pivotBy?: Dimension                 // optional column dimension (e.g. dataset) → matrix
-  metric: string                      // which summary metric (default: the only/most-common one)
-  measure: 'passRate' | 'mean' | 'count' | 'latest'
-  compare?: { dim: Dimension; a: string; b: string }  // Δ between two values of a dim
-  sort?: { by: 'measure' | 'label' | 'time'; dir: 'asc' | 'desc' }
-  search?: string                     // free-text over dims (harness/model/dataset/owner…)
-  viz: 'table' | 'bars' | 'line'      // line only meaningful when grouped by a time bucket
+  filters: { dataset?, harness?, model?, judgeModel?, status?, owner?, originSource?: string[]; from?, to?: string };
+  groupBy: AnalysisDimension[];   // 0..2 dims → grouped rows
+  pivotBy?: AnalysisDimension;    // optional column dimension → matrix
+  metric?: string;                // which summary metric
+  measure: "passRate" | "mean" | "count" | "latest";
+  sort: { by: "measure" | "label"; dir: "asc" | "desc" };
+  search?: string;
+  viz: "table" | "bars" | "line";
+  includeIncomplete?: boolean;    // superseded / cancelled / queued / running are excluded by default
 }
 ```
 
-Rendering (S1, all client-side, extends the existing by-harness grouping code + shared atoms
-`shared/lib/format`, `shared/ui/{score,chip}`):
-
-- **table** — grouped rows (group label = the `groupBy` dims), measure cell(s); when `pivotBy` set, one column
-  per pivot value (matrix); when `compare` set, an extra **Δ** column with a regression/improvement tone.
-- **bars** — horizontal bars of the measure per group (leaderboard feel).
-- **line** — measure over the time bucket (trend feel), reusing the existing SVG sparkline in `trend/page.tsx`.
-
-The measure comes from `summary`: `passRate` (fallback `mean`) via the shared `fmtScore`/`rateHealth` atoms; a
-group's value = mean of its rows' scores (or `latest` = most recent row's score). "Δ / worse" uses the same
-regression semantics as `diffScorecards` but computed over the grouped values.
-
-`superseded`/incomplete scorecards are excluded by default (a filter toggle can include them).
+- **Two engines in lockstep.** `computeAnalysis` runs client-side in the web
+  (`apps/web/src/features/analyze-scorecards/model/analysis.ts`) and server-side in the domain, where it powers
+  `POST /scorecards/query` and MCP `query_scorecards` (`apps/api/src/api/scorecard/request/analysis-query.ts`).
+  A parity test (`apps/web/src/features/analyze-scorecards/model/analysis-parity.test.ts`) holds them together,
+  and a compile-time guard keeps the API's dimension list equal to the domain union.
+- **Case-weighted aggregation.** A group's `passRate`/`mean` is Σ(rate·n)/Σn over its scorecards, not the mean of
+  per-scorecard rates, so a 5-case smoke run does not weigh the same as a 500-case suite. Rows carry `cases` (the
+  sample size) separately from `count` (the scorecards); a summary row with no usable count weighs 1. A
+  scorecard lacking the selected metric is reported as `missing`, never substituted with another metric.
+- **Rendering** — `table` (grouped rows; one column per pivot value when `pivotBy` is set), `bars`, and `line`
+  (over the time bucket), all through `shared/ui/charts` (see skill `web`). Ratio measures pin the axis to 0–100%.
+- **Raw rows as a drill-down.** Clicking a mark scopes a table of the underlying scorecards to that group
+  (`filterScorecards`/`groupKeyOf`/`timeDimensionOf` apply the identical predicate, so the rows cannot disagree
+  with the number). It pages 50 rows at a time with an explicit "showing N of M". Re-shaping the analysis clears
+  the focus.
 
 ## The `View` entity
 
-A `View` is a **named, saved `AnalysisConfig`** — the pivot recipe, not a data snapshot. Opening a View re-runs the
-pivot against the **current** `listScorecards`, so new scorecards appear automatically (the "macro / continuous" ask).
+A `View` (`packages/contracts/src/records/view.ts`) is a named, saved `AnalysisConfig` — the recipe, not the
+data. Opening a View re-runs the pivot against current scorecards.
 
 ```ts
 interface ViewRecord {
-  id: string
-  tenant: string                       // workspace = tenant = trust-zone
-  name: string
-  config: AnalysisConfig               // the saved recipe (validated by Zod at the boundary)
-  visibility: 'private' | 'workspace'  // private (owner-only) | shared read-only to members
-  createdBy: string                    // subject; owner
-  createdAt: string
-  updatedAt: string
+  id: string; tenant: string; name: string;
+  config: unknown;                      // opaque jsonb to the control plane; the web owns its shape
+  visibility: "private" | "workspace";  // owner-only | shared read-only to members
+  createdBy: string; createdAt: string; updatedAt: string;
 }
 ```
 
-**Ownership & sharing (confirmed: private + explicit share).**
-- Created **private** — only the creator sees it (scoped `createdBy === principal.subject`).
-- Owner flips `visibility: 'workspace'` → every member sees it **read-only** in a shared list.
-- **Edit / delete / rename / change visibility** = **creator OR workspace admin** (mirror the schedule edit
-  gate: enforced in `ViewService`, route/MCP inject `actor={subject,isAdmin}`; UI gates the buttons, control
-  plane is authoritative). A non-owner opening a shared View can **fork** it (save a copy as their own private
-  View) but not mutate the original.
-- List response = my private Views + all `workspace`-visible Views; another workspace's View reads **404**.
-
-## Architecture & slices
-
-Follows the established entity pattern (like `schedules`): one service core, two transports (HTTP + MCP),
-mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
-
-### S1 — Unified analysis dashboard (no backend change)
-- New route `/{ws}/scorecards/analyze` — the flexible pivot over `listScorecards`, client-side. Filter bar +
-  group-by/pivot pickers + measure/metric + sort + search + viz(table/bars/line). Reproduces all four lenses.
-- `AnalysisConfig` lives in URL query (`?` params) so every configuration is deep-linkable/bookmarkable even
-  before Views exist.
-- Old routes (`leaderboard`/`by-harness`/`trend`/`compare`) → thin redirects to `/analyze?…preset`. The
-  scorecards list page's analytics segment points at `/analyze`. Existing server endpoints
-  (`leaderboard`/`trend`/`diff`) stay for MCP/agents; the web dashboard computes from `listScorecards`.
-- Reuse: by-harness grouping logic, trend SVG sparkline, `shared/lib/format`, `shared/ui/{score,chip,stat-card}`.
-- **The pickers are GONE (maintainer decision, 2026-07-31).** The dashboard's manual chrome — the stat tiles, the
-  preset row, the free-text search, the filter bar, and the group/pivot/measure/sort/viz strip — was removed:
-  `/{ws}/scorecards/analyze` is now a **blank canvas the conversation draws on** (analysis-studio C). Creating an
-  analysis IS starting a conversation, so the page lands empty with the agent chat open on a NEW conversation, and
-  `apply_view_config` is the only thing that puts a lens on the screen (a saved View / a deep link fills it on
-  arrival instead). `AnalysisConfig`, the URL codec, and `computeAnalysis` are untouched — only the surface that
-  edited them by hand is. What remains on the canvas: the config's own chips (so the lens is readable back), one
-  save control (save as a View / update the open one), the chart or table, and the drill-down below it.
-- **Raw-data layer (added 2026-07-29; drill-down-only since 2026-07-31).** The aggregate is never the whole story,
-  so the canvas can list the scorecard rows it was computed from — but only where the member ASKED: it renders
-  after a mark is clicked, not as a standing dump under every chart. It is NOT a fourth `viz` value — `viz` is
-  bound to the domain/API `AnalysisConfig` enum (`analysis-query.ts`), and raw rows are orthogonal to the
-  aggregate shape, so they render for every viz. `filterScorecards`/`groupKeyOf`/`timeDimensionOf` (exported from
-  the same model module the pivot uses) guarantee the table applies the identical predicate — the rows can't
-  disagree with the numbers above them. Clicking any mark (bar, line bucket, table row) scopes the table to that
-  group with a clearable chip; re-shaping the analysis clears the focus, since the group key no longer means
-  anything. The table caps at 50 rows with an explicit "showing N of M" expander — never a silent truncation.
-- **Charts come from `shared/ui/charts`** (see skill `web`): one palette (`--chart-*`, CVD-validated per surface),
-  one axis/grid/tooltip/legend implementation, entity-stable color slots. Ratio measures pin the axis to 0–100%;
-  other measures auto-scale to their own range.
-- **Case-weighted aggregation (fixed 2026-07-29).** `passRate`/`mean` over a group are Σ(rate·n)/Σn, not the mean
-  of per-scorecard rates — a 5-case smoke run must not weigh the same as a 500-case suite (it displayed 0.900
-  where the answer was 0.802). Rows carry `cases` (the sample size) separately from `count` (the scorecards),
-  because a rate without its n cannot be judged. A summary row with no usable count weighs 1 rather than
-  vanishing. The domain engine and the web copy are fixed in lockstep; V4 removes the duplication.
-- **Captures accumulate on the workspace filesystem.** `POST /views/:id/snapshots` (+ MCP
-  `capture_view_snapshot`) computes the View server-side and writes `views/<id>/<capturedAt>.json` — the
-  numbers, the config that produced them, and the sample size. A report-mode schedule captures on every fire
-  before its agent turn, so the data record survives a failed interpretation. Reads go through the existing
-  `/fs` surface (there is no snapshot list endpoint by design). See `docs/architecture/workspace-filesystem.md`.
-
-### S2 — `View` entity (persist & load) — **SHIPPED**
-- `@everdict/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + migration `0038_create_views.sql`
-  (`everdict_views`: id, tenant, name, config `jsonb`, visibility, created_by, created_at, updated_at; single index
-  `(tenant, visibility, created_at DESC)` — the one read path is "workspace-shared + my-private, newest first").
+- **Storage** — `ViewStore` with in-memory and Postgres implementations (`packages/db/src/results/view-store.ts`),
+  migration `0038_create_views.sql` (`everdict_views`, one index on `(tenant, visibility, created_at DESC)`).
   `listVisible(tenant, subject)` = `visibility='workspace' OR created_by=subject`.
-- `apps/api`: `ViewService` (CRUD + ownership gate — edit/delete = creator **or** workspace admin, via injected
-  `actor{subject,isAdmin}`, mirrors `ScheduleService`) + routes `POST/GET/GET :id/PATCH :id/DELETE :id /views` +
-  MCP tools `create/list/get/update/delete_view` (BFF↔MCP parity).
-  - **authz reuse (no new actions):** reads gate on `scorecards:read`, writes on `scorecards:run`. A View is just a
-    saved lens over scorecards, so it inherits scorecard permissions rather than introducing a `views:*` axis.
-  - `config` is **opaque** (`z.unknown()` → jsonb) at the control plane; the **web** owns its shape. Stored as the
-    flat params form (`configToStored` = `Object.fromEntries(configToParams)`), so loading (`storedToConfig` →
-    `paramsToConfig`) re-validates/normalizes every field and can never yield an invalid config. Recipe, not
-    snapshot — no result data is persisted.
-  - Read of another workspace's / another user's private View → **404** (existence-leak-safe), not 403.
-- `apps/web`: `entities/view` (Zod mirror) + `SavedViewsBar` (save-current / list / load / owner manage) wired into
-  `CustomAnalyzer`. Opening a View hydrates the dashboard from its `config` and re-runs over current data.
+- **Service** — `ViewService` (`packages/application-control/src/view/view-service.ts`): created private by
+  default; edit, delete, rename and visibility changes are allowed to the creator or a workspace admin. Another
+  workspace's View, or another member's private one, reads **404**, not 403.
+- **Transports** (`apps/api/src/api/view/view.routes.ts` · `view.mcp.ts`): `POST/GET /views`,
+  `GET/PATCH/DELETE /views/:id`, and MCP `create_view` · `list_views` · `get_view` · `update_view` ·
+  `delete_view`. Reads gate on `scorecards:read`, writes on `scorecards:run` — a View is a lens over scorecards,
+  so it inherits their permissions rather than adding a `views:*` axis.
+- **Config round trip** — the web stores the flat params form (`configToStored`) and loads it through
+  `storedToConfig` → `paramsToConfig`, which re-validates and normalizes every field, so a stored recipe can
+  never open as an invalid config.
+- **Captures** — `POST /views/:id/snapshots` (MCP `capture_view_snapshot`, `ViewSnapshotService`) computes the
+  View server-side and writes `views/<id>/<capturedAt>.json` onto the workspace filesystem: the numbers, the
+  config that produced them and the sample size. A report-mode schedule captures before its agent turn. There is
+  no snapshot list endpoint; reads go through `/fs` (`docs/architecture/workspace-filesystem.md`).
 
-### S2b — View as a **first-class object** (nav + own routes) — **SHIPPED**
-Views aren't buried inside the analyze dashboard; they're a top-level concept.
-- **Sidebar nav** entry "Views" (`nav-config.ts`, `Bookmark`) → `/{ws}/views`; auto-appears in the command palette
-  (`ALL_NAV_ITEMS`).
-- `/{ws}/views` — **list/manage** page: `ViewList` cards (name · visibility badge · `describeConfig` config-summary
-  chips · owner avatar · "edited n minutes ago" · ⋯ kebab[share-toggle / delete for owner-or-admin]). Empty-state CTA →
-  build one in the analyze dashboard.
-- `/{ws}/views/[id]` — **open** page (clean canonical URL): renders `CustomAnalyzer` hydrated from the View's
-  `config`, live re-run; missing/other-user-private → `notFound()` (404, existence-leak-safe).
-- Shared server loader `loadAnalysisData()` (`api/load-analysis-data.ts`, `server-only`) dedupes the
-  scorecards+members+views+principal fetch across the analyze dashboard, `/views`, and `/views/[id]`. Returns
-  `{scorecards, authors, savedViews, subject, canManage, isAdmin}`; `isAdmin` lets admins manage others' shared
-  Views from both the list kebab and the `SavedViewsBar`.
+## Web
 
-### S3 — Sharing + live — **SHIPPED (fork deferred)**
-- Visibility toggle (`private ↔ workspace`) in the owner-manage row + control-plane enforcement; shared Views listed
-  for all members; deep-link `/{ws}/scorecards/analyze?view=<id>` (server resolves the linked View → custom mode →
-  live re-run). "Copy link" for shared Views.
-- "Live" is inherent (re-run on open) — the dashboard footer already reads "based on N scorecards · live aggregation over current data".
-- **Deferred:** a **fork** action for non-owners (copy a shared View into a private one). Not yet built; non-owners
-  load-and-tweak (URL state) but can't persist over someone else's View.
+- `/{ws}/scorecards/analyze` — the studio canvas (`CustomAnalyzer`), described in
+  [analysis-studio.md](./analysis-studio.md). A `?view=<id>` deep link or config params fill it on arrival;
+  `SaveAnalysisButton` saves the current lens as a View or updates the open one.
+- `/{ws}/views` — the sidebar's Views entry (`apps/web/src/widgets/app-shell/ui/nav-config.ts`). `ViewList` cards
+  show the name, a visibility badge, `describeConfig` chips and the owner; the owner or an admin can toggle
+  sharing or delete.
+- `/{ws}/views/[id]` — opens a View in `CustomAnalyzer`, live; a missing or foreign-private View is `notFound()`.
+- `loadAnalysisData()` (`apps/web/src/features/analyze-scorecards/api/load-analysis-data.ts`) is the shared
+  server loader for the analyze canvas and both Views pages.
 
-### S4 — (optional / future)
-- Server-side `POST /scorecards/analyze` (config → grouped result) for large workspaces where client-side pivot
-  over all scorecards gets heavy; the web transparently switches when the record count crosses a threshold.
-- "Macro" extensions if wanted later: pin a View to the overview, or subscribe (notify on regression in a View's
-  metric — reuse the schedule regression-alert plumbing). **Not** in the initial scope (no panels/versions per the
-  user).
+## Not built
 
-## Non-goals (this iteration)
-- No multi-panel dashboards, no View versioning (user: "no need for panels or versions").
-- No new snapshotting — Views are recipes, always live.
-- No per-case drill-down inside the dashboard (that stays on the scorecard detail page); the dashboard operates on
-  the light `summary`, not per-case results.
-
-## Open questions
-- Default `metric` when a workspace mixes metric names across scorecards — pick the most frequent, expose a
-  selector. (Most workspaces have one.)
-- Time-bucket zero-filling for the `line` viz (gaps vs interpolate) — start with gaps.
+- **Fork** — a non-owner cannot copy a shared View into a private one; they can load it and change the URL state,
+  but not persist over someone else's View.
+- Multi-panel dashboards and View versioning.
+- Per-case drill-down inside the pivot — it operates on the light `summary`; per-case results stay on the
+  scorecard detail page.

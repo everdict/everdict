@@ -171,15 +171,8 @@ for (const doc of docs) {
   const KNOWN_ABSENT = new Map([
     // Generated into the USER's repository by the CI setup-PR flow, never present in ours.
     [".github/workflows/everdict-eval.yml", "generated into the user repo by POST /workspace/ci/links/setup-pr"],
-    // Removed with the `docker` runtime kind in slice 5b; the prose around it says so and cites 038c31d.
-    ["examples/runtimes/docker-1.0.0.json", "removed with the docker runtime kind (slice 5b, 038c31d)"],
     // Lives in the aegra repository, not this one — the paragraph is instructions for setting aegra up.
     ["examples/browser_agent/", "a path inside aegra's repository, not everdict's"],
-    // Dropped with the Connected-accounts feature by migration 0046; the page carries a SUPERSEDED banner.
-    ["packages/db/src/connection-store.test.ts", "dropped with everdict_connections (migration 0046)"],
-    ["apps/api/src/connection-service.test.ts", "dropped with everdict_connections (migration 0046)"],
-    // The pre-re-architecture package, named in prose that explains where its contents went.
-    ["packages/core", "the pre-re-architecture package, cited historically"],
   ]);
 
   // `.env` and friends are gitignored by design — the docs tell you to create them.

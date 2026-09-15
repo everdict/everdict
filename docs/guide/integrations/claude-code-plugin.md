@@ -2,7 +2,8 @@
 kind: wiki
 title: "Claude Code plugin"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [plugin/.mcp.json, plugin/.claude-plugin/plugin.json, plugin/commands/setup.md, plugin/commands/eval.md, .claude-plugin/marketplace.json]
 ---
 # Claude Code plugin
 
@@ -28,7 +29,7 @@ call `run_scorecard` but does not know what a harness is will flail. The plugin 
 
 | Piece | What it is |
 | --- | --- |
-| **MCP server** | the `everdict` tools, pointed at your control plane |
+| **MCP server** | the `everdict` tools, pointed at `${EVERDICT_MCP_URL}` |
 | **`everdict` skill** | the domain model and eval workflows, so the session knows what the entities are |
 | **`/everdict:setup`** | walks a fresh session through connecting and registering its first harness |
 | **`/everdict:eval`** | runs an evaluation end-to-end and reports the verdict |
@@ -50,15 +51,22 @@ Or just say what you want — the session has the tools and the vocabulary:
 
 ## Headless
 
-For CI or a machine with no interactive session, install without the marketplace flow and authenticate
-with an API key rather than OAuth:
+An interactive session logs in through the browser (OAuth) on first tool use. For CI or a machine with
+no interactive session, install from the command line and register the server with an API key instead
+— the bundled server sends no credential of its own:
 
 ```bash
+claude plugin marketplace add everdict/everdict --scope user
+claude plugin install everdict@everdict --scope user
+
 export EVERDICT_MCP_URL=https://everdict.internal/mcp
 export EVERDICT_API_KEY=ak_…
+claude mcp add --transport http everdict "$EVERDICT_MCP_URL" \
+  --header "Authorization: Bearer $EVERDICT_API_KEY"
 ```
 
-Mint the key from the account page in the web app, or `POST /internal/tenant-keys`.
+Mint the key under **Settings → API keys** in the web app, or with `POST /internal/tenant-keys`
+(see [MCP](mcp.md)).
 
 ## Two things people conflate
 

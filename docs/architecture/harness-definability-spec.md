@@ -1,18 +1,18 @@
 ---
 kind: spec
 title: "Harness definability — a client is a target, an environment is an entity, the case reaches the harness"
-status: accepted
-updated: 2026-09-02
-anchors: [packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/harness/harness-template.ts, packages/contracts/src/execution/environment.ts, packages/contracts/src/execution/eval-case.ts, packages/job-runner/src/registry.ts]
+status: landed
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/execution/environment.ts, packages/application-control/src/environment/case-environment.ts, packages/harnesses/src/command.ts]
 ---
 # Harness definability — a client is a target, an environment is an entity, the case reaches the harness
 
-> **Status:** spec for Pillar 1 of `docs/architecture/evolution-program-gap-map.md` (gaps G1.1–G1.4). Nothing
-> below is implemented unless a section says **Landed**. Each section names the counterexample that has to be
-> RED before its change lands, because a definability gap closed without one is a schema that accepts more
-> and a runtime that still does the old thing.
+> **Status:** spec for Pillar 1 of `docs/architecture/evolution-program-gap-map.md` (gaps G1.1–G1.4). Every
+> section is **Landed**; each section's note says what shipped and where the shipped shape differs from the
+> decision text, which is kept as written. Each section names the counterexample that had to be RED before
+> its change landed.
 
-## What holds, and what this spec must not restate
+## What held when this was written (2026-09-02), and what this spec must not restate
 
 Three harness kinds in one closed union (`packages/contracts/src/harness/harness-spec.ts`): `process`,
 `service`, `command`. Template + Instance is the only registration path
@@ -28,14 +28,21 @@ agent's actions land — and today that target is a browser: `TopologyTargetSche
 ## §1 — A client harness is a harness with a target, and a target is not always a browser (G1.1)
 
 > **Landed 2026-09-02, the declaration and its acquisition:** `TopologyTargetSchema` is a discriminated union —
-> `browser` (unchanged), `api` (`baseUrl` or `acquire.mode = service`, `openapi`, `auth`, `observe`), `os` (`acquire.mode =
+> `browser` (unchanged), `api` (`baseUrl` or `acquire.mode = service`, `openapi`, `auth`), `os` (`acquire.mode =
 > service`) — with `targetDefects` refusing an unobtainable target where the spec enters
 > (`packages/contracts/src/harness/harness-spec.ts`). A `command` template may declare a static `api` target, carried
 > onto the resolved spec, reaching the CLI as `{{target.baseUrl}}` and `EVERDICT_TARGET_BASE_URL`. The topology
-> backend acquires an `api` target statically (`staticApiAcquirer`, wiring `target_base_url`) or through a session
-> API; every browser-only read (extension image, saved profile, observation delivery) now narrows on the kind. **Not
-> landed:** the recording proxy that observes an api client's exchanges as trace events, and any provisioning of an
-> `os` target — both refuse by name today rather than pretend.
+> backend acquires an `api` target statically (`staticApiAcquirer`, wiring `target_base_url`, in
+> `packages/topology/src/front-door/target-acquirer.ts`) or through a session API; every browser-only read
+> (extension image, saved profile, observation delivery) narrows on the kind.
+>
+> **Landed differently, 2026-09-03 — observation and the desktop:** the exchanges are NOT observed from the target.
+> Observation became the world provider's obligation (`docs/architecture/world-and-engagement-model.md`): an
+> environment declares `observe: { from }` (`packages/contracts/src/execution/environment.ts`), and the platform
+> fetches that recording after the drive onto the observation channel as `EnvDelta{kind:"world-recording"}`
+> (`packages/application-execution/src/run-case.ts`), not as a trace event. A non-empty `observe` on an `api` target
+> is refused by `targetDefects`, naming the environment as the place to declare it. Nothing provisions an `os`
+> target; a desktop is acquired through a session API, or provided by an environment as `provides: { kind: "session" }`.
 
 **The gap.** The program names "a client that interacts with an environment directly" as a harness shape.
 Today that agent is written as a `command` whose CLI happens to be an HTTP client, or as a topology whose
@@ -80,18 +87,22 @@ one that matters: a target that resolves and is not observed is a declaration, n
 > lane — resume, retry, the Temporal driver, the single run — re-resolves through that seal rather than through
 > a fresh `latest` read, refusing when the document's bytes have moved. `EXPERIMENT_AXES` gains `environment`,
 > so two batches over one dataset and two environment versions read as an environment confound instead of as a
-> change to the harness under test. **Not landed:** the `service` environment kind (nothing provides one yet, so
-> the schema would be a plan), a `source`+`build` recipe for environments, and `subject.type: "environment"` —
-> `subject.type: "environment"` — a campaign evolves one, verified from the manifest seal (the harness stamp
-> names the harness, so a subject that is not the harness is read from what each side sealed), with the
-> harness held constant as an explicit check and the `environment` axis exempted from the confound refusal
-> because it is that campaign's TREATMENT. Adoption registers the candidate through the environment registry
-> under the dataset action pair, with the same owner-preserving write every other lane uses. **Not landed:**
-> the `service` environment kind's DYNAMIC half and a `source`+`build` recipe. Both were deferred with
-> evidence rather than forgotten — see "What the two deferred arms actually need" below. *(Since 2026-09-03 a
-> STATIC provided world is landed — an environment may declare where an already-running world is, and the
-> case reaches it by coordinates: `docs/architecture/world-and-engagement-model.md`. What remains of the
-> `service` arm is bring-up and teardown.)*
+> change to the harness under test. `subject.type: "environment"`
+> (`packages/contracts/src/records/evolution-campaign.ts`) — a campaign evolves one, verified from the manifest
+> seal (the harness stamp names the harness, so a subject that is not the harness is read from what each side
+> sealed), with the harness held constant as an explicit check and the `environment` axis exempted from the
+> confound refusal because it is that campaign's TREATMENT. Adoption registers the candidate through the
+> environment registry under the dataset action pair, with the same owner-preserving write every other lane uses.
+>
+> **Landed 2026-09-03, the two deferred arms, in a different shape than the decision below:** the `service` kind
+> is not a union arm. An environment declares `provides: { kind: "static" | "session" | "topology" }`
+> (`packages/contracts/src/execution/environment.ts`). A static world's coordinates are attached at resolution;
+> `WorldProvidingDispatcher` (`packages/application-control/src/environment/world-provider.ts`) opens a session
+> world, or creates (or joins a shared) topology world, around the dispatch — a created world is recorded in
+> `everdict_created_worlds` and released only after a read-back. An
+> environment carries an `image` and a `source`+`build` recipe, which `CampaignBuildService` builds. The case
+> names an environment as `env: { kind: "ref", id, version? }` rather than `env: { ref: … }`. The model and its
+> invariants are `docs/architecture/world-and-engagement-model.md`.
 
 ### What the two deferred arms actually need (recorded 2026-09-03)
 
@@ -99,8 +110,9 @@ This section exists because §2 above proposed both arms before the entity was b
 the reasons they are not one-line schema additions. A reader arriving with either idea is answered here
 instead of re-running the sweep.
 
-**A `service` environment — a topology the environment PROVIDES.** The idea is right and the machinery it
-would reuse does not fit as it stands:
+**A `service` environment — a topology the environment PROVIDES.** ✅ *Landed 2026-09-03 as `provides`, with the
+port, worklist and read-back teardown this paragraph asks for — see the §2 note above. The original reasoning:*
+The idea is right and the machinery it would reuse does not fit as it stands:
 
 - `TopologyRuntime.ensureTopology(spec: ServiceHarnessSpec, zone?)` (`packages/topology/src/deploy/topology-runtime.ts`)
   is keyed on a HARNESS spec and warm-pooled per `(harness, version, zone)`. An environment topology has no
@@ -168,6 +180,8 @@ same treatment two image digests already get.
 > contract is declarative (`docs/command-harness.md`), the refusal fires at registration when a `conversation`
 > block has no `{{conversation}}` slot or no `{{resume}}`, and the two shipped templates are worked examples to
 > copy. A workspace that runs that CLI writes ten lines; nobody here can write them on their behalf.
+> Two parts of the decision below did not ship: the contract test names the two recipes rather than walking the
+> directory (`apps/api/src/core/harness/harness-seed.test.ts`), and no delegation-profile example accompanies them.
 
 **The gap.** Codex ships as a one-shot `command` recipe (`examples/bundles/codex-pinch/bundle.json`: `codex
 exec … < /dev/null`, no `conversation`). Hermes appears only as an example name in an environment comment.
@@ -196,7 +210,9 @@ token the first turn reported.
 > case's id and environment declaration from the job-runner, and `CommandHarness` renders the tokens shell-quoted
 > (`packages/harnesses/src/command.ts`); `ProcessTemplateSpecSchema.resources` rides the resolved process spec; and
 > `harnessResourcesOf` is the ONE predicate the scheduler, the K8s manifest and the Nomad manifest read the harness's
-> box through — each used to spell `kind === "command"` itself. `case.target.baseUrl` waits for §1.
+> box through — each used to spell `kind === "command"` itself. `case.target.baseUrl` never joined the allowlist:
+> §1 delivers the same value as `{{target.baseUrl}}` / `EVERDICT_TARGET_BASE_URL`, and a provided world's
+> `target_base_url` wiring takes precedence over the harness's own `target` (`packages/harnesses/src/command.ts`).
 
 **The gap.** A command template sees `{{task}}`, `{{model}}`, `{{run_id}}`, `{{conversation}}` and its own
 `params` (`packages/harnesses/src/command.ts`); nothing carries the CASE

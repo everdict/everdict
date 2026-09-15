@@ -2,7 +2,8 @@
 kind: wiki
 title: "The product timeline — Product ⊃ Release over an imported version ledger"
 status: current
-updated: 2026-08-16
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/product.ts, packages/contracts/src/wire/product/product.ts, apps/api/src/api/product/product.routes.ts, packages/domain/src/product/readiness.ts, apps/web/src/app/[workspace]/product/[id]/page.tsx]
 ---
 # The product timeline — Product ⊃ Release over an imported version ledger
 
@@ -25,12 +26,13 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
     kept — a workspace naming its products in its own language would otherwise get `product-1`, `product-2`,
     a worse address than the uuid this replaces) and immutable afterwards, for the reason a team key is: an
     address that follows a rename breaks every link that was ever shared. Unique per workspace, and the
-    service mints it because uniqueness is a question only the store can answer. Resolution lives in
-    `ProductService.get`, so HTTP, MCP and every headless caller take **either form** without learning the
-    rule; the discriminator is the ID's shape (uuid → id, anything else → slug), never the slug's, because a
-    stored slug today's minting rule would not produce must still resolve. The web canonicalizes at the
-    detail route (an id-spelled URL redirects to the slug), the same normalization the issue detail does for
-    `ENG-12`.
+    service mints it because uniqueness is a question only the store can answer. Resolution is one function,
+    `findProductByRef` (`application-control` `product/product-ref.ts`), shared by `ProductService` and
+    `ProductVersionSync`, so HTTP, MCP, Sync and every headless caller take **either form** without learning
+    the rule; the discriminator is the ID's shape (uuid → id, anything else → slug, falling back to id), never
+    the slug's, because a stored slug today's minting rule would not produce must still resolve. The web
+    canonicalizes at the detail route (an id-spelled URL redirects to the slug), the same normalization the
+    issue detail does for `ENG-12`.
   - `services[]` — the tracked composition. Each names a GitHub repository (`host` for GHE), a `source`
     (`releases` | `tags`), an optional `tagPrefix` (monorepos release several services from one repo) and an
     optional `path` (where the service lives inside the repository). The NAME is the timeline's key; changing
@@ -39,37 +41,41 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
     is (host, repository, source, tagPrefix), and two services under one repo-wide tag stream genuinely move
     together, so folding the path into the stream identity would declare one stream to be two and would reset
     a watermark for an edit that changed nothing about what is read. Composition, not provenance.
-  - `series[]` — the watch series: one question asked repeatedly (`dataset × harness × judges`). The `key`
-    is the trend's durable identity (scorecards stamp it; relabeling never re-keys history). Capability refs
-    default to `latest` — a standing series evaluates whatever is current, which is how it composes with the
-    merge→re-pin CI flow (a re-pinned harness instance is picked up with zero coupling). Refs are validated
-    against the registries at write time: a dangling id would fail every auto-run and read as "the product
-    got worse" instead of "the declaration is broken".
+  - `series[]` — the watch series (at most `PRODUCT_SERIES_LIMIT` = 20): one question asked repeatedly
+    (`dataset × harness × judges`). The `key` is the trend's durable identity (scorecards stamp it; relabeling
+    never re-keys history). Capability refs default to `latest` — a standing series evaluates whatever is
+    current, which is how it composes with the merge→re-pin CI flow (a re-pinned harness instance is picked up
+    with zero coupling). Refs are validated against the registries at write time: a dangling id would fail
+    every auto-run and read as "the product got worse" instead of "the declaration is broken".
   - `autoEval` — `{enabled, runtime?}`; on by default.
-  - `history[]` — the tracker's record-embedded audit trail (`appendHistory`, 200 cap).
+  - `history[]` — the tracker's record-embedded audit trail (`appendHistory`, capped at
+    `TRACKER_HISTORY_LIMIT` = 200).
 - **Release** (`product/release.ts`) — a checkpoint: `planned → released | cancelled`, `targetDate`
   (calendar date), optional `seriesKeys` selection (absent = every series), optional `components[]` — the
-  composition it ships (mig 0162; see §"What a release ships" below). **`released` is a gate**: the
-  transition takes `{openIssues, regressedSeries, force}` (counts supplied by the caller — the tracker's
-  rule) and refuses with a 409 naming both while anything blocks; `force: true` ships anyway and is recorded
-  on the fact and in the history (event `released`, `forced: true`). A released release is history — it
-  cannot reopen. Re-planning a cancelled one is fine.
+  composition it ships (mig 0162; see §"What a release ships" below). **`released` is a gate**: the domain
+  transition takes `{openIssues, regressedSeries, force}` (counts `ProductService` computed from readiness —
+  the tracker's rule) and refuses with a 409 naming both while anything blocks; `force: true` ships anyway
+  and is recorded on the fact and in the history (event `released`, `forced: true`). A released release is
+  history — it cannot reopen, be edited or be deleted, because the next release's baseline is resolved from
+  it. Re-planning a cancelled one is fine.
 - **Version ledger** (`ProductServiceVersionRecord`, `everdict_product_service_versions`) — append-only,
-  **insert-once by the natural key** `(tenant, productId, service, version)`. The store enforces it
-  (`ON CONFLICT DO NOTHING` feeding the outbox CTE), so a re-sync or two racing sweeps can never make one
-  version news twice — the dedup is structural, not bookkept. `publishedAt` is the REMOTE clock (tags borrow
-  their commit's committer date); the timeline orders by it.
+  **insert-once by the natural key** `(tenant, productId, service, streamKey, version)` (migs 0155/0157). The
+  store enforces it (`ON CONFLICT DO NOTHING` feeding the outbox CTE), so a re-sync or two racing sweeps can
+  never make one version news twice — the dedup is structural, not bookkept. `publishedAt` is the REMOTE
+  clock (tags borrow their commit's committer date); the timeline orders by it.
 
 ## Declaring a product by CHOOSING, not by typing
 
-A service row used to be four text fields, and one of them punishes a mistake silently. `tagPrefix: "api-"`
-against a repository whose tags read `api/v1.2.0` matches nothing: the sync reports `imported: 0`, no error is
-raised anywhere, and the product's timeline stays empty forever. Every other field fails loudly (a wrong
-repository 404s at the first pull); this one fails as *silence*, which is the failure mode this codebase spends
-most of its guards removing.
+A service row is four text fields, and one of them punishes a mistake silently. `tagPrefix: "api-"` against a
+repository whose tags read `api/v1.2.0` matches nothing: the sync reports `imported: 0`, no error is raised
+anywhere, and the product's timeline stays empty forever. Every other field fails loudly (a wrong repository
+404s at the first pull); this one fails as *silence*, which is the failure mode this codebase spends most of
+its guards removing.
 
 The repository already holds the answer, so `POST /products/discover` (MCP `discover_product_repo`) reads it —
-read-only, persisting nothing — and answers the two questions a service row needs:
+read-only, persisting nothing — and answers the two questions a service row needs. (`GET
+/products/repo-options`, MCP `list_product_repo_options`, lists the workspace GitHub App's installation
+repositories to pick from; empty = no App, and the wizard falls back to manual entry.)
 
 ```
 which streams does it PUBLISH   releases first (a published release is the stronger claim), tags as the
@@ -94,7 +100,8 @@ absent = all) so the number shown is the number that will import. Bounds are dec
 only the newest few are resolved.
 
 Creating with "sync now" runs the first sync immediately, which is a BACKFILL: the release history lands
-quietly to form the time axis, and nothing is evaluated.
+quietly to form the time axis, and the sync evaluates nothing. (The series a create declares are seeded
+separately — see §"Events + auto-eval".)
 
 ## What a release ships
 
@@ -104,19 +111,24 @@ produce three independent version rows, and the decision to ship a particular tr
 it instead ("the newest import before the ship") invents a composition nobody chose, and keeps re-inventing a
 different one as the ledger grows.
 
-`ReleaseRecord.components[]` is `{service, version?}`, validated against the product's tracked services (once
-each — two rows for one service are two answers to one question). The version is OPTIONAL: a planned release
-legitimately names a service whose version is not cut yet, and "we have not decided" is a different statement
-from "v1.2.3". The web picks versions from the imported ledger only (a typed version is a string that joins to
-no row), defaulting to the newest import at the moment a service is *included* — including it is the human
-decision, the default is a convenience on top.
+`ReleaseRecord.components[]` is `{service, version?, versionRecordId?}`, validated against the product's
+tracked services (once each — two rows for one service are two answers to one question). The version is
+OPTIONAL: a planned release legitimately names a service whose version is not cut yet, and "we have not
+decided" is a different statement from "v1.2.3". The web picks versions from the imported ledger only (a typed
+version is a string that joins to no row) and pins the row it offered (`versionRecordId`), defaulting to the
+newest import at the moment a service is *included* — including it is the human decision, the default is a
+convenience on top.
 
 It is deliberately NOT a gate input. The release gate decides on evidence (open linked issues, watched-series
 verdicts); making a half-filled plan un-shippable would be a second, weaker release constitution beside the one
-that already exists. The SHIP freezes the composition into its history entry, the same treatment the per-series
-decisions get: "which versions did 2026.3 contain" stays answerable from the release itself after the plan has
-moved on. Renaming or dropping a service later does not rewrite a shipped release — the record says what
-shipped, which is the point of a record.
+that already exists. The SHIP resolves the plan against the version ledger and freezes the result into its
+history entry as `ShippedComponent`s — the ledger row, its `streamKey`, and an explicit `resolution`
+(`ledger` · `inferred` · `unresolved` · `unplanned` · `ambiguous` · `conflicting` · `unavailable`), because
+`{service, version}` alone cannot say which `v1.0.0` shipped once a service has been repointed at another
+stream, and "we did not decide", "we could not find it" and "the ledger could not be read" are different facts.
+This is the same treatment the per-series decisions get: "which versions did 2026.3 contain" stays answerable
+from the release itself after the plan has moved on. Renaming or dropping a service later does not rewrite a
+shipped release — the record says what shipped, which is the point of a record.
 
 ## Sync — everdict stays the client
 
@@ -129,35 +141,37 @@ workspace GitHub App (`tokenForRepository`, `contents: read`) via the narrow `Gi
   insert-once makes replica races harmless.
 
 Per-service **soft-fail**: an unreachable repository records `sync.lastError` on that service and the rest
-proceed. The watermark (`sync.syncedAt`) is bookkeeping only — correctness comes from the natural key — and
-its ONE load-bearing meaning is the backfill discriminator: **a service's first sync backfills the timeline's
-past silently** (rows land, no facts, no runs; fifty historical releases are not fifty pieces of news).
+proceed. Correctness comes from the natural key, not the watermark (`sync.syncedAt`). What the sync state is
+load-bearing for is telling news from history: **a service's first sync backfills the timeline's past
+silently** (rows land, no facts, no runs; fifty historical releases are not fifty pieces of news), and
+`sync.observedRemoteHead` — the newest remote `publishedAt` the service has ever seen — keeps a later
+recovered tail (rows below the head, imported after a page ceiling was raised) from being announced as
+arrivals. The sync state write joins the product's CAS (`expectVersion`), re-folding only its own watermark
+onto a concurrent edit.
 
 ## Events + auto-eval
 
-Kinds (registered + axis-classified `work` + trigger-matchable, `records/platform-event.ts`):
-`product.created` (observable-only) · `product.service_version_imported` (payload keeps `service` / `version`
-/ `repository` top-level so a subscription filters per service) · `release.created` ·
-`release.status_changed` (`{from, to, forced?}` — "wake me when we ship" is `to eq released`).
+Kinds (registered in `records/platform-event.ts`, activity axis `work`): `product.created` (observable-only) ·
+`product.service_version_imported` (payload keeps `service` / `version` / `repository` top-level so a
+subscription filters per service) · `release.created` · `release.status_changed` (`{from, to, forced?}` —
+"wake me when we ship" is `to eq released`). The last three are trigger-matchable (`TRIGGERABLE_EVENT_KINDS`).
 
 The **auto-eval choke point** lives in the sync (not per transport): after imports, if the product's autoEval
-is on and genuinely new (post-watermark) versions landed, submit ONE scorecard per watched series — the
-active planned release's selection, else every series — via the `SeriesRunSubmitter` seam (closed over
-`ScorecardService.submit` in `main.ts`), as the product's **creator** (the schedule precedent: the standing
-declaration's author, not whoever pressed Sync). Failed submits ride the sync outcome (`failedSeries`) —
-a silently missing batch would read as "the product got worse".
+is on and genuinely new versions landed — not a backfill, published after the service's
+`observedRemoteHead`, and from a stream the current product still declares — submit ONE scorecard per watched
+series — the active planned release's selection, else every series — via the `SeriesRunSubmitter` seam
+(closed over `ScorecardService.submit` in `main.ts`), as the product's **creator** (the schedule precedent:
+the standing declaration's author, not whoever pressed Sync). Failed submits ride the sync outcome
+(`failedSeries`) — a silently missing batch would read as "the product got worse".
 
-**A series has THREE triggers, and only one of them used to exist.** The import fan-out was the only thing that
-ever turned a series into a scorecard, so a series declared on a product whose history was already backfilled
-produced nothing at all until upstream happened to ship again — the sync imports no new row, `inserted` is
-empty, and the fan-out is skipped. The trend drew "no evaluations in this window" forever, and the same
-emptiness reached the release gate as `not_evaluated`, which blocks a required series. A declaration that
-silently disables shipping and offers no way to satisfy itself is a missing trigger, not a missing feature.
-The fan-out therefore lives in `SeriesEvaluator` (`application-control` `product/series-evaluator.ts`) with
-three callers, distinguished by `origin.seriesTrigger`:
+**A series has THREE triggers.** When the import fan-out was the only one, a series declared on a product whose
+history was already backfilled produced nothing at all until upstream happened to ship again, and the same
+emptiness reached the release gate as `not_evaluated`, which blocks a required series. The fan-out therefore
+lives in `SeriesEvaluator` (`application-control` `product/series-evaluator.ts`) with three callers,
+distinguished by `origin.seriesTrigger`:
 
 ```
-version_import    the sync's fan-out, on genuinely new post-watermark rows  → submitted as the product's CREATOR
+version_import    the sync's fan-out, on genuinely new rows                 → submitted as the product's CREATOR
 series_declared   the seed a create/edit owes a series it left unanswered   → submitted as the EDITOR
 manual            POST /products/:id/series/run — a person asked            → submitted as the CALLER
 ```
@@ -176,42 +190,42 @@ landed and must not be undone by a batch that could not be submitted. That is no
 is the whole reason it is allowed to be soft: the series draws an empty trend beside an explicit run control,
 and a required one keeps blocking the release until somebody presses it. The manual run honours no such
 switch — auto-eval governs what happens *without* a person, and a control that quietly does nothing is worse
-than no control. A named key the product does not declare is a 404, never a silently empty fan-out.
+than no control. A named key the product does not declare is a 404, never a silently empty fan-out. Whatever
+the trigger, a series whose contract is unresolvable is refused before submit and reported in `failedSeries`.
 
-**Provenance is the trend's x-axis key**: `ScorecardOrigin` gains `productId` / `releaseId?` / `seriesKey` /
-`seriesTrigger` / `serviceVersion` (`"<service>@<version>"`, the newest arrival of that sync — stamped ONLY by
-an import, because only that trigger has a cause; "ran because of v2.1.0" and "ran while v2.1.0 was current"
-are different claims, and a lane drawing them identically asserts the stronger one). `ScorecardListFilter`
-gains `productId`/`seriesKey` (expression-indexed, mig 0138), so a series chart is a list filter, not a join
-table.
+**Provenance is the trend's x-axis key**: `ScorecardOrigin` carries `productId` / `releaseId?` / `seriesKey` /
+`seriesTrigger` / `seriesContractDigest` / `serviceVersion` (`"<service>@<version>"`, the newest arrival of
+that sync — stamped ONLY by an import, because only that trigger has a cause; "ran because of v2.1.0" and "ran
+while v2.1.0 was current" are different claims, and a lane drawing them identically asserts the stronger one).
+`ScorecardListFilter` carries `productId`/`seriesKey` (the `productId` stamp is expression-indexed, mig 0138),
+so a series chart is a list filter, not a join table.
 
 Harness pins are deliberately untouched: image freshness is the merge→re-pin CI flow's job
-(docs/architecture/github-actions-trigger.md); the series runs `harness@latest` and naturally evaluates the
-newly pinned instance.
+(docs/architecture/github-actions-trigger.md); a series without a pinned version runs `harness@latest` and
+naturally evaluates the newly pinned instance.
 
 ## Readiness + the release axis of regression
 
 `releaseReadiness` (`product/readiness.ts`) composes the SCORECARD GATE's decisions (arch-review 7 P0 — the
-product layer never invents truth semantics): open issues LINKED to the release (`ISSUE_LINK_TYPES` gained
+product layer never invents truth semantics): open issues LINKED to the release (`ISSUE_LINK_TYPES` includes
 `product`/`release`; links stay unvalidated pointers, the gate counts through the same reverse query) + each
-watched series' **release verdict** — `analytics.diff` + `evaluateGate` (maxRegressions 0, the `seriesGate`
-seam wired at composition) over (latest succeeded batch, **baseline anchored at the previous released
-release**), yielding the gate's own vocabulary `pass|block|blocked_missing|not_comparable` plus the product
-layer's two orchestration states: `not_evaluated` (no run — which **BLOCKS a required series: not evaluated
-is never green**; the pre-verdict arithmetic read absence of evidence as not-regressed, a second and weaker
-release constitution under the scorecard gate), `bootstrap_required` (a first ship nobody approved) and
-`no_baseline` (an APPROVED first ship — evidence exists, nothing to regress from; passes). Opting a series
+watched series' **release verdict** — the `seriesGate` seam wired at composition (`refuseGateForInputTrust`
+first, then `diffSnapshot` + `evaluateGate` with maxRegressions 0) over (latest succeeded batch, **baseline
+anchored at the previous released release**), yielding the gate's own vocabulary
+`pass|block|blocked_missing|not_comparable` plus the product layer's orchestration states: `not_evaluated` (no
+run — which **BLOCKS a required series: not evaluated is never green**), `bootstrap_required` (a first ship
+nobody approved, or one whose only evidence has no verdict) and `no_baseline` (an APPROVED first ship —
+evidence exists, nothing to regress from; passes), plus the scope and contract states below. Opting a series
 out of the gate is the EXPLICIT `ProductSeries.requiredForRelease: false`, never an inference from missing
 evidence. `ready = openIssues === 0 && no required series blocks`.
 
-**"No baseline" is four different facts, and the weakest reading used to win** (arch-review 10 P0).
-`BaselineResolution` names them: `none_first_ship` · `resolved` · `missing_historical_evidence` (a previous
-ship pinned a scorecard that has since been DELETED) · `revision_unavailable` (the pinned scorecard was
-RE-SCORED, so the judgment that ship stood on is no longer the one a comparison would read). Collapsed into a
-bare `undefined`, all four read as "first ship" — so `allowNoBaseline`, a governance approval to ship the
-*first* time, silently licensed shipping after the evidence of the last ship disappeared. Losing the record
-of what we shipped against made the gate weaker, which is exactly backwards. `allowNoBaseline` now applies to
-`none_first_ship` alone; the two loss states are unconditionally `not_comparable` and no flag opens them.
+**"No baseline" is four different facts** (arch-review 10 P0). `BaselineResolution` names them:
+`none_first_ship` · `resolved` · `missing_historical_evidence` (a previous ship pinned a scorecard that has
+since been DELETED) · `revision_unavailable` (the pinned scorecard was RE-SCORED, so the judgment that ship
+stood on is no longer the one a comparison would read). Collapsed into a bare `undefined`, all four would read
+as "first ship" — so `allowNoBaseline`, a governance approval to ship the *first* time, would license shipping
+after the evidence of the last ship disappeared. `allowNoBaseline` applies to `none_first_ship` alone; the two
+loss states are unconditionally `not_comparable` and no flag opens them.
 
 The SHIP records the per-series DECISION into the release's history entry — both sides with their scoring
 pins, whether the series gated, and why. Those pins are the ones the **gate itself** read (`diffSnapshot`
@@ -222,21 +236,18 @@ had a bootstrap been approved?" is the first question a post-mortem asks. A forc
 verdict stays a recorded override.
 
 **Evidence must answer the question the series asks NOW** (arch-review 13 P0). `seriesKey` is the TREND's
-identity — deliberately stable so relabeling never re-keys history — and readiness selected release evidence
-by it, so editing a series' dataset/harness/judges left yesterday's green standing as today's evidence: same
-key, different question. Worse for version-less refs, where `latest` moves with the product row untouched, so
-neither the row version nor the policy digest could ever see it. A series is therefore two things and gets two
-identities: `key` (the trend) and `seriesContractDigest` (the CONTRACT). The contract is the resolved
-TRANSITIVE closure, not the top documents: `harness@1` is a document that may name `model: {ref}` with no
-version, so the same declaration can execute under a different model with every id/version above reading
-held. It seals what the scorecard manifest seals — and seals it with the manifest's OWN FUNCTIONS
-(`resolveSeriesContract` over `sealHarnessModelClosure`/`sealJudgeClosure`, arch-review 15 P1-5), because a
-hand-rolled second resolver is not merely a duplicate: it drifts into a SUBSET, and a subset that reads
-"held" is a false assurance at the one moment a release decides to ship. The one it replaced had already
-drifted — no service models (so every service-topology product's model closure resolved to nothing), no
-delegated harness for a harness judge (so the entire agent rendering the verdict could be swapped), no spec
-digest (so a tenant-local `x@1` shadowing the `_shared` `x@1` read as the same document), no `judgeRun` (so a
-workspace switching its default judge model changed what every inline score means, invisibly).
+identity — deliberately stable so relabeling never re-keys history — so selecting release evidence by it alone
+would let an edit to a series' dataset/harness/judges keep yesterday's green standing as today's evidence:
+same key, different question. Worse for version-less refs, where `latest` moves with the product row
+untouched. A series is therefore two things and gets two identities: `key` (the trend) and
+`seriesContractDigest` (the CONTRACT). The contract is the resolved TRANSITIVE closure, not the top documents:
+`harness@1` is a document that may name `model: {ref}` with no version, so the same declaration can execute
+under a different model with every id/version above reading held. It seals what the scorecard manifest seals —
+and seals it with the manifest's OWN FUNCTIONS (`resolveSeriesContract` in `product/series-contract.ts`, over
+`sealHarnessModelClosure`/`sealJudgeClosure`, arch-review 15 P1-5), because a hand-rolled second resolver
+drifts into a SUBSET, and a subset that reads "held" is a false assurance at the one moment a release decides
+to ship. That covers service models, a harness judge's delegated harness, spec digests, and the workspace's
+default judge model (`judgeRun`).
 
 The seam is ONE RESOLUTION with TWO POLICIES over a hole, which is the part worth remembering:
 
@@ -252,59 +263,46 @@ projects a manifest back onto the contract shape and TRUST-63 requires the two d
 correspondence is certified rather than remembered.
 
 The contract names the DOCUMENTS, not just their references (arch-review 16 P0-2): `dataset.digest` and
-`harness.specDigest` ride it, for the same reason the judge closure already carried `specDigest`. The registry
+`harness.specDigest` ride it, for the same reason the judge closure carries `specDigest`. The registry
 resolves owner-first over a `_shared` fallback, so a workspace registering its own `support@1` or `agent@1`
 substitutes different bytes with the id AND the version string both reading held — a shadowed dataset can
 change every case's task, environment, timeout and default graders, and a shadowed harness can change its
-script and topology while its model closure coincidentally matches. `support@1 == support@1` was a structural
-blind spot in the one comparison that decides whether a release ships.
+script and topology while its model closure coincidentally matches.
 
-And SHARING THE RESOLVER IS NOT CARRYING THE RESOLUTION (arch-review 16 P0-3). The last unification removed
-implementation drift; temporal drift is a different animal. The product resolves a series' floating model to
-`M@3` and stamps that digest; `latest` moves; submit re-resolves to `M@4` and seals it — nothing errors, and
-the record then states in its own two fields that it answered a question it did not answer. The auto-eval
-therefore presents `expectedContractDigest`, and submit re-seals and REFUSES on a mismatch before it creates
-or dispatches anything. A mismatch costs a retry; the alternative costs evidence that misstates itself. Batches stamp it at submit (`origin.seriesContractDigest`, resolved through the same seam readiness
-compares against, so the two can never drift into different answers); a newest batch whose stamp differs — or
-is absent, meaning it cannot say which question it answered — is `contract_stale` and blocks a required
-series. An unresolvable contract is its own verdict — `contract_unverifiable`, which BLOCKS a required series.
-Returning "no answer" and letting the check skip was the unknown→absence→safe collapse this codebase has
-removed three times elsewhere, sitting in the one place that decides whether a release ships: a deleted
-dataset or a registry outage made stale evidence pass, in the direction of green. `unknown` (a deployment
-with no resolver at all) stays a genuinely different fact and abstains.
+And SHARING THE RESOLVER IS NOT CARRYING THE RESOLUTION (arch-review 16 P0-3). The product resolves a series'
+floating model to `M@3` and stamps that digest; `latest` moves; submit re-resolves to `M@4` and seals it. So
+every series run submits the RESOLVED refs (not the declaration) and presents `expectedContractDigest`, and
+submit re-seals and REFUSES on a mismatch before it creates or dispatches anything. A mismatch costs a retry;
+the alternative costs evidence that misstates itself. Batches stamp it (`origin.seriesContractDigest`, resolved
+through the same seam readiness compares against); a newest batch whose stamp differs — or is absent, meaning
+it cannot say which question it answered — is `contract_stale` and blocks a required series. An unresolvable
+contract is its own verdict — `contract_unverifiable`, which BLOCKS a required series: a deleted dataset or a
+registry outage must not make stale evidence pass. `unknown` (a deployment with no resolver at all) stays a
+genuinely different fact and abstains.
 
-And the resolution carries its PLAN, not just its digest. The auto-eval stamped a digest of `harness@10` and
-then submitted the version-less ref, which `latest` had meanwhile moved to `@11` — a record whose origin and
-whose execution named different versions. Using the same resolver twice is not the same as carrying one
-decision; state moves between the calls. The ship path freezes the resolution once and reuses it for the
-readiness evaluation AND the recorded decision (`seriesDecisions[].evaluationContract`), so what a release
-passed is answerable without walking to a scorecard that may since have been deleted.
+The ship path freezes the resolution once and reuses it for the readiness evaluation AND the recorded decision
+(`seriesDecisions[].evaluationContract`), so what a release passed is answerable without walking to a scorecard
+that may since have been deleted.
 
 **Runtime is NOT part of the evaluation contract — a decision, not an oversight** (arch-review 14 §14). The
 contract seals what is being ASKED: dataset, harness closure, judge closure. `autoEval.runtime` is placement,
-and placement is not the question. The alternative — folding the execution world into the contract — is
-tempting because a Windows run and a Linux run genuinely can produce different results, and it is wrong for
-the same reason a too-broad guard is always wrong: every environment difference would become a contract
-change, so every infrastructure move would invalidate a product's entire evidence base and the signal would
-be trained out of people within a week.
+and placement is not the question. Folding the execution world into the contract is tempting because a Windows
+run and a Linux run genuinely can produce different results, and it is wrong: every environment difference
+would become a contract change, so every infrastructure move would invalidate a product's entire evidence base
+and the signal would be trained out of people within a week.
 
-The right decomposition is the one the scorecard side already uses:
+The decomposition is the one the scorecard side uses:
 
 ```
 Evaluation Contract   what is being asked   → identity; a change means new evidence is required
 Execution World       where it ran          → cohort/stratum; a change means compare within, not across
 ```
 
-So a world difference is a COMPARISON constraint, not an identity change: two runs of the same contract in
-different worlds are the same question answered under different conditions, and the honest handling is to
-stratify rather than to declare them incomparable. That machinery does not exist yet — everdict has no world
-cohort axis, which is a real gap (the adoption-metrics work names it, and arch-review 15 §17 re-confirmed both
-the gap and this decomposition) — and the decision recorded here is that when it arrives it arrives as a
-cohort, not as another field in the contract digest. **Built (arch-review 19 P2).** The material was already there and honest: every case's `ExecutionManifest`
-records the world it actually ran in (os + how the os was resolved, driver, image, runtime) and is ABSENT
-where no world existed. `worldCohortOf` derives a batch's cohort from those at settle — so it reports rather
-than declares, a batch spread over two operating systems is `mixed` rather than a majority, and a batch where
-nothing reported a world carries no cohort at all.
+The world is a cohort (arch-review 19 P2). Every case's `ExecutionManifest` records the world it actually ran
+in (os + how the os was resolved, driver, image, runtime) and is ABSENT where no world existed. `worldCohortOf`
+derives a batch's cohort from those at settle — so it reports rather than declares, a batch spread over two
+operating systems is `mixed` rather than a majority, and a batch where nothing reported a world carries no
+cohort at all.
 
 The consumer is the release comparison, and what it does is deliberately proportionate: a comparison whose two
 sides ran in different cohorts carries `crossWorld` on the recorded series state and in its reasons. It does
@@ -312,84 +310,76 @@ NOT refuse. Refusing would make an infrastructure migration un-shippable until e
 precisely the too-broad guard this decomposition exists to avoid — while saying it is what stops a regression
 and a migration from being indistinguishable in the record afterwards. An unrecorded world is not a known
 difference either: a legacy batch compares silently, or every comparison against history would carry the
-warning and the signal would be trained out within a week. Writing it down
-because leaving it ambiguous is how "same series contract, different world" quietly ends up averaged into one
-regression series.
+warning and the signal would be trained out within a week.
 
-**Service identity is the STREAM, not the name.** `serviceStreamKey` (repository · source · host · tagPrefix)
-is one exported domain decision with three consumers that used to read it differently: the product edit
-applied it (repoint a service and its watermark cannot survive), the sync reconciler re-matched by NAME and
-could restore repo-A's watermark onto repo-B, and the version ledger keyed by name so repo-B's `v1.0.0`
-collided with repo-A's and vanished as "already known". The ledger's natural key now includes the stream
-(mig 0155), with legacy rows ADOPTED on first write rather than re-imported — re-importing would announce
-years of history as news, the exact storm the backfill rule exists to prevent.
+**Service identity is the STREAM, not the name.** `serviceStreamKey` (host · repository · source · tagPrefix)
+is one exported domain decision with three consumers: the product edit (repoint a service and its watermark
+cannot survive), the sync reconciler (restores a watermark only onto the same stream), and the version ledger
+(repo-B's `v1.0.0` must not collide with repo-A's and vanish as "already known"). The ledger's natural key
+includes the stream (mig 0155), with legacy rows ADOPTED on first write rather than re-imported — re-importing
+would announce years of history as news, the exact storm the backfill rule exists to prevent.
 
 **Backfill takes BOTH signals.** "Has this service ever been synced" is answered by the watermark OR a ledger
-row, and backfill requires the absence of both. The watermark alone was fragile (a first sync whose watermark
-write lost its CAS left the service permanently in backfill, silently swallowing every later release); the
-ledger alone is wrong the other way (a repository with no releases yet syncs successfully and imports
-nothing). Wrong in the safe direction: announcing something arguably historical is a reader's judgement,
-swallowing a release is unrecoverable.
+row in its stream, and backfill requires the absence of both. The watermark alone was fragile (a first sync
+whose watermark write lost its CAS left the service permanently in backfill, silently swallowing every later
+release); the ledger alone is wrong the other way (a repository with no releases yet syncs successfully and
+imports nothing). Wrong in the safe direction: announcing something arguably historical is a reader's
+judgement, swallowing a release is unrecoverable.
 
 **A release's SCOPE is frozen at plan time** (arch-review 12 P0). A release is "a date and a scope somebody
-committed to", and the scope was re-derived from the product's *current* series on every readiness read — so
-deleting a series did not FAIL the gate, it DELETED it: `seriesKeys: ["quality"]` filtered against a product
-that no longer declares `quality` produced an empty watch list, no blocking series, and `ready: true`. A
-bypass sitting underneath every invariant above it, and one no CAS can catch — the decision reads the NEW
-product correctly, and the new product is the one missing its gate. `plannedSeriesKeys` + `seriesSelection`
-(mig 0152) record the promise; a promised series the product no longer declares is `scope_invalid`, which
-blocks unconditionally and does NOT consult `requiredForRelease` (the flag lives on the declaration that
-disappeared, so the edit that removed the gate must not also get to decide it never mattered). Under `all`, a
-series ADDED after the plan is still watched — more gates is never the unsafe direction. Two layers, on
-purpose: `ProductService.update` also REFUSES an edit that would strip a planned release's gate, so the
-failure is legible at the edit rather than discovered later as a release nobody can ship — but a preflight
-can be bypassed (an import, a migration, another replica), so the gate is the guarantee and the preflight is
-the explanation.
+committed to"; re-deriving the scope from the product's *current* series on every readiness read would let
+deleting a series DELETE the gate instead of failing it: `seriesKeys: ["quality"]` filtered against a product
+that no longer declares `quality` produces an empty watch list, no blocking series, and `ready: true`.
+`plannedSeriesKeys` + `seriesSelection` (mig 0152) record the promise; a promised series the product no longer
+declares is `scope_invalid`, which blocks unconditionally and does NOT consult `requiredForRelease` (the flag
+lives on the declaration that disappeared, so the edit that removed the gate must not also get to decide it
+never mattered). Under `all`, a series ADDED after the plan is still watched — more gates is never the unsafe
+direction. Two layers, on purpose: `ProductService.update` also REFUSES an edit that would strip a planned
+release's gate, so the failure is legible at the edit rather than discovered later as a release nobody can
+ship — but a preflight can be bypassed (an import, a migration, another replica), so the gate is the guarantee
+and the preflight is the explanation.
 
-**Version reads are paginated, with a declared ceiling.** `listReleases`/`listTags` sent one `per_page` and
-stopped, so a repository with more than a page of history had its first page imported and the rest silently
-absent — while the first sync is documented as backfilling "the timeline's past". Both now walk until a short
-page, bounded by `maxPages` (default 50 × 100 = 5,000 versions). The bound is declared rather than incidental:
-a limit that merely happens reads as completeness to whoever comes next.
+**Version reads are paginated, with a declared ceiling.** `listReleases`/`listTags` walk until a short page,
+bounded by `maxPages` (default 50 × 100 = 5,000 versions), and report `complete`. A BACKFILL that hits the
+ceiling imports nothing and records the error (a partial first read would make every release beyond the
+ceiling arrive later as news); an established stream imports the newest pages and records
+`sync.completeness: "partial"` so the truncation stays visible after the response is gone. The bound is
+declared rather than incidental: a limit that merely happens reads as completeness to whoever comes next.
 
 **Deleting a product is ONE statement, and children SERIALIZE against it.** `removeAggregate` deletes all
-three in a single data-modifying CTE — but atomicity is not serialization: a child INSERT took no lock on the
-parent, so a `createRelease` that read the product before the delete could still insert its orphan after it.
-Mig 0156 makes the relationship a FOREIGN KEY on `(tenant, product_id)` with `ON DELETE CASCADE`, which is
-the parent-row lock protocol (Postgres takes KEY SHARE on the parent for every child insert) obtained without
-a transaction API the `SqlClient` port does not have — and it enforces the TENANT correlation structurally,
-so no application code has to remember to check it. `NOT VALID`: deployments may already hold orphans created
-by the very race being closed, and validating would fail the migration on data the constraint exists to
+three in a single data-modifying CTE — but atomicity is not serialization: a child INSERT that took no lock on
+the parent could still insert an orphan after it. Mig 0156 makes the relationship a FOREIGN KEY on
+`(tenant, product_id)` with `ON DELETE CASCADE`, which is the parent-row lock protocol (Postgres takes KEY
+SHARE on the parent for every child insert) obtained without a transaction API the `SqlClient` port does not
+have — and it enforces the TENANT correlation structurally. `NOT VALID`: deployments may already hold orphans
+created by the very race being closed, and validating would fail the migration on data the constraint exists to
 prevent more of.
 
-**The ship commits against the release's version and the product's POLICY.** `expectStatus` + `expectVersion`
-guard the release row (mig 0148); `expectProduct` guards the product's `release_policy_digest` (mig 0154),
-evaluated as an `EXISTS` inside the same write statement. A release gate is decided under a policy that lives
-in a different aggregate, so the release's own version could never see it move — an admin flipping a series to
-required mid-decision left the release row untouched, the guard passed, and the history recorded "required,
-not_evaluated" on a release that shipped without a force.
+**The ship commits against its whole read-set.** `expectStatus` + `expectVersion` guard the release row
+(mig 0148). `expectProduct` guards the product's `release_policy_digest` (mig 0154) AND
+`evaluation_definition_digest` (mig 0160), evaluated as an `EXISTS` inside the same write statement: a release
+gate is decided under a policy and a series definition that live in a different aggregate, so the release's own
+version could never see them move. `expectDecision` (`ReleaseDecisionContext`) adds the rest of what the
+decision read — the open linked-issue count, each series' candidate (row, scoring revision and plane digest,
+and nothing newer), the capability generations the contracts resolved under (mig 0163) and the workspace
+settings revision (mig 0164). What no row can carry (a registry-resolved contract moving) is covered by a
+labelled RE-VERIFY of the contracts just before the commit.
 
-The digest replaced the product's row VERSION (mig 0150's first attempt), which was the right invariant with
-the wrong identity: one counter came to mean content revision, release-policy revision AND sync-state
-revision, because the store bumps it on every write — including `markServiceSynced`, whose own contract calls
-itself bookkeeping. That only became load-bearing once the 15-minute sweep joined the CAS constitution, at
-which point a background watermark write conflicted ships whose policy had not moved. Fail-closed is the
-right default, and a guard that refuses for reasons an operator cannot connect to the decision is a guard
-that gets worked around — a trust risk of its own. The digest covers every series' `{key, required,
-allowNoBaseline}`, so renames, icons, service edits and sync watermarks stop conflicting anything; it is
-product-wide rather than per-release because the guard is an `EXISTS` on the product row and must compare a
-stored value. Legacy rows (NULL digest) fall back to the version guard — sound, over-broad, and self-healing
-on that product's next write. The aggregate `version` stays: it is the product's own lost-update guard, a
-different question from "is this still the policy I read".
+The policy digest covers every series' `{key, required, allowNoBaseline}` and the definition digest what the
+series ask, rather than the product's row VERSION: the store bumps the version on every write, including the
+15-minute sweep's `markServiceSynced`, so a version guard conflicted ships whose policy had not moved — and a
+guard that refuses for reasons an operator cannot connect to the decision gets worked around. There is no
+version fallback: a product with a NULL digest cannot have a ship decided against it. The aggregate `version`
+stays as the product's own lost-update guard, a different question from "is this still the policy I read".
 No stored regression flag on the release (no second regression authority): issue regression stays the
 regression watch's, and an issue it reopened blocks the release through the link.
 
 ## Reads + surfaces
 
-- `GET /products/:id/timeline?from&to` — the axis in one read (the pulse's treatment: composed from stores
-  server-side, drawn by the web): releases + windowed version ledger + per-series points (oldest first, with
-  pass rate via `headlinePassRate` and the triggering `serviceVersion`) + the issues' lifecycle markers +
-  the watched capabilities' version registrations.
+- `GET /products/:id/timeline?from&to` (MCP `get_product_timeline`) — the axis in one read (the pulse's
+  treatment: composed from stores server-side, drawn by the web): releases + windowed version ledger +
+  per-series points (oldest first, with pass rate via `decisionPassRate`, status, and the triggering
+  `serviceVersion`) + the issues' lifecycle markers + the watched capabilities' version registrations.
 
   **The evaluation contract is on the axis too** (`capabilities[]`): a new version of a watched harness,
   dataset or judge changes what the next auto-run asks, which makes it an event on this product's timeline
@@ -405,8 +395,8 @@ regression watch's, and an issue it reopened blocks the release through the link
   `release` are explicit links; `evidence` is an issue that one of this product's own watch-series scorecards
   is cited by (`links[].type: "scorecard"`) or was **closed with** (`resolution.scorecardId` — which never
   becomes a link, so a link-only read misses the strongest relationship there is). Reading the explicit links
-  alone drew an empty issue lane on exactly the products with the most to say: a workspace files against a
-  regression, links the batch that shows it, closes with the batch that proves the fix, and never touches the
+  alone would draw an empty issue lane on exactly the products with the most to say: a workspace files against
+  a regression, links the batch that shows it, closes with the batch that proves the fix, and never touches the
   product record. The extra cost is ONE query (`IssueListFilter.scorecards`, both halves in one statement)
   over the scorecards the trend already collected, so the window that bounds the trend bounds this too. Each
   row carries `via` — "we filed this against 2026.3" and "this cites a batch of ours" are different claims,
@@ -425,47 +415,49 @@ regression watch's, and an issue it reopened blocks the release through the link
   axis, this one the QUALITY axis. `keys` absent = everything the product currently watches; an empty array is
   refused rather than read as absent, because "run these, and there are none" is a caller's bug and reading it
   as "run everything" turns it into a batch storm.
-- HTTP + MCP full parity in the `api/product` slice; authz reuses the ISSUE pair (`issues:read`/`issues:write`
-  — the timeline is the same planning workflow, one axis over); delete = creator-or-admin in the service;
-  product deletion cascades releases + ledger (they exist only under their product).
+- The rest of the slice: `POST|GET /products`, `GET|PATCH|DELETE /products/:id`, `GET /products/:id/versions`,
+  `POST /products/:id/releases`, `GET /releases`, `GET|PATCH|DELETE /releases/:id`, `POST /releases/:id/status`.
+  HTTP + MCP full parity in the `api/product` slice; authz reuses the ISSUE pair (`issues:read`/`issues:write`
+  — the timeline is the same planning workflow, one axis over); delete = creator-or-admin in the service
+  (a released release refuses deletion regardless); product deletion cascades releases + ledger (they exist
+  only under their product).
 - Web: `/products` (+`/products/new`, a four-step WIZARD: basics → services (read a repository, tick the
-  proposals, live prefix preview) → series → review+sync), `/product/[slug]` (services + subpaths + sync
-  state, release strip with each release's composition, one `LineChart` per series — points click through to
-  their scorecard, each series header carrying its own "evaluate now" and an empty one saying what would fill
-  it, so a declared-but-unrun series is never a dead chart — the version ledger, history),
-  `/product/[slug]/edit` (the flat form, for editing an
-  existing declaration), `/release/[id]` (readiness card + gate UI: a 409 becomes an explicit forced-ship
-  confirmation; plus the composition editor, versions picked from the ledger). `entities/product` carries the
-  zod mirrors + drift guards and the ONE href builder (`productRef` picks slug-or-id); the tracker history
-  renderer gained the `released` event.
+  proposals, live prefix preview) → series → review+sync), `/product/[id]` (the segment takes the slug; an
+  id redirects to it — services + subpaths + sync state, the lanes, a release strip, one `LineChart` per
+  series — points click through to their scorecard, each series header carrying its own "evaluate now" and an
+  empty one saying what would fill it, so a declared-but-unrun series is never a dead chart — the event feed,
+  the release list with each release's composition, the version ledger, history),
+  `/product/[id]/edit` (the flat form, for editing an existing declaration), `/release/[id]` (readiness card +
+  gate UI: a 409 becomes an explicit forced-ship confirmation; plus the composition editor, versions picked
+  from the ledger). `entities/product` carries the zod mirrors + drift guards and the href builders
+  (`productHref`, with `productRef` picking slug-or-id); the tracker history renderer renders the `released`
+  event.
 - **The version ledger's axis is the SERVICE, not time.** A product assembles several services whose versions
   move on independent streams, and one table sorted by `publishedAt` answers no question anybody has: reading
   "where is api now" out of it means scrolling and filtering by eye. It is one card per tracked service
   (declared order, newest first, collapsed past six), with the streams the product no longer declares kept
   visible at the end rather than dropped — a renamed or repointed service's history disappearing silently
   reads as "the import broke".
-- **A mark on the axis says what it is when you hover it** (`widgets/product-timeline`). Native `title` was
-  what the marks had, and it is the wrong instrument for this screen: it waits a second, renders multi-line
-  text differently in every browser, and is unavailable to the person trying to tell apart two dots 2px away
-  from each other. Releases, version dots and both issue moments now draw a hover card in the same layer as
-  the mark, and the series chart's tooltip takes a `renderPointDetail` slot (the triggering service version,
-  the batch's status) plus a header spelled by `formatX` — it used to print the raw x value, so an ISO instant
-  appeared verbatim in the one place a reader is asking a simple question.
+- **A mark on the axis says what it is when you hover it** (`widgets/product-timeline`). Native `title` is the
+  wrong instrument for this screen: it waits a second, renders multi-line text differently in every browser,
+  and is unavailable to the person trying to tell apart two dots 2px away from each other. Releases, version
+  dots and both issue moments draw a hover card in the same layer as the mark, and the series chart's tooltip
+  takes a `renderPointDetail` slot (the triggering service version, the batch's status) plus a header spelled
+  by `formatX`, so an ISO instant never appears verbatim.
 - **An issue's lane draws two MOMENTS over a lifespan, not one bar.** Occurrence (◆ at `createdAt`) and
   resolution (● at `resolvedAt`) are what people look for on a timeline; a bar alone reads as "something was
   open in early August" and stops there. An unresolved issue gets no end marker — its span still stops at
   `now`, because a bar reaching into the future is a prediction rather than a fact.
-  **Overlapping lifespans pack onto real tracks** (greedy interval assignment): the former odd/even-index
-  split only separated neighbours, so three issues opened the same week drew the first and third exactly on
-  top of each other. Track count = the actual maximum concurrency, and the lane grows its height for a dense
-  window instead of hiding a span.
+  **Overlapping lifespans pack onto real tracks** (greedy interval assignment), so three issues opened the
+  same week never draw on top of each other. Track count = the actual maximum concurrency, and the lane grows
+  its height for a dense window instead of hiding a span.
 - **The detail page reads the same axis two more ways.** A day-grouped, newest-first EVENT FEED
   (`widgets/product-timeline` `timeline-feed.tsx`, the `detailed` prop — GitHub's project-timeline reading):
   every event the lanes draw — version published, release shipped / target day, issue opened/resolved (with
   the closing scorecard as an `evidence` link), series evaluated (pass rate + triggering version), capability
   version registered — told as sentences over the shared `ActivityFeed` atoms, capped with a show-more.
   Dates and day headers read in the SAME UTC the lanes' ticks use — a lane dot on 8/12 and a feed row saying
-  8/13 would discredit both. And a WINDOW RANGE control (`?range=1m|3m|6m|1y` on `/product/[slug]`; the
+  8/13 would discredit both. And a WINDOW RANGE control (`?range=1m|3m|6m|1y` on `/product/[id]`; the
   default quarter lives on no parameter, so the server keeps the one definition of "default"): a filter
   decides the set, so it rides the URL and a pasted link opens the same window. The home summary renders
   neither — lanes + trend only.
@@ -474,7 +466,8 @@ regression watch's, and an issue it reopened blocks the release through the link
 
 contracts `records/product.ts` + `wire/product/product.ts` · domain
 `product/{product,release,readiness,discovery}.ts` · application-control
-`product/{product-service,product-version-sync,series-evaluator,product-discovery}.ts` + `ports/product-store.ts` +
-`ports/github-repo-writer.ts` (version reader + tree reader) · db `product/*` + mig `0138`/`0162`/`0169` ·
-api `api/product/*` + `infrastructure/github/repo-writer.ts` · web `entities/product` +
-`features/manage-product` (wizard + composition editor) + `widgets/product-timeline` + the routes.
+`product/{product-service,product-version-sync,series-evaluator,series-contract,product-discovery,product-ref}.ts`
++ `ports/product-store.ts` + `ports/github-repo-writer.ts` (version reader + tree reader) · db `product/*` +
+migs `0138`/`0148`/`0150`/`0152`/`0154`/`0155`/`0156`/`0157`/`0160`/`0162`/`0169` · api `api/product/*` +
+`infrastructure/github/repo-writer.ts` · web `entities/product` + `features/manage-product` (wizard +
+composition editor) + `widgets/product-timeline` + the routes.

@@ -2,7 +2,8 @@
 kind: wiki
 title: "The secret-free execution envelope"
 status: current
-updated: 2026-08-22
+updated: 2026-09-15
+anchors: [packages/contracts/src/execution/job-payload-transport.ts, packages/job-runner/src/job-payload-env.ts, packages/backends/src/orchestrators/payload-not-in-agent-env.counterexample.test.ts]
 ---
 # The secret-free execution envelope
 
@@ -88,8 +89,9 @@ searched both places would be the same question asked twice.
 - **Nomad** — a `template` stanza renders the payload into the task's own writable directory
   (`${NOMAD_TASK_DIR}`). No extra container, no `sh`. The payload lives in the job spec, which is exactly
   where the env value lives today, so nothing about the control plane's own trust level changes.
-- **K8s** — an emptyDir at `/run/everdict`, plus an **initContainer** running the runner image (ours, always
-  present) that holds the payload in its environment and writes it into the volume. The initContainer has
+- **K8s** — a memory-backed (`medium: Memory`) emptyDir at `/run/everdict`, plus an **initContainer** running
+  the runner image (ours, always present) that holds the payload in its environment and writes it into the
+  volume with a shell builtin (`jobPayloadWriteCommand`). The initContainer has
   TERMINATED before the main container starts, so its `/proc` is gone with it; the main container gets only
   the path. Works with a distroless tenant image because nothing in the main container needs a shell.
 - **Docker / self-hosted / `everdict run`** — untouched. These lanes never used the env contract: they call
@@ -99,8 +101,10 @@ The runner reads and unlinks in one act, behind the seam that already exists:
 
 ```ts
 // packages/job-runner/src/job-payload-env.ts
-takeJobPayload()   // reads the path in the env, UNLINKS the file, and drops the variable
+takeJobPayload()   // drops the variable, UNLINKS the file, then reads the bytes through the already-open fd
 ```
+
+The unlink comes first and its failure is fatal: a payload whose name cannot be removed is never handed on.
 
 `takeJobPayload` is why this is a contained change: every lane already obtains its payload through one
 function whose contract is "the only way to get it is a call that has already destroyed it". This swaps what
@@ -108,8 +112,9 @@ that call destroys.
 
 ### Residual exposure, stated
 
-Between the file being written and the runner unlinking it, it exists at `0600` under the uid the agent will
-later run as. There is no concurrent reader — the runner unlinks at startup and the agent is started by
+Between the file being written and the runner unlinking it, it exists on disk: at `0600` in the Nomad task
+directory, and at `0640` on K8s, where the pod's `fsGroup` (`JOB_PAYLOAD_FS_GROUP`) lets the agent container
+read by group a file the init image wrote under whatever uid its own Dockerfile declares. There is no concurrent reader — the runner unlinks at startup and the agent is started by
 `runCase` afterwards — so the window contains no adversary. It is written down because "no window" would be
 the stronger sentence and it is not the true one.
 
@@ -129,17 +134,17 @@ secret-bearing variable goes red at the commit that adds it instead of at the ne
 becomes worth its cost the day something has to be in the runner's environment that the agent may not read —
 and that is a different design conversation, not a deferred task.
 
-## Verification plan
+## Verification
 
-Local, before anything is deployed:
+Local, in the test suite:
 
-- The runner's own seam: a counterexample that gives `takeJobPayload` a file and asserts the file is **gone**
-  when it returns, and that the payload is absent from `process.env` — both directions, and RED with the
-  unlink removed.
-- The manifest builders: a counterexample asserting no rendered pod, task or container spec carries a
-  secret-bearing value in `env` — asserted over every builder in one file, the shape
-  `untrusted-pod-identity.counterexample.test.ts` already uses, because this too is one invariant that must
-  hold in three places.
+- The runner's own seam — `packages/job-runner/src/job-payload-env.counterexample.test.ts` gives
+  `takeJobPayload` a file and asserts the file is **gone** when it returns and the payload is absent from
+  `process.env`.
+- The manifest builders — `packages/backends/src/orchestrators/payload-not-in-agent-env.counterexample.test.ts`
+  asserts no container spec rendered by `buildK8sJob` or `buildNomadJob` carries a secret-bearing value in
+  `env`, over both lanes in one file (the shape
+  `packages/topology/src/untrusted-pod-identity.counterexample.test.ts` uses).
 
 Against a cluster, because a manifest that type-checks is not a pod that starts:
 
@@ -172,4 +177,4 @@ The env transport was then deleted rather than kept as a fallback.
 - Rule `protocol` — *a secret in a process's initial environment is not revoked by a language-level delete*.
 - Rule `job-runner` — the payload is TAKEN, never read.
 - Rule `backends` — an untrusted pod carries no identity in our cluster (the sibling exposure, closed).
-- `docs/architecture/execution-model-design.md` · `docs/execution-backends.md`.
+- `docs/architecture/execution-model.md` · `docs/execution-backends.md`.

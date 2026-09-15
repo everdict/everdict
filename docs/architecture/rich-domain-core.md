@@ -2,98 +2,84 @@
 kind: wiki
 title: "Rich domain core — the domain expresses itself (design)"
 status: current
-updated: 2026-08-08
-anchors: [packages/domain/src/run/run.ts]
+updated: 2026-09-15
+anchors: [packages/domain/src/run/run.ts, packages/domain/src/scorecard/scorecard-batch.ts, packages/domain/src/member/membership-policy.ts, packages/domain/src/schedule/schedule.ts]
 ---
 # Rich domain core — the domain expresses itself (design)
 
-> **Status: S0-S4 SHIPPED** (`466efdc`→`0941840`; 706/706 tests + build + boot contract at every slice).
-> S1 `a3afa12`: **Run** model (newQueued the only construction path; isTerminal/canAdopt/canRedispatch;
-> succeed/fail/adopt/redispatch return store patches; the service's read-guarded `finalize` = first terminal
-> write wins — 2 races sealed by regressions). S2 `30beb3a`: **ScorecardBatch** aggregate (34 inline status
-> sites mapped to factories/guards/transitions; the "latest child per case" seed helper unified across THREE
-> copies; child writes reuse the Run model; trialSummary derivation on the model; 4 races sealed — late
-> success/failure over a raced supersede, planBatch/finalizeBatch superseded-revive). S3 `7bb06c4`:
-> **MembershipPolicy** (last-admin ×3 → intent-named guards over one predicate; invite wrapper deliberately
-> skipped — the store's consume CTE is the atomic SSOT). S4 `0941840`: **Schedule** model (cron at birth,
-> content-vs-pause edit permission, autoDisable transition; bookkeeping stamps deliberately left plain;
-> Temporal rollback failure now surfaces `{rollbackFailed}` instead of a silent swallow).
->
-> Maintainer-directed Round 6 over the api-layer re-architecture: the control-plane core was an anemic
-> domain — records were behavior-less Zod data, state transitions scattered inline mutations, and invariants
-> lived in services. This round gives each domain a model that owns its lifecycle.
+> **Shipped** in four slices (`a3afa12` Run · `30beb3a` ScorecardBatch · `7bb06c4` MembershipPolicy · `0941840`
+> Schedule), each sealing the races it found with regression tests. The models were written in `apps/api` and
+> moved to `@everdict/domain` by the re-architecture; this page records the idiom and why it exists.
 
-## Problem — measured
+## Problem — what it replaced
 
-- `ScorecardRecord.status` is written at **18+ sites across three services** (batch/ingest/facade), mostly
-  unguarded — a terminal record can be blindly re-written. Terminal-state checks and the "latest child per
-  case" seed algorithm are duplicated 2-3×; trialSummary/ETA/child-run hydration are derived inline in
-  `get()`.
-- `RunRecord.status` is written at 5 sites; the track loop's succeeded/failed writes are unguarded (a race
-  lets the later write win).
-- 13 business invariants live inline in services/routes (last-admin protection ×3 duplicate sites,
-  retry-failed terminal gate, resume eligibility, invite expiry/revocation, cron validity, …).
-- Every record type is pure data (`z.infer`); services assemble them with object literals.
+The control-plane core was an anemic domain: records were behavior-less Zod data, state transitions were
+scattered inline mutations, and invariants lived in services. Measured before the change:
 
-## The idiom (reinterpreted from the proven layered-service source)
+- `ScorecardRecord.status` was written at **18+ sites across three services** (batch/ingest/facade), mostly
+  unguarded — a terminal record could be blindly re-written. Terminal checks and the "latest child per case" seed
+  algorithm were duplicated 2–3×.
+- `RunRecord.status` was written at 5 sites; the track loop's succeeded/failed writes were unguarded, so a race
+  let the later write win.
+- 13 business invariants lived inline in services and routes (last-admin protection ×3, retry-failed terminal
+  gate, resume eligibility, invite expiry/revocation, cron validity, …).
 
-The source codebase's core layer makes the domain express itself: entities hold immutable identity and
-mutable state behind private setters; mutation goes through domain methods that throw on illegal transitions
-(`update(patch)` rejecting a clear of a required field); **state-guard methods** say what is legal
-(`invitation.canAccept() = PENDING && !expired`); repository boundaries convert entity↔domain privately; a
-cross-service read concern gets a **policy component** (visibility policy with a batched `canViewAll` — the
-answer to "services never call services"); services keep orchestration only (idempotency, cross-domain
-composition, events, transaction boundaries).
+## The idiom
 
-TypeScript reinterpretation — no JPA dirty-checking exists, and stores persist partial patches, so a domain
-mutation method **guards the transition and returns the store patch**:
+Reinterpreted from the proven layered-service source: entities hold their state behind domain methods that throw
+on illegal transitions, **state-guard methods** say what is legal (`invitation.canAccept() = PENDING &&
+!expired`), a cross-service invariant gets a **policy** component, and services keep orchestration only
+(idempotency, cross-domain composition, events, transaction boundaries).
+
+TypeScript has no JPA dirty-checking and stores persist partial patches, so a domain transition **guards, then
+returns the store patch together with the facts it produces**:
 
 ```ts
-// packages/domain/src/run/run.ts — the domain model wraps the persistence record (moved from apps/api core/ in the re-architecture)
+// packages/domain/src/run/run.ts
+export interface RunTransition { patch: Partial<RunRecord>; facts: DomainFact[] }
+
 export class Run {
-  private constructor(private readonly record: RunRecord) {}
-  static from(record: RunRecord): Run { return new Run(record); }
-  static newQueued(input: …): RunRecord { /* the only place a queued run is assembled */ }
+  static from(record: RunRecord): Run { … }
+  static newQueued(input: NewQueuedRunInput): RunRecord { /* the only place a queued run is assembled */ }
 
   isTerminal(): boolean { … }
   canAdopt(): boolean { … }
+  canRedispatch(): boolean { … }
 
-  start(): RunUpdate { /* queued→running; anything else throws ConflictError from the DOMAIN */ }
-  succeed(result: CaseResult): RunUpdate { /* terminal re-write throws — first terminal write wins */ }
-  fail(error: ErrorEnvelope): RunUpdate { … }
+  start(now: string): RunTransition { /* queued→running; refused once terminal */ }
+  succeed(result: CaseResult, now: string, declared?: SettleDeclaration): RunTransition { … }
+  fail(…): RunTransition { … }
 }
 
-// the service orchestrates; it never writes a status literal again:
-const run = Run.from(await store.get(id) ?? raise());
-await store.update(id, run.succeed(result));
+// the service orchestrates; it never writes a status literal (session/turn-finalize.ts):
+await finalizeRun(deps, id, tenant, (run) => run.succeed(result, now)); // CAS-guarded: first terminal write wins
 ```
 
-- **Records stay in `@everdict/db`** (persistence contract, unchanged wire/DB shapes). The model is the
-  behavior wrapper; `from(record)` / returned patches are the conversion boundary.
-- **Transitions throw from the domain** (`ConflictError`/`BadRequestError` subclasses of `AppError`) — the
-  service maps them like any other failure; HTTP semantics stay derived from the error type.
-- **Guard methods are the SSOT for legality** (`isTerminal`, `canResume`, `canRetryFailed`, `canAdopt`) —
-  services and transports ask, never re-derive from status literals.
-- **Policies** (`core/<domain>/<x>-policy.ts`) own cross-service read/invariant concerns that would otherwise
-  be duplicated (membership last-admin rule) — plain classes over stores, batched lookups where lists are hot.
-- **Guarding is a deliberate behavior change** at previously-unguarded race sites: the old code let the last
-  write win; the model makes the first terminal write win and the loser a no-op/logged skip. Each such site
-  ships a regression test pinning the new semantics.
+- **Records live in `@everdict/contracts`** (`packages/contracts/src/records/`) with unchanged wire and DB shapes.
+  The model is the behavior wrapper; `from(record)` and the returned transition are the conversion boundary. A
+  transition is never spread — `{...transition}` drops both halves past the type checker; use `.patch`.
+- **Transitions throw from the domain** (`ConflictError` / `BadRequestError`, both `AppError` subclasses); the
+  service maps them like any other failure, and HTTP status still derives from the error type.
+- **Guard methods are the source of truth for legality** (`isTerminal`, `canResume`, `canRetryFailed`,
+  `canAdopt`, `canSupersede`, …): services and transports ask, never re-derive from status literals.
+- **Policies** (`packages/domain/src/<domain>/<x>-policy.ts`) own invariants that would otherwise be duplicated.
+  `MembershipPolicy` is a plain class over a member list the service already fetched — injecting the store would
+  only duplicate the read.
+- **Guarding is a deliberate behavior change** at previously unguarded race sites: the old code let the last write
+  win; the model makes the first terminal write win and the loser a no-op or logged skip, and each such site has a
+  regression test pinning it.
 
-## Slices (green-gated, one commit each)
+## The models
 
-1. **S1 — Run (pilot).** now `packages/domain/src/run/run.ts` (+ per-kind policy modules session-run/agent-run/command-run) + unit tests; run-service's 5 sites rewire (submit assembly via
-   `newQueued`, resume adopt/redispatch via guards, track terminal writes read-guard-update). Regression: a
-   late `fail` cannot overwrite `succeeded`.
-2. **S2 — ScorecardBatch (the beast).** `core/scorecard/scorecard-batch.ts` aggregate: lifecycle
-   (queued→running→succeeded|failed|superseded), `isTerminal/canResume/canRetryFailed/canSupersede`, the
-   unified "latest child per case" seed helper, supersede rules, trialSummary/ETA derivations as read methods.
-   The 18+ mutation sites across batch/ingest/facade all route through it.
-3. **S3 — Membership policy + Invite.** `core/member/membership-policy.ts` owns the last-admin invariant
-   (one implementation, three call sites); invite lifecycle guards wrap the consume semantics.
-4. **S4 — Schedule.** Cron/lifecycle guards + Temporal-sync outcome handling (`ensure` failure → rollback is
-   accounted for, not `.catch(() => {})`).
+| Model | File | What it owns |
+|---|---|---|
+| **Run** | `packages/domain/src/run/run.ts` (+ per-kind modules `session-run.ts`, `agent-run.ts`, `command-run.ts`) | `newQueued` and the other birth factories; `isTerminal` / `canAdopt` / `canRedispatch`; `start` / `succeed` / `fail` / `adopt` / `redispatch` |
+| **ScorecardBatch** | `packages/domain/src/scorecard/scorecard-batch.ts` | lifecycle (queued → running → succeeded \| failed \| superseded \| cancelled); `canResume` / `canRetryFailed` / `canSupersede` / `canCancel`; the unified canonical-child-per-case helper; trial-summary derivation |
+| **MembershipPolicy** | `packages/domain/src/member/membership-policy.ts` | the last-admin invariant behind three intent-named guards (demotion, removal, leave). Invite consumption was deliberately left to the store's atomic consume query |
+| **Schedule** | `packages/domain/src/schedule/schedule.ts` | cron validity at birth, the content-vs-pause edit permission, the Temporal spec, `autoDisable`. Plain bookkeeping stamps stay literal in the service; a failed Temporal rollback surfaces as `rollbackFailed` instead of being swallowed |
 
-Gates per slice: new domain unit tests (English BDD) + the full apps/api suite + build + empty-env boot
-contract. Non-goals (explicitly deferred, separate rounds if ever): the source idiom's `Patch<T>`
-three-state partial-update system; idempotency keys for run submission.
+Services that use them live in `packages/application-control` (`run/run-service.ts`,
+`scorecard/`, `schedule/schedule-service.ts`, …).
+
+Non-goals, still not built: the source idiom's `Patch<T>` three-state partial-update system; idempotency keys for
+run submission.

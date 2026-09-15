@@ -2,8 +2,8 @@
 kind: wiki
 title: "Usage metering (gateway sidecar)"
 status: current
-updated: 2026-08-11
-anchors: [packages/trace/src/usage-proxy.test.ts, packages/harnesses/src/command.test.ts, packages/application-control/src/run/run-service.test.ts, apps/api/src/mcp.ts]
+updated: 2026-09-15
+anchors: [packages/trace/src/usage-proxy.ts, packages/job-runner/src/run.ts, apps/api/src/composition/env-policy.ts, apps/api/src/api/workspace/settings.mcp.ts]
 ---
 # Usage metering (gateway sidecar)
 
@@ -42,24 +42,28 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
 (`trace: otel/mlflow`) instead:
 1. **Control plane decides** whether to meter a run and sets **`CaseJob.meterUsage`** (authoritative).
    Resolution in `RunService` (async): per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
-   (`meterUsageFor(tenant)`) → `false`. `main.ts` wires the policy as **durable per-workspace settings → env
-   fallback**: `(await settingsStore.get(tenant))?.meterUsage ?? envPolicy(tenant)`, where the
+   (`meterUsageFor(tenant)`) → `false`. `apps/api/src/composition/run.ts` wires the policy as **durable
+   per-workspace settings → env fallback**: `(await settingsStore.get(tenant))?.meterUsage ?? envPolicy(tenant)`, where the
    `WorkspaceSettingsStore` (`@everdict/db`, InMemory/Pg, table `everdict_workspace_settings`) is managed by admins via
    **`PUT/GET /workspace/settings`** (`settings:write`/`settings:read`, admin-only), and `envPolicy` is the
-   default from **`EVERDICT_METER_TENANTS`** (comma list) or **`EVERDICT_METER_USAGE=1`** (all).
+   default from **`EVERDICT_METER_TENANTS`** (comma list) or **`EVERDICT_METER_USAGE=1`** (all)
+   (`meterUsagePolicyFromEnv`).
 2. `runCaseJob` uses `job.meterUsage` (falls back to the `EVERDICT_METER_USAGE` env only for direct
-   `LocalBackend.dispatch` with no control plane) → passes `meterUsage` to `makeHarness`.
-3. `CommandHarness.run` (only when `trace:none` + the model-base env var is present — avoids double-counting a
-   harness that already reports its own cost) starts a per-run `startUsageProxy(upstream = OPENAI_API_BASE)`,
+   `LocalBackend.dispatch` with no control plane), forces it off for a containerized case (`resolveMeterUsage`)
+   → passes `meterUsage` to `makeHarness`.
+3. `CommandHarness.run` (only when `trace:none` + the model-base env var `OPENAI_API_BASE` is present in the
+   command env — avoids double-counting a harness that already reports its own cost) starts a per-run `startUsageProxy(upstream = OPENAI_API_BASE)`,
    **rewrites `OPENAI_API_BASE` to the proxy**, runs the command (aider/any CLI — **zero harness code**), then
    emits the captured tokens **and cost** as a synthetic **`llm_call`** trace event (`cost: { inputTokens,
    outputTokens, usd }` — `usd` from the gateway cost header, `0` for subscription models).
-4. That event rides `runCase` → `result.trace`, so the **existing** path settles it: `RunService.track` already
-   does `budget.settle(tenant, costOf(result))` and persists `result` in the `RunStore`. No RunService change.
+4. That event rides `runCase` → `result.trace`, so the **existing** settle path picks it up: `RunService` loops
+   `billingCharges(result, tenant)` and, per line, calls `budget.settle` and `usage.record` (the billing meter —
+   see [architecture/usage-metering.md](architecture/usage-metering.md)), then persists `result` in the
+   `RunStore`. No RunService change.
 5. **Surfaced on the run record:** `RunStore` get/list/update return `RunRecord.usage`
    (`{promptTokens, completionTokens, totalTokens, usd, calls}`), **derived** from `result.trace` via
-   `usageFromTrace` (`@everdict/domain`) on read — no column, no migration, always consistent. Clients (API/MCP/web)
-   read `record.usage` without parsing the trace.
+   `usageFromTrace` (`@everdict/domain`) on read (`withRunUsage`, `packages/db/src/results/run-store.ts`) — no
+   column, no migration, always consistent. Clients (API/MCP/web) read `record.usage` without parsing the trace.
 
 ## Verified
 - Deterministic (`packages/trace/src/usage-proxy.test.ts`): `extractUsage` (incl. `total` fallback, null on
@@ -69,8 +73,10 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
 - Deterministic (`packages/harnesses/src/command.test.ts`): `meterUsage` rewrites the base to the proxy, emits
   the synthetic `llm_call` with the captured tokens **and `usd`**, and closes the proxy; **not** metered when
   `trace` ≠ `none`.
-- Deterministic (`packages/application-control/src/run/run-service.test.ts`): resolution order — per-run override > per-workspace policy
-  > off — and the decided value is carried on `CaseJob.meterUsage`.
+- Deterministic (`apps/api/src/core/run/run-service.test.ts`): resolution order — per-run override > per-workspace
+  policy > off — and the decided value is carried on `CaseJob.meterUsage`.
+- Deterministic (`packages/job-runner/src/run.test.ts`): `resolveMeterUsage` turns metering off for a containerized
+  case, by the `containerize` flag or an injected `DockerDriver`.
 - Live proxy (`scripts/live/usage-proxy.mjs`) vs real workclaw LiteLLM `gpt-5.4-mini`: `run-A` = 2 calls / 3276
   tokens, `run-B` = 1 call / 1642 tokens — captured while responses pass through intact.
 - Live lifecycle (`scripts/live/usage-proxy-run.mjs`): a `command` harness dispatched via `LocalBackend` with
@@ -79,11 +85,12 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
   yet **tokens are metered**.
 
 ## Management surfaces (admin)
-- **HTTP**: `PUT/GET /workspace/settings` (`settings:write`/`settings:read`).
-- **Web**: `/dashboard/settings` toggles `meterUsage` (`@/features/workspace-settings`, `can()`-gated).
-- **MCP**: `get_workspace_settings` / `set_workspace_settings` tools (`apps/api/src/mcp.ts`, admin-gated,
-  workspace-scoped) — full BFF↔MCP parity.
+- **HTTP**: `PUT/GET /workspace/settings` (`settings:write`/`settings:read`, `apps/api/src/api/workspace/settings.routes.ts`).
+- **MCP**: `get_workspace_settings` / `set_workspace_settings` tools (`apps/api/src/api/workspace/settings.mcp.ts`,
+  admin-gated, workspace-scoped).
+- **Web**: no page offers the toggle today. `SettingsForm` (`apps/web/src/features/workspace-settings/ui/settings-form.tsx`)
+  renders a `meterUsage` switch and is exported from the feature, but no route mounts it.
 
-## Not yet (next)
-- Note: `$` capture is **live-ready** but reads `0` on workclaw's LiteLLM because its models are subscription
-  (unpriced); it yields real `$` for any metered model the gateway prices.
+## Note
+`$` capture reads `0` on workclaw's LiteLLM because its models are subscription (unpriced); it yields real `$`
+for any metered model the gateway prices.

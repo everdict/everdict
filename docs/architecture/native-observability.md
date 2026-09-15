@@ -2,12 +2,13 @@
 kind: wiki
 title: "Native observability — Everdict as the trace platform (OTel-first)"
 status: current
-updated: 2026-08-19
-anchors: [packages/trace/src/sources/otel.ts]
+updated: 2026-09-15
+anchors: [packages/trace/src/sources/otel.ts, apps/api/src/api/otlp/otlp.routes.ts, apps/api/src/api/trajectory/trajectory.routes.ts, packages/application-control/src/ports/trajectory-store.ts]
 ---
 # Native observability — Everdict as the trace platform (OTel-first)
 
-> **Status: DESIGN (maintainer decision, 2026-07-29).** Supersedes-in-direction the *edge-adapter* half of
+> **Status: N0–N3, N5 and N6 SHIPPED; N4 (collector-level exporters) not built; byte quotas, sampling and
+> per-plane retention remain (maintainer decision, 2026-07-29).** Supersedes-in-direction the *edge-adapter* half of
 > [execution-model.md](./execution-model.md) §6: instead of "own the evidentiary copy, treat external
 > platforms as import/export edges", Everdict **owns the trace domain itself** — its own OTel-standard
 > ingestion, its own tenant-scoped trace store — and external platforms become egress mirrors plus
@@ -51,17 +52,18 @@ collector and the store**.
 | Piece | Where | Today | Becomes |
 |---|---|---|---|
 | OTLP span parsing + GenAI-convention normalization | `packages/trace/src/sources/otel.ts` | pull mode (query their API) | the receiver's core, unchanged |
-| `everdict.run_id` correlation tag | stamped at execution (`application-execution/run-case.ts`) | lets pull find our runs | native correlation on arrival |
-| `TraceProvenance` extraction | `sources/trace-source.ts` | uniform "Everdict origin" across kinds | ingest-time provenance |
-| Span waterfall + browse/inspect | `spans-to-nodes`, Settings › Traces | renders *their* store | renders *our* store first |
+| `everdict.run_id` correlation tag | stamped at execution (`packages/application-execution/src/run-case.ts`) | lets pull find our runs | native correlation on arrival |
+| `TraceProvenance` extraction | `packages/trace/src/sources/trace-source.ts` (`extractProvenance`) | uniform "Everdict origin" across kinds | ingest-time provenance |
+| Span waterfall + browse/inspect | `apps/web/src/features/browse-traces` (`SpanWaterfall`, `trajectorySpans`), Settings › Traces | renders *their* store | renders *our* store first |
 | `TraceEvent` vocabulary (+ raw `span` passthrough, artifacts) | contracts | the normalization target | ~~unchanged — the internal contract~~ → **demoted to a read-time projection at N6** ([otel-trace-model.md](./otel-trace-model.md)): `TraceSpan` becomes the record, `TraceEvent[]` stays exactly what graders and judges read |
-| TrajectoryStore (design) | execution-model §6 | the owned store for run trajectories | the same store, fed by the collector |
+| TrajectoryStore | `packages/application-control/src/ports/trajectory-store.ts` | the owned store for run trajectories | the same store, fed by the collector |
 
 ## The design
 
 1. **Ingestion front door — an OTel collector per install.** OTLP/HTTP (+gRPC later) in. Tenant isolation
-   at the door: **per-tenant ingest tokens** (mint/revoke — the token-server pattern from the managed
-   image store, third appearance) route spans to the tenant's partition. v1 signal scope: **traces**;
+   at the door: the proposal was **per-tenant ingest tokens** (mint/revoke — the token-server pattern from
+   the managed image store); what shipped is `POST /v1/traces` authenticated by an ordinary workspace API
+   key (`runs:submit`), which routes spans to the tenant's partition. v1 signal scope: **traces**;
    logs/metrics ride the same door on a later rung (N-O3).
 2. **The store — one port, a storage ladder.** The TrajectoryStore grows into the tenant-scoped trace
    store behind one port: **rung 1** Postgres-index + object-storage bodies (eval-scale; fits the compose
@@ -117,11 +119,10 @@ collector and the store**.
 
 ## Phasing
 
-> **Sequenced by [execution-master-plan.md](./execution-master-plan.md)** (plan of record — waves W0–W7; decisions locked at recommended values).
 
-
-- **N0 — Conventions + the door.** Publish the `everdict.*` semconv; OTLP/HTTP receiver (api-embedded for
-  v0) + tenant ingest tokens; normalize → TrajectoryStore. Dogfood: our own harness/agent traces land
+- **N0 — Conventions + the door.** SHIPPED: the `everdict.*` semconv (`packages/contracts/src/execution/semconv.ts`);
+  OTLP/HTTP receiver `POST /v1/traces` (api-embedded, `apps/api/src/api/otlp/otlp.routes.ts`) authenticated
+  by a workspace API key; seal → TrajectoryStore. Dogfood: our own harness/agent traces land
   through the door (replacing two-phase pull where the harness can emit OTLP).
 - **N1 — Look inward.** Settings › Traces primary tab reads our store (browse/inspect/waterfall reuse);
   `LiveTraceRef` → internal link; trace chips point home. **First rung SHIPPED (master-plan W5)**:
@@ -207,7 +208,8 @@ collector and the store**.
   "which row sealed first" from a stamp each writer takes from its own clock, while WHICH attempt a case's
   verdict rests on was already decided in Postgres by the commit receipt; a duplicate carrying a backdated
   stamp therefore won the read and served the abandoned attempt's bytes under the run the receipt named. So
-  the port carries an EXACT-IDENTITY read beside it — `get(tenant, runId, { attemptId })` — which ranks the
+  the port carries an EXACT-IDENTITY read beside it — `planes(tenant, runId, { attemptId })` (`get` before
+  [long-horizon-trace-reads.md](./long-horizon-trace-reads.md) R2 removed the unbounded read) — which ranks the
   asked-for attempt above the clock and REFUSES a plane declaring a different one (a plane declaring none is
   kept: absence is not agreement, but it is not contradiction either). One rule, three impls:
   `segmentDeclaresAttempt` / `trajectoryForAttempt` (`@everdict/application-control`) for Postgres and
@@ -234,12 +236,13 @@ collector and the store**.
   The wire (`GET /trajectories/:id`, `GET /runs/:id/trajectory`, `get_trajectory`) gains `segments`,
   with the execution segment omitting `events` so a system read never ships the same trace twice. The
   web renders it as swimlanes (agent · placement · one lane per service) over one axis, and
-  `span.durationMs` (new, optional) keeps a service's spans from arriving as instants. Remaining:
-  W3C `traceparent`/`baggage` propagation helpers, and per-plane retention/sampling policy.
-- **N4 — Mirror consolidation.** Collector-level exporters subsume raw-trace mirroring; score-attach
-  sinks remain API-side. **Blocked on N6 until now**: a record with no trace id, no span kind/status, no
-  span events and non-hex ids cannot be handed to an exporter as a valid OTLP trace.
-- **N6 — One model: spans are the record.** See [otel-trace-model.md](./otel-trace-model.md). The N0–N5
+  `span.durationMs` (new, optional) keeps a service's spans from arriving as instants. W3C `traceparent`
+  propagation landed with N6 (`TRACEPARENT_ENV`); `baggage` propagation and per-plane retention/sampling
+  policy remain.
+- **N4 — Mirror consolidation.** NOT BUILT. Collector-level exporters subsume raw-trace mirroring; score-attach
+  sinks remain API-side. It was blocked on N6 (a record with no trace id, no span kind/status, no span events
+  and non-hex ids cannot be handed to an exporter as a valid OTLP trace); N6 has shipped.
+- **N6 — One model: spans are the record.** SHIPPED. See [otel-trace-model.md](./otel-trace-model.md). The N0–N5
   rungs kept `TraceEvent` as both the storage record and the judge contract, which left two models for one
   thing and a lossy flatten at our OWN door (`otlp-ingest-service` parsed real OTLP spans and then called
   `spansToTraceEvents` before sealing). N6 restores OTel's upper layer: `TraceSpan` (OTLP-shaped, hex ids,

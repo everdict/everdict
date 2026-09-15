@@ -2,7 +2,7 @@
 kind: wiki
 title: "Your workspace"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
 ---
 # Your workspace
 
@@ -16,10 +16,9 @@ came from.
 - **[Environments](environments.md)** — `repo` · `prompt` · `browser` · `os-use`, and which one a task deserves
 - **[Secrets](secrets.md)** — every credential, by name, encrypted at rest
 - **[Image registry](image-registry.md)** — publishing images, and the provenance that makes two scorecards comparable
+- **[Browser profiles](browser-profiles.md)** — a captured login, so a case is about the task rather than the login
 
-These four connect: an agent writes its output to the filesystem, an eval runs in an environment, and
-that environment is an image whose reference decides whether last week's number means anything.
-
-- **[Browser profiles](browser-profiles.md)** — a captured session, so a case is about the task rather than the login
+They connect: an agent writes its output to the filesystem, an eval runs in an environment, and that
+environment is an image whose reference decides whether last week's number means anything.
 
 For the boundary itself — roles, secrets, isolation — see [Workspace](../concepts/workspace.md).

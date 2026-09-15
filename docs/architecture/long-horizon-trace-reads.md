@@ -2,8 +2,8 @@
 kind: wiki
 title: "Long-horizon trace reads — the event is the unit"
 status: current
-updated: 2026-08-29
-anchors: [packages/application-control/src/ports/artifact-store.ts]
+updated: 2026-09-15
+anchors: [packages/application-control/src/ports/trajectory-store.ts, packages/application-control/src/ports/offloading-trajectory-store.ts, packages/application-control/src/ports/artifact-store.ts, apps/api/src/api/trajectory/trajectory.routes.ts]
 ---
 # Long-horizon trace reads — the event is the unit
 
@@ -12,9 +12,9 @@ anchors: [packages/application-control/src/ports/artifact-store.ts]
 > verbatim from a tenant's OTel exporter. Reading one of those traces exhausted the control plane's heap.
 > This document is why that happened, and the four changes that remove the cause rather than the symptom.
 
-## The defect, stated once
+## The defect, stated once (the code as it stood before R0–R2)
 
-**The storage and transport unit is the whole trajectory, not the event.** Everything else follows from that
+**The storage and transport unit was the whole trajectory, not the event.** Everything else follows from that
 one sentence, and no amount of tuning around it helps.
 
 `PgTrajectoryStore.get` selects the `body` jsonb of the header row and of every segment, with no window and

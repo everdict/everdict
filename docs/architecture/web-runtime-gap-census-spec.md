@@ -1,14 +1,15 @@
 ---
 kind: spec
 title: "What the runtime supports and the web does not — a counted census"
-status: proposed
-updated: 2026-09-04
-anchors: [apps/web/src/shared/lib/control-plane.ts, apps/web/src/entities/scorecard/model/schema.ts, apps/api/src/api/scorecard/scorecard.routes.ts]
+status: landed
+updated: 2026-09-15
+anchors: [scripts/check-web-reach.mjs, apps/web/src/entities/scorecard/model/schema.ts, apps/web/src/entities/run/model/schema.ts, apps/web/src/entities/campaign/model/schema.ts]
 ---
 # What the runtime supports and the web does not — a counted census
 
-> **Status: proposed.** Nothing here is implemented. This page is the CENSUS and the plan it implies; each
-> slice names what it closes and what would show it closed. The counts are the point — "the web is behind"
+> **Status: landed.** Slices 0–5 are built, and `pnpm web-reach` (`scripts/check-web-reach.mjs`) keeps the
+> result closed. This page is the CENSUS (dated 2026-09-04) and the plan it implied; each slice names what it
+> closed and what shows it closed. The counts are the point — "the web is behind"
 > ages into nothing, and a counted sweep stays checkable and shows its own expiry when the numbers move.
 
 ## Why this page exists
@@ -105,7 +106,7 @@ Not an argument that every route needs a page. Several of these are legitimately
 operator-only, and saying so IS the work — an unbuilt page and a deliberate omission look identical in a
 count, and only a decision tells them apart. Slice 0 exists for that reason.
 
-## Slice 0 — decide, before building anything — **Landed**
+## Slice 0 — decide, before building anything — **Landed** — `scripts/check-web-reach.mjs` (`DECIDED`)
 
 Each of the 36 read against what its route actually declares. **Seven are not gaps at all**: their caller was
 never a browser, and counting them as missing pages was the census being conservative in the safe direction.
@@ -141,7 +142,7 @@ never a browser, and counting them as missing pages was the census being conserv
 **29 build + 7 not-a-gap = 36.** No slice below adds to this list; a route that appears later is a new
 census, dated separately.
 
-## Slice 1 — the served facts — **Landed**
+## Slice 1 — the served facts — **Landed** — `apps/web/src/entities/scorecard/model/schema.ts`, `apps/web/src/entities/run/model/schema.ts`
 
 The cheapest real value in the census: the runtime already computes them, the record already carries them,
 and the web threw them away at the schema.
@@ -183,7 +184,7 @@ The first attempt did use `z.object({}).passthrough()` for the run's new fields,
 every one of them — correctly, since a loose shape would let the wire change under the page without the
 build noticing. They are spelled out.
 
-## Slice 2 — the analysis twin — **Landed**
+## Slice 2 — the analysis twin — **Landed** — `packages/domain/src/scorecard/analysis-parity.test.ts`, `apps/web/src/features/analyze-scorecards/model/analysis-parity.test.ts`
 
 **The duplicate is load-bearing and stays.** The studio pivots an already-loaded list, and a round trip per
 filter toggle would make it unusable — that is a real answer, not an excuse. What was NOT load-bearing was
@@ -191,7 +192,7 @@ the lockstep: each engine carried a comment saying the other is kept in step wit
 another component with nothing checking it, and only one of the two is ever called — so a divergence would
 have been invisible for as long as nobody used the route.
 
-`fixtures/analysis-parity.json` is the one question both engines answer. Each side has its own test over it,
+`packages/contracts/fixtures/analysis-parity.json` is the one question both engines answer. Each side has its own test over it,
 neither imports the other (the web may not import `@everdict/domain` at all), and the file is read rather
 than imported for that reason. Four cases: the case-count weighting that stops a 5-case smoke run
 outweighing a 500-case suite, a metric absent from a card contributing NOTHING rather than a zero, `latest`
@@ -204,7 +205,7 @@ only, and dropping it in the domain reddens the domain's only.
 to an older card that has the metric. There is none: `latest` takes the newest card and reads ITS row, which
 for that group is absent. The expectation was the bug, and the property is now pinned by name.
 
-## Slice 3 — approvals — **Landed**
+## Slice 3 — approvals — **Landed** — `apps/web/src/app/[workspace]/approvals/page.tsx`
 
 `/approvals` + `/approvals/:id/decide`, because a human-in-the-loop queue with no human door is the sharpest
 case in the census: the control plane parked agent mutations that only the AGENT surface could answer.
@@ -226,7 +227,7 @@ Three decisions the page makes, each with a test:
 The palette keywords are English-only: it matches on the TRANSLATED label plus keywords, so the `ko` nav
 label already finds the row and Korean keywords here would be debt against the language ratchet for nothing.
 
-## Slice 5 — paying the named debt, surface by surface
+## Slice 5 — paying the named debt, surface by surface — **Landed** — `scripts/check-web-reach.mjs` (none OWED)
 
 Slice 4 turned the remaining gaps into debt the gate carries by name. This is the ledger of what has been
 paid, and it is the only honest place to read how far the census got: the gate going green does not mean the
@@ -274,8 +275,8 @@ record of.
 
 | `/campaigns` (11 of 12) | the evolution domain, which had no page at all. What the surface deliberately does NOT have is the field a driver would most expect: **there is no verdict input**, because the platform derives the verdict from the production scorecard diff and a form offering one would ask a loop to grade its own work. `learned` is required for the mirrored reason — the budget is spent either way, and what the round TAUGHT is the only half the next round can use. Settle is hidden while the gate says `continue` (the arithmetic is the frame's, not the page's), and adopt/merge appear only while the authorization is unspent, because **settling is not adopting**: a campaign reading `adopted` whose registry write nobody has made is work not yet done, not a bug to hide. The twelfth route — the adoption's SPEND — is DECIDED rather than built, and the reason is the finding below |
 
-**0 remain OWED.** Every browser-facing route is reachable; the 18 entries that survive on `DECIDED` each
-name a caller that is not a browser.
+**0 remain OWED.** Every browser-facing route is reachable; every entry that survives on `DECIDED` names a
+caller that is not a browser.
 
 ### What the self-review found, and why it is the census's own lesson
 
@@ -332,7 +333,7 @@ proved:
 | closed `adopt`, authorization unspent | the owed callout naming `harness · patchbot @ 1.2.0` |
 | authorization spent | no callout; rounds reading `held-out +0 / −0` then `+4 / −0`, matching the gate's own output |
 
-The payloads are now `fixtures/campaign-wire.json`, decoded by
+The payloads are now `packages/contracts/fixtures/campaign-wire.json`, decoded by
 `apps/web/src/entities/campaign/model/campaign-wire.test.ts`, and the fixture was driven RED against each
 defect it records. It is captured, never hand-written: a fixture somebody adjusted to pass has stopped
 answering the question. Re-capture by re-running the live script.
@@ -359,7 +360,7 @@ would have shown.
 What the gate guarantees, and what this page is the record of: no route can go unreachable without a
 decision, no decision can outlive its subject, and the debt has a count that only moves one way.
 
-## Slice 4 — the check that keeps it closed — **Landed**
+## Slice 4 — the check that keeps it closed — **Landed** — `scripts/check-web-reach.mjs`
 
 `pnpm web-reach`. It does not demand a caller; it demands an ANSWER: every browser-facing route is reachable
 from the web's one client, or carries a line saying why a person does not need it. An `OWED —` reason keeps
@@ -368,9 +369,11 @@ for it — and a route that BECOMES reachable must lose its line, because a reas
 reads as permission.
 
 It was listed last because it would have been red, and a gate that lands before its fix teaches people to
-bypass gates. It was green at **364 routes, 72 decided, 55 of them OWED**, and it is green now at
-**365 routes, 18 decided, none OWED** — the debt is paid, and the 18 that remain are the routes whose caller
-is a runner, a CI job, another service, or (in one case) a door whose body a browser cannot honestly fill.
+bypass gates. It was green at **364 routes, 72 decided, 55 of them OWED**, then at **365 routes, 18 decided,
+none OWED** when slice 5 closed, and on 2026-09-15 it reads **367 routes, 20 decided, none OWED** (the two
+added entries are the campaign `evidence-view` and `evidence-grants` doors). The debt is paid, and what remains is routes whose caller
+is a runner, a CI job, another service, a delegate holding an evidence grant, or (in one case) a door whose
+body a browser cannot honestly fill.
 
 ⚠️ **An empty OWED list is not the end of the convention, and reading it that way is how the next gap becomes
 invisible.** The next unreachable route needs somewhere honest to sit while its surface is built; what the

@@ -2,184 +2,96 @@
 kind: wiki
 title: "Heterogeneous topology placement — infra-agnostic (capability-driven)"
 status: current
-updated: 2026-07-27
-anchors: [packages/contracts/src/infra/capability.ts, packages/contracts/src/infra/runtime-spec.ts, packages/contracts/src/harness/harness-spec.ts, packages/domain/src/runtime/capability-requirements.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/infra/capability.ts, packages/domain/src/runtime/capability-requirements.ts, packages/topology/src/deploy/nomad-topology.ts, packages/topology/src/deploy/k8s-topology.ts]
 ---
 # Heterogeneous topology placement — infra-agnostic (capability-driven)
 
-**Status: design draft.** Scope: let a `kind:"service"` topology contain services that require **different
-execution environments** (e.g. a Windows Playwright browser-farm service alongside Linux agent services) and stop
-the single co-located host from being a placement/throughput bottleneck — **without leaking any orchestrator
-detail into the harness**. This supersedes the earlier Nomad/Consul-specific draft: infra specifics belong
-*below* the `TopologyRuntime` interface, never in the contract.
+A `kind:"service"` topology may contain services that need different execution environments — a Windows
+Playwright or UI-driver service next to Linux agent services — and a service may need more than one instance.
+Neither may leak an orchestrator detail into the harness, because a registered harness has to run on any runtime:
+a laptop's Docker, any Nomad, any K8s.
 
-## The principle
+> **The harness declares WHAT each service needs (a capability) and addresses peers by name. WHERE and HOW they are
+> placed, co-located, discovered across hosts and scaled is the `TopologyRuntime` adapter's business.** Nomad
+> constraints and K8s `nodeSelector` live inside an adapter, never in the contract.
 
-Everdict is **infra-agnostic**: a registered harness (`(tenant, id, version) → HarnessSpec`) must run on **any**
-runtime — a laptop's Docker, any Nomad, any K8s. So the fix is stated at the abstraction the codebase already
-owns, not at Nomad's:
+## The harness side — portable declarations only
 
-> **The harness declares WHAT each service needs (a capability) and addresses peers by name (`<svc.name>:<port>`).
-> WHERE/HOW they are placed, co-located, discovered across hosts, and scaled is entirely the `TopologyRuntime`
-> adapter's business. Consul / Nomad constraints / K8s `nodeSelector` live *inside* an adapter — the same idiom as
-> every other pluggable adapter here (`Backend`/`Driver`/`Harness`).**
+On `TopologyService` (`packages/contracts/src/harness/harness-spec.ts`):
 
-This is **not new machinery** — it is the existing capability model
-(`packages/contracts/src/infra/capability.ts`), whose SSOT comment already promises: *"a runtime self-probes and
-advertises, a harness derives its requirements → matching is enforced by the per-kind layer. **Adding a capability
-= add one line here.**"* OS heterogeneity is exactly that: one more `functional` capability.
+- `requires.os: linux | windows | macos` — what the service's image or program genuinely needs, on any infra. Unset
+  or `linux` adds no gate.
+- `exec: { kind: "host", command, artifact?, provision? }` — the program runs directly on the node (no container), so
+  a Windows service does not need a Docker-capable Windows node.
+- `replicas` — a portable instance count.
+- `wiring: [{ service, hostEnv?, portEnv?, urlEnv? }]` — inject a peer's coordinates under the env names a
+  third-party image expects; every runtime fills them natively. `EVERDICT_SVC_<PEER>` is injected for `needs` peers.
+- `resources.gpu` — a GPU count, a portable resource ask like cpu and memory.
 
-## What is already portable (unchanged)
+Cluster specifics — node class, pool, GPU node selector — are NOT here; they are the runtime-side binding below.
 
-- **Peer addressing.** Every runtime resolves `<svc.name>:<port>` its own way — Docker network-alias, K8s Service
-  DNS, Nomad loopback/Consul. The harness never assumes co-location; it assumes *name-reachability*. This holds
-  regardless of which node/OS a peer lands on.
-- **`TopologyRuntime` interface.** `ensureTopology(spec, zone) → { endpoints }` (keyed by service name) is
-  unchanged. Placement + cross-host discovery are the adapter's internals behind this seam.
-- **`TopologyService.replicas`** already exists (`harness-spec.ts`). It is a *portable* declaration; each runtime
-  honors it natively. (Nomad ignores it today only because a shared netns can't bind a port twice — an adapter
-  limitation, not a contract one.)
+## The capability gate
 
-## Contract — one abstract, portable field
+1. **Vocabulary** — `CAPABILITY_DEFS` (`packages/contracts/src/infra/capability.ts`) has the functional capabilities
+   `os-windows`, `os-macos` and `gpu`. Linux is the implicit default and derives nothing.
+2. **What a harness requires** — `requiredCapabilitiesForHarness` (`packages/domain/src/runtime/capability-requirements.ts`):
+   `docker` only when at least one service is containerized (`topologyNeedsDocker`), `os-<x>` for each non-Linux
+   `requires.os` (`requiredCapabilitiesForTopology`), and `gpu` when a service asks for one.
+   `requiredCapabilitiesForJob` adds `sandbox` when the case asks for isolation.
+3. **What a runtime provides** — for a registered nomad/k8s runtime `defaultRuntimeCapabilities` derives `docker`,
+   `sandbox` (hardened runtime), `topology` (a trace source) and `gpu` (a GPU binding); `os-windows`/`os-macos`
+   cannot be inferred from the spec and are declared by the operator in `RuntimeSpec.capabilities`
+   (`runtimeSpecWithCapabilities` unions both). A self-hosted runner probes its own platform and advertises
+   `os-windows`/`os-macos` (`packages/self-hosted-runner/src/capabilities.ts`).
+4. **Enforcement** — `RuntimeDispatcher` refuses a job whose requirements `runtimeSatisfies` rejects before dispatch
+   (a runtime that declared no capabilities is not gated); the self-hosted pool refuses a job no runner in it can
+   run. The web grey-badges an unmet runtime through the same `functionalGate`
+   (`apps/web/src/entities/runtime/model/capability-fit.ts`).
 
-`TopologyService` gains an **intrinsic requirement**, never a node selector:
+The gate answers "can this runtime run this topology at all". Putting a given service on a matching node is the
+adapter's job.
 
-```ts
-// harness-spec.ts — TopologyService
-requires: z.object({
-  os: z.enum(["linux", "windows", "macos"]).optional(), // the service's IMAGE genuinely needs this OS (portable capability, not a cluster label)
-}).optional(),
-```
+## Runtime realizations — below the seam
 
-`requires.os` is a **capability**, not placement: a Windows Playwright image needs Windows on *any* infra. Cluster
-specifics (node class, datacenter, pool, GPU **node pool/selector**) are **NOT** here — those are runtime-owned (a
-runtime-side binding set by whoever operates the cluster), out of the harness. A GPU **count**, however, is a portable
-resource ask like cpu/memory — it lives on the harness as `resources.gpu` (see the realized section below). Unset /
-`linux` adds **no gate** (today's behavior).
+- **K8s** (`k8s-topology.ts`) — already one Deployment + Service per service, wired by Service DNS, and `replicas`
+  is honored natively. `requires.os` becomes `nodeSelector: { "kubernetes.io/os": <os> }` (`macos` → `darwin`). A
+  host-exec service is refused fail-fast — K8s has no non-container path.
+- **Nomad** (`nomad-topology.ts`) — `needsPerServiceGroups(spec)` is true when any service has a non-Linux OS,
+  `replicas > 1`, or is host-exec. Otherwise the topology deploys as ONE co-located group
+  ([nomad-colocated-topology.md](./nomad-colocated-topology.md)). Per-service groups are the K8s model on Nomad's
+  own primitives, with no extra infrastructure:
+  - one group per service (`everdict-svc-<name>`), `Count = replicas`, constraint `${attr.kernel.name}` from
+    `requires.os`;
+  - each ported service registered in Nomad-native service discovery (`Provider: "nomad"`);
+  - peers resolved by a `local/peers.env` template over the native catalog (`nomadService`), with
+    `ChangeMode: restart` so a peer reschedule re-resolves — the Service-DNS analog;
+  - Windows/macOS groups omit the Linux bridge network mode; a host-exec service runs as a `raw_exec` task that
+    binds its declared port as a reserved port, after an optional `provision` prestart task.
 
-**Peer wiring for BYO images (`TopologyService.wiring`).** Once a service is on another node, `<svc.name>` no longer
-resolves for free (Nomad has no DNS without Consul). A third-party image also expects its peers under ITS own env
-names (Selenium's `SE_EVENT_BUS_HOST`, …). `wiring: [{ service, hostEnv?, portEnv?, urlEnv? }]` declares "inject
-peer `service`'s coordinates under these env names" — portable: each runtime fills them natively (co-located
-Nomad/Docker = the peer loopback/alias + declared port, static; per-service Nomad = the discovery template,
-re-resolving; K8s = Service DNS). The default `EVERDICT_SVC_<PEER>` is always injected for `needs` peers too.
+  Consul is not used for discovery. When a `ConsulClient` is injected, `NomadTopologyRuntime` applies tenant
+  intentions (`consul-intentions.ts`) — an authorization decision, not the data plane.
+- **Docker (self-hosted, one host)** — provides only the host OS; a runner advertises only its own platform, so a
+  mixed-OS topology fails the gate. A host-exec service is refused fail-fast.
 
-## Capability wiring (existing gate, one new vocabulary line)
+Co-location is an optimization, not a guarantee: the only portable guarantee is name-reachability. Per-service groups
+also remove the co-location bottleneck — each service is bin-packed as its own group, `replicas` lifts the
+single-instance cap, and a reschedule affects one service rather than the whole topology. The session services
+behind a declared pool can be scaled between replica bounds by the pool autoscaler
+([target-acquisition-generalization.md](./target-acquisition-generalization.md), `acquire.capacity.scale`).
 
-1. **Vocabulary** (`capability.ts`, `CAPABILITY_DEFS`): add `"os-windows": { kind: "functional" }` and
-   `"os-macos": { kind: "functional" }`. `linux` stays the implicit default (no capability, no gate → zero churn
-   for the common case).
-2. **Harness requirement** (`requiredCapabilities`, extended for topology): a topology requires
-   `os-<x>` for each distinct non-Linux `service.requires.os`, unioned with its base (`docker`/`topology`). So a
-   Windows+Linux topology requires `{docker, topology, os-windows}`.
-3. **Runtime advertisement** (`defaultRuntimeCapabilities` + the runner's self-probe): a runtime advertises
-   `os-windows`/`os-macos` **only when its node pool actually has such nodes** (self-probed, like the runner's
-   `detectCapabilities`). A laptop Docker advertises only its host OS.
-4. **Placement gate** (`functionalGate`/`runtimeSatisfies`, unchanged): a mixed cluster provides
-   `{os-linux(implicit), os-windows}` ⊇ the topology's `{os-windows}` → candidate. A Linux-only runtime lacks
-   `os-windows` → **excluded, shown grey** in the web runtime badge (the existing capability UX) — a clean
-   "unsupported here", never a broken run.
+A spec with no `requires`, all-container services and `replicas: 1` derives no new capability and renders the same
+co-located Nomad job, K8s manifests and Docker commands as before.
 
-The coarse gate answers *"can this runtime run this topology at all?"*. The fine-grained *"put THIS service on a
-windows-capable node"* is the adapter's private job (below).
+## Runtime-side placement binding (GPU / node pool)
 
-## Runtime realizations — implementation detail, below the seam
+`RuntimeSpec` (`packages/contracts/src/infra/runtime-spec.ts`) carries the operator-owned binding, never the harness:
 
-None of this appears in the harness or contract. Each `TopologyRuntime` satisfies the same declared capability its
-own way:
+- nomad and k8s: `gpu?: number` — reserve N GPUs per job (`device "nvidia/gpu"` in `buildNomadJob`,
+  `nvidia.com/gpu` requests = limits in `buildK8sJob`);
+- k8s: `nodeSelector?` and `tolerations?` on the pod spec;
+- nomad: `constraints?: {attribute, operator?, value}[]` on the task group.
 
-- **K8s** — already one Deployment+Service per service wired by Service DNS. `requires.os` →
-  `nodeSelector: { "kubernetes.io/os": "windows" }` + the standard Windows toleration. **No data-plane change**;
-  the mixed-OS gap on K8s is purely the missing field this contract adds. Lowest-risk realization.
-- **Nomad — the K8s model on Nomad's OWN primitives (for the general Nomad user, no extra infra).** Make Nomad
-  **isomorphic to K8s** using what every Nomad ≥1.3 ships: **one group per service**, registered in **Nomad-native
-  service discovery** (`service { provider = "nomad" }`). Peers resolve `<svc.name>` via a `template` over the
-  native catalog (`{{ range nomad_service "..." }}`, re-rendered + health-gated — the Service-DNS analog, replacing
-  loopback `extra_hosts`); placement via `constraint ${attr.kernel.name}` from `requires.os` (the `nodeSelector`
-  analog); scale via group `Count = replicas`. Per-service groups = per-service netns, so the co-location
-  unique-port constraint disappears. This is the **old per-service-group shape done right**: addresses that went
-  stale (baked dynamic host ports) are now re-resolved through the catalog. **No Consul required** — it works for
-  any Nomad user out of the box.
-  - **Consul — optional enhancement, auto-used when present.** A Nomad cluster that runs Consul gets the richer
-    substrate for free: Consul service DNS / Connect (mesh, mTLS, cross-DC) + the existing tenant intentions
-    (`consul-intentions.ts`). The adapter prefers Consul when a `ConsulClient` is wired, else native discovery.
-    Either way the harness is unchanged — the substrate choice is entirely the adapter's.
-  - **Co-location = a transparent optimization, not a requirement.** A homogeneous, single-instance topology (the
-    common agent-dev case) can still deploy as one co-located group (loopback, atomic lifecycle, zero discovery
-    overhead) — no regression for the majority. The adapter switches to per-service groups + discovery only when
-    the spec declares heterogeneity (`requires.os` divergence) or scale (`replicas > 1`).
-- **Docker (self-hosted, single host)** — provides only the host OS, so a mixed-OS topology simply doesn't match
-  the gate and is declined cleanly (a second-OS daemon is a later runner capability, not a contract change).
-
-## Co-location & scale-out are runtime optimizations, not contract guarantees
-
-The only portable guarantee is name-reachability. Whether an adapter co-locates services (loopback latency,
-atomic lifecycle) or spreads them per-service (the K8s model), and how it scales, is its own call. Under the
-per-service Nomad realization (each service its own group, resolved by native discovery) the **co-location
-bottleneck** dissolves with no harness change:
-
-- **Bin-packing** — each service is packed as its own group, never summed into one fat node.
-- **Throughput ceiling** — the existing `replicas` maps to the service group's `Count`; callers load-balance over
-  the discovered instances (the catalog returns N, health-gated), lifting the old `Count 1` single-instance cap.
-- **Blast radius** — per-service reschedule instead of the whole-topology alloc.
-
-(A homogeneous single-instance topology still deploys co-located — this per-service path engages only when the
-spec declares heterogeneity or scale.)
-
-Warm-pool-of-N instances (whole-topology horizontal scale) remains a separate, adapter-level follow-up; per-run
-isolation is logical (`thread_id`/key-prefix/object-prefix), so N stateless instances are equivalent.
-
-## No-regression
-
-A spec with no `requires` (or all-`linux`) and `replicas:1` derives no new capability, gates identically, and
-renders byte-identical Nomad/K8s/Docker output → existing `topology.test.ts`/`k8s.test.ts`/`nomad-runtime.test.ts`
-golden assertions unchanged. New paths engage only when a service declares a non-Linux OS or `replicas>1`.
-
-## Runtime-side placement binding (GPU / node pool) — realized
-
-The "runtime-owned binding" named in the principle above is a concrete, additive part of `RuntimeSpec`
-(`packages/contracts/src/infra/runtime-spec.ts`), set by whoever registers the runtime — never on the harness:
-
-- Shared (nomad + k8s): `gpu?: number` — reserve N GPUs per job. k8s → `nvidia.com/gpu` requests=limits
-  (`buildK8sJob`); nomad → `device "nvidia/gpu" { count = N }` (`buildNomadJob`).
-- k8s: `nodeSelector?` (pin to a node pool) + `tolerations?` (schedule onto tainted GPU nodes) → the pod spec.
-- nomad: `constraints?: {attribute, operator?, value}[]` → task-group `Constraint {LTarget, Operand, RTarget}`.
-
-They flow `RuntimeSpec → k8sRuntimeOptions/nomadRuntimeOptions` (`build-runtime-backend.ts`) `→
-K8s/NomadBackendOptions → the job builder`. Coarse routing stays capability-based (a harness picks a runtime;
-unmet = grey badge); the fine-grained "put THIS job on a GPU node" is exactly this adapter-level binding — below
-the harness seam, as the principle requires.
-
-**Harness-declared GPU need (realized).** A harness declares `resources.gpu: N` — a PORTABLE resource ask (exactly like
-`resources.cpu`/`memoryMb`, not a node selector). This (a) derives the `gpu` functional capability so `functionalGate`
-routes the job to a gpu-capable runtime — and fail-fast rejects it on a non-gpu one at submit — and (b) reserves N GPUs
-on the job (harness count wins over the runtime binding's blanket default). A runtime advertises `gpu` when its spec
-sets a `gpu` binding (or the operator declares it in `capabilities`). So the COUNT is portable (harness) while WHICH
-node pool it lands on is runtime-owned (binding) — the two layers compose.
-
-## Slices
-
-- **P1 — capability + gate (infra-agnostic core, mixed-OS placement).** `TopologyService.requires.os` +
-  `os-windows`/`os-macos` in `CAPABILITY_DEFS` + `requiredCapabilities`(topology)/`defaultRuntimeCapabilities`
-  wiring + web grey-badge on unmet. Realizations: **K8s `nodeSelector`** (lowest risk, land first — it *is* the
-  model) → **Nomad per-service groups on native discovery** (`provider="nomad"` + `template` + `${attr.kernel.name}`;
-  Consul used only if present; co-location kept for the homogeneous single-instance case) → **Docker decline**.
-  Homogeneous topologies untouched.
-- **P2 — honor `replicas` per service (throughput/bottleneck).** Nomad service group `Count` + catalog LB over
-  discovered instances; K8s already honors replicas.
-- **P3 — warm-pool-of-N + case load-balancing (whole-topology scale).** Adapter-level.
-
-## Files
-
-- `packages/contracts/src/infra/capability.ts` — `os-windows`/`os-macos` vocabulary entries.
-- `packages/contracts/src/harness/harness-spec.ts` — `TopologyService.requires.os`.
-- `packages/domain/src/runtime/capability-requirements.ts` — topology OS → required capabilities; runtime OS
-  advertisement (self-probe hook).
-- `packages/topology/src/deploy/{k8s-topology,nomad-topology,nomad-runtime,docker-runtime}.ts` — native
-  realizations (nodeSelector / per-service group on Nomad-native discovery + constraint, Consul optional /
-  single-host decline). **All infra specifics confined here, behind `TopologyRuntime`.**
-- Supersedes the "one group, whole topology" invariant in `nomad-colocated-topology.md`: a heterogeneous or
-  replicated topology deploys as **per-service groups on Nomad-native discovery** (Consul optional), while a
-  homogeneous single-instance one stays co-located — update that doc + the `topology`/`self-hosted-runner` skill
-  references when code lands.
-```
+They flow `RuntimeSpec → nomadRuntimeOptions / k8sRuntimeOptions` (`packages/backends/src/placement/build-runtime-backend.ts`)
+into the job builders. The GPU count composes: the case's `resources.gpu`, else the harness's, else the runtime
+binding's default. So the COUNT is portable while WHICH node pool it lands on stays runtime-owned.

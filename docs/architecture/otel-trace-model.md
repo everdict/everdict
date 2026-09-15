@@ -2,21 +2,23 @@
 kind: wiki
 title: "The trace model — spans are the record (OTel-compatible)"
 status: current
-updated: 2026-08-06
-anchors: [apps/agent/src/turn-spans.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/execution/span.ts, packages/domain/src/trace/spans-to-events.ts, packages/domain/src/trace/events-to-spans.ts, apps/agent/src/turn-spans.ts]
 ---
 # The trace model — spans are the record (OTel-compatible)
 
-> **Status: DESIGN (maintainer decision, 2026-08-04).** Amends
-> [native-observability.md](./native-observability.md), whose foothold table still reads
-> "`TraceEvent` vocabulary … **unchanged** — the internal contract". That line was right for N0–N5 and is
-> wrong now: it left us with two models for one thing, and the seam between them loses information at our
-> own front door. The direction of native-observability (OTel as the ingestion standard, Everdict owns the
+> **Status: SHIPPED (maintainer decision, 2026-08-04; N6 of [native-observability.md](./native-observability.md)).**
+> `TraceSpanSchema` (`packages/contracts/src/execution/span.ts`) is the record, `spansToEvents` /
+> `eventsToSpans` (`packages/domain/src/trace/`) are the projection and the assembly, the ledger records each
+> body's format (migration `0119`), a scorecard records its projection version (`0120`), and the command
+> harness propagates `TRACEPARENT`. The foothold table's old line — "`TraceEvent` vocabulary … **unchanged** —
+> the internal contract" — was right for N0–N5: it left us with two models for one thing, and the seam
+> between them lost information at our own front door. The direction of native-observability (OTel as the ingestion standard, Everdict owns the
 > collector and the store) is unchanged — this makes the *record* match it.
 
-## The defect, stated once
+## The defect, stated once (before N6)
 
-We hold **two** models of a trace:
+We held **two** models of a trace:
 
 | | shape | who uses it |
 |---|---|---|
@@ -202,7 +204,7 @@ microseconds is genuinely per-platform work; only the projection was duplicated.
 
 ## Costs (honest)
 
-- **The blast radius is wide** — `TraceEvent` is named in 267 non-test files. Most of them only pass it
+- **The blast radius is wide** — `TraceEvent` was named in 267 non-test files when this was decided. Most of them only pass it
   through; the ones that move are the ledger, the door, and the emitters.
 - **Two body formats forever.** Dual-read is not a transition state, it is the price of never rewriting
   evidence. It must be explicit (a column), or it rots into sniffing.

@@ -2,8 +2,8 @@
 kind: wiki
 title: "The ownership protocol"
 status: current
-updated: 2026-08-09
-anchors: [packages/contracts/src/records/ownership.ts, packages/agent-runtime/src/kernel/loop.ts, apps/agent/src/agent-activation.ts, packages/contracts/src/records/capability.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/ownership.ts, packages/domain/src/ownership/ownership.ts, packages/application-control/src/ownership/checkpoint-service.ts, apps/agent/src/verification-turn.ts, packages/domain/src/capability/effect-contract.ts]
 ---
 # The ownership protocol
 
@@ -87,7 +87,7 @@ Stated plainly, because a protocol that overstates its own coverage is the failu
 | Verifier evidence coverage | **enforced** — the kernel reports every object a granted tool actually reached (`onResourceAccess`), and the decision records `offered` / `reviewed` / `unreachable`. The resource scope proves a verifier could not look OUTSIDE its evidence; this proves it looked INSIDE |
 | Affirmative verdicts | **gated by both coverages** — a `verified` from the runner is recorded as `inconclusive`, with the gap named, unless independence is fully `enforced` AND every offered-and-reachable ref was read. The runner reports what it concluded; the PLATFORM decides what that conclusion is worth given what was checked |
 | Verification durability | **enforced** — the verdict is filed as a `VerificationDecision` (mig 0151), an append-only aggregate separate from the checkpoint |
-| Verifier RUNTIME (the agent that produces the verdict) | **not wired** — `VerifierRunner` has no bound implementation. A deployment with no runner REFUSES the request; a missing verifier never becomes an automatic pass |
+| Verifier RUNTIME (the agent that produces the verdict) | **bound when an agent service is configured** — `httpVerifierRunner` (`apps/api/src/infrastructure/agent/http-verifier-runner.ts`) posts the decided envelope to the agent service's `POST /internal/verify`, where `runVerificationTurn` (`apps/agent/src/verification-turn.ts`) runs one bounded turn inside it under a read-scoped `agt_` token and takes the verdict through `structured_output`. A deployment with no runner REFUSES the request (400 — verification is a human act there); a missing verifier never becomes an automatic pass |
 
 **Two scopes, because they answer two questions** (arch-review 10 P1). `scope.reads`/`writes`/`forbidden` are
 CAPABILITY names — the strings `authorizeToolInvocation` compares against `tool.name`. `scope.resources` is
@@ -295,9 +295,9 @@ because both need to read *other people's* records:
    conditional on the linkage existing — no `by`, no role, or an unresolvable executor makes the check
    **abstain**.
 
-Surface: `POST/GET /checkpoints` + `GET /checkpoints/:id`, and the MCP twins `publish_checkpoint` /
-`list_checkpoints` / `get_checkpoint` — the transport an agent actually reaches this through, which is the
-point. Authz reuses `agents:read` / `agents:write` (no new action). Creation emits `checkpoint.created` on
+Surface: `POST/GET /checkpoints` + `GET /checkpoints/:id` + `POST /checkpoints/:id/verify`, and the MCP twins
+`publish_checkpoint` / `list_checkpoints` / `get_checkpoint` / `request_verification` — the transport an agent
+actually reaches this through, which is the point. Authz reuses `agents:read` / `agents:write` (no new action). Creation emits `checkpoint.created` on
 the E0 same-tx outbox, classified on the `agent` activity axis; it is deliberately **not** trigger-matchable,
 because an agent waking on another agent's handoff is the runaway vector the `agent.run.*` family is
 excluded for.

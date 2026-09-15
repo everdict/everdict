@@ -2,7 +2,8 @@
 kind: wiki
 title: "Products & releases"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/product.ts, apps/api/src/api/product/request/create-product.ts, apps/api/src/api/product/request/create-release.ts, apps/api/src/api/product/request/set-release-status.ts, apps/api/src/api/product/product.routes.ts]
 ---
 # Products & releases
 
@@ -15,56 +16,67 @@ two on one axis, so a score has a version attached to it.
 curl -XPOST localhost:8787/products \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "name": "Checkout Agent",
-  "components": [
-    { "name": "api",    "repo": "acme/checkout-api",    "tagPrefix": "v" },
-    { "name": "worker", "repo": "acme/checkout-worker", "tagPrefix": "worker-v" }
+  "services": [
+    { "name": "api",    "repository": "acme/checkout",        "source": "tags",     "tagPrefix": "api-v", "path": "apps/api" },
+    { "name": "worker", "repository": "acme/checkout-worker", "source": "releases" }
   ]
 }'
 ```
 
-Versions arrive by pulling GitHub releases and tags into an **insert-once ledger** — no webhook to
-configure, and re-syncing never rewrites history:
+Each service reads one stream — GitHub `releases` or `tags` of a repository, optionally narrowed by
+`tagPrefix` (a monorepo releases several services from one repository). Versions arrive by pulling that
+stream into an **insert-once ledger** — no webhook to configure, and re-syncing never rewrites history.
+A background sweep syncs on its own; you can also ask:
 
 ```bash
-curl -XPOST localhost:8787/products/prd_12/sync -H 'content-type: default' -d '{}'
+curl -XPOST localhost:8787/products/prd_12/sync -H 'x-everdict-tenant: default'
 ```
 
 :::warning
 `tagPrefix` is the field that fails silently. A typo imports zero versions and reports success, because
-"no tags matched" and "no tags exist" look identical from here. Check `GET /products/:id/versions`
-after the first sync.
+"no tags matched" and "no tags exist" look identical from here. The web app's product wizard reads the
+repository's real version streams first (`POST /products/discover`) so you pick a prefix instead of
+typing one; either way, check `GET /products/:id/versions` after the first sync.
 :::
 
 ## Watch series — evaluation on the version axis
 
-A **series** is dataset × harness × judges, evaluated automatically when a genuinely new version
-appears:
+A **series** is dataset × harness × judges, evaluated automatically when a genuinely new version is
+imported (the first sync is a backfill and fires nothing). It is declared on the product:
 
 ```json
-{ "seriesKey": "retrieval",
-  "dataset": { "id": "retrieval-smoke", "version": "latest" },
-  "harness": { "id": "checkout-agent",  "version": "latest" },
-  "judges":  [{ "id": "tone-rubric", "version": "latest" }] }
+{ "series": [
+  { "key": "retrieval", "label": "Retrieval quality",
+    "dataset": { "id": "retrieval-smoke" },
+    "harness": { "id": "checkout-agent" },
+    "judges":  [{ "id": "tone-rubric" }] }
+] }
 ```
 
-Each resulting scorecard carries
-`origin: { source: "product", productId, seriesKey, serviceVersion }` — and that `serviceVersion` is
-the trend's **x-axis**. The chart is not "score over time"; it is "score per shipped version", which is
-the question anyone actually asks.
+A ref without a `version` means "latest at run time". `POST /products/:id/series/run` evaluates the
+series now.
+
+Each resulting scorecard carries `origin: { source: "product", productId, seriesKey, serviceVersion }`
+— `seriesKey` is the trend's identity and `serviceVersion` labels each point with the version it measured.
+The chart lays points out by time and labels them with versions, so a trend reads as "score per shipped
+version" when every run came from a version import; a manual or series-declared run carries no
+`serviceVersion`.
 
 ## A release is a gate
 
 ```bash
-curl -XPOST localhost:8787/releases \
-  -H 'content-type: application/json' -d '{
-  "productId": "prd_12", "name": "2026.08",
-  "components": [{ "name": "api", "version": "v2.4.0" }]
+curl -XPOST localhost:8787/products/prd_12/releases \
+  -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
+  "name": "2026.08",
+  "components": [{ "service": "api", "version": "api-v2.4.0" }]
 }'
 ```
 
-Shipping it refuses when linked issues are open, or when a watch series **regressed against the
-previous ship**. You can force it, and the force is recorded — because "we shipped over a regression"
-is a fact worth keeping rather than a state to hide.
+Shipping it (`POST /releases/:id/status` with `"status": "released"`) refuses when linked issues are
+open, when a watched series **regressed against the previous ship**, or when a series required for
+release has not been evaluated — a series gates by default, and opting one out is an explicit
+`requiredForRelease: false`. You can pass `"force": true`, and the force is recorded — because "we
+shipped over a regression" is a fact worth keeping rather than a state to hide.
 
 The ship also freezes what actually went out: each planned component resolves against the version
 ledger and the row's id and stream are recorded. So "which v1.0.0 did this release ship?" stays

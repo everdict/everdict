@@ -2,8 +2,8 @@
 kind: wiki
 title: "Agent Judges (@everdict/registry + control plane)"
 status: current
-updated: 2026-08-07
-anchors: [packages/graders/src/script-grader.ts, packages/graders/src/model-judge.scenario.test.ts, apps/api/src/core/execution/judge-runner.test.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/judge-spec.ts, packages/graders/src/script-grader.ts, packages/graders/src/model-judge.ts, apps/api/src/core/execution/judge-auth-dispatcher.ts]
 ---
 # Agent Judges (`@everdict/registry` + control plane)
 
@@ -126,51 +126,37 @@ Judges reuse the `HarnessRegistry`/`DatasetRegistry` model (`packages/registry`)
 - **Role-gating** — `judges:read` = viewer+, `judges:write` = **member+** (users self-register their judges).
 
 ## Contract (`@everdict/contracts`)
-`JudgeSpec` = `discriminatedUnion("kind", [ModelJudgeSpec, HarnessJudgeSpec])` (`JudgeSpecSchema`). Both share
-`id, version, description?, tags`.
+`JudgeSpec` = `discriminatedUnion("kind", [ModelJudgeSpec, HarnessJudgeSpec, CodeJudgeSpec])` (`JudgeSpecSchema`,
+`packages/contracts/src/harness/judge-spec.ts`). All share `id, version, description?, tags`; a judge id may not
+contain `:` (it separates the judge's metric family `judge:<id>` from its criteria). A code judge needs `code` or
+`entrypoint`; a model/harness `promptTemplate` must carry `{verdict_instruction}`, and criteria ids are unique.
 
 ## Registry (`@everdict/registry`)
-`JudgeRegistry` — `register / get / has / versions / ownVersions / list`, mirroring the other registries.
-`InMemoryJudgeRegistry` (dev/test) + `PgJudgeRegistry` (Postgres, `judge` jsonb, PK `(tenant,id,version)`).
-Migration: `packages/db/migrations/0008_create_judges.sql`.
+`JudgeRegistry` (port in `@everdict/application-control`) mirrors the other versioned registries — register, get,
+versions, list, plus creator, version tags and soft delete. `InMemoryJudgeRegistry` (dev/test) + `PgJudgeRegistry`
+(Postgres, PK `(tenant,id,version)`), from `packages/db/migrations/0008_create_judges.sql` onward.
 
 ## BFF ↔ MCP parity
-| HTTP route | MCP tool | Action |
-|---|---|---|
-| `POST /judges` | `create_judge` | `judges:write` (member+) |
-| `POST /judges/validate` (dry-run) | `validate_judge` | `judges:write` |
-| `GET /judges` | `list_judges` | `judges:read` (viewer+) |
-| `GET /judges/:id/versions/:version` | `get_judge` | `judges:read` |
-
-`version` may be `latest`. Other-workspace reads → `404`/`NOT_FOUND`. One service core, one auth core.
-
-**Rubrics** (the judging domain) mirror the same surface and **reuse the judge actions** (no new authz action,
-like views reuse `scorecards:*`):
-
-| HTTP route | MCP tool | Action |
-|---|---|---|
-| `POST /rubrics` | `create_rubric` | `judges:write` (member+) |
-| `POST /rubrics/validate` (dry-run) | `validate_rubric` | `judges:write` |
-| `GET /rubrics` | `list_rubrics` | `judges:read` (viewer+) |
-| `GET /rubrics/:id/versions/:version` | `get_rubric` | `judges:read` |
-| `PUT /rubrics/:id/versions/:version/tags` | `set_rubric_version_tags` | `judges:write` (member+) |
-
-Rubric **version tags** (the last row) are the same mutable registry metadata as on harnesses/datasets/judges/
-runtimes — free-form labels outside the immutable spec, owned-versions only (see `docs/registry.md`).
+Every judge capability is one service over two transports — register, validate (dry-run), preview (zero-cost),
+try (the real dry-run above), list, get, version diff, delete, version tags — with the routes in the generated
+reference (`/docs`) and the tools in `tools/list`. `version` may be `latest`; other-workspace reads are
+`404`/`NOT_FOUND`. **Rubrics** mirror the same surface and **reuse the judge actions** (no new authz action);
+rubric version tags are the same mutable registry metadata as on the other registries (see `docs/registry.md`).
 
 ## Web (`apps/web`)
-- **Judge `/dashboard/judges`** — owned vs `_shared` judges (kind + version chips; rows link to detail).
-- **Detail `/dashboard/judges/[id]`** — kind + fields (model: provider/model/inputs/threshold; harness: ref) + rubric.
-- **Register `/dashboard/judges/new`** — a **kind-toggle form** (model | harness) with a **validate (dry-run)** step,
-  then register (`POST /judges`). Role-gated off `/me` (`judges:write` = member+).
+- **List `/{workspace}/judges`** — the workspace's Agent Judges.
+- **Detail `/{workspace}/judge/[id]`**, with **new version** and **version diff** pages beneath it.
+- **Register `/{workspace}/judges/new`** — the code-judge form (language, code, optional Model binding, runtime),
+  role-gated off `/me` (`judges:write` = member+).
 
 ## Execution (control plane, trace-based)
 A scorecard run **selects judges** (`POST /scorecards` `judges:[{id,version?}]`). After each case's harness run
-produces a trace, the control plane (`apps/api` `ScorecardService.applyJudges` + `JudgeRunner`) resolves each
-`JudgeSpec` via `JudgeRegistry` and applies it to that case's trace → appends a `judge:<id>` `Score` (which then
-flows into the scorecard summary). No re-run; judging is purely trace-based.
+produces a trace, the control plane (`ScoringService.applyJudges` in `@everdict/application-control` + the
+`JudgeRunner` in `apps/api`) resolves each `JudgeSpec` via `JudgeRegistry` and applies it to that case's trace →
+appends a `judge:<id>` `Score` (which then flows into the scorecard summary). No re-run; judging is purely
+trace-based.
 
-Both kinds unify as **`modelJudge(transport)`** (`packages/graders`) — only the *transport* differs. The
+The two engine kinds unify as **`modelJudge(transport)`** (`packages/graders`) — only the *transport* differs. The
 `JudgeRunner` picks it from the spec; missing key / dispatcher → a **skip** score (`detail: "skipped: …"`) so a
 selected judge never silently vanishes, and `UpstreamError`s become skip scores too.
 
@@ -201,14 +187,13 @@ the **same** `runtime → placement.target → RuntimeDispatcher` path the score
 - An unregistered `runtime` is **not** rejected at registration (matching the scorecard selector); the dispatch
   fails and degrades to a **visible skip** score. `model` judges run in-process and ignore `runtime`.
 
-This is slice 1 of `docs/architecture/judge-placement-locality.md` (pluggable observation delivery —
-`reference`/`sentinel`/`egress` — is the later topology work).
+Design: `docs/architecture/judge-placement-locality.md`.
 
 ### Judge executions leave evidence and are metered (never free, never invisible)
 A judge is an execution like any other, so it is **treated like one**:
 
 - **Evidence**: every judge execution seals as its own **`judge:<id>` plane** on the judged case's **child run
-  trajectory** (`TrajectoryStore.seal`, emitter `judge:<id>`) — a model judge's plane holds one `llm_call`
+  trajectory** (`TrajectoryStore.seal`) — a model judge's plane holds one `llm_call`
   (model + token/priced-USD cost + latency) plus the raw verdict text as an assistant message; a code/harness
   judge's plane holds the dispatched wrapper/agent job's whole trace (a FAILED judge job seals too — the dead
   job's account is the diagnosis). The plane sits BESIDE the execution/infra planes, never inside them: the
@@ -216,8 +201,10 @@ A judge is an execution like any other, so it is **treated like one**:
   the case's trace cannot conflate judge cost into harness cost, and `TrajectoryView` draws it as its own lane
   on the run detail with no web change. The run id threads `ScoringService.applyJudges(..., runIdOf)` →
   `JudgeRunner.run(..., runId)` from every scoring path that has children (batch per-case, in-process track,
-  re-score); ingest has no child run, so no plane lands there. Seals are idempotent by `(runId, emitter)` —
-  the FIRST execution's account is the one kept (the ledger's evidence-is-never-rewritten contract).
+  re-score); ingest has no child run, so no plane lands there. The trajectory keeps the FIRST segment per
+  `(runId, emitter)` (evidence is never rewritten), so the emitter is invocation-scoped by
+  `judgeEvidenceEmitter` (`@everdict/domain`): `judge:<id>` for the initial pass, `judge:<id>#<pass>[.<generation>.<attempt>]`
+  for a later pass or attempt — a re-score lands as a new plane instead of a dropped second seal.
 - **Metering**: the same execution's LLM cost lands in the **usage meter under source `judge`** + the
   enforcement budget (settle-only), per `docs/architecture/usage-metering.md` — a model judge's transport usage
   is teed and priced (`priceUsd`); a dispatched judge reuses the case-billing `billingCharges` provenance

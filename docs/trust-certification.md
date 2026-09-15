@@ -1,11 +1,11 @@
 ---
 kind: wiki
-title: "Trust certification (the nightly invariant suite)"
+title: "Trust certification (the invariant suite)"
 status: current
-updated: 2026-08-29
-anchors: [packages/job-runner/src/grader-failure.trust.test.ts, apps/api/src/trust/release-gate.trust.test.ts, apps/api/src/trust/fleet-admission.trust.test.ts, apps/api/src/trust/leader-election.trust.test.ts]
+updated: 2026-09-15
+anchors: [scripts/trust/trust-suite.mjs, apps/api/src/trust/trust-context.ts, scripts/check-trust-certified.mjs, apps/api/src/trust/self-skip-guard.test.ts]
 ---
-# Trust certification (the nightly invariant suite)
+# Trust certification (the invariant suite)
 
 Everdict's product is a **verdict**. Every other kind of bug costs a user time; a bug in the verdict costs
 them the thing they came for, and does it silently — a number that looks like every other number, a green
@@ -22,26 +22,27 @@ budget is not a budget.
 
 - ⚠️ **Where it runs: A PERSON'S MACHINE.** Both workflows that used to run this — a nightly full pass and a
   per-push subset — were DELETED on 2026-09-11 along with every other GitHub Actions workflow
-  (`docs/architecture/harness-declared-limits.md` C3). Nothing runs this on a schedule or on a push any more.
+  (`docs/sdlc/declared-limits.md` C3). Nothing runs this on a schedule or on a push any more.
   What survives is the two commands, and the scope that used to live in the yml now lives in them:
   - **`pnpm trust-fast`** — the subset that needs a real Postgres, object store and ClickHouse
     (`apps/api/src/trust` minus the Temporal files, plus `packages` and `apps/agent`).
-  - **`pnpm trust-full`** — the whole tree, which is what the nightly ran; Temporal additionally needs
+  - **`pnpm trust-full`** — the whole tree, which is what the deleted nightly ran; Temporal additionally needs
     `EVERDICT_TRUST_TEMPORAL`.
   - **`pnpm trust-certified`**, inside `pnpm ci:local`, is the only thing that now NOTICES: it reports how
     long it has been since anything certified and which files in scope have changed since. It does not run
     the suite and does not fail on it, so reading its line is the whole mechanism.
 - **What that costs, stated rather than implied**: certifying invariants only when somebody remembers means
   certifying them after the change that broke them shipped. That already happened once —
-  `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md` — and it is the reason
+  `docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md` — and it is the reason
   `trust-certified` exists.
-- **The subset that used to gate a push** was a required check running on every push and pull request. Certifying invariants only at 03:00 means certifying them
-  after the change that broke them merged. MinIO joined it in arch-review 68 for exactly that reason: four
-  consecutive reviews had repaired the two-phase case's intermediates against a MOCKED 412, which proves the
-  adapter's branch and never the endpoint's behaviour.
-- **What runs it**: `scripts/trust/trust-suite.mjs` — for both, so the rule below cannot differ between them.
-  A positional argument scopes it to a repo-relative path prefix (`!prefix` excludes); no arguments runs
-  everything, which is what the nightly does.
+- **The subset that used to gate a push** was a required check on every push and pull request, because
+  certifying invariants only at 03:00 meant certifying them after the change that broke them merged. MinIO
+  joined it in arch-review 68 for that reason: four consecutive reviews had repaired the two-phase case's
+  intermediates against a MOCKED 412, which proves the adapter's branch and never the endpoint's behaviour.
+  `pnpm trust-fast` keeps that scope.
+- **What runs it**: `scripts/trust/trust-suite.mjs` — for both commands, so the rule below cannot differ between
+  them. A positional argument scopes it to a repo-relative path prefix (`!prefix` excludes); no arguments runs
+  everything, which is `pnpm trust-full`.
 - **What it runs**: every `*.trust.test.ts` file in the repo, colocated with its subject.
 
 ## The one rule that makes the certification worth anything
@@ -49,7 +50,7 @@ budget is not a budget.
 **A skipped scenario is a FAILED certification.**
 
 Every trust file skips itself when its infrastructure is absent — correct for a developer running one
-scenario on a laptop, and catastrophic as a nightly default, because "0 failures out of 0 executed" would
+scenario on a laptop, and catastrophic as a certification default, because "0 failures out of 0 executed" would
 print PASS. So `trust-suite.mjs` parses vitest's JSON report, counts what actually executed, and refuses to
 certify if anything was skipped or if the scenario set is empty. It also refuses to start without a database
 rather than running the non-Pg scenarios and reporting green.
@@ -294,7 +295,7 @@ not something a reviewer remembers:
 | Read a promised world recording that could not be fetched as an empty account, or score it 0 instead of unmeasured | `world-recording.counterexample.test.ts` · `world-state.test.ts` |
 | Run a dialogue case on a harness that cannot converse, or a model-user case with no simulator | `dialogue-engagement.counterexample.test.ts` — every turn an independent run, reported as a conversation |
 
-Reserved and not yet claimed: TRUST-05/06, 19/20, 44, 49/50/51. Each is a number a review named whose sentence
+Reserved and not yet claimed: TRUST-05/06, 44, 49/50/51. Each is a number a review named whose sentence
 is either covered by a neighbouring scenario or awaits the subject that would make it certifiable. A number is
 never recycled, so a claim always lands under the name the review gave it.
 
@@ -309,7 +310,7 @@ is deliberately not trigger-matchable (an agent waking on another agent's handof
 `agent.run.*` family is excluded for), so the request is a judgment a LEAD makes about work it delegated, not
 an ambient reaction. The envelope above is what that request hands to the activation.
 
-Plus the pre-existing live scenario test the nightly can now satisfy:
+Plus one live scenario outside the `*.trust.test.ts` glob, run by hand:
 
 | | | |
 | --- | --- | --- |
@@ -361,6 +362,8 @@ The env vars are deliberately two:
 - `EVERDICT_TRUST_SUITE=1` — run the trust suite at all. Without it every trust file skips, which is what
   keeps `pnpm test` (and therefore the push gate) fast.
 - `EVERDICT_TRUST_DATABASE_URL` — the database the Pg-backed scenarios drive. Falls back to `DATABASE_URL`.
+- `EVERDICT_TRUST_CLICKHOUSE_URL` — the ClickHouse the engine-level trajectory scenarios drive (TRUST-192),
+  e.g. `http://127.0.0.1:8123`.
 
 - `EVERDICT_TRUST_S3_ENDPOINT` / `_ACCESS_KEY` / `_SECRET_KEY` — the object store the intermediate-artifact
   scenario (TRUST-181) drives. Point them at a THROWAWAY MinIO; the scenario writes immutable keys, which by
@@ -375,7 +378,8 @@ EVERDICT_TRUST_S3_ACCESS_KEY=everdict EVERDICT_TRUST_S3_SECRET_KEY=everdict-trus
   pnpm --filter @everdict/api exec vitest run src/trust/intermediate-artifacts.trust.test.ts
 ```
 
-The workspace-filesystem scenario is a separate, nightly one and reads its own pair:
+The workspace-filesystem scenario is a separate `*.scenario.test.ts` (not picked up by the trust runner) and reads
+its own pair:
 
 ```bash
 EVERDICT_E2E_S3_ENDPOINT=http://127.0.0.1:9102 \
@@ -391,76 +395,36 @@ EVERDICT_E2E_S3_ACCESS_KEY=… EVERDICT_E2E_S3_SECRET_KEY=… \
 2. Gate the `describe` on `TRUST_PG_ENABLED` (or plain `EVERDICT_TRUST_SUITE === "1"` when no database is
    needed). Never gate individual `it`s — a half-run scenario is the thing this suite refuses to report.
 3. Lead the file with the **invariant in one sentence**, then say **why a fake cannot prove it**. If you
-   cannot answer the second question, the test belongs in the unit suite, where it will run on every push
-   instead of once a night.
+   cannot answer the second question, the test belongs in the unit suite, where it runs on every push
+   instead of only when someone runs the trust suite.
 4. Nothing to register: the runner globs for the files and attributes each to its package.
 
 ## Deliberately excluded
 
 - **Anything needing a paid model endpoint.** `packages/graders/src/model-judge.scenario.test.ts` calls a
-  real LLM. This repository's Actions hold no such secret, and a nightly that silently no-ops when a key is
-  missing is exactly the false green the suite exists to prevent. An operator running their own fork can
-  enable it by adding `EVERDICT_E2E_OPENAI_BASE_URL` / `_KEY` / `_MODEL` as repository secrets and a step
-  that runs `pnpm --filter @everdict/graders exec vitest run src/model-judge.scenario.test.ts`. It is
-  intentionally not wired to `secrets.*` here, so nobody mistakes an unset secret for a passing judge.
-- **macOS.** `cli-release.yml` and `desktop-release.yml` already build and test on `macos-latest` every
-  release. Windows had no coverage anywhere, which is why the OS lane starts there.
+  real LLM and is run by hand with `EVERDICT_E2E_OPENAI_BASE_URL` / `_KEY` / `_MODEL` set
+  (`pnpm --filter @everdict/graders exec vitest run src/model-judge.scenario.test.ts`). A certification that
+  silently no-ops when a key is missing is exactly the false green the suite exists to prevent.
+- **Other operating systems.** Nothing runs any test on Windows or macOS any more: the nightly Windows lane
+  (`@everdict/contracts`, `@everdict/domain`, `@everdict/self-hosted-runner` on `windows-latest`) and the release
+  workflows' macOS builds were deleted with every other workflow (`docs/sdlc/declared-limits.md` C3).
 
-## The Windows lane
+## Why the suite is not in `pnpm ci:local`
 
-Self-hosted runners run on operators' Windows machines, and until this workflow nothing in CI had executed a
-line of that code on Windows. The nightly runs the packages whose tests are platform-independent **by
-construction**:
+`scripts/ci-local.mjs` is the push gate, and its value is that it is fast enough that nobody is tempted to work
+around it, so it does not require a database before every push. It runs `pnpm trust-certified` instead, which
+reports staleness and fails nothing. Reproducing a certification means pointing `EVERDICT_TRUST_DATABASE_URL`,
+`EVERDICT_TRUST_S3_*` and `EVERDICT_TRUST_CLICKHOUSE_URL` at throwaway services and running `pnpm trust-fast`
+(or `pnpm trust-full`, which also wants a Temporal). The subset's scope is a PATH PREFIX rather than a file list,
+so a trust scenario added under `apps/api/src/trust`, `packages` or `apps/agent` is in scope from the moment it
+exists.
 
-| Package | Why it is in scope |
-| --- | --- |
-| `@everdict/contracts` | pure schemas and types; every path assertion is over a string, never the filesystem |
-| `@everdict/domain` | pure business logic, no I/O by design |
-| `@everdict/self-hosted-runner` | the OS-sensitive one — `capabilities.ts` branches on `process.platform` explicitly, and its test asserts the `win32` branch |
+## Tier B — the process-level scenarios
 
-**Excluded, with the reason** — these are the expansion path, not an oversight. None of them are marked
-passing:
-
-| Package | Why it is excluded |
-| --- | --- |
-| `@everdict/drivers` | `local.test.ts` provisions a real `LocalDriver` and spawns a POSIX shell |
-| `@everdict/job-runner` | `run-case.test.ts` runs the full loop over `LocalDriver` with `sh check.sh` |
-| `@everdict/harnesses` | tests drive fake `ComputeHandle`s (so they look portable) but assert POSIX-shaped absolute paths like `/tmp/t.json`; unverified on Windows |
-
-Expanding the lane means running the excluded package on `windows-latest`, reading what actually fails, and
-fixing either the test's POSIX assumption or the code's. Adding a package to the filter without doing that
-would turn a red lane green by not looking, which is the same move the trust suite exists to refuse.
-
-## Why the full suite is not in ci.yml
-
-`ci.yml` is the **push gate**, and its value is that it is fast enough that nobody is tempted to work around
-it. Booting Temporal and MinIO on every push, and running a Windows matrix that takes several times an ubuntu
-job's minutes, would trade that away. Three workflows, three questions:
-
-| | `ci.yml` (every push) | `trust-fast.yml` (every push) | `trust-nightly.yml` (nightly) |
-| --- | --- | --- | --- |
-| asks | did this change break the code? | do the guarantees that need only a database and an object store still hold? | do ALL the guarantees still hold? |
-| runs against | fakes, in-memory stores | real Postgres, real MinIO | real Postgres, real MinIO, real Temporal, Windows |
-| scope | every unit test | `apps/api/src/trust`, minus the Temporal durability files | every `*.trust.test.ts` |
-| blocks | yes — a red `main` blocks everyone | yes — required check | no — it reports |
-
-The middle column is not a second push gate so much as an admission: an invariant certified only at 03:00 is
-certified after the change that broke it merged, and the scenarios that need nothing but a database are cheap
-enough that there was never a reason to wait. Its scope is a PATH PREFIX rather than a file list, so a trust
-scenario added to `apps/api` is required from the moment it exists — nobody has to remember to enlist it.
-What stays nightly is what needs a server the fast job does not start.
-
-`scripts/ci-local.mjs` mirrors `ci.yml` step for step and is **not** extended to cover either trust workflow:
-the local gate must not require a database before every push. `trust-fast` is therefore the one required
-check that `pnpm ci:local` cannot pre-run — to reproduce it, point `EVERDICT_TRUST_DATABASE_URL` at any
-throwaway Postgres, `EVERDICT_TRUST_S3_*` at any throwaway MinIO, and run the same command the workflow does.
-
-## Tier B — the process-level scenarios (roadmap)
-
-Everything above runs **in process**: real stores, real database, real SQL, but one Node process. The
-scenarios below need a real process boundary — kill a running control plane and observe what the next one
-does. They are the suite's next stage, and they are listed here rather than half-implemented because a
-process-kill scenario that quietly degrades into an in-process one certifies nothing.
+Most scenarios run **in process**: real stores, real database, real SQL, but one Node process. The items below
+needed a real process boundary — kill a running control plane and observe what the next one does — and were
+kept on this list rather than half-implemented, because a process-kill scenario that quietly degrades into an
+in-process one certifies nothing. All of them have landed:
 
 - ~~**Kill the API mid-batch, boot a replacement, assert ownership is honored.**~~ Done — TRUST-127 boots the
   BUILT control plane as a child process against a real database and reads what it settled. The harness it
@@ -486,7 +450,7 @@ process-kill scenario that quietly degrades into an in-process one certifies not
 
 Several rules here are conditions a call site must remember, and every review in this series found one of them
 forgotten somewhere new. A guard that lives only in a comment is a guard that will be missing from the next
-writer, so the recurring ones are now scanned in `pnpm test` — the push gate, not the nightly, because they
+writer, so the recurring ones are now scanned in `pnpm test` — the push gate, not the trust suite, because they
 are about code that has not shipped yet.
 
 | Guard | What it refuses | Where |

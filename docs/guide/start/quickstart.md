@@ -2,7 +2,8 @@
 kind: wiki
 title: "Quickstart"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [deploy/compose/docker-compose.dev.yaml, deploy/compose/docker-compose.prod.yaml, deploy/compose/full.sh, apps/api/src/api/run/request/submit.ts, packages/application-control/src/require-runtime/require-runtime.ts]
 ---
 # Quickstart
 
@@ -21,22 +22,30 @@ docker compose -f deploy/compose/docker-compose.dev.yaml up --build
   land in a usable workspace immediately. The tenant is `default`.
 - **Stores are in-memory** — everything resets when the stack restarts. That is the point of this
   profile; use `prod` or `full` the moment you want to keep a result.
-- Placement is the **local** backend (in-process on this machine).
+- **There is no default placement.** Every run and every batch names a runtime; submitting without one
+  is a `400`. On this profile, register the reference `local` runtime (in-process on the API container)
+  once per restart.
 - Source is bind-mounted, so the web hot-reloads and the API rebuilds on change.
+- The `agent` service (web chat, <http://localhost:8790>) needs `AGENT_LLM_*` to answer; without it only
+  the chat is down.
 
-Check it is alive:
+Check it is alive, and register the runtime:
 
 ```bash
 curl localhost:8787/healthz
+curl -XPOST localhost:8787/runtimes \
+  -H 'x-everdict-tenant: default' -H 'content-type: application/json' \
+  -d @examples/runtimes/local-1.0.0.json
 ```
 
-Submit a run without any agent credentials — the `scripted` harness replays a canned trace, which is
-exactly what you want for a smoke test:
+Submit a run without any agent credentials — the built-in `scripted` harness replays a canned
+trajectory, which is exactly what you want for a smoke test:
 
 ```bash
 curl -XPOST localhost:8787/runs \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "harness": { "id": "scripted", "version": "latest" },
+  "runtime": "local",
   "case": {
     "id": "c1",
     "env": { "kind": "repo", "source": { "files": {} } },
@@ -47,8 +56,8 @@ curl -XPOST localhost:8787/runs \
   }}'
 ```
 
-The response is a `runId` — submission is asynchronous. Poll `GET /runs/{id}`, or watch it in the web
-app.
+The response is the queued run record (`202`, `"status": "queued"`) — submission is asynchronous. Poll
+`GET /runs/{id}` with its `id`, or watch it in the web app.
 
 To drive a **real** agent, give the stack a credential: set `ANTHROPIC_API_KEY` or
 `CLAUDE_CODE_OAUTH_TOKEN` in your shell or a `.env` before `up`, then use the `claude-code` harness
@@ -63,8 +72,9 @@ pnpm install && pnpm build
 pnpm everdict run --task "Create ok.txt with the text done" --test "grep -q done ok.txt"
 ```
 
-This uses the machine's existing login rather than an API key, runs the harness in-process through
-`LocalDriver`, and prints the graded result.
+This uses the machine's existing login rather than an API key, runs the `claude-code` harness
+in-process on the local backend, and prints the graded result as JSON. `--harness scripted` skips the
+model entirely.
 
 ## Which profile to run
 
@@ -74,9 +84,11 @@ This uses the machine's existing login rather than an API key, runs the harness 
 | **prod** | `docker-compose.prod.yaml` | Postgres (persistent volume, migrations auto-applied) | you want results to survive a restart |
 | **full** | `bash deploy/compose/full.sh` | Postgres + Temporal + MinIO | the self-hosted flagship: durable batches, schedules, the workspace filesystem |
 
-`prod` additionally wants `POSTGRES_PASSWORD`, a secrets-encryption key (`EVERDICT_SECRETS_KEY`) and an
-internal token (`EVERDICT_INTERNAL_TOKEN`); copy `deploy/compose/.env.example` to `.env` first.
-`full.sh` generates every missing secret for you and never overwrites one you already set.
+`prod` refuses to start without `POSTGRES_PASSWORD`, and wants a secrets-encryption key
+(`EVERDICT_SECRETS_KEY`) and an internal token (`EVERDICT_INTERNAL_TOKEN`) as well; copy
+`deploy/compose/.env.example` to `.env` in the same directory and pass it with `--env-file`.
+`full.sh` creates `.env` from `.env.full.example`, generates every missing secret, and never overwrites
+one you already set.
 
 > **⚠️ `prod` does not enforce auth by default.** Keycloak is not in that stack, so it behaves as a single
 > tenant `default` with authentication off. Put it on a trusted network or behind a reverse proxy. To get

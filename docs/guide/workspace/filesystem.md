@@ -2,7 +2,8 @@
 kind: wiki
 title: "The workspace filesystem"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/api/fs/fs.routes.ts, apps/api/src/api/fs/request/write-fs-file.ts, apps/api/src/api/fs/request/run-fs-file.ts, packages/storage/src/fs-shared.ts, packages/application-control/src/fs/content-projection.ts]
 ---
 # The workspace filesystem
 
@@ -32,8 +33,10 @@ List a directory:
 curl 'localhost:8787/fs/entries?path=reports' -H 'x-everdict-tenant: default'
 ```
 
-That is the whole basic surface: `PUT /fs/file`, `GET /fs/file`, `GET /fs/entries`,
-`POST /fs/directories`, `POST /fs/entry` (move), and `POST /fs/executions` (run a file).
+That is the basic surface: `PUT /fs/file`, `GET /fs/file`, `GET /fs/entries`, `GET /fs/search`,
+`POST /fs/directories`, `POST /fs/move`, `DELETE /fs/entry`, and `POST /fs/executions` (run a file).
+History is `GET /fs/revisions` (plus `/fs/revisions/diff`, `/fs/revisions/content`), and
+`POST /fs/revisions/restore` brings an old revision back by publishing it as a new one.
 
 ## Every write is an attributed revision
 
@@ -62,8 +65,8 @@ If someone — or some agent — published revision 4 while you were editing, th
 than winning the race. The 409 body carries the live content *and* a three-way merge, so the client can
 show both sides instead of asking you to retype your work.
 
-Omit `baseRevision` and you get last-write-wins. That is fine for a file only you touch, and wrong for
-anything an agent also writes.
+Omit `baseRevision` and you get last-write-wins; `0` means "I expect to create this file". Last-write-wins
+is fine for a file only you touch, and wrong for anything an agent also writes.
 
 :::tip
 Agents in a conversation write under `tasks/<conversation-id>/`, so one agent's scratch output never
@@ -72,7 +75,8 @@ lands on another's. You can browse it in the web app under **Files**.
 
 ## Run a file
 
-A file in the tree can be executed as a run, which is how a saved script becomes a repeatable job:
+A file in the tree can be executed in an isolated sandbox, which is how a saved script becomes a
+repeatable job:
 
 ```bash
 curl -XPOST localhost:8787/fs/executions \
@@ -83,8 +87,11 @@ curl -XPOST localhost:8787/fs/executions \
 }'
 ```
 
-The result is a normal [Run](../concepts/run.md) — same record, same trace, same place in the activity
-feed.
+The response carries what the script printed and the files it wrote. It is not an eval — no harness, no
+grading — but it does enter the run ledger as a [Run](../concepts/run.md) of kind `command`, so who ran
+what, in which image, and where stays answerable. `image` overrides the interpreter's default image and
+`runtime` places it on one of the workspace's registered runtimes. The route is absent (404) on a
+deployment that configured no sandbox driver for file execution.
 
 ## Where the bytes actually are
 
@@ -96,15 +103,18 @@ the guarantee structural rather than careful.
 Revisions go to a sibling bucket, so history survives a file being replaced or deleted.
 
 :::warning
-The `dev` compose profile keeps this in memory and loses it on restart. Use the `full` profile
+Without S3 configured (`EVERDICT_S3_ENDPOINT` and its keys) the control plane keeps the filesystem in
+memory and loses it on restart — that is the `dev` and `prod` Compose stacks. Use the `full` stack
 (`bash deploy/compose/full.sh`) when you want the filesystem to persist — it brings up MinIO.
 :::
 
 ## What lives here besides your files
 
-- **Skills** — `skills/<id>/SKILL.md`
-- **Knowledge** — `knowledge/<id>.md`
+- **Skills** — `skills/<id>/SKILL.md`, with supporting files under `skills/<id>/files/`
+- **Knowledge entries** — `knowledge/<id>.md`
 - **Agent task output** — `tasks/<conversation-id>/`
+- **Agent memory** — `memory/` (the workspace's) and `memory/members/<member>/` (one member's own)
+- **Saved-view snapshots** — `views/<view-id>/`
 
 For skills and knowledge the filesystem is the source of truth: a save writes the file first, and a
 read prefers the file, re-syncing the database replica lazily behind it. Editing `SKILL.md` in the

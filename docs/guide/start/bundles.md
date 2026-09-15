@@ -2,15 +2,16 @@
 kind: wiki
 title: "Bundles"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/core/bundle/bundle-service.ts, apps/api/src/api/bundle/bundle.routes.ts, examples/bundles/codex-pinch/bundle.json]
 ---
 
 > Design SSOT: [bundles.md](../../architecture/bundles.md) — the maintainer page holds the mechanism. Describe the behaviour here; do not re-derive the design.
 # Bundles
 
-A harness, a dataset, a runtime and a grading recipe are four registrations. A **bundle** is all of
-them as one document you apply in a single call — so "here is a working evaluation setup" becomes a
-file someone can read before running it.
+Harness templates, harness instances, datasets, benchmark recipes, judges, rubrics, models and runtimes
+are separate registrations. A **bundle** is any mix of them as one document you apply in a single call
+— so "here is a working evaluation setup" becomes a file someone can read before running it.
 
 ```bash
 cat examples/bundles/codex-pinch/bundle.json      # read it first
@@ -19,8 +20,9 @@ curl -XPOST localhost:8787/bundles/apply \
   -d @examples/bundles/codex-pinch/bundle.json
 ```
 
-That one call registers a Codex `command` harness, two datasets, and a benchmark recipe. Nothing about
-the control plane changed to support Codex — the specifics live in the bundle, not in the product.
+That one call registers a Codex `command` harness (template and instance), two datasets, and a
+benchmark recipe. Nothing about the control plane changed to support Codex — the specifics live in the
+bundle, not in the product.
 
 ## What goes in one
 
@@ -29,14 +31,16 @@ the control plane changed to support Codex — the specifics live in the bundle,
   "id": "codex-pinch",
   "version": "1.1.0",
   "description": "codex harness + pinch benchmark. Pure data — no core changes.",
-  "harnessTemplates": [ { "kind": "command", "id": "codex", "version": "1", "command": "…" } ],
+  "harnessTemplates": [ { "kind": "command", "category": "cli-agent", "id": "codex", "version": "1", "command": "…" } ],
   "harnesses":        [ { "template": { "id": "codex", "version": "1" }, "id": "codex", "version": "1.0.0", "pins": {} } ],
   "datasets":         [ { "id": "pinch-dashboards", "version": "1.0.0", "cases": [ … ] } ],
-  "benchmarkRecipes": [ { "id": "pinch", "source": "…", "mapping": { … } } ]
+  "benchmarkRecipes": [ { "id": "pinch", "version": "1.0.0", "source": "…", "mapping": { … } } ]
 }
 ```
 
-Every section is optional. A bundle that is only a dataset is a fine bundle.
+Every section is optional: `harnessTemplates`, `harnesses`, `datasets`, `benchmarkRecipes`, `judges`,
+`rubrics`, `models`, `runtimes`. A bundle that is only a dataset is a fine bundle. Applying it needs the
+permission each section would need on its own.
 
 ## Why this exists
 
@@ -53,8 +57,12 @@ Two things follow that you will feel immediately:
 
 ## Applying is idempotent by version
 
-Re-applying the same bundle is a no-op — versions are immutable, so a registration that already exists
-is not rewritten. Bump the version inside the bundle to publish a change.
+The response lists every item with a status: `ok`, `conflict`, `error` or `skipped` (no registry for
+that section on this deployment). One failing item never aborts the rest.
+
+Versions are immutable, so re-applying identical content is `ok` and rewrites nothing, while different
+content under a version that already exists is a `conflict`. Bump the item's own version to publish a
+change.
 
 :::warning
 Read a bundle before applying it, the same way you would read a shell script before piping it to bash.

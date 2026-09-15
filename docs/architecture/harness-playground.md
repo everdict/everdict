@@ -2,8 +2,8 @@
 kind: wiki
 title: "Harness playground — interactive test cases against a live harness session"
 status: current
-updated: 2026-08-06
-anchors: [packages/drivers/src/spawn.ts]
+updated: 2026-09-15
+anchors: [apps/api/src/api/sandbox/sandbox.routes.ts, packages/application-control/src/session/session-task-runner.ts, packages/application-control/src/session/frontdoor-turn-runner.ts, packages/drivers/src/spawn.ts]
 ---
 # Harness playground — interactive test cases against a live harness session
 
@@ -88,16 +88,19 @@ MCP twins: `create_sandbox` (harness branch) · `submit_sandbox_task` · `read_s
   create body supplies one (400 with the fix named otherwise). `makeHarness(..., {sandboxInstall:true})`
   makes built-ins install their CLI into the bare image.
 
-## v1 limits (named, not implied)
+## Limits (named, not implied)
 
-- Placement is the P6 **driver lane** (docker on the control plane, `EVERDICT_SANDBOX_DRIVER=docker`
-  opt-in). Dispatching a session to a tenant runtime is a later rung, same record/UI (the placement-ladder
-  rule).
-- The synchronous warm install can hold `POST /sandboxes` for tens of seconds (npm/pip). An async
-  "warming" state is a later rung.
-- Conversational continuity exists (see the Conversations section) for `conversational` process harnesses
-  (claude-code) and service harnesses; `CommandHarness`/other CLIs still refuse conversation mode by name.
-- No envelope admission on session create (no `causedByRunId` input today); tenant budget only.
+- Placement: the lane exists only where the operator configured compute (`EVERDICT_COMPUTE`, or the lane's own
+  alias `EVERDICT_SANDBOX_DRIVER`; `docker` or `nomad` — `apps/api/src/composition/compute-env.ts`). A create body
+  with `runtime` places the session on a runtime the workspace registered instead (W4); a runtime that only runs
+  jobs to completion cannot hold a session open and is refused by name.
+- The synchronous warm install can hold `POST /sandboxes` for tens of seconds (npm/pip); there is no async
+  "warming" state.
+- Conversational continuity exists (see the Conversations section) for harnesses carrying the `conversational`
+  marker — `ClaudeCodeHarness`, and a `CommandHarness` whose spec declares a `conversation` contract — and for
+  service harnesses; any other harness refuses conversation mode by name.
+- Admission: a session an agent opens (`agent.runId`) draws from its causer's envelope (`admitCausedWork`)
+  before the tenant budget; a member's session answers the tenant budget only.
 - `CommandHarness` events arrive at settle (buffered); `ClaudeCodeHarness` streams.
 
 ## Conversations — multi-turn against the harness under test
@@ -113,7 +116,8 @@ recovery never re-dispatches a turn, and aggregations over `role:"case"` childre
 - The contract is `RunContext.conversation: {resume?, onToken?}` (in-process only, like `signal`) plus the
   `EvaluableHarness.conversational` capability marker. A harness without the marker refuses conversation
   mode at create, BEFORE any container is provisioned — silently-fresh turns would be a lie. `CommandHarness`
-  has no marker in v1.
+  carries the marker only when its spec declares `conversation` (its `command` must then hold the
+  `{{conversation}}` slot).
 - `ClaudeCodeHarness` implements it: `claude --resume <session-id>` continues the thread, and the session id
   is captured from the stream-json init AND result lines (`claudeSessionId`, last-wins — a resumed run mints
   a NEW id). The token lives only on the process-local session state (a CP restart orphans the session

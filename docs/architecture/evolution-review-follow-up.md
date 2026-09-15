@@ -2,18 +2,19 @@
 kind: wiki
 title: "Evolution identity and evidence authority"
 status: current
-updated: 2026-09-09
-anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-service.ts, packages/db/src/evolution/campaign-store.ts, apps/api/src/mcp.routes.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/domain/src/evolution/campaign-attempts.ts, packages/application-control/src/scorecard/scorecard-requests.ts, packages/domain/src/scorecard/verdict-policy.ts, apps/api/src/api/campaign/campaign.routes.ts]
 ---
 # Evolution identity and evidence authority
 
 Implements the review of main at `25814996b975a8b721272396b547854adde6fd6f`
 (2026-09-08). The pure domain decisions and the durable adoption effect remain separate.
 
-The [2026-09-09 follow-up review](evolution-review-2026-09-09.md) identified four gaps in
+The [2026-09-09 follow-up review](https://github.com/everdict/everdict/blob/a958dc36d772615a1de0dc81f59f4bb2f4b366d7/docs/architecture/evolution-review-2026-09-09.md) (removed once every finding closed; pinned) identified four gaps in
 provenance, attempt-aware endings, first-party execution paths and criterion identity. All
 four are now closed; that page carries each repair, its committed regression test and the
-neutralization under which the test was observed red. The sections below are updated to
+neutralization under which the test was observed red; the requests are in
+`docs/sdlc/intent/2026-09-09-evolution-follow-up-findings/intent.md`. The sections below are updated to
 describe what is in force.
 
 ## Subject and oracle identity
@@ -25,8 +26,11 @@ seals refuse the round. Evidence, verdict and adoption proof carry the same iden
 No current registry read substitutes for missing historical seals.
 
 Oracle inspection compares two commits in the same repository, including rename source
-paths. Its receipt binds both SHAs, a normalized path-list digest, completeness and
-`commitProvenance`. GitHub comparisons reaching the 300-file response limit are incomplete.
+paths. Its receipt binds both SHAs, a normalized path-list digest, completeness,
+`pathsCover` and `commitProvenance`. On a diverged history the listing unions both sides of the
+fork (`fork-union`, a superset of the two-tree difference) rather than trusting GitHub's
+three-dot file list; a listing that does not state its cover is unverifiable. A comparison
+on either side reaching GitHub's 300-file response limit makes the listing incomplete.
 A moved PR head cannot change the commits inspected. Missing provenance or mismatched
 receipts make the round non-comparable.
 

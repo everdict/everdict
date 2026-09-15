@@ -1,70 +1,93 @@
 ---
 kind: wiki
-title: "Harness version registry (@everdict/registry)"
+title: "Versioned registries (@everdict/registry)"
 status: current
-updated: 2026-08-16
+updated: 2026-09-15
+anchors: [packages/registry/src/index.ts, packages/registry/src/versioned-store.ts, packages/application-control/src/ports/harness-instance-registry.ts, packages/registry/src/harness/load-harness-taxonomy.ts, packages/application-control/src/version-tag/version-tag-service.ts]
 ---
-# Harness version registry (`@everdict/registry`)
+# Versioned registries (`@everdict/registry`)
 
-The **single source of truth for harness versions**: resolve `(id, version) → HarnessSpec`. An `CaseJob`
+The **single source of truth for versioned eval assets**: resolve `(tenant, id, version) → spec`. A `CaseJob`
 carries only `harness: {id, version}` — a *reference*; the registry turns that reference into the concrete spec
-(services, deps, target, front-door, trace source for a service harness; metadata for a process harness).
+(services, deps, target, front-door, trace source for a service harness; command/model for a command harness).
 
-## Contract
-`HarnessRegistry`:
-- `register(spec)` — versions are **immutable**: re-registering the same `(id, version)` with an identical spec
-  is idempotent; with a different spec it throws `ConflictError` (prevents silent drift — the whole point of an SSOT).
-- `get(id, ref?)` / `getService(id, ref?)` — `ref` is an exact version or `"latest"` (default). `getService`
-  narrows to a `ServiceHarnessSpec` (throws if the harness is a process). Unknown id/version → `NotFoundError`.
-- `versions(id)` — sorted (semver-aware: `1.10.0 > 1.9.0`; non-semver keeps registration order).
-- `list()` — every id with its versions.
+The package holds one registry per versioned entity, each an `InMemory*` (dev/test) + `Pg*` pair implementing a
+port in `@everdict/application-control` (`ports/*-registry.ts`): harness templates, harness instances, datasets,
+judges, rubrics, models, agents, runtimes, environments and benchmarks.
+
+## Contract (the shared versioned store)
+The registries sit on one algebra (`VersionedStore` / `PgVersionedStore`, version algebra in `@everdict/domain`
+`registry/version-algebra.ts`); some expose a narrower surface (benchmarks carry no tags or soft delete):
+- `register(tenant, spec, createdBy?, origin?)` — versions are **immutable**: re-registering the same
+  `(id, version)` with an identical spec is idempotent (and revives a soft-deleted version); with a different spec
+  it throws `ConflictError`. Equality is `specsEqual`, a key-order-independent compare (so `jsonb` round-trips match).
+- `get(tenant, id, ref?)` — `ref` is an exact version or `"latest"` (default). Unknown id/version → `NotFoundError`.
+- `versions(tenant, id)` — sorted (semver-aware: `1.10.0 > 1.9.0`; non-semver keeps registration order).
+  `ownVersions(tenant, id)` — only what this tenant registered directly (no `_shared` fallback).
+- `list(tenant)` — every id with its versions and list metadata.
 
 `"latest"` resolves to the highest semver (or last-registered if not semver).
 
+## Harnesses — template + instance
+A harness is authored in two levels (`docs/architecture/harness-taxonomy.md`): a **template** (the shape —
+services/dependencies/slots, versions unpinned; `HarnessTemplateRegistry`) and an **instance** (a template
+reference + pins; `HarnessInstanceRegistry`). The instance registry resolves the pair into the `HarnessSpec`
+backends consume:
+- `getInstance(tenant, id, ref?)` — the stored instance; `get(tenant, id, ref?)` — resolved (template + pins).
+- `getService(tenant, id, ref?)` — resolved and narrowed to a `ServiceHarnessSpec` (`BadRequestError` otherwise).
+- `resolveWithPins(tenant, id, ref, pins)` — resolved with submit-time transient pins (a CI trigger swapping one
+  service image); an unknown slot is a `BadRequestError`, never ignored.
+- `softDelete`, `creatorOf`/`creatorOfVersion` (private harnesses that reference a personal secret).
+
 ## Declarative SSOT (files / GitOps)
-`loadHarnessDir(dir)` builds a registry from a directory of `*.json` `HarnessSpec` files (each validated by
-`HarnessSpecSchema`). Version-controlled files are the authoritative source — reviewable, immutable, diffable.
-See `examples/harness-templates/` (`bu-1.0.0.json`, `bu-1.1.0.json`).
+`loadHarnessTaxonomyDir(dir, { templates?, instances?, tenant? })` builds (or seeds) the two registries from a
+directory: `*.template.json` → `HarnessTemplateSpec`, `*.instance.json` → `HarnessInstanceSpec`, templates first.
+Version-controlled files are reviewable, immutable, diffable. See `examples/harness-templates/`
+(`bu.template.json` + `bu-1.1.0.instance.json`).
 
 ```jsonc
-// examples/harnesses/bu-1.1.0.json
-{ "kind": "service", "id": "bu", "version": "1.1.0", "services": [...], "frontDoor": {...}, "traceSource": {...} }
+// examples/harness-templates/bu-1.1.0.instance.json
+{ "template": { "id": "bu", "version": "1" }, "id": "bu", "version": "1.1.0",
+  "pins": { "agent-server": "mendhak/http-https-echo:latest" } }
 ```
 
+Sibling loaders: `loadDatasetDir`, `loadJudgeDir`, `loadRubricDir`, `loadModelDir`, `loadRuntimeDir`. Nothing in
+`apps/` seeds from files on boot — seeding is explicit.
+
 ## How it plugs in
-`ServiceTopologyBackend` takes `specFor: (id, ref) => ServiceHarnessSpec` — wire it straight to the registry:
+`ServiceTopologyBackend` takes `specFor: (tenant, id, version) => ServiceHarnessSpec` — wire it straight to the
+instance registry:
 ```ts
-const registry = loadHarnessDir("examples/harness-templates");
-new ServiceTopologyBackend({ runtime, traceSource, specFor: (id, ref) => registry.getService(id, ref), ... });
+const { instances } = await loadHarnessTaxonomyDir("examples/harness-templates");
+new ServiceTopologyBackend({ runtime, traceSource, specFor: (tenant, id, ref) => instances.getService(tenant, id, ref), ... });
 ```
-A job that references `version: "latest"` is resolved to the concrete version at dispatch; `CaseResult.harness`
-records the resolved `id@version` (e.g. `bu@1.1.0`), so scorecards/regression always name an exact version.
+A job that references `version: "latest"` is resolved to the concrete version at dispatch, so scorecards and
+regression name an exact version.
 
 Live-verified on the local kind cluster (`scripts/live/registry-k8s.mjs`): load the dir → resolve `bu@latest` →
 `1.1.0` → drive a real K8s service-topology run with the registry-resolved spec.
 
-## Persistence (`PgHarnessRegistry`)
-`HarnessRegistry` is async, so a Postgres-backed impl is a drop-in: `PgHarnessRegistry` stores each version as a
-row in `everdict_harnesses` (`spec` as `jsonb`, PK `(id, version)`), shares the `@everdict/db` `SqlClient` + migrator
-(migration `0002_create_harnesses`), and enforces the same immutability (re-register with a different spec →
-`ConflictError`, using an order-independent compare since `jsonb` doesn't preserve key order). Seed it from the
-file SSOT with `loadHarnessDir(dir, pgRegistry)`. `latest`/semver resolution is identical to in-memory.
+## Persistence (`PgHarnessTemplateRegistry` / `PgHarnessInstanceRegistry`)
+The ports are async, so the Postgres impls are drop-ins: each version is a row in `everdict_harness_templates` /
+`everdict_harness_instances` (`spec` as `jsonb`, PK `(tenant, id, version)`, migration
+`0016_create_harness_taxonomy`), sharing the `@everdict/db` `SqlClient` + migrator and the same immutability. Seed
+them from the file SSOT with `loadHarnessTaxonomyDir(dir, { templates: pgTemplates, instances: pgInstances })`.
 
 Live-verified against real Postgres (`scripts/live/pg-harness-registry.mjs`): migrate → seed files → resolve
 `bu@latest` → `1.1.0` → re-register-different-spec is rejected → spec survives a fresh connection.
 
 ## Tenant ownership
-The registry is keyed by **`(tenant, id, version)`** (migration `0004_harness_tenant`). Resolution prefers the
-tenant's own harness and falls back to the **`_shared`** owner for first-party harnesses (the file loader
-registers under `_shared` by default). `loadHarnessDir(dir, { into, tenant })` chooses the owner. The HTTP
-surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/tenancy.md`.
+Every registry is keyed by **`(tenant, id, version)`**. Resolution prefers the tenant's own version and falls back
+to the **`_shared`** owner for first-party assets (the file loaders register under `_shared` by default; pass
+`tenant` to choose the owner). The HTTP surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see
+`docs/tenancy.md`.
 
 ## Rubrics (`RubricRegistry`)
 Rubrics — HOW to judge: freeform `text` and/or named `criteria` plus an optional `promptTemplate`
 (`docs/architecture/eval-domain-model.md` S3) — are their own versioned entity, mirroring the judge registry:
 `register / get / has / versions / ownVersions / list`, `(tenant, id, version)` keyed, **immutable** versions
 (different content → `ConflictError`), owner-first + `_shared` fallback, and explicit file seeding via `loadRubricDir`
-(default owner `_shared`; `apps/api` no longer auto-seeds rubrics on boot).
+(default owner `_shared`).
 `InMemoryRubricRegistry` (dev/test) + `PgRubricRegistry` (Postgres, `rubric` jsonb, PK `(tenant,id,version)`,
 migration `0053_create_rubrics`). One rubric serves many judges: `JudgeSpec.rubric` accepts `{id, version}` as
 well as the inline string, resolved at judge-run time (see `docs/judges.md`). The HTTP/MCP surface
@@ -90,25 +113,26 @@ against exactly the world it measured and two batches over one dataset and two e
 an environment is part of what an evaluation asks. Design: `docs/architecture/harness-definability-spec.md` §2.
 
 ## Version tags (mutable registry metadata)
-Version numbers alone are hard to tell apart, so every versioned entity (harness instance / dataset / judge /
-runtime / rubric) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry
+Version numbers alone are hard to tell apart, so the versioned entities (harness instance / dataset / judge /
+runtime / rubric / environment) support **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry
 metadata outside the immutable spec** — same layer as `createdBy` — so they can be edited *after* registration (the
-whole point: label versions that already exist) and never participate in `specsEqual`/immutability. Contract on all
-five registries:
+whole point: label versions that already exist) and never participate in `specsEqual`/immutability. Contract on
+those registries:
 - `setVersionTags(tenant, id, version, tags)` — full-array replace (empty = remove all). **Tenant-owned live
   versions only** (no `_shared` fallback — first-party versions can't be tagged), else `NotFoundError`; tombstoned
   versions are excluded like every other read/write.
 - `versionTags(tenant, id)` → `Record<version, string[]>` (only versions that have tags). Reads resolve
   owner-first with `_shared` fallback, same visibility as `versions()`.
-- List entries (`HarnessListEntry`/`DatasetListEntry`/`JudgeListEntry`/`RuntimeListEntry`/`RubricListEntry`) carry
-  an optional `versionTags` map; `GET /harnesses/:id` includes it too.
+- List entries (`HarnessListEntry`/`DatasetListEntry`/`JudgeListEntry`/`RuntimeListEntry`/`RubricListEntry`/
+  `EnvironmentListEntry`) carry an optional `versionTags` map; `GET /harnesses/:id` includes it too.
 Postgres stores tags in a `tags jsonb NOT NULL DEFAULT '[]'` column (migration `0047_version_tags`; rubrics via
 `0054_rubric_version_tags`). HTTP surface:
-`PUT /{harnesses,datasets,judges,runtimes,rubrics}/:id/versions/:version/tags` gated by each entity's
+`PUT /{harnesses,datasets,judges,runtimes,rubrics,environments}/:id/versions/:version/tags` gated by each entity's
 content-mutation action (`harnesses:register` / `datasets:write` / `judges:write` / `runtimes:write` — rubrics
-reuse `judges:write` like the rest of their surface; no new authz action); MCP
-parity via `set_*_version_tags`. Input is normalized in `apps/api` `version-tag-service.ts` (trim, drop empties,
-order-preserving dedupe; ≤20 tags × ≤60 chars).
+reuse `judges:write` and environments `datasets:write`, like the rest of their surfaces; no new authz action); MCP
+parity via `set_*_version_tags`. Input is validated and normalized in `@everdict/application-control`
+`version-tag/version-tag-service.ts` (`VersionTagsBodySchema` ≤20 tags × ≤60 chars; trim, drop empties,
+order-preserving dedupe). The Capability Store (`/capabilities`) has its own tag route over the same normalizer.
 
 ## When a version arrived (`versionDates`)
 

@@ -2,7 +2,8 @@
 kind: wiki
 title: "Notifications"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/api/mattermost/mattermost.routes.ts, packages/contracts/src/records/subscription.ts, packages/application-control/src/platform-event/subscription-reaction-consumer.ts, apps/desktop/src/notification-watcher.ts]
 ---
 # Notifications
 
@@ -11,53 +12,60 @@ late.
 
 ## Mattermost
 
-Register a bot token once, and completions and regressions land in a channel:
+The operator points the control plane at a Mattermost server once (`MATTERMOST_HOST`). A workspace admin
+then registers a bot — under **Settings → Integrations**, or:
 
 ```bash
 curl -XPUT localhost:8787/workspace/mattermost \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
-  "url": "https://mattermost.internal",
-  "tokenSecret": "mattermost-bot",
-  "channel": "evals"
+  "botTokenSecretName": "MATTERMOST_BOT_TOKEN",
+  "defaultChannelId": "<channel-id>"
 }'
 ```
 
-`tokenSecret` names a workspace secret; the token itself never appears in the request or the record.
+`botTokenSecretName` names a workspace secret; the token itself never appears in the request or the
+record. The token (and channel) are verified against the live server when you save. Completions and
+regressions then land in that channel.
 
 ## Webhooks
 
-For anything else, a subscription delivers signed payloads to your endpoint:
+For anything else, a subscription delivers payloads to your endpoint:
 
 ```bash
 curl -XPOST localhost:8787/subscriptions \
-  -H 'content-type: application/json' -d '{
+  -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "name": "post scorecards to ops",
   "selector": { "kinds": ["scorecard.completed"] },
-  "reaction": { "kind": "webhook", "url": "https://ops.internal/hooks/everdict" },
-  "enabled": true
+  "reaction": { "kind": "webhook", "url": "https://ops.internal/hooks/everdict",
+                "secret": "a-long-shared-secret" }
 }'
 ```
 
-Delivery is cursor-based, so a consumer that was down does not lose events — it resumes from where it
-stopped rather than from now.
+With a `secret`, each body is HMAC-SHA256 signed in `x-everdict-signature`. Delivery is at-least-once
+from a durable cursor, with retries and a dead letter for an endpoint that keeps failing — so dedupe on
+the event id in `x-everdict-event`.
 
 ## In the product
 
-The web inbox collects the same events, and the desktop app raises them as native notifications. A run
-you started an hour ago tells you it finished without you keeping the tab open.
+The web notification bell collects the same events, and the desktop app raises them as native
+notifications. A run you started an hour ago tells you it finished without you keeping the tab open.
 
 ## Choosing a trigger
 
 `scorecard.completed` fires on every batch, which is noise if you run nightly. What you usually want is
-the regression, not the run — a subscription whose reaction is an **agent** can diff the result and only
-speak when something moved:
+the regression, not the run. A selector can filter on the event's payload, and a reaction that wakes an
+**agent** can diff the result and only speak when something moved:
 
 ```json
-{ "selector": { "kinds": ["scorecard.completed"] },
-  "reaction": { "kind": "agent", "agentId": "default",
-                "prompt": "Diff against the baseline. Say nothing unless a case regressed." },
-  "cooldownSec": 300 }
+{ "name": "speak up on failing batches",
+  "selector": { "kinds": ["scorecard.completed"],
+                "filters": [{ "field": "passRate", "op": "lt", "value": 1 }] },
+  "reaction": { "kind": "agent", "agentId": "regression-watch" },
+  "governance": { "cooldownSec": 300 } }
 ```
+
+The woken agent follows its own `task` — here, something like "diff against the baseline; say nothing
+unless a case regressed" (see [Workspace agents](../workspace/agents.md)).
 
 :::tip
 Notify on the thing that requires a decision. A channel that receives every completion gets muted in a

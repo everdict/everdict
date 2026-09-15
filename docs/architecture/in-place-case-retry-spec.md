@@ -2,8 +2,8 @@
 kind: spec
 title: "In-place case retry — a scorecard remembers that a case ran more than once"
 status: landed
-updated: 2026-09-04
-anchors: [packages/contracts/src/records/scorecard.ts, packages/domain/src/scorecard/execution-revision.ts, packages/application-control/src/scorecard/retry-failed-batch.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/scorecard.ts, packages/domain/src/scorecard/execution-revision.ts, packages/application-control/src/scorecard/retry-cases-in-place.ts, packages/application-control/src/ports/case-receipt-store.ts]
 ---
 # In-place case retry — a scorecard remembers that a case ran more than once
 
@@ -72,7 +72,7 @@ strictly less. So it is allowed and the pass must say why: `reason` is required 
 The predicate is about the OUTCOME, not about pass/fail: laundering a PASS into a fail deserves the same
 sentence as the other direction.
 
-## Slice 1 — the axis: contracts + the pure decisions — **Landed**
+## Slice 1 — the axis: contracts + the pure decisions — **Landed** — `packages/domain/src/scorecard/execution-revision.ts`
 
 `CaseAttemptSchema` · `ExecutionRevisionSchema` · `ExecutionPassSchema` · `ScorecardRetrySummarySchema`, wired
 onto `ScorecardRecordSchema`; `packages/domain/src/scorecard/execution-revision.ts` holds the pure answers:
@@ -90,7 +90,7 @@ Six invariants, each driven RED by neutralizing it in the production file and re
 | a retry may not ADD a case to a sealed batch | append the orphan to the plane |
 | a pass that produced nothing may not EMPTY a case | filter the plane to what came back |
 
-## Slice 2 — the pass: retry selected cases in place — **Landed**
+## Slice 2 — the pass: retry selected cases in place — **Landed** — `packages/application-control/src/scorecard/retry-cases-in-place.ts`
 
 `ScorecardService.retryCases({tenant, id, cases[], reason?})`, and the sequence is the protocol:
 
@@ -131,7 +131,7 @@ infra death needs none. A second retry while one is live is refused. A case that
 `failed` rather than cleared: a dead pass is addressable, a cleared one is indistinguishable from a pass that
 never ran. And the marker is cleared in the SAME write that appends the revision — the revision boundary.
 
-## Slice 3 — the ledger's neighbours: receipts, child runs, storage — **storage Landed**
+## Slice 3 — the ledger's neighbours: receipts, child runs, storage — **receipts and storage Landed** — `packages/db/src/results/pg-case-receipt-store.ts`, `packages/db/migrations/0213_scorecard_execution_axis.sql`
 
 The three readers that already exist and do not yet know about attempts, each an open question this slice
 answers rather than assumes:
@@ -195,14 +195,14 @@ answers rather than assumes:
   statement no planner accepts: a fresh claim wins and the DATABASE mints the lease, a rival fresh claim is
   refused, the owner writes, a stranger is refused.
 
-## Slice 4 — the doors — **Landed**
+## Slice 4 — the doors — **Landed** — `apps/api/src/api/scorecard/scorecard.routes.ts`
 
 `POST /scorecards/:id/retry-cases` (body: `cases[]`, `reason?`; gate `scorecards:run`; 404 for another
 workspace, the same answer the read gives) and the MCP twin `retry_scorecard_cases` — BFF↔MCP parity is
 structural, and an operation an agent cannot drive is one no agent loop can converge. The forking `/retry`
 stays, and both its route description and its MCP tool now say what it is and name its sibling.
 
-## Slice 5 — the surfaces — **Landed**
+## Slice 5 — the surfaces — **Landed** — `apps/web/src/features/retry-scorecard-cases/ui/retry-case-button.tsx`
 
 The case row shows its attempt count (`ran 2×`), derived from the ledger rather than read from a stored
 number — two counters of one fact diverge eventually. `RetryCaseButton` re-runs one case and asks for a

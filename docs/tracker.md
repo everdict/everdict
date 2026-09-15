@@ -2,8 +2,8 @@
 kind: wiki
 title: "The eval tracker — Initiative ⊃ Project ⊃ Issue"
 status: current
-updated: 2026-08-28
-anchors: [packages/domain/src/tracker/issue.ts]
+updated: 2026-09-15
+anchors: [packages/domain/src/tracker/issue.ts, packages/contracts/src/records/tracker.ts, apps/api/src/api/issue/issue.docs.ts, packages/application-control/src/issue/regression-watch.ts, packages/application-control/src/issue/github-issue-sync.ts]
 ---
 # The eval tracker — Initiative ⊃ Project ⊃ Issue
 
@@ -76,7 +76,7 @@ same reverse query a harness uses (`?linkType=issue&linkId=`), so both screens s
 record to keep in step. Two deliberate details: the id is the target's **UUID**, not its identifier, because an
 identifier is a name a record can be re-issued under and a containment query on the old spelling would stop
 matching; and a mention
-is made by PICKING (the web's issue picker, `add_issue_link` over MCP), never by parsing `ENG-12` out of a
+is made by PICKING (the web's issue picker, `add_issue_link` over MCP), never by parsing `EVD-12` out of a
 description — a link nobody chose is one nobody can explain, and edited text would leave the graph to garbage-collect.
 Finding the issue to pick is what `GET /issues?q=` answers: a case-insensitive substring of the identifier (including
 the ones it used to answer to) or the title. Not the description — a picker row cannot show a paragraph to say why it
@@ -84,8 +84,8 @@ matched.
 
 ### The identifier is the address
 
-`ENG-12` is not decoration — it is how an issue is **addressed** everywhere a human can see the reference:
-`/{workspace}/issue/ENG-12` in the web, `GET /issues/ENG-12` on the control plane, `get_issue({id: "ENG-12"})`
+`EVD-12` is not decoration — it is how an issue is **addressed** everywhere a human can see the reference:
+`/{workspace}/issue/EVD-12` in the web, `GET /issues/EVD-12` on the control plane, `get_issue({id: "EVD-12"})`
 over MCP. A link pasted into a pull request or a chat message therefore reads as the issue people already name in
 conversation, instead of an opaque uuid nobody can match to the thing being discussed.
 
@@ -136,6 +136,10 @@ is derived from the same table, so "open" cannot mean one thing in TypeScript an
 `regressed` sits in `started`, which is the whole argument for having categories: a resolution that stopped
 holding is work IN FLIGHT, not an untouched backlog item and not a finished one.
 
+`regressed` is the addition, and it is why the tracker exists. A done issue whose evaluation later degraded is
+not an untouched `todo`: it carries the resolution it fell from, and it reads as an alarm in every list. **Open
+= not done and not cancelled**, so a regressed issue blocks its initiative exactly like unstarted work.
+
 ### Workflow states — the workspace's own names for its board
 
 The board is `WorkflowState` rows (`/workflow-states`): name · colour · position · and the **canonical status
@@ -149,8 +153,8 @@ field that duplicates the status enum we already have — and the progress arith
 claim, so it does not get to depend on what somebody named a column. `regressed` is not offerable as a column at
 all: an issue reaches it by a resolution falling, never by somebody dragging a card.
 
-The board is seeded with the default six on the list path, idempotently, so a workspace that has never opened
-Settings still has one. An issue names its column with `stateId`; absent means "the default state for that
+The board is seeded with the default six on the list path, idempotently, so a workspace that has never read
+its board still has one. An issue names its column with `stateId`; absent means "the default state for that
 status", which is what every issue that predates the board reads as — and what the regression watch leaves
 behind, honestly, because nobody put that issue in a column.
 
@@ -159,16 +163,6 @@ every write is `settings:write`, because shaping a workspace is administration.
 
 Re-mapping a column's `status` MOVES every issue in it in the same operation, and a state still holding issues
 cannot be deleted (409 naming the count) — the board and the record can never disagree.
-
-### The old status list
-
-```
-backlog · todo · in_progress · in_review · done · cancelled · regressed
-```
-
-`regressed` is the addition, and it is why the tracker exists. A done issue whose evaluation later degraded is
-not an untouched `todo`: it carries the resolution it fell from, and it reads as an alarm in every list. **Open
-= not done and not cancelled**, so a regressed issue blocks its initiative exactly like unstarted work.
 
 ### Transitions
 
@@ -494,7 +488,8 @@ Cross-workspace reads are `404`, never `403` (no existence leak).
 
 ## Surface
 
-Full BFF↔MCP parity. HTTP under `/issues`, `/projects`, `/initiatives`, `/workflow-states`. The issue MCP twins
+BFF↔MCP parity for issues, projects, initiatives and labels; HTTP under `/issues`, `/projects`, `/initiatives`,
+`/issue-labels`, `/workflow-states` (the board has no MCP tools, and no settings screen in the web). The issue MCP twins
 are `create_issue`, `list_issues`, `get_issue`, `update_issue`, `set_issue_status`, `add_issue_link`,
 `remove_issue_link`, `list_issue_scorecards`, `delete_issue` plus the eight-tool sets for projects and
 initiatives —

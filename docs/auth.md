@@ -2,8 +2,8 @@
 kind: wiki
 title: "Auth core (control-plane owned)"
 status: current
-updated: 2026-08-11
-anchors: [apps/api/src/main.ts]
+updated: 2026-09-15
+anchors: [packages/auth/src/oidc.ts, packages/auth/src/api-key.ts, apps/api/src/composition/authenticator.ts, packages/domain/src/auth/authz.ts, deploy/keycloak/realm-everdict.json]
 ---
 # Auth core (control-plane owned)
 
@@ -12,70 +12,72 @@ anchors: [apps/api/src/main.ts]
 it logs a human in against Keycloak and forwards the resulting token; it never decides who you are or what
 you may do. Agents, MCP, and CI never touch the web at all.
 
-## Two identities, one Principal
-Two complementary credentials map to the **same** internal identity:
+## Every credential, one Principal
 
 | Caller | Credential | `via` |
 |---|---|---|
 | Human (through `apps/web`) | Keycloak **OIDC** access token (JWT) | `oidc` |
-| Agent / MCP / CI | **API key** `ak_…` (`Authorization: Bearer ak_…`) | `api-key` |
+| Agent / MCP / CI with a key | **API key** `ak_…` (`Authorization: Bearer ak_…`) | `api-key` |
+| Autonomous agent turn (`apps/agent`) | agent execution token `agt_…` | `agent` |
+| Self-hosted runner | runner pairing token `rnr_…` | `runner` |
+| GitHub Actions workflow | GitHub-signed OIDC token + `x-everdict-workspace` | `github-actions` |
 
-Both resolve to a `Principal`:
-
-```ts
-interface Principal {
-  subject: string;        // user id (oidc) or "key" owner — identity key
-  workspace: string;      // = tenant = trust-zone key
-  roles: string[];        // everdict roles: viewer | member | admin
-  via: "oidc" | "api-key";
-  email?: string;         // oidc email/preferred_username — display only (member list), never authz/identity; absent for api keys
-  name?: string;          // oidc name claim (given+family fallback) — display only; seeds the user profile on login (fill-if-absent, a self-set profile name wins)
-}
-```
+All of them resolve to a `Principal` (`packages/domain/src/auth/principal.ts`, re-exported by `@everdict/auth`):
+`subject` (the identity key), `workspace`, `roles`, `via`, plus optional `email`/`name` (OIDC display metadata
+only — never an authz input), `scopes` (per-key narrowing) and `runnerId`. A campaign evidence grant
+(`Bearer cpe_…`) resolves to a Principal that may only `GET /campaigns/:id/evidence-view` for its own campaign.
 
 `workspace` is the **single tenancy axis**: `workspace === tenant === trust-zone key`. Everyone in a workspace
-shares the same isolation zone (same hardened runtime + namespace + warm-pool keying — see
-`docs/execution-backends.md`). The runtime is already keyed by `tenant`; the auth core simply supplies a
-*real, non-spoofable* `workspace` for that key.
+shares the same isolation zone (see [execution-backends.md](execution-backends.md)). The runtime is keyed by
+`tenant`; the auth core supplies a *real, non-spoofable* `workspace` for that key.
 
 ## `@everdict/auth`
-One `Authenticator` interface, two impls, composed:
+One `Authenticator` interface (`authenticate(bearer, ctx?)`, where `ctx.workspaceHint` is the
+`x-everdict-workspace` header), several impls, composed by `compositeAuthenticator` — first success wins,
+`undefined` from all ⇒ 401. Each impl claims only its own bearer shape:
 
-```ts
-interface Authenticator { authenticate(bearer: string): Promise<Principal | undefined>; }
-compositeAuthenticator([oidc, apiKey])   // tries each; first success wins; undefined ⇒ 401
-```
-
-- **`oidcAuthenticator({ issuer, audience?, jwksUri?, workspaceClaim?, groupPrefix?, keySet? })`** — verifies
-  the JWT with **`jose`** against the realm's **JWKS** (`createRemoteJWKSet` + `jwtVerify`, checking `issuer`
-  and optional `audience`). It only attempts JWT-shaped bearers (3 dot-segments, not `ak_`). Mapping:
-  - **workspace** ← the `workspace` claim, else falls back to a group under `groupPrefix`
-    (`/workspaces/<ws>/…` → `<ws>`).
-  - **roles** ← `realm_access.roles` **intersected with everdict roles** (`viewer|member|admin`); empty ⇒ `viewer`.
-- **`apiKeyAuthenticator({ keyStore, roles? })`** — only attempts `ak_…` bearers; `keyStore.resolveByHash(hashKey(bearer))`
-  → `{ workspace, scopes? }`. Keys carry `roles` (default `["admin"]`) **and** optional per-key `scopes`
-  (`read|write|admin`, cumulative; `admin` = Full Access). `scopes` flow onto the `Principal`; `can()` applies them as
-  an **intersection** with the role matrix (a scoped key can never exceed its role). A key with no stored scopes
-  (legacy / Full Access via `["admin"]`) is unrestricted — same as before. Scope→action mapping (`SCOPE_PERMISSIONS`)
-  lives in `authz.ts` next to `ROLE_PERMISSIONS`: `read` = data reads (not `secrets`/`keys`/`settings`); `write` =
-  read ∪ content mutations (run/register/version-create/run); `admin` = all actions.
+- **`oidcAuthenticator({ issuer, audience?, jwksUri?, workspaceClaim?, groupPrefix?, keySet?, onError? })`** —
+  verifies the JWT with **`jose`** against the realm's **JWKS** (`createRemoteJWKSet` + `jwtVerify`, checking
+  `issuer` and optional `audience`). It only attempts JWT-shaped bearers (3 dot-segments, not `ak_`).
+  - **workspace** ← the `workspace` claim, else a group under `groupPrefix` (`/workspaces/<ws>/…` → `<ws>`), else
+    `""` — a valid token with no workspace still authenticates and is sent to onboarding.
+  - **roles** ← **none**. Keycloak is authentication only: `realm_access.roles` is deliberately ignored and the
+    Principal carries `roles: []` until the workspace membership supplies one (below).
+- **`apiKeyAuthenticator({ keyStore, roles? })`** — `ak_…` only; `keyStore.resolveByHash(hashKey(bearer))`. A
+  **personal** key (it has an `owner`, mig `0041`) resolves AS its issuer (`subject = owner`) and takes the issuer's
+  membership role — a member's key has member permissions. A **machine** key (no owner, e.g. from
+  `/internal/tenant-keys`) is `subject = key:<ws>` with `roles` (default `["admin"]`). Stored `scopes` flow onto the
+  Principal.
+- **`agentTokenAuthenticator`** — `agt_…`; acts AS the agent's creator (their live membership role), scope
+  defaulting to `write` so an autonomous turn never reaches governance or secrets. See
+  `docs/architecture/agent-execution-auth.md`.
+- **`runnerAuthenticator`** — `rnr_…`; `roles: ["runner"]`, fixed workspace, `runnerId` — least privilege.
+- **`githubActionsAuthenticator`** — keyless CI: a GitHub (or trusted GHES) OIDC token is accepted only when its
+  repository and ref match a repo link of the workspace the request names; `roles: ["ci"]`. It is first in the
+  chain so CI tokens never reach the Keycloak verifier. See `docs/architecture/github-actions-trigger.md`.
 
 Verification is **fail-closed**: an unknown key, a bad signature, a wrong issuer, or an expired token all return
-`undefined` → the API answers **401**. Only the SHA-256 **hash** of an API key is ever stored (`@everdict/db`); the
-plaintext is shown once at issuance.
+`undefined` → the API answers **401**. Only the SHA-256 **hash** of a key or token is ever stored (`@everdict/db`);
+the plaintext is shown once at issuance. Keys have no expiry and are immutable — change permissions by revoke +
+reissue.
 
 ## Authorization (`authz.ts`)
-A flat role → action matrix; `can(principal, action)` / `authorize(principal, action)` (throws `ForbiddenError`
-→ **403**):
+A flat role → action matrix in `packages/domain/src/auth/authz.ts` (re-exported by `@everdict/auth`);
+`can(principal, action)` / `authorize(principal, action)` (throws `ForbiddenError` → **403**). Roles are
+`viewer ⊂ member ⊂ admin`, plus the non-member `ci` role (`scorecards:read/run`, `harnesses:read/register`). A
+sample of the matrix — the file is the full list:
 
 | Action | viewer | member | admin |
 |---|:--:|:--:|:--:|
-| `runs:read` | ✓ | ✓ | ✓ |
-| `harnesses:read` | ✓ | ✓ | ✓ |
-| `runs:submit` |   | ✓ | ✓ |
-| `harnesses:register` |   |   | ✓ |
+| `runs:read` · `harnesses:read` · `datasets:read` | ✓ | ✓ | ✓ |
+| `harnesses:register` · `templates:write` · `runtimes:write` (collaborative content) | ✓ | ✓ | ✓ |
+| `runs:submit` · `scorecards:run` · `datasets:write` · `judges:write` · `models:write` |   | ✓ | ✓ |
+| `datasets:delete` · `members:write` · `secrets:write` · `settings:write` · `runtimes:control` |   |   | ✓ |
 
-Roles are cumulative (`member` ⊃ `viewer`, `admin` ⊃ `member`).
+A key's `scopes` (`read|write|admin`, cumulative; `admin` = Full Access, the default when omitted) apply as an
+**intersection**: `read` = data reads (not secrets/keys/settings), `write` = read ∪ content mutations, `admin` =
+every action. A scoped key never exceeds its role. A few actions are "admin **or** the resource's creator": the
+admin half stays in the matrix and the creator half lives in the service that knows who created the row.
 
 ### There is no second ownership axis — the workspace is the boundary
 
@@ -102,35 +104,30 @@ What is left, and what it costs to forget it:
   or shell session answers 404 to you). That is a per-record visibility field, not an ownership axis.
 
 ## How `apps/api` enforces it
-`resolvePrincipal(req)` is called by **every** route:
-1. `Authorization: Bearer <token|ak_…>` → `authenticator.authenticate(...)`; on `undefined` → **401**.
+`resolvePrincipal(req)` (`apps/api/src/api/route-context.ts`) is called by every human/HTTP route:
+1. `Authorization: Bearer <token>` → the composed authenticator; on `undefined` → **401**.
 2. No bearer + `EVERDICT_REQUIRE_AUTH=1` → **401**.
-3. No bearer in **dev** (default) → fallback `Principal{ subject:"dev", workspace: x-everdict-tenant||"default",
-   roles:["admin"] }` so local work needs no Keycloak.
+3. No bearer otherwise (dev) → `Principal{ subject:"dev", workspace: x-everdict-tenant || "default",
+   roles:["admin"] }`, so local work needs no Keycloak. The MCP endpoint has no such fallback.
 
-Then each route gates with `authorize(principal, action)` and scopes data to `principal.workspace`:
+Then **`applyActiveWorkspace`** turns identity into a role. Membership is the role SSOT (`@everdict/db`
+`WorkspaceStore`). The token's workspace (claim or dev header) is the **bootstrap default**: a subject with no
+membership there gets one — as `member` for a human, since a realm role cannot grant admin on someone else's
+workspace. The `x-everdict-workspace` header (the web's active-workspace cookie) selects another membership, and
+`roles` become that membership's role; a non-member selection **falls back** to the default — never a 403 from a
+stale cookie. Admin comes only from creating a workspace (`POST /workspaces`, creator = admin), an invite, or a
+promotion. Runner, GitHub Actions and evidence-grant principals skip this step (a device or a CI repo never gains a
+member row). See [tenancy.md](tenancy.md).
 
-| Method | Path | Action | Notes |
-|---|---|---|---|
-| `GET` | `/me` | — | returns the resolved `Principal` (web/agent uses it to gate UI) |
-| `POST` | `/runs` | `runs:submit` | submits under `principal.workspace` |
-| `GET` | `/runs`, `/runs/:id` | `runs:read` | other workspaces' runs → **404** (not 403 — no existence leak) |
-| `POST` | `/harnesses` | `harnesses:register` | registered under `principal.workspace` (immutable → 409) |
-| `GET` | `/harnesses`, `/harnesses/:id` | `harnesses:read` | workspace-owned + `_shared` |
-| `GET`/`POST` | `/workspaces` | — | self-serve membership: list my workspaces / create one (creator = admin) |
-| `POST` | `/internal/tenant-keys` | — | operator-only; `x-internal-token` (constant-time, fail-closed); body `{workspace}`; returns the plaintext key **once** |
+Each route then gates with `authorize(principal, action)` and scopes data to `principal.workspace`. The per-route
+action is in the generated reference ([api.md](api.md)); the exceptions are: `GET/POST /workspaces` (self-serve,
+no role gate), `/keys` (personal and self-scoped — each user lists, issues and revokes only their own keys), and
+`/internal/**` (operator-only: `x-internal-token`, constant-time compare, fail-closed when
+`EVERDICT_INTERNAL_TOKEN` is unset).
 
-**Active workspace (multi-workspace).** A subject can be a member of several workspaces. After identity is
-resolved, `applyActiveWorkspace` (`server.ts`) picks the active one: the `x-everdict-workspace` header (the web
-forwards it from a httpOnly cookie / sidebar switcher) selects a membership and `Principal.workspace`+`roles`
-come from it; the token's `workspace` claim is the **bootstrap default** (lazily promoted to a membership on
-first use, so existing Keycloak users are seamless). A non-member selection **falls back** to the default —
-never a 403 from a stale cookie. Workspace is still the **single tenancy axis**; this only chooses *which* one is
-active. Membership SSOT = `@everdict/db` `WorkspaceStore`. See `docs/tenancy.md`.
-
-Wire-up (`apps/api/src/main.ts` → `buildAuthenticator`): `oidcAuthenticator` is added **iff** `KEYCLOAK_ISSUER`
-is set (+ optional `OIDC_AUDIENCE`, `WORKSPACE_CLAIM`); `apiKeyAuthenticator` is always present; the two are
-composed.
+Wire-up (`apps/api/src/composition/authenticator.ts` → `buildAuthenticator`): GitHub Actions first;
+`oidcAuthenticator` **iff** `KEYCLOAK_ISSUER` is set (+ optional `OIDC_AUDIENCE`, `WORKSPACE_CLAIM`); API keys,
+agent tokens and runner tokens always.
 
 ```bash
 KEYCLOAK_ISSUER=http://localhost:8081/realms/everdict \
@@ -139,25 +136,23 @@ EVERDICT_REQUIRE_AUTH=1 EVERDICT_INTERNAL_TOKEN=… DATABASE_URL=… \
 ```
 
 Plain `node` does **not** auto-load any `.env` (only Next.js does, for the web) — so the control plane sees env
-only from the shell. For local dev, put the vars in `apps/api/.env` and run from the repo root with
-`pnpm api` (or `pnpm api:dev` for `--watch`, `pnpm api:start` to build first). These use
+only from the shell. For local dev, put the vars in `apps/api/.env` (template: `apps/api/.env.example`) and run
+from the repo root with `pnpm api` (or `pnpm api:dev` for `--watch`, `pnpm api:start` to build first). These use
 `node --env-file-if-exists=apps/api/.env`, so the file fills in **unset** vars only — a real env var (k8s secret)
-always wins, and a missing file is a no-op (prod-safe). At boot the server logs whether the OIDC verifier was
-wired (`▶ auth: OIDC(JWT) verifier enabled issuer=…`) — if you see `KEYCLOAK_ISSUER unset` instead, the env didn't reach
-the process.
+always wins, and a missing file is a no-op (prod-safe).
 
 ### Diagnosing 401s (control-plane logging)
-The control plane runs a structured (pino) request logger at `EVERDICT_LOG_LEVEL` (default `info`; set `silent` to
-disable). It is built to make a Keycloak-token 401 self-explanatory — the common failure when the **web** is wired
-to an SSO but the **control plane** isn't:
+The control plane runs a structured (pino) request logger at `EVERDICT_LOG_LEVEL` (default `info`). It is built to
+make a Keycloak-token 401 self-explanatory — the common failure when the **web** is wired to an SSO but the
+**control plane** isn't:
 - **Boot:** logs `▶ auth: OIDC(JWT) verifier enabled issuer=<X>` when `KEYCLOAK_ISSUER` is set, or a loud
   `▶ auth: KEYCLOAK_ISSUER unset — … Internal SSO access tokens will be 401'd.` when it isn't (root cause #1: the JWT
   verifier was never wired, so every SSO token is rejected).
-- **Per rejected token:** `oidcAuthenticator`'s `onError` hook logs `▶ auth: OIDC token verification failed [<code>] …` with the
-  jose error code (`ERR_JWT_EXPIRED`, claim-validation, signature, **`JWKS_FETCH_FAILED`** = control plane can't
-  reach the SSO's JWKS), the **expected issuer vs the token's actual `iss`** (issuer-mismatch is the #2 cause), the
-  token `aud`, and the token's top-level claim names (so you can see whether the `WORKSPACE_CLAIM` is even present).
-  The token is decoded **unverified**, for diagnostics only.
+- **Per rejected token:** `oidcAuthenticator`'s `onError` hook logs `▶ auth: OIDC token verification failed [<code>] …`
+  with the jose error code (`ERR_JWT_EXPIRED`, claim-validation, signature, **`JWKS_FETCH_FAILED`** = control plane
+  can't reach the SSO's JWKS), the **expected issuer vs the token's actual `iss`** (issuer mismatch is the #2
+  cause), the token `aud`, and the token's top-level claim names (so you can see whether the `WORKSPACE_CLAIM` is
+  even present). The token is decoded **unverified**, for diagnostics only.
 - **Per request:** `auth: Bearer credential rejected → 401` / `auth: no credential (requireAuth) → 401` / `auth: dev
   fallback (x-everdict-tenant)` — distinguishes "token rejected" from "no token forwarded" from "dev fallback".
 
@@ -172,11 +167,13 @@ KEYCLOAK_PORT=8081 docker compose -f deploy/keycloak/docker-compose.yaml up -d  
 ```
 
 The realm defines:
-- realm roles `viewer` / `member` / `admin`;
+- realm roles `viewer` / `member` / `admin` (carried by the fixture; the control plane ignores them);
 - groups `/workspaces/{acme,globex}` each carrying a `workspace` attribute (the group-fallback path);
-- client `everdict-web` (confidential, standard flow for the web + **direct access grant** for headless testing);
-- a **protocol mapper** `workspace` (user attribute → token claim) — this is what `oidcAuthenticator` reads;
-- demo users `alice` (member, workspace `acme`) and `carol` (admin, workspace `acme`).
+- client `everdict-web` (confidential, standard flow for the web + **direct access grant** for headless testing)
+  and the public PKCE client `everdict-mcp` (see [mcp.md](mcp.md));
+- a **protocol mapper** `workspace` (user attribute → token claim) on both clients — this is what
+  `oidcAuthenticator` reads;
+- demo users `alice` and `carol` (workspace `acme`) and `dave` (workspace `globex`).
 
 A Keycloak user needs `firstName`/`lastName`/`email` or it is *"not fully set up"* and ROPC fails — keep the
 fixture complete.
@@ -191,41 +188,29 @@ disappeared" rather than as a realm-config fault. The fixture therefore carries 
 `UPDATE`-by-admin-API repair has the same trap in reverse: `PUT /admin/realms/<r>/users/<id>` REPLACES the user, so a
 body carrying only `attributes` wipes `email`/`firstName`/`lastName` and the account stops being "fully set up".
 
-## Live-verified (real Keycloak)
 Token via **ROPC** (browserless), then through the control plane:
 
 ```bash
 KC=http://localhost:8081/realms/everdict
 ALICE=$(curl -s -d grant_type=password -d client_id=everdict-web -d client_secret=everdict-web-secret \
   -d username=alice -d password=alice "$KC/protocol/openid-connect/token" | jq -r .access_token)
-curl -s $API/me -H "authorization: Bearer $ALICE"          # {workspace:"acme", roles:["member"], via:"oidc"}
+curl -s $API/me -H "authorization: Bearer $ALICE"   # {subject, workspace:"acme", roles:["member"], via:"oidc", workspaces, …}
 ```
 
-Verified end-to-end against a running Keycloak: no token → **401**; forged/expired JWT → **401**;
-`alice` (member) → `/me` ok, `POST /runs` **202**, `POST /harnesses` **403**; `carol` (admin) →
-`POST /harnesses` **201**.
-
-## Web (BFF token courier — done)
+## Web (BFF token courier)
 `apps/web` forwards the Keycloak access token as `Bearer` to the control plane: Auth.js's `jwt` callback stores
 **and refreshes** `accessToken` in the **server-only httpOnly encrypted cookie** — it is **never placed on the
 client session** (the `session` callback exposes only a non-sensitive `error` flag). The server reads it via
 `getAccessToken()` (`getToken` over the cookie) and `control-plane.ts` forwards it (falling back to the dev
 `x-everdict-tenant` path only when Keycloak is unconfigured). Identity comes from `GET /me` — the web never decodes
 the token for `workspace`/roles — and the UI is role-gated off `/me` (`shared/auth/can.ts` mirror), with the
-control plane still the enforcer. Live-verified headless via `scripts/live/web-auth-flow.py` (Auth.js + Keycloak
-authorization-code flow with a cookie jar): `alice`(member) sees the run form but the harness-register page is
-gated; `carol`(admin) sees both; both render `workspace=acme` — and `/api/auth/session` carries **no** access
-token (BFF leak check passes) while the server-side path still works. See `docs/web.md`.
+control plane still the enforcer. `scripts/live/web-auth-flow.py` drives the Auth.js + Keycloak
+authorization-code flow headlessly with a cookie jar and checks that `/api/auth/session` carries **no** access
+token; its per-role page assertions predate the membership role model. See `docs/web.md`.
 
-## MCP (agent-facing — done)
+## MCP (agent-facing)
 The agent surface (`apps/api` `/mcp`) is OAuth-protected the same way Linear's MCP is: `/mcp` returns
 `401 + WWW-Authenticate: resource_metadata=…`, `/.well-known/oauth-protected-resource` (RFC 9728) names
 **Keycloak** as the authorization server, and the MCP client runs OAuth 2.1 + PKCE login. The Bearer is validated
-by the **same `compositeAuthenticator`** (Keycloak JWT via JWKS, or `ak_…` API key) → `Principal`, and tools are
-role-gated/workspace-scoped. No separate MCP auth path. See `docs/mcp.md`.
-
-## Not yet (next)
-- Per-key scopes/expiry, key rotation, self-service signup/plans.
-- Further hardening: a service token + signed **acts-as** assertion (the BFF authenticates with its own identity
-  and asserts the user) so the user's Keycloak token never traverses the internal wire at all.
-```
+by the **same composed authenticator** → `Principal`, and tools are role-gated/workspace-scoped. No separate MCP
+auth path. See [mcp.md](mcp.md).

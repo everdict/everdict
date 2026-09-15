@@ -14,12 +14,6 @@
 2	apps/web/src/shared/lib/image-resize.ts
 1	apps/web/src/widgets/app-shell/ui/command-palette.tsx
 19	apps/web/src/widgets/app-shell/ui/nav-config.ts
-1	docs/architecture/analysis-studio.md
-1	docs/architecture/capability-store.md
-1	docs/architecture/environment-image-store.md
-1	docs/architecture/execution-model.md
-1	docs/architecture/live-observability.md
-1	docs/architecture/topology-portability.md
 1	packages/contracts/src/records/product.ts
 1	packages/db/src/results/scoring-stage-round-trip.scenario.test.ts
 2	packages/db/src/workspace/user-profile-store.test.ts

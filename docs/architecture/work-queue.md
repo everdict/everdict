@@ -2,107 +2,99 @@
 kind: wiki
 title: "Work queue — workload visibility (running/queued/next-scheduled per runtime lane)"
 status: current
-updated: 2026-08-11
-anchors: [packages/application-control/src/queue/queue-service.ts]
+updated: 2026-09-15
+anchors: [packages/application-control/src/queue/queue-service.ts, apps/api/src/api/queue/queue.routes.ts, apps/api/src/api/queue/queue.mcp.ts, apps/web/src/widgets/infra-panel/ui/work-tab.tsx]
 ---
 # Work queue — workload visibility (running/queued/next-scheduled per runtime lane)
 
-Schedule firings, a user's scorecard runs, and one-off runs are all **workloads** received by the
-control plane and queued/dispatched. This document is the SSOT for the read-only visibility slice that
-surfaces that queue in a single view.
+Schedule fires, scorecard runs and one-off runs are all **workloads** the control plane receives, queues and
+dispatches. This page describes the view that shows that queue in one place, plus the two controls it offers
+over the scheduler's real queue.
 
 ## Questions → answers
 - **What's the current work-queue state?** — all scorecard batches + standalone runs in `queued`/`running` state.
-- **Which runtime is it scheduled on?** — lanes are classified by the `runtime` (placement.target) axis captured on the record.
-- **What's running on each runtime right now?** — the lane's `running[]` (batches include progress).
-- **What's next?** — the front of the lane's `queued[]` FIFO + the next firing of active schedules (`upcoming[]`).
+- **Which runtime is it scheduled on?** — lanes are keyed by the `runtime` (placement.target) captured on the record.
+- **What's running on each runtime right now?** — the lane's `running[]`; batches include progress.
+- **What's next?** — the front of the lane's `queued[]` plus the next fire of active schedules (`upcoming[]`).
 
 ## Data (mig `0040`, additive)
-- `RunRecord.runtime` / `ScorecardRecord.runtime` — stamps the runtime the workload was placed on at submit time
+- `RunRecord.runtime` / `ScorecardRecord.runtime` — the runtime the workload was placed on at submit
   (`RunService.submit`: explicit runtime ?? case placement.target; `ScorecardService.submit`: input.runtime;
-  a batch's child runs get the same value). **NULL = default backend** or a legacy record. Lightweight → included in `list`.
+  a batch's child runs get the same value, rewritten to the runtime that actually ran the case after a
+  spillover). **NULL = default backend** or a legacy record.
 - Lane keys: `''` (default backend) · registered runtime id · `self:<runnerId>` (self-hosted).
-  Registered runtimes **expose empty lanes too** ("this runtime is idle" is information).
+  Registered runtimes **also show up as empty lanes** — "this runtime is idle" is information.
 
-## Unit (design decision — user-confirmed)
-**A batch (scorecard) = 1 job**: case fan-out (child runs) is not expanded into items but collapsed into the batch's
-**progress** (`progress { done, active, total? }`) — done/active are child-run counts,
-total is the dataset case count (omitted if it can't be resolved). A standalone run stays 1 job.
+## Unit
+**A batch (scorecard) = 1 job.** Its fan-out (child runs) is folded into the batch's
+`progress { done, active, waiting, total? }`: `done` = finished children (succeeded + failed), `active` =
+running children, `waiting` = queued children (parked behind a runner or backend slot), `total` = the
+selected subset size, else the dataset case count (omitted when it cannot be resolved). A standalone run is 1 job.
 
-## Two queues (scope separation — user-confirmed)
-The **workspace queue** and the **personal queue are different queues.** workspace = work requested in the workspace
-that runs on **shared runtimes** (default backend `''` + registered infra) — `self:*` items never appear here.
-personal = the requester's **own** self-hosted runner (`self:<runnerId>`) queue (lane label = runner hostname).
-Other members' personal runner queues are not exposed (same as the runner ownership model) and are excluded from totals aggregation.
+## Two queues
+The **workspace queue** and the **personal queue** are separate. The workspace queue is work requested in the
+workspace that runs on **shared runtimes** (default backend `''` + registered runtimes); `self:*` items never
+appear there. The personal queue is the requester's **own** self-hosted runners (`self:<runnerId>`, lane label =
+runner hostname). Other members' personal runner queues are not shown and are left out of the totals.
 
-## Service/transport (BFF↔MCP parity)
-`QueueService.snapshot(tenant, subject?)` (`packages/application-control/src/queue/queue-service.ts`) — assembles `{ workspace: lanes[],
-personal: lanes[] }` from store listings (lightweight) alone (personal scope determined by `myRunners(subject)`):
-the active states of scorecards + runs (standalone) + `ScheduleService.list`'s `nextFireTimes` (Temporal
-authoritative; if absent, upcoming is omitted — cron approximation is the web schedule screen's domain) + `RuntimeRegistry.list`.
+## Service and transport
+`QueueService.snapshot(tenant, subject?)` builds `{ totals, scheduler?, workspace: lanes[], personal: lanes[] }`
+from lightweight store listings: active scorecards + standalone runs, child counts per running batch
+(`RunStore.countChildrenByStatus`), `ScheduleService.list`'s `nextFireTimes`, `RuntimeRegistry.list`, and the
+requester's runners (`myRunners(subject)`).
 - HTTP: `GET /queue` (`runs:read`, viewer+)
 - MCP: `get_queue` (same gate)
 
-**Time series (`GET /metrics`)** — the Prometheus half (the snapshot above answers "now"; this answers
-"since when / how often / how long"). Zero-dep text exposition: scrape-time gauges (queue depth, per-backend
-in-flight + memory, per-workspace in-flight/queued, open circuits) + counters at the dispatch seam
-(`everdict_dispatch_total{runtime,outcome}`, spillovers, breaker open transitions, speculation fired/won, OOM
-escalations) + a per-runtime case-duration histogram. UNAUTHENTICATED by design (standard scrape practice —
-firewall the path in deployments). Live: one dead+kind shard batch registered breaker_open 1, spillover_total 3,
-dispatch infra 3 / ok 6, duration count 6 in a single scrape. Every dispatch (runs, batch cases, judges) flows
-through one metered dispatcher wrapper, so coverage needs no per-caller wiring.
+**Scheduler observability.** When the live `Scheduler` is injected, the snapshot carries a workspace
+`scheduler` slice — `{queued, inFlight, quota?, entries?}`, THIS tenant's numbers only, `quota` from
+`EVERDICT_TENANT_QUOTAS` — and each workspace lane an `admission` view
+(`{inFlight, memInFlightMb?, memoryBudgetMb?, cpuInFlight?, cpuBudget?, maxConcurrent?, circuit?}`). Lane
+mapping: a tenant runtime's backends `rt:<tenant>:<id>@<ver>` sum into the id's lane (another tenant's runtime
+with the same id is filtered out inside the service); bare-named global backends aggregate into the `''` lane;
+self-hosted lanes are lease queues and have no admission view. `circuit` is the spillover breaker state (open =
+dispatches currently route around this runtime).
 
-**Scheduler observability** (the seeing half of the fairness/envelope machinery — docs/execution-backends.md):
-the snapshot carries a workspace `scheduler` slice (`{queued, inFlight, quota?}` — THIS tenant's numbers only)
-and each workspace lane an `admission` view (`{inFlight, memInFlightMb?, memoryBudgetMb?, maxConcurrent?,
-circuit?}`). Lane mapping: a tenant runtime's backends `rt:<tenant>:<id>@<ver>` sum into the id's lane (another
-tenant's same-id runtime never counts — filtered inside the service); bare-named global env backends aggregate
-into the `''` (default) lane; self-hosted lanes are lease queues → no admission. `circuit` is the spillover
-breaker state (open = dispatches currently route around this runtime). The web lane header shows the memory
-envelope (`used/budget Mb`) and an open-circuit badge; live-verified: an autoscaled batch showed
-`queued 4 / inFlight 8` + `memInFlightMb 4096`, and a dead-runtime shard surfaced `circuit {open, consecutive 3}`.
+The time-series half (`GET /metrics`, Prometheus text) is operator-only and fail-closed: it answers 404
+without `EVERDICT_METRICS_TOKEN` and 403 without the matching bearer token — see
+[metrics-commercialization.md](./metrics-commercialization.md).
 
-## Web (the infra panel's work tab, `widgets/infra-panel`)
-Not a nav page — the **work tab of the floating infra panel**, opened from the vertical rail on the right edge
-(the rail's work button always carries the running+queued badge, fed by a slow background poll). Two groups:
-**workspace queue / my personal queue (self-hosted)**. Each lane card (Server/Laptop icon + label + count, idle
-badge) renders the flow vertically: **next-scheduled ⇢ queued (FIFO, a 'next' badge at the front) ⇢ running
-(progress bar)**. Items are fixed one-line rows: EntityRef refs + executor avatar + timestamp; a running single
-run offers a watch-live shortcut that opens it in the panel's runs tab (live screen + log tail) in place.
-Polling: 4s while the panel is open, 20s closed (badge only), skipped while the tab is hidden.
+## The scheduler's real queue (entries + controls)
 
-## Correctness: orphan recovery on boot
-Batches/runs are tracked in-process inside the control-plane process (single-process assumption) — on restart, the
-previous process's in-flight records become ghosts with no owner to take them over, and the queue shows 'running'
-forever. On boot, `recoverInterrupted` (`startup-recovery.ts`) finalizes queued/running batches, children, and
-standalone runs as **failed(INTERRUPTED)**. If two control planes share the same DB, another's in-flight records
-will also be recovered, so keep the single-control-plane assumption.
+The lanes are a **projection of record status** (records grouped by runtime). The control plane's actual
+dispatch queue is the `Scheduler`'s WFQ, surfaced as `snapshot.scheduler.entries`: this workspace's waiting
+entries in the order the scheduler's pump will try them. Urgent entries come first — interactive,
+operator-promoted, or waiting longer than `agingMs` — then the rest, tenant-fair within each class; position 1
+is next. Each entry carries its identity (`caseId` / `runId` / `batchId` / harness / pinned `target` /
+`priority` / `tags` — `["judge"]` marks a control-plane judge job), `enqueuedAt` / `waitedMs` / `urgent` /
+`promoted`, and a stable handle `id` (`q<seq>`).
 
-## The scheduler's REAL queue (entries + controls)
+Two controls, both gated `runs:submit` (the same gate as submitting work). `QueueService` enforces the tenant:
+an entry from another workspace, or one already placed, reads 404, so existence does not leak.
+- `DELETE /queue/entries/:entryId` (MCP `cancel_queued_job`) — `Scheduler.cancelEntry` removes the WAITING entry,
+  releases its budget reservation and permit, and rejects its dispatch with `CANCELLED`. In-flight work is untouched.
+- `POST /queue/entries/:entryId/promote` (MCP `promote_queued_job`) — `Scheduler.promoteEntry` moves it to the
+  front of the effective order: urgent class plus the fair-queue head (`FairQueue.promote`). Fairness
+  bookkeeping is untouched. To reorder the whole queue, promote entries in reverse of the order you want.
 
-The lanes above are a **record-status projection** (scorecard/run records grouped by runtime). The control
-plane's actual dispatch queue is the `Scheduler`'s WFQ, and it is surfaced separately as
-`snapshot.scheduler.entries` — this workspace's waiting entries in the scheduler's **effective scan order**
-(the exact order `pump()` will try: urgent class first — interactive / operator-promoted / aged past `agingMs`
-— then the rest, tenant-fair WFQ within each class; position 1 is next). Each entry carries its identity
-(`caseId` / `runId` / `batchId` / harness / pinned `target` / `evalCase.tags` — `["judge"]` marks a
-control-plane judge job) plus `enqueuedAt`/`waitedMs`/`urgent`/`promoted` and a stable handle `id` (`q<seq>`).
+`CANCELLED` is never classified retryable (`classifyFailure`), so a batch case whose entry is cancelled settles
+as a failed case rather than being re-dispatched by the batch's retry loop. Cancelling the scorecard is still
+how a whole batch is stopped.
 
-Two controls, gated `runs:submit` (same as submitting work), tenant-guarded in `QueueService` (another
-workspace's — or an already-placed — entry reads 404, no existence leak):
-- `DELETE /queue/entries/:id` (MCP `cancel_queued_job`) — remove the WAITING entry and settle its dispatch as
-  CANCELLED (the kill switch, e.g. a judge job left queued by a reclaimed batch). In-flight work is untouched.
-- `POST /queue/entries/:id/promote` (MCP `promote_queued_job`) — move it to the front of the effective order
-  (`FairQueue.promote` takes the head's virtual-finish time + the urgent class; fairness bookkeeping is
-  untouched, repeated promotions stack newest-first). This is the queue-reorder primitive: promote in reverse
-  desired order to fully reorder.
+## Web — the work tab of the infra panel (`apps/web/src/widgets/infra-panel`)
+Not a nav page: it is the **work tab of the floating infra panel**, opened from the vertical rail on the right
+edge. The rail's work button carries the running + queued badge. The tab has two groups: **workspace queue** and
+**my personal queue (self-hosted)**. Each lane card (Server/Laptop icon, label, counts, admission bar with
+memory/cpu envelope and an open-circuit badge; idle lanes collapsed) renders the flow **upcoming ⇢ queued (FIFO,
+a 'next' badge on the front) ⇢ running (progress bar)**. A running run opens in the panel's runs tab; a
+scorecard navigates the main view. The scheduler entries render under the scheduler headline with wait time,
+badges, and per-row promote/cancel actions (re-polled right after a mutation).
+Polling (`infra-panel-context.tsx`): 4 s while the panel is open, 20 s while closed (badge only), skipped
+while the browser tab is hidden.
 
-The work tab renders the entries under the scheduler headline with the wait time, judge/urgent/front badges,
-and the two per-row actions (immediate re-poll after a mutation).
-
-## Limitations / follow-ups
-- LANE queue order is a createdAt FIFO **approximation**; the authoritative order is `scheduler.entries`
-  (managed lanes). Exposing the measured self-hosted lease-queue depth is a follow-up.
-- Entry cancel settles through the dispatch caller's own machinery — a batch case may re-dispatch it if the
-  batch's retry budget classifies CANCELLED as retryable; cancelling the scorecard remains the batch-level stop.
-- upcoming is only present when a Temporal driver exists (nextFireTimes). dev (no driver) has an empty column.
+## What the view cannot tell you
+- Lane queue order is a createdAt FIFO **approximation**; the authoritative order is `scheduler.entries`
+  (managed lanes only).
+- `upcoming` exists only when a Temporal schedule driver supplies `nextFireTimes`; without one the column is empty.
+- Records that a dead control plane left `queued`/`running` stay in the lanes until boot recovery resumes or
+  tombstones them — see [batch-resilience.md](./batch-resilience.md) and
+  [multi-replica.md](./multi-replica.md) for which replica reclaims what.

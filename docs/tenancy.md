@@ -2,7 +2,8 @@
 kind: wiki
 title: "Tenant access layer (harness ownership + scoped reads)"
 status: current
-updated: 2026-07-17
+updated: 2026-09-15
+anchors: [packages/domain/src/auth/authz.ts, apps/api/src/api/route-context.ts, apps/api/src/api/workspace/workspace.routes.ts, apps/api/src/api/member/member.routes.ts, apps/api/src/api/api-key/api-key.routes.ts]
 ---
 # Tenant access layer (harness ownership + scoped reads)
 
@@ -12,14 +13,18 @@ runtime tenant-machinery (fairness, isolation, budgets, warm-pool separation, re
 `tenant`; the auth core supplies a *real, non-spoofable* `workspace` for that key, plus a role.
 
 ## Authentication (recap — full detail in `docs/auth.md`)
-Two credentials both resolve to a `Principal{ subject, workspace, roles, via }`:
+Every credential resolves to a `Principal{ subject, workspace, roles, via }`:
 - **Humans** → Keycloak **OIDC** JWT (via `apps/web`), `via:"oidc"`.
-- **Agents / MCP / CI** → **API key** `ak_…` (`Authorization: Bearer ak_…`), `via:"api-key"`.
+- **Agents / MCP / scripts** → **API key** `ak_…` (`Authorization: Bearer ak_…`), `via:"api-key"`.
+- Machine lanes with a fixed workspace and a narrow role: self-hosted runner tokens (`via:"runner"`), GitHub
+  Actions OIDC federation (`via:"github-actions"`, role `ci`), agent execution tokens (`via:"agent"`).
 
 Only the **SHA-256 hash** of a key is stored (`everdict_tenant_keys`), never the plaintext. With
 `EVERDICT_REQUIRE_AUTH=1` a missing/invalid credential is **401**; in dev (default) it falls back to the
-`x-everdict-tenant` header (admin). **Key issuance** is operator-only: `POST /internal/tenant-keys` guarded by
-`x-internal-token` (constant-time, **fail-closed** if unset); the plaintext key is returned **once**.
+`x-everdict-tenant` header (admin). **Key issuance**: any member self-serves personal keys via `GET/POST /keys` and
+`DELETE /keys/:id` (a key acts with the issuer's identity; optional `scopes` `read|write|admin` narrow it, never
+beyond the issuer's role); the operator path `POST /internal/tenant-keys` is guarded by `x-internal-token`
+(constant-time, **fail-closed** if unset). The plaintext key is returned **once**.
 
 ```bash
 curl -XPOST $API/internal/tenant-keys -H 'x-internal-token: <T>' -d '{"workspace":"acme"}'   # → { workspace, apiKey }
@@ -56,6 +61,7 @@ row on each login (display only — for a human-readable member list, never an a
   promotion. The bootstrap caps the role: a **fresh** workspace (de-facto creator) or a **machine key** (issuance
   is admin-gated) keeps the token's role, but a **human (OIDC)** bootstrapping into an **existing** workspace
   joins as **member** — so a global Keycloak `admin` realm role can never grant admin in someone else's workspace.
+- `DELETE /members/me` — leave the workspace yourself (the last admin cannot leave, 409). MCP `leave_workspace`.
 - One service core (`WorkspaceService`), two transports — HTTP routes **and** MCP tools (`list_workspaces` /
   `create_workspace` / `get_workspace` / `update_workspace` / `delete_workspace`). The web surfaces it as a
   Linear-style sidebar **workspace switcher** + create flow, plus a Settings **General** card (logo/name +
@@ -72,31 +78,35 @@ Managing **who** is in a workspace and **how they join** — one service core, H
   (admin) lists active invite links (meta only, incl. `acceptedCount`); `DELETE /invites/:id` revokes.
   **`POST /invites/accept {token}`** is authenticated-only (NOT workspace-role-gated, like `POST /workspaces`) — a
   logged-in **human** (api-key principals rejected) redeems it to join with the invite's role and is returned
-  `{workspace, role}`. A link is **reusable** — anyone with it can join (each acceptance bumps `acceptedCount`
+  `{workspace, role}`. `GET /invites/preview?token=` (unauthenticated) shows the workspace name/logo/role for the link
+  landing without redeeming. A link is **reusable** — anyone with it can join (each acceptance bumps `acceptedCount`
   via an atomic CTE consume) until it **expires** or an admin **revokes** it; an existing member who redeems keeps
   their current role (a shared link can't change privileges). Revoked/expired/unknown all read as an error with no
   existence leak. MCP: `create_invite` / `list_invites` / `revoke_invite` / `accept_invite`.
 
 ## Tenant-owned harnesses (`@everdict/registry`)
-The harness registry is keyed by **`(tenant, id, version)`**. A tenant registers and lists only its own
-harnesses; resolution falls back to the **`_shared`** owner for first-party harnesses (e.g. the file-loaded
-`browser-use` spec), so tenants can run shared harnesses without owning them while keeping their own private.
+The harness registries (templates + instances, `docs/registry.md`) are keyed by **`(tenant, id, version)`**. A tenant
+registers and lists only its own harnesses; resolution falls back to the **`_shared`** owner for first-party
+harnesses, so tenants can run shared harnesses without owning them while keeping their own private.
 
 | Method | Path | Action (role) | Effect |
 |---|---|---|---|
-| `POST` | `/harnesses` | `harnesses:register` (**admin**) | register a `HarnessSpec` under the caller's workspace (immutable; re-register-different → **409**) |
-| `POST` | `/harnesses/validate` | `harnesses:register` (**admin**) | dry-run: schema + the workspace's own `existingVersions`/`versionExists` (no write) — the registration flow's pre-check |
-| `GET`  | `/harnesses` | `harnesses:read` (viewer+) | list the workspace's own + `_shared` (`{id, owner, versions}`) |
+| `POST` | `/harnesses` | `harnesses:register` (**viewer+**) | register a `HarnessInstanceSpec` (template reference + pins) under the caller's workspace (immutable; re-register-different → **409**) |
+| `POST` | `/harnesses/validate` | `harnesses:register` (**viewer+**) | dry-run: schema + the workspace's own `existingVersions`/`versionExists` (no write) — the registration flow's pre-check |
+| `GET`  | `/harnesses` | `harnesses:read` (viewer+) | list the workspace's own + `_shared` (list entries with `id`, `owner`, `versions`, …) |
 | `GET`  | `/harnesses/:id` | `harnesses:read` (viewer+) | versions of that harness visible to the workspace (404 if none) |
+
+Templates have the parallel surface `POST/GET /harness-templates` (`templates:write`, viewer+). Harness registration
+is open to every role because it is collaborative eval content; a harness that references a personal secret is
+private to its creator (`docs/secrets.md`).
 
 `POST /runs` requires `runs:submit` (**member+**); `GET /runs`, `GET /runs/:id` require `runs:read` (viewer+).
 All are workspace-scoped: a tenant can only see and act on its own runs (another workspace's run → **404**).
 
 ## Tenant-owned datasets (`@everdict/registry`)
 Datasets reuse the identical ownership model — keyed by **`(tenant, id, version)`**, owner-first with `_shared`
-fallback (first-party benchmark datasets seeded from `examples/datasets`), immutable versions. They are
-**harness-agnostic** (one dataset, many `harness@version`s). The one difference from harnesses: writes are
-**member+**, not admin (datasets are collaborative eval *content*; harness specs define execution → admin).
+fallback, immutable versions (nothing is auto-seeded; `examples/datasets` are reference files loaded explicitly).
+They are **harness-agnostic** (one dataset, many `harness@version`s). Writes are **member+**.
 
 | Method | Path | Action (role) | Effect |
 |---|---|---|---|
@@ -109,8 +119,9 @@ See `docs/datasets.md`.
 
 ## Agent Judges (`@everdict/registry`)
 Judges reuse the identical ownership model — `(tenant, id, version)`, owner-first with `_shared` fallback
-(no first-party judges are auto-seeded; a workspace registers its own), immutable versions. A judge is `model` (LLM/VLM call) or
-`harness` (delegate to a registered harness). Writes are **member+** (users self-register their judges).
+(no first-party judges are auto-seeded; a workspace registers its own), immutable versions. A judge is `model` (LLM/VLM
+call), `code` (a script) or `harness` (delegate to a registered harness). Writes are **member+** (users
+self-register their judges).
 
 | Method | Path | Action (role) | Effect |
 |---|---|---|---|
@@ -123,9 +134,10 @@ See `docs/judges.md`.
 
 ## Runtimes (tenant execution infrastructure)
 Runtimes reuse the same ownership model — `(tenant, id, version)`, owner-first with `_shared` fallback,
-immutable versions. A runtime is `local` | `nomad` | `k8s` (no secrets in the spec). Writes are **admin**
-(defining execution infra = placement/security, like `harnesses:register`). `POST/GET /runtimes`
-(+`/validate`, `/:id/versions/:version`); `runtimes:read` = viewer+, `runtimes:write` = admin. At dispatch the
+immutable versions. A runtime is `local` | `nomad` | `k8s` (no secrets in the spec). `POST/GET /runtimes`
+(+`/validate`, `/probe`, `/:id/versions/:version`); `runtimes:read` and `runtimes:write` are both viewer+ (the
+credential values a spec names stay admin-only under `secrets:write`); destructive cluster control is
+`runtimes:control` (admin). At dispatch the
 `RuntimeDispatcher` builds the tenant's chosen runtime (credentials from the tenant SecretStore) and routes via
 the Scheduler. See `docs/runtimes.md`.
 
@@ -135,11 +147,9 @@ the Scheduler. See `docs/runtimes.md`.
 workspace-scoped (another workspace's scorecard → **404**); the dataset is resolved with the same
 owner-first/`_shared` rule. See `docs/scorecards.md`.
 
-## Live-verified (real Postgres)
-`EVERDICT_REQUIRE_AUTH=1 EVERDICT_INTERNAL_TOKEN=… DATABASE_URL=… node apps/api/dist/main.js`, then: issue keys for
-`acme`/`beta` → no-key request is `401` → `acme` registers `bu@1.0.0` (`201`) → `acme` lists it, `beta` sees `[]`
-(isolation) → mutated re-register is `409` → the row is `acme | bu | 1.0.0` in `everdict_harnesses`.
+## Verified
+`apps/api/src/server.test.ts` — "API — harness ownership (workspace-scoped)" (one workspace's harness is invisible to
+another) and the role matrix cases (viewer registers a template + instance but cannot submit a run).
 
-## Not yet (next)
-Per-key scopes/expiry; rotating keys. (Workspace **member invites + role management** shipped — see
-`MembershipService` above: token/link invites + member role/remove with last-admin protection.)
+## Not yet
+API key expiry and rotation (keys are revoked and re-issued instead).

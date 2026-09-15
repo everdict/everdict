@@ -2,13 +2,16 @@
 kind: wiki
 title: "Nomad co-located service topology"
 status: current
-updated: 2026-07-09
+updated: 2026-09-15
 anchors: [packages/topology/src/deploy/nomad-topology.ts, packages/topology/src/deploy/nomad-runtime.ts]
 ---
 # Nomad co-located service topology
 
-**Scope: the Nomad `TopologyRuntime` only.** K8s (stable Service DNS) and Docker (already co-located on one
-network) are unchanged. Stores (`dependencies[]`) are out of scope and keep their current model.
+**Scope: the Nomad `TopologyRuntime` only, for a homogeneous single-instance topology** — every service a Linux
+container with `replicas: 1`. A topology that declares a non-Linux `requires.os`, `replicas > 1` or a host-exec
+service deploys as per-service groups instead (`needsPerServiceGroups`; see
+[heterogeneous-topology-placement.md](./heterogeneous-topology-placement.md)). K8s (stable Service DNS) and Docker
+(already co-located on one network) do not use this model. Stores (`dependencies[]`) are out of scope.
 
 ## The problem — dynamic host ports + per-service groups = stale addresses on reschedule
 
@@ -29,7 +32,7 @@ internal address** (`<svc.name>:<fixed container port>`) that does not depend on
 
 ## The model — co-locate every service in one task group (shared netns), loopback comms
 
-`buildNomadTopologyJob` now renders **one task group** (`SERVICE_GROUP_NAME = "everdict-services"`) containing
+For this topology shape `buildNomadTopologyJob` renders **one task group** (`SERVICE_GROUP_NAME = "everdict-services"`) containing
 **one task per service**, on a **bridge** network — so all services share a single network namespace:
 
 - **Inter-service traffic is loopback.** A peer is reached at `localhost:<svc.port>`. `svc.port` is fixed in the
@@ -50,11 +53,11 @@ A shared netns means a port can be bound by only one service (separate netns per
 reuse). `buildNomadTopologyJob` **throws `BadRequestError`** if two services declare the same `port`. Most
 topologies already use distinct ports (front-door 8000, mcp 9000, …); this makes the requirement explicit.
 
-### Limitation — per-service replicas
+### Limitation — one instance
 
-The group's `Count` is `1` (one instance of the whole topology). Per-service `replicas > 1` is not meaningful in
-a shared netns (two tasks can't bind the same port) and is ignored; horizontal scale-out of a co-located
-topology is a follow-up.
+The group's `Count` is `1` (one instance of the whole topology): two tasks cannot bind the same port in a shared
+netns. A service that declares `replicas > 1` therefore takes the whole topology off this model and onto per-service
+groups, where each group's `Count` is its `replicas` and peers are resolved through Nomad-native service discovery.
 
 ## Tenant isolation — unchanged guarantees, simpler mechanism
 

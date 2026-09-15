@@ -1,111 +1,88 @@
 ---
 kind: wiki
-title: "Temporal batch orchestration — SHIPPED (live-verified vs a real dev Temporal)"
+title: "Temporal batch orchestration — a scorecard batch as one durable workflow"
 status: current
-updated: 2026-08-16
+updated: 2026-09-15
+anchors: [packages/orchestrator/src/workflows.ts, packages/application-control/src/scorecard/workflow-batch-driver.ts, apps/api/src/core/scorecard/temporal-batch-driver.ts]
 ---
-# Temporal batch orchestration — SHIPPED (live-verified vs a real dev Temporal)
+# Temporal batch orchestration — a scorecard batch as one durable workflow
 
-> Status: implemented per this design and live-verified 2026-07-08 — worker SIGKILL mid-batch → a new
-> worker replays the history and finishes the workflow (W1); control-plane SIGKILL mid-batch → the
-> activities retry against the restarted CP, boot recovery respects workflow ownership ("batches
-> resumed 1", no double-drive), 24/24 cases complete with zero loss or duplication (W2). Opt-in via
-> EVERDICT_TEMPORAL_ADDRESS (default-on once set; EVERDICT_TEMPORAL_BATCHES=0 opts out); a failed workflow START degrades
-> gracefully to the in-process loop.
+A scorecard batch has two drivers. The **in-process loop** (`InProcessBatchDriver`, entered through
+`track`) lives inside one control-plane process and is made survivable by boot recovery
+([batch-resilience.md](./batch-resilience.md)). The **workflow driver** is one Temporal workflow per batch:
+the workflow owns the driver loop's position, and the control plane still does every piece of work.
 
-## Why (and why not yet)
+## When a batch is workflow-owned
 
-Today a batch's driver loop (`ScorecardService.track`) lives **in-process** in one control plane.
-The resilience layer (docs/architecture/batch-resilience.md) makes that survivable — results persist
-per case, boot recovery resumes interrupted batches, retry-failed re-runs casualties — so a single
-control plane now rides out its own restarts and cluster incidents. What in-process tracking cannot
-give: **more than one control plane** (HA / rolling deploys with zero batch ownership gaps),
-**driver-loop survival independent of any process**, and **per-step observability** of a batch as a
-first-class workflow. That is Temporal's exact shape, and the worker/activity split already exists
-(`@everdict/orchestrator`: workflow = deterministic, activity = `dispatchCase`).
-
-The resilience layer was built first deliberately: it is the fallback story when Temporal is *not*
-deployed (self-hosters, dev), and the seeded track loop it produced is precisely the state machine
-the workflow needs.
+- The control plane builds a `TemporalBatchDriver` when `EVERDICT_TEMPORAL_ADDRESS` is set, unless
+  `EVERDICT_TEMPORAL_BATCHES=0` opts back out (`apps/api/src/composition/scorecard.ts`).
+- `ScorecardService.submit` stamps `orchestration.workflowId` (`everdict-batch-<scorecardId>`) on the record,
+  then starts `scorecardBatchWorkflow` on task queue `everdict-eval`. If the start fails, the stamp is removed
+  and the batch runs on the in-process loop — a Temporal outage never hangs a batch.
+- Inline-dataset batches always take the in-process loop: the workflow re-plans from the dataset registry,
+  which cannot see an inline dataset.
+- Multi-trial batches take the workflow too; the plan is keyed by (case, trial).
 
 ## Shape
 
-One batch = one workflow (`scorecardBatch`), one case = one activity (`dispatchCase`).
-
 ```
-scorecardBatchWorkflow(input: {scorecardId, tenant, dataset ref, harness ref, judges, judge,
-                               runtimes[], concurrency, retries, seed caseIds})
-  ├─ activity resolveBatch()          → cases minus seeds (the same seeded-loop inputs, resolved fresh)
-  ├─ for case in cases (bounded by concurrency, workflow-side semaphore):
-  │    activity dispatchCase(job)     → CaseResult   (retry policy: ONLY when classifyFailure().retryable —
-  │                                     the activity rethrows fatal classes as non-retryable ApplicationFailure)
-  │    activity settleCase(result)    → child-run write-back + judge stream push + export push
-  └─ activity finalizeBatch()         → aggregate/summarize/persist/notify
+scorecardBatchWorkflow({ scorecardId, continueEvery?, rotateAtHistoryLength? })
+  ├─ activity planBatch      → POST /internal/batches/:id/plan      → unfinished (caseId, trial?) items + concurrency
+  ├─ lanes = min(concurrency, 64, slice size); each lane takes the next item:
+  │    activity runBatchCase → POST /internal/batches/:id/case      → dispatch + settle one (case, trial)
+  └─ activity finalizeBatch  → POST /internal/batches/:id/finalize  → aggregate, persist, notify
 ```
 
-- **Determinism**: the workflow holds only ids and counters; every I/O (registry resolve, dispatch,
-  judge, persist) is an activity — same rule the repo already enforces for `workflows.ts`.
-- ~~**Failure classes map to Temporal retry policies**~~ — **this half of the design was deliberately
-  NOT implemented, and the reversal matters when justifying Temporal.** Case-level retry stayed
-  CP-side (`workflow-batch-driver.ts`, the `for (attempt…)` loop over `failure.retryable`): the
-  workflow's generous activity retry is for **TRANSPORT** failures (the control plane unreachable),
-  never for eval semantics. So "Temporal gives us retry" is NOT a reason this design holds — the
-  reasons are durable timers, cross-restart progress, and (below) batch ownership across MORE THAN ONE
-  control plane. Keeping the retry story here would have split the failure taxonomy across two engines.
-- **Resume for free**: workflow history replaces `orchestration`+child-run reconstruction. Boot
-  recovery stays for the non-Temporal deployment; when `EVERDICT_TEMPORAL_ADDRESS` is set, submit
-  starts the workflow instead of `void this.track(...)` and recovery skips Temporal-owned batches
-  (they own themselves).
-- **Supersede / cancel** → workflow cancellation (cooperative, same semantics as the AbortController).
-- **Sharding** stays submit-side (per-case `placement.target` round-robin) — the workflow doesn't
-  care where a case lands; the Scheduler/RuntimeDispatcher path is unchanged inside `dispatchCase`.
+- The activities (`packages/orchestrator/src/activities.ts`) are plain HTTP calls to the control plane with
+  `x-internal-token`; the worker needs `EVERDICT_API_URL` and `EVERDICT_INTERNAL_TOKEN`. The control-plane side
+  is `WorkflowBatchDriver` (`planBatch` / `runBatchCase` / `finalizeBatch`).
+- The workflow holds only ids and counters; all I/O happens in activities.
+- Activity policy: 1 h start-to-close, 1 min heartbeat timeout (`runBatchCase` heartbeats while the control
+  plane runs the case), at most 10 attempts with 5 s–1 min backoff. That retry covers **transport** failures —
+  the control plane restarting or unreachable.
+- **Case-level retry is not Temporal's.** It stays in `WorkflowBatchDriver.runBatchCase` (the attempt loop
+  over `failure.retryable`), with spillover, tail speculation and OOM boost beside it — the same failure
+  taxonomy as the in-process loop. Temporal's retry is not the argument for this driver. The arguments are a
+  driver position that survives any process, and batch ownership that does not depend on one control plane.
+- `planBatch` is idempotent: it returns only unfinished work. A worker that replays history, or an execution
+  continued as new, gets exactly the remainder.
+- TRUST-143 (`apps/api/src/trust/temporal-batch-replay.trust.test.ts`) certifies the chain: a worker killed
+  mid-case, the case re-run by another worker, and the batch finalized exactly once.
 
-## Increment plan (next slice)
+## Ownership, recovery and cancellation
 
-1. `scorecardBatchWorkflow` + activities in `@everdict/orchestrator` beside the existing worker;
-   reuse `executeCase`/`ScoringService` as activity bodies (no logic forks — the service methods are
-   already transport-free).
-2. `ScorecardService.submit`: `temporalDriver?` dep — when configured, start the workflow with the
-   same persisted `orchestration` inputs; `track` stays as the in-process driver otherwise.
-3. Live e2e vs the real dev Temporal (`temporalio/temporal` — the scheduled-evals harness already
-   drives one: `scripts/live/scheduled-pinch-temporal.mjs`): kill the WORKER mid-batch → a new
-   worker picks the workflow up with zero lost cases; kill the control plane → same.
-4. Queue view: Temporal-owned batches surface `workflowId` on the record for deep-linking.
+- Boot recovery leaves a workflow-owned batch alone: when `ScorecardBatch.isWorkflowOwned()` is true
+  (`orchestration.workflowId` is present), `resume` answers `resumed` without driving the batch.
+- Supersede and cancel call `TemporalBatchDriver.cancel` as part of the batch teardown. The call is
+  best-effort, and Temporal cancels the workflow cooperatively.
+- The scorecard detail page shows the workflow id, linked into the Temporal UI when the web's
+  `TEMPORAL_UI_URL` is set. `GET /ops/driver/batch/:id` (with `/cancel` and `/terminate`) addresses the
+  workflow by scorecard id — see [orchestration.md](../orchestration.md).
 
 ## History budget — continue-as-new
 
-One case ≈ a handful of history events (activity scheduled/started/completed × transport retries), so an
-unbounded multi-thousand-case batch would walk into Temporal's per-execution history limits (50K events /
-50MB). The workflow processes at most `continueEvery` cases per execution (default 500;
-`EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY` on the CP feeds the start args) and then `continueAsNew`s with the
-same input. `planBatch`'s idempotence (unfinished-only) is what makes this trivially correct — the continued
-execution re-plans and receives exactly the remainder, with a fresh history, under the same workflowId.
+Each case adds a handful of history events, more when transport retries happen. So a batch of several
+thousand cases would hit Temporal's per-execution limits (50K events / 50MB). The workflow therefore rotates:
 
-Live e2e: 12-case batch with `continueEvery=5` → plan steps "Running 12" → "Running 7 (5 kept)" →
-"Running 2 (10 kept)"; `temporal workflow list` shows ContinuedAsNew ×2 → Completed on one workflowId;
-12/12 pass.
+- **By case count**: one execution runs at most `continueEvery` items (default 500; the control plane
+  passes `EVERDICT_TEMPORAL_BATCH_CONTINUE_EVERY` in the start args), then calls `continueAsNew` with the same
+  input under the same workflow id.
+- **By history pressure**: lanes stop taking new items when the server sets `continueAsNewSuggested` or
+  `historyLength` reaches `rotateAtHistoryLength` (default 20 000; `EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY`).
+  In-flight activities drain first, then the execution continues as new.
 
-**Adaptive rotation (history pressure).** The fixed case-count slice assumes ~a handful of events per case,
-but activity transport retries inflate events-per-case — a flaky network can walk a 500-case slice into the
-history limits anyway. The workflow therefore ALSO rotates when the server itself suggests it
-(`workflowInfo().continueAsNewSuggested`) or when `historyLength` crosses a floor
-(`rotateAtHistoryLength`, default 20 000; dial `EVERDICT_TEMPORAL_BATCH_ROTATE_HISTORY`): lanes stop TAKING
-new cases, in-flight activities drain, and the execution continues-as-new — planBatch's idempotent re-plan
-makes an early rotation harmless. Live: a 24-case batch with the floor at 40 ran as a 4-execution chain
-(~56–59 events each) instead of one 158-event history, 24/24 succeeded.
+Early rotation is safe because the continued execution calls `planBatch` again.
 
-## Retry parity
+## Retry-failed on the workflow
 
-`retry-failed` batches are workflow-owned too (a CP restart mid-retry must not lose them): the carried seeds
-(passes + re-collected recoveries) are MATERIALIZED as succeeded child runs before the workflow starts, so the
-idempotent `planBatch` naturally drives only the re-dispatch remainder and finalize aggregates everything. The
-OOM escalation boost rides `origin.memoryBoostMb` → batch context → `runBatchCase`, identical to the in-process
-loop. Start failure degrades to the in-process loop, same as submit. Live: an OOM retry chain ran entirely
-workflow-owned (each retry its own Completed workflow), escalated 64 → 128 → 256 and passed.
+A `retry-failed` batch is workflow-owned too when the driver is configured and the source batch is
+single-trial (`RetryFailedBatch`). The carried passes, plus any re-collected recoveries, are committed as
+child runs before the workflow starts. `planBatch` then drives only the re-dispatch remainder, and
+`finalizeBatch` aggregates everything. OOM escalation reaches `runBatchCase` through
+`origin.memoryBoostMb`. If the start fails, the retry runs on the in-process loop.
 
-## Non-goals
+## Not in the workflow
 
-- Moving judge/export streaming into Temporal (they are per-case activities already chained after
-  dispatch — no barrier to remove).
-- A second tenancy/fairness layer inside Temporal: WFQ/capacity stay in the Scheduler; Temporal owns
-  durability of the *driver loop*, not placement.
+- Adaptive batch concurrency — in-process loop only; the workflow bounds its own lane count.
+- Placement, fairness and capacity — the control plane's `Scheduler`, unchanged.
+- Judge and export streaming — per-case steps inside `runBatchCase`.

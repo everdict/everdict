@@ -2,8 +2,8 @@
 kind: wiki
 title: "MCP server (agent-facing, OAuth-protected)"
 status: current
-updated: 2026-08-05
-anchors: [apps/api/src/mcp.test.ts]
+updated: 2026-09-15
+anchors: [apps/api/src/mcp.routes.ts, deploy/keycloak/enable-mcp-dcr.sh]
 ---
 
 > Same subject, other audience: [the product page](guide/integrations/mcp.md) is what a user reads. This page is the design SSOT — state the mechanism here and link, never restate.
@@ -11,151 +11,84 @@ anchors: [apps/api/src/mcp.test.ts]
 
 The platform's **agent-facing surface**: an MCP server inside `apps/api` that exposes the same operations as the
 HTTP API as MCP tools, **authenticated like Linear's MCP** — the client logs in via OAuth and the control plane
-validates the token. Humans use the web; agents (Claude Code, CI, custom) use MCP.
+validates the token. Humans use the web; agents (Claude Code, Codex, CI, `apps/agent`) use MCP.
 
-## Tools
-Streamable-HTTP MCP endpoint at `POST /mcp` (stateful sessions). Each tool runs over the **same service core** as
-the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `DatasetRegistry` + `JudgeRegistry` +
-`RuntimeRegistry`), is **role-gated** (`authorize(principal, action)`) and **workspace-scoped**. Tool bodies live
-in the owning resource slice (`apps/api/src/<domain>/<resource>.mcp.ts`); `mcp.ts` is the composition root (see
-rule `api-layer`):
+## The tool catalog is self-describing — this page does not list it
 
-| Tool | Action (role) | Effect |
-|---|---|---|
-| `list_runs` | `runs:read` (viewer+) | the caller's workspace runs |
-| `get_run` | `runs:read` | one run (other workspace → `NOT_FOUND`) |
-| `submit_run` | `runs:submit` (member+) | submit an eval run (repo empty seed + default graders) |
-| `list_harness_templates` | `harnesses:read` (viewer+) | workspace-owned + `_shared` harness templates (top-level category structure) |
-| `get_harness_template` | `harnesses:read` | one `HarnessTemplateSpec` (structure/slots; `version` or `latest`) — config view / new-version prefill |
-| `register_harness_template` | `templates:write` (viewer+) | register a `HarnessTemplateSpec` (immutable → `CONFLICT`) |
-| `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` instances (grouped by template id) |
-| `get_harness_instance` | `harnesses:read` | one raw `HarnessInstanceSpec` (template ref + pins; `version` or `latest`) — config view / re-pin prefill |
-| `export_scorecard_report` | `scorecards:read` | the scorecard as a CITABLE report — identities, scoring semantics (official · proxy · unstated), summary, per-case verdicts; proxy/unstated refused unless `allow_proxy` |
-| `get_harness_lineage` | `harnesses:read` | the harness's lineage in one read — per version: digest, origin, predecessor, fork, intent, seeds, diff + slots moved, adopting campaigns |
-| `resolve_harness_delegate` | `harnesses:read` | WHO maintains a slot's code — the delegation profile the template's `source.maintainer` names, or a named miss (`unmapped` · `ambiguous` · `no_such_slot`) |
-| `register_harness` | `harnesses:register` (viewer+) | register a `HarnessInstanceSpec` (template ref + pins; resolve-validated, immutable → `CONFLICT`) |
-| `list_datasets` | `datasets:read` (viewer+) | workspace-owned + `_shared` benchmark datasets |
-| `get_dataset` | `datasets:read` | one dataset incl. cases (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `diff_datasets` | `datasets:read` | version diff (`id`, `base`, `candidate`; `latest` ok): added/removed/changed cases + meta |
-| `validate_dataset` | `datasets:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
-| `create_dataset` | `datasets:write` (member+) | register a `Dataset` (immutable → `CONFLICT`); stamps `createdBy` = subject |
-| `delete_dataset` | creator **or** `datasets:delete` (admin) | soft-delete one version (tombstone, data preserved); exact `version` required; not creator/admin → `FORBIDDEN`, absent → `NOT_FOUND` |
-| `list_judges` | `judges:read` (viewer+) | workspace-owned + `_shared` Agent Judges (model \| harness) |
-| `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
-| `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
-| `list_rubrics` | `judges:read` (viewer+) | workspace-owned + `_shared` Rubrics (judging-domain actions reused — no new action) |
-| `get_rubric` | `judges:read` | one `RubricSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `validate_rubric` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
-| `create_rubric` | `judges:write` (member+) | register a `RubricSpec` (immutable → `CONFLICT`; referenced by judges as `rubric:{id,version}`) |
-| `set_rubric_version_tags` | `judges:write` (member+) | replace a rubric version's free-form tags (mutable metadata outside the spec; owned versions only → else `NOT_FOUND`) |
-| `list_models` | `models:read` (viewer+) | workspace-owned + `_shared` Models (provider + sub-model + baseUrl) |
-| `get_model` | `models:read` | one `ModelSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `validate_model` | `models:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
-| `create_model` | `models:write` (member+) | register a `ModelSpec` (immutable → `CONFLICT`); referenced by id from judge·command harnesses |
-| `list_environments` | `datasets:read` (viewer+) | workspace-owned + `_shared` environments — the world a case ACTS ON |
-| `get_environment` | `datasets:read` | one `EnvironmentSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `create_environment` | `datasets:write` (viewer+) | register an `EnvironmentSpec` (immutable → `CONFLICT`) |
-| `set_environment_version_tags` | `datasets:write` | replace a version's free-form labels |
-| `list_runtimes` | `runtimes:read` (viewer+) | workspace-owned + `_shared` execution runtimes (local \| nomad \| k8s) |
-| `get_runtime` | `runtimes:read` | one `RuntimeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `validate_runtime` | `runtimes:write` (viewer+) | dry-run: schema + existing versions/conflict (no write) |
-| `probe_runtime` | `runtimes:write` (viewer+) | live connection test: build the backend + `probe()` the cluster (no job) → `{kind,reachable,detail}` |
-| `create_runtime` | `runtimes:write` (viewer+) | register a `RuntimeSpec` (immutable → `CONFLICT`) |
-| `run_scorecard` | `scorecards:run` (member+) | batch-eval a dataset × `harness@version` → queued `ScorecardRecord` (poll with `get_scorecard`) |
-| `list_scorecards` | `scorecards:read` (viewer+) | the workspace's scorecards (summary only) |
-| `get_scorecard` | `scorecards:read` | one scorecard incl. per-case results (other workspace → `NOT_FOUND`) |
-| `diff_scorecards` | `scorecards:read` | compare two scorecards → metric Δ + regressions/improvements |
-| `ingest_scorecard` | `scorecards:run` | upload externally-run `TraceEvent[]` → scorecard (no harness run; push) |
-| `pull_scorecard` | `scorecards:run` | pull traces from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, `authSecret`=SecretStore key) → scorecard |
+Every tool's name, description and input schema is what `tools/list` returns; the source is the owning resource
+slice, `apps/api/src/api/<domain>/<resource>.mcp.ts`, next to the `<resource>.routes.ts` it mirrors.
+`apps/api/src/mcp.ts` is only the composition root (`buildMcpServer` registers each slice's tools per Principal).
+What the catalog cannot tell you:
 
-### Eval tracker (docs/tracker.md)
-Initiative ⊃ Project ⊃ Issue — the "why we evaluate" layer. One action pair covers all three
-(`issues:read` viewer+, `issues:write` member+); delete additionally requires creator-or-admin. This is the
-surface an agent triages its OWN regressions through: find the issue watching a harness, read how it was closed
-last time, move it.
+- **Parity is structural.** A tool and its HTTP route call the same service function, gate the same action with
+  `authorize(principal, action)`, and scope to `principal.workspace` — another workspace's resource is
+  `NOT_FOUND`, as over HTTP. The per-action role matrix is in [auth.md](auth.md).
+- **Errors are tool errors** (`isError`), rendered as `CODE: message` — e.g. `FORBIDDEN: …`. When the `AppError`
+  carries structured data it is appended as JSON under that line, the same payload the HTTP envelope puts in
+  `data` (`failFrom`, `apps/api/src/api/mcp-context.ts`). That is how a caller recovers rather than just failing:
+  `write_file` losing a race to a concurrent publish returns `CONFLICT: …` plus the live content and an attempted
+  three-way merge.
+- **A campaign evidence grant** (`Bearer cpe_…`) gets a server with only the campaign evidence tools.
 
-| tool | authZ | notes |
-|---|---|---|
-| `create_issue` | `issues:write` | file a problem under evaluation; `links` attach the capabilities that verify it |
-| `list_issues` | `issues:read` | one PAGE of SUMMARIES (`{items, nextCursor?}` — pass `nextCursor` back as `cursor`), newest activity first; the description/links/history are on `get_issue`. `linkType`+`linkId` answers "which issues watch this harness", `q` searches identifier + title |
-| `get_issue` | `issues:read` | links, resolution (incl. the scorecard that proved it), GitHub copy, durable history |
-| `update_issue` | `issues:write` | content only (title/description/labels/assignee/project); `null` clears |
-| `set_issue_status` | `issues:write` | say where it should end up — the control plane picks move/resolve/reopen. `done` REQUIRES a resolution; reopening a done issue as `regressed` records a fallen resolution. Illegal move → `CONFLICT` |
-| `add_issue_link` / `remove_issue_link` | `issues:write` | attach/detach harness · dataset · judge · scorecard · run · view · product · release · **case** (`dataset` + `version` + case id — the cases the issue is about; `open_campaign` with `frame.fromIssue` takes them as targets) |
-| `list_issue_scorecards` | `scorecards:read` | the issue's EVALUATION HISTORY: pinned evidence ∪ every batch its linked dataset/harness ran |
-| `delete_issue` | `issues:write` | hard delete; creator or admin |
-| `create/list/get/update/delete_project` | `issues:write` / `issues:read` | issues under one target date; `get` carries the rollup |
-| `set_project_status` | `issues:write` | completing REFUSES while issues are open (`CONFLICT`); `force:true` overrides and is recorded |
-| `post/list_project_update` | `issues:write` / `issues:read` | the project's health + the sentence that explains it (body required) |
-| `create/list/get/update/delete_initiative` | `issues:write` / `issues:read` | a GOAL several projects work toward; `get` carries how far along it is + what is left |
-| `post/list_initiative_update` | `issues:write` / `issues:read` | where the goal STANDS in the lead's words — health + the sentence that explains it (body required) |
-| `set_initiative_status` | `issues:write` | the COMPLETION GATE — refuses while any issue under any of its projects is open; `force:true` is a recorded override |
-| `list_github_import_candidates` | `issues:write` | a repo's issues minus PRs minus what this workspace already imported |
-| `import_github_issues` | `issues:write` | copy GitHub issues in; idempotent by remote identity. A closed issue lands `done` WITHOUT a scorecard — never invent evidence |
-| `pull_github_issues` / `sync_github_issue` | `issues:write` | MANUAL refresh (no webhook, no sweep). GitHub wins on title/description/labels/comments; a remote close/reopen reconciles through the normal transitions |
-| `set_issue_github_sync` | `issues:write` | pull/push toggles. Push closes/reopens the GitHub issue and posts a comment — a visible action in someone else's tracker |
+## Endpoint and sessions
+Streamable-HTTP MCP at **`POST /mcp`** (`GET /mcp` = the SSE stream, `DELETE /mcp` = end session), stateful
+sessions keyed by `mcp-session-id` (`apps/api/src/mcp.routes.ts`):
 
-Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`. When the error
-carries structured data it is appended as JSON under that line — the same payload the HTTP envelope puts in
-`data`. That is how a caller recovers rather than just failing: `write_file` losing a race to a concurrent
-publish returns `CONFLICT: …` plus the live content, the head revision and an attempted three-way merge.
+- A new session starts only with an `initialize` request; any other session-less request is `400`. An unknown
+  session id (e.g. after a control-plane restart) is `404`, which per the spec tells the client to re-initialize.
+- A session is bound to the authority that opened it (subject, workspace, via, roles, scopes, runner id): the
+  same session id presented by a different credential is `403`.
+- Idle sessions are evicted after `EVERDICT_MCP_SESSION_IDLE_MS` (default 10 min) — a SIGKILLed client never sends
+  `DELETE`, and each session holds a whole server.
+- There is **no dev fallback** on `/mcp`: the `x-everdict-tenant` header does not authenticate; no Bearer is a
+  `401` challenge.
 
 ## Auth — "login like Linear MCP" (MCP Authorization spec)
 The MCP server is an OAuth **Protected Resource**; **Keycloak is the authorization server** (the same one the
-web uses). The flow an MCP client (e.g. Claude Code) runs:
+web uses). The flow an MCP client runs:
 
 1. Calls `POST /mcp` with no token → **`401`** + `WWW-Authenticate: Bearer resource_metadata="…/.well-known/oauth-protected-resource"`.
-2. Fetches **`GET /.well-known/oauth-protected-resource`** (RFC 9728) → `{ resource: "<base>/mcp", authorization_servers: ["<KEYCLOAK_ISSUER>"], … }`.
+2. Fetches **`GET /.well-known/oauth-protected-resource`** (RFC 9728; also served at `…/oauth-protected-resource/mcp`)
+   → `{ resource: "<base>/mcp", authorization_servers: ["<KEYCLOAK_ISSUER>"], bearer_methods_supported, scopes_supported, resource_name }`.
 3. Discovers Keycloak's metadata, does **OAuth 2.1 Authorization Code + PKCE** (browser login), gets an access token.
 4. Retries `/mcp` with `Authorization: Bearer <jwt>`.
 
-The control plane validates that Bearer with the **same auth core** as the HTTP API
-(`compositeAuthenticator` → `oidcAuthenticator` verifies the Keycloak JWT via JWKS, or `apiKeyAuthenticator`
-for `ak_…`) → a `Principal{workspace, roles}`. So MCP reuses everything: workspace = tenant = trust-zone, the
-role→action matrix, JWKS verification. No second auth path.
-
-Two credential kinds work on `/mcp`:
-- **Keycloak OIDC** (interactive clients that log in) — the "login like Linear" path.
-- **API key `ak_…`** (headless agents / CI) — `Authorization: Bearer ak_…`, no browser.
+The control plane validates that Bearer with the **same composed authenticator** as the HTTP API → a
+`Principal`, then applies the same active-workspace resolution. No second auth path. Credentials that work on
+`/mcp`: a Keycloak OIDC token (interactive clients), a personal API key `ak_…` (headless agents / CI, no
+browser), an agent execution token `agt_…` (`apps/agent`), and a runner pairing token `rnr_…` (self-hosted
+runners — the runner lease tools accept only this credential, and it carries no role-matrix action).
 
 ## Keycloak client
-`deploy/keycloak/realm-everdict.json` ships a public PKCE client **`everdict-mcp`** (standard flow + loopback redirect
-URIs + `pkce.code.challenge.method=S256` + the `workspace` claim mapper) for MCP clients that use a fixed
-`client_id`. Clients that self-register can use Keycloak's **Dynamic Client Registration**
-(`{issuer}/clients-registrations/openid-connect`) — enable anonymous DCR (or pre-register) per your realm policy.
-`apps/api` advertises the authorization server only when `KEYCLOAK_ISSUER` is set; without it, MCP still works
-with API keys.
+`deploy/keycloak/realm-everdict.json` ships a public PKCE client **`everdict-mcp`** (standard flow + loopback
+redirect URIs + `pkce.code.challenge.method=S256` + the `workspace` claim mapper) for MCP clients that use a fixed
+`client_id`. `apps/api` advertises an authorization server only when `KEYCLOAK_ISSUER` is set; without it,
+`authorization_servers` is empty and MCP works with API keys only.
+
+Clients that self-register need **anonymous Dynamic Client Registration** (RFC 7591): the client registers a
+loopback-redirect client, then does Authorization Code + PKCE. Keycloak's default **Trusted Hosts** anonymous
+policy blocks this (`403`); `deploy/keycloak/enable-mcp-dcr.sh` relaxes it once to trust loopback redirect URIs
+only (`localhost`/`127.0.0.1`, client-URI validation kept on). The realm export carries no default policy
+components, so run the script after the realm exists. API keys never need DCR.
 
 ## Run / connect
 ```bash
-KEYCLOAK_ISSUER=http://localhost:8081/realms/everdict EVERDICT_REQUIRE_AUTH=1 node apps/api/dist/main.js
+KEYCLOAK_ISSUER=http://localhost:8081/realms/everdict EVERDICT_REQUIRE_AUTH=1 pnpm api
 # MCP endpoint: http://localhost:8787/mcp  (an MCP client discovers Keycloak and prompts login)
 ```
-
-Client install (see `README.md`):
-- **Claude Code** — `claude mcp add --transport http everdict http://<host>:8787/mcp` (OAuth browser login),
-  or append `--header "Authorization: Bearer ak_…"` for a headless API key.
-- **Codex** — `~/.codex/config.toml` → `[mcp_servers.everdict]` running `npx -y mcp-remote http://<host>:8787/mcp`
-  (mcp-remote runs the OAuth/PKCE flow; add `--header "Authorization: Bearer ak_…"` to go headless).
-
-The OAuth "login like Linear" path needs **anonymous Dynamic Client Registration** (RFC 7591): an MCP client
-self-registers a loopback-redirect client, then does Authorization Code + PKCE. Keycloak's default
-**Trusted Hosts** anonymous policy blocks this (`403`); `deploy/keycloak/enable-mcp-dcr.sh` relaxes it once to
-trust loopback redirect URIs only (`localhost`/`127.0.0.1`, client-URI validation kept on). The realm export is
-minimal (no default policy components), so run the script after the realm exists. API keys never need DCR.
+Client setup is product documentation: [Claude Code plugin](guide/integrations/claude-code-plugin.md) and
+[Codex](guide/integrations/codex.md).
 
 ## Verified
-- **Deterministic** (`apps/api/src/mcp.test.ts`, in-memory MCP client↔server): `tools/list`; role gating
-  (viewer reads + registers harnesses/templates [no gate, collaborative content], member submits runs, admin
-  manages members/keys); raw config reads (`get_harness_template`/`get_harness_instance`); workspace scoping
-  (another workspace's run → `NOT_FOUND`).
-- **HTTP auth** (`server.test.ts`): unauthenticated `/mcp` → `401` + `WWW-Authenticate`; protected-resource
-  metadata points at Keycloak.
-- **Live** (`scripts/live/mcp-auth.mjs`, real Keycloak): discovery + `401` challenge; a real Keycloak OIDC token
-  drives a stateful MCP session — `alice`(member) lists/submits but `register_harness` → `FORBIDDEN`;
-  `carol`(admin) registers; an `ak_…` API key also authenticates `/mcp`.
-- **Live OAuth, full browser flow** (`scripts/live/mcp-oauth.mjs`, real Keycloak): the exact "login like Linear"
-  path Claude Code / mcp-remote run — anonymous **DCR** (public PKCE client, loopback redirect) → Authorization
-  Code + PKCE → Keycloak **login** → one-time **consent** → loopback `?code` → token exchange → `/mcp`
-  `initialize` + `tools/list`. End-to-end green (the browser steps scripted headlessly).
+- **Deterministic** (`apps/api/src/mcp.test.ts`, in-memory MCP client↔server): `tools/list`; role gating (viewer
+  reads and registers harness templates/instances — ungated collaborative content; viewer `submit_run` is a
+  permission error; member submits runs and creates datasets; admin-only governance tools refuse a member);
+  workspace scoping (another workspace's run → `NOT_FOUND`); runner-only tools refuse regular credentials.
+- **HTTP auth** (`apps/api/src/server.test.ts`): unauthenticated `POST /mcp` → `401` + `WWW-Authenticate`
+  carrying `resource_metadata`; the protected-resource metadata names the `/mcp` resource; authenticated but
+  session-less `GET /mcp` → `400`.
+- **Live** (`scripts/live/mcp-auth.mjs`, `scripts/live/mcp-oauth.mjs`, real Keycloak): discovery + `401`
+  challenge, a Keycloak OIDC token driving a stateful session, an `ak_…` key on `/mcp`, and the full browser flow
+  (anonymous DCR → Authorization Code + PKCE → login → consent → loopback `?code` → token exchange → `initialize`
+  + `tools/list`). `mcp-auth.mjs` still asserts the pre-membership role model (a member's `register_harness` →
+  `FORBIDDEN`), which the current matrix no longer produces — re-baseline it before trusting a red run.

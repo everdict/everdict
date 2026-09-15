@@ -2,8 +2,8 @@
 kind: wiki
 title: "Models (workspace-registered LLM models)"
 status: current
-updated: 2026-08-12
-anchors: [packages/contracts/src/harness/model-spec.ts, packages/domain/src/model/model-binding.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/model-spec.ts, packages/domain/src/model/model-binding.ts, apps/api/src/core/model/model-service.ts, apps/api/src/core/execution/model-resolving-dispatcher.ts]
 ---
 # Models (workspace-registered LLM models)
 
@@ -80,7 +80,7 @@ whose conversation this is:
 | # | Where it is set | Who sets it | Stored as |
 |---|-----------------|-------------|-----------|
 | 1 | the chat header's model picker — THIS conversation | the member, per conversation | `AgentSessionRecord.model` (mig 0073) |
-| 2 | **Account › Preferences → Default agent model** — MY conversations | each member, for themselves | `AgentMemberPreferences.model` (mig 0167) |
+| 2 | **Settings › Preferences → Default agent model** — MY conversations | each member, for themselves | `AgentMemberPreferences.model` (mig 0167) |
 | 3 | Settings › Agent → the chat agent's model | an admin, for everybody | `AgentSpec.model` |
 | 4 | `AGENT_MODEL` / `AGENT_LLM_*` | the operator | deployment env |
 
@@ -104,14 +104,11 @@ MCP twins `get_agent_model` / `set_agent_model`. The options come from `GET /mod
 model in this workspace is refused **here** (404) rather than becoming a conversation that cannot answer.
 
 ## Surface (BFF ↔ MCP parity)
-`POST /models` (register — explicit-version, programmatic/bundle path) · `POST /models/validate` (dry-run: schema +
-version conflict + `missingSecrets` warning) · `PUT /models/:id` (interactive **save/edit** upsert, version-free) ·
-`POST /models/test-connection` (fire a dummy completion → response preview) · `GET /models` ·
-`GET /models/:id/versions/:version` · `DELETE /models/:id/versions/:version` (one version) ·
-`DELETE /models/:id` (bulk — `{versions}` or body-less = the whole model) — `models:read` (viewer+) /
-`models:write` (member+ — register/save/test) / delete = creator-or-admin (`models:delete`). MCP twins: `list_models` /
-`get_model` / `validate_model` / `create_model` / `save_model` / `test_model_connection` / `delete_model` /
-`delete_model_versions`. Web: **Settings → Models** — the version field is hidden (immutable versions still exist under
+One service over two transports (routes in the generated reference at `/docs`, tools in `tools/list`): register
+(explicit version — the programmatic/bundle path), validate (dry-run incl. a `missingSecrets` warning), **save**
+(`PUT /models/:id`, the version-free interactive upsert), **test connection**, list, get, delete one version, and
+bulk delete. `models:read` (viewer+) / `models:write` (member+ — register/save/test) / delete = creator-or-admin
+(`models:delete`). Web: **Settings → Models** — the version field is hidden (immutable versions still exist under
 the hood); a register/edit form with a `SecretPicker` for `apiKeySecret` requires a passing **connection test** (a
 dummy completion, response previewed) before Save is enabled, and any connection-field edit re-arms that gate. Each row
 shows provider · model · baseUrl and the linked-key state, plus a per-row **connection-check** button (dummy call →

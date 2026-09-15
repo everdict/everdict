@@ -2,7 +2,7 @@
 kind: wiki
 title: "Control-plane read budget — no read grows with the workspace"
 status: current
-updated: 2026-09-03
+updated: 2026-09-15
 anchors: [packages/db/src/client.ts, packages/contracts/src/infra/outbound-deadline.ts]
 ---
 # Control-plane read budget — no read grows with the workspace
@@ -76,7 +76,7 @@ Four reads asked for a collection and kept a handful:
 | queue snapshot | the whole run ledger (`SELECT *`, heavy `result` jsonb) | queued + running | `statuses` |
 | boot recovery | the whole run ledger, **every workspace** | queued + running | `statuses` |
 
-The pulse is the sharpest case because it is the home screen: one request issuing ~10 reads in parallel, so a
+The pulse was the sharpest case because it was then the home screen: one request issuing ~10 reads in parallel, so a
 single page view took most of a ten-connection pool, and its scorecard read carried jsonb summary columns for
 the workspace's entire history. Two users opening the dashboard was enough to starve every other route.
 

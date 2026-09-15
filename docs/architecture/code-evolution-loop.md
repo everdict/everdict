@@ -2,16 +2,15 @@
 kind: wiki
 title: "Code evolution loop — a delegated coding agent mutates the harness repo, everdict builds the image, the campaign decides"
 status: current
-updated: 2026-09-02
-anchors: [packages/application-control/src/capability/first-party.ts, packages/application-control/src/evolution/campaign-service.ts, packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/session/sandbox-session-service.ts, packages/contracts/src/records/capability.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-build-service.ts, packages/contracts/src/records/capability.ts, packages/domain/src/evolution/oracle-scope.ts, apps/api/src/api/campaign/campaign.routes.ts]
 ---
 # Code evolution loop — a delegated coding agent mutates the harness repo, everdict builds the image, the campaign decides
 
-> **Status:** the DRIVER half landed 2026-09-02 as the first-party skill `code_evolve`
+> **Status:** the DRIVER half is the first-party skill `code_evolve`
 > (`packages/application-control/src/capability/first-party.ts`), composed from `delegate_work` and
-> `harness_evolve`; and the RECORD half's first rung landed with it: a round now carries where its candidate
-> came from (`verdict.candidateSource` — the candidate scorecard's origin coordinates, platform-derived). The
-> remaining rungs are listed under "What is open", each with the seam it closes.
+> `harness_evolve`. The RECORD half — D2 through D7 below — is landed. What remains open is listed under
+> "What is open" and under D2's PR-mode alternative.
 
 ## The goal, as stated
 
@@ -127,8 +126,8 @@ A coding agent with a repository checkout can edit the dataset, the judge rubric
 scaffold. Any of those is the candidate rewriting its own exam.
 
 The frame is the place to freeze that boundary: an `oracleScope` of repository path patterns, declared at
-open. A round whose candidate PR touches a path in scope is recorded `comparable: false` with the reason
-`oracle touched` — the same treatment as a drifted scenario set, because it is the same defect: the exam
+open. A round whose candidate PR touches a path in scope is recorded `comparable: false` with a reason naming
+the touched paths — the same treatment as a drifted scenario set, because it is the same defect: the exam
 moved. **Landed:** `CampaignService.logRound` reads the pull request the candidate names through the
 workspace GitHub App's changed-files listing (a REQUIRED dependency that answers `unknown` where no App is
 configured), matches it with `oracleTouched` (`@everdict/domain`), and records the offending paths on the
@@ -147,6 +146,14 @@ origin with the candidate's own sha, and the oracle compared a commit with itsel
 and certified `clean` about a change it never looked at. `OracleCheckReceipt.commitProvenance` records that
 the commits are the platform's word; its absence marks a receipt written before this change.
 
+⚠️ **Naming both commits is not covering their difference (review 2026-09-10 R1).** GitHub's comparison is
+three-dot, so on a diverged history its file list describes merge-base→candidate and omits what the baseline
+changed after the fork. The adapter (`apps/api/src/infrastructure/github/repo-writer.ts`) then makes a second
+comparison from the merge base to the baseline and unions the two lists, declaring `pathsCover: fork-union` (a
+superset of the two-tree difference) instead of `evaluated-difference`. `oracleCheck` decides on that
+declaration; a listing that states no cover, or one that contradicts its own merge base, is unverifiable, and
+the receipt records the cover.
+
 The consequence is stated rather than worked around: **a campaign whose baseline Everdict did not build
 cannot use an oracle scope** — every round answers `unverifiable`, naming the missing side. Build the
 baseline through `build_campaign_candidate` once before round 1.
@@ -154,12 +161,14 @@ baseline through `build_campaign_candidate` once before round 1.
 ### D4 — the round records where its candidate came from
 
 A round named a `candidateVersion` and nothing else. The chain "delegation session → PR → sha → image → scorecard
-→ round" existed in four different records and was joined in none. **Landed:** `verdictOf` copies the
-candidate scorecard's origin coordinates onto the round as `verdict.candidateSource` — `source`, `repo`,
-`sha`, `ref`, `prNumber`, `runUrl`, `pinOverrides` — and an adopted close carries the same block. It is
-derived from the candidate scorecard's own record (L3), never accepted from the caller; `source` travels
-with it because it says who authored the coordinates (a `github-actions` origin is CI's word under OIDC, an
-`api` origin is the submitter's).
+→ round" existed in four different records and was joined in none. **Landed:** the round carries
+`verdict.candidateSource`, and an adopted close carries the same block. When Everdict's build ledger minted the
+candidate version (D2), it is filled from that record — `source: "everdict-build"`, `repo`, `sha`, `ref`,
+`prNumber`, `image`, `baseImage`, `buildId`, or `images` + `buildSetId` for a build set. Otherwise `verdictOf`
+copies the candidate scorecard's origin coordinates — `source`, `repo`, `sha`, `ref`, `prNumber`, `runUrl`,
+`pinOverrides`. Either way it is derived from a platform record (L3), never accepted from the caller; `source`
+travels with it because it says who authored the coordinates (a `github-actions` origin is CI's word under OIDC,
+an `api` origin is the submitter's).
 
 ### D5 — adoption reaches the merge
 
@@ -229,5 +238,9 @@ policy, and refusing the boot is the honest answer until such a lane exists.
 
 - `code_evolve` is a store entry a workspace copies (first-party skill test), names every tool it drives, and
   carries its round-brief reference file.
-- `verdict.candidateSource` is pinned by the campaign service suite: derived from the candidate scorecard's
-  origin, absent when the origin says nothing, carried onto an adopted close, and never read by the gate.
+- `verdict.candidateSource` is pinned by the campaign service suite: filled from the build ledger when a build
+  minted the version, otherwise derived from the candidate scorecard's origin, absent when neither says
+  anything, carried onto an adopted close, and never read by the gate.
+- The oracle's commits and cover are pinned by
+  `packages/db/src/evolution/oracle-commits-are-built.counterexample.test.ts` and
+  `apps/api/src/infrastructure/github/oracle-commit.counterexample.test.ts`.

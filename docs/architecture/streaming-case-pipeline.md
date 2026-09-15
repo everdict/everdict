@@ -2,31 +2,28 @@
 kind: wiki
 title: "Streaming case pipeline — kill the batch barriers, release compute early"
 status: current
-updated: 2026-07-07
+updated: 2026-09-15
+anchors: [packages/application-execution/src/run-case.ts, packages/application-control/src/execution/scoring-service.ts, packages/application-control/src/execution/collect-trace.ts, packages/application-control/src/trace-sink/trace-sink-service.ts]
 ---
 # Streaming case pipeline — kill the batch barriers, release compute early
 
-> **Status: doc-first SSOT.** Successor to
-> [execution-scoring-orchestration](./execution-scoring-orchestration.md) (which separated the *concerns*:
-> execute / score / orchestrate). This doc removes the remaining **serialization** between those concerns:
-> phase barriers in the batch pipeline and sandbox occupancy during non-compute work. Related:
-> [trace-sink](./trace-sink.md) (the observability round-trip this pipeline feeds).
+> Successor to [execution-scoring-orchestration](./execution-scoring-orchestration.md) (which separated the
+> *concerns*: execute / score / orchestrate). This page describes how the per-case pipeline removes the
+> **serialization** between those concerns: phase barriers in the batch pipeline and sandbox occupancy during
+> non-compute work. Related: [trace-sink](./trace-sink.md) (the observability round-trip this pipeline feeds).
 
-## Problem — measured, not hypothetical
+## Why — the barriers this removed
 
-The batch pipeline is already async at the API surface (202 + background `track()`), fanned out per case
-(`runSuite` mapLimit), and backpressured at placement (`Scheduler` WFQ). What remains serial:
+Before this design, a batch was async at the API surface and fanned out per case, but three things were serial:
 
-1. **Judge application is a barrier AND a serial loop.** `ScoringService.applyJudges` runs
-   `for judge × for case`, one `await` at a time, and only starts after the *entire* batch finishes
-   (`scorecard-service.ts` phase `judges`). 100 cases × 2 judges × ~5s LLM call ≈ 17 min of pure serial tail;
-   the slowest case gates judging of every other case.
-2. **Phase barriers.** dispatch-all → judge-all → offload → export → finalize. Sandbox-bound work (execution)
-   and I/O-bound work (judge LLM calls) never overlap.
-3. **The sandbox is held during non-compute work.** In `runner.runCase` the compute handle stays provisioned
-   through grading — including graders that never touch the environment (trace/snapshot/judge). The most
-   expensive resource (an isolated job) idles on network/LLM latency. Same shape in
-   `ServiceTopologyBackend`: the browser target is held through grading.
+1. **Judge application was a barrier AND a serial loop** — `for judge × for case`, one `await` at a time, starting
+   only after the entire batch finished. 100 cases × 2 judges × ~5s LLM call ≈ 17 min of serial tail; the slowest
+   case gated judging of every other case.
+2. **Phase barriers** — dispatch-all → judge-all → offload → export → finalize. Sandbox-bound work (execution)
+   and I/O-bound work (judge LLM calls) never overlapped.
+3. **The sandbox was held during non-compute work** — the compute handle stayed provisioned through grading,
+   including graders that never touch the environment (trace/snapshot/judge); the topology backend likewise held
+   the browser target through grading.
 
 ## Principles
 
@@ -37,36 +34,43 @@ The batch pipeline is already async at the API surface (202 + background `track(
 3. **Observations are materialized before release** — anything a post-release grader needs from the
    environment (today: the os-use screenshot ref) is captured into the observation bag first.
 4. **No semantic drift.** Per-case score order stays deterministic; judge failure semantics
-   (`error.phase="judges"`), supersede, and "missing judge = silent skip" are preserved.
+   (`error.phase="judges"`) and supersede behave as in a non-streaming pass.
 
 ## Design
 
 ### D1 — per-case scoring core + case-axis parallelism (`ScoringService`)
 
-- `resolveJudges(tenant, selections)` — resolve specs **once** up front (missing → skipped here, not per case).
-- `applyJudgesToCase(tenant, evalCase, specs, result, runtime?)` — judges applied **sequentially within a
+- `resolveJudges(tenant, selections, sealed?)` — resolve specs **once** up front. An unresolvable judge is returned
+  as `unresolved`, never dropped; the stream turns it into a per-case unmeasured score.
+- `applyJudgesToCase(tenant, evalCase, specs, result, runtime, …)` — judges applied **sequentially within a
   case** (deterministic score order), cases run **in parallel** (bounded, `caseConcurrency` default 4 —
   provider rate-limit guard).
-- `createJudgeStream(tenant, dataset, judges, runtime?)` → `{ push(result), settle() }` — the streaming unit.
+- `createJudgeStream(...)` → `{ push(result), settle() }` — the streaming unit.
   `push` fires a bounded task immediately; `settle` joins all tasks and rethrows the first error.
-  `applyJudges` (kept for ingest + back-compat) = push all results, settle. One core, two consumption modes.
+  `applyJudges` (ingest) = push all results, settle. One core, two consumption modes.
+  All in `packages/application-control/src/execution/scoring-service.ts`.
 
-### D2 — streaming judges in the live batch (`ScorecardService.track`)
+### D2 — streaming judges in the live batch (in-process driver)
+
+The in-process driver (`packages/application-control/src/scorecard/in-process-batch-driver.ts`) streams. The
+Temporal driver (`workflow-batch-driver.ts`, `runBatchCase`) has no batch barrier to remove: each case is
+executed, settled and judged inside its own activity ([temporal-batch-orchestration](./temporal-batch-orchestration.md)).
 
 - Specs pre-resolved before `runSuite`; `onResult` pushes each finished case into the judge stream —
   **judging overlaps dispatch**, the slowest case no longer gates the fastest.
 - After `runSuite`: `phase = "judges"` → `await stream.settle()` — the barrier collapses to a join.
-  A judge task error still lands on `error.phase="judges"` after dispatch completes (same as today).
+  A judge task error still lands on `error.phase="judges"` after dispatch completes.
 - Supersede: after abort no further cases are pushed; already-launched tasks settle before persisting
   (avoids racing `writeBackResults` against in-flight score mutation). Judge scores on a superseded partial
   result are harmless — `superseded ≠ succeeded`, no baseline/leaderboard pollution.
 
-### D3 — early compute release (`runner.runCase` + topology backend)
+### D3 — early compute release (`runCase` + topology backend)
 
-- `Grader` contract gains an optional marker: **`needsCompute?: boolean`** — declared `true` by the outcome
-  family that executes commands in the environment (`tests-pass` / `command` / `swe-bench` / `script-score`).
+- The `Grader` contract carries an optional marker, **`needsCompute?: boolean`** — declared `true` by the graders
+  that execute in the environment (`tests-pass` / `command` / `swe-bench` / `script-score` / `state-check` /
+  `reward-file`, and a script grader that asks for it).
   Undeclared = observation-only (trace/steps/cost/latency/browser/judge).
-- `runCase` order: run → snapshot → grade `needsCompute` graders → **materialize** the os-use screenshot
+- `runCase` (`packages/application-execution/src/run-case.ts`) order: run → snapshot → grade `needsCompute` graders → **materialize** the os-use screenshot
   (ref → base64, into the *grading* snapshot only — the stored snapshot stays ref-only, no record bloat) →
   **release compute** → grade observation-only graders (judge LLM waits no longer hold the sandbox).
   The `finally` release stays (idempotent via flag) — the invariant "ComputeHandle is always released in a
@@ -84,8 +88,8 @@ harness exported to an observability platform near the runtime.** Two modes, one
   `EvaluableHarness` gains two optional hooks: `traceSource()` (the platform coordinates + collect mode,
   from the harness spec) and `collectTrace(runId)` (the actual pull). `CommandHarnessSpec.trace` gains
   **`collect: "job" | "control-plane"` (default `"job"`)**.
-- **Mode `job` (default — no regression, in-job pull moved after release).** `CommandHarness.run()` no longer
-  pulls at the generator tail; `runCase` calls `collectTrace(runId)` **after compute release** and appends the
+- **Mode `job` (default — the in-job pull happens after release).** `CommandHarness.run()` does not pull at the
+  generator tail; `runCase` calls `collectTrace(runId)` **after compute release** and appends the
   platform events before observation-only grading. The sandbox is free during OTel/MLflow flush lag. Outcome
   (`needsCompute`) graders grade before release on the exec-only trace — they never read the trace, so this
   is semantically identical.
@@ -121,7 +125,8 @@ harness exported to an observability platform near the runtime.** Two modes, one
   `everdict.run_id` = `$EVERDICT_RUN_ID` (SDK `set_trace_tag` = `PATCH /api/3.0/mlflow/traces/{id}/tags`), and
   `MlflowTraceSource` resolves it via `POST /api/3.0/mlflow/traces/search` (backtick tag filter;
   `locations` is required → `trace.experiment` must scope the search). Default `"id"` keeps the
-  runId=trace-id (pull-ingest) convention. Live-verified as S4 (below).
+  runId=trace-id (pull-ingest) convention. Live-verified as S4 (below). A service harness's
+  `TraceSourceSpec` can also name a different tag key (`correlateTag`).
 
 ### D4 — verified live (real MLflow 3.14, `scripts/live/trace-collect-mlflow.mjs`)
 
@@ -136,17 +141,19 @@ the seeded trace is tagged `everdict.run_id` (the real-SDK contract) and an ever
 resolves through `traces/search` to the real spans, completing the deferred grading.
 All PASS 2026-07-06.
 
-### D4 — command trace kinds are the full 5 (shipped; phoenix live-verified)
+### D4 — command trace kinds (phoenix live-verified)
 
-`CommandTraceSpec` accepts **otel | mlflow | langfuse | langsmith | phoenix** — the same 5 kinds as
-`buildTraceSource`, which `CommandHarness.collectTrace` now uses directly (one factory, adapter-owned auth
+`CommandTraceSpec` (`packages/contracts/src/harness/harness-spec.ts`) accepts the platform kinds
+**otel | mlflow | langfuse | langsmith | phoenix** — the same 5 kinds as `buildTraceSource`, which
+`CommandHarness.collectTrace` uses directly — plus `none` (result only) and `file` (the command writes its own
+`TraceEvent` stream to a file in the sandbox) (one factory, adapter-owned auth
 header conventions: otel/mlflow verbatim `Authorization`, langsmith `x-api-key`). Phoenix requires
 `project` (spans are only addressable per project) — it rides `traceSource()` → `traceRef.project` →
 `TraceSourceConfig.project`, converging with mlflow's `experiment` on the config side. Live-verified vs a
 real Arize Phoenix (`scripts/live/trace-collect-phoenix.mjs`, docker-booted): P1 `collect="job"` post-release
 pull round trip + P2 `collect="control-plane"` completion, both PASS 2026-07-07.
 
-### D4 — OTel tag correlation (shipped; Jaeger live-verified, the full real-agent round trip)
+### D4 — OTel tag correlation (Jaeger live-verified, the full real-agent round trip)
 
 `CommandTraceSpec` otel gains **`correlate:"id"|"tag"` + `service`** (mirroring mlflow's tag mode).
 `OtelTraceSource` in tag mode searches the **Jaeger query API**
@@ -158,9 +165,9 @@ zero id coordination**: no seeding, no injected runId — `runCase` mints the ke
 OTLP-exporting script) mints its *own* trace id and sets only the `everdict.run_id` resource attribute, and both
 collect modes (O1 job / O2 control-plane) resolve it by tag search. PASS 2026-07-07.
 
-### D5 — per-case sink export streaming (shipped)
+### D5 — per-case sink export streaming
 
-The trace-sink export (the last remaining batch barrier) now streams: each case is exported to the
+The trace-sink export (the last remaining batch barrier) streams: each case is exported to the
 harness-selected platform **the moment its judging completes**, so the team sees traces/scores appear in
 their MLflow/Langfuse case-by-case *while the batch runs*, and a batch that dies mid-way has already
 exported its finished cases. Shape:
@@ -172,19 +179,17 @@ exported its finished cases. Shape:
   no schema or web change). Export tasks never throw (unchanged isolation contract); a wholesale failure
   surfaces as the first case error promoted to the top-level message. `exportScorecard` (ingest + fallback)
   is reimplemented as push-all + settle over the same core.
-- **Chaining**: `JudgeStream.push` now returns a per-case completion promise; `ScorecardService.track`
-  chains `judged.then(() => exportStream.push(case))` — exports always carry judge scores, and the
-  case-completion pipeline is now executed → judged → exported with only aggregate/persist as the barrier.
-  Wired via `ScorecardServiceDeps.exportStreamFor`; without it the live batch falls back to the old
-  post-batch `exportResults` (no regression), and ingest stays batch-shaped.
+- **Chaining**: `JudgeStream.push` returns a per-case completion promise; the in-process driver chains
+  `judged.then(() => exportStream.push(case))` — exports always carry judge scores, and the case-completion
+  pipeline is executed → judged → exported with only aggregate/persist as the barrier. Wired via the
+  `exportStreamFor` dependency (`scorecard-deps.ts`); without it the live batch falls back to post-batch
+  `exportResults`, and ingest stays batch-shaped.
 - **Supersede**: no new exports are launched after abort; already-launched ones are joined and recorded as a
   partial `export` outcome on the superseded record (traceability — `superseded ≠ succeeded`, no pollution).
 
-## Follow-ups (deliberately not in this pass)
-- **Durable batch orchestration on Temporal** — per-case activities give restart resilience + horizontal
-  control-plane scale; extend the existing runs pattern when batch sizes demand it.
-- **Capacity-derived dispatch concurrency** — `runSuite` default 4 is static; derive from
-  `Scheduler.capacity()` when large clusters go underutilized.
+## Not built
+- **Capacity-derived dispatch concurrency** — `runSuite`'s default concurrency of 4 is static
+  (`packages/application-control/src/run-suite.ts`); it is not derived from `Scheduler.capacity()`.
 
 ## Non-goals
 

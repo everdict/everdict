@@ -2,36 +2,47 @@
 kind: wiki
 title: "Your first scorecard"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/api/scorecard/request/run-scorecard.ts, packages/contracts/src/harness/harness-template.ts, examples/quickstart/harness.json, examples/quickstart/dataset.json, examples/runtimes/local-1.0.0.json]
 ---
 # Your first scorecard
 
 A single run tells you what happened once. A **scorecard** produces a verdict: one dataset × one
 harness, every case scored the same way, aggregated into a number you can compare against the next one.
 
-The fastest path is to clone one that already works.
+The fastest path is to register one that already works.
 
 ## Five minutes, no API key
 
+With the `dev` stack up ([Quickstart](quickstart.md)), from the repository root:
+
 ```bash
-docker compose -f deploy/compose/docker-compose.dev.yaml up --build -d
-bash examples/quickstart/run.sh
+H='content-type: application/json'
+# ① where it runs — in-process on the API container (dev only)
+curl -XPOST localhost:8787/runtimes          -H "$H" -d @examples/runtimes/local-1.0.0.json
+# ② the agent — a template (the shape), then an instance of it (what a scorecard names)
+curl -XPOST localhost:8787/harness-templates -H "$H" -d @examples/quickstart/harness.json
+curl -XPOST localhost:8787/harnesses         -H "$H" -d '{
+  "template": { "id": "demo-agent", "version": "1.0.0" },
+  "id": "demo-agent", "version": "1.0.0", "pins": {} }'
+# ③ the problems
+curl -XPOST localhost:8787/datasets          -H "$H" -d @examples/quickstart/dataset.json
+# ④ the batch
+curl -XPOST localhost:8787/scorecards        -H "$H" -d '{
+  "dataset": { "id": "demo-smoke", "version": "latest" },
+  "harness": { "id": "demo-agent", "version": "latest" },
+  "runtime": "local" }'
 ```
 
-```
-① registering harness   demo-agent@1.0.0
-② registering dataset   demo-smoke@1.0.0
-③ running scorecard     sc_…
-   waiting … succeeded
-④ verdict               2/2 passed (passRate 1)
-```
+The last call answers `202` with the queued scorecard record. Poll `GET /scorecards/{id}` until
+`status` is `succeeded`; its `verdictSummary` should read 2 passed of 2 verdicted.
 
 No model, no provider key, no judge. The demo harness is a shell command and the graders are `grep`, so
 what you just verified is the *plumbing* — that a harness registers, a dataset registers, a batch runs
 every case, and a verdict comes out the other end.
 
-The three files in `examples/quickstart/` are the whole thing: `harness.json`, `dataset.json`, and the
-script that submits them.
+`examples/quickstart/` holds the two documents: `harness.json` (a `command` template) and
+`dataset.json` (two `repo` cases).
 
 :::tip
 Keep this working evaluation around. When something later breaks, running it tells you in ten seconds
@@ -42,21 +53,24 @@ whether the problem is your agent or your install.
 
 ### 1 — point it at your agent
 
-Edit `harness.json`. Everything except `command` stays:
+Copy `harness.json` and change `command` (and the ids). Everything else stays:
 
 ```json
 {
   "kind": "command",
+  "category": "cli-agent",
   "id": "my-agent",
-  "version": "1.0.0",
+  "version": "1",
   "command": "my-agent --prompt {{task}} < /dev/null",
   "model": "claude-sonnet-5",
   "trace": { "kind": "none" }
 }
 ```
 
-`{{task}}` is where the case's instruction is substituted. `< /dev/null` matters more than it looks —
-run through a pipe rather than a TTY, an agent that waits for stdin will hang until the timeout.
+Register it with `POST /harness-templates`, then register an instance of it with `POST /harnesses`
+exactly as in ②. `{{task}}` is where the case's instruction is substituted, already shell-quoted.
+`< /dev/null` matters more than it looks — run through a pipe rather than a TTY, an agent that waits for
+stdin will hang until the timeout.
 
 ### 2 — write cases that can fail
 
@@ -83,6 +97,7 @@ curl -XPOST localhost:8787/scorecards \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "dataset": { "id": "my-dataset", "version": "latest" },
   "harness": { "id": "my-agent",   "version": "latest" },
+  "runtime": "local",
   "trials":  3
 }'
 ```
@@ -94,7 +109,7 @@ was a coin flip.
 ### 4 — compare
 
 ```bash
-curl 'localhost:8787/scorecards/diff?baseline=sc_aaa&candidate=sc_bbb' \
+curl 'localhost:8787/scorecards/diff?baseline=<baseline-id>&candidate=<candidate-id>' \
   -H 'x-everdict-tenant: default'
 ```
 
@@ -102,10 +117,12 @@ This is the call that makes the whole exercise worth it, and the one a CI gate m
 
 ## Submit options worth knowing
 
-`judges[]` applies Agent Judges to each trace. `runtime` picks where it runs (`self:<id>` for your own
-machine). `subset` runs part of the dataset by `ids`, `tags` or `limit`. `graders[]` overrides the
-dataset's graders for one batch. `criticalCases[]` names cases whose failure fails the batch regardless
-of the rate. `concurrency` and `retries` shape throughput and transient-failure policy.
+`runtime` is required: a registered runtime id, `self:<runner-id>` for your own machine, a
+comma-separated list to shard the batch, or `auto` for every registered runtime. `judges[]` applies
+Agent Judges to each trace. `cases` runs part of the dataset by `ids`, `tags` or `limit`. `graders[]`
+replaces the dataset's graders for one batch. `criticalCases[]` (`{ "caseId" }` or `{ "prefix" }`) names
+cases a release gate blocks on regardless of significance or regression budget. `concurrency` and
+`retries` shape throughput and transient-failure policy.
 
 ## Read the result honestly
 

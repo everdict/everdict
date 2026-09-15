@@ -2,8 +2,8 @@
 kind: runbook
 title: "Preflight — 0001_create_runs"
 status: current
-updated: 2026-07-07
-anchors: [packages/db/src/db.test.ts]
+updated: 2026-09-15
+anchors: [packages/db/migrations/0001_create_runs.sql, packages/db/src/migrate.ts]
 ---
 # Preflight — 0001_create_runs
 

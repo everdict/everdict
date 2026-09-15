@@ -1,22 +1,22 @@
 ---
 kind: wiki
-title: "Suna (Kortix) as an everdict harness — mapping + the gaps it exposes"
+title: "Suna (Kortix) as an everdict harness — mapping + the gaps it exposed"
 status: current
-updated: 2026-07-15
-anchors: [packages/contracts/src/harness/harness-spec.ts, packages/topology/src/service-backend.ts]
+updated: 2026-09-15
+anchors: [examples/bundles/suna/suna.harness.template.json, packages/topology/src/front-door/front-door-driver.ts]
 ---
-# Suna (Kortix) as an everdict harness — mapping + the gaps it exposes
+# Suna (Kortix) as an everdict harness — mapping + the gaps it exposed
 
-Suna is a real, popular open-source generalist agent whose topology is exactly what everdict's service-topology
-harnesses target: a **backend API + a worker + a frontend**, talking over **Redis**, with an agent that runs tools
-(browser, code, files) in a sandbox, plus **MCP** integration, **file attachments**, and — most relevant to us — it
-emits its agent traces to **Langfuse**. Running Suna *through* everdict (submit a task → let Suna run → pull its trace →
-grade/judge) is the same "eval a real deployed agent" story as the trace-source registry. This doc maps Suna onto the
-everdict `ServiceHarnessSpec` and records the concrete gaps that mapping exposes.
+Suna is a popular open-source generalist agent whose topology is exactly what everdict's service-topology harnesses
+target: a **backend API + a worker + a frontend**, talking over **Redis**, with an agent that runs tools (browser,
+code, files) in a sandbox, plus **MCP** integration, **file attachments**, and agent traces exported to **Langfuse**.
+Running Suna through everdict (submit a task → let Suna run → pull its trace → grade/judge) is the "eval a real
+deployed agent" story. This page maps Suna onto `ServiceHarnessSpec` and records what the mapping exposed and how
+each gap was closed.
 
-## Suna's real topology (legacy branch `SUNA-LEGACY-cutoff`)
+## Suna's topology (legacy branch `SUNA-LEGACY-cutoff`)
 
-Verified from the repo (`backend/pyproject.toml`, `backend/api.py`, `docker-compose.yaml`, `backend/core/`):
+As read from that branch (`backend/pyproject.toml`, `backend/api.py`, `docker-compose.yaml`, `backend/core/`):
 
 | piece | what it is |
 |---|---|
@@ -30,67 +30,52 @@ Verified from the repo (`backend/pyproject.toml`, `backend/api.py`, `docker-comp
 | `core/mcp_module` | MCP integration | `core/files` | attachments | `core/tools` | browser/files/etc |
 | `litellm` | model gateway (multi-provider) |
 
-## The everdict harness mapping (`examples/bundles/suna/suna.harness.template.json`)
+## The harness mapping (`examples/bundles/suna/suna.harness.template.json`)
 
-What maps cleanly:
-- **services** → `backend` / `worker` / `frontend` (per-version warm; the worker `needs` the backend).
+- **services** → `backend` / `worker` / `frontend` (per-version warm; `worker` and `frontend` `needs` the backend).
 - **redis** → a `redis` dependency (`isolateBy: "key-prefix"`) — per-case isolation of the agent-run streams.
-- **Supabase** → a `postgres` dependency with `isolateBy: "external"` (BYO managed store; everdict connects, does not provision).
-- **async agent run** → `frontDoor.completion.mode = "stream"` (SSE) + `frontDoor.correlate = { mode: "returned", path: "agent_run_id" }` — Suna's initiate returns an `agent_run_id`, then streams. This is exactly the front-door generalization (stream completion + returned correlation).
-- **trace** → Suna emits to **Langfuse**; everdict pulls it via the **workspace trace-source registry** (`kind: "langfuse"`, `correlate: "tag"`) — register the Langfuse endpoint once and select it for the `suna` harness. See `docs/service-harness.md` (trace sources).
+- **Supabase** → a `postgres` dependency with `isolateBy: "external"` (BYO managed store; everdict connects, does not
+  provision).
+- **async agent run** → `frontDoor.completion.mode = "stream"` + `frontDoor.correlate = { mode: "returned", path:
+  "agent_run_id" }` — Suna's initiate returns an `agent_run_id`, then streams
+  ([completion-stream-callback.md](./completion-stream-callback.md)).
+- **submit** → `POST /api/agent/initiate` with `request.encoding: "form"`, `bodyTemplate { prompt, thread_id }` and a
+  `files` attachment.
+- **trace** → an inline `traceSource: { kind: "langfuse", authSecret, correlate: "tag" }`; the workspace trace-source
+  registry can supply the same source instead (see `docs/service-harness.md`, trace sources).
 
-## The gaps this exposes (grounded in everdict code)
+The bundle is declarative: Suna needs an external Supabase, Daytona and provider keys, so it is not runnable in the
+repository, but a team can point everdict at their Suna deployment with it.
 
-### GAP 1 — the harness's INLINE `traceSource` is narrow (`otel|mlflow`), but real agents emit to Langfuse/etc.
-`ServiceHarnessSpec.traceSource` is `{ kind: z.enum(["otel","mlflow"]), endpoint }`
-(`packages/contracts/src/harness/harness-spec.ts` `TraceSourceSpecSchema`). Suna uses **Langfuse**, which the inline
-field cannot express (and it has no auth/correlate/scope either — the same narrowness the earlier gap analysis found for
-service-topology pull). The **workspace trace-source registry** (5 kinds incl. langfuse + auth + `correlate: id|tag` +
-scope, resolved per-dispatch by `ServiceTopologyBackend.traceSourceFor`) already fills this — so Suna's Langfuse traces
-ARE pullable **via the registry**. The remaining rough edge: a harness author who sets `traceSource` *inline* on the
-spec still can't pick langfuse. **Fix (small): widen `TraceSourceSpecSchema` to the 5 kinds + optional `authSecret`
-/`correlate`/`service`/`project`, at parity with `CommandTraceSpec` and the workspace registry** — then the inline path
-and the registry agree, and Langfuse works either way.
+## The gaps the mapping exposed
 
-### GAP 2 — the front-door submit is JSON-only; Suna's `/api/agent/initiate` is `multipart/form-data` with file attachments.
-`frontDoor.request.bodyTemplate` is a JSON record interpolated and POSTed as `application/json`
-(`packages/topology/src/service-backend.ts` → `interpolateTemplate`; `HttpFrontDoorDriver` sends JSON). Suna's initiate
-takes a **prompt + optional file attachments** as multipart. So (a) a text-only task can be adapted only if Suna accepts
-JSON on that route, and (b) an **attachment-bearing eval case cannot be submitted at all** — there is no way to carry a
-file through the front-door. **Fix (medium): a front-door `request.encoding: "json" | "form"` knob + a `files` channel**
-(carry an eval-case attachment, or a pre-uploaded reference, into the multipart submit). This is the same "attachments"
-capability the user's criteria named, and it generalizes beyond Suna (any agent with an upload-first task).
+### GAP 1 — the inline trace source could not name Langfuse (closed)
 
-### GAP 3 — dependency stores are `postgres|redis|minio`; Supabase (pg+auth+storage) and Daytona (sandbox) have no first-class kind.
-`TopologyDependencySchema.store = z.enum(["postgres","redis","minio"])`
-(`packages/contracts/src/harness/harness-spec.ts`). Suna's **Supabase** is Postgres **plus auth + storage + realtime** —
-`isolateBy: "external"` covers "connect to a BYO managed store" (enough for eval: everdict doesn't provision/isolate it),
-but everdict has no notion of the auth/storage sub-capabilities. **Daytona** (the per-run agent **sandbox** where the
-browser/code tools execute) is not a store at all — it is agent-managed (Suna provisions it via `daytona-sdk` per run),
-so everdict neither provisions nor isolates it. **Assessment: mostly OK for eval** — the `external` tier connects Suna to
-Supabase, and the Daytona sandbox is Suna's own per-`thread_id` isolation concern. **Not a required fix**, but note that
-everdict's `target` (browser|service) does not model an agent-owned remote sandbox, so everdict has no per-case
-visibility/isolation guarantee over where Suna's tools actually run. (A deliberate non-goal, like cross-runtime locality.)
+`TraceSourceSpecSchema` (`packages/contracts/src/harness/harness-spec.ts`, shared by `ServiceHarnessSpec.traceSource`
+and the runtime spec's topology trace source) used to be `otel | mlflow` + endpoint, while the workspace registry
+already supported Langfuse. It now carries the five kinds (`otel`, `mlflow`, `langfuse`, `langsmith`, `phoenix`) plus
+`authSecret` / `correlate` / `correlateTag` / `service` / `project`, so the inline path and the registry agree. For a
+runtime's trace source, `buildTopologyBackend` (`apps/api/src/core/execution/topology-backend.ts`) resolves
+`authSecret` from the tenant's secrets.
 
-### Non-gaps (already covered)
-- **Async agent-run streaming** — `completion: "stream"` + `correlate: "returned"` (front-door generalization).
-- **MCP** — Suna's MCP is internal (the agent connects to its configured MCP servers); everdict only submits the task, so nothing is needed.
-- **Model endpoint** — Suna runs its own litellm; if a harness subprocess needed a gateway, `collectAuthEnv` now forwards `OPENAI_BASE_URL` (the earlier G3 fix).
+### GAP 2 — the front-door submit was JSON-only (closed)
 
-## Prioritized fixes
-1. **GAP 1 — SHIPPED.** `TraceSourceSpecSchema` (shared by `ServiceHarnessSpec.traceSource` and
-   `RuntimeSpec.topologyConfig.traceSource`) is widened to the 5 kinds + `authSecret`/`correlate`/`service`/`project`;
-   `buildTopologyBackend` builds the full config and resolves `authSecret` from the tenant SecretStore (`secretEnv`), so
-   the inline runtime/harness trace source can point at **Langfuse** (and langsmith/phoenix) with auth + tag correlation —
-   at parity with the workspace registry. The Suna template now sets `traceSource: {kind:"langfuse", correlate:"tag", …}`.
-2. **GAP 2 — SHIPPED.** `FrontDoorRequest` gains `encoding: "json" | "form"` + a `files` channel
-   (`{field, from, filename?}`, resolved from the case env's inline repo files into multipart parts by
-   `resolveFrontDoorFiles`); the front-door driver's `encodeBody` sends `multipart/form-data` (payload → text parts, files
-   → file parts) on both the submit and stream paths. So Suna's multipart `/api/agent/initiate` with **attachments** is
-   expressible (`request.encoding:"form"` + `files`). Generalizes to any upload-first agent.
-3. **GAP 3 (non-goal for now):** external tier already connects Supabase; Daytona sandbox stays agent-managed.
+Suna's initiate is `multipart/form-data` with optional attachments, so an attachment-bearing case could not be
+submitted. `FrontDoorRequestSchema` now has `encoding: "json" | "form"` and `files: [{ field, from, filename? }]`.
+`resolveFrontDoorFiles` (`packages/topology/src/service-backend.ts`) takes each file from the case's repo-env inline
+`source.files` — the only supported source; a missing file fails the run — and the driver's `encodeBody` sends the
+payload as text parts and the files as file parts, on both the submit and the stream paths.
 
-The bundle (`examples/bundles/suna/`) is declarative: Suna needs an external Supabase + Daytona + provider keys, so it is
-not runnable in-repo, but the harness template + this mapping let a team point everdict at their Suna deployment and pull
-its Langfuse traces for evaluation today (GAP 1 via the workspace registry), and name the two fixes that make the inline
-path and attachments first-class.
+### GAP 3 — Supabase and Daytona have no first-class kind (accepted)
+
+`TopologyDependencySchema.store` is `postgres | redis | minio`. Supabase is Postgres plus auth, storage and realtime;
+`isolateBy: "external"` connects Suna to it, which is enough for evaluation, but everdict has no notion of the
+sub-capabilities. Daytona is not a store: Suna provisions a sandbox per run with `daytona-sdk`, so everdict neither
+provisions nor isolates it, and its `target` kinds do not model an agent-owned remote sandbox. everdict therefore has
+no per-case visibility or isolation guarantee over where Suna's tools run — a deliberate non-goal.
+
+### Not gaps
+
+- **MCP** — Suna connects to its own configured MCP servers; everdict only submits the task.
+- **Model endpoint** — Suna runs its own litellm; when a harness subprocess needs a gateway, the job runner's auth env
+  forwarding carries `OPENAI_BASE_URL`.

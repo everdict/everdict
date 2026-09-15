@@ -2,16 +2,17 @@
 kind: spec
 title: "Evolution routing — WHO from the template, WHAT from the evidence, the issue binds the cases, the gate verifies the targets"
 status: accepted
-updated: 2026-09-02
-anchors: [packages/contracts/src/harness/harness-template.ts, packages/contracts/src/records/tracker.ts, packages/contracts/src/records/evolution-campaign.ts, packages/domain/src/evolution/campaign-gate.ts, packages/application-control/src/evolution/campaign-build-service.ts, packages/application-control/src/capability/first-party.ts, apps/api/src/api/campaign/request/build-campaign.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/harness-template.ts, packages/domain/src/evolution/diagnosis.ts, packages/domain/src/evolution/frame-from-issue.ts, packages/domain/src/evolution/campaign-gate.ts, apps/api/src/api/campaign/request/build-campaign.ts]
 ---
 # Evolution routing — WHO from the template, WHAT from the evidence, the issue binds the cases, the gate verifies the targets
 
 > **Status:** spec for Pillar 4 of `docs/architecture/evolution-program-gap-map.md` (gaps G4.1–G4.5). The
-> loop it routes exists (`docs/architecture/code-evolution-loop.md`); what does not exist is the part the
-> program states most sharply — evolution "must know exactly which parts to modify and WHO is best placed to
-> modify them, delegate to that specialist, verify the actual issue was resolved". Today the driver answers
-> WHAT from a prose ladder, WHO by asking a member, and "resolved" by an aggregate count.
+> loop it routes exists (`docs/architecture/code-evolution-loop.md`); this spec is the part the program states
+> most sharply — evolution "must know exactly which parts to modify and WHO is best placed to modify them,
+> delegate to that specialist, verify the actual issue was resolved". When it was written the driver answered
+> WHAT from a prose ladder, WHO by asking a member, and "resolved" by an aggregate count. §1–§5 are landed
+> (each section says where, and §4–§5 record their narrowings); the one piece not built is §2's `slotChosenBy`.
 
 ## What holds, and what this spec must not restate
 
@@ -160,7 +161,7 @@ and both records readable.
 > `GET /campaigns?subjectType=&subjectId=` and `list_campaigns { subject_type, subject_id }` return every
 > campaign ever opened on one capability, newest first, each with its rounds (verdict, evidence reference,
 > `learned`) and close. The narrowing is a predicate IN the store's query (`packages/db/src/evolution/campaign-store.ts`),
-> beside the team ceiling, never a page filtered afterwards. A half-named subject is refused, not read as "all".
+> never a page filtered afterwards. A half-named subject is refused, not read as "all".
 > The `code_evolve` skill reads it before its first hypothesis.
 
 **The gap.** Campaigns list per workspace. "Everything ever tried on this harness — the rounds, what lost,

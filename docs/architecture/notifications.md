@@ -2,12 +2,12 @@
 kind: wiki
 title: "Notifications — job completion via web inbox + desktop native"
 status: current
-updated: 2026-08-11
-anchors: [apps/web/src/entities/notification/model/href.ts, apps/desktop/src/notification-watcher.ts, apps/agent/src/server.ts, apps/api/src/api/ops/internal.routes.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/notification.ts, packages/application-control/src/notification/feed-consumers.ts, apps/web/src/entities/notification/model/href.ts, apps/desktop/src/notification-watcher.ts, apps/web/src/widgets/notification-bell/ui/notification-bell.tsx]
 ---
 # Notifications — job completion via web inbox + desktop native
 
-> **Status: DESIGN → implementation in progress (2026-07-03).**
+> **Status: SHIPPED (N1–N8).** The completion rows now ride the platform event log (see N5).
 > User ask: I want to receive "the job finished"-type events **as notifications in the web, and on the desktop too**.
 >
 > - **N1 — one feed, standard delivery.** The control plane keeps a per-user **notification feed**
@@ -18,8 +18,8 @@ anchors: [apps/web/src/entities/notification/model/href.ts, apps/desktop/src/not
 > - **N2 — recipient = the person who asked for the work.** Notifications are personal
 >   (`recipient = subject`), like connections/runners. The emitter uses the record's creator; work
 >   without a known creator emits nothing (v1) — no workspace broadcast rows, no per-user read joins.
-> - **N3 — transport is polling (v1).** The web polls the unread feed (TanStack Query,
->   ~25s interval + refetch on window focus; TanStack Query is not yet used on the web, so a plain interval) — consistent with the control plane's async/poll idiom. SSE/web-push are
+> - **N3 — transport is polling (v1).** The web polls the unread feed (a plain 25s interval + refetch on
+>   window focus) — consistent with the control plane's async/poll idiom. SSE/web-push are
 >   explicit non-goals for v1 (a browser tab or the resident desktop must be open; the desktop is
 >   tray-resident anyway, which is exactly the "notification-receiving device" role).
 > - **N4 — the runner's local drain notification stays.** The desktop main process already notifies
@@ -35,30 +35,32 @@ anchors: [apps/web/src/entities/notification/model/href.ts, apps/desktop/src/not
 >   to "" — so the first real notification isn't mistaken for backlog). **Dedup**: the web bell yields
 >   renderer-native firing when desktop+paired (subscribing to the bridge `runnerStatus().paired`), and the watcher
 >   skips when the app window is visible and focused. It does not mark fired items as read (read happens in the inbox).
-> - **N5 — same emission seam as Mattermost.** Feed rows are written at the exact points the
->   Mattermost connected-account notify already fires (run finalize · scorecard finalize) — one
->   completion event fans out to [feed, Mattermost].
+> - **N5 — same emission seam as Mattermost.** Both channels consume the same completion FACTS on the platform
+>   event log (`run.completed`/`run.failed`/`scorecard.completed`/`scorecard.failed`): the feed through the
+>   `feed:runs`/`feed:scorecards` consumers (`packages/application-control/src/notification/feed-consumers.ts`,
+>   row id `nf-<eventId>`, so a redelivery writes no duplicate), Mattermost through `mm:completions`.
 
 ## Shape
 
 ```
-finalize(run|scorecard) ──▶ NotificationService.emit ──▶ NotificationStore (InMemory|Pg)
+finalize(run|scorecard) ──▶ platform event log ──▶ feed:runs / feed:scorecards ──▶ NotificationStore (InMemory|Pg)
                                                             ▲ read/ack
 web bell (poll /notifications) ──▶ new items → Web Notification API ──▶ (browser | Electron→OS)
 ```
 
 - **Entity** — `{ id, workspace, recipient(subject), kind, title, body?, link{runId|scorecardId},
-  createdAt, readAt? }`. `kind`: `run_completed` | `run_failed` | `scorecard_completed` |
-  `scorecard_failed` | `schedule_completed` | `schedule_failed` | `comment_mention` | `issue_regressed` |
-  `tracker_update_posted` (extensible). A
+  createdAt, readAt? }`. `kind` (`NotificationKindSchema`, `packages/contracts/src/records/notification.ts`):
+  `run_completed` | `run_failed` | `scorecard_completed` | `scorecard_failed` | `schedule_completed` |
+  `schedule_failed` | `report_completed` | `comment_mention` | `issue_regressed` | `tracker_update_posted` |
+  `agent_approval_requested`. A
   scheduled eval (cron fire **or** manual "run now") reuses the scorecard completion seam but is
-  **branded** — `NotificationService.notifyScorecard` emits `schedule_{completed,failed}` (title
-  "Scheduled run …") when `record.origin.source === "schedule"`, in place of the generic
+  **branded** — `scorecardFeedConsumer` emits `schedule_{completed,failed}` (title
+  "Scheduled run …") when the fact's `origin` is `schedule`, in place of the generic
   `scorecard_{completed,failed}`, so the bell reads as "my scheduled job ran".
 - **API (BFF+MCP parity)** — `GET /notifications?unread=1&limit=` (mine, workspace-scoped),
   `POST /notifications/read` `{ids?|all:true}`. Personal — **no role gate** (self-scoped, like
   connections/runners).
-- **Web** — `widgets/notification-bell` in the topbar: unread badge, dropdown inbox (click → navigate to run/
+- **Web** — `widgets/notification-bell` in the floating top-right controls (`widgets/app-shell/ui/top-controls.tsx`): unread badge, dropdown inbox (click → navigate to run/
   scorecard detail + mark read, "mark all read"), 25s polling + refetch on focus. New-item detection fires
   `new Notification(title, {body})`; browser needs a one-time permission (the bell dropdown's "enable browser
   notifications" toggle), Electron grants it by default.
@@ -70,12 +72,10 @@ web bell (poll /notifications) ──▶ new items → Web Notification API ─�
 3. ✅ Live verify: run completes → feed row → bell badge → mark read, in the real desktop shell renderer.
 
 ## Verified (confirmed implementation details)
-- **Emission seam** — inside `NotificationService.notifyRun/notifyScorecard`, called by
-  `RunService`/`ScorecardService`'s existing `onComplete` hook, feed insertion + Mattermost posting run
-  independently (one channel's failure doesn't block the other). A scheduled scorecard branches on
-  `record.origin.source === "schedule"` in the SAME `notifyScorecard` seam (so cron fires and manual
-  "run now" both notify exactly once — `ScheduleService.finalize` only records the terminal `lastStatus`,
-  it no longer notifies).
+- **Emission seam** — originally `NotificationService.notifyRun/notifyScorecard` on the services'
+  `onComplete` hook; now the `feed:runs`/`feed:scorecards` and `mm:completions` consumers of the completion facts
+  (N5), each channel independent of the other. A scheduled scorecard branches on the fact's `origin` in the SAME
+  scorecard consumer, so cron fires and manual "run now" both notify exactly once.
 - **Recipient** — scorecard uses the existing `createdBy` (mig 0035), run uses the `createdBy` added this time
   (mig 0036; `POST /runs` already passes `submittedBy=principal.subject`, so it's stamped immediately).
   **Scorecard child runs are excluded from the feed** (subsumed by the single batch — prevents flooding by the
@@ -84,7 +84,7 @@ web bell (poll /notifications) ──▶ new items → Web Notification API ─�
   `InMemory/PgNotificationStore` (`markRead` counts rows via `RETURNING` — `SqlClient` only exposes rows).
 - **API/MCP** — `GET /notifications?unread&limit` + `POST /notifications/read {ids|all}` (personal,
   no role gate) ↔ MCP `list_notifications`/`read_notifications` (BFF parity).
-- **Web** — `widgets/notification-bell` (sidebar, Linear Inbox position): 25s polling + refetch on focus, unread
+- **Web** — `widgets/notification-bell` (floating top-right controls): 25s polling + refetch on focus, unread
   badge, inbox dropdown (click → run/scorecard detail + mark read, mark all read — the header has controls only,
   no title), **native-notification state is an icon + dropdown** (on = Bell(primary) / off·blocked = BellOff):
   enable/disable (local preference `everdict:native-notifications`, persists across refresh); if permission is not
@@ -92,8 +92,7 @@ web bell (poll /notifications) ──▶ new items → Web Notification API ─�
   re-requested programmatically — directs to site settings). Firing condition = granted && preference on.
   Native firing happens **only when the window is not visible**
   (`document.hidden` — a visible tab is covered by the badge; the first-load batch is excluded from firing, capped
-  at 3 per poll). BFF proxy routes `GET /api/notifications` + `POST /api/notifications/read`. Note: the sidebar
-  `aside` (sticky) is a stacking context, so the popover ends up beneath the body → fixed with `aside z-20`.
+  at 3 per poll). BFF proxy routes `GET /api/notifications` + `POST /api/notifications/read`.
 - **Live verified (2026-07-03)** — in-memory API + web + a real Electron shell: scripted run completes →
   `run_completed` feed (recipient=submitter) → bell badge 1 → inbox item → mark all read → badge cleared, renderer
   `Notification.permission === "granted"` (confirms the desktop native-firing path is enabled by default).

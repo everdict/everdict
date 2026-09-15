@@ -2,8 +2,8 @@
 kind: wiki
 title: "Evolution program — the four pillars, what holds today, and the gap each spec closes"
 status: current
-updated: 2026-09-04
-anchors: [packages/contracts/src/harness/harness-template.ts, packages/contracts/src/records/evolution-campaign.ts, packages/application-control/src/evolution/campaign-service.ts, packages/application-control/src/capability/first-party.ts, packages/contracts/src/records/tracker.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/harness/harness-template.ts, packages/contracts/src/execution/environment.ts, packages/contracts/src/records/tracker.ts, packages/db/src/evolution/experiment-family.ts]
 ---
 # Evolution program — the four pillars, what holds today, and the gap each spec closes
 
@@ -37,18 +37,18 @@ lives.
 agent from a declaration, `docs/command-harness.md`). Every harness is authored as Template + Instance
 (`packages/contracts/src/harness/harness-template.ts`, `docs/architecture/harness-taxonomy.md`); a
 `command` template that declares a `conversation` contract is conversational and can be a delegation
-profile's agent — that carriage was broken until today and is fixed in the same batch as this page. The
-environments a case can name are `repo | browser | prompt | os-use` (`packages/contracts/src/execution/eval-case.ts`),
-placed on `linux | windows | macos`. Built-in adapters: `ClaudeCodeHarness`, `ScriptedHarness`,
-`CommandHarness` (`packages/harnesses/src`); the job-runner selects the adapter by kind
-(`packages/job-runner/src/registry.ts`).
+profile's agent (that carriage was fixed on 2026-09-02). The environments a case can name are
+`repo | browser | prompt | os-use`, or a `ref` to a registered environment
+(`packages/contracts/src/execution/environment.ts`), placed on `linux | windows | macos`. Built-in adapters:
+`ClaudeCodeHarness`, `ScriptedHarness`, `CommandHarness` (`packages/harnesses/src`); the job-runner picks
+`CommandHarness` by spec kind and the built-ins by id (`packages/job-runner/src/registry.ts`).
 
 **Gaps.**
 
 | id | gap | closed by |
 |---|---|---|
-| G1.1 | A **client** harness — one that acts on an environment through its API, browser or OS with no code of its own in the sandbox — has no shape of its own. A topology's `target` is a `browser` literal; an API target and an OS target do not exist, so a client is emulated as a `command` whose CLI happens to be a client. | `harness-definability-spec.md` §1 — **landed 2026-09-02** (declaration + acquisition; api observation proxy open) |
-| G1.2 | The **environment is not an entity**. A case embeds its environment; a topology embeds its target; a campaign's subject is `agent | harness`. An environment cannot be registered, versioned, diffed, or evolved. | `harness-definability-spec.md` §2 — **landed 2026-09-02** (entity + ref + seal + identity axis; campaign subject open) |
+| G1.1 | A **client** harness — one that acts on an environment through its API, browser or OS with no code of its own in the sandbox — has no shape of its own. A topology's `target` is a `browser` literal; an API target and an OS target do not exist, so a client is emulated as a `command` whose CLI happens to be a client. | `harness-definability-spec.md` §1 — **landed 2026-09-02** (declaration + acquisition). Observation is not declared on the api target: since 2026-09-03 it belongs to the environment that provides the world (`EnvironmentSpec.observe` in `packages/contracts/src/execution/environment.ts`), and an api target that declares `observe` is refused. |
+| G1.2 | The **environment is not an entity**. A case embeds its environment; a topology embeds its target; a campaign's subject is `agent | harness`. An environment cannot be registered, versioned, diffed, or evolved. | `harness-definability-spec.md` §2 — **landed 2026-09-02** (entity + ref + seal + identity axis, and an `environment` campaign subject — `CampaignSubjectSchema` in `packages/contracts/src/records/evolution-campaign.ts`) |
 | G1.3 | **Codex, Hermes and claude-code-router have no first-party template.** Codex ships as a one-shot `command` recipe; the others do not ship. The contract they need (`conversation`) is reachable from a template as of today. | `harness-definability-spec.md` §3 — **landed 2026-09-02** for codex + claude-code-router. A first-party hermes recipe needs one fact about a third-party CLI (its resume flag) that this repository cannot supply and must not guess; the contract, the refusal and two worked examples are all in place for whoever runs it. |
 | G1.4 | A harness **cannot see the case** beyond `{{task}}` and its own params — no per-case hook carries the case's environment or metadata into the command — and a `process` harness declares no `resources`. | `harness-definability-spec.md` §4 — **landed 2026-09-02** |
 
@@ -93,7 +93,7 @@ trace reads, per-call cost on the trace.
 
 | id | gap | closed by |
 |---|---|---|
-| G3.1 | **On-ramps are incomplete.** Terminal-Bench slices 2–5 are unbuilt (`docs/architecture/standard-task-formats.md`); there is no adapter for WebArena, tau-bench, BrowseComp or SWE-bench beyond `swe-bench-lite`; first-party seeding of `_shared` was removed, so a fresh deployment starts with zero benchmarks. | `benchmark-evidence-spec.md` §1 — **first slice landed 2026-09-02** (Terminal-Bench on-ramp, SWE-bench Verified, boot readiness; three adapters open) |
+| G3.1 | **On-ramps are incomplete.** Terminal-Bench slices 2–5 are unbuilt (`docs/architecture/standard-task-formats.md`); there is no adapter for WebArena, tau-bench, BrowseComp or SWE-bench beyond `swe-bench-lite`; first-party seeding of `_shared` was removed, so a fresh deployment starts with zero benchmarks. | `benchmark-evidence-spec.md` §1 — **landed 2026-09-03**: the Terminal-Bench on-ramp end to end, boot readiness, and the `swe-bench-verified`, `browsecomp`, `webarena` and `tau-bench` adapters (`packages/datasets/src/catalog.ts`) |
 | G3.2 | **No agent-behaviour diagnosis.** `classifyFailure` is `infra | config | harness | agent` at the platform's granularity; an agent FAIL carries no `failure` at all, so "why did it fail" is judge prose plus a trace. | `benchmark-evidence-spec.md` §2 — **landed 2026-09-02** (judge-family score details) |
 | G3.3 | **No platform-derived evidence record for the next step.** A round carries a verdict (counts) and `learned` (the driver's prose, explicitly advice). Nothing platform-authored says which held-out cases failed on the candidate, with what diagnosis, pointing at which trace pages. The next round's brief is built by the driver from raw reads. | `benchmark-evidence-spec.md` §3 — **landed 2026-09-02** |
 | G3.4 | **Comparability stops at the label.** `official | proxy` says whether a number is citable; nothing exports a run in the benchmark's own report format with the evaluator identity attached. | `benchmark-evidence-spec.md` §4 — **landed 2026-09-02** (generic citable report; leaderboard file formats open) |
@@ -116,7 +116,7 @@ minting the version, a derived round verdict, a gate, an adoption and a merge
 | G4.3 | **The issue and the cases are not bound.** `ISSUE_LINK_TYPES` (`packages/contracts/src/records/tracker.ts`) has no `case`; a frame cannot be derived from an issue; the gate reads aggregate held-out counts, so "the actual issue was resolved" — THESE cases now pass — is never verified. | `evolution-routing-spec.md` §3 — **landed 2026-09-02** |
 | G4.4 | **One build is one slot.** A hypothesis that touches two services needs two builds and a hand-composed pin set; `pin_harness_images` accepts several pins, the build door accepts one slot. | `evolution-routing-spec.md` §4 — **landed 2026-09-02** (one pull request per set; claim-before-mint) |
 | G4.5 | **No memory across campaigns.** Campaigns list per workspace; nothing reads "everything ever tried on this harness" — the rounds, what lost, what each taught. | `evolution-routing-spec.md` §5 — **landed 2026-09-02** |
-| G4.6 | **The subject is an agent or a harness.** An environment cannot be evolved (G1.2). | `harness-definability-spec.md` §2 |
+| G4.6 | **The subject is an agent or a harness.** An environment cannot be evolved (G1.2). | `harness-definability-spec.md` §2 — **landed 2026-09-02** (`CampaignSubjectSchema.type` includes `environment`) |
 
 ## The order
 
@@ -200,7 +200,7 @@ Assessed against the tree, not against this page. What each line below claims wa
 
 | id | gap | state |
 |---|---|---|
-| G4.11 | **The held-out family is guarded along the CHAIN and is blind to SIBLINGS.** `continues` makes a successor verify that the whole chain's rounds fit inside one pre-registered `heldOutFamilySize` — the correct rule, on the axis the platform can see. Two campaigns opened CONCURRENTLY on the same subject, each declaring a family that covers only itself, spend the same held-out rows twice and nothing looks. Measured, in the first parallel wave ever run here: case `15380` was held-out in two of three concurrent campaigns, each with `heldOutFamilySize: 3`, so that row was asked six times under a correction that assumed three. Parallelism is what creates this — a sequential walk cannot reach it — so it arrived with the capability. | **OPEN** — the arithmetic is settled and the POLICY is not: refuse an overlapping held-out set on an open sibling, require the siblings to declare one spanning family (the chain's answer, generalized from a line to a set), or admit the overlap and correct for it at the verdict. That is the maintainer's call, not a detail to pick while implementing. |
+| G4.11 | **The held-out family is guarded along the CHAIN and is blind to SIBLINGS.** `continues` makes a successor verify that the whole chain's rounds fit inside one pre-registered `heldOutFamilySize` — the correct rule, on the axis the platform can see. Two campaigns opened CONCURRENTLY on the same subject, each declaring a family that covers only itself, spend the same held-out rows twice and nothing looks. Measured, in the first parallel wave ever run here: case `15380` was held-out in two of three concurrent campaigns, each with `heldOutFamilySize: 3`, so that row was asked six times under a correction that assumed three. Parallelism is what creates this — a sequential walk cannot reach it — so it arrived with the capability. | **narrowed 2026-09-08, still OPEN** — campaigns in one `continues` tree now share one family ledger, siblings included, and reserve against it atomically (`familyMembers` / `reserveInFamily` in `packages/db/src/evolution/experiment-family.ts`). Independent roots on the same subject are still separate families. For those, the arithmetic is settled and the POLICY is not: refuse an overlapping held-out set on an open sibling, require the siblings to declare one spanning family (the chain's answer, generalized from a line to a set), or admit the overlap and correct for it at the verdict. That is the maintainer's call, not a detail to pick while implementing. |
 
 **What the parallel half looks like, measured.** Three campaigns × three rounds ran concurrently against one
 self-hosted runner (`scripts/live/evolution-wave.mjs`, 4 workers), independent lineages sharing only a wiki of

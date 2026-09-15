@@ -2,7 +2,7 @@
 kind: wiki
 title: "Guide — the product documentation"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
 ---
 # Guide — the product documentation
 
@@ -18,10 +18,10 @@ published outside this repository — see
 - [Your first scorecard](start/first-scorecard.md) — dataset × harness → a verdict you can defend
 - [Bring your own agent](start/bring-your-agent.md) — the on-ramp per agent kind, ending at a registered harness
 - [Bundles](start/bundles.md) — a whole evaluation setup as one document you apply
-- [Connect an agent](start/connect-an-agent.md) — MCP, API keys, and the Claude Code plugin
+- [Connect an agent](start/connect-an-agent.md) — MCP, API keys, the Claude Code plugin, and self-hosted runners
 
 ## Core concepts
-- [Overview](concepts/README.md) — the seven nouns, and how one run flows through them
+- [Overview](concepts/README.md) — the eight nouns, and how one run flows through them
 - [Run](concepts/run.md) · [Harness](concepts/harness.md) · [Dataset](concepts/dataset.md) ·
   [Grader & Judge](concepts/grader-and-judge.md) · [Scorecard](concepts/scorecard.md) ·
   [Verdict](concepts/verdict.md) · [Workspace](concepts/workspace.md) ·
@@ -34,15 +34,15 @@ published outside this repository — see
 - [The workspace filesystem](workspace/filesystem.md) — one file tree per workspace, with attributed revisions
 - [Environments](workspace/environments.md) — `repo` · `prompt` · `browser` · `os-use`, and how to choose
 - [Secrets](workspace/secrets.md) — credentials by name, and the two kinds treated differently
-- [Image registry](workspace/image-registry.md)
-- [Browser profiles](workspace/browser-profiles.md) — a captured session so cases do not start at a login wall — publishing images and keeping their provenance
+- [Image registry](workspace/image-registry.md) — publishing images and keeping their provenance
+- [Browser profiles](workspace/browser-profiles.md) — a captured session so cases do not start at a login wall
 
 ## Integrations
 - [Section index](integrations/README.md)
 - [MCP](integrations/mcp.md) — drive Everdict from any agent
 - [Claude Code plugin](integrations/claude-code-plugin.md) — two commands, tools plus domain context
-- [Running Codex](integrations/codex.md)
-- [Desktop app](integrations/desktop-app.md) — a runner that lives on your machine — Codex as the agent under test, via a declarative harness
+- [Running Codex](integrations/codex.md) — Codex as the agent under test, via a declarative harness
+- [Desktop app](integrations/desktop-app.md) — a runner that lives on your machine
 
 ## Operate
 - [Section index](operate/README.md)

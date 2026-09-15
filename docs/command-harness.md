@@ -2,8 +2,8 @@
 kind: wiki
 title: "Declarative command harness (bring any CLI agent, no code)"
 status: current
-updated: 2026-08-11
-anchors: [packages/harnesses/src/command.test.ts]
+updated: 2026-09-15
+anchors: [packages/harnesses/src/command.ts, packages/contracts/src/harness/harness-spec.ts]
 ---
 # Declarative command harness (bring any CLI agent, no code)
 
@@ -21,10 +21,14 @@ single generic `CommandHarness` interprets it. A SaaS user registers a spec → 
   "setup": ["pip install --quiet aider-chat==0.74.0"],   // run once in the sandbox before the task
   "command": "aider --yes --no-git --message {{task}} --model {{model}} .",
   "model": "sonnet",
-  "env": { },                          // extra env (LLM keys come from per-tenant secrets, not here)
-  "trace": { "kind": "none" }          // | { "kind":"otel"|"mlflow"|"langfuse"|"langsmith"|"phoenix", "endpoint":"…",
+  "env": { },                          // extra env: literal or { "secretRef": "…" } (LLM keys come from secrets, not literals)
+  "params": { },                       // values for any other {{key}} in `command` (not shell-escaped)
+  "workDir": "work",                   // optional: where setup and command run (default "work")
+  "trace": { "kind": "none" }          // | { "kind":"file", "path":"everdict-trace.json" }
+                                       // | { "kind":"otel"|"mlflow"|"langfuse"|"langsmith"|"phoenix", "endpoint":"…",
                                        //     "collect":"job"|"control-plane", "authSecret":"…"?,
-                                       //     mlflow: "correlate":"id"|"tag"?, "experiment":"…"? · phoenix: "project" }
+                                       //     otel: "correlate":"id"|"tag"?, "service":"…"? · mlflow: "correlate"?, "experiment":"…"?
+                                       //     · phoenix: "project" }
 }
 ```
 Template tokens in `command`: **`{{target.baseUrl}}`** (the static `api` target the template declares — the
@@ -35,13 +39,14 @@ refused at registration, because the verifier-private material must never reach 
 lacks renders as the empty string), **`{{seeds}}`** (the directory the harness version's skill/knowledge seeds were
 written to before install — `/everdict/seeds/skills/<id>/SKILL.md`, `/everdict/seeds/knowledge/<id>.md`; see
 `docs/architecture/harness-identity-and-seeds-spec.md` §2), **`{{task}}`** (shell-quoted automatically — don't wrap it in quotes),
-`{{model}}`, `{{run_id}}`.
+`{{model}}`, `{{run_id}}`, and `{{conversation}}` (below). Any other `{{key}}` is filled from `params[key]`, which
+cannot override the reserved tokens.
 
 ## How it runs
 The control plane resolves the spec from the registry and **embeds it in the `CaseJob`** (`harnessSpec`). The
 dispatched agent's `makeHarness` sees `kind:"command"` and builds the generic `CommandHarness`
 (`@everdict/harnesses`), which: runs `setup` → runs the templated `command` in the sandbox (`ComputeHandle.exec`,
-cwd `work`, with `EVERDICT_RUN_ID` + `spec.env` injected) → extracts the trace. The repo `Environment` + `Graders`
+cwd `workDir`, with `EVERDICT_RUN_ID`, a W3C trace context `TRACEPARENT` derived from the run id, and `spec.env` injected) → extracts the trace. The repo `Environment` + `Graders`
 are unchanged, so evaluation (git-diff snapshot, `tests-pass`, …) works as for any harness. Same process-dispatch
 path → runs on **Local / Nomad / K8s** backends with the existing isolation.
 
@@ -124,9 +129,10 @@ this only the built-in `claude-code` adapter could.
   had exactly that gap: the marker existed, and only a hand-built spec nobody registers could reach it.
 
 ## Security
-`setup`/`command` are **arbitrary user code** → they run only inside a **trust zone** (gVisor/Kata + per-tenant
-namespace + warm-pool keying), the isolation the runtime already enforces for untrusted tenant code. Pin
-image/install versions.
+`setup`/`command` are **arbitrary user code** → they run only inside the dispatched job's sandbox, isolated by
+whatever the placement enforces: the `RuntimeSpec`'s declared runtime by default, or a per-tenant **trust zone**
+(gVisor/Kata + per-tenant namespace) when the operator sets `EVERDICT_TRUST_ZONES=per-tenant` (see
+[execution-backends.md](execution-backends.md)). Pin image/install versions.
 
 ## Verified
 - **Deterministic** (`packages/harnesses/src/command.test.ts`): setup ordering; `{{task}}` shell-quoting + env

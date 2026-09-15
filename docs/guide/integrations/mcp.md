@@ -2,7 +2,8 @@
 kind: wiki
 title: "MCP"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/mcp.routes.ts, apps/api/src/api/api-key/api-key.routes.ts, apps/api/src/api/ops/internal.routes.ts]
 ---
 
 > Design SSOT: [mcp.md](../../mcp.md) — the maintainer page holds the mechanism. Describe the behaviour here; do not re-derive the design.
@@ -16,11 +17,6 @@ That parity is the design commitment: a capability exists on **both** surfaces o
 "the UI can do it but the agent cannot".
 
 ## Point a client at it
-
-```bash
-export EVERDICT_MCP_URL=http://localhost:8787/mcp
-export EVERDICT_API_KEY=ak_…
-```
 
 Most clients take a JSON block:
 
@@ -42,20 +38,24 @@ see [the Claude Code plugin](claude-code-plugin.md).
 ## Two ways to authenticate
 
 **API key** — for headless clients, CI, and agents. Keys look like `ak_…`, and resolve to the same
-`Principal { subject, workspace, roles }` an OIDC token produces:
+`Principal { subject, workspace, roles }` an OIDC token produces. A member mints a personal key under
+**Settings → API keys** (`POST /keys`); it acts with that member's permissions. An operator can mint one
+for a workspace with the internal token:
 
 ```bash
 curl -XPOST localhost:8787/internal/tenant-keys \
-  -H "authorization: Bearer $EVERDICT_INTERNAL_TOKEN" \
+  -H "x-internal-token: $EVERDICT_INTERNAL_TOKEN" \
   -H 'content-type: application/json' -d '{"workspace":"default"}'
 ```
 
-**OAuth (Keycloak)** — the "log in like Linear" flow, for a human-attended client. Needs a stack with
-Keycloak (`deploy/keycloak/`, or the `full` profile with `--profile auth`).
+**OAuth (Keycloak)** — the "log in like Linear" flow, for a human-attended client. The control plane
+publishes protected-resource metadata at `/.well-known/oauth-protected-resource`. Needs a stack with
+Keycloak (`deploy/keycloak/`, or the `full` stack with `--profile auth`).
 
 :::warning
-On the `dev` compose profile there is no auth at all — the API accepts an `x-everdict-tenant` header
-and everything is workspace `default`. Convenient locally, unusable anywhere else.
+Without `EVERDICT_REQUIRE_AUTH=1` there is no auth at all — the API accepts an `x-everdict-tenant` header
+and everything is workspace `default`. That is the `dev` and `prod` Compose default. Convenient locally,
+unusable anywhere else.
 :::
 
 ## What the agent can actually do
@@ -67,8 +67,8 @@ the integrations:
 | --- | --- |
 | Eval entities | `list_datasets` · `create_dataset` · `register_harness` · `create_judge` · `create_runtime` |
 | Running | `run_scorecard` · `get_scorecard` · `diff_scorecards` · `create_schedule` |
-| Tracker | `create_issue` · `create_project` · `create_initiative` · `create_cycle` |
-| Workspace | `create_agent` · `create_skill` · `create_knowledge_entry` · `create_api_key` · `create_team` |
+| Tracker | `create_issue` · `create_project` · `create_initiative` · `add_project_milestone` |
+| Workspace | `create_agent` · `create_skill` · `create_knowledge_entry` · `create_api_key` · `create_subscription` · `write_file` |
 | Product | `create_product` · `create_release` |
 
 A role gate applies per tool, so an agent holding a `viewer` key can read scorecards and cannot start
@@ -84,14 +84,8 @@ What an agent typically does, in the order it does it:
 4. `diff_scorecards` — compare against the baseline
 5. `create_issue` — file what regressed, linking the scorecard that proved it
 
-Step 5 is the one people skip and then miss: an issue that cites the scorecard which proved it can
+Step 5 is the one people skip and then miss: an issue closed on the scorecard that proved it can
 **reopen itself as `regressed`** when that proof stops holding.
-
-## Docs for the agent, not just the human
-
-The published docs site advertises an `llms.txt`, so an agent pointed at the docs URL can read the
-domain model before it starts calling tools. Combined with the MCP surface, a fresh session can go from
-"no context" to "ran an eval" without a human pasting explanations.
 
 ## See also
 

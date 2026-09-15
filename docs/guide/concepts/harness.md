@@ -2,7 +2,8 @@
 kind: wiki
 title: "Harness"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/contracts/src/harness/harness-template.ts, packages/contracts/src/harness/harness-spec.ts, apps/api/src/api/harness/harness-template.routes.ts, apps/api/src/api/harness/harness.routes.ts, packages/job-runner/src/registry.ts]
 ---
 # Harness
 
@@ -12,25 +13,29 @@ A harness is the agent under test. Here is a complete one:
 {
   "kind": "command",
   "category": "cli-agent",
-  "id": "codex",
+  "id": "aider",
   "version": "1",
-  "setup": [],
-  "command": "codex exec --sandbox workspace-write --skip-git-repo-check {{task}} < /dev/null",
-  "model": "gpt-5-codex",
+  "setup": ["pip install --quiet aider-chat==0.74.0"],
+  "command": "aider --yes --no-git --no-auto-commits --message {{task}} --model {{model}} .",
+  "model": "sonnet",
   "env": {},
   "trace": { "kind": "none" }
 }
 ```
 
 That is the entire integration. No adapter, no SDK, no code — a JSON document naming an executable and
-how to run it. `{{task}}` is where the case's instruction is substituted.
+how to run it. `{{task}}` is where the case's instruction is substituted (shell-quoted), `{{model}}` the
+model.
 
-Register it:
+Register it — the template, then an instance of it, which is what runs and scorecards name:
 
 ```bash
-curl -XPOST localhost:8787/harnesses \
+curl -XPOST localhost:8787/harness-templates \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' \
   -d @examples/harness-templates/aider.template.json
+curl -XPOST localhost:8787/harnesses \
+  -H 'x-everdict-tenant: default' -H 'content-type: application/json' \
+  -d @examples/harness-templates/aider-0.74.0.instance.json
 ```
 
 Everdict drives your agent **over a process boundary** — it starts the thing, feeds it a task, and
@@ -42,24 +47,26 @@ started and observed can be evaluated, whether or not it was written with evalua
 **`command`** — a declaration, like the one above. Reach for this first; most CLI agents need nothing
 else. Reference: [`../../command-harness.md`](../../command-harness.md).
 
-**`process`** — a coded adapter, for an agent that needs real integration logic. `ClaudeCodeHarness`
-parses Claude's stream-JSON into trace events; `ScriptedHarness` replays a canned trace and is what you
-want for smoke tests.
+**`process`** — a coded adapter, for an agent that needs real integration logic. Two are built in and
+need no registration: `claude-code` (`ClaudeCodeHarness`) parses Claude's stream-JSON into trace
+events; `scripted` (`ScriptedHarness`) replays a canned trajectory and is what you want for smoke tests.
 
 **`service`** — the agent is a stack, not a binary: an API, a worker, a browser, a vector store, all
-deployed for the run and torn down after.
+deployed for the run and torn down after. It declares a `frontDoor` (where the task is submitted) and a
+`traceSource` (where the trace is pulled from).
 
 ```json
 {
   "kind": "service",
-  "id": "browser-use",
-  "version": "1.2.0",
+  "category": "topology",
+  "id": "my-stack",
+  "version": "1",
   "services": [
     { "name": "api",   "image": "ghcr.io/acme/agent-api:1.2.0", "port": 8000 },
-    { "name": "redis", "image": "redis:7-alpine" }
+    { "name": "redis", "image": "redis:7-alpine", "port": 6379 }
   ],
-  "target": { "acquire": { "mode": "service", "capacity": 4 } },
-  "trace": { "kind": "langfuse" }
+  "frontDoor":   { "service": "api", "submit": "POST /runs" },
+  "traceSource": { "kind": "langfuse", "endpoint": "https://langfuse.internal", "authSecret": "langfuse-key" }
 }
 ```
 
@@ -70,16 +77,16 @@ Reference: [`../../service-harness.md`](../../service-harness.md).
 This is the distinction that trips people up first, and it exists to answer one question: *which exact
 thing did we evaluate?*
 
-A **template** is the shape — the kind, the command, the slots it exposes. It gets a new version only
-when the shape changes.
+A **template** (`POST /harness-templates`) is the shape — the kind, the command, the slots it exposes,
+and a `category` label. It gets a new version only when the shape changes.
 
 ```json
-{ "kind": "command", "id": "aider", "version": "1",
+{ "kind": "command", "category": "cli-agent", "id": "aider", "version": "1",
   "command": "aider --message {{task}} --model {{model}}" }
 ```
 
-An **instance** is a template reference plus **pins** — slot to concrete value. Conventionally one per
-pull request or commit:
+An **instance** (`POST /harnesses`) is a template reference plus **pins** — slot to concrete value; a
+command template's slots are `image` and `model`. Conventionally one per pull request or commit:
 
 ```json
 { "template": { "id": "aider", "version": "1" },
@@ -98,18 +105,20 @@ a candidate image without publishing it:
 curl -XPOST localhost:8787/scorecards \
   -H 'content-type: application/json' -d '{
   "dataset": { "id": "smoke", "version": "latest" },
-  "harness": { "id": "aider", "version": "latest",
-               "pins": { "image": "ghcr.io/acme/agent@sha256:9f2c…" } }
+  "harness": { "id": "my-stack", "version": "latest",
+               "pins": { "api": "ghcr.io/acme/agent-api@sha256:9f2c…" } },
+  "runtime": "prod-cluster"
 }'
 ```
 
 The swap is recorded in the scorecard's `origin.pinOverrides`, so the record names what actually ran
-rather than what was registered.
+rather than what was registered. A durable change is `POST /harnesses/:id/pins`, which registers a new
+instance version.
 
 ## Versions are immutable
 
-Harnesses live in the registry as `(workspace, id, version)`. `latest` resolves by semver, and a
-version, once published, never changes.
+Templates and instances live in the registry as `(workspace, id, version)`. `latest` resolves by
+semver, and a version, once published, never changes.
 
 That is not bureaucracy — it is the precondition for the product's only real claim. A scorecard records
 the version it evaluated. If that version could be edited afterwards, comparing it to next week's
@@ -134,15 +143,17 @@ infra-agnostic on purpose: it declares *what* it needs, never *where*.
 Each harness knows how to turn its own native output into `TraceEvent`s. Downstream, everything reads
 the normalized form, which is why a judge written once works across agents.
 
+A `command` harness picks its `trace.kind`: `none`, `file` (the command writes its own `TraceEvent`
+stream to a file), or a platform to pull from (`otel`, `mlflow`, `langfuse`, `langsmith`, `phoenix`).
 When an agent emits nothing parseable, say so — `"trace": { "kind": "none" }`. The run is then graded on
 its **outcome** rather than its trajectory, which is a legitimate choice and usually a stricter one.
 Inventing a trace format the agent does not emit is how you get judges scoring noise.
 
 Cost and tokens come from the harness's own trace (Claude reports `total_cost_usd`), never estimated.
-Under `LocalDriver` the harness uses the machine's existing login — no API key needed.
+On a self-hosted runner the harness uses the machine's existing login — no API key needed.
 
 ## See also
 
 - [Dataset](dataset.md) — what the harness is pointed at
-- [Running Codex](../integrations/codex.md) — this page's `command` example, end to end
+- [Running Codex](../integrations/codex.md) — a `command` harness, end to end
 - [`../../registry.md`](../../registry.md) — versioning and `_shared` resolution

@@ -2,7 +2,7 @@
 kind: decision
 title: "Parallel evolution — the walk branches, and what may cross between branches"
 status: proposed
-updated: 2026-09-04
+updated: 2026-09-15
 ---
 # Parallel evolution — the walk branches, and what may cross between branches
 
@@ -21,10 +21,12 @@ than for evidence.
 
 - **The tree is already the unit of statistical accounting.** `assertChainIsHonest`
   (`packages/application-control/src/evolution/campaign-service.ts`) walks the ancestors of `continues` AND,
-  transitively, every campaign that continues any member — across the tenant, deliberately without the
-  caller's team ceiling, because "a private team's sibling spent the rows just the same". The pre-registered
-  `heldOutFamilySize` is spent by the whole tree, not by one line through it.
-- **A chain link is verified, in six checks**: the predecessor ADOPTED something; of the same subject; this
+  transitively, every campaign that continues any member — across the whole tenant, because a sibling nobody
+  on this line can see spent the rows just the same. The pre-registered `heldOutFamilySize` is spent by the
+  whole tree, not by one line through it: ancestors are charged the rounds they logged, and a descendant still
+  OPEN is charged its full `budget.maxRounds` allocation, because it has not finished spending its share.
+- **A chain link is verified, in seven checks**: the predecessor ADOPTED something; the CODE that adoption was
+  built from is merged to the default branch (a chain starts from what is on the default branch); of the same subject; this
   frame baselines exactly the version it adopted; the held-out rows are identical; the significance block is
   identical; and the rounds already spent plus this campaign's `budget.maxRounds` still fit inside the shared
   family. A walk longer than `MAX_CHAIN_LINKS` (64) is refused rather than followed.
@@ -121,8 +123,9 @@ because the existing code is already set-shaped:
 
 **What was checked before writing that.** The tree accounting is not a comment: `assertChainIsHonest` grows
 the closure to a fixed point and then sums it —
-`for (const c of everyCampaign) if (tree.has(c.id) && !seen.has(c.id)) spent += c.rounds.length` — so a
-sibling's rounds really are charged to the family. There is no defect to fix here; there is a shape the
+`spent += c.state === "open" ? c.frame.budget.maxRounds : c.rounds.length` over every member of the closure
+that is not an ancestor — so a sibling's rounds really are charged to the family, and an open sibling is
+charged what it may still spend. There is no defect to fix here; there is a shape the
 schema cannot express, and no caller that needs it expressed.
 
 ## Rejected alternatives

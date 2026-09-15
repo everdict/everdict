@@ -2,7 +2,8 @@
 kind: wiki
 title: "Scorecard"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/api/scorecard/request/run-scorecard.ts, apps/api/src/api/scorecard/scorecard.docs.ts, packages/application-control/src/scorecard/scorecard-requests.ts, packages/contracts/src/records/gate.ts]
 ---
 # Scorecard
 
@@ -13,6 +14,7 @@ curl -XPOST localhost:8787/scorecards \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "dataset": { "id": "retrieval-smoke", "version": "latest" },
   "harness": { "id": "my-agent",        "version": "1.4.0" },
+  "runtime": "prod-cluster",
   "judges":  [{ "id": "tone-rubric",    "version": "latest" }],
   "trials":  3,
   "concurrency": 8
@@ -20,25 +22,28 @@ curl -XPOST localhost:8787/scorecards \
 ```
 
 ```json
-{ "scorecardId": "sc_91f2ab" }
+{ "id": "91f2ab3c-…", "status": "queued", "…": "…" }
 ```
 
 A run tells you what happened once. A scorecard answers "is this version good" — and paired with a
 second one, "did it get better":
 
 ```bash
-curl 'localhost:8787/scorecards/diff?baseline=sc_7c01&candidate=sc_91f2ab' \
+curl 'localhost:8787/scorecards/diff?baseline=<baseline-id>&candidate=91f2ab3c-…' \
   -H 'x-everdict-tenant: default'
 ```
 
 The diff matches cases by id and names regressions and improvements individually. This is the call a
-CI gate makes: block the pull request when a case that used to pass now fails.
+CI gate makes: block the pull request when a case that used to pass now fails. `POST /scorecards/gate`
+turns the same comparison into a release decision — `pass`, `block`, `blocked_missing` or
+`not_comparable`, and only the first is a green light.
 
 ## Trials, and why one run per case is not enough
 
 ```json
 { "dataset": { "id": "retrieval-smoke", "version": "latest" },
   "harness": { "id": "my-agent", "version": "1.4.0" },
+  "runtime": "prod-cluster",
   "trials": 5 }
 ```
 
@@ -60,11 +65,12 @@ what was registered.
 **The verdict policy** — composed at submit and stamped with a digest. The rules that decided pass and
 fail travel with the result, so reading a six-month-old scorecard tells you what "pass" meant *then*.
 
-**A manifest seal** — a content digest per facet: cases, the grading plan, and each judge's model,
-rubric and harness closure.
+**A manifest seal** — a content digest per facet: the dataset and each case, the effective grading
+plan, the resolved harness spec, each judge with its closure (model, rubric, delegated harness), and the
+verdict policy.
 
 ```bash
-curl -XPOST localhost:8787/scorecards/sc_91f2ab/verify-manifest \
+curl -XPOST localhost:8787/scorecards/91f2ab3c-…/verify-manifest \
   -H 'x-everdict-tenant: default'
 ```
 
@@ -86,24 +92,30 @@ curl -XPOST localhost:8787/scorecards/ingest \
   -H 'content-type: application/json' -d '{
   "dataset": { "id": "retrieval-smoke", "version": "latest" },
   "judges": [{ "id": "tone-rubric", "version": "latest" }],
-  "traces": [{ "caseId": "add-retry", "events": [ … ] }]
+  "traces": [{ "caseId": "add-retry", "trace": [ … ] }]
 }'
 ```
 
-**Pull** from the observability platform your team already uses:
+**Pull** from the observability platform your team already uses, by the trace ids you have:
 
 ```bash
 curl -XPOST localhost:8787/scorecards/ingest/pull \
   -H 'content-type: application/json' -d '{
-  "source": "mlflow-prod",
+  "source": { "name": "mlflow-prod" },
+  "runs": [{ "caseId": "add-retry", "runId": "<trace-id>" }],
   "dataset": { "id": "retrieval-smoke", "version": "latest" },
   "judges": [{ "id": "tone-rubric", "version": "latest" }]
 }'
 ```
 
-When the source kind matches, scores are **attached to the original traces** rather than duplicated —
-the eval shows up where your team already looks. The reverse direction exists too: a trace sink exports
-judged detail back out. A sink failure never fails the scorecard; the outcome is recorded on the record.
+`source` is a trace source registered in the workspace (Settings › Observability) or an inline
+`{ kind, endpoint, authSecret }`. `dataset` is optional on both doors — without it every trace becomes
+its own case and only the judges score it.
+
+The reverse direction exists too: a trace sink exports judged detail back to your platform. On a pull,
+when the sink is the same platform kind as the source, the scores are **attached to the original
+traces** rather than duplicated — the eval shows up where your team already looks. A sink failure never
+fails the scorecard; the outcome is recorded on the record.
 
 ## Saved views
 

@@ -2,7 +2,8 @@
 kind: wiki
 title: "Durability & Temporal"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/api/src/core/scorecard/temporal-batch-driver.ts, packages/application-control/src/scorecard/in-process-batch-driver.ts, packages/orchestrator/src/activities.ts, packages/orchestrator/src/orchestrator.ts, apps/cli/src/main.ts]
 ---
 # Durability & Temporal
 
@@ -10,23 +11,28 @@ A 400-case scorecard runs for two hours. Somewhere in that window you will deplo
 evicted, or a machine will reboot. What happens to the batch is a product decision, and Everdict makes
 it explicitly.
 
-## Two orchestrators
+## Two ways a batch is driven
 
-**`DirectOrchestrator`** — an in-process loop. Fine for development, and the default on the `dev`
-profile. On restart, in-flight work becomes ghosts: the cases may still be running on their runtimes,
-but nothing knows where the batch was.
+**In process** — the control plane's own batch loop. The default whenever no Temporal is configured,
+which is the `dev` and `prod` stacks. With a persistent database (`prod`) the run ledger is its
+checkpoint: on boot, a recovery sweep resumes interrupted scorecards and adopts still-running work
+rather than re-running it. That is rung 1 below — it works, and it carries rung 1's costs. On `dev`
+the ledger is in memory, so a restart is rung 0.
 
-**`TemporalOrchestrator`** — each batch is a durable workflow. A restart resumes rather than restarts,
-and transient backend failures retry without a human.
+**On Temporal** — each batch is a durable workflow. A restart resumes rather than restarts, and
+transient backend failures retry without a human. It switches on when the control plane has
+`EVERDICT_TEMPORAL_ADDRESS` (`EVERDICT_TEMPORAL_BATCHES=0` opts batches back out), with a worker
+process polling the task queue:
 
 ```bash
-bash deploy/compose/full.sh        # brings up Temporal alongside Postgres and MinIO
-everdict run --orchestrator temporal
-everdict worker                    # the workflow worker
+bash deploy/compose/full.sh        # Postgres, MinIO, Temporal, the API, the worker, the agent and the web app
+everdict worker                    # the workflow worker, when you run one yourself
 ```
 
-Temporal stays **optional**. Everything works without it; what you lose is the durability described
-below.
+The CLI makes the same choice for a single case: `everdict run --orchestrator direct|temporal`.
+
+Temporal stays **optional**. Evaluation works without it; what you lose is the durability described
+below — and **cron schedules**, which only fire on Temporal.
 
 ## What a workflow engine actually buys
 
@@ -72,10 +78,11 @@ a resume into a wrong answer rather than an error.
 
 ## What this looks like when things break
 
-**Control plane restarts mid-batch** — the workflow resumes at the case it was on. Cases already
+**Control plane restarts mid-batch** — the batch resumes at the case it was on. Cases already
 dispatched are adopted rather than re-run.
 
-**A backend returns a transient error** — retried under the workflow's policy, not by a human noticing.
+**A backend returns a transient error** — retried under the batch's `retries` policy, not by a human
+noticing.
 
 **A case OOMs** — classified, and with `oomAutoBoost` re-dispatched with more memory instead of being
 recorded as an agent failure. The distinction matters: an infrastructure death is not evidence about

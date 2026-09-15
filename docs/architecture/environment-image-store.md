@@ -2,13 +2,13 @@
 kind: wiki
 title: "Environment image store — managed eval-environment images as store assets"
 status: current
-updated: 2026-07-31
-anchors: [apps/web/src/entities/capability/model/schema.ts, packages/contracts/src/records/capability.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/capability.ts, apps/web/src/features/pick-environment/ui/environment-picker.tsx, apps/cli/src/image-push.ts]
 ---
 # Environment image store — managed eval-environment images as store assets
 
-> **Status:** E1–E4 SHIPPED + E5 (agent guidance) — see the slice list for the per-slice state and the
-> deliberate v1 reductions. Direction confirmed with the maintainer (2026-07-27):
+> **Status:** E1–E6 SHIPPED; only E5's live end-to-end scenario is pending — see the slice list for the
+> per-slice state and the deliberate v1 reductions. Direction confirmed with the maintainer (2026-07-27):
 > managed images should be store assets "like the skill/tool store", not raw strings.
 > Builds on `docs/architecture/capability-store.md` (the store substrate) and
 > `docs/architecture/workspace-image-registry.md` (where image bytes live + pull auth).
@@ -16,8 +16,8 @@ anchors: [apps/web/src/entities/capability/model/schema.ts, packages/contracts/s
 ## Why
 
 The motivating scenario: several workspaces evaluate the same benchmark — say **OfficeQA** — whose
-environment needs a non-trivial library/tool stack baked into an image. Today each workspace prepares
-that environment by itself, because an image in Everdict is a **raw string with no identity**:
+environment needs a non-trivial library/tool stack baked into an image. Before this feature each workspace
+prepared that environment by itself, because an image in Everdict was a **raw string with no identity**:
 
 - `TopologyService.image`, instance `pins` (slot → ref), `CommandHarnessSpec.image`, `EvalCase.image`
   all hold bare refs like `officeqa-env:v3`. The workspace-image-registry work gave those refs
@@ -27,8 +27,8 @@ that environment by itself, because an image in Everdict is a **raw string with 
 - There is no place to **browse** available environment images, and no way to **share** one across
   workspaces — the only cross-tenant sharing anywhere is the operator-seeded `_shared` registry
   fallback and the capability store's `subset`/`public` tiers.
-- An **agent that composes a topology** (the conversational agent already holds `register_harness` /
-  `register_harness_template` in `EVAL_ACTIONS`) has no context source describing available
+- An **agent that composes a topology** (the conversational agent already holds the `register_harness` /
+  `register_harness_template` MCP tools) had no context source describing available
   environments — a human side-channels the image ref and its wiring conventions into the prompt.
 
 So three requirements, one entity:
@@ -47,8 +47,8 @@ The store substrate already exists and was explicitly designed for this move:
 `docs/architecture/capability-store.md` locks "a future capability kind = a new `type` variant + an
 adapter, with **zero** new table/store/route/authz-action." We take that offer.
 
-- **`CapabilityType` gains `"environment"`** — a fourth variant beside `mcp | code | skill` on the one
-  discriminated `Capability` entity. The `everdict_capabilities.type` column is unconstrained `text`
+- **`CapabilityType` gains `"environment"`** — a variant beside `mcp | code | skill` (and, later,
+  `delegation`) on the one discriminated `Capability` entity. The `everdict_capabilities.type` column is unconstrained `text`
   (migration `0072`), so **no DB migration** — only the Zod enum, the spec union, and the web's loose
   mirror (`apps/web/src/entities/capability/model/schema.ts`) change.
 - Everything the requirements need comes free from the substrate: immutable versions, the four reach
@@ -77,19 +77,26 @@ exactly that for the topology-composing act. The store's framing softens from "a
 
 ## The model
 
-Additions to `packages/contracts/src/records/capability.ts` (reusing harness-spec schemas — the same
-intra-package import `harness-template.ts` already does):
+In `packages/contracts/src/records/capability.ts` (reusing the topology schemas verbatim):
 
 ```ts
+export const EnvironmentContentsSchema = z
+  .object({
+    benchmark: z.string().optional(), // e.g. "officeqa" — the benchmark this environment serves
+    packages: z.array(z.string()).default([]), // headline libraries/tools baked in (discovery, not a manifest)
+    os: z.string().optional(), // "linux" | "windows" | … (informs placement expectations)
+    arch: z.string().optional(), // "amd64" | "arm64" | …
+  })
+  .strict();
+
 // The wiring dowry an image brings along: how a topology composes around THIS image. Every field is a
 // suggestion consumed at AUTHORING time (web form prefill / agent context) — never silently applied at
 // dispatch. Reuses the topology vocabulary verbatim so a preset is copy-paste-valid in a HarnessSpec.
 export const EnvironmentPresetSchema = z
   .object({
-    // Suggested service fragment for using this image as a topology service: port, env defaults,
-    // readiness, resources, wiring (BYO env names), needs. No image (it IS this asset), no name
-    // (the adopting template names the service).
-    service: TopologyServiceSchema.omit({ image: true, name: true }).partial().optional(),
+    // Suggested service fragment for using this image as a topology service. No image (it IS this asset),
+    // no name (the adopting template names the service); strict, so either key is rejected, not stripped.
+    service: TopologyServiceSchema.omit({ image: true, name: true }).partial().strict().optional(),
     // Stores this environment expects (postgres/redis/minio + isolateBy + inject templates).
     dependencies: z.array(TopologyDependencySchema).default([]),
     // Present when the image is a front-door service (how to submit/complete against it).
@@ -99,23 +106,19 @@ export const EnvironmentPresetSchema = z
   })
   .strict();
 
-export const EnvironmentSpecSchema = z.object({
+export const EnvironmentImageSpecSchema = z.object({
   type: z.literal("environment"),
   image: z.string().min(1), // fully-qualified pullable ref; digest-pinned recommended (mutable tag → publish warning)
-  contents: z
-    .object({
-      benchmark: z.string().optional(), // e.g. "officeqa" — the benchmark this environment serves
-      packages: z.array(z.string()).default([]), // headline libraries/tools baked in (discovery, not a manifest)
-      os: z.string().optional(), // "linux" | "windows" | … (informs placement expectations)
-      arch: z.string().optional(), // "amd64" | "arm64" | …
-    })
-    .optional(),
+  contents: EnvironmentContentsSchema.optional(),
   preset: EnvironmentPresetSchema.optional(),
   // Markdown: how the environment is composed — entry points, conventions, seeded data, gotchas.
   // This is the context a topology-composing agent receives; written for a reader who will wire it.
   instructions: z.string(),
 });
 ```
+
+(Not to be confused with `EnvironmentSpecSchema` in `packages/contracts/src/execution/environment.ts`, the
+versioned environment REGISTRY entity.)
 
 `CapabilityRecord.name` = the environment's display/reference name (e.g. `officeqa-env`); for this
 kind no runtime tool is derived from it. `tags` carry free discovery facets as usual. No
@@ -158,20 +161,19 @@ Every image input — instance **pins**, service-kind `services[].image`, comman
   `workspace-image-registry.md` holds;
 - prefills the wiring from `preset` where the form has matching fields (service env/port/readiness,
   dependencies, front door) — visible, editable, nothing hidden;
-- (optional slice) records provenance as an **annotation**: `HarnessInstanceSpec.pinSources?:
-  Record<slot, {source, id, version}>` — ignored by `resolveHarnessInstance`, used only for badges and
-  "newer environment version available" hints. Absent = today's behavior, so existing specs are
-  untouched.
+- records provenance as an **annotation** (E4b): `HarnessInstanceSpec.pinSources?:
+  Record<slot, {source, id, version}>` — ignored by `resolveHarnessInstance`, used only for badges. Absent =
+  the pre-store behavior, so existing specs are untouched.
 
 ### 3. Agent composition (the third requirement)
 
-The conversational agent already holds the authoring verbs (`EVAL_ACTIONS`:
-`register_harness_template`, `register_harness`, `pin_harness_images`). What it lacks is environment
-context; with environments in the store it arrives through the **existing** capability read tools:
+The conversational agent already holds the authoring verbs as MCP tools (`register_harness_template`,
+`register_harness`, `pin_harness_images`). What it lacked is environment context; with environments in the
+store it arrives through the **existing** capability read tools (`list_capabilities`, `get_capability`):
 
-> "OfficeQA 토폴로지 만들어줘" → agent lists visible `environment` capabilities → reads
+> "Build me an OfficeQA topology" → agent lists visible `environment` capabilities → reads
 > `contents`/`preset`/`instructions` of `officeqa-env` → composes the template/instance (preset
-> fragments pasted into the spec, image ref pinned) → registers via `EVAL_ACTIONS`.
+> fragments pasted into the spec, image ref pinned) → registers through the same MCP tools.
 
 Slice E5 adds the prompt-level guidance (agent instructions/skill: *when composing a topology, check
 the store for a matching environment first and honor its preset + instructions*) — no new runtime
@@ -191,9 +193,10 @@ Sharing the *asset* does not by itself make the *bytes* pullable: pull secrets a
   (given that workspace's auth); `local`/`unqualified` → warned at publish time (reusing the domain
   `imageWarnings` rules, including the mutable-tag warning) *and* badged for consumers. Warn, never
   block — the same stance as harness registration.
-- **Cross-tenant pull-credential brokering** (store-mediated minting of pull auth for consumers of a
-  shared environment) is a named later option, not v1: it creates a real trust surface (publisher
-  credentials exercised by foreign workspaces) that deserves its own design.
+- **Cross-tenant pull-credential brokering** was a named later option, not v1. For images in Everdict's own
+  registry it shipped as M6 of `docs/architecture/managed-image-store.md`: an adopting workspace gets a
+  short-lived pull grant minted by the control plane, and no publisher credential is handed over. Images in
+  a BYO registry still follow the stance above.
 
 ## Authz
 
@@ -235,7 +238,8 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
   rendered instructions + preset JSON + package chips.
 - **E6 — the authoring journey is one path** ✅ (the "can an agent do this end-to-end?" review): the
   bytes and the asset stop being two disconnected acts. `everdict image push --register-environment <id>`
-  registers the pushed ref (digest-pinned from docker's `RepoDigests`, os/arch read off the local image,
+  registers the pushed ref (digest-pinned from the managed registry's own manifest, or from docker's
+  `RepoDigests` on the BYO path; os/arch read off the local image,
   reach defaulting to `workspace`) right after the push; the plugin skill + the conversational agent's
   system prompt carry the build→push→register→pin recipe (before this, both only described CONSUMING an
   environment, so the authoring half was invisible to agents); `verify_image` / `…/verify` bring the
@@ -261,7 +265,7 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
     consumer that adopts it gets a short-lived pull grant we mint (M6) instead of a credential exchange we
     cannot broker. Hosting is no longer a non-goal — only building is.
 - **Rewriting refs at dispatch** — specs keep verbatim strings; the store informs authoring only.
-- **Cross-tenant pull-credential brokering** — later option (see above).
+- **Cross-tenant pull-credential brokering for BYO registries** — managed-store images have it (see above).
 - **Multi-service environment bundles** — that is a harness template; one environment = one image.
 - **A parallel "image catalog" outside the store** — the capability entity is the one catalog.
 
@@ -273,7 +277,8 @@ Reused verbatim: `capabilities:read` (browse/resolve), `capabilities:write` (pub
   own just-pushed image got only a static classification warning while someone else's import got a real
   check. The editor's "Verify pull" renders `pullable`/`reason` and, on success, offers a one-click **pin
   this digest**; changing the ref discards the verdict so a stale badge can never lie. On the CLI path
-  `everdict image push --register-environment` digest-pins from docker's own `RepoDigests`.
+  `everdict image push --register-environment` digest-pins from the registry's manifest (managed) or docker's
+  own `RepoDigests` (BYO).
 - **Preset drift** — when a new environment version changes the preset, already-authored harnesses
   keep their copied wiring (by design). Is a diff hint ("your harness wiring differs from the pinned
   environment's current preset") worth building, or noise?

@@ -2,7 +2,8 @@
 kind: wiki
 title: "What the agent knows"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [apps/agent/src/system-prompt.ts, apps/api/src/api/knowledge/knowledge.mcp.ts, apps/api/src/api/knowledge/request/knowledge-entry-write.ts, packages/domain/src/knowledge/freshness.ts, packages/contracts/src/knowledge/predicate.ts]
 ---
 # What the agent knows
 
@@ -27,11 +28,14 @@ regressions matter, what your team calls things.
 - Model: claude-sonnet-5
 - Date: 2026-08-11
 - Task directory: tasks/cv_881 — this conversation's own area on the workspace filesystem.
-  Write this task's outputs there; promote finished deliverables to the shared library.
-- Web app: https://everdict.acme.internal — deep-link ONE entity as <web>/acme/<resource>/<id>,
+  Write this task's outputs there; promote finished deliverables to the shared library (reports/ · data/ · artifacts/).
+- Web app: https://everdict.acme.internal — deep-link ONE entity for the member as <web>/acme/<resource>/<id>,
   where <resource> is SINGULAR (scorecard · run · harness · dataset · judge · runtime · view ·
-  schedule · issue · project · initiative). An issue is addressed by its identifier: …/issue/ENG-12.
+  schedule · issue · project · initiative); … An issue is addressed by its identifier: …/issue/ENG-12.
 ```
+
+(Abbreviated: the real block also names the desktop download page, and says so plainly when the
+platform tools are unavailable this turn.)
 
 Two details in there are load-bearing:
 
@@ -57,8 +61,8 @@ the agent calls:
 ```
 
 Those refs are **anchors** — the entities the task concerns. Back comes the graph's related facts, plus
-the workspace's knowledge entries (claims, decisions, conventions) and skill candidates *about* those
-anchors.
+the workspace's knowledge entries and skill candidates *about* those anchors. (`@`-referencing an
+entity in a message recalls the same context for that turn — see below.)
 
 So an agent asked "why did retrieval regress on 2.1.0" starts with what your team already concluded
 about 2.1.0, rather than re-deriving it from scratch and reaching a different answer.
@@ -95,16 +99,24 @@ listings and badges, anchor relation is for assembling context for one task.
 
 Context is only as good as what has been written down. Three ways knowledge gets in:
 
-**Knowledge entries** — claims, decisions and conventions, stored in the
-[filesystem](filesystem.md) as `knowledge/<id>.md`:
+**Knowledge entries** — a `finding`, `decision`, `convention` or `context`, pinned to the entities it
+concerns. The body lives in the [filesystem](filesystem.md) as `knowledge/<id>.md`; the entry itself is
+created through the API (the agent's `create_knowledge_entry` tool is the same call):
 
 ```bash
-curl -XPUT localhost:8787/fs/file \
-  -H 'content-type: application/json' -d '{
-  "path": "knowledge/retrieval-suite.md",
-  "content": "# retrieval-smoke\n\nCases tagged `long-context` are the ones customers hit.\nA regression there is P1; everything else can wait a cycle.\n"
+curl -XPOST localhost:8787/knowledge/entries \
+  -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
+  "kind": "finding",
+  "title": "Long-context citations drop above 8k tokens on 2.1.0",
+  "body": "retrieval/long-context and retrieval/citations fail above 8k tokens; shorter cases are unaffected.",
+  "refs": [{ "type": "harness", "key": "checkout-agent", "version": "2.1.0" }],
+  "evidence": [{ "type": "scorecard", "key": "sc_91f2ab" }],
+  "visibility": "workspace"
 }'
 ```
+
+The version in `refs` is the claim's time coordinate. A new entry defaults to `private`; `workspace`
+shares it.
 
 **Typed relationships** — the graph, over a closed predicate vocabulary:
 
@@ -120,8 +132,8 @@ Node types cover the whole product — `harness`, `dataset`, `scorecard`, `run`,
 `judge`, `runtime`, `skill`, `secret`, `model` and more — so the graph describes your actual
 work rather than a parallel wiki.
 
-**Annotations** — a note plus a confidence on an existing node, for the small observation that is not
-worth a document.
+**Annotations** — a note plus a confidence on an existing node (`annotate_knowledge`), for the small
+observation that is not worth an entry.
 
 ## Attaching context by hand
 

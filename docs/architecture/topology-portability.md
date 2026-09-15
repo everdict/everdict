@@ -2,8 +2,8 @@
 kind: wiki
 title: "Topology portability — one HarnessSpec, identical semantics on every runtime"
 status: current
-updated: 2026-07-15
-anchors: [packages/topology/src/deploy/nomad-topology.ts, packages/domain/src/harness/portability.ts, packages/topology/src/deploy/peer-resolver.ts]
+updated: 2026-09-15
+anchors: [packages/domain/src/harness/portability.ts, packages/topology/src/deploy/peer-resolver.ts, packages/topology/src/deploy/reachability.ts]
 ---
 # Topology portability — one HarnessSpec, identical semantics on every runtime
 
@@ -67,47 +67,47 @@ requires routes through the one per-backend seam that IS portable.
 | layer | when | guarantee |
 |---|---|---|
 | **L0 Contract** (this doc + `topology` skill) | authoring | the law authors and reviewers follow |
-| **L1 Static portability lint** (`/harnesses/validate` + register) | authoring | a non-portable spec **cannot register** |
-| **L2 Single resolution authority** (`AddressResolver`) | build | logical→physical lives in ONE audited seam per backend |
-| **L3 Cross-runtime conformance suite** | CI / scenario | a golden spec is **proven** identical on every backend |
-| **L4 Reachability preflight + cross-runtime smoke parity** | per-run | an escape fails fast with a precise, per-runtime message |
+| **L1 Static portability lint** (`/harnesses/validate`, `/harness-templates/validate` + register) | authoring | a spec with a structural defect **cannot register** |
+| **L2 Single resolution authority** (`peer-resolver.ts`) | build | peer-host resolution lives in ONE audited file |
+| **L3 Cross-runtime conformance** (`topology-conformance.test.ts`) | test | a golden spec renders each backend's correct peer address |
+| **L4 Reachability preflight** | per-run | an unroutable endpoint fails fast with one per-runtime message |
 
-L1 prevents, L2 shrinks the divergence surface, L3 proves, L4 catches. No single layer is trusted alone —
-that is what "굉장히 견고 / very robust" means here.
+L1 prevents, L2 shrinks the divergence surface, L3 proves, L4 catches. No single layer is trusted alone.
 
 ### L1 — static portability lint (the highest-leverage layer)
 
 A pure `checkPortability(spec): PortabilityIssue[]` in `@everdict/domain`
-(`packages/domain/src/harness/portability.ts`), each issue carrying a **severity**. Enforcement lives at the
-**registry `register`** — the single chokepoint every path (HTTP route, bundle `apply`, MCP) flows through — via
-`assertPortable(resolved)`, so a non-portable spec never lands, uniformly, and only at registration (dispatch is
-untouched → existing versions are grandfathered). `POST /harnesses/validate` surfaces the issues before submit.
+(`packages/domain/src/harness/portability.ts`), each issue carrying a **severity** and the exact field. Enforcement
+is `assertPortable` at registration (the harness-instance registry's `register`, which the HTTP route, bundle
+`apply` and MCP all reach), so a new version with a structural defect never lands; dispatch is untouched, so
+existing versions are grandfathered. `POST /harnesses/validate` and `POST /harness-templates/validate` surface the
+issues before submit.
 
-**Severity (SHIPPED S1 — `block new, warn existing`):**
-- **`error` → hard-block.** The *structural* rules (`peer-by-literal`, `needs-complete`, `addressed-has-port`,
-  `reference-not-address`, `unique-ports`) — a peer addressed by its literal name, a missing `needs` edge, a
-  duplicate port, a dangling reference. These resolve differently (or not at all) on another runtime with **no
-  legitimate exception**, so a new registration is rejected (`BadRequestError`; existing versions grandfathered).
-- **`warning` → surfaced, not blocked.** `no-literal-host` (loopback / private-IP / docker host-gateway) — often
-  an *intentional* self-hosted-only choice, and its fix (declare a dependency, use a model binding) is a
-  migration. Returned as `portabilityWarnings` on register/validate (like `imageWarnings`); migrated in **S2**.
+**Severity — block new, warn existing:**
+- **`error` → hard-block** (`BadRequestError`). The structural rules — they resolve differently, or not at all, on
+  another runtime with no legitimate exception.
+- **`warning` → surfaced, not blocked**, returned as `portabilityWarnings` on register/validate. Often an intentional
+  self-hosted-only choice, or an inert declaration rather than a divergent one.
 
-Each issue names the exact field. The shipped example bundles (langgraph / browser-use / bu) trip only
-`no-literal-host` (0 structural), so they still register/apply with a warning.
+| rule | severity | detects |
+|---|---|---|
+| **peer-by-literal** | error | a declared peer addressed by its literal `<name>:<port>` — no discovery on per-service Nomad, wrong DNS on K8s; use `{{peer}}` |
+| **needs-complete** | error | a peer referenced but not declared in `needs` — per-service Nomad wires only `needs` |
+| **addressed-has-port** | error | an addressed peer / front-door / target service with no `port` |
+| **reference-not-address** | error | a front-door / target reference to a service that is not declared |
+| **unique-ports** | error | two services sharing a `port` — the co-located Nomad netns forbids it |
+| **no-literal-host** | warning | `localhost` / `127.0.0.1` / private IP / docker host-gateway in an address |
+| **store-by-literal** | warning | a bare container/store DNS `host:port` in service env — resolves only under Docker |
+| **inject-shadowed-literal** | warning | a `service.env` literal under a key a dependency `inject` also sets — the literal is dead |
+| **artifact-store-internal** | warning | an in-topology object store whose artifact URLs will not reach the judge |
+| **profile-uninjectable** | warning | a saved browser profile on a target whose browser the control plane cannot reach |
+| **host-program-undelivered** | warning | a host-exec service with no `exec.artifact` — the program is assumed pre-installed |
+| **context-id-unread** | warning | `frontDoor.contextId` declared while the trace source does not correlate by tag |
 
-| rule | detects | why it breaks | anchor to make portable |
-|---|---|---|---|
-| **no-literal-host** | `localhost`/`127.0.0.1`/`0.0.0.0`/private-IP in any `service.env`, `frontDoor.request.bodyTemplate`, `target`/`acquire` template | resolves to self on separate-pod/alloc backends | use `{{peer}}` / a store `connEnv` var |
-| **peer-by-token** | a literal `<name>:<port>` where `<name>` is a declared service | no discovery on per-service Nomad; wrong DNS on K8s | replace with `{{peer}}` (routes into the `needs`/`port` check) |
-| **needs-complete** | a `{{peer}}`/reference to a service not in `needs` | per-service Nomad wires only `needs` | add the `needs` edge (already thrown at deploy — L1 moves it to submit) |
-| **addressed-has-port** | a peer/front-door/target service with no `port` | nothing to publish/forward | declare `port` |
-| **reference-not-address** | front-door/target/store given a raw URL instead of a declared service/dependency | pins to one backend's addressing | reference the service/dependency by name |
-| **unique-ports** (co-located) | two services share a `port` | shared netns port collision (already thrown by the Nomad builder) | give distinct ports |
+`no-literal-host` has not been promoted to an error: some example bundles (`examples/bundles/browser-use/bundle.json`)
+still carry host literals.
 
-The lint is the L0-lint rung of the validation ladder (`docs/architecture/` — harness smoke/validation): it is
-pure, cheap, and runs before any bytes are pulled.
-
-### L2 — single resolution authority (`peer-resolver`) — SHIPPED (S3)
+### L2 — single resolution authority (`peer-resolver`)
 
 The load-bearing divergence is **peer-host** resolution (a `needs` service → its physical build-time host). It is
 now centralized in `packages/topology/src/deploy/peer-resolver.ts` as named strategies — `aliasPeerHost` (docker
@@ -121,45 +121,28 @@ consul-template render (a different mechanism, staying in `nomad-topology`'s `pe
 The other two addresses are **runtime-discovered**, not build-time computable, so they are not part of this pure
 resolver: the **front-door base** (`topo.endpoints[service]`) and **store host:port** (store `connEnv`) are produced
 by each runtime's `ensureTopology` (docker published port / Nomad alloc host:port / K8s port-forward) and already
-flow through one channel (`topo.endpoints` / `storeEnv`). No behavior change — the resolvers emit byte-identical
-strings to the former inline lambdas; the deterministic builder tests are the net (217 topology tests green).
+flow through one channel (`topo.endpoints` / `storeEnv`).
 
-### L3 — cross-runtime conformance suite (the proof)
+### L3 — cross-runtime conformance
 
-A **golden canary** `HarnessSpec` that exercises every portable construct — two services with a `needs` +
-`{{peer}}` edge, a shared store, a front door with a `bodyTemplate`, a target, a trace source — is deployed on
-**each** backend (env-gated `*.scenario.test.ts` + `scripts/live/topology-portability-<backend>.mjs`, per the
-`testing` skill) and asserted to yield **identical observable behavior**: same `CaseResult` verdict, same
-normalized trace shape, same grader outcome. This is the automated guarantee that "one definition runs
-identically everywhere"; it fails CI the moment a backend diverges. Docker + Nomad + K8s all have live
-scenario harnesses already (`scripts/live/service-topology-{nomad,k8s}.mjs`) to extend.
+`topology-conformance.test.ts` pushes a golden canary through the pure builders and asserts each backend's correct
+peer host — Nomad plain alias vs K8s `<id>-<service>` DNS, via `wiring` AND `{{peer}}`. It proves the rendered
+addresses, not a live bring-up: there is no env-gated scenario that deploys one canary on every backend and compares
+the `CaseResult`. The live scripts that exist exercise one backend each (`scripts/live/service-topology-nomad.mjs`,
+`scripts/live/service-topology-k8s.mjs`, `scripts/live/self-hosted-service-runner.mjs`).
 
-### L4 — reachability preflight + cross-runtime smoke parity (per-run backstop)
+### L4 — reachability preflight
 
-- **Bring-up reachability preflight — SHIPPED.** Each runtime's `waitForHttp` already polls the resolved endpoint
-  during `ensureTopology` before it is added to `topo.endpoints`, so readiness polling *is* the control-plane-side
-  reachability check. The three copies now throw ONE shared `endpointUnreachableError(url)`
-  (`reachability.ts`) — "the control plane cannot reach it on this runtime" — so an unroutable address fails the
-  same, clear way everywhere instead of a bare "not ready". (`service-backend` additionally guards front-door
-  presence.) Remaining: **cross-runtime smoke parity** (run the single-case smoke on the ACTUAL target runtime +
-  a canary-diff mode — needs the smoke-run affordance) and the **Nomad hostIP `127.0.0.1` fallback guard** (warn
-  when a multi-node alloc reports no routable host).
-- **Cross-runtime smoke parity:** the single-case smoke run (validation ladder L2) runs on the **actual target
-  runtime**, and a "portability check" mode brings the canary up on a second backend and diffs bring-up +
-  reachability. "Passed on self-hosted" must never be read as "passes on Nomad."
-- **Nomad hostIP fallback:** the `HostIP===""` → `127.0.0.1` fallback (`nomad-topology.ts` `resolvePort`)
-  silently masks the real address on a multi-node cluster — warn (or fail-fast when the cluster spans nodes).
+Each runtime's readiness poll during `ensureTopology` checks the resolved endpoint before it enters
+`topo.endpoints`, so readiness polling is the control-plane-side reachability check. All three runtimes throw one
+shared `endpointUnreachableError(url)` (`packages/topology/src/deploy/reachability.ts`) — "the control plane cannot
+reach it on this runtime" — instead of a bare "not ready"; `service-backend` additionally guards front-door presence.
 
-## 4. Slice plan
-
-1. **S1 — portability lint (L1).** `checkPortability` + wire into `/harnesses/validate` and register/resolve; web surfaces issues inline (the delivery-mode badge is the precedent). *Biggest leverage, cheapest, no runtime.*
-2. **S2 — `{{peer}}` canonicalization + migration (L0/L1).** Literal inter-service/`localhost`/IP → hard error; migrate the example bundles + any registered specs off hardcodes (now that `e6c76c5` makes `{{peer}}` work on all four paths).
-3. **S3 — peer-resolver centralization (L2) — SHIPPED.** The four inline `hostFor` lambdas → named strategies in `peer-resolver.ts` + a parity test that locks each backend's peer-host form; no behavior change (217 topology tests green).
-4. **S4 — conformance suite (L3) — deterministic slice SHIPPED.** A golden canary through the pure builders asserts each backend's correct peer host (`topology-conformance.test.ts`: Nomad plain alias vs K8s `<id>-<service>` DNS, via wiring AND `{{peer}}`). Follow-up: the env-gated live 3-backend scenario (real bring-up + identical `CaseResult`).
-5. **S5 — reachability preflight (L4) — SHIPPED.** The runtimes' readiness poll is the reachability check; unified into one `endpointUnreachableError` for a clear, consistent "cannot reach it on this runtime". Follow-up: cross-runtime smoke-on-target + the Nomad hostIP-fallback guard.
-
-S1+S2 alone close the reported failure mode at authoring time; S3–S5 make it *provably* robust and keep it
-that way.
+Not built:
+- **Cross-runtime smoke parity** — running the single-case smoke on the actual target runtime and diffing a canary
+  bring-up on a second backend. "Passed on self-hosted" must still not be read as "passes on Nomad".
+- **A Nomad host-IP guard** — `resolvePort` (`nomad-topology.ts`) still falls back to `127.0.0.1` when an alloc
+  reports an empty `HostIP`, which silently masks the real address on a multi-node cluster.
 
 ## See also
 `docs/service-harness.md` · `docs/architecture/nomad-colocated-topology.md` ·

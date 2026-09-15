@@ -2,7 +2,8 @@
 kind: wiki
 title: "Live observability — watch a run while it runs"
 status: current
-updated: 2026-08-07
+updated: 2026-09-15
+anchors: [apps/api/src/api/run/run-observability.routes.ts, apps/api/src/api/run/run-observability.docs.ts, packages/contracts/src/job-result-wire.ts, apps/api/src/common/live-trace-store.ts]
 ---
 # Live observability — watch a run while it runs
 
@@ -27,8 +28,8 @@ exit codes all identical; timeout kills the process group and reads exit 124).
 
 On top of that job log:
 
-- **`Backend.logs(caseId)`** (Nomad + K8s) — the case's newest job's current stdout, sentinel-
-  stripped. Snapshot semantics, best-effort (queued/GC'd job → undefined), reuses the adopt lookup.
+- **`ManagedWorkControl.logsForWork(work)`** (Nomad + K8s) — the current stdout of exactly the job the run's
+  `RuntimeWorkRef` names, sentinel-stripped. Snapshot semantics, best-effort (queued/GC'd job → undefined).
 - **`GET /runs/:id/logs`** — snapshot `{status, found, text}`; the web run detail's LiveLogs widget
   polls it every 3s through the BFF and stops at a terminal status. MCP parity: `get_run_logs`.
 - **`GET /runs/:id/logs/stream`** — SSE tail: appended chunks as JSON-encoded `data:` events every
@@ -38,8 +39,8 @@ On top of that job log:
 
 Scope: standalone runs (the run detail page). Batch children are addressable runs too, so the same
 endpoints work on a child run id (drill in from the scorecard). The self-hosted runner path also
-echoes (its terminal shows harness output), but `Backend.logs` covers nomad/k8s jobs only —
-lease-queue lanes have no orchestrator job to read. `DockerDriver` (case.image jobs) now ALSO echoes
+echoes (its terminal shows harness output) and pushes it over `report_case_log`, while `logsForWork` covers
+nomad/k8s jobs only — lease-queue lanes have no orchestrator job to read. `DockerDriver` (case.image jobs) now ALSO echoes
 in-job (`DockerDriver({echo:true})` — same tee contract as LocalDriver), so case.image harnesses feed
 the live log tail too.
 
@@ -49,10 +50,9 @@ line, then `event: end {"status":"succeeded"}`.
 
 ## ④ Sandbox web terminal — exec into the live case container
 
-A new **`Backend.exec(caseId, command)`** seam runs a one-shot `sh -c command` inside the case's
+**`ManagedWorkControl.execInWork(work, command)`** runs a one-shot `sh -c command` inside exactly that work's
 live sandbox (Nomad: `nomad alloc exec -task agent <alloc>` shelling to the CLI with NOMAD_ADDR/
-TOKEN in env — WS exec is CLI-only; K8s: `kubectl exec job/<name>`; both reuse the adopt lookup for
-the newest RUNNING alloc/pod). undefined = no live container.
+TOKEN in env — WS exec is CLI-only; K8s: `kubectl exec job/<name>`). undefined = no live container.
 
 - **`POST /runs/:id/exec {command}`** → `{found, stdout, stderr, exitCode}`; MCP `exec_in_run`.
 - Authz is tightened beyond `runs:read`: exec runs arbitrary (mutating) commands in the sandbox, so
@@ -115,7 +115,7 @@ logged-out, which scores as a capability failure rather than a configuration one
 so the control plane rediscovers it by the CP-minted runId (`ServiceTopologyBackend` prefers
 `job.runId`, so the browser alloc is keyed by the record-derivable id) and captures a live frame with
 `captureCdpScreenshot` (find a page target → `Page.captureScreenshot` over the CDP WebSocket → base64
-PNG). `RunService.screen` routes `env.kind === "browser"` to `Backend.captureScreen(runId)`; the same
+PNG). `RunService.screen` tries `ScreenCapturable.captureScreen(runId)` for any run with a runtime lane; the same
 web `LiveScreen` widget renders it (it keys off `supported`, not the env kind). The CDP-capture
 primitive is live-verified against a real `chromedp/headless-shell` (a 15 KB PNG captured over CDP).
 Nomad exposes the browser CDP as a host:port so rediscovery is clean; the **K8s** topology reaches CDP
@@ -125,7 +125,7 @@ needs a live topology run (same remaining live check as os-use's Xvfb image).
 
 ## ⑥ Interactive terminal — a persistent shell over WebSocket
 
-The one-shot exec (④) can't hold shell state (each call is a fresh `sh -c`). `Backend.execStream(caseId)`
+The one-shot exec (④) can't hold shell state (each call is a fresh `sh -c`). `execStreamInWork?(work)`
 opens a PERSISTENT interactive shell — Nomad `nomad alloc exec -i -task agent <alloc> /bin/sh` (K8s is a
 follow-up: its kubeconfig is materialized per-dispatch, so a long-lived stream needs the temp file kept open)
 — and returns a `{write, onData, onExit, close}` handle.
@@ -154,7 +154,7 @@ on the job (`CaseJob.runId`; `runCase` keeps its self-mint only as the no-CP fal
   **derivable from the record alone**, zero lookups for observers.
 - `GET /runs/:id` (and MCP `get_run`) adds a derived `liveTrace {kind, endpoint, runId}` while the
   run is queued/running and its harness exports a platform trace; the web run detail renders it as
-  a deep-link callout ("트레이스가 mlflow 플랫폼에 실시간 적재 중" + the correlation id). Settled
+  a deep-link callout (the platform kind + the correlation id to search by). Settled
   runs drop it — the collected trace/traceRef is the evidence then.
 - Stability note: the id is stable across spillover/transient retries of the same record, so a
   re-attempt's spans land under the same address (more evidence, same search key). Collection
@@ -178,8 +178,8 @@ a final flush fires in `release()`). Who supplies `report` is per lane:
 
 - **Managed (Nomad/K8s)** — the job's only channel back is its own stdout, so the job-runner entry prints each
   event as an `__EVERDICT_EVENT__` line (`encodeLiveEvent`: byte-heavy fields trimmed to a 4 KB cap, oversized
-  events dropped rather than emitted broken; the sealed trace keeps the full text). `Observable.caseEvents(caseId)`
-  (Nomad + K8s, beside `logs()`) re-reads the job log and decodes the lines (`extractLiveEvents` — torn tail
+  events dropped rather than emitted broken; the sealed trace keeps the full text). `eventsForWork(work)`
+  (Nomad + K8s, beside `logsForWork`) re-reads the job log and decodes the lines (`extractLiveEvents` — torn tail
   lines skipped); `stripSentinel` now drops event lines too, so the human log views stay clean. Snapshot
   semantics, same as the log tail.
 - **Self-hosted runner** — pushes the batches over its MCP session (`report_case_trace`, the trajectory twin of
@@ -207,10 +207,10 @@ The reads above answer "what is the AGENT doing"; this trio answers "what is the
 CASE" — the gap where a scorecard sat silently `queued`/`running` while the cluster couldn't place it, a
 service was OOM-looping, or the evidence vanished with the deleted job.
 
-### Case placement (`CaseInspectable`)
+### Case placement (`inspectWork`)
 
-`Backend.inspectCase(caseId) → CasePlacement` (wire SSOT `@everdict/contracts/wire`): the case's newest
-orchestrator job normalized to `phase queued | blocked | starting | running | dead` + the placed unit/node,
+`ManagedWorkControl.inspectWork(work) → CasePlacement` (wire SSOT `@everdict/contracts/wire`): exactly the
+run's orchestrator job normalized to `phase queued | blocked | starting | running | dead` + the placed unit/node,
 the scheduler's capacity verdict when blocked (Nomad blocked-evaluation exhausted dimensions / K8s
 `FailedScheduling` message), an OOM verdict, restarts, the unit's live resource ask (`cpu`/`memoryMb` — Nomad
 `resources=true` AllocatedResources / K8s pod requests) + `ageSeconds`, and the orchestrator event feed (image

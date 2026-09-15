@@ -210,8 +210,10 @@ ablation is needed to distinguish individual benefit from interaction.
 **First experiment.** Choose a failure family with a concrete structural diagnosis and compare a text-only
 edit against an executable helper or workflow edit. Reuse existing build and evidence paths described in
 [code evolution](code-evolution-loop.md) and [evolution routing](evolution-routing-spec.md).
-Do not edit the benchmark oracle as an agent-improvement operator. The existing merge-base check that
-closed the [September 10 review finding](evolution-review-2026-09-10.md) remains a prerequisite.
+Do not edit the benchmark oracle as an agent-improvement operator. The oracle-scope refusal —
+fork-union coverage over the diverged comparison, which on 2026-09-11 replaced the merge-base refusal that
+closed the [September 10 review finding](https://github.com/everdict/everdict/blob/a958dc36d772615a1de0dc81f59f4bb2f4b366d7/docs/architecture/evolution-review-2026-09-10.md) — remains a prerequisite
+(see [code evolution](code-evolution-loop.md), D3).
 
 A bounded compilation experiment can precede broader workflow search. [DSPy](evolution-papers/E13.md) motivates exposing module inputs/outputs and selecting stage-specific demonstrations; [FunSearch](evolution-papers/E12.md) motivates a fixed skeleton with one evolving function. Compare these changes with the same model, architecture, token budget, and evaluation population before adding ensembles or stronger teachers. Final-answer success permits examining an intermediate trace, not automatically trusting its explanations. Record the full compiled artifact, including selected examples and their order, rather than only the unchanged top-level source.
 

@@ -2,181 +2,88 @@
 kind: wiki
 title: "Leaderboard — model as a first-class dimension (harness × model × benchmark)"
 status: current
-updated: 2026-08-11
-anchors: [packages/domain/src/scorecard/trend.ts, packages/domain/src/scorecard/scorecard.ts]
+updated: 2026-09-15
+anchors: [packages/domain/src/scorecard/leaderboard.ts, packages/domain/src/scorecard/models.ts]
 ---
 # Leaderboard — model as a first-class dimension (harness × model × benchmark)
 
-> **Status: ALL 3 SLICES + follow-ups SHIPPED (gates green — suite·db·api: format/lint/typecheck/test; web:
-> prettier/eslint/tsc).** Follow-ups: historical `models` backfill, harness-centric view, and a model→leaderboard
-> HTTP-level E2E (ingest a trace with a known `llm_call.model` → `GET /scorecards/leaderboard` row carries it).
-> Live codex/pinch E2E is the only open item (needs the codex CommandHarness image + pinch dataset + provider keys —
-> not runnable headlessly here).
-> Decisions locked with the user:
-> **(1) model source = observed-first (trace `llm_call.model`) + declared fallback (spec `model`), store both;
-> (2) first view = per-benchmark leaderboard ranking (harness × model).**
->
-> Like [scheduled-evals](./scheduled-evals.md), [self-hosted-runner](./self-hosted-runner.md) and
-> [judge-placement-locality](./judge-placement-locality.md): **strict generalization, additive.** The unit of
-> aggregation — a **`ScorecardRecord`** (dataset@v × harness@v × time, with a lightweight per-metric `summary`) —
-> already exists and is reused verbatim. This work adds **one missing dimension (`model`)** to that record and a
-> **ranking view** (`leaderboard`) on top of the same lightweight `list()` that `trendSeries` already consumes.
+A public leaderboard (SWE-bench, GAIA, …) answers *for this benchmark, which harnesses and models score best?*
+Everdict answers it self-serve over three axes: **benchmark** (dataset), **harness**, and **model**. The unit of
+aggregation is the existing `ScorecardRecord` (dataset@v × harness@v, with a lightweight per-metric `summary`);
+this page covers the `model` dimension on that record and the ranking view built on it.
 
-## Problem
+## Model is per run, not per harness version
 
-A public leaderboard (SWE-bench, GAIA, …) shows: *for this benchmark, here are the harnesses/models ranked by
-score.* Everdict wants the same, self-serve, plus experiment tracking and cross-harness comparison — over **three
-axes**:
+The same `command` harness version can be re-pinned to a different model, and a `process` harness (Claude Code)
+may pin none at all — only its trace reveals what ran. So the leaderboard's model axis is **captured per
+scorecard from the trace**, not derived from the harness spec. It is a run-derived string; it is not a reference
+to the registered `Model` entity (`docs/models.md`) that harnesses and judges bind to.
 
-- **benchmark (dataset)** — "how does harness A score on the benchmarks it ran?"
-- **harness** — "harness A vs B on the shared benchmarks"
-- **model** — "which LLM does harness A@vX actually use, and how does model choice move the score?"
+## Capture: `models` on the scorecard record
 
-Everything except **model** already exists (`Scorecard = dataset@v × harness@v`, `diffScorecards` for A-vs-B,
-`trendSeries` for experiment-over-time, `summarizeScorecard` for per-metric pass rate). The one gap is that
-**`model` is captured nowhere**: it lives only inside each trace as per-call `llm_call.model`
-(`packages/contracts/src/execution/trace.ts:18`) and as a spec input (`CommandHarnessSpec.model`,
-`packages/contracts/src/harness/harness-spec.ts:222`; judge `model`), neither of which survives into the aggregated record.
-
-**Key insight — model is per-run, not per-harness-version.** The same `command` harness version can be re-pinned
-to a different `model`; a `process` harness (Claude Code) uses the machine login and pins **no** model at all
-(only the trace reveals what ran). So model must be **captured per scorecard run by observing the trace**, not
-derived from the harness spec. This is why model is a run-derived tag, **not** a new registry entity.
-
-## Current state — verified
-
-- **`ScorecardRecord`** (`packages/db/src/results/scorecard-store.ts:36`) keys on `{dataset:{id,version}, harness:{id,version}}`
-  + lightweight `summary: MetricSummary[]` + heavy `scorecard` (per-case, omitted from `list`). `harness.version`
-  is the **resolved concrete** version (never `latest`) — `scorecard-service.ts:164`.
-- **Trace carries the actual model** — `TraceEvent` `llm_call.model` (`core/src/trace.ts:18`). `CommandHarness`
-  even synthesizes it from `spec.model` when proxying usage. This is the observed-model source of truth.
-- **Declared model** — only `CommandHarnessSpec.model` (`harness-spec.ts:222`); `process`/`service` specs have
-  none. Judge model is `ModelJudgeSpec.model` (separate axis — the *scorer*, not the harness-under-test).
-- **Aggregation already lightweight-driven** — `trendSeries` (`packages/domain/src/scorecard/trend.ts`) consumes a
-  `TrendCard` that `ScorecardRecord` **structurally satisfies** (suite has no `db` dep). A leaderboard is the same
-  pattern: rank instead of time-order.
-- **Analytics that exist** — `summarizeScorecard` / `diffScorecards` / `trendSeries` / `scorecardPassRate`
-  (`packages/domain/src/scorecard/scorecard.ts` + `trend.ts`); web pages list / detail / **compare** / **trend**
-  (`apps/web/.../scorecards/*`). **No** ranking/leaderboard view and **no** model column anywhere today.
-- **Store filtering** — `ScorecardStore.list(tenant?)` filters by tenant only; trend/diff filter in the service.
-  The leaderboard follows suit (filter+group in the service over `list`), no new store query in v1.
-
-## Design
-
-### 1. Capture `model` on the scorecard record (the enabler — Slice 1)
-
-At **finalize** (`ScorecardService.track` for live runs, `finishIngest` for push/pull ingest) compute a small
-`models` object from the completed `Scorecard` + the resolved harness spec, and store it on the record:
+`scorecardModels(sc, declared?)` (`packages/domain/src/scorecard/models.ts`) returns:
 
 ```ts
-// @everdict/domain (pure; core-only dep)
-scorecardModels(sc: Scorecard, declared?: string): {
-  observed: string[]   // distinct llm_call.model across all cases, sorted
-  declared?: string    // spec-declared model (CommandHarnessSpec.model), else undefined
-  primary?: string     // ranking key: most-frequent observed (tie → lexicographically first), else declared
-}
+{ observed: string[];   // distinct llm_call.model across all case traces, sorted
+  declared?: string;    // the spec-declared model (CommandHarnessSpec.model)
+  primary?: string }    // group key: most-frequent observed (tie → lexicographically first), else declared
 ```
 
-- **observed** = ground truth of "what LLM did harness A actually use" (from the trace).
-- **declared** = configured intent (from `spec.model`); lets the UI flag **declared ≠ observed** drift.
-- **primary** = the single value the leaderboard groups on. Observed wins (real > configured); `declared`
-  fallback covers harnesses whose traces omit model; both absent ⇒ `undefined` ⇒ grouped as **unknown** (honest,
-  e.g. a Claude Code run with no model in its trace).
+- **observed** is the ground truth of what ran; **declared** is configured intent, so the UI can flag
+  declared ≠ observed drift; neither ⇒ `primary` unset ⇒ the row is grouped as **unknown**.
+- Computed when a batch finalizes (`in-process-batch-driver.ts`, `workflow-batch-driver.ts`) and when an ingest
+  finishes (`scorecard-ingest-service.ts`, observed only), all under `packages/application-control/src/scorecard/`.
+- Stored in the `models jsonb` column on `everdict_scorecards` (migration `0028_add_scorecard_models.sql`),
+  mirrored as `ScorecardModelsSchema` (`packages/contracts/src/records/scorecard.ts`) and included in the
+  lightweight list, so every list/detail response carries it.
+- **Backfill** for rows that predate capture: `POST /scorecards/backfill-models` (`scorecards:run`) and MCP
+  `backfill_scorecard_models` recompute `models` from the stored traces of succeeded records lacking it
+  (idempotent, observed only).
 
-Stored as an additive `models jsonb` column on `everdict_scorecards` (**mig 0028**), mirrored on
-`ScorecardRecordSchema` and **kept in `list`** (it is light — the leaderboard needs it without the heavy
-`scorecard`). Historical rows have `models = null` (⇒ primary unknown); backfill is a follow-up (derivable from
-the stored `scorecard.results[].trace`).
+The judge's model is a separate axis — the scorer, not the harness under test — carried as `judgeModels`.
 
-`db` mirrors the shape as a Zod schema (`ScorecardModelsSchema`), exactly as it already mirrors
-`MetricSummary` — `db` depends only on `core`, `suite` does the computation, the service passes the result to
-`store.update` (validated at the Pg boundary).
+## Ranking: `leaderboard`
 
-### 2. Rank view — `leaderboard` (Slice 2)
+`leaderboard(cards, { datasetId, metric, harnessId?, model?, judgeModel?, window? })`
+(`packages/domain/src/scorecard/leaderboard.ts`), called by `ScorecardAnalyticsService.leaderboard`
+(`packages/application-control/src/scorecard/scorecard-analytics-service.ts`) over the lightweight list narrowed
+in SQL to the dataset, `succeeded`, `kind: scorecard` (experiments never rank) and the optional harness:
 
-```ts
-// @everdict/domain (pure; consumes the same lightweight card as trendSeries)
-leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, model?, window?: "latest"|"best" })
-  : { dataset, metric, rows: LeaderboardRow[] /* ranked desc by score */ }
-// row: { harness:{id,version}, model?, scorecardId, createdAt, score, passRate, mean, runs }
-```
+- filters by `model` (against `models.primary`) and `judgeModel` (a fair comparison among runs scored by the
+  same judge model);
+- groups by `harness.id@version × models.primary` and collapses each group to one representative scorecard —
+  `window=latest` (default, newest) or `best` (highest score, newest on a tie) — with `runs` = group size;
+- `score = summary[metric].passRate ?? mean`; a metric with no measured value contributes no score and ranks last;
+- ranks in the metric's declared direction (a `lower_is_better` metric such as cost ranks ascending);
+- a row with no model is marked `modelUnknown`; a board whose batches were judged under different verdict
+  policies is marked `policyMixed`.
 
-- Filter to `status:succeeded` + `dataset.id` (+ optional `harness`/`model`).
-- **Group by `harness.id@version × models.primary`**; collapse each group to one representative scorecard
-  (`window=latest` default, `best` = highest score) with `runs` = group size.
-- `score = summary[metric].passRate ?? mean` (same convention as `trendSeries`); `metric` is an explicit axis
-  (like trend — no universal headline metric; the UI offers a dropdown of metrics present).
-- Ranked descending by `score`. `LeaderboardCard` is structurally satisfied by `ScorecardRecord` (incl. `models`).
+`metric` is an explicit axis; when absent the service picks the highest-authority pass-rate metric present in the
+data (`preferredMetric`) rather than a literal default.
 
-### 3. The three views (Slice 3, web)
+## Surface (BFF↔MCP parity)
 
-- **Per-benchmark leaderboard** *(first)* — pick dataset + metric → ranked `harness × model` table. The
-  SWE-bench-style board. "pinch run on codex" lands here as one row.
-- **Harness-centric history** — ✅ SHIPPED (`scorecards/by-harness`, web-only): pick harness A → its scorecards
-  grouped by dataset, with model + version + per-metric summary each (reuses `list` filtered by `harness.id`;
-  no new API — the list already carries `models`).
-- **Cross-harness compare** — existing `compare` (diff A↔B) + model shown per side; the leaderboard filtered to
-  chosen harnesses covers the across-benchmarks case.
+- **HTTP** — `GET /scorecards/leaderboard?dataset=&metric=&harness=&model=&judgeModel=&window=` (`dataset`
+  required; `scorecards:read`).
+- **MCP** — `leaderboard_scorecards`, same core. The trend lens has its MCP twin too (`trend_scorecards`).
+- **Web** — `/{ws}/scorecards/leaderboard` (`LeaderboardPicker`, `apps/web/src/features/leaderboard-scorecards`):
+  dataset + metric + window → ranked table with a model chip and an unknown-model label. The model also appears
+  on the scorecard list rows, on the detail page (primary + observed chips + a declared ≠ actual drift badge),
+  and per side on the compare page. `/{ws}/scorecards/by-harness` is the harness-centric history (one harness's
+  scorecards grouped by dataset).
 
-## Surface (BFF↔MCP parity + roles)
-
-- **HTTP** — `GET /scorecards/leaderboard?dataset=&metric=&harness?=&model?=&window?=` → `Leaderboard`
-  (static route, ordered before `:id` like `/diff` and `/trend`). `scorecards:read`, workspace-scoped.
-- **MCP** — `leaderboard_scorecards` (same `ScorecardService.leaderboard` core).
-- **Response additions** — `models` now present on every `ScorecardRecord` (list + get), so the existing
-  `GET /scorecards`, `GET /scorecards/:id`, list/detail web pages surface model with no new endpoint.
-- **Web** — new `/[workspace]/scorecards/leaderboard` (dataset+metric picker → ranked table, model badge,
-  declared≠observed drift badge, link to each scorecard); model column added to list + detail + compare.
-
-## Reuse vs new
-
-| Piece | Status |
-|---|---|
-| `ScorecardRecord` / `summary` / `list` / `trendSeries` / `diffScorecards` / `caseVerdict` | **reused verbatim** |
-| `ScorecardService.submit` + `track` + `finishIngest` pipeline | **reused** (add one finalize step) |
-| `scorecardModels` (`@everdict/domain`) + `ScorecardModelsSchema` (`@everdict/db`) | **new** (Slice 1) |
-| `models jsonb` column + mig 0028 + Pg read/write/list | **new** (Slice 1) |
-| `leaderboard` (`@everdict/domain`) + `ScorecardService.leaderboard` | **new** (Slice 2) |
-| `GET /scorecards/leaderboard` + `leaderboard_scorecards` MCP + `scorecards:read` gate | **new** (Slice 2) |
-| Leaderboard web page + model column on list/detail/compare | **new** (Slice 3) |
-
-## Slices (pnpm gates green at each)
-
-1. ✅ **Model capture** — `scorecardModels` (suite) + `ScorecardModelsSchema` + `models` on `ScorecardRecord`
-   (db) + mig 0028 (additive `models jsonb`) + Pg read/write/**list** + wire into `track`/`finishIngest`. New
-   runs record observed+declared+primary; `list`/`get` expose it. Tests: `models.test.ts` (6), extended
-   `scorecard-store.test.ts` (models round-trip + list), `scorecard-service.test.ts` (observed capture on submit).
-2. ✅ **Leaderboard core + surface** — `leaderboard` (suite; groups (harness@version × models.primary), window
-   latest/best, ranks by `summary[metric].passRate ?? mean`) + `ScorecardService.leaderboard` +
-   `GET /scorecards/leaderboard?dataset=&metric=&harness?=&model?=&window?=` (static, before `:id`) +
-   `leaderboard_scorecards` MCP + `scorecards:read` gate. Tests: `leaderboard.test.ts` (7), service scoping,
-   `server.test.ts` route (dataset-missing 400 + run-collapse), `mcp.test.ts` (tool-list + functional).
-   *(No `trend` MCP tool exists today — pre-existing parity gap, out of scope; leaderboard ships full parity.)*
-3. ✅ **Web** — `scorecards/leaderboard` page (dataset+metric+window picker → ranked table, rank badge, model
-   chip, `unknown` fallback) + `LeaderboardPicker` feature + `controlPlane.leaderboardScorecards` client +
-   `models`/leaderboard mirror schemas. Model surfaced on **list** (row chip), **detail** (model card: primary +
-   observed chips + `declared≠actual` drift badge), **compare** (model per side, from the already-loaded records).
-   "Leaderboard" button added to the scorecards list header (next to Trend/Compare).
+The same dimensions are also available in the general pivot (`model`, `judgeModel` in
+[scorecard-analysis-views.md](./scorecard-analysis-views.md)).
 
 ## Decisions / non-goals
 
-- **Model source = observed-first + declared fallback, store both (locked).** Lets the board rank by what
-  actually ran while surfacing config drift; `unknown` when a trace omits model and no spec declares one.
-- **Model is a run-derived tag, not a registry entity.** Models are external identifiers (`claude-opus-4-8`,
-  `gpt-4`), not versioned SSOT like harnesses/datasets/judges. No `ModelRegistry`.
-- **Metric is an explicit ranking axis** (parity with `trendSeries`) — no assumed universal headline metric.
-- **Judge model is a separate axis** — `models` is the harness-under-test's LLM, not the scorer's. (A judge-model
-  breakdown, if wanted, is a later, separate cut.)
-- **Backfill of historical `models`** — ✅ SHIPPED. `ScorecardService.backfillModels(tenant)` recomputes from the
-  stored `scorecard.results[].trace` for succeeded records lacking `models` (idempotent, observed-only —
-  the trace is ground truth); `POST /scorecards/backfill-models` (`scorecards:run`) + MCP
-  `backfill_scorecard_models`. New runs still populate at finalize; this backfills pre-existing rows.
-- **Store-level model/dataset filters** deferred — the leaderboard filters+groups in the service over the
-  lightweight `list`, exactly as trend/diff already do; add SQL filters only if `list` volume demands it.
-- **Single-run (`RunStore`) model tagging** out of scope — this is the scorecard/benchmark surface.
+- **Observed-first, declared fallback, store both.** Rank by what actually ran while surfacing config drift.
+- **Metric is an explicit ranking axis** — no assumed universal headline metric.
+- **No store-level model filter** — model and judge-model narrowing happens in the domain over the lightweight
+  list; SQL narrows only dataset, status, kind and harness.
+- **Single-run (`RunStore`) model tagging** is out of scope — this is the scorecard/benchmark surface.
 
 ## See also
 
 [scorecards.md](../scorecards.md) · [suites.md](../suites.md) (trend/diff) · [datasets.md](../datasets.md)
-(benchmark→dataset import) · [scheduled-evals.md](./scheduled-evals.md) (same additive-generalization pattern) ·
-rules `api-layer` / `db` / `mcp` / `core-contracts`.
+(benchmark→dataset import).

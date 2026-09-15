@@ -2,7 +2,8 @@
 kind: wiki
 title: "Run"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/run.ts, apps/api/src/api/run/request/submit.ts, packages/contracts/src/execution/case-failure.ts, packages/contracts/src/execution/environment.ts]
 ---
 # Run
 
@@ -12,6 +13,7 @@ A Run is one execution, recorded. Submit one:
 curl -XPOST localhost:8787/runs \
   -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "harness": { "id": "scripted", "version": "latest" },
+  "runtime": "local",
   "case": {
     "id": "c1",
     "env": { "kind": "repo", "source": { "files": {} } },
@@ -23,14 +25,14 @@ curl -XPOST localhost:8787/runs \
 ```
 
 ```json
-{ "runId": "run_7bf1c204" }
+{ "id": "3f0c9a52-…", "caseId": "c1", "status": "queued", "…": "…" }
 ```
 
-That is the shape of everything here: **submission is asynchronous**. You get an id immediately and
-poll, subscribe to a webhook, or watch it in the web app.
+That is the shape of everything here: **submission is asynchronous**. You get the queued record (`202`)
+immediately and poll, pass a `webhookUrl` at submit, or watch it in the web app.
 
 ```bash
-curl localhost:8787/runs/run_7bf1c204 -H 'x-everdict-tenant: default'
+curl localhost:8787/runs/3f0c9a52-… -H 'x-everdict-tenant: default'
 ```
 
 This is not an implementation detail to skim past. An agent evaluation can take a long time, and
@@ -38,19 +40,20 @@ nothing in the system assumes a request stays open for it.
 
 ## The lifecycle
 
-`queued → running → succeeded | failed`, plus `suspended` for a run parked on something — a human
-approval, most often — rather than finished. A suspended run has not failed; treating it as failure is
-a mistake the API deliberately makes hard.
+`queued → running → succeeded | failed`, plus `suspended` for a run that stopped without completing and
+can be resumed — an agent run that reached its budget, or one parked on a wait. A suspended run has not
+failed and has not succeeded; a resume is a new run, and the suspended row stays the record of where the
+work stopped.
 
 ## Run is the universal record
 
-An eval case, an agent turn, a file execution, a scheduled batch's child — they all land as runs. There
-is one place to ask "what happened, when, caused by whom, at what cost", and one list to look at.
+An eval case, an agent turn, a command, a sandbox session, a scheduled batch's child — they all land as
+runs (`kind`: `eval`, `agent`, `command`, `sandbox`, `analysis`). There is one place to ask "what
+happened, when, caused by whom, at what cost", and one list to look at.
 
-Every run carries an `origin` describing what caused it: a person, CI, a schedule, a subscription
-reacting to an event, a product version arriving. That field is what makes the product timeline's
-x-axis possible — a trend of "how did we score on each shipped version" is only reconstructable because
-each run remembers why it exists.
+Every run carries an `origin` describing what caused it — `cause` is one of `member`, `schedule`,
+`event`, `run`, `ci` or `api`, with the actor and the schedule, event or parent run behind it. A trend
+over time is only reconstructable because each run remembers why it exists.
 
 ## What one run separates
 
@@ -73,7 +76,7 @@ A **Backend** answers *where does this job run* — a Nomad cluster, a Kubernete
 POST /runs
     │
     ▼
-Runtime            local · nomad · k8s · self:<id>
+Runtime            local · nomad · k8s · self:<runner-id>
     │
     ▼
 Backend   ── WHERE ──▶  dispatches a job-runner job
@@ -89,29 +92,33 @@ A Backend never runs the harness itself. It dispatches the `@everdict/job-runner
 job's result off a stdout sentinel. Isolation is the orchestrator's — a Kubernetes `runtimeClassName`,
 a Nomad task driver — not something Everdict re-implements badly.
 
-Which backend a run lands on comes from the runtime you registered:
+Which backend a run lands on comes from the `runtime` you name, and naming one is required — a submit
+without it is a `400`:
 
 ```json
 { "harness": { "id": "codex", "version": "latest" },
-  "runtime": "self:rnr_8812",
+  "runtime": "self:<runner-id>",
   "case": { "…": "…" } }
 ```
 
-`self:<id>` sends it to your own machine, where your own login pays for the tokens.
+`self:<runner-id>` sends it to your own machine, where your own login pays for the tokens.
 
 ## Evidence, not an exit code
 
 A run's value is what it leaves behind:
 
-- **Trace** — the normalized `TraceEvent` stream plus OTel spans. Every number a judge produced can be
-  walked back to the events it read.
-- **Snapshot** — what changed in the world. For a repo environment that is a git diff, not a copy, so a
-  grader can ask what the agent actually touched.
+- **Trace** — the normalized `TraceEvent` stream. Every number a judge produced can be walked back to
+  the events it read.
+- **Snapshot** — what changed in the world. For a repo environment that is a git diff and the changed
+  files, not a copy, so a grader can ask what the agent actually touched.
 - **Cost and tokens** — from the harness's own trace, never estimated.
-- **Failure classification** — a closed vocabulary (OOM, timeout, infra). Note what is *not* in it:
-  "flaky" is a judgment, and the record stores facts.
+- **Failure classification** — a closed vocabulary: the `stage` that failed (`dispatch`, `install`,
+  `run`, `collect`, `grade`) and whose fault it was (`infra`, `config`, `harness`, `agent`), plus
+  whether an as-is retry has a chance. Note what is *not* in it: "flaky" is a judgment, and the record
+  stores facts.
 
-Heavy media is offloaded to an artifact store and referenced, so the record stays small enough to list.
+Heavy media — a full page DOM, a screenshot — is offloaded to an artifact store and referenced, so the
+record stays small enough to list.
 
 :::tip
 Watch a long run while it runs rather than waiting for it — the live trace shows tool calls as they

@@ -2,371 +2,221 @@
 kind: wiki
 title: "Workspace-scoped integrations (GitHub App + Mattermost) — replacing personal Connected accounts"
 status: current
-updated: 2026-08-11
-anchors: [apps/api/src/infrastructure/oauth/github-app.ts, packages/environments/src/repo.ts, packages/application-control/src/execution/execute-case.ts, apps/agent/src/action-policy.ts]
+updated: 2026-09-15
+anchors: [apps/api/src/api/github-app/github-app.routes.ts, apps/api/src/api/mattermost/mattermost.routes.ts, packages/application-control/src/github-app/github-app-service.ts, packages/application-control/src/mattermost/mattermost-service.ts, packages/application-control/src/mattermost/mattermost-command-service.ts]
 ---
 # Workspace-scoped integrations (GitHub App + Mattermost) — replacing personal Connected accounts
 
-> **Status:** design (S0). SSOT for the migration from **personal Connected accounts** to
-> **workspace-owned integrations**. Supersedes the outbound-OAuth connection model in
-> `docs/architecture/workspace-scoped-integrations.md` for GitHub/GHE/Mattermost (that doc is retired in S6).
+GitHub (github.com and GitHub Enterprise) and Mattermost are **workspace-owned integrations**. They replaced
+the personal Connected accounts feature, which has been removed.
 
 ## Why
 
-Personal Connected accounts connect a member's github.com account via a GitHub **OAuth App**. The
-`repo` scope is **all-or-nothing** — it grants the token access to *every* public+private repo the
-member can reach. There is no per-repository selection at the GitHub grant level, and the token is
-tied to one person's login (leaves with them, bills to them, invisible to teammates).
+Personal Connected accounts connected a member's github.com account through a GitHub **OAuth App**. Its
+`repo` scope is **all-or-nothing**: the token reaches *every* public and private repository the member can
+reach, GitHub offers no per-repository selection at grant time, and the token belongs to one person's login
+(it leaves with them, and teammates cannot see it).
 
 The product needs:
 
 1. **Per-repository access** enforced *by GitHub*, not by app-level filtering.
-2. **Team-owned** repo access — decoupled from any single member's personal login.
-3. **Self-serve** setup from the web (no operator involvement per workspace).
+2. **Team-owned** repository access, decoupled from any single member's login.
+3. **Self-serve** setup from the web, with no operator involvement per workspace.
 
-Only a GitHub **App** (installation model) gives (1) and (2): an org owner installs the app and picks
-repos; GitHub issues short-lived **installation tokens** scoped to exactly those repos. So we move
-*all* GitHub/GHE repo access to workspace-owned GitHub App installations, and re-scope Mattermost
-notifications to a workspace-level self-serve credential — then delete the personal connection
-feature entirely.
+Only a GitHub **App** (the installation model) gives (1) and (2): an org owner installs the App and picks
+repositories, and GitHub issues short-lived **installation tokens** scoped to exactly those repositories.
 
-## Decisions (locked)
+## Decisions
 
-- **Scope:** GitHub App installations are **workspace-owned** (org install), not personal.
-- **GHE parity:** GitHub Enterprise works **identically to github.com** — one operator-**env** App
-  (`GITHUB_ENTERPRISE_APP_*`) for the whole deployment, install-only (no per-workspace App
-  registration). The admin just clicks *Install → pick repos*, exactly like github.com. The only
-  difference is *which env block holds the App creds* (see the table below), not the UX. (This
-  supersedes the earlier per-workspace GHE registration design — the `githubApp.registrations` field
-  and its routes/MCP tools/web form were removed.)
-- **Mattermost (full two-way):** the corporate Mattermost **server URL is an operator env
-  (`MATTERMOST_HOST`)**, shared across the deployment — the self-hosted operator registers it once,
-  so workspaces never input a host (and no surface ever *shows* it: it is deployment infrastructure,
-  not workspace configuration — it only decides whether the integration is available at all). A
-  workspace admin then registers only the **bot token** (+ channel + slash-command token, all
-  SecretStore name-refs) → **outbound** notifications *and* **inbound** slash commands + interactive
-  buttons. **Registration is verified against the live server (strict):** the bot token must
-  authenticate (`/api/v4/users/me`) and, when a channel is given, the channel must be accessible
-  (`/api/v4/channels/{id}`) — a failed connection blocks the save (there is also an explicit
-  `POST /workspace/mattermost/probe`). This is Everdict's **first inbound integration surface**
-  (verified, workspace-scoped) — a deliberate, contained exception to the "no inbound webhooks"
-  stance (which still holds for GitHub App push triggers).
-- **Mattermost is MULTI-connection** (like GitHub's multiple installations): a workspace registers
-  **one connection per team/purpose**, keyed by `name` (bot token + channel + optional slash-command
-  token). What varies per connection is the *bot and channel*, never the host. Consequences, all
-  keyed off the same normalized list (`mattermostConnections()` in `@everdict/domain` — plural field
-  ∪ the legacy singular registration, so every consumer sees one list):
-  - **Outbound fans out**: a completion/regression fact posts to EVERY connection that has a
-    `defaultChannelId`, each through its own bot token. Registering a connection with a channel IS
-    the subscription — there is no separate "primary" flag. One connection's missing secret or MM
-    outage never silences the others (per-connection best-effort, as before).
-  - **Inbound accepts any connection's token**: the request carries only the token, so verification
-    constant-time-compares it against every connection's `commandTokenSecretName` value (fail-closed,
-    and every candidate is compared so the work doesn't depend on which one matched).
-  - **Agent actions select one**: `post_mattermost_message` / `list_mattermost_channels` /
-    `get_mattermost_channel_posts` take an optional `connection` name — omitted = the first
-    registered one; an unknown name is a 404 (never a silent post to the wrong channel).
-- **Remove personal Connected accounts entirely** (github, github-enterprise, mattermost personal
-  connections + the applications roster + the OAuth `integrations`). Done **last**, after the
-  replacements are live, so no window breaks repo-clone or notifications.
-- **No inbound *GitHub* webhooks.** For GitHub we remain the *client* (mint outbound installation
-  tokens); GitHub App push-triggered eval stays deferred (`github-actions-trigger.md`). **Mattermost
-  is the deliberate exception** — full two-way needs a verified inbound surface (see the Mattermost
-  section below).
+- **Installations are workspace-owned** (org install), never personal.
+- **GitHub Enterprise works exactly like github.com.** One operator-**env** App per host for the whole
+  deployment; a workspace admin only installs and picks repositories. The earlier per-workspace GHE App
+  registration (`githubApp.registrations`, its routes, MCP tools and web form) was removed.
+- **The Mattermost server URL is operator env (`MATTERMOST_HOST`)**, shared by the deployment. A workspace
+  never enters a host, and the web never renders it — it only decides whether the integration is available.
+  A workspace admin registers the **bot token**, channel and optional slash-command token, all as SecretStore
+  name-refs. **Registration is verified against the live server** (`MattermostClient.verify`: the bot token
+  must pass `/api/v4/users/me`, and a given channel must pass `/api/v4/channels/{id}`); a failed check blocks
+  the save. `POST /workspace/mattermost/probe` runs the same check without saving.
+- **Mattermost is multi-connection.** A workspace registers one connection per team or purpose, keyed by
+  `name`. Every consumer reads one normalized list, `mattermostConnections()` in `@everdict/domain` (the plural
+  field plus the legacy singular registration lifted in as `name: "default"`):
+  - **Outbound fans out** to every connection that has a `defaultChannelId`, each through its own bot token.
+    A channel on a connection IS the subscription. One connection's missing secret or outage never silences
+    the others.
+  - **Inbound accepts any connection's token.** The request carries only a token, so verification
+    constant-time-compares it against every connection's `commandTokenSecretName` value, comparing all of
+    them regardless of which one matched. Fail-closed.
+  - **Agent actions select one.** `post_mattermost_message` / `list_mattermost_channels` /
+    `get_mattermost_channel_posts` take an optional `connection` name; omitted means the first registered
+    one, and an unknown name is a 404 rather than a post to the wrong channel.
+- **Personal Connected accounts are gone**: the services, routes, MCP tools, web pages, the
+  `GITHUB_OAUTH_CLIENT_*` env, and the `everdict_connections` table (dropped by
+  `packages/db/migrations/0046_drop_connections.sql`). Residue: `env.source.connectionId` still parses, and
+  `repoTokenFor` is still an optional port on the run and scorecard services, but the API binds nothing to it.
+- **No inbound GitHub webhooks.** For GitHub, Everdict is the *client* that mints outbound installation
+  tokens; webhook-fired evaluation stays deferred ([github-actions-trigger.md](github-actions-trigger.md)).
+  **Mattermost is the deliberate exception**: two-way chat needs a verified inbound surface.
 
 ## App registration: two homes (both env), one UX
-
-A GitHub App is registered **per GitHub host**, and **both hosts are operator env** — one App per host
-for the whole deployment. There is **no per-workspace App registration**; the admin only installs.
 
 | Host | App credentials (App ID + slug + PEM private key), operator env | PEM encoding |
 |---|---|---|
 | **github.com** | `GITHUB_APP_ID`, `GITHUB_APP_SLUG`, `GITHUB_APP_PRIVATE_KEY` | base64(PEM) or raw PEM (`\n` restored) |
 | **GitHub Enterprise `https://ghe.host`** | `GITHUB_ENTERPRISE_HOST`, `GITHUB_ENTERPRISE_APP_ID`, `GITHUB_ENTERPRISE_APP_SLUG`, `GITHUB_ENTERPRISE_APP_PRIVATE_KEY` | base64(PEM) or raw PEM |
 
-Credential resolution (`GithubAppService.resolveAppCreds`/`resolveInstallTarget`) keys off the install
-host: no host → the github.com env App; a host matching `GITHUB_ENTERPRISE_HOST` (normalized `sameHost`)
-→ the enterprise env App; any other host → `BadRequest`. The **installation** (the thing that grants
-repo access) is workspace-owned in both cases. From the member's perspective the flow is identical:
-*install on org → pick repos → workspace can clone them.* The status view exposes `providers:
-{ githubCom: boolean, enterprise?: { host } }` so the web renders one install button per configured host.
+Credential resolution (`GithubAppService.resolveAppCreds` / `resolveInstallTarget`) keys off the install
+host: no host means the github.com App, a host matching `GITHUB_ENTERPRISE_HOST` (normalized `sameHost`)
+means the enterprise App, and any other host is a `BadRequest`. The status view exposes
+`providers: { githubCom: boolean, enterprise?: { host } }` so the web renders one install button per
+configured host.
 
-## Target data model
+## Data model
 
-Everything non-secret lives in `WorkspaceSettings` JSONB (like `integrations` and `ci.links` today);
-the only secret (GHE App private key, Mattermost webhook URL) is a **SecretStore name-ref**.
+Everything is non-secret JSONB in `WorkspaceSettings`
+(`packages/contracts/src/records/workspace-settings.ts`):
 
 ```ts
-// packages/contracts/src/records/workspace-settings.ts — WorkspaceSettingsSchema additions
 githubApp: z.object({
-  // Both github.com AND GitHub Enterprise App creds are operator env → NOT stored here (no registrations field).
-  // Workspace-owned installations (github.com + GHE). One per installed org.
   installations: z.array(z.object({
-    host: z.string().url().optional(),      // omitted = github.com; set = the enterprise host (GITHUB_ENTERPRISE_HOST)
-    installationId: z.number().int(),       // GitHub installation id
-    account: z.string().min(1),             // org/user login the app is installed on
-    connectedBy: z.string(),                // audit — principal.subject of the admin who linked
+    host: z.string().url().optional(),   // unset = github.com
+    installationId: z.number().int(),
+    account: z.string().min(1),          // installed org/user login
+    connectedBy: z.string(),             // audit — the admin who linked it
     connectedAt: z.string(),
   })).default([]),
 }).optional(),
 
-// mattermost: the server URL is operator env (MATTERMOST_HOST) → NOT stored here (host is legacy-optional).
-// A workspace stores only the bot/channel/command name-refs; the host is sourced from env at read/post time.
-// The SINGULAR field is legacy read-compat (superseded by mattermostConnections): a reader lifts it in as
-// name="default" and the next write persists the plural list + nulls this one (same shape as imageRegistry).
+// Legacy read-compat: lifted in as name="default"; a write persists the plural list and clears this.
 mattermost: z.object({
-  host: z.string().url().optional(),             // legacy/optional — no longer written (env-sourced)
-  botTokenSecretName: z.string().min(1),         // SecretStore key — bot access token (outbound posts, threads, DMs, interactive)
-  commandTokenSecretName: z.string().optional(), // SecretStore key — slash-command/action token (inbound verification)
-  defaultChannelId: z.string().optional(),       // default notify channel
-  inboundToken: z.string().optional(),           // vestigial (ws-in-URL routing superseded it)
+  host: z.string().url().optional(),     // no longer written (env-sourced)
+  botTokenSecretName: z.string().min(1),
+  defaultChannelId: z.string().min(1).optional(),
+  commandTokenSecretName: z.string().min(1).optional(),
+  inboundToken: z.string().optional(),   // vestigial — ws-in-URL routing replaced it
 }).nullable().optional(),
 
-// The canonical list — one connection per team/purpose, upserted by name. Notifications fan out to every
-// entry with a defaultChannelId; inbound verification accepts any entry's commandTokenSecretName.
 mattermostConnections: z.array(z.object({
-  name: z.string().min(1),                       // connection name (reference/upsert key, e.g. "team-alerts")
+  name: z.string().min(1),               // upsert key, e.g. "team-alerts"
   botTokenSecretName: z.string().min(1),
   defaultChannelId: z.string().min(1).optional(),
   commandTokenSecretName: z.string().min(1).optional(),
 })).optional(),
 ```
 
-Installation records hold **no long-lived token** — installation tokens are minted on demand from the
-operator-env App private key (github.com or enterprise) and are short-lived (~1h). So no new encrypted
-store is needed; JSONB + SecretStore name-refs suffice. `everdict_connections` is **dropped** in S6.
-Removing `githubApp.registrations` / stored `mattermost.host` needs no migration — the JSONB fields are
-simply no longer read/written (old rows parse and are rewritten without them).
+No token is stored. Installation tokens are minted on demand from the operator-env App private key and live
+about an hour; Mattermost tokens are SecretStore name-refs whose values are never returned by any surface.
 
-## Token minting (the core)
+## Token minting
 
-`apps/api/src/infrastructure/oauth/github-app.ts` (new), host-aware like `github.ts`:
+`apps/api/src/infrastructure/oauth/github-app.ts` signs the **App JWT** (`{ iss: appId, iat, exp <= 10m }`,
+RS256) and exchanges it at `POST {apiBase}/app/installations/{id}/access_tokens`, narrowed by `repositories`
+and `permissions`. `GithubAppService` resolves the workspace installation by host and owner, then:
 
-1. **App JWT** — sign `{ iss: appId, iat, exp<=10m }` with RS256 using the App private key.
-2. **Installation token** — `POST {apiBase}/app/installations/{id}/access_tokens` with
-   `{ repositories: [name], permissions: { contents: "read" } }` → GitHub returns a token **restricted
-   to those repos + permissions**, expiring in ~1h.
-3. `installationTokenForRepo(workspace, { host?, owner, repo })` resolves the workspace installation
-   for that host+owner, loads the App private key from operator env (github.com or, when the host
-   matches `GITHUB_ENTERPRISE_HOST`, the enterprise App), mints a token scoped to `owner/repo`, returns it.
-
-This is the **workspace analog of `repoTokenFor`** — resolved by **workspace** (not submitter
-subject), so any member's run in the workspace uses it. The transient plumbing is unchanged: the
-token is carried as `CaseJob.repoToken` (never persisted), injected into git via `http.extraheader`
-(`packages/environments/src/repo.ts`, already implemented).
-
-## Repo-source wiring (S3)
-
-Today `env.source = { git, ref, connectionId? }` where `connectionId` → personal connection resolved
-against the submitter. New: reference the **workspace installation** instead. The resolver keys off
-**workspace**, so it works for any member and needs no personal login.
-
-```ts
-// env.source gains a workspace-installation reference (discriminated from personal connectionId,
-// which is removed in S6). Resolution: parse owner/name from `git` → installationTokenForRepo(workspace,…).
-env.source = { git: "https://github.com/acme/api", ref: "main", via: "workspace-github-app" }
-```
-
-`packages/application-control/src/execution/execute-case.ts` gains one branch: if the source is a workspace-github-app source, mint
-an installation token (by workspace) instead of pulling a personal connection token. The CI-link repo
-picker (`ci-link-service.ts listRepos`) switches from the personal token to the installation's
-`GET {apiBase}/installation/repositories`.
+- `tokenForRepo(workspace, gitUrl)` — a `contents: read` token for one repository. The run and scorecard paths
+  bind it as `installationTokenFor`, and `packages/application-control/src/execution/execute-case.ts` calls it
+  for a private `env.source.git` seed. It resolves by **workspace**, so any member's run can use it. The token
+  travels as the transient `CaseJob.repoToken` (never persisted) and reaches git through a URL-scoped
+  `http.<url>.extraheader` (`packages/contracts/src/execution/git-auth.ts`).
+- `tokenForRepository(workspace, "owner/name", permissions, host?)` — write-capable tokens (setup PRs,
+  commits, issues). Host-strict, so the same org name on github.com and a GHE never mints across hosts.
+- `runnerRegistrationToken(workspace, target, host?)` — an `administration: write` token for GitHub Actions
+  self-hosted runner registration.
+- `listRepos(workspace)` — every installation's `GET /installation/repositories`, the repository picker.
 
 ## Auth / authz
 
-- **Install / unlink / set-mattermost / probe-mattermost** = admin (`settings:write`), same gate as
-  today's `integrations` (workspace app config). Reads = `members:read` / `settings:read`. (There is no
-  GHE-app-registration route anymore — both GitHub hosts are operator env.)
-- No new `Authenticator` — we are the outbound client. (Contrast: GitHub Actions OIDC federation in
-  `github-actions-trigger.md` stays as-is.)
-- **Mattermost registration = admin (`settings:write`).** "Self-serve from the web" is satisfied by
-  admin-in-web (no operator/ops ticket). Full two-way inherently requires MM-side admin actions
-  (create bot, register the `/everdict` slash command), so a lighter member-level gate wouldn't help —
-  resolved to admin.
-- **Posting a message = member (`mattermost:post`).** Registration is admin governance; *using* the
-  registered integration (posting to the channel) is a member action — honestly named as its own action
-  (like `images:push`) rather than overloading admin-only `settings:write`. This is what lets a member's
-  conversational agent notify the team by default.
-- **Using the GitHub App = member, on BOTH halves (`github:read` + `github:write`).** Same split as
-  Mattermost: installing the App and picking its repos is admin governance (`settings:write`), and every
-  repository the installation covers is then readable *and* writable by a member — which is what a
-  workspace means when it says "we connected GitHub".
-  The read half was `settings:read` (**admin-only**) while `github:write` was already member+, so a member —
-  and the conversational agent acting as one — could open a pull request against a repository it was
-  forbidden to read one file of, and the shipped `scorecard-fix-pr` skill 403'd at its "locate the code"
-  step. `github:read` covers the repo picker (`GET /workspace/github-app/repos`, `list_github_app_repos`),
-  `get_github_file`, `list_github_repo_files`, and `list_github_issues`; it rides the **read** api-key scope
-  (reading a repository is reading, not governance). Installation status itself — installation ids, the
-  callback URL, `GET /workspace/github-app` — stays `settings:read`: that is the App's administration, not
-  its use. The repository set is still the fence: a token is minted per repo against the owner's
-  installation, so a repo nobody selected at install time is unreachable to reads and writes alike.
-- **The surface on an installed repository, end to end.** Read (`github:read`): `list_github_app_repos` (which
-  repos) → `list_github_repo_files` (what is in one) → `get_github_file` (one file) · `list_github_issues` (what
-  is open) → `get_github_issue` (one item WITH its comment thread) · `get_github_pull_request_changes` (what a PR
-  changes, per file, with GitHub's diff). Write (`github:write`): `create_github_issue` ·
-  `comment_on_github_issue` · `set_github_issue_state` (close/reopen — STATE ONLY, the author's title and body
-  are never rewritten) · `open_github_pr` (propose) · `commit_github_files` (land it directly on a branch) ·
-  `sandbox_git_push` (publish a session's branch).
-  **`open_github_pr` proposes, `commit_github_files` lands.** They are siblings, not a flag on one tool: a PR is
-  a change somebody still has to accept, while a direct commit is the change. That difference is answered in the
-  agent's consent gate rather than in authorization — `commit_github_files` is a GUARDED action
-  (`apps/agent/src/action-policy.ts`), so it keeps asking the member even in `auto` mode, exactly like
-  `sandbox_git_push`, while `open_github_pr` does not.
-- **Every bounded read reports its bound.** `truncated` on the tree and the PR diff, `commentsTruncated` on an
-  issue thread — because a partial answer taken for a complete one is how an agent concludes a file does not
-  exist, or reviews half a diff and calls it reviewed. `commitFiles` likewise returns the branch's resulting
-  `headSha`, read AFTER the writes: a write nobody can name afterwards is a write nobody can verify.
-- **Reading a repo starts with `list_github_repo_files`.** `get_github_file` needs an exact path, so a
-  surface that only offers it is readable only by someone who already knows the repository. The tree read
-  (`GithubRepoTreeReader`, shared with the product wizard's discovery) reports its own bound: `truncated`
-  is true when GitHub cut the tree short **or** when the caller's `limit` dropped matches, because a partial
-  listing mistaken for the repository is how an agent concludes a file does not exist.
+- **Install, unlink, register/remove Mattermost, probe** = admin (`settings:write`). Installation status
+  (`GET /workspace/github-app`: installation ids, the callback URL) and `GET /workspace/mattermost` =
+  `settings:read`. No new `Authenticator`: for GitHub, Everdict is the outbound client.
+- **Posting a message = member (`mattermost:post`).** Registration is governance; *using* the registered
+  integration is a member action, named as its own action rather than overloading admin-only `settings:write`.
+- **Using the GitHub App = member, on both halves (`github:read` + `github:write`).** Installing the App and
+  picking its repositories is governance; every repository the installation covers is then readable and
+  writable by a member. The read half used to be `settings:read` (admin-only) while `github:write` was
+  already member-level, so a member — and the agent acting as one — could open a pull request against a
+  repository it could not read one file of. `github:read` rides the **read** API-key scope. The repository
+  set is still the fence: a token is minted per repository against the owner's installation, so a repository
+  nobody selected at install time is unreachable to reads and writes alike.
+- **The surface on an installed repository.** Read (`github:read`): `list_github_app_repos`
+  (`GET /workspace/github-app/repos`) → `list_github_repo_files` → `get_github_file` · `list_github_issues` →
+  `get_github_issue` (with its comment thread) · `get_github_pull_request_changes`. Write (`github:write`):
+  `create_github_issue` · `comment_on_github_issue` · `set_github_issue_state` (close/reopen — state only,
+  never the author's title or body) · `open_github_pr` · `commit_github_files` · `sandbox_git_push`.
+- **`open_github_pr` proposes, `commit_github_files` lands.** They are siblings, not a flag on one tool: a PR
+  is a change somebody still has to accept, a direct commit is the change. The difference is answered in the
+  agent's consent gate rather than in authorization: `commit_github_files` and `sandbox_git_push` are GUARDED
+  actions (`apps/agent/src/action-policy.ts`) that keep asking the member even in `auto` mode, while
+  `open_github_pr` is not.
+- **Every bounded read reports its bound.** `truncated` on the tree listing and the PR diff,
+  `commentsTruncated` on an issue thread — a partial answer taken for a complete one is how an agent concludes
+  a file does not exist, or reviews half a diff. The tree read (`GithubRepoTreeReader`) reports `truncated`
+  when GitHub cut the tree short **or** when the caller's `limit` dropped matches. `commitFiles` returns the
+  branch's resulting `headSha`, read after the writes.
 
-## Install / link flow (S2) — mirrors the connections callback
+## Install / link flow
 
-- `POST /workspace/github-app/install/start` → `{ installUrl }` =
-  `https://github.com/apps/{slug}/installations/new?state={s}` (github.com) or the GHE equivalent.
-  Admin clicks → GitHub install page → **picks repos** → GitHub redirects to our callback.
-- public `GET /workspace/github-app/callback?installation_id&setup_action&state` → verify state →
-  append an installation record to the workspace → 302 to `/{ws}/settings?tab=integrations`.
-- `GET /workspace/github-app` → installations + `providers` (github.com / enterprise, both env) + each
-  installation's selected repos (via installation token → `/installation/repositories`). No secrets returned.
-- `DELETE /workspace/github-app/installations/{id}` → forget the record (actual uninstall is on GitHub).
-  (No registration routes — both GitHub hosts are operator env.)
-- **BFF↔MCP parity:** every route has an MCP tool twin (`*_workspace_github_app`), one shared service
-  core (`packages/application-control` `GithubAppService`, thin `apps/api/src/api/github-app/*` transports).
+- `POST /workspace/github-app/install/start` (`start_workspace_github_app_install`) → `{ installUrl }` for
+  github.com or the configured GHE. The admin installs on GitHub and **picks repositories**.
+- Public `GET /workspace/github-app/callback?installation_id&setup_action&state` → verify `state` → append the
+  installation record → redirect to `/{ws}/settings?tab=integrations`.
+- `GET /workspace/github-app` (`list_workspace_github_app`) → installations with each one's selected
+  repositories (a per-installation soft failure shows `reposError`), `providers`, and the callback URL to
+  register as the App's Setup URL. No secrets.
+- `DELETE /workspace/github-app/installations/:id` (`unlink_workspace_github_app_installation`) → forget the
+  record; the actual uninstall happens on GitHub.
 
-## Mattermost integration (full two-way)
+Routes are thin transports (`apps/api/src/api/github-app/`) over one service core
+(`packages/application-control/src/github-app/github-app-service.ts`).
 
-A corporate Mattermost whose **server URL is operator env (`MATTERMOST_HOST`)**, shared across the
-deployment; a workspace admin registers only the workspace's bot + channel. Mattermost is bidirectional,
-so it needs both outbound bot calls and **inbound endpoints**.
+## Mattermost integration (two-way)
 
-**Registration (admin, `settings:write`, self-serve web form).** The server URL is never rendered (env — see the
-decision above). The admin names the connection and picks its **bot access token** (SecretStore name-ref) +
-channel + (for inbound) a **slash-command token**; the form is an upsert keyed by that name, so a workspace
-builds a LIST of connections (`PUT /workspace/mattermost` with `name`, `DELETE /workspace/mattermost/:name`,
-`GET` returning `{ host?, connections[] }`). **Registration is strict — verified against the live server before saving**
-(`MattermostClient.verify`: `/api/v4/users/me` for the token + `/api/v4/channels/{id}` for the channel; a
-failed connection is a `BadRequest`). There is also an explicit `POST /workspace/mattermost/probe`
-(`probe_workspace_mattermost`) that returns a classified `{ reachable, reason?, botUsername?, channelName? }`
-— the web's "Test connection" gates Save on a reachable probe. On success Everdict **shows the admin the
-URLs/commands to register on the MM side**:
-- Slash command `/everdict` → `POST {API_PUBLIC_URL}/integrations/mattermost/command?t={inboundToken}`
-- Interactive actions → `{API_PUBLIC_URL}/integrations/mattermost/action?t={inboundToken}`
+**Registration** (`settings:write`, web form). `PUT /workspace/mattermost` upserts a connection by `name`
+(omitted = `"default"`), `DELETE /workspace/mattermost/:name` removes one, and `GET /workspace/mattermost`
+returns `{ host?, connections[] }` — `host` present only means the operator configured a server. MCP twins:
+`get_workspace_mattermost`, `set_workspace_mattermost`, `remove_workspace_mattermost`,
+`probe_workspace_mattermost`. The probe returns a classified `{ reachable, reason?, … }` and the web's "Test
+connection" gates Save on it. A connection with a `commandTokenSecretName` exposes the URLs to register on the
+Mattermost side:
 
-`inboundToken` is an opaque Everdict-minted value embedded in those URLs; every inbound request carries
-it → **routes the request to the right workspace** (multi-tenant inbound with no user session).
+- Slash command `/everdict` → `POST {API_PUBLIC_URL}/integrations/mattermost/command?ws=<workspace>`
+- Interactive actions → `{API_PUBLIC_URL}/integrations/mattermost/action?ws=<workspace>`
 
-**Outbound (Everdict → MM), bot token + REST API** (`/api/v4/posts`):
-- Completion / regression / CI / digest notifications (thread-aware), fanned out to every connection that has
-  a channel — each posted with that connection's own bot token, and its Rerun button carries that
-  connection's inbound token.
-- Interactive messages: message `attachments[].actions` buttons (Re-run / View scorecard / Compare /
-  Acknowledge).
-- **Agent-callable post** (`POST /workspace/mattermost/messages` + MCP `post_mattermost_message`, over
-  `MattermostService.postMessage`): the conversational agent posts an arbitrary message to a connection's
-  channel as its bot (e.g. "post this regression summary to the team") — `connection` selects which one,
-  omitted = the first registered. Unlike the
-  fire-and-forget notification path, failures are **surfaced** (config gaps → `BadRequest`; a transport/non-2xx
-  from MM → the adapter's remapped `UpstreamError`) so the agent (and its HITL approver) learns the post's fate.
-  Gated `mattermost:post` (**member+**, not admin) — using the integration is a member's job. The agent gets this
-  tool **by default** (see `agent-conversations.md` P8: it is one of the curated `INTEGRATION_ACTIONS`, bridged
-  HITL-gated).
+The workspace slug in the URL routes the request (it is not a secret); the token verification above
+authenticates it. This replaced an Everdict-minted `inboundToken`, which is why that schema field is vestigial.
 
-**Inbound (MM → Everdict), two verified public endpoints:**
-- `POST /integrations/mattermost/command` — `/everdict run|leaderboard|status …` → parse → dispatch →
-  respond (ephemeral or in-channel/threaded).
-- `POST /integrations/mattermost/action` — button click → perform action → update the message.
-- **Verification:** each request carries MM's `token` field → constant-time compare against EVERY connection's
-  `commandTokenSecretName` value (the slash command may be installed on any of them, and the request names
-  none); `?ws=` selects the workspace. Fail-closed.
+**Outbound (Everdict → Mattermost)**, bot token + REST API (`/api/v4/posts`):
 
-**AuthZ for chat-triggered actions.** Inbound requests have no OIDC user. Model it like CI: a
-workspace-scoped **`chat` principal** (`via: mattermost`, roles limited to `scorecards:run/read` +
-reads — never admin), added as a composed `Authenticator` branch keyed off the verified inbound
-token. **Optional later:** map the MM user (by email) → an Everdict identity so runs are attributed to
-the real person; v1 uses the service principal.
+- Completion posts come from one event-log consumer, `mm:completions`
+  (`packages/application-control/src/notification/mattermost-consumer.ts`): run completed/failed, scorecard
+  completed/failed/cancelled, report completed, and project/initiative status updates, fanned out to every
+  connection with a channel. The channel is a mirror, not a ledger: a transport failure skips the post.
+- **Rerun button.** A scorecard post carries an interactive **Rerun** action when that connection has an
+  inbound token and `API_PUBLIC_URL` is set. The button posts back to `/integrations/mattermost/action` with
+  the embedded context (the verification token plus dataset and harness), and the action handler re-fires
+  dataset × harness. Without either precondition the post stays a plain message — no dead buttons.
+- **Agent-callable post.** `POST /workspace/mattermost/messages` + MCP `post_mattermost_message` (over
+  `MattermostService.postMessage`) post an arbitrary message to a connection's channel as its bot. Unlike the
+  notification path, failures are **surfaced** (config gaps → `BadRequest`; a transport or non-2xx failure →
+  the adapter's remapped `UpstreamError`) so the agent and its approver learn the post's fate. The
+  conversational agent bridges the whole control-plane MCP catalog, so this tool is on its default surface
+  ([agent-conversations.md](agent-conversations.md)).
 
-## Slice plan (replace-first, remove-last)
+**Inbound (Mattermost → Everdict)**, two public endpoints verified by
+`MattermostCommandService` (`packages/application-control/src/mattermost/mattermost-command-service.ts`):
 
-Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Quality gate
-(format/lint/typecheck/test/build) green per slice.
+- `POST /integrations/mattermost/command` — form-urlencoded slash command: `/everdict run <harness> <dataset>`
+  (submits a scorecard with `submittedBy: mattermost:<user>`) · `leaderboard <dataset>` · `status` · `help`.
+- `POST /integrations/mattermost/action` — a button click; `rerun` is the one action handled.
+- **Verification**: missing `?ws=`, no inbound-configured connection, a missing token or a mismatch all fail
+  (400 for the missing query, 403 otherwise).
 
-- **S0 — this doc.**
-- **S1 — App core (no UI):** operator env (`GITHUB_APP_ID/PRIVATE_KEY/SLUG`) + `github-app.ts`
-  (App JWT → installation token, host-aware, repo-restricted) + `WorkspaceSettings.githubApp` schema
-  + unit tests (mocked GitHub). Proof: mint a repo-scoped installation token.
-- **S2 — install/link API + MCP + authz:** start/callback/list/unlink + GHE registration. Settings →
-  Integrations deep-link target.
-- **S3 — repo-source wiring:** `env.source` workspace-github-app source resolved by workspace in
-  `execute-case.ts`; CI-link picker → `/installation/repositories`. **Live private-repo clone verify**
-  (github.com + one GHE if reachable).
-- **S4 — Web UI:** Settings → Integrations "GitHub App (org)" section (install / registrations / selected
-  repos / unlink) + repo-source picker offering workspace installations.
-- **S5 — Mattermost M1 (outbound bot + registration):** workspace registration (`mattermost` block,
-  host + bot token, self-serve web form) + switch the completion/regression notifier from
-  personal-token post to **bot REST API** (`/api/v4/posts`, thread-aware). Replaces the old
-  `notify.connectionId`. **Notifications keep working throughout.**
-- **S6 — Clean-migrate the personal-connection consumers to the App, then remove (last).** Removing
-  personal connections would break two shipped features that use a personal GitHub token
-  (`ci-link-service`: repo picker + setup-PR + runner registration token). So migrate first, then
-  delete. Sub-slices:
-  - **S6a — GitHub App capability foundation (additive):** extend `GithubAppService` with
-    `listRepos(workspace)` (`GET /installation/repositories` across installations),
-    `tokenForRepository(workspace, "owner/name", permissions)` (configurable perms — contents:write +
-    pull_requests:write for setup-PR), and `runnerRegistrationToken(workspace, target)` (installation
-    token w/ administration → `…/actions/runners/registration-token`). App permissions widen
-    accordingly. Tests; no rewire yet.
-  - **S6b — Rewire `ci-link-service` + runner self-registration (API) to the App:** picker/setup-PR/
-    runner token resolve by **workspace installation** (drop `owner, connectionId`); routes/MCP drop
-    the connection param (`GET /workspace/github-app/repos` picker, `open_ci_setup_pr`,
-    `github_install_workspace_runner`). The **web** ci-links picker + workspace-runners rewire folds
-    into S6c (same surgery as removing the connection concept from the web; web still builds green
-    between S6b↔S6c — the CI repo picker just 404s until S6c).
-  - **S6c — Remove personal Connected accounts:** delete `ConnectionService`/`ConnectionStore`/
-  OAuth `integrations`/routes (`/connections*`, `/workspace/applications`, `/workspace/integrations`)/
-  MCP tools/web `manage-connections` + `entities/connection` + account "Connected accounts" tab +
-  applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `everdict_connections` **drop
-  migration** (expand→contract; preflight note). Retire `docs/architecture/workspace-scoped-integrations.md`. Keep
-  `API_PUBLIC_URL`/`WEB_BASE_URL` (the App install callback + Mattermost inbound URLs use them).
-- **S7–S8 — Mattermost inbound (slash commands + button actions) — SHIPPED.** Public routes
-  `POST /integrations/mattermost/{command,action}` — workspace routed by `?ws=<slug>` (slug not
-  secret), authenticated by **constant-time compare** of the request `token` against the workspace's
-  `commandTokenSecretName` value (fail-closed: missing config / missing token / mismatch → 403).
-  `MattermostCommandService` parses `/everdict run <harness> <dataset>` (submits a scorecard,
-  `submittedBy=mattermost:<user>`) · `/everdict leaderboard <dataset>` · `/everdict status` · `help`; the
-  action endpoint handles a `rerun` button context. Registration gains `commandTokenSecretName`
-  (API + MCP `set_workspace_mattermost` + web form); the view exposes the inbound URLs for the admin
-  to register on the MM side. form-urlencoded body parser added for MM slash commands.
-  - Chose ws-in-URL routing over a separate `inboundToken` (simpler, still token-verified); the schema
-    `inboundToken` field is now vestigial (harmless, unused).
-  - Follow-up: **auto-attach** the `rerun` button to outbound completion posts (the action endpoint
-    already handles clicks; only the outbound attachment is unwired) + MM-user→Everdict-identity mapping.
-
-## Rollout / safety
-
-- **Order guarantees no broken window:** repo access (S1–S4) and notifications (S5) are fully live
-  before the personal feature is removed (S6).
-- **DB:** additive JSONB in S1–S5 (ships normally); the `everdict_connections` DROP in S6 is
-  contract-phase with a `docs/migration/preflight/` note (verify no code references the table first).
-- **Secrets:** GHE App private key + Mattermost webhook URL are SecretStore name-refs — never in git,
-  never returned by any surface. App private key (github.com) is operator env, treated like the KEK.
+There is no chat principal and no `Authenticator` branch for these requests: the service verifies the token
+itself and acts as the workspace. Mapping the Mattermost user to an Everdict identity is not built.
 
 ## Non-goals
 
-- Inbound GitHub App **webhooks** / push-triggered eval (stays deferred in `github-actions-trigger.md`).
-- Migrating existing personal tokens into installations (users re-install the App; personal tokens are
-  simply dropped in S6).
-- GitLab/Bitbucket (out of scope).
-
-
-## Rerun button on completion posts
-
-A scorecard completion post carries an interactive **Rerun** action when the workspace has the inbound half
-configured (`commandTokenSecretName`) and the control plane knows its public URL (`API_PUBLIC_URL`): the button
-posts back to `/integrations/mattermost/action?ws=<workspace>` with the embedded context (the same verification
-token the slash-command inbound checks + the dataset/harness coordinates), and the existing `handleAction`
-re-fires dataset×harness from chat. Without either precondition the post stays a plain message — no dead
-buttons. Regression alerts stay button-less for now (their payload carries scorecard ids, not rerun
-coordinates).
+- Inbound GitHub App **webhooks** / push-triggered evaluation (deferred in
+  [github-actions-trigger.md](github-actions-trigger.md)).
+- Migrating old personal tokens into installations — members re-install the App.
+- GitLab / Bitbucket.

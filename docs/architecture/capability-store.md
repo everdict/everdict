@@ -2,635 +2,460 @@
 kind: wiki
 title: "Capability Store (SSOT)"
 status: current
-updated: 2026-08-12
-anchors: [packages/contracts/src/harness/agent-spec.ts, packages/contracts/src/records/skill.ts, packages/contracts/src/records/capability.ts, apps/agent/src/profile.ts]
+updated: 2026-09-15
+anchors: [packages/contracts/src/records/capability.ts, packages/domain/src/capability/capability-visibility.ts, apps/api/src/api/capability/capability.routes.ts, packages/application-control/src/agent/agent-capabilities.ts, apps/agent/src/code-tools.ts]
 ---
 # Capability Store (SSOT)
 
-> A **store** — not a private registry — where a workspace's members AUTHOR agent capabilities (managed **tool
-> adapters**, not raw MCP endpoints) and **publish** them at one of three reach tiers: **private** (only me),
-> **subset** (a chosen subset of *your own* workspaces — "this skill, in 2 of my 5 workspaces"), or **public**
-> (every Everdict workspace). One discriminated
-> `Capability` entity carries three kinds — `mcp` (a curated MCP connection), `code` (a python/node tool Everdict
-> executes), `skill` (instructions) — so a browsing member adopts a capability into their agent instead of hand-typing
-> a server URL. Design confirmed with the user (2026-07-24): **ideal structure + flexibility prioritized over least
-> disruption** → one unified versioned entity (mirrors the `Judge` kind idiom), adoption by **immutable-version
-> reference** (not value copy), skills folded in. Doc-first.
+> A **store** where a workspace's members author versioned capabilities, publish them at a reach tier, and adopt
+> each other's instead of hand-typing a server URL. One discriminated `Capability` entity carries five kinds —
+> `mcp` (a curated MCP connection), `code` (a python/node tool Everdict runs), `skill` (instructions a workspace
+> copies into its skill library), `environment` (an eval-environment image) and `delegation` (a work environment
+> Everdict hands work to). It mirrors the `Judge` kind idiom: one entity and one `type` discriminant, so a new kind
+> is a new variant plus its consumer, with no new table, store, route or authz action. Adoption is by
+> **immutable-version reference**, not by value copy.
 
-## Problem
+## Why a store
 
-Today the only agent tool channel is `AgentSpec.mcpServers[]` (`packages/contracts/src/harness/agent-spec.ts`): a
-member hand-types `{name, url, authSecret, write}` per server in **Settings › Agent**. That is:
+Before it, the only agent tool channel was `AgentSpec.mcpServers[]`: a member hand-typed `{name, url, authSecret,
+write}` per server. That channel is raw (every member re-discovers a server's URL and secrets), invisible to other
+members, unshareable across workspaces, and MCP-only (a small python/node function needed a hosted MCP server).
+`mcpServers[]` remains as the raw escape hatch; the store is a curation, discovery and sharing layer over the same
+MCP bridge.
 
-- **Raw, not managed** — no adapter that already knows a tool's URL, which secrets it needs, and what it provides;
-  every member re-discovers and re-types the same server.
-- **Not discoverable** — a tool one member wires up is invisible to everyone else; nothing is browsable or reusable.
-- **Not shareable** — there is no way to offer a tool to another workspace, let alone publish one broadly. The only
-  cross-tenant sharing anywhere in Everdict is the first-party `_shared` registry fallback (operator-seeded, not
-  user-authored).
-- **MCP-only** — a "tool" can only be an external MCP server. A member cannot ship a small python/node function as a
-  tool without standing up and hosting an MCP server.
-- **Skills are a parallel, weaker channel** — `SkillRecord` (`packages/contracts/src/records/skill.ts`) is
-  instructions-only, `private|workspace`, mutable, and **ambient** (every visible skill auto-applies via
-  `skillStore.list`). It cannot be shared beyond a workspace and is not part of any store.
-
-We want a **store**: managed, browsable, adoptable capabilities that members author and publish across three reach
-tiers, spanning tools (MCP + code) and skills under one surface.
-
-## Key insight: three layers, one entity
-
-The feature splits cleanly into three layers, each landing on an existing pattern:
+## Three layers
 
 ```
-① CATALOG (the store)     Capability = the SSOT of what exists to adopt (browse · publish · version)
-                          one entity, discriminated: type ∈ { mcp | code | skill }
-                          reach: private | workspace | subset(sharedWith[]) | public
-                          immutable versions (npm-style) + a pure visibility kernel in @everdict/domain
-                                  │  browse / publish
-                                  ▼
-② ADOPTION (agent config) AgentSpec.capabilities[] = immutable-version REFERENCES to catalog entries
-                          { source, id, version, … consumer-side binding } — a pinned, reproducible dependency
-                          upgrade = re-pin to a newer version; the catalog stays the single source of truth
-                                  │  resolve (cross-tenant, visibility re-checked, best-effort)
-                                  ▼
-③ RUNTIME (apps/agent)    profile.ts resolves each ref → splits by type → type-specific adapter:
-                          • mcp   → existing mcpToolToDefinition bridge         (runtime unchanged)
-                          • skill → existing use_skill tool                     (runtime unchanged)
-                          • code  → NEW: provision a sandbox ComputeHandle, run the script, parse stdout → ToolResult
+① CATALOG    CapabilityRecord — what exists to adopt (browse · publish · version)
+             type ∈ { mcp | code | skill | environment | delegation }
+             reach: private | workspace | subset(sharedWith[]) | public
+             immutable versions + a pure reach kernel in @everdict/domain
+                     │  browse / publish
+                     ▼
+② ADOPTION   mcp/code  → AgentSpec.capabilities[] = pinned {source, id, version} + consumer-side binding
+             skill     → copied into the workspace skill library (SkillRecord)
+             environment → imported into WorkspaceSettings.adoptedEnvironments
+             delegation  → named by POST /sandboxes {profile}
+                     │  resolve (cross-tenant, reach re-checked, best-effort)
+                     ▼
+③ RUNTIME    resolveAgentCapabilities (@everdict/application-control) decides the member's toolset;
+             the agent's profile resolver shapes each enabled tool:
+             • mcp  → mcpToolToDefinition bridge over Streamable HTTP (url) or a stdio container (image)
+             • code → a code__<name> tool that runs the pinned source in a ComputeHandle
 ```
 
-Two structural choices (confirmed, chosen for structure + flexibility over least disruption):
-
-1. **One unified `everdict_capabilities` versioned table, discriminated by `type`** — not a `Tool` table plus a
-   separate `Skill` table. This is exactly the idiom Everdict already uses for **Judges** (`model|harness|code` under
-   one entity). A future capability kind = a new `type` variant + a runtime adapter, with **zero** new
-   table/store/route/authz-action. Skills (nascent — migration `0071`) fold in as `type:'skill'`.
-2. **Adoption by immutable-version reference, not value copy** — because versions are immutable (a published
-   `x@1.2.0` never changes), a `{source, id, version}` reference is *already* a reproducible pin. The catalog is the
-   only SSOT; `AgentSpec` stays thin; the store keeps live provenance ("N workspaces adopted this", "update
-   available", deprecation). A pinned public `code` tool is as audit-safe as a value copy — its version cannot mutate
-   under the adopter — while staying normalized.
-
-The MCP runtime path does **not** change: an adopted `mcp` capability resolves to the same bridged tools the raw
-`mcpServers[]` path already produces. The store is a curation/discovery/sharing layer *over* the existing bridge.
+**Storage.** The `CapabilityStore` port (`packages/application-control/src/ports/capability-store.ts`) has InMemory
+and Pg implementations in `packages/db/src/workspace/capability-store.ts` over `everdict_capabilities` (migration
+0072): `(tenant, id, version)` primary key, indexed `type`/`visibility`, `shared_with`/`tags` jsonb, soft-delete
+tombstones. Migration 0072 also seeded existing skills into the catalog as `type:'skill'` rows; `everdict_skills`
+(0071) stayed, and it is still the skill library agents read.
 
 ## The `Capability` model
 
-The Zod schema is the SSOT (`packages/contracts/src/records/capability.ts`); types are `z.infer`red. The spec is a
-discriminated union so each kind validates its own shape.
+The Zod schema is the SSOT (`packages/contracts/src/records/capability.ts`); types are `z.infer`red and the spec is
+a discriminated union.
 
 ```ts
-type CapabilityType = 'mcp' | 'code' | 'skill'
+type CapabilityVisibility = 'private' | 'workspace' | 'subset' | 'public'
 
-// Reach tier. Extends the `private | workspace` vocabulary (Views / skills / browser-profiles) with the two
-// genuinely-new cross-tenant tiers. `workspace = tenant = trust-zone`.
-type CapabilityVisibility =
-  | 'private'    // creator-only, within the owning workspace
-  | 'workspace'  // any member of the owning workspace
-  | 'subset'     // the owning workspace + every workspace id in `sharedWith`
-  | 'public'     // every Everdict workspace (cross-tenant read)
-
-// --- the discriminated spec (spec.type is the record's kind) ---
-
-interface McpToolSpec {           // a curated, managed MCP connection (the "adapter")
+interface McpToolSpec {
   type: 'mcp'
-  // EXACTLY ONE transport (enforced at the save boundary — SaveCapabilityBodySchema — since a discriminatedUnion
-  // member can't be a refined ZodEffects). url = a remote server; image = a container Everdict runs over stdio.
-  url?: string                     // remote MCP endpoint (Streamable HTTP); auth = requiredSecrets[0] → Authorization
-  image?: string                   // container image → `docker run --rm -i <image> [args]` (MCP over stdio); requiredSecrets → --env
-  args?: string[]                  // trailing args after the image (stdio only) — e.g. ["-t","stdio"] for grafana/mcp-grafana
-  provides?: string[]              // the tool names this server exposes (for the store card; discovery only)
-  requiredSecrets: { name: string; description: string }[]  // secrets the ADOPTER must supply (declared, never valued)
-  write: boolean                   // does this server offer mutating tools (adopter still opts in per-adoption)
+  url?: string              // remote Streamable-HTTP endpoint; requiredSecrets[0] → Authorization header
+  image?: string            // `docker run --rm -i <image> [args]` (MCP over stdio); requiredSecrets → container env
+  args: string[]            // trailing args after the image (stdio only)
+  provides: string[]        // declared tool names (store card / discovery only)
+  requiredSecrets: { name: string; description: string }[]  // names the adopter binds, never values
+  write: boolean            // offers mutating tools (the adopter still opts in with enableWrite)
+  effects?: EffectContract  // required when write = true
 }
-// Containerized stdio servers are ISOLATED by construction (the container is the sandbox — matching the code-tool
-// sandbox discipline and the Docker MCP Catalog distribution) and are OPERATOR-GATED: the agent spawns `docker run`
-// only when AGENT_MCP_ALLOW_STDIO is set (default off), and — if AGENT_MCP_STDIO_ALLOWED_IMAGES pins a set — only for
-// images on that allowlist; otherwise the capability is skipped (degrade, never fail). Curated
-// image-transport servers are seeded in `firstPartyCatalogExtras()` (public + adoptable, NOT default-enabled) —
-// e.g. the Grafana MCP server (grafana/mcp-grafana). Self-hosted stdio servers (ClickHouse, Playwright, Qdrant, …)
-// are the reason for this transport: they have no universal HTTP endpoint, so `url` alone couldn't publish them.
 
-interface CodeToolSpec {          // a python/node function Everdict runs and bridges as a callable tool
+interface CodeToolSpec {
   type: 'code'
   language: 'python' | 'node'
-  code: string                     // the source, pinned by version (immutable — auditable)
-  parametersSchema: Record<string, unknown>  // JSON Schema for the tool's arguments (shown to the model verbatim)
-  isReadOnly: boolean              // read-only tools skip the permission gate; writes require consent
+  code: string                               // the pinned source
+  parametersSchema: Record<string, unknown>  // JSON Schema shown to the model verbatim
+  isReadOnly: boolean                        // default true
+  requiredSecrets: { name: string; description: string }[]
   timeoutSec?: number
-  image?: string                   // optional dedicated sandbox image (else the default hardened sandbox)
-  requiredSecrets?: { name: string; description: string }[]  // env the adopter binds at adoption
-  examples?: { name?: string; input: Record<string, unknown>; note?: string }[]  // worked examples (see below)
+  image?: string                             // dedicated sandbox image
+  examples: { name?: string; input: Record<string, unknown>; note?: string }[]  // at most 8
+  effects?: EffectContract                   // required when isReadOnly = false
 }
 
-interface SkillSpec {             // the SKILL.md shape (today's SkillRecord), now versioned + shareable
-  type: 'skill'
-  instructions: string             // the SKILL.md body, loaded on demand via use_skill
-  files: SkillFile[]               // supporting reference files, each loaded individually via read_skill_file
-}
-
-type CapabilitySpec = McpToolSpec | CodeToolSpec | SkillSpec
+interface SkillCapabilitySpec { type: 'skill'; instructions: string; files: SkillFile[] }
+// EnvironmentImageSpec  — see environment-image-store.md
+// DelegationProfileSpec — see "Fifth kind" below
 
 interface CapabilityRecord {
   id: string
-  tenant: string                   // the OWNER workspace (the publisher)
-  version: string                  // immutable; new content = new version (registration-order / semver, like harness/judge)
-  name: string                     // the tool/skill name the agent sees (namespaced at runtime)
-  description: string              // the discovery line (store card + the model's when-to-use)
+  tenant: string            // the OWNER workspace (the publisher)
+  version: string           // immutable; new content = new version
+  name: string              // the name the agent sees (namespaced at runtime)
+  description: string       // store card + the model's when-to-use
   spec: CapabilitySpec
   visibility: CapabilityVisibility
-  sharedWith: string[]             // target workspace ids (⊆ the AUTHOR's own memberships); only when visibility === 'subset'
+  sharedWith: string[]      // target workspace ids; only meaningful for 'subset'
   tags: string[]
-  createdBy: string                // subject; owner
-  createdAt: string
-  // No updatedAt — versions are immutable (edit = publish a new version). Matches the registry entities.
+  createdBy: string
+  createdAt: string         // no updatedAt — editing content publishes a new version
 }
 ```
 
-## Visibility & sharing (the net-new part)
+- **Exactly one MCP transport** is enforced at the save boundary (`SaveCapabilityBodySchema.superRefine`), not in
+  the union, because a discriminated-union member cannot be a refined schema. The runtime prefers `image`, else `url`.
+- **Effect contract.** A write-capable `mcp` or `code` spec must declare `effects` (side effect, idempotency,
+  rollback, partial failure, data access): `assertCapabilityEffects`
+  (`packages/domain/src/capability/effect-contract.ts`) refuses the save otherwise, and `effectsRequireConsent`
+  decides whether a call keeps asking a human in auto mode.
+- **stdio servers are operator-gated.** The agent spawns `docker run` only when `AGENT_MCP_ALLOW_STDIO` is `1` or
+  `true`, and, if `AGENT_MCP_STDIO_ALLOWED_IMAGES` lists images, only for those; otherwise the capability is skipped,
+  never failed. Curated image-transport servers ship in `firstPartyCatalogExtras()` — Grafana, Playwright, Postgres —
+  as public, adoptable entries that are not enabled by default.
 
-`private`/`workspace` reuse the exact `listVisible(tenant, subject)` pattern from `ViewStore`/`SkillStore`
-(`visibility='workspace' OR created_by=subject`, scoped to the owning tenant). The two new tiers are the first
-capabilities to be readable from a workspace other than the one they live in — but they are two very different acts:
-`subset` fans a capability across **the author's own workspaces**, `public` exposes it to **everyone**.
+## Visibility & sharing
 
-- **subset** — the author shares to a chosen subset of **the workspaces they themselves are a member of**: "this
-  skill, in 2 of my 5 workspaces." A multi-select over the author's own memberships → `sharedWith[]` (validated
-  `⊆ memberships` at publish). A workspace `T` reads it iff `visibility='subset' AND T = ANY(sharedWith)` (the owner
-  always reads); every member of a target workspace then sees it there. This is **not** publishing to strangers'
-  workspaces — that is `public`. Because the targets are the author's own trust zones, no org/group tenancy layer and
-  no accept/invite handshake is needed; the author fans out unilaterally and can revoke by dropping a workspace from
-  `sharedWith`. Member-gated (a member owns fanning out their own capability).
-- **public** — the real "expose to everyone" tier: readable by any authenticated subject in **any** Everdict
-  workspace (a dedicated `listPublic()` read path, no tenant filter). This is where the genuine trust-boundary cost
-  lives, so setting `visibility='public'` is **admin-gated by default** (publishing globally is a heavy act).
-  **Instance policy (`EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH`)** relaxes this: a self-hosted operator running a
-  *community* instance sets it so **any member** — not only an admin — may publish/promote to `public`. It is a
-  deployment property ("is this a shared-catalog instance?"), not per-workspace state, so it lives in operator config
-  (no migration), is injected into `CapabilityService` as `allowMemberPublicPublish`, and is surfaced to the web on
-  `GET /me → config.allowMemberPublicPublish` for UX gating (the service still enforces). The `mayPublishPublic(actor)`
-  helper is the single authority — both `save()` (new-capability create) and `setVisibility()` (reach promotion)
-  consult it.
+`canConsumeCapability(capability, { tenant, subject })` (`packages/domain/src/capability/capability-visibility.ts`)
+is the single authority for reading or using a capability. The store service (get, versions, diff), the agent
+resolver (adopted refs) and the code try-runner all call it, and the Pg store's SQL mirrors it.
 
-A pure kernel in `@everdict/domain` — `canConsume(capability, { tenant, subject })` and
-`visibleCapabilities(all, { tenant, subject })` — is the single authority, reused by the store service (browse) AND
-the runtime resolver (adoption). Writes (edit-as-new-version / delete / change visibility) are **creator-or-admin,
-owner-tenant only** — the same gate as `ViewService`, injected as `actor={subject,isAdmin}`.
+- **private** — the creator, in the owning workspace only.
+- **workspace** — any member of the owning workspace.
+- **subset** — the owning workspace plus every workspace id in `sharedWith`; another workspace never reads a
+  `private` or `workspace` capability. It exists to fan a capability across the author's own workspaces ("this
+  skill, in 2 of my 5"), and the web picker offers only workspaces the author belongs to. The server does not check
+  `sharedWith` against memberships.
+- **public** — every workspace, through `listPublic()` (no tenant filter). Publishing or promoting to `public` is
+  admin-only unless the operator sets `EVERDICT_ALLOW_MEMBER_PUBLIC_PUBLISH=1` — a deployment property (a community
+  instance), injected into `CapabilityService` as `allowMemberPublicPublish` and surfaced on `GET /me` →
+  `config.allowMemberPublicPublish` for UX gating only. `mayPublishPublic(actor)` is consulted by both `save()` (a new
+  capability) and `setVisibility()` (a reach change).
 
-## Adoption (reference, pinned, cross-tenant)
+A capability the caller cannot see answers 404, so a foreign private publication is indistinguishable from a missing
+one.
 
-`AgentSpec` gains a `capabilities[]` field of pinned references; the existing `mcpServers[]` stays as the **raw
-escape hatch** (power users, or a server not worth publishing — mirrors `openai-compatible` as the LLM escape hatch).
-
-```ts
-interface CapabilityRef {
-  source: string                    // the owner workspace that published the capability (= my tenant for private/workspace)
-  id: string
-  version: string                   // the pinned immutable version (reproducible)
-  // consumer-side binding, layered on the reference at adoption:
-  secretBindings?: Record<string, string>  // required-secret name → one of MY workspace's secret names
-  enableWrite?: boolean             // opt in to a write-capable mcp/code capability (default false)
-}
-
-// AgentSpecSchema gains:  capabilities: z.array(CapabilityRefSchema).default([])
-```
-
-Runtime resolution (`apps/agent/src/profile.ts`, per turn, best-effort like today's secret/skill resolution):
-for each ref, `capabilityRegistry.getForConsumer(source, id, version, { tenant, subject })` loads the pinned record
-**and re-checks `canConsume`** (access may have been revoked / unpublished → skip that capability, degrade, never
-fail the turn). Resolved records are split by `spec.type` and handed to the type adapters below. Because the version
-is immutable, an eval run that uses this agent is reproducible; the store surfaces "update available" by comparing a
-ref's pinned version to the latest visible version.
-
-**Skills become explicitly adopted, not ambient.** Once a capability can be `public`, auto-applying every visible
-skill is absurd (you would inherit every public skill on Everdict). So an agent uses only the skill capabilities it
-has adopted — a deliberate behavior change from today's `skillStore.list` ambient model, and the correct one for a
-store.
-
-## Version management (parity with the registry entities)
-
-All four kinds (mcp | code | skill | environment) are versioned on ONE substrate, so versioning is uniform by
-construction: `(tenant, id, version)` is immutable, a content edit auto patch-bumps (`latest` moves; pinned adoptions
-stay reproducible), and per-version `tags` are mutable metadata OUTSIDE spec immutability. The full management surface
-mirrors the registry entities (harness/dataset/judge/runtime) — one service core (`CapabilityService`), two transports
-(BFF + MCP), one web drill-in:
-
-- **List versions** — `GET /capabilities/:id/versions` + `list_capability_versions` → the ascending live versions plus
-  a `version → tags` display map. `?source=` reads a cross-tenant public/subset owner (so the store can show the
-  history of a capability published from another workspace).
-- **Version tags** — `PUT /capabilities/:id/versions/:version/tags` + `set_capability_version_tags` → replace a
-  version's free-form labels (trimmed / deduped, ≤20×60, reusing `normalizeVersionTags`). Gate: `capabilities:write`
-  PLUS the version's creator-or-admin (the `deleteVersion` gate); own-workspace versions only.
-- **Version diff** — `GET /capabilities/:id/diff?base=&candidate=` + `diff_capability_versions` → a structural diff over
-  the immutable content (name/description/spec) via the shared `diffSpecFields` engine (the same one behind the
-  harness/judge diffs); `typeChanged` flags an mcp ↔ code ↔ skill ↔ environment restructure. `?source=` diffs a
-  cross-tenant public/subset owner. Reproducible by the immutable-version guarantee (`CapabilitySpecDiff`).
-- **Reads** — `GET /capabilities/:id` and `GET /capabilities/:id/versions/:version` also take an optional `?source=`, so
-  the store's version switcher can inspect an older version of a public capability owned by another workspace.
-- **Web** — the store detail drill-in (`CapabilityVersionsPanel`) adds a version switcher (loads any version's spec),
-  the shared `VersionTagsEditor` (`entity="capability"`, editable only for an own-workspace creator/admin), and an
-  inline base ↔ candidate diff. Built-ins (`_everdict`) are code-defined single-version → no panel.
-
-## Runtime consumption (per-type adapters)
-
-`apps/agent/src/mcp-tools.ts` builds the `ToolRegistry`; each resolved capability becomes one or more
-`ToolDefinition`s:
-
-- **`mcp`** — two transports resolved in `profile.ts` to a `ResolvedMcpServer` union. **http** (`url`): each
-  `secretBindings` value → workspace SecretStore value → `Authorization` header; connect via Streamable HTTP.
-  **stdio** (`image`): each `requiredSecrets` → the adopter's bound secret value → a container env var; the agent
-  connects via `StdioClientTransport` running `docker run --rm -i --env NAME … <image> [args]` (secret VALUES ride in
-  the spawned process's env, only `--env NAME` on argv — no `ps`/log leak). Both bridge with `mcpToolToDefinition`,
-  namespaced `mcp__<name>__<tool>`, write-filtered by `enableWrite`. stdio is skipped unless `AGENT_MCP_ALLOW_STDIO`
-  is set, and skipped when a required secret is unbound. **Private images**: the docker CLI inherits the operator's
-  host credentials (the agent forwards only `HOME`/`PATH` — not its own secrets — to the docker process), so a private
-  image pulls via the host's `docker login` / credential helpers. Per-*workspace* registry credentials (the workspace
-  image-registry pull auth) into the docker pull is a future item — the operator-host login covers the managed case.
-- **`skill`** — feed `{name, description, instructions, files}` into the existing `buildSkillTools` → the `use_skill`
-  (+ `read_skill_file` when files exist) tools. **Zero new runtime code.**
-
-### Code-tool verification — nobody adopts by reading source
-
-A code capability carries **worked `examples`** ({name?, input, note?} — concrete argument objects), and they do
-triple duty: the store detail shows them (what the tool DOES, not just its code), the try-runner executes them, and
-the agent bridge appends up to two to the bridged tool's description (the model learns the call shape from a real
-invocation, alongside `parametersSchema`). Verification runs on the agent service (`POST /agent/code-tools/try`,
-mirroring the skill test-drive):
-
-- **check** — parse-only compile validation (`node --check` / `python3 -m py_compile`): the source is written into a
-  fresh handle and parsed, never executed — safe for any target. The wizard offers it before publish.
-- **run** — execute the tool against an example input under the agent's EXACT execution contract (input JSON as
-  argv[1], last-JSON-on-stdout result, per-call handle, dispose in finally) and the same sandbox gate: a target from
-  ANOTHER workspace runs only on an isolated runtime, refused otherwise. Targets are an unsaved draft `spec` (the
-  wizard) or a published `{source,id,version}` ref (the store's try panel) — the ref is resolved and
-  visibility-re-checked server-side, so the client never asserts trust. `requiredSecrets` bind by their declared name
-  from the caller's workspace → personal secrets; unresolved names come back in `missingSecrets` so a failing run is
-  explainable rather than mysterious.
-- **`code`** — NEW. Register a `ToolDefinition` (`name` from the capability, `parametersJsonSchema` = the spec's
-  `parametersSchema`, `isReadOnly` from the spec) whose `call(input, ctx)`:
-  1. provisions a **sandbox** `ComputeHandle` (see security),
-  2. writes the tool `input` (validated against `parametersSchema`) as a JSON context file,
-  3. runs the pinned source (`python3 <script> <context-path>` — the **exact** script-grader contract from
-     `packages/graders/src/script-grader.ts`: context JSON in, `ToolResult`-shaped JSON on stdout),
-  4. parses stdout → `ToolResult`, disposes the handle in `finally`.
-
-  This reuses the mature `Driver`/`ComputeHandle`/script-execution contract wholesale — the "new execution path" is a
-  thin adapter, not new infrastructure.
-
-## Security: `code` capabilities
-
-A `public`/`subset` `code` capability means **running another workspace's code**. Non-negotiable:
-
-- **Sandbox mandatory for adopted-from-others code** — a `code` capability whose `source !== tenant` runs in a
-  hardened `DockerDriver` container (no host FS, network gated by policy), never `LocalDriver` on the control-plane
-  host. Your-own-workspace code in dev may use `LocalDriver`.
-- **Explicit consent at adoption** — adopting a `code` capability surfaces its (immutable, inspectable) source and
-  requires an explicit confirm; the pinned version cannot change under you afterward.
-- **`isReadOnly` honored** — a write-capable code tool goes through the same permission gate as write MCP tools.
-- **`public` publish is admin-gated** and a candidate for later operator review.
+**Writes are owner-workspace only.** A new version or a reach change needs the capability's latest creator or an
+admin; tag edits and version deletes need that version's creator or an admin. `visibility`/`sharedWith` apply only
+when creating: a content edit inherits the reach, which changes only through `PATCH /capabilities/:id/visibility`.
+When `visibility` is omitted on create, `CapabilityService.save` picks it by kind — `environment` → `workspace` (the
+image a harness pins is a team asset), every other kind → `private`.
 
 ## Authz
 
-New resource actions on the domain matrix (`packages/domain/src/auth/authz.ts`), replacing the nascent `skills:*`:
+Actions on the domain matrix (`packages/domain/src/auth/authz.ts`):
 
 - `capabilities:read` — viewer+ (browse the store, resolve adopted refs).
-- `capabilities:write` — member+ (author / publish a new version / adopt into one's agent). Setting
-  `visibility='public'` additionally requires admin (service-enforced via the injected `actor`, no separate action —
-  avoids knob proliferation, mirrors the View gate).
-- `capabilities:delete` — creator-or-admin (soft-delete a version / tombstone the capability).
+- `capabilities:write` — member+ (author, publish a version, change reach, tag, delete a version). Every capability
+  write route gates on it; the service adds the creator-or-admin and public gates above.
+- `capabilities:delete` — admin; `deleteVersion` also accepts the version's creator.
 
-## Architecture & slices
+Skills keep their own `skills:read`/`skills:write`. Adopting into an agent is `agents:write`; importing an
+environment is `settings:write`.
 
-Follows the established entity pattern (service core + two transports [HTTP + MCP] + mem/Pg stores + Zod at every
-boundary + a pure-HTTP web mirror), like `views`/`schedules`. Each phase ends on a green gate.
+## HTTP + MCP surface
 
-### Phase 1 — the `Capability` entity + visibility kernel + storage
-- `@everdict/contracts`: `capability.ts` (`CapabilitySpec` discriminated union, `CapabilityRecord`,
-  `CapabilityVisibility`, `CapabilityRef`); extend `AgentSpecSchema` with `capabilities[]`.
-- `@everdict/domain`: the pure visibility kernel (`canConsume` / `visibleCapabilities`) + the three new authz actions.
-- `@everdict/db`: `everdict_capabilities` migration — the versioned shape `(tenant, id, version, spec jsonb,
-  created_at, created_by, deleted_at)` **plus** indexed `type`, `visibility`, `shared_with jsonb`, `tags jsonb`
-  columns for the browse/visibility queries (a specialized versioned store, like `ViewStore` extends the base shape).
-  Data migration folds `everdict_skills` → `type:'skill'` rows (`version 1.0.0`); `0071` becomes a no-op/dropped.
-- `packages/registry` (or `db`): `CapabilityStore` — InMemory + Pg — `register` (immutable/soft-delete/revive),
-  `getForConsumer` (visibility-checked, cross-tenant), `listVisible(tenant, subject)`, `listPublic`, `versions`,
-  `softDelete`. Unit-tested against both impls.
+`apps/api/src/api/capability/capability.routes.ts`, with MCP twins in `capability.mcp.ts`:
 
-### Phase 2 — control-plane API + MCP parity
-- `apps/api`: `CapabilityService` (CRUD, publish-version, visibility change with the admin gate for `public`, adopt
-  helpers) + routes `POST/GET /capabilities`, `GET /capabilities/:id/versions/:v`, `PATCH` (visibility/tags),
-  `DELETE` + BFF↔MCP tools (`list/get/create/delete_capability`, `set_capability_visibility`). Gated on the new
-  actions. Cross-tenant `listPublic`/subset reads honored.
+| HTTP | MCP |
+|---|---|
+| `GET /capabilities` — what this workspace can use without the public catalog | `list_capabilities` |
+| `GET /capabilities/public` — first-party built-ins first, then every `public` row | `list_public_capabilities` |
+| `GET /capabilities/:id`, `GET /capabilities/:id/versions/:version` (`?source=`) | `get_capability` |
+| `GET /capabilities/:id/versions` (`?source=`) | `list_capability_versions` |
+| `GET /capabilities/:id/diff?base=&candidate=` (`?source=`) | `diff_capability_versions` |
+| `PUT /capabilities/:id` — version-free upsert | `save_capability` |
+| `POST /capabilities/validate` | `validate_capability` |
+| `POST /capabilities/probe-mcp` | `probe_capability_mcp` |
+| `PATCH /capabilities/:id/visibility` | `set_capability_visibility` |
+| `PUT /capabilities/:id/versions/:version/tags` | `set_capability_version_tags` |
+| `DELETE /capabilities/:id/versions/:version` | `delete_capability` |
 
-### Phase 3 — adoption wiring
-- `AgentSpec.capabilities[]` end-to-end: `agent-service` save path, `apps/agent/src/profile.ts` resolves refs
-  cross-tenant + `canConsume` re-check + best-effort degrade; raw `mcpServers[]` retained as the escape hatch.
+`?source=` reads a capability owned by another workspace (public or subset-shared to the caller).
 
-### Phase 4 — runtime adapters
-- **4a** — `mcp` + `skill` capabilities load through the existing bridge / `use_skill` (reuse).
-- **4b** — the `code` adapter: sandbox `ComputeHandle` provision + script-contract exec + `ToolResult` parse
-  (`apps/agent` + a small shared exec helper reusing the driver/script-grader machinery).
+## Version management
 
-### Phase 5 — the web store surface
-- `apps/web`: `/{workspace}/store` — browse (union of visible capabilities; filter by type mcp/code/skill; search;
-  tags; reach badge), detail (description · provides · required secrets · versions · author · **Adopt**), author flow
-  (type picker → type-specific form: MCP url+required-secrets, code editor + params schema, skill instructions;
-  visibility picker + a workspace-picker for `subset`). Settings › Agent lists adopted capabilities + secret
-  bindings; **Settings › Skills migrates into the store**. FSD slices, next-intl catalogs, `settings-list`.
+All kinds are versioned on one substrate. `PUT /capabilities/:id` registers `1.0.0` for a new id, patch-bumps on
+changed content (`latest` moves, pinned adoptions stay reproducible) and is a no-op on identical content.
+`visibility`, `sharedWith` and per-version `tags` are mutable metadata outside spec immutability.
 
-### Phase 6 — public hardening
-- Enforce the sandbox for adopted-from-others `code`; adopt-time consent for `code`; the `public` admin gate; (later)
-  operator review, ratings/usage, deprecation propagation.
+- **List versions** — the ascending live versions plus a `version → tags` display map.
+- **Version tags** — replace one version's free-form labels, trimmed, deduped and capped (≤20×60) by
+  `normalizeVersionTags`; own-workspace versions only.
+- **Version diff** — `diffCapabilitySpecs` runs the shared `diffSpecFields` engine (the one behind the harness and
+  judge diffs) over name/description/spec and returns a `CapabilitySpecDiff`; `typeChanged` flags a kind change.
+- **Web** — the store detail's `CapabilityVersionsPanel` loads any version's spec, edits tags through the shared
+  `VersionTagsEditor` (own-workspace creator or admin only) and shows an inline base ↔ candidate diff. First-party
+  built-ins are code-defined single versions and get no panel.
 
-## Web IA — management in Settings, the store as discovery (confirmed 2026-07-28)
+## Adoption (reference, pinned, cross-tenant)
 
-The one store page originally mixed three different owners: browse/adopt (discovery), the workspace's own
-publications (management), and the imported-environment inventory (`settings:write`-shaped workspace state). Confirmed
-split — **no API/authz change, web IA only**:
+```ts
+interface CapabilityRef {                  // AgentSpec.capabilities[]
+  source: string                           // the owner workspace (= my tenant for private/workspace)
+  id: string
+  version: string                          // the pinned immutable version
+  secretBindings: Record<string, string>   // requiredSecrets[].name → one of MY secret names
+  enableWrite: boolean                     // opt in to a write-capable mcp/code capability (default false)
+}
+```
 
-- **`/store` = discovery only.** Browse + adopt/import over the public catalog (public + first-party managed
-  capabilities); rows show an in-workspace badge instead of management actions. The workspace's own publications live
-  on `/store/mine` (all kinds in one list) and in the kind-scoped Settings pages below — both render the same
-  `CapabilityStore` `variant='mine'`.
-- **Settings › Agent group = the agent as one concern**: `/settings/agent` (config + adopted refs + default-tool
-  toggles) · `/settings/tools` (**the member's own toolset** — see below) · `/settings/skills` (living workspace
-  skills) · `/settings/knowledge` (the knowledge graph, moved from the Workspace group).
-- **Settings › Workspace › Environments** (`/settings/environments`) — environments are eval infra, not agent
-  config, and (unlike tools) get a **dedicated environment-first surface, not the reused store chrome**
-  (`EnvironmentWorkbench` + `EnvironmentEditor`, 2026-07-29): one unified list merges the workspace's authored
-  `environment` capabilities with the imported-environment inventory per identity (`source/id`) — rows speak
-  environment vocabulary (benchmark chip · visibility/pull badges · in-place expand rendering the agent-contract
-  markdown + preset), with authored-row manage menu (edit / reach / delete), inventory re-check / remove, and an
-  inline `auth`-failure escape to Settings › Integrations (registry + pull secret). Authoring is an
-  environment-only dialog sectioned by journey (basics → image [+ registry tag helper] → contents → **agent
-  contract** [scaffold template prompting entry points / result paths + markdown preview] → wiring preset
-  [advanced, collapsed, live JSON validation] → reach), and **new environments default to `workspace`
-  visibility** (team sharing is the surface's purpose; the store wizard's `private` default stays for other
-  kinds). That default is the SERVICE's, not the form's (E6): `CapabilityService.save` picks the first
-  version's reach by kind when the caller omits `visibility` — `environment` → `workspace`, tool kinds →
-  `private` — so the API/MCP path (an agent registering the image a member just pushed) can't quietly create a
-  team asset nobody but its author can see. A tool kind is one member's agent's until shared; an environment is
-  what a harness pins, held workspace-wide on `WorkspaceSettings.adoptedEnvironments`. Discovery/import of other workspaces' environments stays in `/store` (linked). The store substrate
-  (entity, versions, reach kernel, routes) is unchanged — presentation only.
-### The store DETAIL is a route, not a dialog (confirmed 2026-07-31)
+On the store detail page, adopting a capability that declares secrets or offers writes opens a dialog to bind the
+secrets and opt in to writes; otherwise it is one click. Every resolution re-reads the pinned version
+(`CapabilityStore.getVersion`) and re-checks `canConsumeCapability`; a revoked or unpublished capability is skipped,
+never a failed turn. Because the version is immutable, an eval run using the agent is reproducible.
 
-A store row is a LINK to `/{workspace}/store/{source}/{id}` (`?from=mine` when the entry point was the workspace's own
-publications — it picks the back link and shows the reach badge). The detail used to be a modal over the list; it is
-now a page, for the same reason the tool detail is (`### The tool DETAIL`): the right-hand infra/chat panel is half the
-workflow, a full-screen spec (code + try-runner, SKILL.md + attachment tabs, an environment's agent contract) does not
+Only `mcp` and `code` capabilities become agent tools.
+
+## Runtime consumption (per-type adapters)
+
+`apps/agent/src/profile.ts` calls `resolveAgentCapabilities` on every turn and shapes each enabled tool;
+`apps/agent/src/mcp-tools.ts` builds the `ToolRegistry`.
+
+- **`mcp` over http** (`url`) — the first declared secret's bound value becomes the `Authorization` header. The server
+  is bridged with `mcpToolToDefinition`, namespaced `mcp__<name>__<tool>`; unless the adoption enabled writes, only
+  read tools are bridged.
+- **`mcp` over stdio** (`image`) — each required secret's bound value becomes a container env var, and
+  `StdioClientTransport` runs `docker run --rm -i --env NAME … <image> [args]`, so values ride in the spawned
+  process's environment and only names reach argv. An unbound required secret drops the server. The docker CLI
+  receives the bound secrets plus `HOME`/`PATH` only, so a private image pulls with the operator host's
+  `docker login`; per-workspace registry credentials are not wired into this pull.
+- **`code`** — a `code__<name>` tool (`apps/agent/src/code-tools.ts`). Each call provisions a `ComputeHandle`, writes
+  the input JSON to a sandbox-relative file, runs `python3`/`node` with that path as its argument, reads the last
+  JSON value on stdout (`{content, isError?}`) as the `ToolResult`, and disposes the handle in `finally` — the
+  script-grader contract (`packages/graders/src/script-grader.ts`). Up to two `examples` are appended to the tool
+  description so the model sees a real call shape.
+
+A bridged name has one spelling — `mcpBridgedName`/`codeBridgedName` in
+`packages/domain/src/capability/tool-naming.ts` — used by the runtime and by the tool detail page.
+
+### Code-tool verification — nobody adopts by reading source
+
+`POST /agent/code-tools/try` (`apps/agent/src/code-try.ts`) verifies a code tool before anyone depends on it:
+
+- **check** — parse-only (`node --check` / `python3 -m py_compile`); never executes, so it is safe for any target.
+  The publish wizard offers it.
+- **run** — executes one example input under the runtime's exact contract and sandbox gate. The target is an unsaved
+  draft `spec` (the wizard) or a published `{source, id, version}` ref (the store's try panel), resolved and
+  reach-checked server-side so the client never asserts trust; a first-party default resolves from its shipped
+  definition. Required secrets bind by declared name from the caller's workspace, then personal, secrets; unresolved
+  names come back in `missingSecrets`.
+
+## Security: `code` capabilities
+
+- **Code from another workspace needs an isolated runtime.** A resolved code tool is marked `sandbox` when its owner
+  is not the reading workspace (first-party code is trusted). `buildCodeTools` registers such a tool only on an
+  isolated `CodeToolRuntime` and skips it otherwise; the try-runner refuses it the same way. The agent service
+  composes a `LocalDriver` runtime (`isolated: false`), so today own-workspace and first-party code runs and code
+  adopted from another workspace is skipped.
+- **Writes go through the permission gate** — `isReadOnly: false` and the declared `effects` reach the consent gate
+  exactly as a write MCP tool's do.
+- **Inspection before adoption** — the store detail shows the pinned source and worked examples and hosts the
+  try-runner.
+
+## Web surfaces
+
+- **`/{workspace}/store`** — browse-only over the public catalog (first-party built-ins plus every `public`
+  capability); rows already in the workspace carry a badge.
+- **`/{workspace}/store/mine`** — the workspace's own publications of every kind and reach (the web `CapabilityStore`
+  component with `variant='mine'`): publish, edit, change reach, delete. First-party entries are excluded.
+- **Sidebar › Agent** — `/{workspace}/tools` and `/{workspace}/skills` (the member's toolset and the skill library,
+  below) next to the store.
+- **Settings › Agent** (`/settings/agent`) — the workspace's agents; an agent's page holds its config, its adopted
+  references and the built-in default-tool toggles (`AgentSpec.disabledDefaults`).
+- **Settings › Workspace › Environments** (`/settings/environments`) — environments are eval infrastructure, not
+  agent config, so they get an environment-first surface rather than the store chrome: `EnvironmentWorkbench` merges
+  the workspace's authored `environment` capabilities with the imported inventory per `source/id` (with an inline
+  escape to Settings › Integrations when a pull fails on auth), and `EnvironmentEditor` authors one, defaulting to
+  `workspace` reach. Discovering other workspaces' environments stays in the store.
+
+### The store DETAIL is a route, not a dialog
+
+A store row links to `/{workspace}/store/{source}/{id}` (`?from=mine` when the entry point was the workspace's own
+publications — it picks the back link and shows the reach badge). The right-hand infra/chat panel is half the
+workflow, a full-screen spec (code + try-runner, SKILL.md + attachments, an environment's agent contract) does not
 belong in a box over the list, and a published capability deserves an address a member can share.
 
-- The page fetches the record server-side (`getCapability(id, source)` — first-party `_shared` entries resolve there
-  too) and 404s on anything the caller cannot see, so a foreign private publication stays indistinguishable from a
-  missing one. `?version=` is not part of the address: the version switcher stays an on-demand client read
-  (`CapabilityVersionsPanel`), because inspecting an old version is a lens on the same entity, not another entity.
-- **The detail is the only surface that adds/removes**: list rows stay read-only (manage menu aside), and
-  `CapabilityDetailView` owns the whole per-kind decision — agent adoption (`agents:write`, with the secret-binding /
-  write-opt-in dialog), skill copy-into-library (`skills:write`), environment import + pull re-check (`settings:write`).
-  Mutations `router.refresh()` the page so its own "in your workspace" state is re-read from the control plane, on top
-  of the server actions' `revalidatePath` of the list surfaces (which now includes this dynamic route, `'page'` typed).
+- The page fetches the record server-side (`GET /capabilities/:id?source=`; first-party `_everdict` entries resolve
+  there too) and 404s on anything the caller cannot see. `?version=` is not part of the address: the version switcher is an
+  on-demand client read, because an old version is a lens on the same entity.
+- **The detail is the only surface that adds or removes.** `CapabilityDetailView` owns the per-kind decision: agent
+  adoption (`agents:write`, with the secret-binding / write opt-in dialog), skill copy into the library
+  (`skills:write`), environment import and pull re-check (`settings:write`). Server actions revalidate the list
+  surfaces and this route, and the page calls `router.refresh()` to re-read its own "in your workspace" state.
 
-## The member's agent: Tools + Skills are per member (confirmed 2026-07-29)
+## The member's agent: Tools + Skills are per member
 
-A workspace is not one agent. Two members of the same workspace want different tools on the assistant they talk to and
-different procedures it follows, and before this the only knobs were workspace-wide: `AgentSpec.capabilities[]` (so
-adopting a tool handed it to everyone) and the skill library (so every member's agent carried every skill). Confirmed
-direction (2026-07-29, with the user): **the workspace is the shared BASELINE — "which tools and skills this workspace
-supports" — and each member overlays their own on/off on top of it.**
+A workspace is not one agent. The workspace is the shared BASELINE — which tools and skills it supports — and each
+member overlays their own on/off on top of it.
 
-- **Both pages are a list and a switch.** `/settings/tools` shows every tool the caller can put on their agent;
-  `/settings/skills` keeps its authoring surface (create · edit · share · delete) and gains a per-row "use" switch.
-  Rows group by scope — `personal` (published/drafted private by this member, visible to them alone) · `workspace`
-  (adopted on the AgentSpec, hand-wired `mcpServers[]`, authored here, or published workspace-wide) · `builtin` (the
-  first-party defaults). On the Tools page publishing, versioning, reach, the catalog and the workspace counts are NOT
-  present (user decision) — authoring and discovery stay in `/store` and `/store/mine`. Settings › Account no longer
-  carries a "My tools & skills" tab: a member's private tools and private skill drafts appear in the `personal`
-  section of the two Agent pages.
-- **The overlay.** `AgentMemberPreferences` (`(tenant, subject) → {tools, skills}`, each `key → boolean`, mig 0090) is
-  per member and self-scoped, like a personal secret. An ABSENT key means "follow the workspace" — clearing an override
-  deletes the key rather than freezing today's baseline value, so a later workspace change still reaches that member.
-  Keys namespace the channels: `default:<id>` · `capability:<owner>/<id>` · `mcp:<name>` (tools) · `skill:<id>`
-  (an authored Skill record).
-- **The baselines.** ON for everyone: adopted capabilities, hand-wired MCP servers, the workspace's authored skills
-  (plus the caller's own drafts), and non-opted-out first-party defaults. Listed but OFF until the member switches
-  them on: a capability published here that nobody adopted — tool or skill kind — and the member's own private
-  publications. Existing workspaces therefore behave exactly as before until someone touches a switch.
-- **One decision point.** `resolveAgentCapabilities` (`@everdict/application-control`) assembles both candidate pools
-  in ONE pass over the baseline (adopted references carry both kinds; visibility re-checked cross-tenant), overlays the
-  member's preferences and resolves name shadowing through the pure `selectForMember` kernel (`@everdict/domain`) —
-  which is what keeps "an authored skill shadows a same-named package" and "an adopted tool shadows a built-in" true
-  per member rather than per workspace. BOTH the settings pages (`GET/PUT /agent/tools` + `/agent/skills`, with the
-  `list_agent_tools`/`set_agent_tool`/`list_agent_skills`/`set_agent_skill` MCP twins) and the agent runtime
-  (`apps/agent` profile resolver, per turn, keyed by `principal.subject`) read it — so what a member configures and
-  what their agent carries cannot disagree. Skill FRESHNESS coverage stays an authored-record concern, computed for the
-  enabled authored skills in one batched pass.
-- Shadowing is per channel: a tool and a skill may share a name (the model reaches them through different doors —
-  a tool call vs `use_skill`). The workspace-wide default-tool toggles on Settings › Agent remain the admin baseline.
-- **A third channel rides the same overlay: the MODEL the member's agent thinks with** (`AgentMemberPreferences.model`,
-  mig 0167 — `GET/PUT /agent/model`, Account › Preferences). Not a capability decision, so it is not part of
-  `resolveAgentCapabilities`; it is read by the same profile resolver and follows the same reset rule (`null` = follow
-  the workspace's `AgentSpec.model`, never a frozen copy of it). Resolution order + the crafted-agent and verifier
-  exceptions: `docs/models.md` §"Which model a CONVERSATION runs on".
+- **Both pages are a list and a switch.** `/{workspace}/tools` shows every tool the caller can put on their agent;
+  `/{workspace}/skills` is the skill library (create · generate · edit · share · delete) with a per-row "use" switch.
+  Rows group by `AgentToolScope`: `personal` (the member's own private publications or drafts) · `workspace` (adopted
+  on the AgentSpec, hand-wired in `mcpServers[]`, authored here, or published workspace-wide) · `builtin` (first-party
+  defaults). Publishing, versioning, reach and the catalog stay in the store.
+- **The overlay.** `AgentMemberPreferences` (`(tenant, subject) → {tools, skills, model}`, migrations 0090 and 0167)
+  is self-scoped, like a personal secret. An ABSENT key follows the workspace: resetting an override deletes the key
+  rather than freezing today's baseline, so a later workspace change still reaches that member. Keys namespace the
+  channels: `default:<id>` · `capability:<owner>/<id>` · `mcp:<name>` (tools) · `skill:<id>` (an authored skill).
+- **The baselines.** On for everyone: adopted capabilities, hand-wired MCP servers, the workspace's authored skills
+  (plus the caller's own drafts), and first-party defaults the workspace has not opted out of. Listed but off until
+  the member switches them on: `mcp`/`code` capabilities published in this workspace that the agent has not adopted,
+  and the member's own private tool publications.
+- **One decision point.** `resolveAgentCapabilities` builds both candidate pools in one pass — tools in runtime
+  priority order (hand-wired servers → adopted → merely available → first-party defaults), skills from the
+  workspace's own `SkillRecord`s only — overlays the member's preferences, and resolves name collisions with the pure
+  `selectForMember` kernel (`@everdict/domain`): the first enabled candidate for a name wins and the rest report
+  `shadowedBy`. The pages (`GET/PUT /agent/tools`, `GET/PUT /agent/skills`; MCP `list_agent_tools`/`set_agent_tool`/
+  `list_agent_skills`/`set_agent_skill`) and the agent runtime (keyed by `principal.subject`) read the same answer,
+  so what a member configures and what their agent carries cannot disagree. Shadowing is per channel: a tool and a
+  skill may share a name, because the model reaches them through different doors.
+- **A third channel rides the same overlay: the model.** `AgentMemberPreferences.model` (`GET/PUT /agent/model`,
+  MCP `get_agent_model`/`set_agent_model`, Settings › Account › Preferences) is not a capability decision and is not
+  part of `resolveAgentCapabilities`. The profile resolver reads it for the workspace chat agent only (a crafted
+  agent's model is part of its identity), and `null` follows the workspace's `AgentSpec.model`. Resolution order:
+  [models.md](../models.md) §"Which model a CONVERSATION runs on".
 
-### The tool DETAIL (confirmed 2026-07-29)
+### The tool DETAIL
 
-The list is a switch; `/settings/tools/<urlencoded key>` is the explanation behind the switch — a ROUTED page (never a
-dialog: the right-hand chat panel is half the workflow). `GET /agent/tools/:key` (`get_agent_tool`) returns the row
-plus what the tool actually IS, all derived from the same `resolveAgentCapabilities` pass the runtime uses:
+`/{workspace}/tool/<urlencoded key>` is the explanation behind the switch — a routed page, never a dialog.
+`GET /agent/tools/:key` (`get_agent_tool`) returns the row plus what the tool is, derived from the same resolver pass
+the runtime uses:
 
-- **`transport`** — the three things the agent really does: `http` (open an MCP session) · `stdio` (`docker run -i` a
-  container) · `code` (write the source into a sandbox and run it). Rendered as one sentence + the real target.
-- **`functions`** — what the tool puts in front of the model, under the NAMESPACED name the model calls. A `code`
-  capability is exactly one function; an `mcp` server contributes as many as it serves. The bridged name has ONE
-  spelling — `mcpBridgedName`/`codeBridgedName` in `@everdict/domain` — used by the runtime bridge AND by this page,
-  so what a member reads is what gets registered. The DECLARED list is the author's `provides`; `POST
-  /agent/tools/:key/probe` (`probe_agent_tool`) connects AS THIS MEMBER with their bound secret and replaces it with
-  the server's own answer. Probing is HTTP-MCP only (a stdio container is the agent's to start, a code tool is verified
-  by RUNNING it — the store's try-runner, reused here; a first-party default resolves from the shipped definitions
-  since it has no store row, and stays trusted on a host runtime).
-- **`secrets`** — each declared name with the secret name it actually reads and whether the member can satisfy it.
-  Every channel's binding lives on the AgentSpec — an ADOPTED capability on its `CapabilityRef.secretBindings`, a
-  hand-wired server on its `authSecret`, and a first-party default / published-but-unadopted capability on the
-  spec-level `toolSecretBindings` overlay (tool key → declared name → workspace secret name; without an entry they
-  bind by the declared name) — so `PUT /agent/tools/:key/secrets` (`bind_agent_tool_secrets`, `agents:write`)
-  rewrites any of them and cuts a new agent version (bootstrapping the chat config when a fresh workspace has none).
-  The page therefore offers the same secret picker everywhere: select one of your existing secret names or create one
-  inline; a member without `agents:write` still gets "store a secret under exactly the bound name". Names only,
-  never values.
-- **Editing is the chat, not a form.** `editable` (a capability THIS workspace owns) surfaces "대화로 편집하기" →
-  the `tool` reference type (`get_capability`, carrying `source` since a tool may be owned elsewhere) + the `toolEdit`
-  mission; the agent reads the spec and publishes a new version under HITL approval. Built-ins and other workspaces'
+- **`transport`** — `http` (open an MCP session) · `stdio` (`docker run -i` a container) · `code` (run the source in
+  a sandbox).
+- **`functions`** — what the tool puts in front of the model, under its bridged name. The declared list is the
+  author's `provides` (a `code` tool is exactly one function); `POST /agent/tools/:key/probe` (`probe_agent_tool`)
+  connects as this member with their bound secret and replaces it with the server's own answer. Probing is HTTP-MCP
+  only (`probeable`); a code tool is verified by running it with the try-runner.
+- **`secrets`** — each declared name, the secret name it reads, and whether the member can satisfy it. The binding
+  lives on the AgentSpec: an adopted capability's `CapabilityRef.secretBindings`, a hand-wired server's `authSecret`,
+  and, for a first-party default or an unadopted publication, the spec-level `toolSecretBindings` overlay (tool key →
+  declared name → secret name; without an entry they bind by the declared name). `PUT /agent/tools/:key/secrets`
+  (`bind_agent_tool_secrets`, `agents:write`) rewrites any of them and registers a new agent version, bootstrapping
+  the chat config when a fresh workspace has none. Binding a workspace-tier secret additionally needs `secrets:read`,
+  because its value is sent to an endpoint a member can author. Names only, never values.
+- **Editing is the chat, not a form.** When `editable` (a capability this workspace owns), "Edit in chat" drops a
+  `tool` reference (carrying `source`) and frames the panel with the `toolEdit` mission; the agent reads the spec with
+  `get_capability` and publishes a new version with `save_capability` under approval. Built-ins and other workspaces'
   publications are read-only here.
 
-## First-party default toolset (confirmed 2026-07-27)
+## First-party default toolset
 
-The store as designed above is **adopt-only**: a capability reaches an agent solely via an explicit
-`AgentSpec.capabilities[]` pin. But an agent should ship with tools **out of the box** — web search, PDF reading, and
-the "use the integration" actions for whatever integrations a workspace has configured — without any member browsing
-the store first. And those same tools must stay **marketplace-installable** (a workspace can swap in a richer/custom
-version). Confirmed direction (2026-07-27, with the user): deliver **both channels on one substrate** — the
-`Capability` entity — by adding a **first-party, default-enabled tier**. No parallel "built-in tools" list in code; a
-default IS a capability, so it is browsable, versioned, and replaceable like any other.
+An agent ships with tools out of the box, and those tools stay replaceable. A default IS a capability — browsable,
+versioned and shadowable like any other — so there is no parallel built-in list.
 
-### The tier
-- **First-party** = operator/Everdict-authored capabilities owned by a reserved `_everdict` tenant (mirrors the
-  `_shared` registry fallback), readable by every workspace.
-- **Browsable in the store** — the built-ins are code-defined (`firstPartyDefaults()`, not DB rows), so
-  `CapabilityService.listPublic()` **merges them ahead of** the DB `public` catalog (`firstPartyCatalog` injected).
-  This is what makes "the same tool, two channels" true in the store *surface*, not just in the agent runtime: the
-  public tab shows the built-ins with a **"built-in" badge** (owner `_everdict`), and because they aren't DB rows they
-  are **read-only** there (no edit/reach/delete — even for an admin) and shown as *provided by default* rather than an
-  Adopt button (they're managed via Settings › Agent `disabledDefaults`, not adoption).
-- **Tools only.** The default tier is `web_search` / `fetch_url` / `pdf_read` — capabilities of the product. Everdict's
-  SKILLS are store examples a workspace copies (see Phase 10 below), never defaults.
-- **Default-enabled** = the agent includes them **without** an `AgentSpec.capabilities[]` pin. The effective toolset:
-  ```
-  first-party default capabilities (auto, gated)   ← web search · PDF · integration use-actions
-  ∪ adopted capabilities (explicit pins)           ← richer / community / custom
-  ∪ raw mcpServers[] (escape hatch)
-  ```
-- **Gated** — an integration default is on only when its integration is configured (Mattermost set → the Mattermost
-  tools appear; GitHub App installed → the GitHub tools; a registry set → the image tools). A generic default (PDF) is
-  unconditional; web search is on when a search-provider key is resolvable.
-- **Opt-out & shadow** — `AgentSpec.disabledDefaults[]` (capability ids) turns a default off; adopting a capability
-  with the same `name` shadows the default (the pinned, adopted version wins). Defaults never silently override a
-  member's explicit choice.
+- **Owner** — the reserved `_everdict` tenant (`FIRST_PARTY_TENANT`), readable by every workspace. The records are
+  code-defined in `packages/application-control/src/capability/first-party.ts`, not DB rows: `CapabilityService`
+  merges the injected `firstPartyCatalog` (`firstPartyDefaults()` + `firstPartyCatalogExtras()`) ahead of the DB
+  `public` catalog and resolves those entries by `(source, id)`. In the store they carry a built-in badge and are
+  read-only, even for an admin.
+- **The defaults** are three `code` tools with no integration requirement: `web_search` (declares `TAVILY_API_KEY`),
+  `fetch_url` and `pdf_read`.
+- **Effective toolset** — a default is included without a `capabilities[]` pin, subject to
+  `AgentSpec.disabledDefaults[]` (by capability id) and the member overlay; a same-named hand-wired, adopted or
+  available tool shadows it.
+- **Secrets** — a default resolves each declared secret from an operator-global value first
+  (`AGENT_WEBSEARCH_API_KEY` supplies `TAVILY_API_KEY`), then from the workspace/personal secret of that name. A
+  default whose declared secrets resolve to nothing is not offered to the model.
+- **Integration gate** — `CapabilityRequirement` (`mattermost | github | image-registry`), `configuredIntegrations`
+  and `selectDefaultCapabilities` (`@everdict/domain`) can gate a default on a configured integration, but no shipped
+  default declares one. The Mattermost, GitHub and image-registry actions (`post_mattermost_message`,
+  `open_github_pr`, `get_github_file`, `open_ci_setup_pr`, …) are control-plane MCP tools, whose credentials live
+  server-side.
 
-### Secret resolution for first-party defaults
-A default declares `requiredSecrets` like any capability, but its values resolve **from the workspace's existing
-integration config**, not a manual `secretBindings` map at adoption (there is no adoption step):
-- Mattermost tools → the configured bot token (`workspace/mattermost`).
-- GitHub tools → the workspace GitHub App **installation token** (already minted for clone/CI).
-- image-registry tools → the registry push/pull credentials.
-- Web search → a search-provider key: an **operator-global** key (Everdict runs search for every workspace) or, absent
-  that, a **workspace-bound** secret; unresolved → the tool is listed as "configure to enable," never a hard failure.
+The agent's base control-plane surface is bridge-all ([agent-conversations.md](agent-conversations.md) P13): every
+entity's reads and mutations reach the agent except the runner wire-protocol tools, each mutation decided by the
+session's permission mode (default · auto · bypass · plan) on top of RBAC.
 
-### Slices (additive to Phases 1–6)
-- **Phase 7 — first-party tier mechanism.** Reserved `_everdict` owner + a `defaultEnabled` / `requires`
-  (`mattermost | github | image-registry | null`) marking on the record; `CapabilityStore.listDefaults()`; a pure
-  domain gate `applicableDefaults(defaults, { integrationsConfigured })`; `profile.ts` merges resolved defaults
-  (secrets from integration config) with adopted caps and honors `disabledDefaults[]` + name-shadowing; web surfaces
-  defaults in Settings › Agent (per-default toggle) and flags them "built-in" in the store.
-- **Phase 8 — seed the generic tools.** A PDF `code` capability (python, extract text from a URL/artifact; no secret;
-  default-on) and a web-search `code` capability (portable search API — Tavily/Brave/Serper — behind a search-provider
-  key; default-on when resolvable). Portable API over any provider-native web_search so it works across Anthropic +
-  OpenAI harnesses.
-- **Phase 9 — rich integration adapters.** First-party `code` (or hosted `mcp`) capabilities beyond the current three
-  use-actions: Mattermost (list channels · read/post thread), GitHub (create issue · comment on PR/issue · read repo
-  file · list PRs/issues), image-registry (list images/tags · inspect) — each gated on its integration, secrets
-  auto-bound from config, writes HITL-gated.
-- **Phase 10 — first-party SKILLs (landed), then REFRAMED as store examples (2026-07-29, user decision).** Everdict
-  authors two skills — **`scorecard-fix-pr`** (the eval→fix loop as a procedure: diagnose a scorecard's failing cases
-  from the eval evidence, locate the root cause via `get_github_file`, open the fix PR via `open_github_pr` with the
-  experiment context MANDATORY in the body) and **`trace-analysis`** — but they are **NOT a default tier**. They are
-  EXAMPLES that live in the store (`firstPartySkillExamples()`, merged into the public catalog) until a workspace
-  takes one.
-  - **A skill is a document a workspace owns.** Shipping one as a silent default puts a procedure in every
-    workspace's agent that nobody there wrote, can edit, or can version — which is exactly what the reframe removes.
-    Tools stay defaults (nobody edits `web_search`); skills do not.
-  - **Taking one COPIES it** (`POST /skills/import` → `SkillService.importFromStore`): the content lands as an
-    ordinary workspace `SkillRecord`, `visibility: workspace`, its version line starting at the version copied, with
-    `origin: {source, id, version, name}` as provenance (never a live link — the moment they edit it, a link would
-    either fight their edits or lie). The store hides an example a workspace already took; taking it twice is 409.
-  - **Skill-kind capabilities are not agent attachments at all.** `resolveAgentCapabilities` resolves skills from ONE
-    channel — the workspace's own `SkillRecord`s — so Settings › Agent › Skills lists exactly what the agent follows,
-    and every entry is editable and versionable by the people it belongs to. Publishing a skill to the store hands
-    others something to copy; it does not add a second, uneditable row to anyone's library (not even the author's).
-    The old `origin: authored | packaged` split on `GET /agent/skills` is gone with it.
-  - `scorecard-fix-pr`'s `requires: "github"` gate went with the default tier: nothing is auto-attached, so there is
-    nothing to gate. The copy tells the agent to use the GitHub tools, and those are gated on their own.
-  See "Skill versions" below.
+### First-party skills are store examples, not defaults
 
-The base control-plane surface is now **bridge-all** (docs/architecture/agent-conversations.md P13): every entity's
-reads AND mutations reach the agent (only the runner wire-protocol tools are excluded), with each mutation decided by
-the session's permission mode (default=ask · auto=ask only guarded actions · bypass · plan) on top of the RBAC. The
-former curated `INTEGRATION_ACTIONS` admission list is gone — the integration "use" actions (post_mattermost_message,
-open_ci_setup_pr, open_github_pr, …) are simply part of that surface, and they still migrate into first-party
-integration capabilities as the richer Phase 9 adapters land.
+Everdict authors skills — `scorecard-fix-pr`, `trace-analysis`, `memory-consolidation`, `delegate-work`,
+`agent-evolve`, `harness-evolve`, `code-evolve` (`firstPartySkillExamples()`) — and ships them as public catalog
+entries that a workspace takes.
+
+- **A skill is a document a workspace owns.** A silent default would put a procedure in every workspace's agent that
+  nobody there wrote, can edit or can version. Tools stay defaults (nobody edits `web_search`); skills do not.
+- **Taking one COPIES it** (`POST /skills/import`, MCP `import_skill` → `SkillService.importFromStore`): the content
+  lands as an ordinary `SkillRecord` (`visibility: workspace` unless the caller says otherwise), its version line
+  starting at the copied version, with `origin: {source, id, version, name}` as provenance — never a live link, which
+  would either fight later edits or lie about them. Taking the same publication twice is 409.
+- **Skill-kind capabilities are not agent attachments.** Skills resolve from the workspace's own `SkillRecord`s only,
+  so the Skills page lists exactly what the agent follows and every entry is editable by the people it belongs to.
+  Publishing a skill hands others something to copy; it adds no second row to anyone's library, the author's
+  included.
+
+See "Skill versions" below.
 
 ## Fourth kind — `environment` (managed eval-environment images)
 
-The substrate's extensibility claim has been exercised: `type:'environment'` publishes a **managed eval-environment
-image** (pullable ref + composition preset + instructions) into the same store — consumed at harness-AUTHORING time
-(template pins / service images), not adopted as an agent tool. Full design + slices:
-`docs/architecture/environment-image-store.md`.
+`type:'environment'` publishes a managed eval-environment image (pullable ref + composition preset + instructions)
+into the same store. It is consumed at harness-authoring time (template pins, service images), never adopted as an
+agent tool. Full description: [environment-image-store.md](environment-image-store.md).
 
 ## Fifth kind — `delegation` (a work environment everdict hands work TO)
 
-The other four kinds describe what an agent USES. `type:'delegation'` describes an environment everdict
-**employs**: a registered work-agent it can hand a job to and converse with until the job is done.
+The other kinds describe what an agent USES. `type:'delegation'` describes an environment everdict **employs**: a
+registered work-agent it can hand a job to and converse with until the job is done.
 
-**Why a capability and not a harness.** A harness is the agent *under test* — the eval lane's subject. A
-delegate is the opposite role: it is the worker. What a workspace needs of it is exactly what the store
-already provides — versioning, the four reach tiers, cross-tenant sharing, adopt-and-edit, and a first-party
-EXAMPLE to start from. (The harness registry could not carry it anyway: `ProcessHarnessSpec` is
-`{kind,id,version}`, `makeHarness` discarded everything else, and model resolution skipped process kind
-entirely — so a "claude-code with THIS image, model and env" had no representation at all.)
+**Why a capability and not a harness.** A harness is the agent *under test* — the eval lane's subject. A delegate is
+the worker. What a workspace needs of it is what the store already provides: versioning, the reach tiers,
+cross-tenant sharing, adopt-and-edit, and a first-party example to start from (`code-delegate`,
+`firstPartyDelegationExamples()`).
 
-**What it pins** — one reference collapses what a delegation otherwise re-specifies per call:
-`harness` (which conversational agent runs — any adapter carrying the `conversational` marker) · `image`
-(prebuilt, so a delegation costs no per-session install) · `model` (a registered Model → baseUrl + underlying
-model + key, `ModelRef.env` remapping included) · `env` (literal or `{secretRef, scope}`) · `workDir` (the
-conversation's stable cwd) · `instructions` + `instructionsFile` (the STANDING brief, seeded as the file that
-agent reads by convention — CLAUDE.md · AGENTS.md · …) · `ttlSec`.
+**What it pins** — one reference collapses what a delegation otherwise re-specifies per call: `harness` (which
+conversational agent runs — any adapter carrying the `conversational` marker) · `image` (prebuilt, so a delegation
+costs no per-session install) · `model` (a registered Model → baseUrl + underlying model + key, `ModelRef.env`
+remapping included) · `env` (literal or `{secretRef, scope}`) · `workDir` (the conversation's stable cwd) ·
+`instructions` + `instructionsFile` (the STANDING brief, seeded as the file that agent reads by convention —
+CLAUDE.md · AGENTS.md · …) · `ttlSec` · `network` (the `NetworkPolicy` the session's box must enforce).
 
-**Env precedence, stated once**: `harnessAuthEnv` (workspace→personal tiers) < the profile's own `env` < the
-model's connection env. Same "model wins" rule the eval lane applies, so a profile and a harness never
-disagree about who owns the endpoint.
+**Env precedence, stated once**: `harnessAuthEnv` (workspace→personal tiers) < the profile's own `env` < the model's
+connection env. It is the same "model wins" rule the eval lane applies, so a profile and a harness never disagree
+about who owns the endpoint.
 
-**The handoff is a contract, not a prose blob.** `POST /sandboxes {profile, brief}` — the brief (goal ·
-context · references · constraints · done-criteria; the reference TYPE vocabulary is the agent's own) is
-rendered once (`renderDelegationBrief`, `@everdict/domain`), written into the delegate's working directory as
-`BRIEF.md` **before the ledger row exists** (a delegate that silently never got its context is the failure
-this ordering prevents), and sealed on the session trajectory as a `delegation.brief` marker — so the ledger
-alone answers what they were actually asked to do. A profile session is always a conversation; turns run in
-the profile's own `workDir`, never a per-task scope, or the delegate walks away from its brief.
+**The handoff is a contract, not a prose blob.** `POST /sandboxes {profile, brief}` — the brief (goal · context ·
+references · constraints · done-criteria) is rendered once (`renderDelegationBrief`, `@everdict/domain`), written into
+the delegate's working directory as `BRIEF.md` **before the ledger row exists** (a delegate that silently never got
+its context is the failure this ordering prevents), and sealed on the session trajectory as a `delegation.brief`
+marker, so the ledger alone answers what the delegate was asked to do. A profile session is always a conversation;
+turns run in the profile's own `workDir`, never a per-task scope.
 
-**WHO is a separate axis from WHERE.** A profile is an OVERLAY on the session's target, not a boot mode — a
-delegate must be able to work anywhere a member can: alone it runs in its own image; with `world` it continues
-that world (and its work hibernates into the next snapshot) or FOUNDS one, taking the profile's image as the
-genesis base when the caller names none; with `environment`/`image` it works in that one; `repo` clones in as
-usual. The only conflict is `harness`, which also says who runs.
+**WHO is a separate axis from WHERE.** A profile is an overlay on the session's target, not a boot mode: alone it runs
+in its own image; with `world` it continues that world (its work hibernates into the next snapshot) or founds one,
+taking the profile's image as the genesis base when the caller names none; with `environment` or `image` it works in
+that one; `repo` clones in as usual. The only conflict is `harness`, which also says who runs.
 
-Refused by name: a brief without a profile, `profile` + `harness`, a profile whose harness cannot converse,
-and a profile naming a secret the workspace has not set.
+Refused by name: a brief without a profile, `profile` + `harness`, a profile whose harness cannot converse, and a
+profile naming a secret the workspace has not set.
 
-**Scope note (live-verified)**: the profile's `env` is the DELEGATE's environment — it reaches the agent
-adapter, not the session's `exec` channel (which is the operator's own shell, and has never carried
-`apiKeyEnv` either). If a delegation needs a variable present for hand-run commands too, bake it into the
-image; making `exec` inherit the agent's environment would quietly hand an operator shell the delegate's
-credentials.
+**Scope note (live-verified)**: the profile's `env` is the DELEGATE's environment — it reaches the agent adapter, not
+the session's `exec` channel (which is the operator's own shell, and has never carried `apiKeyEnv` either). If a
+delegation needs a variable present for hand-run commands too, bake it into the image; making `exec` inherit the
+agent's environment would quietly hand an operator shell the delegate's credentials.
 
-## Non-goals (this iteration)
-- No org/group tenancy layer — `subset` is an explicit `sharedWith[]`.
-- No accept/invite handshake for `subset` — the owner shares unilaterally (revocable).
-- No live-reference adoption (auto-updating) — refs are pinned; upgrade is an explicit re-pin.
-- No marketplace economy (payments/ratings/reviews) in v1 — provenance + "update available" only.
-- No value-copy adoption — the catalog is the SSOT.
-
-## Open questions
-- **Secret-binding UX** for `mcp`/`code` at adoption — map each declared `requiredSecrets[].name` to a workspace
-  secret via the existing `SecretPicker`; unbound required secret → block adoption or warn?
-- **`public` moderation** — admin-gate is v1; do we need operator review / a report flow before a global marketplace?
-- **`code` sandbox network policy** — default deny-all egress, or an allowlist the author declares and the adopter
-  approves?
-- **Namespacing collisions** across many adopted capabilities — `mcp__<name>__<tool>` / `code__<name>`; enforce
-  unique `name` per agent at adoption.
-- **Skill migration** — confirm `everdict_skills` has no production data worth preserving beyond the fold-in.
-
-## Skill versions (2026-07-29)
+## Skill versions
 
 A workspace skill carries its own semver, so "edit it in conversation, then stamp the version" is a real loop:
 
 - **The row is the WORKING COPY.** Members (and the agent, via `update_skill` under the session's permission mode)
-  edit it freely; `SkillRecord.version` names the last content the workspace decided to *publish*, not every keystroke.
+  edit it freely; `SkillRecord.version` names the last content the workspace decided to publish, not every keystroke.
 - **A stamp freezes content** (`POST /skills/:id/versions` / MCP `stamp_skill_version`): `bump` (major|minor|patch,
   default patch) or an explicit version that must order above the current one (else 400), plus an optional `note`
-  (the changelog line). The snapshot is immutable — a re-stamp of a live version is 409 — which is what makes "what
-  did this procedure say when we ran that eval?" answerable. Content is read filesystem-first, so a body an agent
-  rewrote through the workspace filesystem is what gets frozen.
-- **A stamp is not an edit**: `updatedAt` stays put, so `latestStamp.stampedAt < skill.updatedAt` is exactly
-  "there are changes since the last stamp" — the detail page shows that as a badge next to the version.
+  (the changelog line). The snapshot is immutable — re-stamping a live version is 409 — which is what makes "what did
+  this procedure say when we ran that eval?" answerable. Content is read filesystem-first, so a body an agent rewrote
+  through the workspace filesystem is what gets frozen.
+- **A stamp is not an edit**: `updatedAt` stays put, so the newest stamp's `stampedAt` earlier than
+  `skill.updatedAt` means "changed since the last stamp", shown as a badge next to the version on the skill detail.
 - Storage: `everdict_skills.version` + `everdict_skills.origin` (jsonb) and the `everdict_skill_versions` table
-  (mig 0091), behind the `SkillVersionStore` port (kept out of `SkillStore`: the row is read on every agent turn, the
-  line only when someone opens the version panel — the same split as `WorkspaceFs` ← `FsRevisionStore`).
+  (migration 0091), behind the `SkillVersionStore` port — kept out of `SkillStore` because the row is read on every
+  agent turn and the line only when someone opens the version panel (the same split as `WorkspaceFs` ←
+  `FsRevisionStore`).
+
+## Not built
+
+- No org/group tenancy layer and no accept/invite handshake — `subset` is an explicit `sharedWith[]` the owner edits
+  unilaterally.
+- No auto-updating references — refs are pinned and an upgrade is an explicit re-pin; the store shows no "update
+  available" or adoption counts.
+- No marketplace economy (payments, ratings, reviews) and no operator review of `public` publications beyond the
+  admin gate.
+- No isolated code runtime composed into the agent service (see "Security").

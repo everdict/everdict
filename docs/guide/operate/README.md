@@ -2,11 +2,11 @@
 kind: wiki
 title: "Operate"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
 ---
 # Operate
 
-Running one evaluation is a command. Running evaluation as a practice is these four pages.
+Running one evaluation is a command. Running evaluation as a practice is these pages.
 
 - **[Track the work](tracker.md)** — issues, projects and initiatives: why you are evaluating
 - **[Schedules & monitoring](schedules.md)** — run a scorecard on a cron, and notice when it moves

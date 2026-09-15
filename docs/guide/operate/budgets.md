@@ -2,7 +2,8 @@
 kind: wiki
 title: "Budgets & cost"
 status: current
-updated: 2026-08-11
+updated: 2026-09-15
+anchors: [packages/domain/src/billing/budget.ts, apps/api/src/api/billing/billing.routes.ts, apps/api/src/common/budget-tracker.ts, apps/api/src/api/scorecard/request/run-scorecard.ts]
 ---
 # Budgets & cost
 
@@ -13,8 +14,9 @@ provider bill, and the first surprise usually arrives as an invoice rather than 
 
 Three places, and they are not equally visible:
 
-**The agent under test** — unless it runs on a self-hosted runner, where the machine's own login pays.
-That is the single largest lever: `runtime: "self:<id>"` moves agent spend off the workspace entirely.
+**The agent under test** — unless it runs on a personal self-hosted runner, where the machine's own
+login pays. That is the single largest lever: `runtime: "self:<id>"` moves agent spend off the workspace
+(calls made with a workspace-registered model are still the workspace's).
 
 **Judges** — every `model` judge is a provider call per case per trial. Three trials with two judges is
 six calls per case.
@@ -29,18 +31,25 @@ a usage-proxy sidecar recovers per-run token usage for gateways that do not.
 Every run carries its own cost, so a scorecard's cost is the sum of things you can inspect
 individually — not a number you have to trust.
 
-## Budgets are meter-only
+## Two instruments: the meter and the budget
+
+**The usage meter** (`GET /usage`) records the workspace's metered LLM cost — agent, judge and
+workspace-agent conversations — and never blocks anything.
+
+**The budget** (`GET /budget`, and `PUT /budget` for an admin; **Settings → Budget**) sets caps per
+workspace on cost (`usd`), `tokens` and `runs`. Any cap left unset is unlimited, and a workspace with no
+limit falls back to the operator's `EVERDICT_TENANT_USD` / `EVERDICT_TENANT_RUNS` if those are set.
 
 :::warning
-A workspace budget **records** spend. It does not refuse it. Nothing in the platform will stop a batch
-halfway because it got expensive.
+A budget **refuses**. Once a cap is reached, new work is rejected with `402 BUDGET_EXCEEDED` — a run,
+a file execution, a browser session, and **each remaining case of a batch already under way**, which then
+fails. Cost is only known after a run, so the last run that crosses the cap is allowed to finish.
 :::
 
-That is a deliberate choice — a batch killed at 60% produces a partial scorecard, which is worse than
-an expensive complete one, because a partial result that looks complete is how wrong decisions get
-made. But it means the budget is a *reporting* tool, and the control you actually have is upstream:
+That is a real trade: a batch stopped at 60% is a failed scorecard, not a cheaper complete one. So set
+caps as a backstop against runaway spend, and keep the control you actually want upstream:
 
-- **`subset`** — run 40 cases nightly and the full 400 weekly.
+- **`cases`** — run a subset (`limit`, `tags` or explicit `ids`) nightly and the full dataset weekly.
 - **`trials`** — three is usually enough to see flakiness; five rarely tells you more.
 - **Judges** — prefer deterministic graders. Every judge you add is both variance and spend.
 - **`self:<id>`** — move agent spend to a machine whose subscription already exists.
@@ -55,7 +64,7 @@ agent calls  = 200 × 3            = 600
 judge calls  = 200 × 3 × 1        = 600
 ```
 
-Nightly, that is 42,000 model calls a month before anyone runs anything by hand. If those numbers look
+Nightly, that is 36,000 model calls a month before anyone runs anything by hand. If those numbers look
 fine, run it nightly. If they do not, the answer is a nightly subset and a weekly full run — not a
 smaller model for the judge, which trades money for a noisier verdict.
 
