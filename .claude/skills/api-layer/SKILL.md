@@ -5,49 +5,54 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # API layer (`apps/api`)
 
-The external SaaS surface. A Fastify server over the runtime (Scheduler + trust zones + secrets + budgets +
-autoscaling). Structured by a TS reinterpretation of the proven layered-service idiom: **root = layer
-(`common ← core ← api`, one-way), inside each layer = domain folders, the same domain name recurring per
-layer.** See `docs/api.md` + `docs/architecture/api-route-modularization.md`.
-Rule: `.claude/rules/api-layer.md`.
+The external SaaS surface: a Fastify server that is transport and composition over the layer spine. The
+business code it serves is NOT in this app — the re-architecture moved the services into
+`@everdict/application-control` and the domain models into `@everdict/domain`, and `apps/api` keeps the transport
+slices, the composition roots and the machinery bound to this process. See `docs/api.md` +
+`docs/architecture/api-route-modularization.md`. Rule: `.claude/rules/api-layer.md`.
 
 ## Structure map
 
 ```
+packages/domain/src/<domain>/               ← models (guard methods + transitions returning store patches; an illegal
+                                              transition throws from the domain) + <x>-policy.ts. docs/architecture/rich-domain-core.md
+packages/application-control/src/<domain>/  ← <resource>-service.ts (orchestration ONLY: idempotency, cross-domain
+                                              composition, events — never a status literal) + collaborators + tests
+packages/application-control/src/ports/     ← the store/registry ports those services take (impls: @everdict/db, @everdict/registry)
+packages/application-control/src/execution/ ← execute-case.ts (executeCase) · scoring-service.ts (ScoringService)
+
 apps/api/src/
-  main.ts            ← process composition root: env → deps wiring, grouped into per-concern builders
-  server.ts          ← HTTP composition root ONLY: app build (parsers/logging), WS upgrade, MCP transport,
+  main.ts            ← process composition root: env → deps, over the builders in composition/
+  composition/       ← per-concern wiring builders (persistence, dispatch, run, scorecard, services, authenticator, …)
+  server.ts          ← HTTP composition root ONLY: app build (parsers/logging/swagger), WS upgrade,
                        register<X>Routes(app, deps) calls
   mcp.ts             ← MCP composition root ONLY: McpServer build + register<X>Tools(server, ctx) calls
-  api/               ← TRANSPORT layer (one folder per domain entity)
+  mcp.routes.ts      ← the /mcp Streamable HTTP transport + session map
+  api/               ← TRANSPORT layer (one folder per domain entity — `ls apps/api/src/api`)
     route-context.ts   ← ServerDeps (deps bag) + auth chain (resolveIdentity/applyActiveWorkspace/
                          resolvePrincipal/resolveBearerPrincipal) + gate/sendError/zodIssues/constantTimeEq
     mcp-context.ts     ← McpDeps + McpToolContext + ok/fail/run/plain (the MCP twin of route-context)
-    <domain>/          ← run · scorecard · harness · dataset · judge · model · runtime · benchmark · bundle · product ·
-                         schedule · view · task · secret · member · workspace · profile · notification · comment ·
-                         api-key · runner · github-app · mattermost · trace-sink · image-registry · ci-link ·
-                         queue · billing (+ execution/ ops/ = machinery's thin transport surfaces)
+    <domain>/          ← (execution/ + ops/ = the thin transport surfaces of the machinery below)
       <resource>.routes.ts   ← registerXRoutes(app, deps): thin handlers, zero logic
       <resource>.mcp.ts      ← registerXTools(server, ctx): the same resource's MCP tools, zero logic
       <resource>.docs.ts     ← OpenAPI route descriptors (summary/tags/params/body/response) — the
                                docs/impl separation; routes attach { schema: docs.x }
       request/<dto>.ts       ← one file per request Zod DTO (XxxBodySchema) — only when it has bodies
-      response/<dto>.ts      ← response DTO schemas (reuse @everdict/db/core record schemas as SSOT)
+      response/<dto>.ts      ← response DTO schemas (reuse @everdict/contracts record/spec schemas as SSOT)
       (+ inject-based transport tests)
-  core/              ← BUSINESS layer (same domain names as api/)
-    <domain>/          ← <entity>.ts (domain model: guard methods + transitions that return store patches;
-                         illegal transition throws from the domain) + <x>-policy.ts (cross-service
-                         read/invariant concerns, batched) + <resource>-service.ts (orchestration ONLY:
-                         idempotency, cross-domain composition, events — never a status literal) +
-                         collaborator services + tests. See docs/architecture/rich-domain-core.md.
-    execution/         ← engine machinery: execute-case, scoring-service, judge-runner, dispatchers, backends
-    ops/               ← instrumentation/recovery machinery: metrics, speculation, startup-recovery, …
-  common/            ← cross-cutting helpers (budget-tracker, usage-meter, version-tag-service, …)
-  infrastructure/    ← external-client plumbing (oauth/)
+  core/              ← app-bound machinery that did not move to a package (~35 files)
+    execution/         ← dispatchers (runtime/seeding/judge-auth/…), self-hosted + topology backends, judge-runner
+    ops/               ← runtime inspect/probe/control, driver ops
+    schedule/ · scorecard/  ← the Temporal drivers
+    <domain>/          ← a few services bound to an adapter package (model, bundle, benchmark, browser-session, …)
+  common/            ← cross-cutting helpers (budget-tracker, usage-meter, live stores, tickets, …)
+  infrastructure/    ← external-client plumbing (github, mattermost, oauth, registry, browser-session, …)
 ```
 
-- **Root = layer, inside = domain.** `api/<domain>/` and `core/<domain>/` share the entity name — the
-  vertical slice spans layers by NAME. One-way imports: `common ← core ← api` (core never imports api).
+- **Where a thing goes.** A new service → `packages/application-control/src/<domain>/`; a new model or policy →
+  `packages/domain/src/<domain>/`; its transports → `apps/api/src/api/<domain>/`. `apps/api/src/core/` is only
+  for code that needs an adapter package or this process. One-way imports inside the app:
+  `common ← infrastructure ← core ← api`; only `main.ts` imports `composition/`.
   A sub-resource lives in its owner's domain (harness-template in `harness/`, invite in `member/`). Never a
   concern umbrella (`catalog/`) on the domain axis; never routes in server.ts; never tool bodies in mcp.ts.
   The slice owns **both transports** — parity is structural, not a convention you remember. Storage is the
@@ -105,32 +110,36 @@ in the ledgers themselves (`RunListOptions.viewer`, `TrajectoryMeta.owner`), alw
 surface serves runs or their evidence, ask the audience question there too; see docs/api.md §Run audience.
 
 ## Recipe: adding a resource
-1. `core/<domain>/<resource>-service.ts` — logic + store access + response shaping. Inputs are command objects.
+1. `packages/application-control/src/<domain>/<resource>-service.ts` — logic + store access + response shaping,
+   over a port in `ports/` (impl in `@everdict/db`/`@everdict/registry`); export it from the package index.
+   Inputs are command objects. A lifecycle's legality goes in a `packages/domain/src/<domain>/` model.
 2. `api/<domain>/request/<dto>.ts` — `CreateXBodySchema`/`UpdateXBodySchema` (Zod), one file per DTO.
-   Registry-backed resources often validate with the core spec schema directly (no file needed).
+   Registry-backed resources often validate with the contracts spec schema directly (no file needed).
 3. `api/<domain>/<resource>.routes.ts` — `registerXRoutes(app, deps)` in the fixed shape above.
 4. `server.ts` — one `registerXRoutes(app, deps)` line. `api/route-context.ts` — add the service to
-   `ServerDeps` (optional field; absent = feature-gated 404).
+   `ServerDeps` (optional field; absent = feature-gated 404), constructed in `main.ts` or its `composition/` builder.
 5. **MCP parity** — `api/<domain>/<resource>.mcp.ts` with `registerXTools(server, ctx)` calling the same
    service function; one `registerXTools(...)` line in `mcp.ts`. Descriptions carry the semantics (the tool
    schema IS the doc for agents).
-6. **OpenAPI** — `api/<domain>/response/<dto>.ts` (reuse the db/core record schema if one exists) +
+6. **OpenAPI** — `api/<domain>/response/<dto>.ts` (reuse the contracts record schema if one exists) +
    `api/<domain>/<resource>.docs.ts` descriptors; attach `{ schema: docs.x }` in the route registration.
    Doc-only (no-op validator/serializer) — never changes behavior; English text.
 7. Tests: `buildServer` + `inject` (see skill `testing`) — cover authz (401/403), validation (400), 404 scoping.
 
-## Run lifecycle (`RunService`) — the archetype service
-`submit`: `budget.admit(tenant)` (over-limit → 402, no run created) → `store.create(queued)` → return 202 →
-(background) `executeCase` → on success `budget.settle(costOf)` + `store.update(succeeded, result)`,
-on error `store.update(failed, envelope)` → optional `webhookUrl` POST of the final record. The dispatcher is a
-`Dispatcher` — an in-process `Scheduler` (default) or the Temporal orchestrator for the durable path.
+## Run lifecycle (`RunService`, application-control) — the archetype service
+`submit`: `admitCausedWork` (only when an agent caused the run) → `budget.admit(tenant)` (over-limit → 402, no run
+created) → `Run.newQueued` + `store.create` → the route returns 202 → (background) `executeCase` →
+`budget.settle` + the `Run` transition (`succeed`/`fail`), whose terminal fact `runWebhookConsumer` later turns into
+the optional `webhookUrl` callback (never fired inline). The
+dispatcher is a `Dispatcher` — an in-process `Scheduler` (default) or the Temporal orchestrator for the durable path.
 
 ## Three concerns: execution · orchestration · scoring (don't re-tangle)
-See `docs/architecture/execution-scoring-orchestration.md`.
-- **Execution** = `execution/execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — **pure**. No
+See `docs/architecture/execution-scoring-orchestration.md`. Both files below are in
+`packages/application-control/src/execution/`.
+- **Execution** = `execute-case.ts` `executeCase(deps, owner, job, opts?) → CaseResult` — **pure**. No
   settle/offload/notify. `RunService` and `ScorecardService` both call it (never route the batch through
   `RunService.submit`).
-- **Scoring** = `execution/scoring-service.ts` — judge application over results, independent of how they were
+- **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how they were
   produced (live batch **and** ingest share it); aggregation stays pure in `@everdict/domain`.
 - **Orchestration** = the services drive execution and own admit/settle, delivery (202/webhook), notify, progress.
 
@@ -142,7 +151,7 @@ See `docs/architecture/execution-scoring-orchestration.md`.
 ## Gotchas
 - Route paths can sit on their **own line** (`app.get<…>(\n  "/x/:id/diff",`) — grep `^\s+"/<resource>` too.
 - Before moving an exported schema, grep its consumers (`mcp.ts`, tests) — update imports in the same change.
-- The `server.test.ts` suite (buildServer+inject, ~636 tests incl. 401/403/400/404) is the refactor safety net:
+- The `server.test.ts` suite (buildServer+inject, incl. 401/403/400/404) is the refactor safety net:
   the route surface must stay identical.
 - Body-less DELETE with `content-type: application/json` is tolerated (the lenient parser in server.ts) — don't
   add a second content-type parser.

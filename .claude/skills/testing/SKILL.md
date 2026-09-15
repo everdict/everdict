@@ -7,11 +7,11 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 ## The suite that is not Vitest
 
-`evals/` is a second suite and it tests something Vitest cannot reach: whether the CONFIGURATION that steers
+`scripts/evals/` is a second suite and it tests something Vitest cannot reach: whether the CONFIGURATION that steers
 the agent — `CLAUDE.md`, the rules, the skills — still carries its lessons. Each case is an incident this
 repository already recorded, replayed as a prompt, with assertions on the artifacts a correct answer must
 name. `pnpm agent-evals` runs it; `--drill <id>` removes a case's declared lesson and requires that case to go
-RED, which is the part that makes the rest evidence. See `evals/README.md`, and `evals/RETIRED.md` for the two
+RED, which is the part that makes the rest evidence. See `scripts/evals/README.md`, and `scripts/evals/RETIRED.md` for the two
 cases that were retired rather than tuned.
 
 It is NOT part of `pnpm test` and not part of `ci:local`: it needs a model, and a gate that makes every

@@ -253,9 +253,7 @@ console.log("  p08  concurrent sessions");
 console.log(
   `         peak ${peak} live at once${peakAt > 0 ? ` (${new Date(peakAt).toISOString().slice(0, 16)}Z)` : ""}`,
 );
-console.log(
-  "         the stated ceiling is THREE, tied to review capacity — docs/architecture/harness-observability.md",
-);
+console.log("         the stated ceiling is THREE, tied to review capacity — docs/sdlc/observability.md");
 console.log("");
 console.log("  p08  steering vs waiting");
 console.log(

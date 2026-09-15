@@ -12,7 +12,7 @@
 // Two halves:
 //   · the RULE (`verdictFor`): a `fix` commit that changes source under packages/** or apps/** either also
 //     changes a test file, or declares in its body why not — `Regression-test: none — <why>`. A declaration,
-//     not a heuristic over the message, in the form `lessons/` and `intent/` already use.
+//     not a heuristic over the message, in the form `docs/sdlc/lessons/` and `docs/sdlc/intent/` already use.
 //   · the PROOF (`proveInWorktree`): with the commit checked out in a throwaway worktree, revert its source
 //     hunks to the parent, run its test files, and require them to FAIL. A test that passes on the pre-fix
 //     code never proved the bug was gone (skill `testing`, the vacuous-pass rules).

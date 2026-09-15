@@ -7,7 +7,7 @@
 // one outcome the caller was written to handle, so a guard that refuses EVERY real call reads as a green test.
 //
 // This guard exists because the prose version of it did not hold. arch-review 63 wrote the law into
-// `.claude/rules/protocol.md` — "A DOUBLE THAT ALWAYS SUCCEEDS IS NOT A STORE" — and the same wave shipped:
+// `.claude/skills/protocol/references/corollaries.md` — "A DOUBLE THAT ALWAYS SUCCEEDS IS NOT A STORE" — and the same wave shipped:
 //
 //     attempts: { transition: async (id, to) => { moved.push([id, to]); return true; } }
 //

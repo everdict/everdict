@@ -9,7 +9,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 right. It just stops at two layers. `docs/` appears there only as something `pnpm docs-check` also scans, so
 the question a writer actually has — *where does this go?* — has never had an answer.
 
-It shows: this repository has 177 documents, 28 rules and 19 skills, and nothing states the choice between
+It shows: this repository has hundreds of documents, 28 rules and 19 skills, and nothing stated the choice between
 them. Everyone picks by instinct, and instinct puts the same knowledge in three places at once or in none.
 
 There is a SECOND question underneath it, and it went unanswered for longer. Once the answer is "a document",
@@ -33,19 +33,22 @@ The test is one question: **what breaks if this is missing?** A defect written a
 design that goes the wrong way for lack of context is a skill. An argument nobody can reconstruct in six
 months is a document.
 
-## Two layers that are not any of the three
+## Records — under `docs/`, and not documents
 
-`intent/` and `releases/` arrived after this page was written, and neither is a doc, a rule or a skill. The
-test that separates them from all three is tense:
+`docs/sdlc/intent/`, `docs/sdlc/lessons/`, `docs/sdlc/releases/` and the two ledgers
+(`docs/sdlc/finding-dispositions.md`, `docs/sdlc/scan-dismissals.md`) live in the docs tree so a reader
+has one place to look, but none of them is a doc, a rule or a skill. The test that separates them is tense:
 
     RULE / SKILL / DOC     describe or constrain work — what to do, how, and why we chose it
     intent/<date>-<slug>/  ASKS for work that has not happened, and is answered by a plan and a diff
+    lessons/<date>-<slug>  records what an incident taught, once, in the four sentences no diff holds
     releases/<tag>.md      SETTLES an act that cannot be undone, before it happens
+    the two ledgers        GRADE what a reviewer or scanner reported, one line per judgement
 
-A record of a decision already made is a `decision` document. A request for a change nobody has made yet is an
-`intent.md`, and `pnpm intent-chain` refuses a plan that does not descend from one. An authorization for a
-tag push is a `releases/<tag>.md`, and the push gate refuses the tag without it. Neither carries the `kind:`
-frontmatter of a document, because neither is one — see `intent/README.md` and `releases/README.md`.
+Each has a shape owned by the gate that reads it — `pnpm intent-chain`, `pnpm lesson-evals`, the push hook's
+release arm, `scripts/marked-ledger.mjs` — so none carries `kind:` frontmatter, and `pnpm docs-check` holds them
+only to resolving links (`RECORDS` in `scripts/check-docs.mjs`). Their READMEs are ordinary wiki pages.
+`docs/sdlc/README.md` is the map.
 
 The overlap worth naming: an intent that is accepted and shipped often DESERVES a `decision` document, and
 they are not the same artifact. The intent records what was wanted; the decision records what was chosen
@@ -56,7 +59,11 @@ layer exists.
 
 1. **Is it a prohibition that fires while typing?** → rule. Keep it to the non-default: what an ecosystem
    default would get wrong here. Rules are injected by a glob nobody chose to read, so a rule nobody obeys is
-   a rule that arrived at the wrong moment, not one written badly.
+   a rule that arrived at the wrong moment, not one written badly. **The incident that produced a rule is not
+   the rule**: it is a record, and it goes to a document the rule points at. A rule past a couple of hundred
+   lines is carrying records — `ci.md` reached 714 and `protocol.md` 1,231 before that was repaired
+   (`docs/architecture/repository-layout.md`); the catalog of gates is `docs/sdlc/gates.md` and the
+   protocol corollaries are a skill reference.
 2. **Is it what you wish you had read before starting?** → skill. Recipes, domain models, subsystem
    specifics, the passes of a review. A skill is allowed to be long because it is pulled deliberately.
 3. **Is it a decision plus its reason?** → document. This is the layer with a memory: a rule says *do this*,
@@ -119,8 +126,10 @@ is — a `wiki` page, and a fine one. The record is the part the code cannot hol
 ## Where a document goes
 
 The tree's own layout is a recorded decision, not an accident — read `docs/architecture/docs-site-removal.md`
-before moving anything. In short: `guide/` is product documentation written for someone using Everdict;
-everything else is for maintainers, indexed by topic in `docs/README.md` rather than by directory. Placement
+and `docs/architecture/repository-layout.md` before moving anything. In short: `guide/` is product
+documentation written for someone using Everdict; `harness/` is how this repository itself is built, gated and
+remembered; everything else is for maintainers, indexed by topic in `docs/README.md` rather than by directory.
+Nothing document-shaped lives at the repository root except `CLAUDE.md`, `REVIEW.md` and the community files. Placement
 between the root and `architecture/` is historical and deliberately frozen, because in-code references make
 relocation expensive. Nothing is published outside the repository, so `docs/README.md` is the only navigation
 there is — an unindexed page is an unreachable one.
@@ -155,7 +164,17 @@ The third one is the reason to choose deliberately rather than write in all thre
 ## When a change must update this layer
 
 CLAUDE.md already says skills travel with the code: a change to a convention or an invariant updates the
-matching skill reference in the same change, and mere implementation churn does not. The same sentence
+matching skill reference in the same change, and mere implementation churn does not.
+
+**A product document is owned by the change that makes it false**, and `pnpm doc-anchors` asks it: a push
+that changes a file a page lists in `anchors:` edits that page or declares `Docs-unchanged: <doc> — <why>`.
+It REFUSES only for pages people follow (guide, root reference, runbooks, migration preflights); design records
+under `docs/architecture/` are listed as advisory, because replaying a month of commits showed they would be
+owed on 44% of them — a gate asked that often gets a rote answer.
+So an anchor is a promise to be asked, and its breadth is its cost — anchor the files that DEFINE the
+documented surface (the route module or its `*.docs.ts`, the contracts schema, the web page, the CLI command),
+never a composition root or a hot service file unless the page is about that file. A page generated from
+source (the OpenAPI reference) needs no anchor and no author. The same sentence
 applies to the other two layers with the same test — did the RULE change, or only the code that follows it?
 
 A change that reverses a recorded decision updates the record. Leaving the old one standing beside the new

@@ -6,7 +6,7 @@
 // be the quiet kind: the chain accepts a spelling the rotation does not skip, and a declined intent gets a
 // spec written over its decision.
 //
-// The form is the one `lessons/` adopted for `Eval case: none — <why>` and `scripts/fix-proof.mjs` uses for
+// The form is the one `docs/sdlc/lessons/` adopted for `Eval case: none — <why>` and `scripts/fix-proof.mjs` uses for
 // `Regression-test: none — <why>`: a declaration a check reads, never a heuristic over prose. A reason is
 // required; `Design: none —` with nothing after the dash is not a declaration.
 

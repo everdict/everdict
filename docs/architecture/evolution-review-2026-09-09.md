@@ -18,7 +18,7 @@ and the neutralization under which that test was observed red. The status lines 
 whose reproduction is deleted with its fix cannot be re-checked.
 
 See [the implementation overview](evolution-review-follow-up.md), the
-[request these repairs were filed under](https://github.com/everdict/everdict/blob/main/intent/2026-09-09-evolution-follow-up-findings/intent.md)
+[request these repairs were filed under](../sdlc/intent/2026-09-09-evolution-follow-up-findings/intent.md)
 and [the original verification record](https://github.com/everdict/everdict/blob/7f6fd9db/intent/2026-09-08-evolution-evidence-authority/review.md).
 P1 affects adoption integrity or the ability to complete an evolution campaign;
 P2 affects semantic identity and extension behavior.
@@ -345,5 +345,5 @@ Stated limits:
   `EVERDICT_TRUST_SUITE=1`, so `pnpm test`, `pnpm ci:commits` and `pnpm ci:local` were all green
   over them — and `trust-fast` is a GitHub workflow, which this deployment has had disabled since
   2026-08-21 (declared-limits C3). Repaired to the shape production produces, each now ASSERTING
-  the stamped identity. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+  the stamped identity. See `docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
 - Not executed: live GitHub, `pnpm protocol-mutations`, and the deployment E2E.

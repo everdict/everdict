@@ -60,11 +60,13 @@ a TODO.
 Details in `references/verification.md`. The short form: a counterexample seen RED for the stated reason →
 the change → `pnpm protocol-mutations --only <rung>` (neutralize the protocol, the suite MUST go red;
 AUTHOR-run since 2026-08-29 — no gate checks it) → escape hatch deleted.
-`pnpm ci:local` before any push; `trust fast (real Postgres)` is required and the local gate does not cover it.
+`pnpm ci:local` before any push; `pnpm trust-fast` (real Postgres) is owed for a trust-suite subject and the local gate does not run it.
 
 ## Topic map
 - `references/case-law.md` — every incident: the shape, the wrong reasoning verbatim, the correct shape.
+- `references/corollaries.md` — the 46 corollaries the rule lists by heading: each incident after the laws
+  were written, and the shape that holds. The rule is the index; this is the body.
 - `references/verification.md` — proving a test proves something; mutation, non-vacuous fixtures, scanners.
 - Rules: `protocol.md` (this, pushed) · `testing.md` (vacuous-pass rules) · `backends.md` (placement-specific
   applications of L1/L5) · `ci.md` (the gate).
-- Docs: `docs/trust-certification.md` · `docs/architecture/execution-model-design.md`.
+- Docs: `docs/trust-certification.md` · `docs/architecture/execution-model.md`.

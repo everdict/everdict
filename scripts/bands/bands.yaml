@@ -21,7 +21,7 @@ tiers:
     action: diagnose # a read-only session; it may look, it may not act
     tools: "Read,Grep,Glob"
   3sigma:
-    action: propose # writes intent/<date>-<slug>/intent.md and nothing else
+    action: propose # writes docs/sdlc/intent/<date>-<slug>/intent.md and nothing else
     routes: [intent]
 
 metrics:

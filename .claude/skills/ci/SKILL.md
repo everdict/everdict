@@ -16,7 +16,7 @@ The four "required checks" configured on `main` name workflows that no longer ex
 pnpm ci:local   # scripts/ci-local.mjs — the whole gate
 ```
 On success with a **clean tree** it stamps `.git/everdict-ci-ok` with the HEAD sha. A dirty-tree
-pass prints green but does NOT stamp (CI validates the pushed commit, not your working tree):
+pass prints green but does NOT stamp (the stamp certifies the pushed commit, not your working tree):
 commit first, then re-run — turbo cache makes the re-run fast.
 
 ## Enforcement — the pre-push hook
@@ -33,12 +33,12 @@ if it blocks you wrongly, fix the hook, don't dodge it.
    system must stay in step across contracts/web/theme) → `node scripts/live/empty-env-boot.mjs`.
 2. **web (self-contained)**: `pnpm -F @everdict/web lint` + `build`. ⚠ `next build` runs its own
    tsc — the root typecheck does NOT catch web type errors, and the web's type anchors need
-   `@everdict/contracts` built first (in ci.yml an explicit step; locally the root build covers it).
+   `@everdict/contracts` built first (the root build covers it).
 3. **secret scan**: `gitleaks git . --config .gitleaks.toml --log-opts="--all" --no-banner` —
    **all history**, so a "leak" in any past commit (docs included) fails every future run until
    allowlisted in `.gitleaks.toml` (narrow regex, `regexTarget = "line"`) or rewritten out.
    A real secret means rotate + scrub, never allowlist. The gate auto-installs the pinned
-   gitleaks (same version as ci.yml) to `~/.cache/everdict/` if missing.
+   gitleaks to `~/.cache/everdict/` if missing.
 
 When iterating on ONE failed step, run that step directly, then finish with a full `pnpm ci:local`.
 
@@ -74,8 +74,8 @@ See `docs/trust-certification.md`.
    push. Surface it to the maintainer; do not sweep others' files into your commit and do not
    push on top of red "because it wasn't me".
 3. **Gate drift is gone as a failure mode.** There is no second list to drift from: `scripts/ci-local.mjs`
-   is the only place a step exists. Adding a control means adding it there AND naming it in rule `ci`, which
-   `pnpm controls-documented` refuses to let you skip.
+   is the only place a step exists. Adding a control means adding it there AND naming it — with the incident
+   that produced it — in `docs/sdlc/gates.md`, which `pnpm controls-documented` refuses to let you skip.
 
 ## After pushing — there is nothing to confirm
 No workflow runs, so the gate that ran BEFORE the push is the only thing that ever will. That is the whole
@@ -88,12 +88,12 @@ closest thing left to a clean-environment check — run it, not just `ci:local`.
 ## The gates this page names only because they change how you work
 **`pnpm intent-chain`** enforces the Plan→Build handoff from the commit graph, so a
 `plan.md` must be committed in a LATER commit than the `intent.md` it cites. Writing both in one commit fails
-the gate — by design, because that is the shape a plan written after the diff takes. See `intent/README.md`.
+the gate — by design, because that is the shape a plan written after the diff takes. See `docs/sdlc/intent/README.md`.
 
 **`pnpm agent-evals`** is the second stamp the push gate asks for. It is not part of `ci:local` and not in
-CI; a push that CHANGES `CLAUDE.md`, `.claude/**` or `evals/**` is denied unless a green run has stamped HEAD
+CI; a push that CHANGES `CLAUDE.md`, `.claude/**`, `docs/sdlc/gates.md` or `scripts/evals/**` is denied unless a green run has stamped HEAD
 in `.git/everdict-evals-ok`. Editing a skill therefore costs one ~90s run before you can push it. Ordinary
-pushes never meet the arm. See `evals/README.md`.
+pushes never meet the arm. See `scripts/evals/README.md`.
 
 **`pnpm guardrails`** checks the push gate itself — that `.claude/settings.json` still wires it (and the
 SessionStart hook that starts the telemetry sink), that its decision still holds over fourteen cases, that
@@ -105,10 +105,11 @@ because the heredoc body is part of the command string. Use an editor for those 
 
 Every push decision is recorded in `.git/everdict-gate-log.jsonl` with the ARM that fired, so "what has
 this gate refused" is a query. `pnpm telemetry` collects the session facts no file can answer —
-`docs/architecture/harness-observability.md` is the inventory of what the harness knows about itself.
+`docs/sdlc/observability.md` is the inventory of what the harness knows about itself.
 
 **`pnpm review`** is the third stamp. A push carrying `packages/**` or `apps/**` is denied until a review
 has run for HEAD; it stamps on completion, not on cleanliness, so findings are yours to judge. A push whose
-HEAD carries a release tag needs `releases/<tag>.md` committed first — see `releases/README.md`.
+HEAD carries a release tag needs `docs/sdlc/releases/<tag>.md` committed first — see `docs/sdlc/releases/README.md`.
 
-See rule `ci.md` for the pushed critical rules.
+See rule `ci.md` for the pushed critical rules, and `docs/sdlc/gates.md` for why every control exists —
+read the control's section there before changing it.

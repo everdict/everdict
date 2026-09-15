@@ -6,9 +6,9 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 # Evaluation (the eval-first core)
 
 > **"Eval" means two things in this repository, and this skill owns one of them.** Here it is the PRODUCT's
-> scoring domain — graders, judges, scorecards, the verdict Everdict sells. The directory `evals/` at the root
+> scoring domain — graders, judges, scorecards, the verdict Everdict sells. The directory `scripts/evals/` at the root
 > is the other one: the regression suite over this repository's own agent configuration (skill `testing`,
-> `evals/README.md`). They share a word and nothing else — different subject, different runner, different
+> `scripts/evals/README.md`). They share a word and nothing else — different subject, different runner, different
 > gate. When a sentence about "the evals" could mean either, name the one you mean.
 
 

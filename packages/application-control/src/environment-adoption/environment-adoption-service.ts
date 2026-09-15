@@ -199,7 +199,7 @@ export class EnvironmentAdoptionService {
   // a user exactly like a revocation. It is kept because the honest repair is a THIRD display state, which
   // reaches the served schema, the web entity schema and a message catalog in two locales, and inventing
   // that at the end of a scan triage is how the next defect gets written. Filed as
-  // `intent/2026-09-11-an-inventory-cannot-say-it-does-not-know/`. What the scan changed is that `adopt` no
+  // `docs/sdlc/intent/2026-09-11-an-inventory-cannot-say-it-does-not-know/`. What the scan changed is that `adopt` no
   // longer answers 404 about something that exists — a wrong ANSWER, where this is a wrong LABEL.
   private toView(
     entry: AdoptionEntry,

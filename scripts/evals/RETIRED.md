@@ -70,7 +70,7 @@ cannot be about.
 
 Its removal drill said so from both directions, which is the part worth keeping. It drilled RED once and GREEN
 an hour later with nothing about it changed, and that flip is what
-`lessons/2026-09-07-the-drill-is-not-deterministic.md` was written from. A case whose certificate depends on
+`docs/sdlc/lessons/2026-09-07-the-drill-is-not-deterministic.md` was written from. A case whose certificate depends on
 which run you look at is not certifying anything; the honest reading of the pair is that it sits on the
 boundary where the lesson and the default answer agree, which is exactly where a case stops discriminating.
 
@@ -176,7 +176,7 @@ retired for it after `madge-exit-code` and `scanner-blind-to-composition-root`.
 covers L2, but nothing replays L1. The honest replacement is a case over a LIVE symbol — a specific store
 method whose return type carries the proof — in the shape that replaced `authz-optional-reflex`, not a reworded
 regex over this prompt. Filed as an open question in
-`intent/2026-09-06-four-cases-that-do-not-measure/`.
+`docs/sdlc/intent/2026-09-06-four-cases-that-do-not-measure/`.
 
 ## `allowlist-rebuild-eats-fields`, `backends-never-run-the-harness`, `ci-local-before-push` — the code already knew the answer
 
@@ -265,4 +265,4 @@ what configuration is for.
 ⚠️ **And the drill is not deterministic.** In the same session `provenance-at-the-source` drilled RED in one
 run and GREEN in the next with its case untouched. A single drill is evidence, not proof, and these seven were
 retired on TWO green drills each (before and after the rewrite) rather than one. A case whose verdict flips is
-kept and marked, not retired — see `lessons/2026-09-07-the-drill-is-not-deterministic.md`.
+kept and marked, not retired — see `docs/sdlc/lessons/2026-09-07-the-drill-is-not-deterministic.md`.

@@ -15,7 +15,7 @@
 //
 // A declaration, because a heuristic over commit prose gets re-litigated by every reworded sentence — the
 // lesson-evals check paid for that three times. Newer than this check, because the alternative is rewriting
-// history, and `pnpm intent-chain` has an opinion about that. Commits under `scripts/`, `evals/` and docs are
+// history, and `pnpm intent-chain` has an opinion about that. Commits under `scripts/`, `scripts/evals/` and docs are
 // not in scope: their proof is a truth table or a drill, not a Vitest file, and a rule that demanded one there
 // would be answered with `expect(true)`.
 //

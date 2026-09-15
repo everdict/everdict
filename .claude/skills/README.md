@@ -12,7 +12,7 @@ and writing into all three is how they diverge.
 | How it reaches you | frontmatter `paths:` glob → auto-injected when a matching file is read or edited | matched on the skill's `description:`, or invoked as `/name` |
 | What it owns | short rules that **conflict with ecosystem defaults** — what you would otherwise do "the standard TS way" and get wrong here | **look-up knowledge you know you are missing** — recipes, domain models, subsystem specifics |
 | Failure mode it prevents | a convention nobody remembers at the moment of editing | a design decided without the context that already exists |
-| Size | thin (~20–40 lines): the non-default rules inline, plus a pointer to the skill | slim `SKILL.md` (≤~100 lines) + `references/` for depth |
+| Size | thin (~20–40 lines): the non-default rules inline, plus a pointer to the skill. Incident history is a record and goes to `docs/` | slim `SKILL.md` (≤~100 lines) + `references/` for depth |
 
 **Two CI-required checks keep this map honest**, because a rule is documentation the MODEL reads: it arrives
 by a glob at the moment of editing, and nobody is reading it deliberately enough to notice that it went stale.
@@ -41,14 +41,16 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `testing` `**/*.test.ts` — Vitest idioms, and the **vacuous-pass rules**: a counterexample is seen RED *for
   the stated reason*, a fixture comes from the production builder and must actually reach the predicate, a
   deleted subject re-proves its tests by mutation, an empty `describe` fails the suite.
-- `ci` `**/*` — never push before `pnpm ci:local` is green; the pre-push hook enforces it; confirm the run
-  went green afterwards.
+- `ci` `**/*` — never push before `pnpm ci:local` is green; the pre-push hook enforces it and the stamps a push
+  owes; what a green gate does not say (skipped trust scenarios, unsafe Biome fixes). There is nothing to
+  confirm after a push. Why each control exists is `docs/sdlc/gates.md`, not the rule.
 
 **The cross-cutting one**
 - `protocol` — the **five laws** for the seam between a decision and an effect, pushed across the kernel and
   the control plane because that is where this repo's defects recur, and they recur as *correct nouns
-  consumed as annotations*, which no layering rule can see. Includes the fourth-instance rule: **a comment
-  that promises another component's behaviour is a claim, and the claim is what needs the test.**
+  consumed as annotations*, which no layering rule can see. The rule carries the laws, the definition of done,
+  and a one-line index of the 46 corollaries (e.g. **a comment that promises another component's behaviour is
+  a claim, and the claim is what needs the test**); each corollary's incident is in skill `protocol`.
 
 **The layer spine**
 - `core-contracts` `packages/{contracts,domain}` — contracts is the dependency ROOT (no I/O, no SDKs); domain
@@ -66,8 +68,8 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `db` · `registry` · `datasets` · `images` · `trace` — stores and migrations, versioned SSOT, task-format
   on-ramps, the managed image store, trace sources/sinks. (`packages/storage` has no rule of its own: it is
   inside the `events` and `protocol` globs, which are the conventions its adapters actually need.)
-- `api-layer` `apps/api` — the resource-slice idiom: `api/<domain>` over `core/<domain>`, thin routes, rich
-  domain models, BFF↔MCP parity.
+- `api-layer` `apps/api` — the transport-slice idiom: `api/<domain>` over services in `application-control` and
+  models in `domain`, thin routes, BFF↔MCP parity.
 - `mcp` · `auth` · `web` · `workspace-integrations` — the agent-facing tool surface, the auth core, the
   Next.js app, and the per-workspace integrations.
 
@@ -88,7 +90,8 @@ two reviews after it was deleted). A name that is gone may still be written — 
   any review request.
 - `protocol/` — **effects and authority**: the five laws in full, the design checklist to run BEFORE writing
   an effect path, the **case law** (every recurring defect with file, line, and the wrong reasoning verbatim),
-  and the verification protocol (mutation-first, non-vacuous fixtures, when a scanner is legitimate).
+  the **corollaries** the rule indexes by heading, and the verification protocol (mutation-first, non-vacuous
+  fixtures, when a scanner is legitimate).
 - `documenting/` — **which layer knowledge goes in**: a doc, a rule or a skill, chosen by the failure each
   one prevents; what a design record owes (the alternative it rejected, counted rather than adjectival); and
   the three things the gates above cannot see. Read before writing or moving any of the three.
@@ -113,7 +116,8 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `agent-runtime/` — the agent kernel: `runAgentLoop`, `ToolDefinition`/`ToolRegistry`, the envelope + consent
   gates, sub-agents, MCP bridging.
 - `testing/` — Vitest, fake-injection units, `buildServer`+`inject`, env-gated live E2E (no Testcontainers).
-- `ci/` — local CI parity: mirror the deleted ci.yml workflow before ANY push, confirm green after.
+- `ci/` — the push gate: `pnpm ci:local` is the whole pipeline (there is no remote CI), the stamps a push owes,
+  the trust suite the gate does not run, and the failure protocol.
 
 ---
 
@@ -128,17 +132,18 @@ policy whose named enforcer is gone is back to being advisory with a table that 
 | Policy | Taught by | Enforced by |
 |---|---|---|
 | never push before the full local gate is green, every commit in the push | skill `ci`, rule `ci` | `scripts/hooks/pre-push-gate.mjs` · `pnpm guardrails` |
-| the configuration that steers the agent is regression-tested before it ships | skill `ci`, `evals/README.md` | `pnpm agent-evals` (stamp) · the eval arm of the push hook |
+| the configuration that steers the agent is regression-tested before it ships | skill `ci`, `scripts/evals/README.md` | `pnpm agent-evals` (stamp) · the eval arm of the push hook |
 | product code gets the same review every time | skill `code-review`, `REVIEW.md` | `pnpm review` (stamp) · the review arm of the push hook |
-| a release tag needs a committed authorization | `releases/README.md` | the release arm of the push hook |
-| a change starts as an intent, and a plan descends from it | `intent/README.md`, skill `documenting` | `pnpm intent-chain` |
-| an accepted intent is designed or declines the pass in one line | `intent/README.md` | `pnpm intent-chain` · `pnpm design` |
+| a release tag needs a committed authorization | `docs/sdlc/releases/README.md` | the release arm of the push hook |
+| a change starts as an intent, and a plan descends from it | `docs/sdlc/intent/README.md`, skill `documenting` | `pnpm intent-chain` |
+| an accepted intent is designed or declines the pass in one line | `docs/sdlc/intent/README.md` | `pnpm intent-chain` · `pnpm design` |
 | every fix ships a test that was red on the pre-fix code | skill `testing`, CLAUDE.md | `pnpm fix-proof` · the proof in `pnpm ci:commits` |
 | a failed read is a third value, never an empty result | skill `protocol`, rule `protocol` | `pnpm swallowed-reads` · `pnpm gated-doors` · `pnpm scan` |
 | a field the platform authors is not read off a producer's document | skill `protocol`, rule `protocol` | `pnpm untrusted-ingress` · `pnpm authz-optional` · `pnpm scan` |
 | a scanner states the vocabulary it watches, and it must be live | rule `ci` | `pnpm scanner-watches` · `pnpm convention-harness` |
 | every control that exists is named by the conventions | rule `ci`, this file | `pnpm controls-documented` |
-| a lesson that says it produced an eval case has one | `lessons/README.md` | `pnpm lesson-evals` |
+| a lesson that says it produced an eval case has one | `docs/sdlc/lessons/README.md` | `pnpm lesson-evals` |
+| a change that makes an anchored document false updates it or says why not | skill `documenting`, rule `ci` | `pnpm doc-anchors` · the documentation pass in `REVIEW.md` |
 | a rule reaches live paths and a skill has a description to match on | this file | `pnpm convention-harness` · `pnpm docs-check` |
 | the web app imports nothing from the runtime | rule `web`, skill `web` | `pnpm web-imports` · `pnpm web-reach` |
 | the job runner's dependency cone is closed | rule `job-runner` | `pnpm cone` · `pnpm import-cycles` |

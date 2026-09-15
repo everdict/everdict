@@ -24,7 +24,7 @@ const wv = await importBenchmark(
   getBenchmark("webvoyager"),
   { id: "wv-mini", version: "1.0.0" },
   {
-    text: readFileSync("datasets/webvoyager-mini.jsonl", "utf8"),
+    text: readFileSync("examples/benchmarks/webvoyager-mini.jsonl", "utf8"),
   },
 );
 console.log(`graders preset: ${wv.cases[0]?.graders.map((g) => g.id).join(" + ")}\n`);

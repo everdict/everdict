@@ -1,8 +1,8 @@
 // ONE reader for the two committed ledgers that share a marker, because writing it twice already diverged
 // three times in one afternoon.
 //
-// `findings/DISPOSITIONS.md` (what happened to what the reviewer and the scanner reported) and
-// `scans/DISMISSED.md` (which findings were dismissed, and why) have the same shape: prose, then
+// `docs/sdlc/finding-dispositions.md` (what happened to what the reviewer and the scanner reported) and
+// `docs/sdlc/scan-dismissals.md` (which findings were dismissed, and why) have the same shape: prose, then
 // `<!-- entries below, newest last -->`, then one line per entry. Both are COMMITTED, both are read by a
 // script, and both are the counter-metric somebody could otherwise move without anyone seeing.
 //

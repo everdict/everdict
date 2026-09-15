@@ -1,4 +1,10 @@
-# `lessons/` — what an incident taught, written once
+---
+kind: wiki
+title: "Lessons — what an incident taught"
+status: current
+updated: 2026-09-15
+---
+# `docs/sdlc/lessons/` — what an incident taught, written once
 
 When something goes wrong here, what gets learned currently lives in two places: the commit message that fixed
 it, and the header of whichever check was written afterwards. Both are good records of the **fix**. Neither
@@ -11,7 +17,7 @@ are reconstructed from a diff every time.
 ## Writing one
 
 ```sh
-cp lessons/TEMPLATE.md lessons/2026-09-05-the-gate-failed-open.md
+cp docs/sdlc/lessons/TEMPLATE.md docs/sdlc/lessons/2026-09-05-the-gate-failed-open.md
 ```
 
 Four questions, and they are four on purpose: anything longer does not get written, and a lesson nobody writes
@@ -23,7 +29,7 @@ defect invisible.
 
 ## What happens to one
 
-- an eval case, when the failure was one an agent can be asked to repeat (`evals/README.md`);
+- an eval case, when the failure was one an agent can be asked to repeat (`scripts/evals/README.md`);
 - a scan class, when it is a shape rather than an instance (`scripts/scan/SCOPES.md`);
 - a check, when it is mechanical — which is what most of `.claude/rules/ci.md` is a list of.
 

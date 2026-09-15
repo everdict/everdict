@@ -226,7 +226,7 @@ const releaseTags = git("tag", "--points-at", "HEAD")
     tag,
     // Committed, not merely present: an authorization that lives only in the working tree did not travel with
     // the tag it authorizes.
-    authorized: git("cat-file", "-e", `HEAD:releases/${tag}.md`).status === 0,
+    authorized: git("cat-file", "-e", `HEAD:docs/sdlc/releases/${tag}.md`).status === 0,
   }));
 
 const decision = decideGate({

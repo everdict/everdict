@@ -29,9 +29,9 @@ None of them travels with a clone. The one exception is below the table, and it 
 | `everdict-gate-log.jsonl` | `scripts/hooks/pre-push-gate.mjs`, on every push decision | `{at, verdict, arm, head, pushed, configChanged, productChanged, releaseTags, cwd?, reason}` — `cwd` only when the push came from a linked worktree |
 | `everdict-telemetry.jsonl` | `scripts/telemetry/otlp-sink.mjs`, started by the SessionStart hook | one JSON line per OTLP payload a session exported |
 
-Two records are COMMITTED rather than kept in `.git/`. `releases/<tag>.md` has to travel with the tag it
+Two records are COMMITTED rather than kept in `.git/`. `docs/sdlc/releases/<tag>.md` has to travel with the tag it
 authorizes — an authorization that lives only in a working tree did not authorize anything anyone else can
-see. `findings/DISPOSITIONS.md` grades what the reviewer and the scanner reported, and travels for the sibling
+see. `docs/sdlc/finding-dispositions.md` grades what the reviewer and the scanner reported, and travels for the sibling
 reason: the reports are this checkout's operations, but the judgement on them is the project's.
 
 Three of them are **stamps** — `ci-ok`, `evals-ok`, `review-ok` — and they answer "may this proceed". The
@@ -50,18 +50,18 @@ costing it.
 
 ## What one run of the eval suite leaves behind
 
-- `evals/.results/<id>.json` — the full transcript of the most recent run of that case. Overwritten every
+- `scripts/evals/.results/<id>.json` — the full transcript of the most recent run of that case. Overwritten every
   run, and named in every failure line so a red case is one file away from its own evidence.
-- `evals/history.jsonl` — one line per run: `{at, model, models[], partial, passed, of, executed, cost, cases[]}`.
+- `scripts/evals/history.jsonl` — one line per run: `{at, model, models[], partial, passed, of, executed, cost, cases[]}`.
   Committed, because it is the baseline a control band will read, and a baseline cannot be collected
   retroactively. `models[]` is the model IDs that actually answered, read from each envelope: `model` is the
   alias the suite asked for, and an alias moves without a commit here to trigger on.
-- Also in `evals/history.jsonl`, one line per **drill**: `{at, model, drill: <id>, red, seconds, subjects}` —
+- Also in `scripts/evals/history.jsonl`, one line per **drill**: `{at, model, drill: <id>, red, seconds, subjects}` —
   whether the case went red without its lesson, and a digest of the subject files it certified. An errored or
   timed-out agent call is inconclusive and records nothing, so a rate-limited `--drill-all` fails rather than
   writing false reds. `pnpm agent-evals --drill-status` reads those lines and reports never / green / drifted /
   red per case. The stamp is not yet coupled to this (it needs a clean drill-all to land with it — see
-  `evals/README.md`); today the state is advisory.
+  `scripts/evals/README.md`); today the state is advisory.
 
 A `--only` run is recorded with `partial: true` rather than dropped, so a band can filter it out instead of
 averaging one case into a suite-wide rate.
@@ -118,7 +118,7 @@ number when that query and the rework rate disagree with it.
   bounded: one sink per machine, bound to the port, refused when the port is busy, dying with the machine,
   reaped by nobody. Sessions in linked worktrees export to the same port, so the ledger in the common git
   directory holds every checkout's sessions together.
-- **No baseline is old enough to band on.** `evals/history.jsonl` starts on 2026-09-05. A rolling baseline
+- **No baseline is old enough to band on.** `scripts/evals/history.jsonl` starts on 2026-09-05. A rolling baseline
   needs weeks, and the first control band is blocked on having one — which is the entire reason recording
   started before anything reads it.
 - **The ledgers do not travel.** A second checkout starts with no history of what its gates decided. For one
@@ -136,7 +136,7 @@ a dismissal with its reason, the eval suite proves a case measures its lesson by
 reviewer produced findings that nobody ever graded. The article names the counter-metric for that play
 outright: **finding precision**, tuned by rating findings.
 
-`findings/DISPOSITIONS.md` is that rating, and it is COMMITTED for the reason `scans/DISMISSED.md` is: the
+`docs/sdlc/finding-dispositions.md` is that rating, and it is COMMITTED for the reason `docs/sdlc/scan-dismissals.md` is: the
 reports are this checkout's operations and live in `.git/`, but the judgement on them is the project's, and a
 judgement nobody else can read is one the next person makes again. One line per graded finding, written by
 `pnpm findings --record`, with a verdict of `real`, `false-positive`, or `carried` (real, deliberately not

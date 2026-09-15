@@ -16,7 +16,7 @@ Pick from what the change touched, in this order, and stop at the first red:
 - always: `pnpm lint`, `pnpm typecheck`
 - `packages/**` or `apps/**`: `pnpm test`, `pnpm build`
 - `.claude/**`, `docs/**`, `CLAUDE.md`: `pnpm convention-harness`, `pnpm docs-check`, `pnpm guardrails`
-- `intent/**`: `pnpm intent-chain`
+- `docs/sdlc/intent/**`: `pnpm intent-chain`
 - `apps/web/**`: `pnpm -F @everdict/web lint` and `build` — the root typecheck does NOT cover the web
 - a trust-suite subject (the commit ledger, the fences, settle, the receipt/attempt stores): say so, and say
   that `trust-fast` needs a real Postgres and object store, so `pnpm test` going green proves nothing there

@@ -33,6 +33,30 @@ const walk = (dir, out = []) => {
 
 const docs = walk("docs").sort();
 
+// ── RECORDS: files under docs/ whose shape another gate owns ────────────────────────────────────────
+//
+// The harness's records moved from the repository root into `docs/sdlc/` so that a reader has one tree to
+// open (`docs/sdlc/README.md` says what each is). Moving them did not make them documents. An intent, a
+// lesson, a release authorization and the two ledgers are each held to a shape by the gate that reads them —
+// `pnpm intent-chain`, `pnpm lesson-evals`, the push hook's release arm, `scripts/marked-ledger.mjs` — and
+// none of those shapes is a `kind:` block. Holding them to check 5 as well would be two owners for one file,
+// which is the divergence rule `protocol` L3 names. They are also dated: what an intent cited in September is
+// the record, exactly as it is for the rearchitecture folder below, so check 3 does not re-litigate it.
+//
+// What stays checked: every relative link still resolves (check 2 — a record moved with its links), and each
+// record directory's README.md is an ordinary document, indexed and kind-declared like any other.
+const RECORDS = [
+  /^docs\/sdlc\/intent\/(?!README\.md$)/,
+  /^docs\/sdlc\/lessons\/(?!README\.md$)/,
+  /^docs\/sdlc\/releases\/(?!README\.md$)/,
+  /^docs\/sdlc\/(finding-dispositions|scan-dismissals)\.md$/,
+];
+const isRecord = (doc) => RECORDS.some((pattern) => pattern.test(doc));
+if (!docs.some(isRecord)) {
+  console.error("docs check FAILED — no record matched RECORDS. The exemption names directories that are gone.");
+  process.exit(1);
+}
+
 // The rules and skills are documentation the MODEL reads, not the human — the push layer is injected into
 // context by a `paths:` glob, so a rule citing a moved file teaches the wrong address at the moment of
 // editing, with nobody reading it deliberately enough to notice. `pnpm convention-harness` checks that
@@ -70,7 +94,7 @@ const frontmatterOf = (doc) => {
       .map((href) => (href.startsWith("../") ? href.slice(3) : `docs/${href.replace(/^\.\//, "")}`)),
   );
   for (const doc of docs) {
-    if (doc === INDEX || linked.has(doc)) continue;
+    if (doc === INDEX || linked.has(doc) || isRecord(doc)) continue;
     failures.push(`${INDEX} does not link ${doc} — every document belongs in the index`);
   }
 }
@@ -86,12 +110,24 @@ for (const doc of docs) {
     // — and then the `^https?:` skip above meant every one of those was unchecked. The rule and the skip
     // together manufacture a class of citation the gate cannot verify while appearing to have verified it,
     // which is the shape this file exists to refuse. Found by `pnpm review` on the four entries this batch
-    // added for `intent/`, `releases/`, `lessons/` and `evals/` — the four directories it was trying to make
+    // added for `docs/sdlc/intent/`, `docs/sdlc/releases/`, `docs/sdlc/lessons/` and `scripts/evals/` — the four directories it was trying to make
     // discoverable, cited in the one form nothing reads.
     //
     // A URL naming a blob in THIS repository is a path assertion and is checked as one. Anything else is a
     // link to the internet and stays out of scope: this check knows about files, not about hosts.
-    const inRepo = /^https:\/\/github\.com\/everdict\/everdict\/blob\/[^/]+\/(.+)$/.exec(href)?.[1];
+    //
+    // A URL PINNED TO A COMMIT is a claim about THAT commit, not about today's tree. When the harness records
+    // moved from the root into `docs/sdlc/`, a permalink to `blob/<sha>/intent/README.md` stayed exactly as
+    // true as the day it was written, and reading it against the working tree would have forced a historical
+    // citation to be rewritten into one its author never made. So a hex ref is resolved at its own commit,
+    // and a ref this clone cannot resolve is a failure rather than a skip: cannot-find-out is not a pass.
+    const blob = /^https:\/\/github\.com\/everdict\/everdict\/blob\/([^/]+)\/(.+)$/.exec(href);
+    const inRepo = blob?.[2];
+    if (blob !== null && /^[0-9a-f]{7,40}$/.test(blob[1])) {
+      if (spawnSync("git", ["cat-file", "-e", `${blob[1]}:${blob[2]}`], { cwd: ROOT }).status !== 0)
+        failures.push(`${doc} links to ${href}, and commit ${blob[1]} has no ${blob[2]} (or is not in this history)`);
+      continue;
+    }
     if (inRepo !== undefined && !existsSync(join(ROOT, inRepo))) {
       failures.push(`${doc} links to ${href}, and this repository has no ${inRepo}`);
       continue;
@@ -155,7 +191,7 @@ for (const doc of docs) {
   // earlier answer survives unedited (`docs/architecture/document-kinds.md`).
   const superseded = (doc) => frontmatterOf(doc)?.get("status") === "superseded";
   for (const doc of citing) {
-    if (doc.startsWith(HISTORICAL) || superseded(doc)) continue;
+    if (doc.startsWith(HISTORICAL) || superseded(doc) || isRecord(doc)) continue;
     const text = readFileSync(join(ROOT, doc), "utf8");
     for (const m of text.matchAll(/`([^`\n]+)`/g)) {
       let token = m[1].trim().replace(/[).,;:]+$/, "");
@@ -325,6 +361,7 @@ for (const doc of docs) {
   // The index is not exempt: it carries the same block and passes it, and an exemption whose reason is
   // "it is the index" is the shape this repository reads as permission.
   for (const doc of docs) {
+    if (isRecord(doc)) continue; // shape owned by its own gate — see RECORDS
     const fm = frontmatterOf(doc);
     if (fm === undefined) {
       failures.push(`${doc} has no frontmatter — every document declares kind/title/status/updated`);

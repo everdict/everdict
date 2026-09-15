@@ -13,7 +13,7 @@ import { diffScorecards, summarizeScorecard } from "../../packages/domain/dist/i
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
 
-const DATASET = process.env.DATASET ?? "datasets/webvoyager-mini.jsonl";
+const DATASET = process.env.DATASET ?? "examples/benchmarks/webvoyager-mini.jsonl";
 const TENANT = "acme";
 const DS_ID = "webvoyager-mini";
 const DS_VER = "1.0.0";

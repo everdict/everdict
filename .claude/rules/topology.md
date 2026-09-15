@@ -16,8 +16,11 @@ Service-topology harnesses (multi-service + a target env). See docs/service-harn
   drop-in `TopologyRuntime`s; keep them isomorphic so `ServiceTopologyBackend` stays orchestrator-agnostic.
 - **Warm pools are NOT shared across tenants** — key the warm pool by `(spec, version, TrustZone.id)` and carry
   the zone in the job ID/namespace. `ensureTopology`/`provisionBrowserEnv` take an optional `TrustZone`.
-- **Nomad topology = ONE co-located task group** (`SERVICE_GROUP_NAME`), all services on a `bridge` netns →
-  inter-service comms over `localhost:<svc.port>` (never a dynamic host port; stable across reschedule). Ports must
-  be unique (shared netns); don't reintroduce a per-service group or per-service Connect sidecars. K8s (Service
-  DNS) and Docker are unchanged. See `docs/architecture/nomad-colocated-topology.md`.
+- **Nomad grouping is decided by ONE predicate, `needsPerServiceGroups`** — branch on it, never re-derive it.
+  A homogeneous topology (every service a Linux container with `replicas: 1`) renders ONE co-located group
+  (`SERVICE_GROUP_NAME`) on a `bridge` netns: peers talk over `localhost:<svc.port>`, never a dynamic host port, so
+  addresses survive a reschedule and ports must be distinct (a collision throws `BadRequestError`). A non-Linux
+  `requires.os`, `replicas > 1` or a host-exec service renders one group per service instead (`perServiceGroupName`,
+  peers via an injected `EVERDICT_SVC_<PEER>` address). Neither mode wires Connect sidecars. K8s (Service DNS) and
+  Docker (one network) do not use this. See `docs/architecture/nomad-colocated-topology.md`.
 - Map failures to `AppError`.

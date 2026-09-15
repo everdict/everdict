@@ -5,7 +5,7 @@
 //
 // Five stages of this harness refuse things. The sixth was never made to NOTICE, so every `intent.md` here
 // existed because a human wrote one, and the chain ran forward from a person and never returned to the queue
-// on its own. The materials were already accumulating — `evals/history.jsonl` and `.git/everdict-gate-log.jsonl`
+// on its own. The materials were already accumulating — `scripts/evals/history.jsonl` and `.git/everdict-gate-log.jsonl`
 // are exactly the shape a control band reads — and nothing read them.
 //
 // ⚠️ DETECTION IS DETERMINISTIC. Rolling mean and standard deviation over a versioned window, tiers in a
@@ -16,7 +16,7 @@
 // nothing. A band over three points is noise wearing a sigma, and the first thing it would do is file an
 // intent nobody believes — the same rule the trust suite applies to a scenario that skips.
 //
-// The 3σ tier may only PROPOSE: it writes `intent/<date>-<slug>/intent.md` and has no route to the code.
+// The 3σ tier may only PROPOSE: it writes `docs/sdlc/intent/<date>-<slug>/intent.md` and has no route to the code.
 // `pnpm intent-chain` then applies to that file exactly as it does to a human's.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -175,7 +175,9 @@ const readJsonl = (file) => {
 const SERIES = {
   "evals-history": () => {
     // Under `--source-dir` the history is read from there too, so a fixture can stand in for every series.
-    const file = opts.sourceDir ? path.join(gitDir, "evals-history.jsonl") : path.join(root, "evals", "history.jsonl");
+    const file = opts.sourceDir
+      ? path.join(gitDir, "evals-history.jsonl")
+      : path.join(root, "scripts", "evals", "history.jsonl");
     const rows = readJsonl(file);
     if (rows === null) return null;
     // A drill line records a NEUTRALIZED run and has no pass rate; a partial run has one over one case; and a
@@ -289,7 +291,7 @@ const today = new Date().toISOString().slice(0, 10);
 
 /** The directory of an OPEN intent this watcher filed for `metricSlug` on any date, or undefined. */
 const openBandIntent = (metricSlug) => {
-  const home = path.join(root, "intent");
+  const home = path.join(root, "docs", "sdlc", "intent");
   let entries;
   try {
     entries = readdirSync(home);
@@ -355,7 +357,7 @@ for (const breach of breaches) {
   // is the same breach, and the design pass for this change pointed out that a dedupe keyed on today's date
   // would either re-refuse every morning or file a twin. Open means not `shipped` and not `rejected` — a
   // closed intent for an old breach of the same metric does not cover a new one.
-  const dir = path.join(root, "intent", `${today}-band-${slug(breach.metric.id)}`);
+  const dir = path.join(root, "docs", "sdlc", "intent", `${today}-band-${slug(breach.metric.id)}`);
   const open = openBandIntent(slug(breach.metric.id));
   if (open !== undefined) {
     console.log(
@@ -423,7 +425,7 @@ if (breaches.length === 0) console.log("\nNo band breached.");
 // refused — that is the "already open" branch above, and it is the state the refusal is trying to reach.
 if (opts.dryRun && unfiled.length > 0) {
   console.error(
-    `\n✖ watch-bands: ${unfiled.length} 3σ breach(es) with no intent filed — ${unfiled.map((b) => b.metric.id).join(", ")}.\n  A dry run only rehearses; the push waits until the queue holds the proposal. Run \`pnpm watch-bands\` (no --dry-run),\n  commit the intent/<date>-band-<metric>/intent.md it writes, and re-run the gate.`,
+    `\n✖ watch-bands: ${unfiled.length} 3σ breach(es) with no intent filed — ${unfiled.map((b) => b.metric.id).join(", ")}.\n  A dry run only rehearses; the push waits until the queue holds the proposal. Run \`pnpm watch-bands\` (no --dry-run),\n  commit the docs/sdlc/intent/<date>-band-<metric>/intent.md it writes, and re-run the gate.`,
   );
   process.exit(1);
 }

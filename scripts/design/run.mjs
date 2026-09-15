@@ -20,7 +20,7 @@ import { fileURLToPath } from "node:url";
 import { designDeclined } from "../intent-declarations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const home = path.join(root, "intent");
+const home = path.join(root, "docs", "sdlc", "intent");
 const DENIED = "Edit,Write,MultiEdit,NotebookEdit,Bash,Task,WebFetch,WebSearch";
 
 const KNOWN = new Set(["--next", "--change", "--model", "--timeout", "--list"]);
@@ -86,13 +86,13 @@ if (change === undefined) {
 const dir = path.join(home, change);
 const intentFile = path.join(dir, "intent.md");
 if (!existsSync(intentFile)) {
-  console.error(`✖ design: intent/${change}/intent.md does not exist.`);
+  console.error(`✖ design: docs/sdlc/intent/${change}/intent.md does not exist.`);
   process.exit(1);
 }
 const specFile = path.join(dir, "spec.md");
 if (existsSync(specFile)) {
   console.error(
-    `✖ design: intent/${change}/spec.md already exists. Delete it deliberately, or design another change — overwriting a spec somebody reviewed is not a thing this should do quietly.`,
+    `✖ design: docs/sdlc/intent/${change}/spec.md already exists. Delete it deliberately, or design another change — overwriting a spec somebody reviewed is not a thing this should do quietly.`,
   );
   process.exit(1);
 }
@@ -131,7 +131,7 @@ const intentSha = git("log", "--diff-filter=A", "--format=%H", "--", path.relati
   .at(-1);
 if (intentSha === undefined) {
   console.error(
-    `✖ design: intent/${change}/intent.md is not committed yet, so a spec cannot cite the commit that carries the request.`,
+    `✖ design: docs/sdlc/intent/${change}/intent.md is not committed yet, so a spec cannot cite the commit that carries the request.`,
   );
   process.exit(1);
 }

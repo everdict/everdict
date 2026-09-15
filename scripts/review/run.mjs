@@ -237,7 +237,7 @@ let unstructuredParts = 0;
 let nitsOmitted = 0;
 let spend = 0;
 // ⚠️ NOTHING EXITS INSIDE THIS TRY. `process.exit()` skips the `finally` that removes the throwaway worktree —
-// the same defect `evals/run.mjs`'s drill had, and the one that leaked a worktree here when a killed run took
+// the same defect `scripts/evals/run.mjs`'s drill had, and the one that leaked a worktree here when a killed run took
 // the child with it. Failures set `failure` and break; the exit happens after teardown.
 // ⚠️ A LONG REVIEW THAT RESTARTS FROM ZERO IS A TOOL NOBODY RUNS. Six parts over 596 files is twenty-odd
 // minutes, and any interruption — a killed terminal, a timeout, a laptop lid — threw away every completed part

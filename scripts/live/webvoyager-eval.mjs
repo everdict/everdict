@@ -3,7 +3,7 @@
 // (user-owned) → load via registry.get(tenant) → per-case evaluation with the real browser-use harness → Scorecard → ScorecardStore.
 //
 // Benchmark: WebVoyager (github.com/MinorJerry/WebVoyager). The full set is 15 commercial sites + VLM scoring → here an accessible subset
-// (datasets/webvoyager-mini.jsonl, same format). The same importer also works on the full WebVoyager_data.jsonl (DATASET=).
+// (examples/benchmarks/webvoyager-mini.jsonl, same format). The same importer also works on the full WebVoyager_data.jsonl (DATASET=).
 //
 // Prereq: chromedp CDP + LiteLLM (gpt-5.4-mini) + browser-use venv. Env: OPENAI_API_KEY, OPENAI_BASE_URL, CDP_URL, BU_PY.
 import { execFileSync } from "node:child_process";
@@ -17,7 +17,7 @@ import { makeGraders } from "../../packages/graders/dist/index.js";
 import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
 
 const PY = process.env.BU_PY ?? "python3";
-const DATASET = process.env.DATASET ?? "datasets/webvoyager-mini.jsonl";
+const DATASET = process.env.DATASET ?? "examples/benchmarks/webvoyager-mini.jsonl";
 const TENANT = process.env.TENANT ?? "acme";
 const DS_ID = "webvoyager-mini";
 const DS_VER = "1.0.0";

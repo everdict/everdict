@@ -14,12 +14,15 @@ import { computeAnalysis } from "./analysis.js";
 // that only the web's copy is ever called, so a divergence here would have been invisible for as long as
 // nobody used the route.
 //
-// `fixtures/analysis-parity.json` is the one question both engines answer. The web has its own test over the
+// `packages/contracts/fixtures/analysis-parity.json` is the one question both engines answer. The web has its own test over the
 // same file. Neither imports the other — the web may not import `@everdict/domain` at all — so the fixture
 // is what they meet at. docs/architecture/web-runtime-gap-census-spec.md
 
 const fixture = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../../../fixtures/analysis-parity.json"), "utf8"),
+  readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "../../../contracts/fixtures/analysis-parity.json"),
+    "utf8",
+  ),
 ) as {
   cards: AnalysisCard[];
   cases: {

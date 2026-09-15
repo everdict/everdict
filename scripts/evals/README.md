@@ -1,4 +1,4 @@
-# `evals/` — regression tests for the configuration that steers the agent
+# `scripts/evals/` — regression tests for the configuration that steers the agent
 
 `pnpm docs-check` and `pnpm convention-harness` ask whether `CLAUDE.md`, the rules and the skills are still
 SHAPED right: paths resolve, symbols exist, globs match live code, descriptions survive. Neither can ask the
@@ -6,7 +6,7 @@ question that matters after a skill is edited — **does the agent still do the 
 
 A skill edit that stops it triggering, a rule whose wording drifted from what it meant, a `CLAUDE.md` line
 deleted as redundant: every one of those leaves every existing gate green, and the only witness is the next
-session that quietly does the wrong thing. `evals/` is that witness, written down.
+session that quietly does the wrong thing. `scripts/evals/` is that witness, written down.
 
 ## Running it
 
@@ -20,7 +20,7 @@ pnpm agent-evals --drill <id>         # the removal drill — see below
 
 Each case is one `claude -p` run with `cwd` at the repository root, which is the point: `CLAUDE.md`, the
 rules and the skills are discovered exactly as a real session discovers them. Transcripts land in
-`evals/.results/<id>.json` (gitignored) and are named in every failure line.
+`scripts/evals/.results/<id>.json` (gitignored) and are named in every failure line.
 
 **The model is held to one alias by default** (`sonnet`), and that is a deliberate trade. Holding it makes
 the *configuration* the only variable a run changes on purpose — it is not a pin: an alias moves when the
@@ -48,7 +48,7 @@ article's other question: when a new model is swapped in, does the agent still d
 retired, so a reader copied the shape of a case the suite no longer had, and then a live one, which
 `pnpm agent-evals` refused on the spot: this page carried both of that case's `neutralize` needles, so it
 became a file the drill does not remove the lesson from and the case would have certified nothing. A document
-about the cases is inside the tree the cases are asked in. The real ones are in `evals/cases/`.
+about the cases is inside the tree the cases are asked in. The real ones are in `scripts/evals/cases/`.
 
 **The suite is ONE case, and that is the measured size rather than the intended one.** Two complete
 drill-alls in one session retired eleven: four because the answer sat in live source, seven because a capable
@@ -67,10 +67,10 @@ remove the manifest.
 What survives shares one property: the correct answer names something **this repository
 invented and a model cannot derive** — a private environment variable that only the rule knows is the
 difference between a scenario that ran and one that skipped. It is certified RED under its own drill
-(`docs/architecture/harness-drill-certificates.md`), which is a sentence the fifteen-case version
+(`docs/sdlc/drill-certificates.md`), which is a sentence the fifteen-case version
 could not say about twelve of them. The article's 20–50 baseline is a target for cases that MEASURE, and
 backfilling toward the number with cases that do not is how the suite got here — COVERAGE is the open question
-now, not validity. See `RETIRED.md`, and `lessons/2026-09-07-the-drill-is-not-deterministic.md` for why a
+now, not validity. See `RETIRED.md`, and `docs/sdlc/lessons/2026-09-07-the-drill-is-not-deterministic.md` for why a
 retirement needs two green drills and what reading a case still catches that counting drills does not.
 
 **Before any of the fields: can the CODEBASE answer this?** A configuration eval can only measure what the
@@ -83,7 +83,7 @@ greps. Narrowing moved in the wrong direction, and only running the case in BOTH
 passes, so the assertion is not too tight; drilled: still passes, so the lesson is not the cause). The cases
 that survive are the ones whose subject is a fact no file in the tree states — a tool's exit code lying about
 what it did, a norm about what counts as evidence, a policy about language. See
-`lessons/2026-09-06-the-code-already-knew-the-answer.md`.
+`docs/sdlc/lessons/2026-09-06-the-code-already-knew-the-answer.md`.
 
 - **`why`** names the incident. Cases come from failures that actually happened here and are already written
   down. An invented case tests an invented convention.
@@ -113,7 +113,7 @@ protocols — and where that gate costs ninety minutes of real builds and real s
 agent call, which is why it can stay.
 
 **A drill result is a ledger line, and a drill has an expiry.** Every drill appends
-`{drill: <id>, red, seconds, subjects}` to `evals/history.jsonl` — `subjects` is a digest of the subject files
+`{drill: <id>, red, seconds, subjects}` to `scripts/evals/history.jsonl` — `subjects` is a digest of the subject files
 it certified. `--drill-status` reports each case as never / green / drifted (red, but a subject changed since)
 / red; `--drill-all` re-runs every drill and fails if any stays **green** (a case that does not measure its
 lesson) or comes back **inconclusive** (the agent never answered — a rate limit, not a red; the two are kept
@@ -126,12 +126,12 @@ this repository forbids a gate that ships before its fix. A clean drill-all is t
 limit can throttle, and it also surfaces the handful of cases that stay green on their own (their assertions
 are generically answerable). Until those are re-pointed or retired and a green drill-all exists, the drill
 state is advisory: `--drill-status` reports it and the person reads it. Tracked in
-`intent/2026-09-06-what-the-second-audit-found/`.
+`docs/sdlc/intent/2026-09-06-what-the-second-audit-found/`.
 
 **And the lesson may not live anywhere the case does not name.** At load, every case's `neutralize` set is
 looked for in every tracked markdown file outside its `subject`; a file that carries all of them is refused
 with the repair named — add it to `subject` (the drill then removes the lesson there too) or reword it. The
-session under test can Grep the whole tree, so a copy of the lesson in a `lessons/` entry or in this README
+session under test can Grep the whole tree, so a copy of the lesson in a `docs/sdlc/lessons/` entry or in this README
 answers the prompt after the drill has removed it from the subjects, and the drill certifies nothing. The
 first run of that check refused eleven of twenty cases. The fingerprint is the whole set, so one shared word
 is not a leak. There is no allowlist: a file a session can read after the removal makes the drill vacuous
@@ -153,8 +153,8 @@ machine's existing login (no API key)."* A GitHub runner is a bare machine with 
 would require an `ANTHROPIC_API_KEY` secret — a cost of the delivery choice, not of the thing delivered.
 
 So it is enforced where enforcement already lives. `scripts/hooks/pre-push-gate.mjs` denies a push whose
-commits are not in the CI-parity ledger; it now also denies a push that **changes** `CLAUDE.md`, `.claude/**`
-or `evals/**` unless `.git/everdict-evals-ok` stamps the current HEAD. A green `pnpm agent-evals` writes that
+commits are not in the CI-parity ledger; it now also denies a push that **changes** `CLAUDE.md`, `.claude/**`,
+`docs/sdlc/gates.md` or `scripts/evals/**` unless `.git/everdict-evals-ok` stamps the current HEAD. A green `pnpm agent-evals` writes that
 stamp. A push that leaves the configuration alone never meets the arm.
 
 The stamp attests a COMMIT, so a run over dirty configuration declines to write one and says so: the suite
@@ -167,7 +167,7 @@ intermediate commit; nobody bisects a skill's wording.
 
 ## The history
 
-Every run appends one line to `evals/history.jsonl` — timestamp, model, per-case outcome, cost. `.results/`
+Every run appends one line to `scripts/evals/history.jsonl` — timestamp, model, per-case outcome, cost. `.results/`
 is overwritten each run, so before this the eval pass rate had no history at all, and that closes a door: a
 control band needs a rolling baseline, and a baseline cannot be collected retroactively. Every unrecorded run
 was a run that could never be part of one.
@@ -175,7 +175,7 @@ was a run that could never be part of one.
 A `--only` run is recorded with `partial: true` rather than dropped, so a band can filter it out instead of
 averaging one case into a suite-wide rate. The file is excluded from the stamp's cleanliness check and from
 the push gate's configuration set (`CONFIG_PATHSPEC`, one definition read by both): it is what a run WRITES,
-and treating it as configuration closes a loop with no exit — appending dirties `evals/`, a dirty `evals/`
+and treating it as configuration closes a loop with no exit — appending dirties `scripts/evals/`, a dirty `scripts/evals/`
 refuses the stamp, and earning the stamp appends again.
 
 ## Owed: the model-swap question — half paid

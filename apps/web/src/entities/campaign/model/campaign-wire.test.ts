@@ -24,7 +24,7 @@ import { campaignDecisionSchema, campaignListSchema, campaignSchema } from './sc
 // spent. Re-capture rather than hand-edit: a fixture somebody adjusted to pass is a fixture that has stopped
 // answering the question.
 const wire = JSON.parse(
-  readFileSync(new URL('../../../../../../fixtures/campaign-wire.json', import.meta.url), 'utf8')
+  readFileSync(new URL('../../../../../../packages/contracts/fixtures/campaign-wire.json', import.meta.url), 'utf8')
 ) as {
   list: unknown
   record: unknown

@@ -101,7 +101,7 @@ export const campaignListSchema = z.array(campaignSchema.omit({ rounds: true }))
 // caught that: the read was CAST rather than parsed, so `decision.answer` was `undefined` at runtime and
 // `undefined !== 'continue'` offered a settle button on every campaign the gate was still saying continue to
 // — the exact state the button is hidden to prevent. Only driving it against a live control plane found it,
-// which is why the payloads are now a fixture (`fixtures/campaign-wire.json`) and this read is parsed.
+// which is why the payloads are now a fixture (`packages/contracts/fixtures/campaign-wire.json`) and this read is parsed.
 //
 // `CampaignGateAnswer` lives in `@everdict/domain`, which the web may not import, so there is no drift guard
 // for this one — the fixture is what stands in for it.

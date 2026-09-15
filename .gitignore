@@ -42,4 +42,4 @@ __pycache__/
 deploy/compose/certs/
 
 # Agent-eval transcripts — one JSON per case, rewritten on every run.
-evals/.results/
+scripts/evals/.results/

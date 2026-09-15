@@ -60,11 +60,11 @@ const KO_LOCALE = [
   // this repository's maintainer does not produce. Same category as the ko test assertions the policy already
   // exempts: the Korean is the input under test, never the repository's own prose.
   //
-  // ⚠️ The first version of this entry read `evals/cases`, exempting the whole directory — so any later case
+  // ⚠️ The first version of this entry read `scripts/evals/cases`, exempting the whole directory — so any later case
   // that picked up Hangul by accident would have passed silently. It was caught by `pnpm review` on its first
   // real run: a change entirely about tightening a ratchet had quietly widened another one. Each further
   // stimulus case is argued and listed here on its own line.
-  "evals/cases/english-only-source.json",
+  "scripts/evals/cases/english-only-source.json",
 ];
 const isKoLocale = (file) => KO_LOCALE.some((p) => file === p || file.startsWith(`${p}/`));
 

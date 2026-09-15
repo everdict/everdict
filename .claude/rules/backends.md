@@ -24,7 +24,7 @@ A Backend = placement: dispatch a job-runner job to an orchestrator. See skill `
   envelope 402 + depth/in-flight guards 429, when an agent asked) then `BudgetTracker.admit` (tenant 402),
   BEFORE any container is provisioned, and `release()` on any failure that produced nothing. The causer id
   is never client-supplied — it rides the agent attribution header. A new lane that takes compute and skips
-  this is a bypass, and the master plan makes a bypass a review-blocking defect. What the hold-open lanes do
+  this is a bypass, which that same §5.1 makes a review-blocking defect. What the hold-open lanes do
   NOT share is `Scheduler.dispatch`: it is task-shaped (queue → run → result), and a session has no result
   to await, so it would park a slot forever. They share admission, and their held-open jobs are counted by
   the same `capacity()` probe (all submit under the `everdict-` prefix).

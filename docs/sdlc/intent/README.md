@@ -1,16 +1,22 @@
-# `intent/` — where a change starts
+---
+kind: wiki
+title: "Intent — where a change starts"
+status: current
+updated: 2026-09-15
+---
+# `docs/sdlc/intent/` — where a change starts
 
 An idea enters the repository here, in the originator's own words, as a version-controlled artifact the
 next stage can act on. One directory per change:
 
 ```
-intent/<YYYY-MM-DD>-<slug>/
+docs/sdlc/intent/<YYYY-MM-DD>-<slug>/
   intent.md    what is wanted, why, under which constraints   (required)
   spec.md      the requirements + design pass over it         (optional)
   plan.md      the implementation plan, before any code       (optional, but see below)
 ```
 
-`intent/TEMPLATE.md` and `intent/PLAN-TEMPLATE.md` are the shapes. `pnpm intent-chain` enforces them.
+`docs/sdlc/intent/TEMPLATE.md` and `docs/sdlc/intent/PLAN-TEMPLATE.md` are the shapes. `pnpm intent-chain` enforces them.
 
 `spec.md` is written by `pnpm design --next`, which takes the oldest **accepted** intent without one, applies
 this repository's rules and skills as constraints, and leaves the result in the working tree **uncommitted** —

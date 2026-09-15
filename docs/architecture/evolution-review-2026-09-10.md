@@ -169,7 +169,7 @@ reader through (`expected true to be false`, twice).
 `pnpm agent-evals` were all green. That is not the gate failing at its job; it is the gate's
 job. It reads a diff, and this defect is not in a diff — it is in what GitHub's comparison
 endpoint MEANS, which is answerable only by asking GitHub. The finding is therefore not
-recorded in `findings/DISPOSITIONS.md`: that ledger grades what `pnpm review` and `pnpm scan`
+recorded in `docs/sdlc/finding-dispositions.md`: that ledger grades what `pnpm review` and `pnpm scan`
 raised, and counting a finding they did not raise would inflate the very number it exists to
 keep honest. Its disposition is this section.
 
@@ -237,7 +237,7 @@ cache; dependency builds also used cache. The import-cycle check ran successfull
 Not executed: the complete repository test suite, full CI certification, real PostgreSQL
 transactions or concurrency, authenticated private GitHub or GitHub Enterprise access,
 and deployment E2E. No implementation fixes, commits, pushes, or review/CI stamps were
-written by the review. The existing one-line local addition in `evals/history.jsonl` was
+written by the review. The existing one-line local addition in `scripts/evals/history.jsonl` was
 preserved.
 
 ## Re-running the oracle probe

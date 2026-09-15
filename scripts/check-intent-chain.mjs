@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// Intent-chain guard — the Plan/Build handoff, enforced instead of stated (`intent/README.md`).
+// Intent-chain guard — the Plan/Build handoff, enforced instead of stated (`docs/sdlc/intent/README.md`).
 //
 // A plan written after the diff is not a plan, it is a description that agrees with itself, and nothing in a
 // repository can tell the two apart by reading them: both are markdown that matches the code. The only
 // witness is the COMMIT ORDER, so this check asks git the three questions the prose version can only request:
 //
-//   1. every change directory carries an `intent.md` in the shape `intent/TEMPLATE.md` declares;
+//   1. every change directory carries an `intent.md` in the shape `docs/sdlc/intent/TEMPLATE.md` declares;
 //   2. a `plan.md` CITES the commit that introduced its intent (`From: intent.md @ <sha>`), and that commit
 //      is an ancestor of the plan's own — a plan cannot precede the request it answers;
 //   3. `Status: shipped` names the commit that landed it, and that commit is STRICTLY later than the plan.
@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 import { designDeclined } from "./intent-declarations.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const home = path.join(root, "intent");
+const home = path.join(root, "docs", "sdlc", "intent");
 const rel = (p) => path.relative(root, p);
 
 const violations = [];
@@ -41,7 +41,9 @@ const gitOk = (...args) => git(...args).status === 0;
 
 // ── preconditions ────────────────────────────────────────────────────────────────────────────────
 if (!existsSync(home)) {
-  console.error("✖ intent-chain: intent/ is missing. The Plan stage has no home — see intent/README.md.");
+  console.error(
+    "✖ intent-chain: docs/sdlc/intent/ is missing. The Plan stage has no home — see docs/sdlc/intent/README.md.",
+  );
   process.exit(1);
 }
 if (gitOut("rev-parse", "--is-shallow-repository") === "true") {
@@ -52,7 +54,7 @@ if (gitOut("rev-parse", "--is-shallow-repository") === "true") {
 }
 for (const required of ["README.md", "TEMPLATE.md", "PLAN-TEMPLATE.md"]) {
   if (!existsSync(path.join(home, required)))
-    fail(`intent/${required} is missing — the shape it defines is what this check enforces.`);
+    fail(`docs/sdlc/intent/${required} is missing — the shape it defines is what this check enforces.`);
 }
 
 // ── the shapes ───────────────────────────────────────────────────────────────────────────────────
@@ -61,9 +63,15 @@ const PLAN_SECTIONS = ["Files that change", "Order of work", "Risks", "Proof"];
 const STATUSES = ["draft", "accepted", "rejected", "shipped"];
 const DIR_NAME = /^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*$/;
 
-/** The commit that INTRODUCED a tracked path, or undefined when the path is not committed yet. */
+/**
+ * The commit that INTRODUCED a tracked path, or undefined when the path is not committed yet.
+ *
+ * `--follow` is load-bearing: this directory moved from the repository root to `docs/sdlc/intent/`, and
+ * without it the oldest add of every file is the MOVE — so every `From:` sha reads as wrong and every
+ * `Shipped:` as earlier than its plan. A rename is not an introduction; the request was made where it was made.
+ */
 const introducedBy = (file) => {
-  const log = gitOut("log", "--diff-filter=A", "--format=%H", "--", rel(file));
+  const log = gitOut("log", "--follow", "--diff-filter=A", "--format=%H", "--", rel(file));
   if (!log) return undefined;
   const lines = log.split("\n").filter(Boolean);
   return lines[lines.length - 1]; // git logs newest-first; the oldest add is the introduction
@@ -85,7 +93,7 @@ const changes = readdirSync(home)
 
 for (const name of changes) {
   const dir = path.join(home, name);
-  const label = `intent/${name}`;
+  const label = `docs/sdlc/intent/${name}`;
   if (!DIR_NAME.test(name)) fail(`${label}: directory name must be <YYYY-MM-DD>-<slug> (lowercase, hyphens).`);
 
   const intentFile = path.join(dir, "intent.md");
@@ -111,7 +119,7 @@ for (const name of changes) {
   const intentHeadings = headingsOf(intent);
   for (const section of INTENT_SECTIONS) {
     if (!intentHeadings.includes(section))
-      fail(`${label}/intent.md: missing section "## ${section}" (intent/TEMPLATE.md).`);
+      fail(`${label}/intent.md: missing section "## ${section}" (docs/sdlc/intent/TEMPLATE.md).`);
   }
 
   // ── the Plan→Design handoff: a spec, or one line saying why not ─────────────────────────────────
@@ -122,7 +130,7 @@ for (const name of changes) {
   // `Design: none — <why>` has been DECIDED against, in writing, by whoever accepted it; one with neither has
   // simply not been picked up, and nothing distinguished it from the second until this line. The 2026-09-06
   // audit scored the Plan and Design stages at L2 for that reason: the artifact existed, and the handoff was
-  // a start button somebody had to press. The declaration is the same form `lessons/` uses for
+  // a start button somebody had to press. The declaration is the same form `docs/sdlc/lessons/` uses for
   // `Eval case: none — <why>`, and for the same reason — a declaration cannot be misread, and a note can be.
   // `pnpm design --next` skips a declared intent; `pnpm intent-chain` refuses an undeclared one.
   if (status === "accepted" && !existsSync(path.join(dir, "spec.md"))) {
@@ -210,7 +218,7 @@ for (const name of changes) {
     const planHeadings = headingsOf(plan);
     for (const section of PLAN_SECTIONS) {
       if (!planHeadings.includes(section))
-        fail(`${label}/plan.md: missing section "## ${section}" (intent/PLAN-TEMPLATE.md).`);
+        fail(`${label}/plan.md: missing section "## ${section}" (docs/sdlc/intent/PLAN-TEMPLATE.md).`);
     }
     citations++;
     const cited = /^From:\s*intent\.md\s*@\s*([0-9a-f]{7,40})\s*$/m.exec(plan)?.[1];
@@ -259,12 +267,12 @@ for (const note of notes) console.log(`· ${note}`);
 if (violations.length > 0) {
   console.error(`\n✖ intent-chain: ${violations.length} violation(s)\n`);
   for (const v of violations) console.error(`  - ${v}`);
-  console.error("\n  intent/README.md states the chain; this check is the part of it git can refuse.");
+  console.error("\n  docs/sdlc/intent/README.md states the chain; this check is the part of it git can refuse.");
   process.exit(1);
 }
 // The count is the cheap half of a lesson: "the chain holds" says it is intact, and the number of commit
 // references says what a rebase would cost — at the moment somebody is already looking.
-// See lessons/2026-09-05-the-chain-makes-a-rebase-expensive.md.
+// See docs/sdlc/lessons/2026-09-05-the-chain-makes-a-rebase-expensive.md.
 console.log(
   `✓ intent-chain: ${changes.length} change director${changes.length === 1 ? "y" : "ies"}, ${citations} commit reference(s) trusted — the chain holds. A rebase rewrites every one of them.`,
 );

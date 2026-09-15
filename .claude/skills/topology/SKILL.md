@@ -146,8 +146,11 @@ always deploys them, K8s deploys when `provisionDependencies` is set, and Nomad 
 `provisionDependencies` option for the no-zone case (deploys the stores as a dedicated silo under a `default` id via
 `provisionSilo`, no tenant DDL). Without it, no-zone = `external` (BYO). Pre-fix Nomad no-zone deployed ZERO declared
 stores (the isolation branch was gated on `if (zone)`).
-**Co-located topology (Nomad only — see `docs/architecture/nomad-colocated-topology.md`).** `buildNomadTopologyJob`
-renders **one task group** (`SERVICE_GROUP_NAME`) with **one task per service** on a **bridge** netns — every
+**Co-located topology (Nomad only — see `docs/architecture/nomad-colocated-topology.md`).** For a homogeneous
+topology (every service a Linux container, `replicas: 1`) `buildNomadTopologyJob` renders **one task group**
+(`SERVICE_GROUP_NAME`) with **one task per service** on a **bridge** netns; a non-Linux `requires.os`,
+`replicas > 1` or a host-exec service switches the whole job to one group per service (`needsPerServiceGroups`).
+In the co-located group every
 service shares one network namespace, so peers talk over **loopback** (`localhost:<svc.port>`; `extra_hosts` also
 maps each service **name** → `127.0.0.1` for `<svc.name>:<port>` docker/k8s parity). This ports the docker
 runtime's fixed internal-address model: an inter-service address never depends on a dynamically-assigned host
@@ -155,7 +158,7 @@ port, so it never goes **stale** on reschedule (the whole topology reschedules a
 for the old per-service-group model's `fetch failed`). Each ported service still gets a group dynamic host port
 (label = its sanitized name) for control-plane reach; `ensureTopology` waits for the one group's alloc **once**
 and resolves each service by `servicePortLabel(svc.name)`. Shared netns ⇒ **ports must be unique** (throws
-`BadRequestError` on a collision); per-service `replicas` is ignored (`Count 1`).
+`BadRequestError` on a collision); the group is `Count: 1` — a `replicas > 1` service takes the per-service path.
 **Tenant isolation:** `ensureTopology`/`provisionBrowserEnv` take an optional `TrustZone`; the warm pool is keyed
 by `(spec, version, zone.id)` and the job ID/namespace carry the zone — warm topologies are **never shared across
 tenants** (a shared agent/LangGraph process would leak state/secrets). A tenant's co-located alloc has no route to

@@ -109,7 +109,7 @@ if (opts.status) {
 // A dismissal is a DECISION, so it is committed. `.git/` does not travel with a clone, and a dismissal nobody
 // else can read is a dismissal the next person redoes. The reason is required for the reason the article
 // gives: without it the findings-per-scan trend is a number anybody can lower by clicking.
-const DISMISSED = path.join(root, "scans", "DISMISSED.md");
+const DISMISSED = path.join(root, "docs", "sdlc", "scan-dismissals.md");
 if (opts.dismiss) {
   if (opts.scope === undefined || opts.file === undefined || opts.reason === undefined) {
     console.error(
@@ -222,8 +222,9 @@ const prompt = [
   "This is NOT a diff review. Nothing here has changed recently; the question is what is wrong in code nobody",
   "has looked at, under the conventions this repository holds today.",
   "",
-  "Read `.claude/rules/protocol.md` and `.claude/rules/ci.md` first: they record the defect classes this",
-  "repository has actually paid for. Look for those classes specifically —",
+  "Read `.claude/rules/protocol.md`, `.claude/skills/protocol/references/corollaries.md` and",
+  "`docs/sdlc/gates.md` first: they record the defect classes this repository has actually paid for (the",
+  "rule is the index; the other two carry the incidents). Look for those classes specifically —",
   "  · a field the PLATFORM authors riding on a document a PRODUCER submits, and then acted on;",
   "  · a failed read consumed as an empty result rather than as a third value;",
   "  · identity re-derived from rendered output instead of carried from the source;",

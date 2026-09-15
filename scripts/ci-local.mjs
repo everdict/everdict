@@ -113,6 +113,7 @@ run("pnpm swallowed-reads", "pnpm", ["swallowed-reads"]);
 run("pnpm gate-order", "pnpm", ["gate-order"]);
 run("pnpm intent-chain", "pnpm", ["intent-chain"]);
 run("pnpm fix-proof", "pnpm", ["fix-proof"]);
+run("pnpm doc-anchors", "pnpm", ["doc-anchors"]);
 run("pnpm docs-check", "pnpm", ["docs-check"]);
 run("pnpm constructed-casts", "pnpm", ["constructed-casts"]);
 run("pnpm guarded-doubles", "pnpm", ["guarded-doubles"]);
@@ -159,7 +160,7 @@ run("bands (dry run)", "pnpm", ["watch-bands", "--dry-run"]);
 // `ci:local` boots no Postgres, no object store and no ClickHouse, by design — so every `*.trust.test.ts`
 // SKIPS, and vitest reports a skip and a pass with the same exit code. That is how six certifications stayed
 // red for days while this gate, `pnpm test` and `pnpm ci:commits` were all green nine times over
-// (`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`). It does not run them and
+// (`docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`). It does not run them and
 // does not fail on them; it refuses to let "skipped" and "passed" look alike in the summary a person reads.
 // It IS red when the scope has no source, because a count over the wrong population is worse
 // than no count.
@@ -177,7 +178,7 @@ run("pnpm trust-certified", "pnpm", ["trust-certified"]);
 // neither touches the worktree.
 spawnSync("git", ["read-tree", "HEAD"], { cwd: root });
 spawnSync("git", ["update-index", "--refresh", "-q", "--unmerged"], { cwd: root });
-// ⚠️ `evals/history.jsonl` is excluded, for the reason it is excluded from the gate's CONFIG_PATHSPEC: it is a
+// ⚠️ `scripts/evals/history.jsonl` is excluded, for the reason it is excluded from the gate's CONFIG_PATHSPEC: it is a
 // record a RUN produces, not code a run validates. Including it closed a loop with no exit — `pnpm agent-evals`
 // appends a line, the line makes the tree dirty, a dirty tree refuses the CI stamp, and committing the line
 // moves HEAD so the eval stamp it just earned no longer names it.

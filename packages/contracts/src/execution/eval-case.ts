@@ -540,7 +540,7 @@ export type CaseResult = z.infer<typeof CaseResultSchema>;
 // ⚠️ AND NOTHING RE-ASKS THIS LIST. `pnpm untrusted-ingress` checks that a DOOR uses the untrusted schema;
 // no check asks whether the schema strips the right fields, which is why a field added after the lesson
 // never learned it. The exhaustive-classification repair is filed as
-// `intent/2026-09-11-every-case-result-field-declares-its-author/` — three of the nineteen fields could not
+// `docs/sdlc/intent/2026-09-11-every-case-result-field-declares-its-author/` — three of the nineteen fields could not
 // be classified by reading alone, and guessing at those would be worse than the gap.
 const PLATFORM_STAMPED_RESULT_FIELDS = ["provenance", "verifier", "judgmentsSealed", "sourceTraceId"] as const;
 

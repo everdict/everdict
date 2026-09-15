@@ -74,7 +74,10 @@ const DECIDED = new Map([
   ["/bundles/apply", "one-shot register for the CLI/GitOps"],
   ["/scorecards/backfill-models", "an operator maintenance sweep over historical records"],
   ["/agents/validate", "reached through the craft form's own submit path, not as a door of its own"],
-  ["/scorecards/query", "the client engine answers it; both are held to fixtures/analysis-parity.json"],
+  [
+    "/scorecards/query",
+    "the client engine answers it; both are held to packages/contracts/fixtures/analysis-parity.json",
+  ],
   ["/v2/token", "the Docker Registry v2 token endpoint — the docker client's auth realm"],
   ["/integrations/mattermost/action", "Mattermost posts here when someone clicks a message button"],
   ["/integrations/mattermost/command", "a Mattermost slash command's webhook"],

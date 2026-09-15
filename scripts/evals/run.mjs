@@ -21,10 +21,10 @@
 // nothing behind.
 //
 // Usage:
-//   node evals/run.mjs [--only <id>] [--model <alias>] [--timeout <sec>]
-//   node evals/run.mjs --drill <id>        # one case's removal drill, recorded in the history
-//   node evals/run.mjs --drill-all         # every case's drill; refuses if any stays green
-//   node evals/run.mjs --list
+//   node scripts/evals/run.mjs [--only <id>] [--model <alias>] [--timeout <sec>]
+//   node scripts/evals/run.mjs --drill <id>        # one case's removal drill, recorded in the history
+//   node scripts/evals/run.mjs --drill-all         # every case's drill; refuses if any stays green
+//   node scripts/evals/run.mjs --list
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -41,15 +41,15 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CONFIG_PATHS, CONFIG_PATHSPEC } from "../scripts/hooks/gate-decision.mjs";
+import { CONFIG_PATHS, CONFIG_PATHSPEC } from "../hooks/gate-decision.mjs";
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const caseDir = path.join(root, "evals", "cases");
-const resultDir = path.join(root, "evals", ".results");
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const caseDir = path.join(root, "scripts", "evals", "cases");
+const resultDir = path.join(root, "scripts", "evals", ".results");
 
 // The configuration under test. Copied from the working tree into the worktree so a maintainer can run the
 // suite against a skill edit BEFORE committing it — which is when the answer is still cheap to change.
-// Copied into the worktree so a skill edit can be tested BEFORE it is committed. `evals` is not overlaid —
+// Copied into the worktree so a skill edit can be tested BEFORE it is committed. `scripts/evals` is not overlaid —
 // the runner reads its cases from the working tree directly — but it is part of what the push gate asks
 // about, so it is part of what must be clean before a stamp is written.
 const CONFIG = CONFIG_PATHS;
@@ -67,16 +67,19 @@ const CLEAN_PATHSPEC = CONFIG_PATHSPEC;
 // The digest is over the overlaid BYTES, which is what the session actually reads. `--fresh` still ignores
 // the cache entirely; the drill still never touches it.
 //
-// ⚠️ AND IT MUST NOT HASH WHAT A RUN WRITES, WHICH THE FIRST VERSION DID. `CONFIG` contains `evals`, and
-// `evals/` holds `.results/` — this cache — and `history.jsonl`, which every run appends to. So the key
+// ⚠️ AND IT MUST NOT HASH WHAT A RUN WRITES, WHICH THE FIRST VERSION DID. `CONFIG` contains `scripts/evals`, and
+// that directory holds `.results/` — this cache — and `history.jsonl`, which every run appends to. So the key
 // churned on every invocation and the cache could never hit: the fix that closed a real hole (an
 // uncommitted config edit answered from a stale pass) silently destroyed the resume the cache exists for,
 // and the only visible symptom is a suite that costs full price every time, which reads like normal.
 //
 // The rule is already written down twice in this file: `CONFIG_PATHSPEC` excludes `history.jsonl` because
 // "the history is what a run WRITES, so it cannot be part of what a run attests", and the overlay itself
-// filters `evals` out at line 196. Same sentence, third place.
-const WRITTEN_BY_A_RUN = new Set([path.join("evals", ".results"), path.join("evals", "history.jsonl")]);
+// filters `scripts/evals` out in `setup`. Same sentence, third place.
+const WRITTEN_BY_A_RUN = new Set([
+  path.join("scripts", "evals", ".results"),
+  path.join("scripts", "evals", "history.jsonl"),
+]);
 const configDigest = (() => {
   const h = createHash("sha256");
   const walk = (rel) => {
@@ -138,13 +141,13 @@ for (let i = 0; i < argv.length; i++) {
 
 // ── the corpus ───────────────────────────────────────────────────────────────────────────────────
 if (!existsSync(caseDir)) {
-  console.error("✖ agent-evals: evals/cases/ is missing — there is nothing to run, which is not a pass.");
+  console.error("✖ agent-evals: scripts/evals/cases/ is missing — there is nothing to run, which is not a pass.");
   process.exit(1);
 }
 const cases = readdirSync(caseDir)
   .filter((f) => f.endsWith(".json"))
   .sort()
-  .map((f) => ({ ...JSON.parse(readFileSync(path.join(caseDir, f), "utf8")), file: `evals/cases/${f}` }));
+  .map((f) => ({ ...JSON.parse(readFileSync(path.join(caseDir, f), "utf8")), file: `scripts/evals/cases/${f}` }));
 if (cases.length === 0) {
   console.error("✖ agent-evals: zero cases. An empty suite reports green over a question it never asked.");
   process.exit(1);
@@ -186,7 +189,7 @@ for (const c of cases) {
 //
 // The check above asks whether a neutralization is PRESENT in some subject. It never asked whether the same
 // lesson is ABSENT everywhere else — and on 2026-09-06 a removal drill stayed green because the sentence a
-// case removes from CLAUDE.md and rule `ci` had been copied, the day before, into a `lessons/` entry and
+// case removes from CLAUDE.md and rule `ci` had been copied, the day before, into a `docs/sdlc/lessons/` entry and
 // into this suite's own README, neither of which the case named. The session under test can Grep the whole
 // tree; it found the copy and answered from it. The drill measured nothing, and nothing said so.
 //
@@ -206,7 +209,7 @@ const TEXT = /\.(md|mjs|cjs|m?ts|tsx|js|json|ya?ml|txt|sh|py)$/;
 const trackedText = spawnSync("git", ["ls-files"], { cwd: root, encoding: "utf8" })
   .stdout.split("\n")
   .filter(Boolean)
-  .filter((file) => TEXT.test(file) && !file.startsWith("evals/cases/"));
+  .filter((file) => TEXT.test(file) && !file.startsWith("scripts/evals/cases/"));
 const fileLines = new Map();
 const linesOf = (file) => {
   if (!fileLines.has(file)) {
@@ -266,25 +269,25 @@ const setup = () => {
     console.error(`✖ agent-evals: could not create the throwaway worktree.\n${add.stderr}`);
     process.exit(1);
   }
-  for (const item of CONFIG.filter((i) => i !== "evals"))
+  for (const item of CONFIG.filter((i) => i !== "scripts/evals"))
     cpSync(path.join(root, item), path.join(wt, item), { recursive: true, force: true });
   // ── THE CASE FILES CANNOT BE IN THE TREE THE CASE IS ASKED IN ──────────────────────────────────
   //
-  // A worktree is `git worktree add HEAD`, so it carries every tracked file — `evals/cases/*.json` included.
+  // A worktree is `git worktree add HEAD`, so it carries every tracked file — `scripts/evals/cases/*.json` included.
   // Each of those names its own `mustMatch` and its own `neutralize` needles, and every case grants
   // `Read,Grep,Glob`. So a session asked one of these questions can grep a word from the question, land on
   // the case file that asks it, and read the assertion string it is being graded against — the answer,
   // handed over by the exam paper, from a file the drill does not touch because it is not a subject.
   //
-  // That is the mechanism behind what `lessons/2026-09-07-the-drill-is-not-deterministic.md` recorded as
-  // noise: a drill whose verdict depends on whether the session happened to grep `evals/` flips between runs
+  // That is the mechanism behind what `docs/sdlc/lessons/2026-09-07-the-drill-is-not-deterministic.md` recorded as
+  // noise: a drill whose verdict depends on whether the session happened to grep `scripts/evals/` flips between runs
   // with nothing changed, which is exactly what was observed twice.
   //
-  // The exclusivity check above deliberately exempts `evals/cases/` from the LEAK SCAN, and is right to —
+  // The exclusivity check above deliberately exempts `scripts/evals/cases/` from the LEAK SCAN, and is right to —
   // a case naming its own needles is not a copy of the lesson. The exemption was silently doing a second
   // job it was never argued for: leaving those files where the session under test can read them. The runner
   // reads its cases from the working tree (see CONFIG above), so nothing here needs them.
-  rmSync(path.join(wt, "evals", "cases"), { recursive: true, force: true });
+  rmSync(path.join(wt, "scripts", "evals", "cases"), { recursive: true, force: true });
 };
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -428,7 +431,7 @@ const runCase = (c, { cache = true } = {}) => {
 // ⚠️ A DRILL RESULT IS A LEDGER LINE. Until 2026-09-06 a drill was run once, when its case was written, and
 // its verdict lived in a terminal that closed. Nothing recorded that it had ever passed, nothing re-ran it,
 // and one went stale the day after its case landed — the lesson was copied into a second file and the case
-// kept passing without it. So every drill appends `{drill: <id>, red: true|false}` to `evals/history.jsonl`
+// kept passing without it. So every drill appends `{drill: <id>, red: true|false}` to `scripts/evals/history.jsonl`
 // (the band reader skips those lines), and `--drill-all` re-runs every case's drill and refuses if any stays
 // green. The 90-day rule the audit applies to a certificate applies here: a drill nobody has re-run is a
 // claim, and the ledger says when it was last a fact.
@@ -445,7 +448,7 @@ const subjectsDigest = (c) => {
 };
 const recordDrill = (c, red, seconds) => {
   appendFileSync(
-    path.join(root, "evals", "history.jsonl"),
+    path.join(root, "scripts", "evals", "history.jsonl"),
     `${JSON.stringify({
       at: new Date().toISOString(),
       model: opts.model,
@@ -460,7 +463,7 @@ const recordDrill = (c, red, seconds) => {
 const drillStatus = () => {
   let rows = [];
   try {
-    rows = readFileSync(path.join(root, "evals", "history.jsonl"), "utf8")
+    rows = readFileSync(path.join(root, "scripts", "evals", "history.jsonl"), "utf8")
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l))
@@ -596,7 +599,7 @@ try {
   for (const c of selected) {
     const out = runCase(c);
     spend += out.cost;
-    // ⚠️ `reused` RIDES INTO THE HISTORY. `evals/history.jsonl` is the declared input to a control band, and
+    // ⚠️ `reused` RIDES INTO THE HISTORY. `scripts/evals/history.jsonl` is the declared input to a control band, and
     // a run built from cache hits used to look identical there to one where every case was freshly executed
     // — so "the configuration was re-verified today" and "verified once and reused nineteen times" were the
     // same record. The suite-wide `cost` hinted at it and a hint is not a field. It matters more now that
@@ -631,7 +634,7 @@ try {
     console.log(`✖ ${c.id.padEnd(32)} ${out.seconds}s`);
     for (const m of out.misses) console.log(`    ${m}`);
     console.log(`    why this case exists: ${c.why}`);
-    console.log(`    subject: ${c.subject.join(", ")} · transcript: evals/.results/${c.id}.json`);
+    console.log(`    subject: ${c.subject.join(", ")} · transcript: scripts/evals/.results/${c.id}.json`);
   }
 } finally {
   teardown();
@@ -641,7 +644,7 @@ console.log(
     `${inconclusive > 0 ? ` · ${inconclusive} INCONCLUSIVE (the agent never answered)` : ""}`,
 );
 
-// ⚠️ AFTER the history, never before. A failing run used to exit here, so `evals/history.jsonl` only ever
+// ⚠️ AFTER the history, never before. A failing run used to exit here, so `scripts/evals/history.jsonl` only ever
 // received SUCCESSES — and `eval-pass-rate`, the band whose entire job is to notice the suite getting worse,
 // watched a series that could not contain a regression. The one indicator here that is about behaviour was
 // structurally incapable of moving.
@@ -653,7 +656,7 @@ console.log(
 // A `--only` run is recorded as `partial` rather than dropped, so a future band can filter it out instead of
 // averaging one case into a suite-wide rate.
 appendFileSync(
-  path.join(root, "evals", "history.jsonl"),
+  path.join(root, "scripts", "evals", "history.jsonl"),
   `${JSON.stringify({
     at: new Date().toISOString(),
     model: opts.model,
@@ -690,7 +693,7 @@ appendFileSync(
 // a gate that ships before its fix, skill `code-review`), and a clean drill-all is twenty real agent calls
 // that a rate limit can turn into false reds — which is exactly the bug the `ok`/inconclusive split above was
 // written to stop. So the coupling waits on a green drill-all, tracked in
-// `intent/2026-09-06-what-the-second-audit-found/`. Until then `--drill-status` reports never / green /
+// `docs/sdlc/intent/2026-09-06-what-the-second-audit-found/`. Until then `--drill-status` reports never / green /
 // drifted / red, and the person reads it. What DID land is cheaper and needs no agent: the exclusivity refusal
 // at load, which caught the actual audit bug.
 const notCertified = drillStatus().filter((r) => r.state !== "red");

@@ -37,7 +37,7 @@ its own identity axis (`docs/architecture/harness-definability-spec.md` §2). Se
   `versions()`. Never move tags into the spec (that would freeze them behind immutability) and never let them
   affect conflict/idempotency checks. Surface: `PUT /:id/versions/:version/tags` + MCP `set_*_version_tags`,
   gated by each entity's existing content-mutation action (no new authz action); normalization (trim/dedupe/caps)
-  lives in `apps/api` `version-tag-service.ts` — one core, two transports.
+  lives in `packages/application-control/src/version-tag/version-tag-service.ts` — one core, two transports.
 - **`origin` is provenance metadata, NOT spec content** — where a version came from (`CapabilityOrigin`: the
   issue it was built for, the agent + conversation that shaped it, the channel). It sits beside `createdBy`/tags
   for the same reason: versions are immutable, so a spec-resident origin would mint a version for unchanged

@@ -10,6 +10,8 @@ still a matter of editing a document. `pnpm intent-chain` refuses a plan whose i
 ## Files that change
 
 Name them. A reader who has never seen the session should be able to implement from this alone.
+Include the documents the change makes false — `pnpm doc-anchors` will ask about every page that anchors a
+file named here.
 
 ## Order of work
 

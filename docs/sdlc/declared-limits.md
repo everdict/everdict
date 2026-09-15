@@ -88,7 +88,7 @@ rehearsed path in the pipeline.*
 registry) and operates no running environment of its own. There are no environments to tier, no deployment to
 expose, and a rollback path with nothing to roll back is a script that has never been true.
 
-**What its absence does not mean** — the publish act is not ungated. `releases/<tag>.md` must be committed
+**What its absence does not mean** — the publish act is not ungated. `docs/sdlc/releases/<tag>.md` must be committed
 before a release tag may leave, and it asks for the rollback command and where it has been rehearsed —
 *"a rollback path that has never been run is a sentence."* The gate refuses the tag, not the deployment,
 because the tag is what this project actually ships.
@@ -109,7 +109,7 @@ installed, which is already known.
 **What its absence does not mean, and what this entry used to claim.** The first version of this page said the
 gate-level rows (3, 4, 5, 6) had "all been driven against the real hook, in both directions". The second audit
 drove them and found that sentence true for row 4 (an unauthorized release, refused three times with the
-reason), true at the push and not at the edit for row 5 (a change under `CLAUDE.md`, `.claude/` or `evals/` is
+reason), true at the push and not at the edit for row 5 (a change under `CLAUDE.md`, `.claude/` or `scripts/evals/` is
 refused without a fresh eval stamp; the edit itself is not stopped, and generated paths are not protected at
 all), true for row 3 except through a linked worktree (see 2, repaired), and **not true for row 6**: nothing
 read a test file during a fix, and the row was stopped by attention alone. Row 6 has a mechanism now, in this
@@ -158,7 +158,7 @@ one is a position, and a position that hides among facts stops being arguable.
 **Clause** — play `Claude Code plan mode as the default starting point`, L4: *an implementation PR with no
 `plan.md` is blocked.*
 
-**Declined because** — `intent/README.md` says it in its own words: *"A one-line fix does not need one; the
+**Declined because** — `docs/sdlc/intent/README.md` says it in its own words: *"A one-line fix does not need one; the
 test is whether the reason survives in the commit message alone."* A gate that demands a plan for every change
 would demand one for a typo, and the first repair anybody reaches for is a plan that says nothing — which is
 worse than no plan, because it passes.
@@ -181,7 +181,7 @@ home triggers the design pass with no human input.*
 
 **Declined because** — the same argument as C1, one stage earlier: not every change needs a requirements pass,
 and a gate that insists otherwise is routed around within a week. Until 2026-09-06 this position lived in
-`intent/README.md` and in a shipped intent's constraints, and the audit scored both plays at L2 because the
+`docs/sdlc/intent/README.md` and in a shipped intent's constraints, and the audit scored both plays at L2 because the
 handoff was a start button somebody had to press and nothing distinguished "declined" from "not picked up".
 
 **What its absence does not mean** — the third state is refused now. An accepted intent has a `spec.md`, or
@@ -220,7 +220,7 @@ are expected" — that line means nothing ran, and it is expected.
 - **Release publishing.** Tags `cli-v*`, `desktop-v*`, `v*`/`api-v*`/`web-v*`/`agent-v*` used to build SEA
   binaries, desktop bundles and images. A release is now built by hand from the matrices those workflows
   described, which `docs/architecture/runner-distribution.md`, `docs/architecture/desktop-app.md` and skill
-  `desktop` preserve. The `releases/<tag>.md` authorization gate is unaffected and still refuses a tag push
+  `desktop` preserve. The `docs/sdlc/releases/<tag>.md` authorization gate is unaffected and still refuses a tag push
   without one.
 - **A second reader of the gate list.** Rule `ci` used to warn about drift between `ci.yml` and
   `scripts/ci-local.mjs`; there is now one list, so that failure mode is gone and its replacement is
@@ -232,7 +232,7 @@ reports a skip and a pass with the same exit code. On 2026-09-10 six certificati
 asserting a whole `Score` against a shape that had grown a key, one sealing a receipt over bytes the row
 would never hold — after days in which `pnpm test`, `pnpm ci:commits` and `pnpm ci:local` were all green over
 them. Nothing anywhere could say how long it had been since anything ran them. See
-`lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+`docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
 
 **What now makes that gap visible** — `pnpm trust-certified`, wired into `ci:local`. It prints the scenario
 count in the subset's scope, the last certification's sha and date, and which files in that scope have
@@ -254,7 +254,7 @@ SUPERSEDED rather than edited if that changes.
 dry run that exited 0 on a breach: detection with no person, filing with one, and the push never waited for
 the second half. The alternative — filing from inside the gate — writes into the tree the gate is checking,
 which is the eval runner's first recorded incident one layer up, and reopens the loop this repository already
-closed once for `evals/history.jsonl` (a run dirties the tree, a dirty tree refuses the stamp). So the gate's
+closed once for `scripts/evals/history.jsonl` (a run dirties the tree, a dirty tree refuses the stamp). So the gate's
 dry run REFUSES at 3σ, names the command, and the push waits until `pnpm watch-bands` has filed the intent and
 it is committed. The person's only decision is gone; their hands are still on the one command.
 
@@ -305,7 +305,7 @@ Mattermost integration; that is a feature for tenants, not where this project's 
 
 Reopens if: a team channel becomes where incidents start — which is the same fact that reopens entry 1.
 
-Buildable half, and built: post-mortems are committed to a version-controlled home (`lessons/`, seven
+Buildable half, and built: post-mortems are committed to a version-controlled home (`docs/sdlc/lessons/`, seven
 entries with real history), each declaring the eval case it produced or why it produced none, read by
 `pnpm lesson-evals`.
 
@@ -326,7 +326,7 @@ and putting them here would be exactly the abuse this page's own rule warns abou
 - **The second scan rotation** — every scope read once; the trend needs a second pass. Work.
 - **Baselines old enough to band on** — three of four bands compute now; L5 needs two quarters of movement,
   so no play can claim it before 2027-03. Time.
-- **`CLAUDE.md` at eight pages** — `intent/2026-09-06-claude-md-is-eight-pages/`, a draft. Work, and a
+- **`CLAUDE.md` at eight pages** — `docs/sdlc/intent/2026-09-06-claude-md-is-eight-pages/`, a draft. Work, and a
   judgement the eval suite has to referee.
 
 ## What would make this page wrong

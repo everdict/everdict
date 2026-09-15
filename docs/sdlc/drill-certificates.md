@@ -20,7 +20,7 @@ next run's block above it.
 ## 2026-09-06 — the second audit
 
 Run against branch `perf/control-plane-read-budget` at `87d42eae`, by Claude in the maintainer's working
-tree. Verdict G2 artifact chain. The repairs the drills led to are `intent/2026-09-06-what-the-second-audit-found/`.
+tree. Verdict G2 artifact chain. The repairs the drills led to are `docs/sdlc/intent/2026-09-06-what-the-second-audit-found/`.
 
 ```
 drill:      removal
@@ -41,7 +41,7 @@ observed:
                   against a real linked worktree; RED with the old predicate on
                   both worktree rows, green with the new one.
   eval suite      --drill on one case: still PASSED with its lesson removed (104.9s).
-                  The lesson had been copied into a lessons/ entry and the suite's
+                  The lesson had been copied into a docs/sdlc/lessons/ entry and the suite's
                   README, neither in the case's subject. Repaired the same day:
                   exclusivity refusal at load (found ELEVEN leaking cases, not one),
                   drill lines in the committed history with a subject digest,
@@ -55,7 +55,7 @@ observed:
 verdict:    FAIL at the time of the audit; two of the three controls repaired and
             re-observed the same day. The bug-fix and plan-adherence rows are
             still owed a run against real commits.
-follow-up:  intent/2026-09-06-what-the-second-audit-found/
+follow-up:  docs/sdlc/intent/2026-09-06-what-the-second-audit-found/
 ```
 
 The eval row was re-run as a full `--drill-all` once the false-red split (an errored agent call is
@@ -81,7 +81,7 @@ meaning:    The inconclusive split is the load-bearing repair here — before it
 verdict:    the mechanism PASSES (it distinguished red / green / inconclusive
             correctly); the SUITE is not yet clean — 4 cases to fix or retire, then
             a full green drill-all before the stamp couples to it.
-follow-up:  intent/2026-09-06-four-cases-that-do-not-measure/
+follow-up:  docs/sdlc/intent/2026-09-06-four-cases-that-do-not-measure/
 ```
 
 The four were retired, and the drill-all was then run to completion — no rate limit, every case executed.
@@ -111,7 +111,7 @@ meaning:    80% of the suite certifies nothing. The earlier finding (the codebas
 verdict:    the MECHANISM is sound and now proven at full scale; the SUITE is not.
             No bulk action taken: the last round narrowed four assertions on an
             assumed cause and moved backwards.
-follow-up:  intent/2026-09-06-the-suite-measures-almost-nothing/
+follow-up:  docs/sdlc/intent/2026-09-06-the-suite-measures-almost-nothing/
 ```
 
 ```
@@ -175,7 +175,7 @@ observed:
 verdict:    FAIL at the time of the audit (row 6, row 3's worktree path); both
             repaired and re-observed the same day. Row 5's edit-time half
             stays open.
-follow-up:  intent/2026-09-06-what-the-second-audit-found/
+follow-up:  docs/sdlc/intent/2026-09-06-what-the-second-audit-found/
 ```
 
 ```
@@ -215,7 +215,7 @@ meaning:    every SURVIVING case goes red without its lesson, and each refusal
             things honestly is a different artifact from one that appeared to
             measure fifteen.
             ⚠️ AND THE INSTRUMENT WAS LEAKING. The throwaway worktree is
-            `git worktree add HEAD`, so it carried `evals/cases/*.json` — each
+            `git worktree add HEAD`, so it carried `scripts/evals/cases/*.json` — each
             naming its own assertion — into the tree the session under test can
             Grep, while every case grants Read/Grep/Glob. The exclusivity check
             exempts that directory from its LEAK SCAN, correctly, and the
@@ -230,8 +230,8 @@ context:    eight cases were retired to get here. Seven on two green drills each
             reason a drill could not have produced: its assertion matched any
             competent answer and its `neutralize` named a heading while the
             sentence that answers the prompt stayed in the file. Both defects are
-            in `evals/RETIRED.md`; the flip that made somebody look is in
-            `lessons/2026-09-07-the-drill-is-not-deterministic.md`.
+            in `scripts/evals/RETIRED.md`; the flip that made somebody look is in
+            `docs/sdlc/lessons/2026-09-07-the-drill-is-not-deterministic.md`.
 ```
 
 ## 2026-09-11 — one case, and the assertion that was wrong
@@ -258,7 +258,7 @@ meaning:    ⚠️ THE CASE WAS ASSERTING A FALSE FACT, AND THE DRILL COULD NOT 
             drill, and not by four of them.
             The assertion is /EVERDICT_TRUST_SUITE/ now and re-certified RED.
             ⚠️ Its `neutralize` set had to change with it: the exclusivity check
-            refused the obvious needles because `lessons/2026-09-10-…` and
+            refused the obvious needles because `docs/sdlc/lessons/2026-09-10-…` and
             `check-trust-certified.mjs` both carry all of them, so the drill
             would have certified nothing. The third needle is a phrase `git grep`
             finds in CLAUDE.md and nowhere else — deliberately NOT reproduced
@@ -272,7 +272,7 @@ context:    the suite went from two cases to one on 2026-09-09, when
             `sibling-doors-guard-alike` was retired after a third green drill —
             its assertion named `guard-siblings`, which is a `package.json`
             script name, so a control's NAME can be grepped out of the tree a
-            drill leaves standing. `intent/2026-09-07-assertions-reachable-without-the-lesson/`
+            drill leaves standing. `docs/sdlc/intent/2026-09-07-assertions-reachable-without-the-lesson/`
             is the filed diagnosis and is still `draft`. The `eval-pass-rate`
             band now reads FLAT over 19 identical samples: a sigma over one case
             says nothing.
@@ -311,7 +311,7 @@ verdict:    `skipped-scenario-is-not-passing` measures whether a session can FIN
             the answer, not whether the configuration carries it. Second case to
             fail this way — `sibling-doors-guard-alike` was retired on 2026-09-09
             for the same reason — and the filed diagnosis is
-            `intent/2026-09-07-assertions-reachable-without-the-lesson/`, still
+            `docs/sdlc/intent/2026-09-07-assertions-reachable-without-the-lesson/`, still
             `draft`. NOT retired here: it is the suite's only case, `pnpm agent-evals`
             refuses an empty corpus, and choosing the replacement question is the
             design pass that intent asks for.

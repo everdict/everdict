@@ -10,14 +10,22 @@
 // The gate was open on exactly the state meaning "nothing here has ever been gated". Keeping the two states
 // distinct in the SIGNATURE is what stops that returning.
 
-/** Paths whose change makes a push carry the configuration that steers the agent. */
-export const CONFIG_PATHS = ["CLAUDE.md", ".claude", "evals"];
+/**
+ * Paths whose change makes a push carry the configuration that steers the agent.
+ *
+ * `docs/sdlc/gates.md` is here because a lesson moved there, not because documents steer. Until 2026-09-15
+ * its text WAS `.claude/rules/ci.md`, inside this arm; the incident bodies moved to the catalog and an eval
+ * case names it as a subject. Leaving it out would have narrowed the arm silently — an edit deleting the lesson
+ * the case measures would owe no eval run — and the runner overlays only these paths into its worktree, so a
+ * drill over an uncommitted catalog would have read HEAD's copy.
+ */
+export const CONFIG_PATHS = ["CLAUDE.md", ".claude", "docs/sdlc/gates.md", "scripts/evals"];
 
 /**
  * The same set as a git pathspec, minus the eval history.
  *
- * `evals/history.jsonl` is the record a run PRODUCES, not configuration a run tests, and treating it as the
- * latter closes a loop with no exit: appending a line dirties `evals/`, a dirty `evals/` refuses the stamp,
+ * `scripts/evals/history.jsonl` is the record a run PRODUCES, not configuration a run tests, and treating it as the
+ * latter closes a loop with no exit: appending a line dirties `scripts/evals/`, a dirty `scripts/evals/` refuses the stamp,
  * and earning the stamp appends another line.
  *
  * ⚠️ THIS COMMENT USED TO PROMISE SOMETHING THE CODE DID NOT DO. It said the exclusion came "from this one
@@ -27,7 +35,7 @@ export const CONFIG_PATHS = ["CLAUDE.md", ".claude", "evals"];
  * the file that states the rule. Found by `pnpm review`. The constant below is the definition now, and every
  * caller imports it.
  */
-export const RUN_OUTPUT_EXCLUDE = ":(exclude)evals/history.jsonl";
+export const RUN_OUTPUT_EXCLUDE = ":(exclude)scripts/evals/history.jsonl";
 export const CONFIG_PATHSPEC = [...CONFIG_PATHS, RUN_OUTPUT_EXCLUDE];
 
 /**
@@ -41,7 +49,7 @@ export const CONFIG_PATHSPEC = [...CONFIG_PATHS, RUN_OUTPUT_EXCLUDE];
  */
 export const PRODUCT_PATHS = ["packages", "apps", "scripts"];
 
-/** Tags that publish. Each needs an authorization committed at `releases/<tag>.md`. */
+/** Tags that publish. Each needs an authorization committed at `docs/sdlc/releases/<tag>.md`. */
 export const RELEASE_TAG = /^(?:cli|desktop|api|web|agent|job-runner)-v\d|^v\d/;
 
 /**
@@ -98,7 +106,7 @@ export function decideGate({
     return {
       allow: false,
       arm: ARMS.RELEASE_UNAUTHORIZED,
-      reason: `push blocked: HEAD carries release tag(s) ${unauthorized.join(", ")} with no authorization committed at releases/<tag>.md. A release is the one act here with no undo; write what ships, what verified it, and who authorizes.`,
+      reason: `push blocked: HEAD carries release tag(s) ${unauthorized.join(", ")} with no authorization committed at docs/sdlc/releases/<tag>.md. A release is the one act here with no undo; write what ships, what verified it, and who authorizes.`,
     };
   }
 

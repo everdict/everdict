@@ -13,13 +13,13 @@ import type { AnalysisConfig } from './analysis'
 // checking it, and a census then found only this copy is ever called. A divergence would have been
 // invisible for as long as nobody used the route.
 //
-// `fixtures/analysis-parity.json` is the one question both engines answer, and the domain has its own test
+// `packages/contracts/fixtures/analysis-parity.json` is the one question both engines answer, and the domain has its own test
 // over the same file. Neither imports the other — the web may not import `@everdict/domain` at all — so the
 // fixture is what they meet at. It is read rather than imported for the same reason.
 // docs/architecture/web-runtime-gap-census-spec.md
 
 const fixture = JSON.parse(
-  readFileSync(new URL('../../../../../../fixtures/analysis-parity.json', import.meta.url), 'utf8')
+  readFileSync(new URL('../../../../../../packages/contracts/fixtures/analysis-parity.json', import.meta.url), 'utf8')
 ) as {
   cards: Parameters<typeof computeAnalysis>[0]
   cases: {

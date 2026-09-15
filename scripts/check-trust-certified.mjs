@@ -12,9 +12,9 @@
 // so `pnpm test` reports them SKIPPED and exits 0, `pnpm ci:local` boots no Postgres/MinIO/ClickHouse by
 // design, and `pnpm ci:commits` skips them once per commit. The one thing that runs them is the `trust-fast`
 // workflow — which was `disabled_manually` from 2026-08-21 and DELETED with every other workflow on 2026-09-11
-// (`docs/architecture/harness-declared-limits.md` C3). `.claude/rules/ci.md` has carried the warning — *"a
+// (`docs/sdlc/declared-limits.md` C3). `.claude/rules/ci.md` has carried the warning — *"a
 // trust scenario that SKIPS is not a passing one, and locally that is the default"* — the whole time, and
-// prose is what it was. See `lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+// prose is what it was. See `docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
 //
 // ── WHAT THIS DOES, AND WHAT IT DELIBERATELY DOES NOT ────────────────────────────────────────────────
 //

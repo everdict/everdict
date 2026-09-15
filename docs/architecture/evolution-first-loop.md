@@ -12,7 +12,7 @@ supplies the narrower first implementation sequence now reflected in that docume
 It settles C1, C2 and C5 into ONE loop. C3, C4, C6, C7 and C8 stay exactly as proposed there; nothing here
 narrows them and nothing here depends on them.
 
-Two papers drive it. `intent/2026-09-11-a-selection-split-and-declared-edits/` narrows SkillOpt (R38) to three
+Two papers drive it. `docs/sdlc/intent/2026-09-11-a-selection-split-and-declared-edits/` narrows SkillOpt (R38) to three
 missing mechanisms and carries the arithmetic. WikiSkill (S00) is the seed of the
 [literature review](evolution-literature-review.md) and is the larger reported effect — +15.0 points from
 giving the PROPOSER durable knowledge, −2.8 from also giving it to the executor.
@@ -212,5 +212,5 @@ the platform either way.
 
 The mechanisms and their limits are catalogued in the [literature review](evolution-literature-review.md):
 WikiSkill is S00, SkillOpt is R38, GEPA R01, ACE and ReasoningBank E08–E09. The cost arithmetic is reproducible
-from `intent/2026-09-11-a-selection-split-and-declared-edits/power.mjs`, which calls this repository's own
+from `docs/sdlc/intent/2026-09-11-a-selection-split-and-declared-edits/power.mjs`, which calls this repository's own
 significance functions rather than quoting the table.

@@ -16,8 +16,8 @@
 // The drill did this for the eval suite: it asks whether a case measures anything. This asks the sibling
 // question one control over — whether a finding was worth reading.
 //
-// ⚠️ A DISPOSITION IS A DECISION, SO IT IS COMMITTED. `findings/DISPOSITIONS.md` travels with the repository
-// for the same reason `scans/DISMISSED.md` does: `.git/` does not travel, and a judgement nobody else can
+// ⚠️ A DISPOSITION IS A DECISION, SO IT IS COMMITTED. `docs/sdlc/finding-dispositions.md` travels with the repository
+// for the same reason `docs/sdlc/scan-dismissals.md` does: `.git/` does not travel, and a judgement nobody else can
 // read is one the next person makes again. The REPORTS stay in `.git/` (they are this checkout's operations);
 // the verdicts on them are the project's.
 //
@@ -34,7 +34,7 @@ import { readMarkedLedger } from "./marked-ledger.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const gitDir = path.join(root, ".git");
-const LEDGER = path.join(root, "findings", "DISPOSITIONS.md");
+const LEDGER = path.join(root, "docs", "sdlc", "finding-dispositions.md");
 
 const VERDICTS = new Set(["real", "false-positive", "carried"]);
 const KNOWN = new Set(["--record", "--source", "--key", "--file", "--verdict", "--why", "--json"]);

@@ -8,7 +8,7 @@ review happened, never whether it was clean. A person decides what to do about w
 
 ## Passes
 
-Run four, and tag every finding with its pass.
+Run five, and tag every finding with its pass.
 
 - **Authorship** — for every value this change made load-bearing, who can author it? A field the platform
   authors riding on a document a producer submits, an identity re-derived from rendered output, a coordinate
@@ -20,6 +20,11 @@ Run four, and tag every finding with its pass.
   composed with an unbounded neighbour is the failure, not either half.
 - **Compliance** — does the change match its `intent.md`, its `plan.md`, and the rules under `.claude/rules/`
   whose globs it touches? Name the rule, not a feeling.
+- **Documentation** — does the change make a sentence in `docs/` false: a route, field, command, UI location
+  or behaviour a page describes? `pnpm doc-anchors` only sees pages that ANCHOR the changed file, refuses only for followed pages
+  (guide, reference, runbooks) and merely lists `docs/architecture/**` as advisory, and a `Docs-unchanged:` line
+  is the author's claim, not a proof — so read the advisory and declined pages too. Quote the
+  sentence that is now wrong.
 
 ## What Important means here
 
@@ -52,7 +57,7 @@ than in the list.
 
 Findings rank and inform, and the gate never asks whether one was clean — but an ungraded finding leaves the
 reviewer's precision unmeasured, and the article names that as this play's counter-metric. So after a review
-is triaged, each Important finding gets one line in `findings/DISPOSITIONS.md`:
+is triaged, each Important finding gets one line in `docs/sdlc/finding-dispositions.md`:
 
 ```sh
 pnpm findings --record --source review --key <head12> --file <path> \
@@ -65,5 +70,5 @@ still ungraded; an ungraded corpus reads **UNKNOWN**, never 100%.
 
 ## Reading the diff is the last pass, not the first
 
-The four passes above are questions about the change's surroundings. Answer them before reading the diff
+The five passes above are questions about the change's surroundings. Answer them before reading the diff
 line by line, because the defects this repository has actually paid for lived in code the diff never showed.
