@@ -17,17 +17,19 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 > not a runtime kind); a topology runtime is now just a nomad/k8s runtime that carries a `traceSource`.
 
 > **Run on *your own* machine → use a [self-hosted runner](architecture/self-hosted-runner.md), not `local`.**
-> `local` is in-process on the **control-plane** host (dev only). A self-hosted runner (personal, on the account
-> page; lease/pull transport) **supersedes** `local` for the "single machine" use case — the machine becomes the
+> `local` is in-process on the **control-plane** host (dev only). A self-hosted runner (personal, paired from the
+> Runtimes page; lease/pull transport) **supersedes** `local` for the "single machine" use case — the machine becomes the
 > *user's*, with the user's login and isolation. Cluster runtimes below stay workspace-shared as today.
-> Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "Connect this device as a runner" on the
-> account page (no token copy); headless boxes use `everdict runner --pair <rnr_…>`.
+> Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "Connect this device" on the Runtimes
+> page (no token copy); headless boxes use `everdict runner --pair <rnr_…>`.
 
 ## Contract (`@everdict/contracts`)
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`, `packages/contracts/src/infra/runtime-spec.ts`)
 with `id, version, description?, tags, capabilities?` plus the admission envelope below:
 - **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
-  self-hosted runner callout above).
+  self-hosted runner callout above). It isolates nothing, so when the operator configures per-tenant trust
+  zones a `local` runtime **refuses every job from an untrusted tenant zone** (`LocalBackend`,
+  `packages/backends/src/orchestrators/local.ts`); only a trusted zone, or a deployment with no zones, runs on it.
 - **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret?, gpu?, constraints?, cpuMhzPerCore? }`.
   `cpuMhzPerCore` is **this cluster's per-core clock in MHz**, and it exists because the two sides measure CPU
   differently: a case declares `resources.cpu` in MILLICORES (1000 = 1 vCPU) and Nomad places `Resources.CPU`

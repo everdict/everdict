@@ -1,4 +1,4 @@
-import type { RuntimeSpec } from "@everdict/contracts";
+import type { CaseJob, RuntimeSpec } from "@everdict/contracts";
 import { perTenantTrustZones } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { isInspectable, isProbeable, isReclaimable } from "../backend.js";
@@ -189,5 +189,34 @@ describe("buildRuntimeBackend — trust zones reach the dispatched backend", () 
         tenant: "acme",
       }),
     ).rejects.toThrow(/runc|isolation/i);
+  });
+});
+
+// ── A LOCAL RUNTIME RUNS IN THE CONTROL-PLANE PROCESS, SO IT ISOLATES NOTHING ──────────────────────────
+//
+// With trust zones configured, an untrusted tenant zone must run on a hardened runtime — the nomad/k8s builders
+// enforce it above. `kind: "local"` never consulted the zones: registering a runtime is viewer+, so any tenant
+// could register `local` and have a `command` harness execute on the control-plane host, around the isolation
+// the operator configured.
+describe("buildRuntimeBackend — a local runtime under trust zones", () => {
+  const local: RuntimeSpec = { kind: "local", id: "l", version: "1.0.0", tags: [] };
+  // Not a runnable job: a dispatch that gets past the zone check fails inside the job runner instead, with a
+  // different message — which is how "not refused by the zone" is told apart from "refused by the zone".
+  const job = (tenant?: string) => ({ ...(tenant !== undefined ? { tenant } : {}) }) as unknown as CaseJob;
+
+  it("refuses a job from an untrusted tenant zone", async () => {
+    const backend = buildRuntimeBackend(local, { trustZones: perTenantTrustZones() });
+    await expect(backend.dispatch(job("acme"))).rejects.toThrow(/untrusted tenant zone 'acme'.*local/i);
+    await expect(backend.dispatch(job())).rejects.toThrow(/untrusted tenant zone 'default'.*local/i);
+  });
+
+  it("does not refuse a trusted zone, or a deployment with no zones at all", async () => {
+    const trusted = perTenantTrustZones({
+      overrides: { first: { id: "first", isolationRuntime: "runc", trusted: true, network: "open" } },
+    });
+    await expect(buildRuntimeBackend(local, { trustZones: trusted }).dispatch(job("first"))).rejects.not.toThrow(
+      /untrusted tenant zone/i,
+    );
+    await expect(buildRuntimeBackend(local).dispatch(job("acme"))).rejects.not.toThrow(/untrusted tenant zone/i);
   });
 });

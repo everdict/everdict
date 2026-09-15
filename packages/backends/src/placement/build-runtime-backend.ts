@@ -97,7 +97,7 @@ export function buildRuntimeBackend(
   spec: RuntimeSpec,
   opts: { secretEnv?: Record<string, string>; trustZones?: TrustZonePolicy } = {},
 ): Backend {
-  if (spec.kind === "local") return new LocalBackend();
+  if (spec.kind === "local") return new LocalBackend(4, opts.trustZones ? { trustZones: opts.trustZones } : {});
   if (spec.kind === "k8s")
     return new K8sBackend({
       ...k8sRuntimeOptions(spec, opts.secretEnv),
