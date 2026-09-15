@@ -14,7 +14,8 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { JudgeGrader, modelJudge, openaiComplete, stepsGrader } from "../../packages/graders/dist/index.js";
+import { JudgeGrader, modelJudge, stepsGrader, transportComplete } from "../../packages/graders/dist/index.js";
+import { transportFor } from "../../packages/llm/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 
 const MODEL = process.env.LG_MODEL ?? "gpt-5.4-mini";
@@ -168,7 +169,12 @@ async function main() {
 
   // The engine judge: a real model judge (LiteLLM) that scores the answer and SEES the agent's action steps (ctx.trace).
   const judge = new JudgeGrader(
-    modelJudge(openaiComplete({ apiKey: KEY, model: MODEL, baseUrl: "http://127.0.0.1:4000/v1" })),
+    modelJudge(
+      transportComplete(
+        transportFor({ provider: "openai-compatible", apiKey: KEY, baseUrl: "http://127.0.0.1:4000/v1" }),
+        { model: MODEL },
+      ),
+    ),
     {
       id: "judge",
       rubric: `The agent must report the exact access code ${EXPECTED} read from the results page. Pass ONLY if the final answer contains ${EXPECTED}.`,

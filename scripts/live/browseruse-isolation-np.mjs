@@ -9,7 +9,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { staticTrustZones } from "../../packages/backends/dist/index.js";
+import { staticTrustZones } from "../../packages/domain/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 

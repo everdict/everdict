@@ -3,7 +3,7 @@
 // Control groups: reachable (kind-everdict context) vs unreachable (wrong context / dead Nomad).
 //   Run: node scripts/live/runtime-probe-k8s.mjs   (after building apps/api and packages)
 import process from "node:process";
-import { makeRuntimeProber } from "../../apps/api/dist/runtime-probe.js";
+import { makeRuntimeProber } from "../../apps/api/dist/core/ops/runtime-probe.js";
 
 const probe = makeRuntimeProber({ secretsFor: async () => ({}) }); // context auth, so no secret needed
 

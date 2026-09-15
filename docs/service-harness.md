@@ -350,6 +350,5 @@ The same period verified capabilities that are not topology-specific; their refe
   (`examples/benchmarks/osworld-sample.jsonl`).
 - **Judge configuration**: `judgeFromEnv` / `makeGradersFromEnv`, `CaseJob.judge` → `judgeEnv`, the workspace default
   (`WorkspaceSettings.judge`) and per-job key resolution (`JudgeAuthDispatcher`) — `judge-dispatch-e2e.mjs`,
-  `judge-config-injection.mjs`,
-  [`workspace-judge-default.mjs`](https://github.com/everdict/everdict/blob/32879892f/scripts/live/workspace-judge-default.mjs),
+  `judge-config-injection.mjs`, `workspace-judge-default.mjs`,
   [`judge-grading.mjs`](https://github.com/everdict/everdict/blob/32879892f/scripts/live/judge-grading.mjs).

@@ -9,7 +9,7 @@
 // Usage: KUBECONFIG context kind-everdict, kubectl on PATH.
 //   PATH=$HOME/.local/bin:$PATH node scripts/live/service-topology-k8s.mjs
 
-import { perTenantTrustZones } from "../../packages/backends/dist/index.js";
+import { perTenantTrustZones } from "../../packages/domain/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
 

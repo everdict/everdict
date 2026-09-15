@@ -1,7 +1,7 @@
-import { RunService } from "../../apps/api/dist/run-service.js";
-import { ScorecardService } from "../../apps/api/dist/scorecard-service.js";
 import { buildServer } from "../../apps/api/dist/server.js";
+import { RunService, ScorecardService } from "../../packages/application-control/dist/index.js";
 import { InMemoryRunStore, InMemoryScorecardStore } from "../../packages/db/dist/index.js";
+import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
 
 const now = new Date().toISOString();
 const dummyDispatcher = { submit: async () => ({}), capacity: async () => ({ total: 0, used: 0 }) };
@@ -188,7 +188,11 @@ await scorecardStore.create({
 });
 
 const runService = new RunService({ dispatcher: dummyDispatcher, store: runStore, newId: () => "bu-demo" });
-const scorecardService = new ScorecardService({ store: scorecardStore, dispatch: async () => ({}), runner: {} });
+const scorecardService = new ScorecardService({
+  store: scorecardStore,
+  dispatcher: dummyDispatcher,
+  datasets: new InMemoryDatasetRegistry(),
+});
 const app = buildServer({ service: runService, scorecardService }); // ServerDeps.service = RunService
 await app.listen({ port: 8787, host: "0.0.0.0" });
 console.log("seed control-plane on :8787 — run bu-demo, scorecard bu-sc-demo (tenant=default, dev auth)");

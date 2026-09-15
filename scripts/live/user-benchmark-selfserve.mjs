@@ -6,11 +6,11 @@
 //   C) fix + no setup → unresolved (dependency not provisioned → ImportError) = proves env.setup is a load-bearing data hook
 import { Buffer } from "node:buffer";
 import process from "node:process";
+import { runCase } from "../../packages/application-execution/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { RepoEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { ScriptedHarness } from "../../packages/harnesses/dist/index.js";
-import { runCase } from "../../packages/runner/dist/index.js";
 
 // case of a new benchmark the user imported (pure data; there is no line about this benchmark in our code).
 const FILES = {

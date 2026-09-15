@@ -9,12 +9,12 @@
 // Usage: node scripts/live/trace-collect-otel.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
-import { executeCase } from "../../apps/api/dist/execute-case.js";
+import { executeCase } from "../../packages/application-control/dist/index.js";
+import { runCase } from "../../packages/application-execution/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { RepoEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { CommandHarness } from "../../packages/harnesses/dist/index.js";
-import { runCase } from "../../packages/runner/dist/index.js";
 import { buildTraceSource } from "../../packages/trace/dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -136,7 +136,7 @@ try {
   );
   assert(pre.snapshot.diff.includes(`run_id=${pre.traceRef?.runId}`), "O2 key the agent saw = traceRef.runId");
   const job = { evalCase: caseFor("c-cp"), harness: { id: "instrumented-cli", version: "1.0.0" }, tenant: "e2e" };
-  const done = await executeCase({ dispatcher: { dispatch: async () => pre }, buildTraceSource }, "e2e", job);
+  const done = await executeCase({ dispatcher: { dispatch: async () => pre }, buildTraceSource, makeGraders }, job);
   assert(
     done.trace.find((e) => e.kind === "llm_call")?.model === "gpt-5.4-mini",
     "O2 completed via real Jaeger search pull",

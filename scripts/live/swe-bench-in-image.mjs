@@ -8,11 +8,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { runCase } from "../../packages/application-execution/dist/index.js";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
 import { RepoEnvironment } from "../../packages/environments/dist/index.js";
 import { SweBenchGrader } from "../../packages/graders/dist/index.js";
 import { ScriptedHarness } from "../../packages/harnesses/dist/index.js";
-import { runCase } from "../../packages/runner/dist/index.js";
 
 const IMAGE = "everdict-testbed:demo";
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";

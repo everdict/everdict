@@ -14,12 +14,12 @@
 // Usage: node scripts/live/trace-collect-mlflow.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
-import { executeCase } from "../../apps/api/dist/execute-case.js";
+import { executeCase } from "../../packages/application-control/dist/index.js";
+import { runCase } from "../../packages/application-execution/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { RepoEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { CommandHarness } from "../../packages/harnesses/dist/index.js";
-import { runCase } from "../../packages/runner/dist/index.js";
 import { buildTraceSink, buildTraceSource } from "../../packages/trace/dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -179,7 +179,7 @@ try {
     "S2 the job scores only ground-truth (observation scoring deferred)",
   );
   const job = { evalCase: caseFor("c-cp"), harness: { id: "instrumented-cli", version: "1.0.0" }, tenant: "e2e" };
-  const done = await executeCase({ dispatcher: { dispatch: async () => pre }, buildTraceSource }, "e2e", job);
+  const done = await executeCase({ dispatcher: { dispatch: async () => pre }, buildTraceSource, makeGraders }, job);
   const llm2 = done.trace.find((e) => e.kind === "llm_call");
   assert(llm2?.model === "gpt-5.4-mini", "S2 executeCase pulls from real MLflow to complete the trace");
   assert((score(done, "steps")?.value ?? 0) > 0, "S2 deferred steps scored on the control plane");
@@ -193,7 +193,10 @@ try {
   // 4) S3 — soft-degrade: dead endpoint → error event surfaced + execution artifacts preserved (the case does not die).
   console.log("\n=== S3: soft-degrade — a collection failure does not discard execution artifacts ===");
   const broken = { ...pre, traceRef: { ...pre.traceRef, endpoint: "http://127.0.0.1:59999" } };
-  const degraded = await executeCase({ dispatcher: { dispatch: async () => broken }, buildTraceSource }, "e2e", job);
+  const degraded = await executeCase(
+    { dispatcher: { dispatch: async () => broken }, buildTraceSource, makeGraders },
+    job,
+  );
   assert(
     degraded.trace.some((e) => e.kind === "error" && e.message.includes("trace collection failed")),
     "S3 collection failure surfaced as an error event",
@@ -232,7 +235,10 @@ try {
     "S4 the EVERDICT_RUN_ID the command saw = the tag value (agent contract)",
   );
   const jobTag = { evalCase: caseFor("c-tag"), harness: { id: "instrumented-cli", version: "1.0.0" }, tenant: "e2e" };
-  const doneTag = await executeCase({ dispatcher: { dispatch: async () => preTag }, buildTraceSource }, "e2e", jobTag);
+  const doneTag = await executeCase(
+    { dispatcher: { dispatch: async () => preTag }, buildTraceSource, makeGraders },
+    jobTag,
+  );
   const llmTag = doneTag.trace.find((e) => e.kind === "llm_call");
   assert(
     llmTag?.model === "gpt-5.4-mini",

@@ -6,7 +6,7 @@
 //   resolveHarnessInstance (template + pins → HarnessSpec)          [core, control-plane resolve]
 //   resolveHarnessSecrets  (secretRef → LiteLLM key)               [core, control-plane secret bake]
 //   importFromSpec         (bundle recipe → Dataset)               [datasets, POST /benchmarks/import]
-//   runLeasedJob           (self-hosted runner kind-branch:        [runner-core]
+//   runLeasedJob           (self-hosted runner kind-branch:        [self-hosted-runner]
 //       case.image + docker → DockerDriver container runs the CommandHarness; trace:none stdout →
 //       assistant message; runCase + safeGrade grade via makeGradersFromEnv judge)
 //   runSuite               (batch loop → Scorecard)                [suite, ScorecardService path]
@@ -26,8 +26,8 @@ import { resolveHarnessInstance } from "../../packages/contracts/dist/index.js";
 import { BenchmarkAdapterSpecSchema, importFromSpec } from "../../packages/datasets/dist/index.js";
 import { InMemoryScorecardStore } from "../../packages/db/dist/index.js";
 import { resolveHarnessSecrets } from "../../packages/domain/dist/index.js";
-import { summarizeScorecard } from "../../packages/domain/dist/index.js";
-import { runLeasedJob } from "../../packages/runner-core/dist/index.js";
+import { summarizeScorecard, verdictSummaryOf } from "../../packages/domain/dist/index.js";
+import { runLeasedJob } from "../../packages/self-hosted-runner/dist/index.js";
 
 const MODEL = process.env.MODEL ?? "gpt-5.4-mini";
 const JUDGE_MODEL = process.env.JUDGE_MODEL ?? "gpt-5.4-mini";
@@ -130,6 +130,10 @@ const dispatch = (job) => runLeasedJob(job, { dockerAvailable: true, log: (m) =>
 const store = new InMemoryScorecardStore();
 const now = new Date().toISOString();
 const overall = [];
+// A case that died at dispatch or on infrastructure never ran the harness — its scorecard row is not an
+// evaluation, so it must fail the run instead of being summarized as "success=-".
+const broken = [];
+let verdicted = 0;
 const ids = (ONLY.length ? ONLY : ["webvoyager-2025", "online-mind2web", "bu-bench-v1-open"]).filter(
   (id) => recipeById[id],
 );
@@ -176,10 +180,14 @@ for (const id of ids) {
   for (const r of scorecard.results) {
     const judge = r.scores.find((s) => s.metric === "judge");
     const ans = r.snapshot?.dom ?? r.trace?.findLast?.((e) => e.kind === "message")?.text ?? "";
+    const failed = r.failure ? ` [${r.failure.stage}/${r.failure.class} ${r.failure.code}]` : "";
     console.log(
-      `    [${r.caseId}] ${judge?.pass ? "PASS" : judge?.pass === false ? "FAIL" : "?"} ${JSON.stringify((ans || "").slice(-70))}`,
+      `    [${r.caseId}] ${judge?.pass ? "PASS" : judge?.pass === false ? "FAIL" : "?"}${failed} ${JSON.stringify((ans || "").slice(-70))}`,
     );
+    if (r.failure && (r.failure.stage === "dispatch" || r.failure.class === "infra"))
+      broken.push({ id, caseId: r.caseId, failure: r.failure });
   }
+  verdicted += verdictSummaryOf(scorecard.results).verdicted;
   console.log(`  [${id}] summary:`);
   for (const s of summary) {
     const pr = s.passRate === undefined ? "-" : `${(s.passRate * 100).toFixed(0)}%`;
@@ -192,6 +200,16 @@ for (const id of ids) {
 console.log(`\n=== browser-use × ${overall.length} benchmarks — task success (judge passRate) ===`);
 for (const o of overall) console.log(`  ${o.id.padEnd(20)} n=${o.n}  success=${o.task}`);
 const stored = await store.list(TENANT);
+if (broken.length > 0 || verdicted === 0) {
+  for (const b of broken)
+    console.log(
+      `  ✗ [${b.id}] ${b.caseId}: ${b.failure.stage}/${b.failure.class} ${b.failure.code} — ${String(b.failure.message).replace(/\s+/g, " ").slice(0, 160)}`,
+    );
+  console.log(
+    `\n❌ not an evaluation: ${broken.length} case(s) failed at dispatch/infrastructure, ${verdicted} case(s) produced a verdict.`,
+  );
+  process.exit(1);
+}
 console.log(
   `\n✅ ran ${overall.length} benchmark(s) through everdict's real execution path (runLeasedJob → CommandHarness in DockerDriver → runCase/safeGrade → runSuite) → ${stored.length} Scorecard(s) for ${TENANT}.`,
 );

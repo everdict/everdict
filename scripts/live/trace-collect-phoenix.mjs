@@ -10,12 +10,12 @@
 // Usage: node scripts/live/trace-collect-phoenix.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
-import { executeCase } from "../../apps/api/dist/execute-case.js";
+import { executeCase } from "../../packages/application-control/dist/index.js";
+import { runCase } from "../../packages/application-execution/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { RepoEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { CommandHarness } from "../../packages/harnesses/dist/index.js";
-import { runCase } from "../../packages/runner/dist/index.js";
 import { buildTraceSink, buildTraceSource } from "../../packages/trace/dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -125,7 +125,7 @@ try {
   );
   assert(pre.scores.map((s) => s.graderId).join(",") === "tests-pass", "P2 the job grades ground-truth only");
   const job = { evalCase: caseFor("c-cp"), harness: { id: "instrumented-cli", version: "1.0.0" }, tenant: "e2e" };
-  const done = await executeCase({ dispatcher: { dispatch: async () => pre }, buildTraceSource }, "e2e", job);
+  const done = await executeCase({ dispatcher: { dispatch: async () => pre }, buildTraceSource, makeGraders }, job);
   assert(
     done.trace.find((e) => e.kind === "llm_call")?.model === "gpt-5.4-mini",
     "P2 trace completed via real Phoenix pull",

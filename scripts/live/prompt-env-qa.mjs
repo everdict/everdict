@@ -3,12 +3,12 @@
 //   B) runCaseJob picks PromptEnvironment for prompt cases (previously RepoEnvironment.seed would throw) → snapshot.kind=prompt
 //   C) runCase(PromptEnvironment + QA harness + answer-match) → pass if the answer matches (QA eval without browser/repo)
 import process from "node:process";
+import { runCase } from "../../packages/application-execution/dist/index.js";
 import { adapterToDataset, getBenchmark } from "../../packages/datasets/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { PromptEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { runCaseJob } from "../../packages/job-runner/dist/index.js";
-import { runCase } from "../../packages/runner/dist/index.js";
 
 // A) the gsm8k adapter emits a prompt env as data.
 const ds = adapterToDataset(getBenchmark("gsm8k"), [{ question: "2+2?", answer: "calc … #### 4" }], {

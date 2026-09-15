@@ -5,7 +5,8 @@
 //
 // Usage: OPENAI_API_KEY=<litellm key> [OPENAI_API_BASE=http://127.0.0.1:4000] node scripts/live/usage-proxy-run.mjs
 import process from "node:process";
-import { LocalBackend, sumCost } from "../../packages/backends/dist/index.js";
+import { LocalBackend } from "../../packages/backends/dist/index.js";
+import { sumCost } from "../../packages/domain/dist/index.js";
 
 const KEY = process.env.OPENAI_API_KEY;
 const BASE = process.env.OPENAI_API_BASE ?? "http://127.0.0.1:4000";

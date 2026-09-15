@@ -6,14 +6,8 @@
 //
 // Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-job-runner:local node scripts/live/autoscaler-nomad.mjs
 
-import {
-  Autoscaler,
-  BackendRegistry,
-  MutableSlots,
-  NomadBackend,
-  Scheduler,
-  aggregateLoad,
-} from "../../packages/backends/dist/index.js";
+import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
+import { Autoscaler, MutableSlots, aggregateLoad } from "../../packages/domain/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
 const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-job-runner:local";

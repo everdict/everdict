@@ -1,5 +1,3 @@
-import { RunService } from "../../apps/api/dist/run-service.js";
-import { ScorecardService } from "../../apps/api/dist/scorecard-service.js";
 import { buildServer } from "../../apps/api/dist/server.js";
 // Self-contained e2e: boot the REAL control-plane (buildServer, in-memory deps + a cost-producing mock dispatcher)
 // on a real HTTP port, then drive it with the published @everdict/sdk over real fetch. Proves the SDK → HTTP → service
@@ -7,8 +5,9 @@ import { buildServer } from "../../apps/api/dist/server.js";
 // Run: node scripts/live/sdk-usage-e2e.mjs   (build first: pnpm -r build)
 // Import via relative dist paths — pnpm doesn't hoist @everdict/* to the repo root, and node dedupes by real path so
 // these are the same module instances the built server uses (transitive @everdict/* imports resolve inside each dist).
-import { inMemoryUsageMeter } from "../../packages/backends/dist/index.js";
+import { RunService, ScorecardService } from "../../packages/application-control/dist/index.js";
 import { InMemoryRunStore, InMemoryScorecardStore } from "../../packages/db/dist/index.js";
+import { inMemoryUsageMeter } from "../../packages/domain/dist/index.js";
 import { InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
 import { EverdictClient } from "../../packages/sdk/dist/index.js";
 

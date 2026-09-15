@@ -3,7 +3,7 @@
 // every run is inline-judge scored with that model. A per-request override beats the workspace default.
 // process.env.EVERDICT_JUDGE_MODEL is left empty on purpose → the model must come only from the workspace settings → job.judge.
 import process from "node:process";
-import { RunService } from "../../apps/api/dist/run-service.js";
+import { RunService } from "../../packages/application-control/dist/index.js";
 import { InMemoryRunStore, InMemoryWorkspaceSettingsStore } from "../../packages/db/dist/index.js";
 import { runCaseJob } from "../../packages/job-runner/dist/index.js";
 

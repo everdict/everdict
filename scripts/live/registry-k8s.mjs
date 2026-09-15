@@ -6,8 +6,8 @@
 //
 // Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/registry-k8s.mjs
 
-import { perTenantTrustZones } from "../../packages/backends/dist/index.js";
-import { LATEST, loadHarnessTaxonomyDir } from "../../packages/registry/dist/index.js";
+import { LATEST, perTenantTrustZones } from "../../packages/domain/dist/index.js";
+import { loadHarnessTaxonomyDir } from "../../packages/registry/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
 
