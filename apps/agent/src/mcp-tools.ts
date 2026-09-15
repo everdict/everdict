@@ -29,12 +29,6 @@ const READ_PREFIXES = ["get_", "list_", "inspect_", "diff_", "estimate_", "leade
 // permissive direction is the real cost, so the test beside this asserts the membership rather than trusting
 // the name.
 const NAMED_READS = new Set<string>([
-  // Knowledge graph: a node's ranked relationships, a multi-hop neighbourhood, a node's authored notes — so the
-  // agent can consult the workspace's knowledge before analyzing or contributing. (get_knowledge_node /
-  // get_knowledge_graph already match `get_`.)
-  "knowledge_related",
-  "knowledge_subgraph",
-  "knowledge_notes",
   // The evolution campaign's two reads. `campaign_decision` asks the frozen frame whether to continue, adopt
   // or halt, and `campaign_adoption` reads back what a close authorized — both gate `scorecards:read`, neither
   // touches anything. Missing here they were classified as MUTATIONS, so an agent walking a campaign had to

@@ -2,8 +2,8 @@
 kind: wiki
 title: "What the agent knows"
 status: current
-updated: 2026-09-15
-anchors: [apps/agent/src/system-prompt.ts, apps/api/src/api/knowledge/knowledge.mcp.ts, apps/api/src/api/knowledge/request/knowledge-entry-write.ts, packages/domain/src/knowledge/freshness.ts, packages/contracts/src/knowledge/predicate.ts]
+updated: 2026-09-16
+anchors: [apps/agent/src/system-prompt.ts, apps/api/src/api/knowledge/knowledge.mcp.ts, apps/api/src/api/knowledge/request/knowledge-entry-write.ts, packages/domain/src/knowledge/freshness.ts, packages/application-control/src/knowledge/knowledge-service.ts]
 ---
 # What the agent knows
 
@@ -60,9 +60,11 @@ the agent calls:
   ] }
 ```
 
-Those refs are **anchors** — the entities the task concerns. Back comes the graph's related facts, plus
-the workspace's knowledge entries and skill candidates *about* those anchors. (`@`-referencing an
-entity in a message recalls the same context for that turn — see below.)
+Those refs are **anchors** — the entities the task concerns. Back come the workspace's knowledge entries
+and skill candidates *about* those anchors — `{ "knowledge": [...], "skills": [...] }`. An entry matches
+when one of its refs names the same entity family (a claim pinned at `checkout-agent@2.0.0` still surfaces
+for a task anchored at `2.1.0`). (`@`-referencing an entity in a message recalls the same context for that
+turn — see below.)
 
 So an agent asked "why did retrieval regress on 2.1.0" starts with what your team already concluded
 about 2.1.0, rather than re-deriving it from scratch and reaching a different answer.
@@ -97,7 +99,7 @@ listings and badges, anchor relation is for assembling context for one task.
 
 ## Teaching the workspace
 
-Context is only as good as what has been written down. Three ways knowledge gets in:
+Context is only as good as what has been written down. Two ways knowledge gets in:
 
 **Knowledge entries** — a `finding`, `decision`, `convention` or `context`, pinned to the entities it
 concerns. The body lives in the [filesystem](filesystem.md) as `knowledge/<id>.md`; the entry itself is
@@ -116,24 +118,14 @@ curl -XPOST localhost:8787/knowledge/entries \
 ```
 
 The version in `refs` is the claim's time coordinate. A new entry defaults to `private`; `workspace`
-shares it.
+shares it. When a claim stops holding, write a new entry that `supersedes` it, pinned at the version where
+the behavior changed. Reference types cover the whole product — `harness`, `dataset`, `scorecard`, `run`,
+`case`, `issue`, `judge`, `runtime`, `skill`, `secret`, `model` and more.
 
-**Typed relationships** — the graph, over a closed predicate vocabulary:
-
-```json
-{ "tool": "relate_knowledge",
-  "subject":   { "type": "scorecard", "key": "sc_91f2ab" },
-  "predicate": "compared_to",
-  "object":    { "type": "scorecard", "key": "sc_7c01" },
-  "note": "the 2.1.0 → 2.2.0 comparison the retrieval decision rested on" }
-```
-
-Node types cover the whole product — `harness`, `dataset`, `scorecard`, `run`, `case`, `issue`,
-`judge`, `runtime`, `skill`, `secret`, `model` and more — so the graph describes your actual
-work rather than a parallel wiki.
-
-**Annotations** — a note plus a confidence on an existing node (`annotate_knowledge`), for the small
-observation that is not worth an entry.
+**Extraction from a discussion** — `POST /knowledge/extract` (the agent's `extract_knowledge`) reads a
+comment thread with one of your registered models and stores its durable conclusions as `proposed`
+entries. A proposal feeds no agent context until someone approves it (`approve_knowledge_entry`, which
+also makes the approver its author) or rejects it.
 
 ## Attaching context by hand
 
@@ -157,4 +149,4 @@ decisions worth not re-litigating.
 
 - [Workspace agents](agents.md) — the agent this context is assembled for
 - [The workspace filesystem](filesystem.md) — where knowledge and skills live
-- [`../../architecture/knowledge-graph.md`](../../architecture/knowledge-graph.md) — the design record
+- [`../../architecture/workspace-knowledge.md`](../../architecture/workspace-knowledge.md) — the design record

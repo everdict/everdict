@@ -77,7 +77,6 @@ import {
   InMemoryIssueNumberAllocator,
   InMemoryIssueStore,
   InMemoryKnowledgeEntryStore,
-  InMemoryKnowledgeStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryPlatformEventStore,
@@ -109,7 +108,6 @@ import {
   InMemoryWorkspaceStore,
   InMemoryWorldCreationStore,
   type KnowledgeEntryStore,
-  type KnowledgeStore,
   type NotificationStore,
   type OAuthStateStore,
   PgAdoptionOperationStore,
@@ -140,7 +138,6 @@ import {
   PgIssueNumberAllocator,
   PgIssueStore,
   PgKnowledgeEntryStore,
-  PgKnowledgeStore,
   PgLeaderElector,
   PgNotificationStore,
   PgOAuthStateStore,
@@ -289,7 +286,6 @@ export interface Persistence {
   eventConsumerStateStore: EventConsumerStateStore; // durable consumer cursors + dead letters (E1)
   trajectoryStore: TrajectoryStore; // the OWNED trajectory store (P5 rung 1) — sealed evidence per run
   commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
-  knowledgeStore: KnowledgeStore; // workspace knowledge graph — append-only mention/edge + upsert node projection
   knowledgeEntryStore: KnowledgeEntryStore; // knowledge entries (reified claims) — dual-scoped private|workspace
   fsRevisionStore: FsRevisionStore; // workspace-filesystem publication ledger — who published which revision, when
   subscriptionStore: SubscriptionStore; // subscription registry (event → reaction rules, E3 §6)
@@ -520,7 +516,6 @@ export async function makePersistence(): Promise<Persistence> {
       eventConsumerStateStore: new InMemoryEventConsumerStateStore(),
       trajectoryStore: named(clickhouseTrajectories ?? new InMemoryTrajectoryStore()),
       commentStore: new InMemoryCommentStore(),
-      knowledgeStore: new InMemoryKnowledgeStore(),
       knowledgeEntryStore: new InMemoryKnowledgeEntryStore(),
       fsRevisionStore: new InMemoryFsRevisionStore(),
       subscriptionStore: new InMemorySubscriptionStore(),
@@ -610,7 +605,6 @@ export async function makePersistence(): Promise<Persistence> {
     eventConsumerStateStore: new PgEventConsumerStateStore(client),
     trajectoryStore: named(clickhouseTrajectories ?? new PgTrajectoryStore(client)),
     commentStore: new PgCommentStore(client),
-    knowledgeStore: new PgKnowledgeStore(client),
     knowledgeEntryStore: new PgKnowledgeEntryStore(client),
     fsRevisionStore: new PgFsRevisionStore(client),
     subscriptionStore: new PgSubscriptionStore(client),

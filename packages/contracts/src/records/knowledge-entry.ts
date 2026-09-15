@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { KnowledgePinSchema, NodeRefSchema } from "../knowledge/knowledge-node.js";
+import { KnowledgePinSchema, NodeRefSchema } from "../knowledge/node-ref.js";
 import { SourceKindSchema } from "../knowledge/source-kind.js";
 
 // A knowledge entry's lifecycle status. `proposed` = an extraction CANDIDATE (drawn from a text surface by the
@@ -28,8 +28,8 @@ export type KnowledgeEntryVisibility = z.infer<typeof KnowledgeEntryVisibilitySc
 export const KNOWLEDGE_ENTRY_MAX_REFS = 16;
 
 // Extraction provenance — the audit lock for a PROPOSED entry (and, after approval, the retained record of where the
-// claim was drawn from): the text surface it came out of (`(sourceKind, sourceId)`, the same audit tuple the mention
-// spine uses), the extractor version, and the extractor's confidence (< 1 — extraction is fuzzy by definition).
+// claim was drawn from): the text surface it came out of (the `(sourceKind, sourceId)` audit tuple), the extractor
+// version, and the extractor's confidence (< 1 — extraction is fuzzy by definition).
 export const KnowledgeEntryExtractionSchema = z.object({
   sourceKind: SourceKindSchema,
   sourceId: z.string().min(1),
@@ -41,26 +41,25 @@ export type KnowledgeEntryExtraction = z.infer<typeof KnowledgeEntryExtractionSc
 // KnowledgeEntryRecord — a reified claim: workspace-general, high-level knowledge that is ABOUT domain entities rather
 // than a relationship between them ("harness web-agent@2.x is flaky on login cases when run on k8s"). The task-oriented
 // complement of a Skill: a skill answers "how do I do this" (a procedure bundle), an entry answers "what is true / why
-// we decided" (an assertion). The record is the SSOT; a deterministic harvester projects it into the graph as a
-// `knowledge` node with `about` edges (refs) and `evidenced_by` edges (evidence) — the claim stratum's generic grammar.
-// See docs/architecture/knowledge-graph.md §The knowledge layer.
+// we decided" (an assertion). The record is the whole of it: task-context assembly reads entries straight from their
+// store, family-matching `refs` against the task's anchors. See docs/architecture/workspace-knowledge.md.
 export const KnowledgeEntryRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(), // the workspace this knowledge belongs to
   kind: KnowledgeEntryKindSchema,
-  title: z.string().min(1).max(300), // the one-line claim itself — becomes the graph node's label
+  title: z.string().min(1).max(300), // the one-line claim itself
   body: z.string(), // markdown — where the claim's specificity lives (details, caveats, rationale)
   // What the claim concerns — subject-time PINS ({type, key, version?, verifiedVersion?}: the known-valid interval
-  // [version, verifiedVersion]), projected as `about` edges carrying the interval. The pin's version is the point the
-  // claim was observed at; `verify` extends verifiedVersion to the entity's then-latest. A claim about an earlier
-  // point is not stale — it is knowledge ABOUT that coordinate; whether it extends to the present is a separate,
-  // recorded fact. See docs/architecture/knowledge-graph.md §The time axis.
+  // [version, verifiedVersion]). The pin's version is the point the claim was observed at; `verify` extends
+  // verifiedVersion to the entity's then-latest. A claim about an earlier point is not stale — it is knowledge ABOUT
+  // that coordinate; whether it extends to the present is a separate, recorded fact.
+  // See docs/architecture/workspace-knowledge.md §The time axis.
   refs: z.array(KnowledgePinSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).default([]),
   // What backs the claim — the observations it was drawn from (a scorecard, a run, a comment thread, an agent
-  // session), projected as `evidenced_by` edges. An unevidenced entry is allowed (a convention has no scorecard).
+  // session). An unevidenced entry is allowed (a convention has no scorecard).
   evidence: z.array(NodeRefSchema).max(KNOWLEDGE_ENTRY_MAX_REFS).default([]),
   status: KnowledgeEntryStatusSchema.default("active"),
-  supersedes: z.string().optional(), // the entry id this one revises — the graph gets a `supersedes` edge
+  supersedes: z.string().optional(), // the entry id this one revises
   // Present on extraction-born entries (proposed AND approved — the origin survives approval for audit).
   extraction: KnowledgeEntryExtractionSchema.optional(),
   visibility: KnowledgeEntryVisibilitySchema,

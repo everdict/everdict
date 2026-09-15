@@ -39,8 +39,8 @@ export class AgentService {
   // harness re-pin dropped its ancestry for as long as it did. The caller assembles the channel half (and
   // may declare `from` — the campaign's issue — for a FIRST version); on a BUMP the service overrides
   // `from` with the base it just resolved, because it is the only code that knows the ancestor at the write
-  // and a caller-declared one would be a second spelling of that fact (L3). The harvester then reads a
-  // same-family `from` as the `succeeds` lineage edge.
+  // and a caller-declared one would be a second spelling of that fact (L3). A same-family `from` is the
+  // version's recorded lineage.
   async saveAgent(
     tenant: string,
     subject: string | undefined,

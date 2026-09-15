@@ -11,6 +11,11 @@ anchors: [scripts/check-web-reach.mjs, apps/web/src/entities/scorecard/model/sch
 > result closed. This page is the CENSUS (dated 2026-09-04) and the plan it implied; each slice names what it
 > closed and what shows it closed. The counts are the point — "the web is behind"
 > ages into nothing, and a counted sweep stays checkable and shows its own expiry when the numbers move.
+>
+> **2026-09-16:** the knowledge-graph routes counted below (`annotate`, `annotations`, `relate`, `related`,
+> `node`, `subgraph`) and the graph pages Slice 5 built for them were removed with the graph
+> (`docs/architecture/workspace-knowledge.md`, migration `0216`). `extract` and `context` remain. The tables
+> are left as counted.
 
 ## Why this page exists
 

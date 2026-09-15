@@ -6,7 +6,6 @@
 1	apps/api/src/api/harness/harness-template.routes.ts
 2	apps/api/src/api/image-registry/image-registry.routes.ts
 1	apps/api/src/api/images/images.routes.ts
-6	apps/api/src/api/knowledge/knowledge.routes.ts
 2	apps/api/src/api/mattermost/mattermost.routes.ts
 1	apps/api/src/api/member/invite.routes.ts
 1	apps/api/src/api/member/member.routes.ts

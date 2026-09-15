@@ -78,7 +78,7 @@ export function EnvironmentWorkbench({
   myWorkspaces: { id: string; name: string }[]
   imageRegistries: { name: string; host: string }[]
   // The conversation entry point — the right conversation panel is the widget layer, so a feature cannot use it directly (FSD forbids importing
-  // upward). A page-level client component owns the hook and passes it down through this callback (following SettingsFilesExplorer/SettingsKnowledgeMap).
+  // upward). A page-level client component owns the hook and passes it down through this callback (following SettingsFilesExplorer).
   onMention?: (reference: AgentReference) => void
   onAskAgent?: (prompt: string, reference?: AgentReference) => void
 }) {

@@ -1,7 +1,7 @@
 import type { NodeRef, SkillFile } from "@everdict/contracts";
 import type { ToolDefinition, ToolResult } from "./definition.js";
 
-// The subject-time coverage the control plane computes for a skill (see docs/architecture/knowledge-graph.md §The
+// The subject-time coverage the control plane computes for a skill (see docs/architecture/workspace-knowledge.md §The
 // time axis). Time is a coordinate, not decay: `behind` = the skill's knowledge is AS-OF earlier entity versions —
 // still true about those versions; its validity at the present is UNKNOWN (not wrong). `unverified` = nobody
 // confirmed the procedure recently on the wall clock. Carried through so the agent follows an as-of procedure

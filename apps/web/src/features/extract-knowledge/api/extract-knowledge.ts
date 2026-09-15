@@ -6,7 +6,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 export interface ExtractResult {
   ok: boolean
   // How many CANDIDATES the pass proposed. They are `proposed` entries awaiting review, never published
-  // knowledge — the whole point of the route is that a model does not get to write into the graph directly.
+  // knowledge — the whole point of the route is that a model does not get to publish knowledge directly.
   proposed?: number
   error?: string
 }

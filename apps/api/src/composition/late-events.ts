@@ -1,7 +1,7 @@
 import type { EmitPlatformEventInput, IssueBacklinkPort, PlatformEventEmitter } from "@everdict/application-control";
 
 // Construction-order forwarder (E2): fact producers built BEFORE the platform-event service exists — the
-// registries, the RevisionedWorkspaceFs decorator, the knowledge service — emit through this; bind() connects
+// registries, the RevisionedWorkspaceFs decorator, the knowledge-entry service — emit through this; bind() connects
 // it once buildIntegrations has produced the real service. A fact emitted before bind is dropped, which only
 // covers boot-time writes (and _shared seed registrations never emit at all). Same late-binding idiom as the
 // cascade-cancel holder in main.ts.

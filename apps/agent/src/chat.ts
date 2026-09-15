@@ -90,11 +90,12 @@ function referenceArgs(ref: AgentReference): Record<string, unknown> {
 
 const MAX_REFERENCE_CHARS = 4_000;
 
-// Auto-recall (Claude Code's relevant_memories reinterpreted): map each @-reference to its knowledge-graph node
-// ref and ask get_task_context ONCE for what the workspace already knows about those anchors — claims/decisions/
-// conventions + skill candidates, projected onto the reference's own version coordinate (the anchor-relative
-// as-of model). Precision-first: no embedding search — the user's references ARE the anchors; a message with no
-// references recalls nothing. `trace` has no knowledge node type (external observability id) — skipped.
+// Auto-recall (Claude Code's relevant_memories reinterpreted): map each @-reference to a knowledge reference
+// ({type, key, version?}) and ask get_task_context ONCE for what the workspace already knows about those anchors —
+// claims/decisions/conventions + skill candidates, projected onto the reference's own version coordinate (the
+// anchor-relative as-of model). Precision-first: no embedding search — the user's references ARE the anchors; a
+// message with no references recalls nothing. `trace` has no knowledge reference type (external observability
+// id) — skipped.
 const KNOWLEDGE_NODE_TYPE: Partial<Record<AgentReferenceType, string>> = {
   harness: "harness",
   runtime: "runtime",
@@ -105,7 +106,7 @@ const KNOWLEDGE_NODE_TYPE: Partial<Record<AgentReferenceType, string>> = {
   view: "view",
   skill: "skill",
   knowledge: "knowledge",
-  environment: "capability", // an environment IS a capability of kind `environment` (same node identity)
+  environment: "capability", // an environment IS a capability of kind `environment` (same reference identity)
   tool: "capability",
 };
 const MAX_KNOWLEDGE_CHARS = 4_000;

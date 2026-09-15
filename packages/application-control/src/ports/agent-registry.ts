@@ -14,7 +14,7 @@ export interface AgentRegistry {
   // createdBy = creator of the first-registered version (for who-may-delete gating; undefined for seed/_shared).
   // before the axis), which is the workspace's.
   // `versionOrigins` = version → birth stamp (only stamped versions; omitted when none) — the same
-  // per-version answer every other registry list carries, and what the succeeds/born_from harvest reads.
+  // per-version answer every other registry list carries.
   list(tenant: string): Promise<
     Array<{
       id: string;

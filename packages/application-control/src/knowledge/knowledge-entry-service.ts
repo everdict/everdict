@@ -22,8 +22,8 @@ import {
   resolveCoverage,
 } from "./freshness-resolver.js";
 
-// Knowledge-entry CRUD — reified claims, the knowledge layer's record (docs/architecture/knowledge-graph.md §The
-// knowledge layer). Dual-scoped and gated exactly like Skills: `private` = a personal draft (creator-only, non-creator
+// Knowledge-entry CRUD — reified claims, the knowledge layer's record (docs/architecture/workspace-knowledge.md
+// §Knowledge entries). Dual-scoped and gated exactly like Skills: `private` = a personal draft (creator-only, non-creator
 // sees 404), `workspace` = shared knowledge (read by any member, managed creator-or-admin). `supersedes` records
 // revision lineage on the NEW entry only — it deliberately does NOT flip the old entry's status (that write is gated
 // like any other management op; auto-flipping would let a non-manager bypass the gate). When a resolver is injected,
@@ -34,8 +34,8 @@ export interface CreateKnowledgeEntryInput {
   kind: KnowledgeEntryKind;
   title: string;
   body: string;
-  refs?: NodeRef[]; // what the claim concerns (version-pinned → `about` edges)
-  evidence?: NodeRef[]; // what backs it (→ `evidenced_by` edges)
+  refs?: NodeRef[]; // what the claim concerns (version-pinned)
+  evidence?: NodeRef[]; // what backs it
   supersedes?: string; // the entry this one revises
   visibility?: KnowledgeEntryVisibility; // defaults to "private" — sharing is an explicit opt-in
 }

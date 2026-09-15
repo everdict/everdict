@@ -43,7 +43,7 @@ export interface CreateSkillInput {
   description: string;
   instructions: string;
   files?: SkillFile[]; // supporting reference files (defaults to none)
-  refs?: NodeRef[]; // the version-pinned entities the skill documents (→ `about` edges, the staleness contract)
+  refs?: NodeRef[]; // the version-pinned entities the skill documents (the staleness contract)
   visibility?: SkillVisibility; // defaults to "private" (personal draft) — sharing is an explicit opt-in
 }
 

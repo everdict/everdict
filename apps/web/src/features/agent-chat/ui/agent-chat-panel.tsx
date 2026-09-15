@@ -809,7 +809,7 @@ export function AgentChatPanel({
   // the draft prompt, then clear the buffer so a later tab re-mount (the agent tab unmounts when another infra
   // tab is shown) does not re-inject the same prefill. A prompt overwrites only an empty composer — never a
   // member's in-progress draft.
-  // Whether to start in a NEW conversation is the entry's decision (startsFreshConversation): an edit mission always does, analyze/ask only
+  // Whether to start in a NEW conversation is the entry's decision (startsFreshConversation): an edit mission always does, analyze only
   // when the entry declared `fresh` — the flow of comparing two scorecards in one conversation is kept by default, and only entries whose
   // subject IS that one record (an issue detail, an empty analysis canvas) opt out. Mission framing appears only on an empty screen, so this
   // decision IS "do you get a panel framed for the work every time you enter".

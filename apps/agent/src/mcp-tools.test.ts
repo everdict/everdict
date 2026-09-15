@@ -43,9 +43,8 @@ describe("base tool default wiring", () => {
       "set_secret",
       "set_workspace_mattermost",
       // knowledge reads + writes
-      "knowledge_related",
-      "annotate_knowledge",
-      "relate_knowledge",
+      "get_task_context",
+      "create_knowledge_entry",
       // the workspace filesystem — reads and writes alike
       "list_files",
       "get_file",
@@ -71,10 +70,6 @@ describe("base tool default wiring", () => {
     for (const name of [
       "list_ci_links",
       "inspect_trace",
-      "get_knowledge_node",
-      "knowledge_related",
-      "knowledge_subgraph",
-      "knowledge_notes",
       // …and the campaign's two subject-named reads. Both gate `scorecards:read` and neither writes; before
       // they were named here an agent walking a campaign needed an approval to ASK the gate whether to keep
       // walking — once per round, which is the difference between a procedure and an interrogation.
@@ -103,9 +98,6 @@ describe("base tool default wiring", () => {
       "run_scorecard",
       "delete_dataset",
       "set_secret",
-      "annotate_knowledge",
-      "relate_knowledge",
-      "reindex_knowledge",
       // knowledge-entry writes — contributions stay HITL under the session's permission mode
       "create_knowledge_entry",
       "update_knowledge_entry",

@@ -7,167 +7,28 @@ import {
   UpdateKnowledgeEntryBodySchema,
 } from "./request/knowledge-entry-write.js";
 import { ExtractKnowledgeBodySchema } from "./request/knowledge-extract.js";
-import {
-  KnowledgeGraphQuerySchema,
-  KnowledgeRelatedQuerySchema,
-  KnowledgeSubgraphQuerySchema,
-} from "./request/knowledge-query.js";
-import { AnnotateKnowledgeBodySchema, RelateKnowledgeBodySchema } from "./request/knowledge-write.js";
 
-// Knowledge graph — the workspace's runs/scorecards/schedules/registry entities projected into a queryable graph of
-// nodes + typed edges. Read = scorecards:read (the graph is derived from eval data); reindex = settings:write (an
-// admin maintenance op that rebuilds the graph from current records). See docs/architecture/knowledge-graph.md.
+// Workspace knowledge — task-context assembly over the knowledge entries and skills ABOUT a task's anchors, the entry
+// library (reified claims: CRUD, verify, review), and thread extraction. Reads = scorecards:read; member
+// contributions = comments:write. See docs/architecture/workspace-knowledge.md.
 export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps): void {
-  // A single node by its content-addressed id (e.g. "harness:acme:web-agent@1.0.0").
-  app.get("/knowledge/node", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const id = (req.query as { id?: string }).id;
-    if (!id) return reply.code(400).send({ code: "BAD_REQUEST", message: "id query param is required." });
-    try {
-      gate(principal, "scorecards:read");
-      return reply.send(await deps.knowledgeService.node(principal.workspace, id));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // A node's 1-hop related facts, ranked for display: ?id=&direction=out|in|both&predicates=a,b&limit=N
-  app.get("/knowledge/related", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = KnowledgeRelatedQuerySchema.safeParse(req.query);
-    if (!parsed.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
-    try {
-      gate(principal, "scorecards:read");
-      const facts = await deps.knowledgeService.related(principal.workspace, parsed.data.id, parsed.data);
-      return reply.send({ facts });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // A multi-hop subgraph from a node: ?id=&depth=N&direction=&predicates=a,b&nodeTypes=harness,dataset
-  app.get("/knowledge/subgraph", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = KnowledgeSubgraphQuerySchema.safeParse(req.query);
-    if (!parsed.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
-    try {
-      gate(principal, "scorecards:read");
-      return reply.send(await deps.knowledgeService.subgraph(principal.workspace, parsed.data.id, parsed.data));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // The whole-workspace graph for rendering (Settings › Knowledge) — nodes + edges + counts, rooted at the workspace
-  // hub node so the caller needs no node id: ?depth=1..5 (default 2).
-  app.get("/knowledge/graph", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = KnowledgeGraphQuerySchema.safeParse(req.query);
-    if (!parsed.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
-    try {
-      gate(principal, "scorecards:read");
-      const opts = parsed.data.depth !== undefined ? { depth: parsed.data.depth } : {};
-      return reply.send(await deps.knowledgeService.graph(principal.workspace, opts));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // The authored notes attached to a node (the read side of /knowledge/annotate): ?id=
-  app.get("/knowledge/annotations", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const id = (req.query as { id?: string }).id;
-    if (!id) return reply.code(400).send({ code: "BAD_REQUEST", message: "id query param is required." });
-    try {
-      gate(principal, "scorecards:read");
-      return reply.send({ notes: await deps.knowledgeService.notes(principal.workspace, id) });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // Rebuild this workspace's graph by harvesting its existing records (idempotent). Admin maintenance.
-  app.post("/knowledge/reindex", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "settings:write");
-      return reply.send(await deps.knowledgeService.reindex(principal.workspace));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // Contribute knowledge — a free-form note on a node (author = the caller). member+.
-  app.post("/knowledge/annotate", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = AnnotateKnowledgeBodySchema.safeParse(req.body);
-    if (!parsed.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
-    try {
-      gate(principal, "comments:write");
-      return reply
-        .code(201)
-        .send(await deps.knowledgeService.annotate(principal.workspace, principal.subject, parsed.data));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // Contribute knowledge — assert a typed relationship between two nodes (closed predicate). member+.
-  app.post("/knowledge/relate", async (req, reply) => {
-    if (!deps.knowledgeService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = RelateKnowledgeBodySchema.safeParse(req.body);
-    if (!parsed.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
-    try {
-      gate(principal, "comments:write");
-      return reply
-        .code(201)
-        .send(await deps.knowledgeService.relate(principal.workspace, principal.subject, parsed.data));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // Task-time context assembly — per-anchor structural facts + the knowledge entries and skill candidates ABOUT the
-  // anchors, freshness-decorated. POST because anchors are structured NodeRefs (keys may contain '/' / ':').
+  // Task-time context assembly — the knowledge entries and skill candidates ABOUT the anchors, each positioned on the
+  // anchor's version coordinate and freshness-decorated. POST because anchors are structured NodeRefs (keys may
+  // contain '/' / ':').
   app.post("/knowledge/context", async (req, reply) => {
     if (!deps.knowledgeService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
     const parsed = AssembleContextBodySchema.safeParse(req.body);
     if (!parsed.success)
       return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
     try {
-      gate(principal, "scorecards:read");
       return reply.send(
         await deps.knowledgeService.assembleContext(principal.workspace, principal.subject, parsed.data.refs),
       );
@@ -176,9 +37,9 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
     }
   });
 
-  // --- knowledge entries: reified claims (the knowledge layer's record; annotate's promoted successor) ---
-  // Reads = scorecards:read (like every knowledge read); writes = comments:write (a member contribution, like
-  // annotate/relate); manage (edit/delete/verify) additionally gates creator-or-admin in the service.
+  // --- knowledge entries: reified claims ---
+  // Reads = scorecards:read (like every knowledge read); writes = comments:write (a member contribution); manage
+  // (edit/delete/verify) additionally gates creator-or-admin in the service.
 
   app.post("/knowledge/entries", async (req, reply) => {
     if (!deps.knowledgeEntryService)

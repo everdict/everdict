@@ -9,8 +9,8 @@ import { z } from "zod";
 
 // POST /knowledge/entries body — contribute a reified claim (finding/decision/convention/context). visibility
 // defaults to "private" (a personal draft); sharing to the workspace is an explicit opt-in. `refs` = what the claim
-// concerns (version-pinned → `about` edges); `evidence` = the observations backing it (→ `evidenced_by` edges);
-// `supersedes` = the entry this one revises (the old entry's status stays an explicit, gated write).
+// concerns (version-pinned); `evidence` = the observations backing it; `supersedes` = the entry this one revises
+// (the old entry's status stays an explicit, gated write).
 export const CreateKnowledgeEntryBodySchema = z.object({
   kind: KnowledgeEntryKindSchema,
   title: z.string().min(1).max(300),

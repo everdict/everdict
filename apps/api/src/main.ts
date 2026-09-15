@@ -260,7 +260,6 @@ async function main(): Promise<void> {
     eventConsumerStateStore,
     trajectoryStore: rawTrajectoryStore,
     commentStore,
-    knowledgeStore,
     knowledgeEntryStore,
     fsRevisionStore,
     subscriptionStore,
@@ -404,34 +403,12 @@ async function main(): Promise<void> {
     events: lateEvents, // E2 knowledge facts (created/proposed/approved)
   });
 
-  // Workspace knowledge graph — the query surface over the harvested graph + a pull reindex that harvests the
-  // tenant-listable record stores into it, plus task-time context assembly over the knowledge-layer records
-  // (skills + entries). The tracker stores are the INTENT stratum — the issue hub whose links/resolutions decide
-  // which execution records (runs/scorecards) are materialised at all. See docs/architecture/knowledge-graph.md.
+  // Task-time context assembly — the knowledge entries and skill candidates ABOUT a task's anchors, read straight from
+  // their records and positioned on each anchor's version coordinate. See docs/architecture/workspace-knowledge.md.
   const knowledgeService = new KnowledgeService({
-    store: knowledgeStore,
-    reindexSources: {
-      scorecards: scorecardStore,
-      runs: store,
-      schedules: scheduleStore,
-      issues: issueStore,
-      projects: projectStore,
-      initiatives: initiativeStore,
-      datasets: datasetRegistry,
-      judges: judgeRegistry,
-      runtimes: runtimeRegistry,
-      models: modelRegistry,
-      rubrics: rubricRegistry,
-      harnesses: harnessInstanceRegistry,
-      agents: agentRegistry,
-      skills: skillStore,
-      knowledgeEntries: knowledgeEntryStore,
-    },
-    contextSources: {
-      skills: skillStore,
-      knowledgeEntries: knowledgeEntryStore,
-      latestVersionOf,
-    },
+    skills: skillStore,
+    knowledgeEntries: knowledgeEntryStore,
+    latestVersionOf,
   });
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the
@@ -2234,7 +2211,7 @@ async function main(): Promise<void> {
     notificationService, // notification feed (bell inbox) route — self-scoped
     platformEvents: platformEventService, // platform-event log — internal reconcile cursor (agent-automation A1)
     commentService, // resource comments route + MCP
-    knowledgeService, // workspace knowledge graph route + MCP
+    knowledgeService, // task-context assembly — route + MCP
     knowledgeEntryService, // knowledge entries (reified claims) CRUD + verify — route + MCP
     knowledgeExtraction, // thread → proposed-entry mining — route + MCP
     runnerHub,

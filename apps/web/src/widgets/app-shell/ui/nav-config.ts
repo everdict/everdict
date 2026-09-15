@@ -63,9 +63,9 @@ export interface NavSection {
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).
 // metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
-// files/knowledge are workspace *configuration* surfaces, not eval objects: their single home is Settings
-// (Settings › Files, Settings › Agent › Knowledge — see settings-nav-config). The legacy top-level routes stay
-// reachable via URL but are deliberately absent from the sidebar and the command palette.
+// files is a workspace *configuration* surface, not an eval object: its single home is Settings › Files (see
+// settings-nav-config). The legacy top-level route stays reachable via URL but is deliberately absent from the
+// sidebar and the command palette.
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
@@ -178,7 +178,7 @@ export const NAV_SECTIONS: NavSection[] = [
         href: '/knowledge',
         labelKey: 'knowledge',
         icon: Network,
-        keywords: 'knowledge graph entry claim lineage 지식 그래프',
+        keywords: 'knowledge entry claim finding decision convention 지식 결정 컨벤션',
       },
       {
         href: '/store',

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { KnowledgePinSchema } from "../knowledge/knowledge-node.js";
+import { KnowledgePinSchema } from "../knowledge/node-ref.js";
 
 // A skill's scope (workspace skill-share, mirrors the browser-profile / View visibility vocabulary). `private` = a
 // personal draft visible/manageable only by its creator; `workspace` = a shared workspace asset any member can see and
@@ -63,10 +63,10 @@ export const SkillRecordSchema = z.object({
   instructions: z.string(), // the SKILL.md body — the procedure, loaded into context when the agent invokes the skill
   files: SkillFilesSchema.default([]), // supporting reference files, each loaded individually on demand
   // The entities this skill documents, pinned on the SUBJECT-TIME axis (`{type, key, version?, verifiedVersion?}` —
-  // the known-valid interval [version, verifiedVersion]), projected into the knowledge graph as
-  // `skill -[about]-> entity@version` edges carrying the interval. Coverage against the entity's present is derived
-  // by comparing its latest version to the interval end — knowledge about an earlier point stays valid ABOUT that
-  // point (a coordinate, not decay). See docs/architecture/knowledge-graph.md §The time axis.
+  // the known-valid interval [version, verifiedVersion]) — the same pins knowledge entries carry, matched against a
+  // task's anchors by context assembly. Coverage against the entity's present is derived by comparing its latest
+  // version to the interval end — knowledge about an earlier point stays valid ABOUT that point (a coordinate, not
+  // decay). See docs/architecture/workspace-knowledge.md §The time axis.
   refs: z.array(KnowledgePinSchema).max(16).default([]),
   // `private` = personal draft (creator-only) · `workspace` = shared asset (read/use by any member + the agent, manage creator-or-admin).
   visibility: SkillVisibilitySchema,

@@ -12,8 +12,8 @@ import { compareVersions } from "../registry/version-algebra.js";
 //     coordinate a task is projected onto? `covers | earlier | later | general` — for context assembly. The anchor's
 //     own version IS the as-of coordinate (an old scorecard's harness@2.1.0 anchor projects the knowledge base onto
 //     that point; no separate asOf parameter).
-// The caller resolves each pinned family's LATEST version (registries today; a graph-native `succeeds` join can back
-// the same resolver later); this kernel is pure — the clock is an argument, never read.
+// The caller resolves each pinned family's LATEST version (from the registries); this kernel is pure — the clock is an
+// argument, never read.
 
 export interface CoverageGap {
   ref: KnowledgePin;

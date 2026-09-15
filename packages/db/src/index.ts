@@ -88,7 +88,6 @@ export type {
   PlatformEventStore,
   PlatformEventListOptions,
   CommentStore,
-  KnowledgeStore,
   TenantKeyStore,
   SecretStore,
   OAuthStateStore,
@@ -232,5 +231,3 @@ export { InMemoryWorkspaceInviteStore, PgWorkspaceInviteStore } from "./workspac
 export { InMemoryUserProfileStore, PgUserProfileStore } from "./workspace/user-profile-store.js";
 export { InMemoryCallbackStore, PgCallbackStore } from "./activity/callback-store.js";
 export { InMemoryRunnerJobStore, PgRunnerJobStore } from "./activity/runner-job-store.js";
-export { InMemoryKnowledgeStore } from "./knowledge/in-memory-knowledge-store.js";
-export { PgKnowledgeStore } from "./knowledge/pg-knowledge-store.js";

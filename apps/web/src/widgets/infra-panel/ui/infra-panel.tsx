@@ -9,7 +9,6 @@ import {
   ChevronsRight,
   FileText,
   FlaskConical,
-  Network,
   Play,
   Server,
   Sparkles,
@@ -31,7 +30,6 @@ import {
   type InfraTab,
 } from '../model/infra-panel-context'
 import { FilesTab } from './files-tab'
-import { KnowledgeTab } from './knowledge-tab'
 import { WorkTab } from './work-tab'
 
 // The floating infra panel — the right half of the split view. On md+ it takes real layout space as a flex-1
@@ -55,7 +53,6 @@ const TAB_META: Record<InfraTab, { icon: LucideIcon }> = {
   work: { icon: Activity },
   agent: { icon: Sparkles },
   files: { icon: FileText },
-  knowledge: { icon: Network },
   playground: { icon: FlaskConical },
 }
 
@@ -410,7 +407,6 @@ export function InfraPanel({
               </div>
             )}
             {tab === 'files' && <FilesTab canWrite={canFilesWrite} canRun={canFilesRun} />}
-            {tab === 'knowledge' && <KnowledgeTab />}
             {tab === 'playground' && (
               <div className="h-full">
                 <HarnessPlaygroundPanel

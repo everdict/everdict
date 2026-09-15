@@ -2,7 +2,7 @@
 kind: decision
 title: "Everdict as the development system of record — a methodology seed, and lineage and direction per service"
 status: proposed
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/contracts/src/records/knowledge-entry.ts, packages/contracts/src/records/tracker.ts, packages/contracts/src/records/product.ts, packages/application-control/src/harness/harness-lineage-service.ts, plugin/.claude-plugin/plugin.json]
 ---
 # Everdict as the development system of record — a methodology seed, and lineage and direction per service
@@ -43,7 +43,7 @@ fixes:
 | release authorization | Product ⊃ Release with a ship guard | the link from a release record to the git tag it authorizes |
 | review findings, dismissals | checkpoints, `request_verification`, comments | a disposition ledger as an entity |
 | config regression evals, drift bands | scorecards, schedules, watched series | a trigger on a change to the configuration |
-| lineage of a harness | `harnessLineage`, `forked_from` · `succeeds` · `born_from` edges, seeds inside the version digest | the same read for a software service |
+| lineage of a harness | `harnessLineage` over each version's recorded origin — predecessor, fork, the intent it was born from — and seeds inside the version digest | the same read for a software service |
 | improving a skill | evolution campaigns behind a held-out gate | the seed's skills as a campaign subject |
 
 ## The model
@@ -58,7 +58,7 @@ issue link — so the two kinds of service are read the same way.
 
 ### Lineage — how it got here, in one read
 
-For each version of a service: the requests it was born from (issues, `born_from`), the decisions that shaped
+For each version of a service: the requests it was born from (issues, the origin's `from`), the decisions that shaped
 it and the interval they are known to hold over (knowledge pins), the evidence it was judged on (scorecards),
 what review found, and the authorization it shipped under. For a harness this is `harnessLineage` today; the
 proposal extends the same read to a software service, whose versions are its releases.
@@ -196,7 +196,9 @@ tests, the scanners under `scripts/`. This repository's own process records alre
 2. **Unreachable Everdict at push time.** Recommendation: refuse, with a recorded break-glass.
 3. **Where it lives.** Recommendation: an application over tracker, knowledge and capability store — no spine
    domain.
-4. **The service reference.** A new reference type naming a product service or a harness, or a graph node only.
+4. **The service reference.** A new reference type in the knowledge vocabulary (`NODE_TYPES`) naming a product
+   service or a harness, or a product service named through the references that exist (its product record plus a
+   path).
 5. **Bootstrap.** Everdict's own development would run on a deployed Everdict, so a broken deployment gates its
    own repair. It needs a declared limit and a break-glass.
 6. **What crosses workspaces to improve the seed.** Recommendation: opt-in, aggregate evaluation outcomes only.

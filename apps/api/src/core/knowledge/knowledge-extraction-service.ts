@@ -16,7 +16,7 @@ import { transportFor } from "@everdict/llm";
 import type { ModelRegistry } from "@everdict/registry";
 import type { ScopedSecretTiers } from "../execution/judge-auth-dispatcher.js";
 
-// knowledge-extract — the accumulation loop's EXTRACTION leg (docs/architecture/knowledge-graph.md): mine a closed
+// knowledge-extract — the accumulation loop's EXTRACTION leg (docs/architecture/workspace-knowledge.md): mine a closed
 // discussion (a comment thread) for durable, evidence-backed conclusions and store them as `proposed` knowledge
 // entries (confidence < 1, authored by the extractor sentinel) awaiting HITL review — approval promotes a proposal to
 // an authored claim. On-demand today (HTTP/MCP; a platform-event trigger can drive it later). Reuses the

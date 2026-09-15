@@ -1,56 +1,9 @@
-import type {
-  EdgeMention as ContractEdgeMention,
-  KnowledgeEntryRecord as ContractKnowledgeEntryRecord,
-  KnowledgeNode as ContractKnowledgeNode,
-} from '@everdict/contracts'
+import type { KnowledgeEntryRecord as ContractKnowledgeEntryRecord } from '@everdict/contracts'
 import { z } from 'zod'
 
-// Local runtime-validation schemas for the knowledge-graph rendering (Settings › Knowledge). Per the web's isolation
-// rule the app keeps its OWN zod v4 schemas (never importing the zod v3 wire schemas) and drift-guards their shape
-// against the contract records. `type`/`predicate` stay loose strings here — the closed vocabularies are value arrays
-// the web may not import, so the UI maps them by string with a fallback (see features/knowledge-graph/lib/node-style).
-
-export const knowledgeNodeSchema = z.object({
-  nodeId: z.string(),
-  type: z.string(),
-  key: z.string(),
-  version: z.string().optional(),
-  label: z.string(),
-  attrs: z.record(z.string(), z.unknown()).default({}),
-  resolution: z.string().default('resolved'),
-  evidenceCount: z.number().default(0),
-  // When the graph last saw this node observed — the detail panel's "as of" line. Absent on a reference node
-  // (a pin whose entity nothing has projected yet).
-  lastObservedAt: z.string().optional(),
-})
-export type KnowledgeNodeView = z.infer<typeof knowledgeNodeSchema>
-
-export const knowledgeEdgeSchema = z.object({
-  id: z.string(),
-  predicate: z.string(),
-  subjectNodeId: z.string().optional(),
-  objectNodeId: z.string().optional(),
-  subjectTypeHint: z.string().optional(),
-  objectTypeHint: z.string().optional(),
-  polarity: z.string().default('affirmed'),
-  edgeAttrs: z.record(z.string(), z.unknown()).default({}),
-})
-export type KnowledgeEdgeView = z.infer<typeof knowledgeEdgeSchema>
-
-export const knowledgeGraphSchema = z.object({
-  root: z.string(),
-  nodes: z.array(knowledgeNodeSchema),
-  edges: z.array(knowledgeEdgeSchema),
-  stats: z.object({
-    totalNodes: z.number(),
-    totalEdges: z.number(),
-    nodesByType: z.record(z.string(), z.number()).default({}),
-    edgesByPredicate: z.record(z.string(), z.number()).default({}),
-  }),
-})
-export type KnowledgeGraph = z.infer<typeof knowledgeGraphSchema>
-
-// --- knowledge entries: reified claims (the knowledge layer's record) ---
+// Local runtime-validation schemas for knowledge entries — reified claims, the `/knowledge` library's record. Per the
+// web's isolation rule the app keeps its OWN zod v4 schemas (never importing the zod v3 wire schemas) and
+// drift-guards their shape against the contract record.
 
 // A version-pinned reference to a domain entity ({type, key, version?}). `type` stays a loose string (the closed
 // NodeType vocabulary is a value array the web may not import); the create form offers the common types.
@@ -108,26 +61,11 @@ export const knowledgeEntrySchema = z.object({
 })
 export type KnowledgeEntry = z.infer<typeof knowledgeEntrySchema>
 
-// The whole-workspace-graph response has no contract wire type (it is an application-control read-model), so only its
-// node/edge element shapes are drift-guarded: the contract record (narrow — a NodeType/Predicate union where this view
-// keeps a loose string) must stay assignable to this consumer view, so a wire rename/retype of an OVERLAPPING field
-// fails the web typecheck (a Pick of a removed key is itself a compile error). This is the loose-consumer-view guard.
-//
-// The EDGE the graph endpoint sends is a deliberate RENDER PROJECTION of the stored mention — no audit spine (origin /
-// extractor / confidence / evidencePath / …), because that payload exists to be drawn and the spine was two thirds of
-// its bytes. Guarding against the record is still right (the projection's fields are the record's), but do not add
-// fields here expecting them to arrive: provenance comes from `related` / `node`. See knowledge-graph.md §Rendering.
 type AssertAssignable<A extends B, B> = A
-type _NodeGuard = AssertAssignable<
-  Pick<ContractKnowledgeNode, keyof KnowledgeNodeView>,
-  KnowledgeNodeView
->
-type _EdgeGuard = AssertAssignable<
-  Pick<ContractEdgeMention, keyof KnowledgeEdgeView>,
-  KnowledgeEdgeView
->
+
 // Entry guard: the record fields (coverage excluded — a server-side decoration with no contract type) follow the
-// same loose-consumer-view rule: the contract record must stay assignable to this view.
+// loose-consumer-view rule: the contract record (narrow — a NodeType union where this view keeps a loose string) must
+// stay assignable to this view, so a wire rename/retype of an overlapping field fails the web typecheck.
 type _EntryGuard = AssertAssignable<
   Pick<ContractKnowledgeEntryRecord, Exclude<keyof KnowledgeEntry, 'coverage'>>,
   Omit<KnowledgeEntry, 'coverage'>

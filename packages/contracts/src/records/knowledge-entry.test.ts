@@ -62,7 +62,7 @@ describe("KnowledgeEntryRecord — a reified claim", () => {
   });
 });
 
-describe("SkillRecord — the graph-facing additions stay additive", () => {
+describe("SkillRecord — the knowledge-pin additions stay additive", () => {
   const baseSkill = {
     id: "sk1",
     tenant: "acme",
@@ -81,7 +81,7 @@ describe("SkillRecord — the graph-facing additions stay additive", () => {
     expect(r.verifiedAt).toBeUndefined();
   });
 
-  it("accepts version-pinned refs the harvester will project as about edges", () => {
+  it("accepts version-pinned refs that context assembly matches against task anchors", () => {
     const r = SkillRecordSchema.parse({
       ...baseSkill,
       refs: [{ type: "dataset", key: "login-cases", version: "3.0.0" }],

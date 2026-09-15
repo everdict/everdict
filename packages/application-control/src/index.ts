@@ -799,25 +799,11 @@ export { ScorecardIngestService } from "./scorecard/scorecard-ingest-service.js"
 export { ScorecardAnalyticsService } from "./scorecard/scorecard-analytics-service.js";
 export { dispatchManifest, foldEnvDeltas } from "./recording-manifest.js";
 
-// knowledge — the knowledge-graph store port + the harvest ingest use-case (projection lives in @everdict/domain).
-export type { KnowledgeStore } from "./ports/knowledge-store.js";
-export { ingestHarvest } from "./knowledge/ingest-harvest.js";
+// knowledge — task-time context assembly over knowledge entries + skills (the subject-time kernel is @everdict/domain).
 export {
-  KnowledgeQueryService,
-  type NeighborQuery,
-  type RelatedFact,
-  type Subgraph,
-  type TraversalDirection,
-} from "./knowledge/knowledge-query-service.js";
-export {
-  type KnowledgeContextSources,
-  type KnowledgeGraphResult,
   KnowledgeService,
-  type KnowledgeReindexResult,
-  type KnowledgeReindexSources,
   type KnowledgeServiceDeps,
   type TaskContext,
-  type TaskContextAnchor,
   type TaskContextSkill,
 } from "./knowledge/knowledge-service.js";
 export {

@@ -73,9 +73,9 @@ export async function capabilityOriginFor(
   agent: AgentAttribution | undefined,
   declared: DeclaredOrigin | undefined,
   // The capability BEING registered. A declared `from` naming its own family is refused (review wave C):
-  // the harvester reads a same-family `from` as the version-lineage `succeeds` edge, and only the
-  // platform's own writes (re-pin, bump) may say it — they resolve the base at the write (L3). A caller
-  // declaring it would mint a lineage edge for a derivation that never happened. Required, not optional —
+  // a same-family `from` IS the version lineage — `harnessLineage` reads it as the recorded predecessor —
+  // and only the platform's own writes (re-pin, bump) may say it — they resolve the base at the write (L3). A
+  // caller declaring it would record a lineage for a derivation that never happened. Required, not optional —
   // an optional self is a call site that forgot to say who it is.
   self: { type: CapabilityOriginSourceType; id: string },
 ): Promise<CapabilityOrigin> {

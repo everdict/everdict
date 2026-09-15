@@ -311,7 +311,7 @@ export function registerFsRoutes(app: FastifyInstance, deps: ServerDeps): void {
     }
   });
 
-  // Empty the whole tree — governance, not content mutation: settings:write (admin), like the knowledge reindex.
+  // Empty the whole tree — governance, not content mutation: settings:write (admin).
   // Deliberately the UNSCOPED service: emptying a workspace has to mean emptying it, and a member-scoped clear
   // would silently leave every other member's memory behind for the next tenant of the same workspace.
   app.delete("/fs", { schema: fsDocs.clear }, async (req, reply) => {

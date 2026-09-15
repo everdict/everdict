@@ -2,7 +2,7 @@
 kind: spec
 title: "Harness identity and seeds — forks are recorded, seeds hang off the version, lineage is one read, a seeded finding is a leak"
 status: landed
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/contracts/src/records/capability-origin.ts, packages/application-control/src/harness/harness-seeds.ts, packages/domain/src/harness/harness-seeds.ts, packages/application-control/src/harness/harness-lineage-service.ts, packages/domain/src/evolution/seed-leak.ts]
 ---
 # Harness identity and seeds — forks are recorded, seeds hang off the version, lineage is one read, a seeded finding is a leak
@@ -11,6 +11,11 @@ anchors: [packages/contracts/src/records/capability-origin.ts, packages/applicat
 > sections are **Landed** (2026-09-02); each note says what shipped and where it differs from the decision text,
 > which is kept as written. §2 and §4 had to land together: a seed that is part of the digest is a seed the leak
 > rule can read, and a seed outside the digest is one the rule cannot.
+>
+> **2026-09-16:** the workspace knowledge graph these sections cite — its `succeeds` / `born_from` /
+> `forked_from` edges and the harvest that emitted them — was removed (`docs/architecture/workspace-knowledge.md`,
+> migration `0216`). Lineage is read from the recorded origin by `harnessLineage` (§3); the edge wording below is
+> the record of what held when each section was written.
 
 ## What held when this was written (2026-09-02), and what this spec must not restate
 
@@ -18,12 +23,11 @@ Instance versions are immutable; a version resolves (`resolveHarnessInstance`) t
 scorecard manifest seals (`packages/contracts/src/records/scorecard.ts`), so "which harness ran" is a
 provable fact. Every register carries a `CapabilityOrigin` — channel, the intent it was born from, a note —
 and the knowledge graph records `succeeds` (one id, version N to N−1) and `born_from` (a version to the
-issue, scorecard or run that caused it) — `packages/contracts/src/knowledge/predicate.ts`;
-`docs/architecture/evolution-lineage.md` Track A. `diff_harness_versions` names the slot that moved between
+issue, scorecard or run that caused it) — `docs/architecture/evolution-lineage.md` Track A. `diff_harness_versions` names the slot that moved between
 two versions. Skills are versioned records (`packages/contracts/src/records/skill.ts`); knowledge entries
 are claims with `evidence` and a `supersedes` chain (`packages/contracts/src/records/knowledge-entry.ts`);
 both carry `refs: KnowledgePin[]` — a claim's known-valid INTERVAL along an entity's version timeline
-(`packages/contracts/src/knowledge/knowledge-node.ts`; `docs/architecture/knowledge-graph.md`).
+(`packages/contracts/src/knowledge/node-ref.ts`; `docs/architecture/workspace-knowledge.md`).
 
 ## §1 — A fork is recorded where it happens (G2.1)
 
@@ -32,8 +36,9 @@ both carry `refs: KnowledgePin[]` — a claim's known-valid INTERVAL along an en
 > inside the digest, the way `origin.from` already is. Declared as a body sibling `forkedFrom` on `POST /harnesses`
 > and as `register_harness { forkedFrom }`; `verifyForkLineage` (`packages/application-control/src/harness/harness-fork.ts`)
 > refuses before the write when the parent does not resolve (404) or does not digest as named (409, via
-> `digestUnder` so an older-era seal still verifies); the knowledge harvest emits `forked_from` to the other id's
-> version with the digest on the edge (`packages/domain/src/knowledge/harvest-specs.ts`).
+> `digestUnder` so an older-era seal still verifies); the knowledge harvest emitted `forked_from` to the other id's
+> version with the digest on the edge until the graph was removed (2026-09-16); `harnessLineage` reports it as
+> `forkedFrom`.
 
 **The gap.** `succeeds` is same-id only. A harness that started as a copy of another — a Codex variant of the
 Claude scaffold, a workspace's copy of a `_shared` template, a team's fork of another team's instance —

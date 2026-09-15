@@ -63,7 +63,7 @@ describe("action policy (bridge-all surface)", () => {
       "create_github_issue",
       "post_mattermost_message",
       "set_workspace_mattermost",
-      "annotate_knowledge",
+      "create_knowledge_entry",
     ])
       expect(isGuardedAction(name)).toBe(false);
   });

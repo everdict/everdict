@@ -18,7 +18,6 @@ import type { CaseJob, CaseResult, RunRecord, RuntimeSpec } from "@everdict/cont
 import {
   InMemoryBudgetStore,
   InMemoryKnowledgeEntryStore,
-  InMemoryKnowledgeStore,
   InMemoryOAuthStateStore,
   InMemoryRecordingStore,
   InMemoryRunStore,
@@ -2660,25 +2659,18 @@ describe("MCP knowledge tools", () => {
     return {
       ...base,
       entries,
-      knowledgeService: new KnowledgeService({
-        store: new InMemoryKnowledgeStore(),
-        contextSources: { knowledgeEntries: entries },
-      }),
+      knowledgeService: new KnowledgeService({ skills: new InMemorySkillStore(), knowledgeEntries: entries }),
       knowledgeEntryService: new KnowledgeEntryService({ store: entries }),
     };
   }
 
-  it("exposes the graph reads, the entry CRUD and task-context assembly", async () => {
+  it("exposes the entry CRUD and task-context assembly", async () => {
     const client = await connect(withKnowledge(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name);
     for (const tool of [
       "get_knowledge_entry", // the @-reference resolver's read — a broken name silently degrades every mention
       "list_knowledge_entries",
       "create_knowledge_entry",
-      "get_knowledge_node",
-      "knowledge_related",
-      "knowledge_subgraph",
-      "get_knowledge_graph",
       "get_task_context",
     ])
       expect(names).toContain(tool);
@@ -2704,12 +2696,12 @@ describe("MCP knowledge tools", () => {
     expect(read.refs[0]).toMatchObject({ type: "harness", key: "web-agent", version: "2.1.0" });
   });
 
-  // A workspace with no knowledge service wired (the graph needs a database) must not advertise the tools.
+  // A workspace with no knowledge services wired must not advertise the tools.
   it("registers nothing when the knowledge services are absent", async () => {
     const client = await connect(harness(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name);
     expect(names).not.toContain("get_knowledge_entry");
-    expect(names).not.toContain("get_knowledge_node");
+    expect(names).not.toContain("get_task_context");
   });
 });
 

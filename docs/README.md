@@ -124,7 +124,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [tracker.md](tracker.md) — the eval tracker: Initiative ⊃ Project ⊃ Issue (the "why we evaluate" layer)
 - [architecture/product-timeline.md](architecture/product-timeline.md) — Product ⊃ Release over an imported version ledger (the "what we ship" axis)
 - [architecture/workspace-filesystem.md](architecture/workspace-filesystem.md) — one isolated file tree per workspace, attributed revisions, three-way merge
-- [architecture/knowledge-graph.md](architecture/knowledge-graph.md) — the workspace knowledge graph: mention/edge spine, intent-centred reindex, knowledge entries with time-axis pins, context assembly, HTTP/MCP and the map
+- [architecture/workspace-knowledge.md](architecture/workspace-knowledge.md) — workspace knowledge: knowledge entries with time-axis pins, coverage and anchor relation, task-context assembly, thread extraction, HTTP/MCP (and the knowledge graph that was removed)
 - [architecture/evolution-lineage.md](architecture/evolution-lineage.md) — evolution lineage: ancestry recorded at the write, events on the outbox, the campaign as a settlement
 - [architecture/evolution-review-follow-up.md](architecture/evolution-review-follow-up.md) — evaluated identities, family attempts, adoption claims and scoped delegate evidence
 - [architecture/parallel-evolution.md](architecture/parallel-evolution.md) — campaigns in parallel form a tree: what the shared held-out family costs, why bytes merge and evidence does not, and the one place the schema is a tree where a merge needs a DAG
@@ -223,7 +223,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 
 ## Database migrations
 - [migration/README.md](migration/README.md) — migration discipline (expand → deploy → contract, preflight checks)
-- Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0200_trajectory_events](migration/preflight/0200_trajectory_events.md) · [0212-drop-team-axis](migration/preflight/0212-drop-team-axis.md) · [0215-remove-team-era-facts](migration/preflight/0215-remove-team-era-facts.md)
+- Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0200_trajectory_events](migration/preflight/0200_trajectory_events.md) · [0212-drop-team-axis](migration/preflight/0212-drop-team-axis.md) · [0215-remove-team-era-facts](migration/preflight/0215-remove-team-era-facts.md) · [0216-drop-knowledge-graph](migration/preflight/0216-drop-knowledge-graph.md)
 
 ## The documentation itself
 - [architecture/document-kinds.md](architecture/document-kinds.md) — the four kinds a document can be (wiki · decision · spec · runbook), what each owes, and how each is allowed to change

@@ -1,17 +1,8 @@
 import { KnowledgeEntryService, KnowledgeService } from "@everdict/application-control";
 import { RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
-import type { Dataset, IssueRecord, NodeRef, ScorecardRecord } from "@everdict/contracts";
-import {
-  InMemoryCommentStore,
-  InMemoryIssueStore,
-  InMemoryKnowledgeEntryStore,
-  InMemoryKnowledgeStore,
-  InMemoryRunStore,
-  InMemoryScorecardStore,
-} from "@everdict/db";
-import { harvestScorecard, nodeId } from "@everdict/domain";
-import { InMemoryDatasetRegistry } from "@everdict/registry";
+import type { NodeRef } from "@everdict/contracts";
+import { InMemoryCommentStore, InMemoryKnowledgeEntryStore, InMemoryRunStore, InMemorySkillStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { KnowledgeExtractionService } from "../../core/knowledge/knowledge-extraction-service.js";
 import { buildServer } from "../../server.js";
@@ -22,77 +13,28 @@ const unusedDispatcher: Dispatcher = {
   },
 };
 
-const SCORECARD: ScorecardRecord = {
-  id: "sc1",
-  tenant: "acme",
-  dataset: { id: "web-bench", version: "1.0.0" },
-  harness: { id: "web-agent", version: "2.1.0" },
-  status: "succeeded",
-  orchestration: { judges: [{ id: "correctness", version: "1.0.0" }], concurrency: 4, retries: 0 },
-  createdAt: "2026-07-27T00:00:00Z",
-  updatedAt: "2026-07-27T01:00:00Z",
-};
-
 const H = { "x-everdict-tenant": "acme" };
-const SC_NODE = nodeId("acme", { type: "scorecard", key: "sc1" });
-const HARNESS_NODE = nodeId("acme", { type: "harness", key: "web-agent", version: "2.1.0" });
-
-const ISSUE: IssueRecord = {
-  id: "i1",
-  tenant: "acme",
-  number: 12,
-  identifier: "ENG-12",
-  formerIdentifiers: [],
-  title: "Judge misses truncated answers",
-  status: "done",
-  priority: "none",
-  labelIds: [],
-  links: [],
-  resolution: { scorecardId: "sc1", by: "user-alice", at: "2026-07-28T00:00:00Z" },
-  history: [],
-  createdBy: "user-alice",
-  createdAt: "2026-07-27T00:00:00Z",
-  updatedAt: "2026-07-28T00:00:00Z",
-};
-const ISSUE_NODE = nodeId("acme", { type: "issue", key: "i1" });
 
 async function build(withKnowledge: boolean) {
   const service = new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() });
   if (!withKnowledge) return buildServer({ service });
 
-  const store = new InMemoryKnowledgeStore();
-  const h = harvestScorecard(SCORECARD);
-  await store.putNodes(h.nodes);
-  await store.putMentions(h.mentions);
-  await store.putEdges(h.edges);
-  // The harness the scorecard evaluated, materialised the way its own harvester would (a reindex covers the
-  // registries too). Without a node row on BOTH ends an edge is not drawable, so the graph read-model omits it —
-  // this is what makes the scorecard→harness `evaluates` edge part of the rendered map.
-  await store.putNodes([
-    {
-      nodeId: HARNESS_NODE,
-      tenant: "acme",
-      type: "harness",
-      key: "web-agent",
-      version: "2.1.0",
-      label: "web-agent@2.1.0",
-      attrs: {},
-      resolution: "resolved",
-      evidenceCount: 1,
-      createdAt: "2026-07-27T00:00:00Z",
-      updatedAt: "2026-07-27T00:00:00Z",
-    },
-  ]);
-  const scorecards = new InMemoryScorecardStore();
-  await scorecards.create(SCORECARD);
-  await scorecards.create({ ...SCORECARD, id: "sc2" }); // nothing references sc2 — reindex must not materialise it
-  const datasets = new InMemoryDatasetRegistry();
-  await datasets.register("acme", DATASET, "user-alice");
-  // The intent stratum: an issue whose resolution names SCORECARD — the reference that ADMITS the scorecard into
-  // the reindexed graph (an unreferenced execution record is pruned; see the admission rule in the service).
-  const issues = new InMemoryIssueStore();
-  await issues.create(ISSUE);
   const knowledgeEntryStore = new InMemoryKnowledgeEntryStore();
+  const skillStore = new InMemorySkillStore();
+  await skillStore.create({
+    id: "triage",
+    tenant: "acme",
+    name: "web-agent-triage",
+    description: "how to triage a web-agent regression",
+    instructions: "SKILL-BODY", // listing-level only — must not ride the context payload
+    files: [],
+    refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
+    visibility: "workspace",
+    version: "1.0.0",
+    createdBy: "user-alice",
+    createdAt: "2026-07-28T00:00:00Z",
+    updatedAt: "2026-07-28T00:00:00Z",
+  });
   // Fake registry-latest: the harness family moved on to 2.3.0 (so a 2.1.0-pinned ref reads superseded).
   const latestVersionOf = async (_tenant: string, ref: NodeRef) =>
     ref.type === "harness" && ref.key === "web-agent" ? "2.3.0" : undefined;
@@ -122,249 +64,14 @@ async function build(withKnowledge: boolean) {
   return buildServer({
     service,
     knowledgeService: new KnowledgeService({
-      store,
-      reindexSources: { scorecards, datasets, issues },
-      contextSources: { knowledgeEntries: knowledgeEntryStore, latestVersionOf },
+      skills: skillStore,
+      knowledgeEntries: knowledgeEntryStore,
+      latestVersionOf,
     }),
     knowledgeEntryService,
     knowledgeExtraction,
   });
 }
-
-const DATASET: Dataset = {
-  id: "web-bench",
-  version: "1.0.0",
-  cases: [{ id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", timeoutSec: 60, tags: [], graders: [] }],
-  tags: ["web"],
-};
-const DATASET_NODE = nodeId("acme", { type: "dataset", key: "web-bench", version: "1.0.0" });
-
-describe("knowledge routes", () => {
-  it("returns 404 when the knowledge service is not configured", async () => {
-    const res = await (await build(false)).inject({ method: "GET", url: `/knowledge/node?id=${SC_NODE}`, headers: H });
-    expect(res.statusCode).toBe(404);
-  });
-
-  it("400s when the node id query param is missing", async () => {
-    const res = await (await build(true)).inject({ method: "GET", url: "/knowledge/node", headers: H });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("gets a harvested node by id, and 404s an unknown id", async () => {
-    const app = await build(true);
-    const ok = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(SC_NODE)}`,
-      headers: H,
-    });
-    expect(ok.statusCode).toBe(200);
-    expect((ok.json() as { type: string }).type).toBe("scorecard");
-    const miss = await app.inject({ method: "GET", url: "/knowledge/node?id=scorecard:acme:nope", headers: H });
-    expect(miss.statusCode).toBe(404);
-  });
-
-  it("returns ranked related facts, evaluates outranking in_workspace", async () => {
-    const res = await (await build(true)).inject({
-      method: "GET",
-      url: `/knowledge/related?id=${encodeURIComponent(SC_NODE)}&direction=out`,
-      headers: H,
-    });
-    expect(res.statusCode).toBe(200);
-    const facts = (res.json() as { facts: Array<{ predicate: string; nodeId: string }> }).facts;
-    expect(facts[0]?.predicate).toBe("evaluates");
-    expect(facts.find((f) => f.predicate === "evaluates")?.nodeId).toBe(HARNESS_NODE);
-  });
-
-  it("400s an invalid predicate filter (closed vocabulary)", async () => {
-    const res = await (await build(true)).inject({
-      method: "GET",
-      url: `/knowledge/related?id=${encodeURIComponent(SC_NODE)}&predicates=not_a_predicate`,
-      headers: H,
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("expands a subgraph and reindexes from the record stores", async () => {
-    const app = await build(true);
-    const sub = await app.inject({
-      method: "GET",
-      url: `/knowledge/subgraph?id=${encodeURIComponent(SC_NODE)}&depth=1`,
-      headers: H,
-    });
-    expect(sub.statusCode).toBe(200);
-    expect((sub.json() as { edges: unknown[] }).edges.length).toBeGreaterThan(0);
-
-    const reindex = await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
-    expect(reindex.statusCode).toBe(200);
-    expect((reindex.json() as { scanned: number }).scanned).toBeGreaterThanOrEqual(1);
-  });
-
-  it("reindex materialises registry nodes — the dataset node the scorecard edge pointed at", async () => {
-    const app = await build(true);
-    // Before reindex, only the scorecard's dataset EDGE exists; the dataset NODE row is not yet materialised.
-    const before = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(DATASET_NODE)}`,
-      headers: H,
-    });
-    expect(before.statusCode).toBe(404);
-    await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
-    const after = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(DATASET_NODE)}`,
-      headers: H,
-    });
-    expect(after.statusCode).toBe(200);
-    expect((after.json() as { type: string }).type).toBe("dataset");
-  });
-
-  it("reindex materialises the issue hub, and keeps the scorecard its resolution references", async () => {
-    const app = await build(true);
-    // Before reindex the tracker has never been projected.
-    const before = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(ISSUE_NODE)}`,
-      headers: H,
-    });
-    expect(before.statusCode).toBe(404);
-    await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
-    const after = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(ISSUE_NODE)}`,
-      headers: H,
-    });
-    expect(after.statusCode).toBe(200);
-    expect((after.json() as { type: string; label: string }).label).toBe("ENG-12 · Judge misses truncated answers");
-    // The issue's resolution references sc1, so the scorecard survives the execution-admission prune…
-    const sc = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(SC_NODE)}`,
-      headers: H,
-    });
-    expect(sc.statusCode).toBe(200);
-    // …and the resolved_by edge is on the issue's related facts.
-    const related = await app.inject({
-      method: "GET",
-      url: `/knowledge/related?id=${encodeURIComponent(ISSUE_NODE)}`,
-      headers: H,
-    });
-    expect(related.statusCode).toBe(200);
-    const facts = (related.json() as { facts: Array<{ predicate: string }> }).facts;
-    expect(facts.some((f) => f.predicate === "resolved_by")).toBe(true);
-  });
-
-  it("reindex leaves an unreferenced execution record OFF the graph (evidence, not inventory)", async () => {
-    const app = await build(true);
-    await app.inject({ method: "POST", url: "/knowledge/reindex", headers: H });
-    // sc2 sits in the scorecard store, but no issue/knowledge references it — never materialised.
-    const sc2 = await app.inject({
-      method: "GET",
-      url: `/knowledge/node?id=${encodeURIComponent(nodeId("acme", { type: "scorecard", key: "sc2" }))}`,
-      headers: H,
-    });
-    expect(sc2.statusCode).toBe(404);
-  });
-
-  it("returns the whole workspace graph rooted at the workspace hub node", async () => {
-    const res = await (await build(true)).inject({ method: "GET", url: "/knowledge/graph", headers: H });
-    expect(res.statusCode).toBe(200);
-    const body = res.json() as {
-      root: string;
-      nodes: Array<{ nodeId: string; type: string }>;
-      edges: Array<{ predicate: string }>;
-      stats: { totalNodes: number; totalEdges: number; nodesByType: Record<string, number> };
-    };
-    // rooted at the workspace hub node — every harvested entity carries an in_workspace edge to it
-    expect(body.root).toBe(nodeId("acme", { type: "workspace", key: "acme" }));
-    // the scorecard is reached (in_workspace incoming), and its eval edges are pulled in at depth 2
-    expect(body.nodes.some((n) => n.nodeId === SC_NODE)).toBe(true);
-    expect(body.stats.nodesByType.scorecard).toBe(1);
-    expect(body.stats.totalNodes).toBe(body.nodes.length);
-    expect(body.edges.some((e) => e.predicate === "evaluates")).toBe(true);
-    // …but the scoping star does NOT ship: the workspace hub is never materialised, so `in_workspace` has no
-    // second endpoint to draw to. On a real workspace that is most of the payload.
-    expect(body.edges.some((e) => e.predicate === "in_workspace")).toBe(false);
-  });
-
-  it("400s a graph depth below 1", async () => {
-    const res = await (await build(true)).inject({ method: "GET", url: "/knowledge/graph?depth=0", headers: H });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("404s the graph when the knowledge service is not configured", async () => {
-    const res = await (await build(false)).inject({ method: "GET", url: "/knowledge/graph", headers: H });
-    expect(res.statusCode).toBe(404);
-  });
-
-  it("annotate attaches an authored note readable via /knowledge/annotations", async () => {
-    const app = await build(true);
-    const post = await app.inject({
-      method: "POST",
-      url: "/knowledge/annotate",
-      headers: H,
-      payload: { node: { type: "scorecard", key: "sc1" }, note: "flaky on network cases" },
-    });
-    expect(post.statusCode).toBe(201);
-    const notes = await app.inject({
-      method: "GET",
-      url: `/knowledge/annotations?id=${encodeURIComponent(SC_NODE)}`,
-      headers: H,
-    });
-    expect(notes.statusCode).toBe(200);
-    const body = notes.json() as { notes: Array<{ evidenceQuote?: string; origin: string }> };
-    expect(body.notes[0]?.evidenceQuote).toBe("flaky on network cases");
-    expect(body.notes[0]?.origin).toBe("authored");
-  });
-
-  it("400s an empty annotate note", async () => {
-    const res = await (await build(true)).inject({
-      method: "POST",
-      url: "/knowledge/annotate",
-      headers: H,
-      payload: { node: { type: "scorecard", key: "sc1" }, note: "" },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-
-  it("relate asserts an authored edge readable via /knowledge/related", async () => {
-    const app = await build(true);
-    const post = await app.inject({
-      method: "POST",
-      url: "/knowledge/relate",
-      headers: H,
-      payload: {
-        subject: { type: "scorecard", key: "sc1" },
-        predicate: "compared_to",
-        object: { type: "scorecard", key: "sc2" },
-        note: "same dataset, newer harness",
-      },
-    });
-    expect(post.statusCode).toBe(201);
-    const related = await app.inject({
-      method: "GET",
-      url: `/knowledge/related?id=${encodeURIComponent(SC_NODE)}&direction=out&predicates=compared_to`,
-      headers: H,
-    });
-    const facts = (related.json() as { facts: Array<{ predicate: string; nodeId: string }> }).facts;
-    expect(facts.find((f) => f.predicate === "compared_to")?.nodeId).toBe(
-      nodeId("acme", { type: "scorecard", key: "sc2" }),
-    );
-  });
-
-  it("400s relating a node to itself", async () => {
-    const res = await (await build(true)).inject({
-      method: "POST",
-      url: "/knowledge/relate",
-      headers: H,
-      payload: {
-        subject: { type: "scorecard", key: "sc1" },
-        predicate: "compared_to",
-        object: { type: "scorecard", key: "sc1" },
-      },
-    });
-    expect(res.statusCode).toBe(400);
-  });
-});
 
 describe("knowledge entries — reified claims", () => {
   const entryPayload = {
@@ -436,7 +143,7 @@ describe("knowledge entries — reified claims", () => {
     expect(gone.statusCode).toBe(404);
   });
 
-  it("assembles task context: anchors' facts + the entries about the anchor family (version-agnostic match)", async () => {
+  it("assembles task context: the entries and skills about the anchor family (version-agnostic match)", async () => {
     const app = await build(true);
     await app.inject({ method: "POST", url: "/knowledge/entries", headers: H, payload: entryPayload });
 
@@ -449,14 +156,27 @@ describe("knowledge entries — reified claims", () => {
     });
     expect(res.statusCode).toBe(200);
     const ctx = res.json() as {
-      anchors: Array<{ nodeId: string; facts: unknown[] }>;
       knowledge: Array<{ title: string; relation?: string; coverage?: { state: string } }>;
-      skills: unknown[];
+      skills: Array<{ id: string; relation?: string }>;
     };
-    expect(ctx.anchors[0]?.nodeId).toBe(nodeId("acme", { type: "harness", key: "web-agent", version: "2.3.0" }));
+    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "skills"]);
+    expect(ctx.knowledge).toHaveLength(1);
     expect(ctx.knowledge[0]?.title).toBe(entryPayload.title);
     expect(ctx.knowledge[0]?.coverage?.state).toBe("behind");
     expect(ctx.knowledge[0]?.relation).toBe("earlier"); // pinned at 2.1.0, anchored at 2.3.0
+    expect(ctx.skills.map((k) => k.id)).toEqual(["triage"]);
+    expect(ctx.skills[0]?.relation).toBe("earlier");
+    expect(res.body).not.toContain("SKILL-BODY");
+  });
+
+  it("404s task context when the knowledge service is not configured", async () => {
+    const res = await (await build(false)).inject({
+      method: "POST",
+      url: "/knowledge/context",
+      headers: H,
+      payload: { refs: [{ type: "harness", key: "web-agent" }] },
+    });
+    expect(res.statusCode).toBe(404);
   });
 
   it("400s an empty context anchor list", async () => {

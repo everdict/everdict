@@ -2,8 +2,8 @@
 kind: wiki
 title: "Evolution lineage — ancestry, events, and the loop's own protocol"
 status: current
-updated: 2026-09-15
-anchors: [packages/domain/src/knowledge/harvest-specs.ts, packages/application-control/src/harness/harness-pin-service.ts, packages/domain/src/image/image-provenance.ts, packages/domain/src/observation/observation-trace.ts, packages/domain/src/evolution/campaign-gate.ts]
+updated: 2026-09-16
+anchors: [packages/application-control/src/harness/harness-lineage-service.ts, packages/application-control/src/harness/harness-pin-service.ts, packages/domain/src/image/image-provenance.ts, packages/domain/src/observation/observation-trace.ts, packages/domain/src/evolution/campaign-gate.ts]
 ---
 # Evolution lineage — ancestry, events, and the loop's own protocol
 
@@ -21,7 +21,7 @@ Four tracks closed those seams. All four are landed; what is still open is liste
 1. **Ancestry is recorded by the writer that knows it** (L3). Nothing downstream re-derives lineage from semver
    adjacency or registration order — a version pinned from an older base has THAT base as its parent.
 2. **An absent lineage is absent, not inferred** (L2). A version registered with no recorded same-family
-   origin has no `succeeds` edge. No backfill by guessing.
+   origin has no recorded predecessor. No backfill by guessing.
 3. **A lineage event is a fact on the existing outbox, in the transaction that made it true** (L1/L4).
 4. **The judgment may read the world's own account, and "no observation" is a third value** (L2).
 5. **Adoption is a settlement** (L1/L4). Promoting a candidate references a frozen campaign frame by digest
@@ -37,10 +37,12 @@ Four tracks closed those seams. All four are landed; what is still open is liste
 - `withRegisteredFact` (`packages/application-control/src/platform-event/registry-facts.ts`) forwards the whole
   `register` call, and the `*.registered` fact payload carries `origin: {via, from?}`. **No new event kind**: a
   repin is a registration, and every consumer already listens to `registered`.
-- The spec harvester (`common` in `packages/domain/src/knowledge/harvest-specs.ts`) reads the stored origin:
-  a `from` naming the spec's own family with a version becomes `succeeds`; any other `from` becomes `born_from`.
-  Registries persist the origin beside the spec (`packages/registry/src/pg-versioned-store.ts`, surfaced as
-  `versionOrigins`), per the rule in `packages/contracts/src/records/capability-origin.ts`.
+- Registries persist the origin beside the spec (`packages/registry/src/pg-versioned-store.ts`, surfaced as
+  `versionOrigins`), per the rule in `packages/contracts/src/records/capability-origin.ts`. `harnessLineage`
+  (`packages/application-control/src/harness/harness-lineage-service.ts`) reads it: a `from` naming the harness's
+  own family with a version is the recorded predecessor (`via: "origin"`); any other `from` is the intent the
+  version was born from (`bornFrom`). Until 2026-09-16 the knowledge graph's spec harvester also turned the same
+  stamp into `succeeds` / `born_from` edges; the graph was removed ([workspace-knowledge.md](workspace-knowledge.md)).
 - A caller may not declare a same-family `from`: `capabilityOriginFor` (`apps/api/src/api/capability-origin.ts`)
   takes the capability's `self` and refuses it at every register door. `save_agent` records the declared issue
   on a first version and the base on a bump; the agent list forwards `versionOrigins` to the wire and the web
@@ -102,7 +104,7 @@ Four tracks closed those seams. All four are landed; what is still open is liste
   `adopt_campaign_candidate` present the spec, which is compared against the stored proof and digested before
   the registry write (`apps/api/src/composition/campaign-adoption.ts`). The gate refuses `adopt` when the round
   sealed no spec digest unless the frame recorded `allowLabelOnlyAdoption`. The adopted version is registered
-  with `from: {type: "issue"}`, so it is `born_from` the campaign's issue.
+  with `from: {type: "issue"}`, so its recorded origin is the campaign's issue.
 - **Completion.** The join between a spent adoption and the issue resolution is symmetric: an E1 consumer over
   `issue.status_changed` (`packages/application-control/src/evolution/adoption-completion-watch.ts`) and the
   registration path both perform it. `AdoptionCompletionReconciler` owns the case where neither lands; its
@@ -115,8 +117,6 @@ Four tracks closed those seams. All four are landed; what is still open is liste
 
 ## Still open
 
-- **`compared_to` has no emitter.** The predicate is declared (`packages/contracts/src/knowledge/predicate.ts`);
-  no harvester turns a round into `candidateScorecard -[compared_to]-> baselineScorecard`.
 - **Ingested scorecards seal no manifest and resolve no registry document.** A loop running on ingested traces
   needs both `allowUnverifiedIdentity` and `allowLabelOnlyAdoption` on the frame; the stronger answer is for
   ingest to seal the digest of the document it evaluated and the world it ran in.
@@ -134,7 +134,7 @@ Four tracks closed those seams. All four are landed; what is still open is liste
 
 ## Related
 
-- `docs/architecture/knowledge-graph.md` — the lineage predicates, the intent stratum, harvest mechanics.
+- `docs/architecture/workspace-knowledge.md` — knowledge entries and the pins a seed or a finding is written in.
 - `docs/architecture/event-plumbing.md` — the outbox, consumers, subscriptions.
 - `docs/tracker.md` — issues as the intent hub; resolution-as-baseline; the regression watch.
 - Rule `protocol` — the five laws this design applies.

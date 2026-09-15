@@ -51,19 +51,6 @@
     "snapshotError": "스냅샷에 실패했습니다.",
     "snapshotTitle": "파일시스템을 세계의 다음 버전으로 발행합니다."
   },
-  "knowledgePage": {
-    "contextEmpty": "이 앵커로는 에이전트가 받을 것이 없습니다.",
-    "expand": "확장",
-    "noHops": "두 홉 안에 아무것도 없습니다.",
-    "previewContext": "에이전트 컨텍스트",
-    "addNote": "메모 추가",
-    "factsUnread": "이 노드에 대해 알려진 것을 읽지 못했습니다 ({error}) — 아는 것이 없다는 뜻이 아닙니다.",
-    "noteError": "메모를 추가하지 못했습니다.",
-    "notePlaceholder": "이 노드에 대해 아는 것",
-    "relate": "관계 추가",
-    "relateError": "관계가 거부되었습니다 — 술어가 없을 수 있습니다.",
-    "targetPlaceholder": "대상 노드 id"
-  },
   "experimentsPage": {
     "description": "채점 전(phase 1) 그룹. phase 2 는 이미 있는 run 위에 judge 를 적용하고 phase 1 을 다시 실행하지 않습니다 — 컴퓨트는 이미 썼으니 두 번째 질문은 judge 값만 듭니다.",
     "empty": "실행된 실험이 없습니다.",
@@ -3080,8 +3067,6 @@
     "integrations": "통합",
     "integrationsDesc": "GitHub App·Mattermost·트레이스 싱크/소스·이미지 레지스트리.",
     "observability": "트레이스",
-    "knowledge": "지식",
-    "knowledgeDesc": "워크스페이스가 쌓은 지식과 스킬을, 그것이 다루는 엔티티 위에 지도로 펼칩니다.",
     "ci": "CI 연동",
     "ciDesc": "키리스 CI 평가를 위한 저장소 신뢰 연결.",
     "budget": "예산·사용량",
@@ -3168,28 +3153,7 @@
       "reactivate": "재활성",
       "delete": "삭제",
       "deleteConfirm": "정말 삭제할까요?"
-    },
-    "summary": "노드 {nodes}개 · 엣지 {edges}개",
-    "truncated": "+{count}개 더 있음(미표시)",
-    "reindex": "그래프 재구성",
-    "reindexed": "그래프 재구성 완료 — 노드 {nodes}개, 엣지 {edges}개.",
-    "reindexError": "지식 그래프를 재구성하지 못했습니다.",
-    "emptyTitle": "아직 지식이 없습니다",
-    "emptyHint": "지식이나 스킬을 작성하면 바로 여기에 나타납니다. 그래프를 다시 만들면 워크스페이스의 평가 데이터(스코어카드·실행·하네스·데이터셋·평가자·런타임·멤버)까지 함께 수확합니다.",
-    "emptyHintReadonly": "멤버가 지식과 스킬을 작성하면 여기에 나타납니다. 평가 데이터까지 수확하려면 관리자가 그래프를 다시 만들 수 있습니다.",
-    "selectHint": "맵에서 노드를 고르면 그게 무엇이고 무엇과 이어져 있는지 보여줍니다.",
-    "relationships": "관계",
-    "noRelationships": "맵에 연결된 관계가 없습니다.",
-    "evidence": "관측 {count}건",
-    "unavailableTitle": "지식 그래프를 사용할 수 없음",
-    "unavailableHint": "이 배포에는 지식 서비스가 구성되어 있지 않습니다(데이터베이스가 필요합니다).",
-    "searchPlaceholder": "맵 검색",
-    "zoomIn": "확대",
-    "zoomOut": "축소",
-    "fit": "전체 보기",
-    "canvasHint": "드래그로 이동 · 스크롤로 확대 · 노드를 클릭하면 상세",
-    "pending": "미투영",
-    "askInChat": "대화에서 물어보기"
+    }
   },
   "files": {
     "clear": "트리 비우기",
@@ -3674,7 +3638,6 @@
     "tab_files": "파일",
     "collapse": "패널 접기",
     "back": "뒤로",
-    "tab_knowledge": "지식",
     "tab_playground": "플레이그라운드"
   },
   "playground": {
@@ -4070,16 +4033,6 @@
           "이걸 증명할 평가를 어떻게 짤지 제안해 줘",
           "지금 링크된 증거로 이 이슈를 닫을 수 있는지 봐 줘",
           "회귀했다면 어느 스코어카드에서 어긋났는지 짚어 줘"
-        ]
-      },
-      "knowledgeAsk": {
-        "title": "이 항목에 대해 물어보기",
-        "body": "이 지식 항목에 대해 무엇이든 물어보세요. 에이전트가 워크스페이스 지식 그래프에서 답합니다 — 내용, 출처, 그리고 무엇과 이어져 있는지.",
-        "suggestions": [
-          "이 항목을 두 문장으로 요약해 줘",
-          "여기로 이어지는 것과 여기서 이어지는 걸 알려 줘",
-          "이 지식이 어디서 왔는지 계보를 추적해 줘",
-          "워크스페이스 안에서 이것과 모순되는 게 있는지 봐 줘"
         ]
       }
     },

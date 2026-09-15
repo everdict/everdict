@@ -135,7 +135,7 @@ panel/list guidance is not.
   Both produce a scorecard with no harness run. Role-gated off `/me` (run/ingest = member+, read/compare = viewer+).
   See `docs/scorecards.md`.
 - **Infra panel (split view, `widgets/infra-panel`)** — infra concerns (schedules · runtimes · runs · work
-  queue, plus the agent, files, knowledge and playground tabs) don't live on the left with the eval pages: a **vertical rail** of toggle buttons (vertically centered,
+  queue, plus the agent, files and playground tabs) don't live on the left with the eval pages: a **vertical rail** of toggle buttons (vertically centered,
   the divider between the eval half and the infra half) opens a **floating right panel** (rounded, gapped,
   pop-shadow card — not a flush docked column) as a flex sibling of `main`, so the two sides split the space
   half-and-half on md+; on mobile the rail floats on the right edge and the panel becomes a floating sheet.
@@ -176,13 +176,7 @@ panel/list guidance is not.
   and deleting is the row trash / bulk delete. Multi-select follows the scorecard-list grammar (hover-revealed
   checkboxes, shift-click ranges, Esc clears, floating action bar) and a drag from a checked row carries the
   whole selection; `rewriteMovedPath` re-points an open selection a move carried along and `coversPath` closes
-  one a delete removed (see `docs/architecture/workspace-filesystem.md`). The **knowledge** tab is the same shape for the
-  knowledge map: Settings › Knowledge is a force-directed graph (canvas-2D — pan / zoom / drag a node / search /
-  per-type filter chips) of the workspace's claims and skills over the entities they concern; picking a node calls
-  `useInfraPanel().openKnowledgeNode(id)` and the panel shows what that node IS (type, version, harvested attrs, a
-  claim's markdown body via `/api/knowledge/entries/[id]`) plus its relationships grouped by predicate — rendered
-  from the graph the screen published, so map and detail always agree; picking a neighbour there re-centres the map
-  (see `docs/architecture/knowledge-graph.md`).
+  one a delete removed (see `docs/architecture/workspace-filesystem.md`).
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **Detail `/{workspace}/judge/[id]`** shows kind + fields + rubric. **Register `/{workspace}/judges/new`**
   (`features/register-judge`) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`

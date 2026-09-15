@@ -18,10 +18,10 @@ import { useMentionInChat } from '../model/infra-panel-context'
 // `mission` marks a specialized entry: the chat keeps its structure but frames itself for that task
 // (tailored empty-state copy + suggestions) instead of the generic "ask about your workspace" framing. The
 // caption follows the mission's intent — an edit mission reads "Edit in chat", everything else keeps the
-// analyze caption — and `label` overrides both for surfaces with their own wording (e.g. knowledge: "Ask in chat").
+// analyze caption — and `label` overrides both for surfaces with their own wording (e.g. the skill detail's own edit caption).
 // `compact` folds the caption away and leaves the icon — for a dense header like the issue view, where record actions are already lined up as
 // icon buttons on the breadcrumb row (copy link, ⋯). The caption survives as aria-label/title, so the wording and the mission decision stay in one place.
-// `fresh` gives an analyze/ask mission the START behaviour of an edit entry: rather than dropping a chip onto whatever thread was open, it begins
+// `fresh` gives an analyze mission the START behaviour of an edit entry: rather than dropping a chip onto whatever thread was open, it begins
 // a NEW conversation — which is what makes that mission's framing (visible only on an empty screen) actually appear on every entry.
 export function MentionInChatButton({
   reference,

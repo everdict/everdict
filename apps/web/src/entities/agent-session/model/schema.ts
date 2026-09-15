@@ -118,14 +118,13 @@ export const AGENT_CHAT_MISSIONS = [
   'scorecardAnalyze',
   'runAnalyze',
   'issueAnalyze',
-  'knowledgeAsk',
 ] as const
 export const agentChatMissionSchema = z.enum(AGENT_CHAT_MISSIONS)
 export type AgentChatMission = z.infer<typeof agentChatMissionSchema>
 
 // The NATURE of a mission — it is what decides how the panel treats an entry. `edit` (a dedicated job editing an authored artifact) always
 // starts a NEW conversation (there is never a reason to inherit somebody else's thread) and its default label becomes "edit by conversation".
-// `analyze`/`ask` (entries that ASK about a result or knowledge) only drop a reference chip onto the open conversation — so as not to break the
+// `analyze` (entries that ASK about a result) only drop a reference chip onto the open conversation — so as not to break the
 // flow of comparing two scorecards in one conversation.
 export const AGENT_CHAT_MISSION_INTENTS = {
   skillEdit: 'edit',
@@ -140,13 +139,12 @@ export const AGENT_CHAT_MISSION_INTENTS = {
   scorecardAnalyze: 'analyze',
   runAnalyze: 'analyze',
   issueAnalyze: 'analyze',
-  knowledgeAsk: 'ask',
-} as const satisfies Record<AgentChatMission, 'edit' | 'analyze' | 'ask'>
+} as const satisfies Record<AgentChatMission, 'edit' | 'analyze'>
 export type AgentChatMissionIntent = (typeof AGENT_CHAT_MISSION_INTENTS)[AgentChatMission]
 
 // Whether this entry starts in a NEW conversation. Mission framing (the title, description and suggestions) appears only on an empty screen, so
 // this decision IS "do you actually see a panel framed for the work every time you enter". An `edit` mission always does — editing an authored
-// artifact has no reason to inherit somebody else's thread. `analyze`/`ask` only when the entry states `fresh`:
+// artifact has no reason to inherit somebody else's thread. `analyze` only when the entry states `fresh`:
 // the default is keeping the open thread (the flow of comparing two scorecards in one conversation), and an entry whose SUBJECT is this one
 // record rather than whatever was open (an issue detail, an empty analysis canvas) declares that exception for itself.
 export function startsFreshConversation(entry: {

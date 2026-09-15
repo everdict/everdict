@@ -8,9 +8,9 @@ describe('chat entry — which entries start their own conversation', () => {
     expect(startsFreshConversation({ mission: 'harnessEdit' })).toBe(true)
   })
 
-  it('keeps the open thread for analyze/ask, so two scorecards can be compared in one conversation', () => {
+  it('keeps the open thread for analyze, so two scorecards can be compared in one conversation', () => {
     expect(startsFreshConversation({ mission: 'scorecardAnalyze' })).toBe(false)
-    expect(startsFreshConversation({ mission: 'knowledgeAsk' })).toBe(false)
+    expect(startsFreshConversation({ mission: 'runAnalyze' })).toBe(false)
   })
 
   it('starts fresh when an analyze entry declares itself the subject of the conversation', () => {

@@ -233,7 +233,7 @@ export interface ServerDeps {
   notificationService?: NotificationService; // personal notification feed (bell inbox) — self-scoped (route disabled if absent)
   platformEvents?: PlatformEventService; // platform-event log (agent-automation A1) — internal reconcile cursor (route disabled if absent)
   commentService?: CommentService; // resource comments (datasets, etc.) — collaborative discussion (route disabled if absent)
-  knowledgeService?: KnowledgeService; // workspace knowledge graph — node/related/subgraph queries + reindex (route disabled if absent)
+  knowledgeService?: KnowledgeService; // task-context assembly — POST /knowledge/context (route disabled if absent)
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) CRUD + verify (routes disabled if absent)
   knowledgeExtraction?: KnowledgeExtractionService; // thread → proposed-entry mining (route disabled if absent)
   runnerHub?: RunnerHubLike; // self-hosted runner lease hub — used by the MCP lease/result/heartbeat tools (disabled if absent)

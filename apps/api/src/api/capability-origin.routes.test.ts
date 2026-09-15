@@ -253,10 +253,10 @@ describe("capability origin — a registration records where it came from", () =
   });
 
   it("a register may not DECLARE its own family as its origin — lineage is stamped, never claimed (review wave C)", async () => {
-    // The harvester reads a same-family `from` as the version-lineage `succeeds` edge, and only the
-    // platform's own writes (re-pin, bump) may say it — they resolve the base at the write. A caller
-    // declaring its own family would mint that edge for a derivation that never happened (L3). Seen RED:
-    // the forged declaration was stamped and the lineage edge became claimable from any register body.
+    // A same-family `from` IS the version lineage (the recorded predecessor), and only the platform's own
+    // writes (re-pin, bump) may say it — they resolve the base at the write. A caller declaring its own
+    // family would record a lineage for a derivation that never happened (L3). Seen RED: the forged
+    // declaration was stamped and the lineage became claimable from any register body.
     const { app } = build();
     const res = await app.inject({
       method: "POST",

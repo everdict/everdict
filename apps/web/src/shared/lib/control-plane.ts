@@ -255,54 +255,6 @@ export const controlPlane = {
     call<T>(auth, '/comments', { method: 'POST', body: JSON.stringify(body) }),
   deleteComment: (auth: AuthContext, id: string) =>
     callVoid(auth, `/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // Knowledge graph — the workspace's eval data projected into a queryable node/edge graph (Settings › Knowledge).
-  // graph = the whole-workspace projection (read = scorecards:read); reindex = rebuild from records (settings:write).
-  knowledgeGraph: <T>(auth: AuthContext, depth?: number) =>
-    call<T>(auth, `/knowledge/graph${depth !== undefined ? `?depth=${depth}` : ''}`),
-
-  // ── THE KNOWLEDGE GRAPH'S WRITE SIDE, AND THE READS THAT MAKE IT USEFUL ─────────────────────────
-  //
-  // The web could DRAW the graph and author nothing in it: eight routes, all unreachable. A graph a person
-  // can only look at is a report; the notes, the relationships and the mined candidates are what make it a
-  // place work accumulates. Census slice 5. docs/architecture/web-runtime-gap-census-spec.md
-  //
-  // One node by its content-addressed id (e.g. "harness:acme:web-agent@1.0.0").
-  knowledgeNode: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/knowledge/node?id=${encodeURIComponent(id)}`),
-  // A node's 1-hop facts, ranked for display; and the multi-hop walk behind it.
-  knowledgeRelated: <T>(auth: AuthContext, id: string, limit?: number) =>
-    call<T>(
-      auth,
-      `/knowledge/related?id=${encodeURIComponent(id)}${limit !== undefined ? `&limit=${limit}` : ''}`
-    ),
-  knowledgeSubgraph: <T>(auth: AuthContext, id: string, depth?: number) =>
-    call<T>(
-      auth,
-      `/knowledge/subgraph?id=${encodeURIComponent(id)}${depth !== undefined ? `&depth=${depth}` : ''}`
-    ),
-  // The authored notes on a node — the READ side of annotate, which is why they travel together.
-  knowledgeAnnotations: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/knowledge/annotations?id=${encodeURIComponent(id)}`),
-  annotateKnowledge: <T>(auth: AuthContext, body: { node: unknown; note: string }) =>
-    call<T>(auth, '/knowledge/annotate', { method: 'POST', body: JSON.stringify(body) }),
-  // A TYPED relationship — the predicate vocabulary is closed at the control plane, so this cannot invent
-  // an edge kind the graph has no rule for.
-  relateKnowledge: <T>(
-    auth: AuthContext,
-    body: { from: unknown; to: unknown; predicate: string }
-  ) => call<T>(auth, '/knowledge/relate', { method: 'POST', body: JSON.stringify(body) }),
-  // Mine a discussion thread for entry CANDIDATES — proposed entries awaiting review, never published
-  // knowledge. A real billable model call, like skill-generate.
-  extractKnowledge: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/knowledge/extract', { method: 'POST', body: JSON.stringify(body) }),
-  // Task-time context assembly. POST because anchors are structured NodeRefs whose keys may contain '/' or
-  // ':' — a query string would have to escape them and would still read badly in a log.
-  knowledgeContext: <T>(auth: AuthContext, body: { anchors: unknown[] }) =>
-    call<T>(auth, '/knowledge/context', { method: 'POST', body: JSON.stringify(body) }),
-  reindexKnowledge: <T>(auth: AuthContext) =>
-    call<T>(auth, '/knowledge/reindex', { method: 'POST' }),
-  // Knowledge entries — reified claims (the knowledge layer). List is freshness-decorated; read=scorecards:read,
-  // write=comments:write, manage=creator-or-admin (control plane enforces). verify stamps verifiedAt (not an edit).
   // Workspace filesystem — the shared, workspace-isolated file tree (paths travel as query params; the control
   // plane normalizes them and rejects traversal).
   listFsEntries: <T>(auth: AuthContext, path: string) =>
@@ -355,9 +307,9 @@ export const controlPlane = {
     call<T>(auth, `/fs/revisions/content?path=${encodeURIComponent(path)}&revision=${revision}`),
   restoreFsRevision: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/fs/revisions/restore', { method: 'POST', body: JSON.stringify(body) }),
+  // Knowledge entries — reified claims (the knowledge layer). List is freshness-decorated; read=scorecards:read,
+  // write=comments:write, manage=creator-or-admin (control plane enforces). verify stamps verifiedAt (not an edit).
   listKnowledgeEntries: <T>(auth: AuthContext) => call<T>(auth, '/knowledge/entries'),
-  getKnowledgeEntry: <T>(auth: AuthContext, id: string) =>
-    call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}`),
   createKnowledgeEntry: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/knowledge/entries', { method: 'POST', body: JSON.stringify(body) }),
   updateKnowledgeEntry: <T>(auth: AuthContext, id: string, patch: unknown) =>
@@ -373,6 +325,10 @@ export const controlPlane = {
     call<T>(auth, `/knowledge/entries/${encodeURIComponent(id)}/approve`, { method: 'POST' }),
   rejectKnowledgeEntry: (auth: AuthContext, id: string) =>
     callVoid(auth, `/knowledge/entries/${encodeURIComponent(id)}/reject`, { method: 'POST' }),
+  // Mine a discussion thread for knowledge-entry CANDIDATES — proposed entries awaiting review, never published
+  // knowledge. A real billable model call, like skill-generate.
+  extractKnowledge: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/knowledge/extract', { method: 'POST', body: JSON.stringify(body) }),
   // Workspace membership (self-serve): my workspace list + create (creator is admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>

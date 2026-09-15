@@ -94,6 +94,9 @@ const DECIDED = new Map([
     "/workspace/settings",
     "no page draws the metering/default-judge policy; it is set through MCP `get_/set_workspace_settings`",
   ],
+  // Its one browser caller was a preview inside the knowledge map's node panel, deleted with the graph — and it sent
+  // `anchors` where the route reads `refs`, so it never succeeded. The door stays because it is the agent's.
+  ["/knowledge/context", "task-time context assembly for an agent; agents read it through MCP `get_task_context`"],
 
   // ── OWED — a real gap with a person behind it ─────────────────────────────────────────────────────
   //
@@ -117,7 +120,7 @@ const walk = (dir, out = []) => {
 
 // A route's declaration, normalized to one parameter spelling. Anything else compares two spellings.
 // A trailing `${…}` that BUILDS A QUERY STRING is not a path segment. It cannot be matched with a regex,
-// because the group nests: `/knowledge/graph${depth !== undefined ? `?depth=${depth}` : ""}`. So the tail is
+// because the group nests: `/runs/${id}/logs${stream ? `?stream=${encodeURIComponent(stream)}` : ""}`. So the tail is
 // found by balancing braces, and dropped when its text contains a `?` or names a query variable.
 const stripTrailingQuery = (path) => {
   if (!path.endsWith("}")) return path;

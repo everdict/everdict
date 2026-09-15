@@ -42,7 +42,7 @@ export const PLATFORM_EVENT_KINDS = [
   // its fact (emitted by the RevisionedWorkspaceFs choke point). Agent-authored publishes stamp
   // causedBy agent:<agentId>:<conversationId>, the loop guard's key.
   "file.published",
-  // Knowledge lifecycle (knowledge-graph S14 HITL): created = member-authored (born active), proposed = an
+  // Knowledge-entry lifecycle (the extraction review loop): created = member-authored (born active), proposed = an
   // extraction candidate awaiting review, approved = proposed → active with authorship transferred.
   "knowledge.created",
   "knowledge.proposed",

@@ -1,13 +1,6 @@
-import { EdgeMentionSchema, type KnowledgeEntryRecord, MentionSchema, type SkillRecord } from "@everdict/contracts";
+import type { SkillRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { anchorRelation, assessCoverage } from "./freshness.js";
-import { harvestKnowledgeEntry, harvestSkill } from "./harvest-knowledge.js";
-import { nodeId } from "./ids.js";
-
-function assertValid(r: { mentions: unknown[]; edges: unknown[] }): void {
-  for (const m of r.mentions) expect(MentionSchema.safeParse(m).success).toBe(true);
-  for (const e of r.edges) expect(EdgeMentionSchema.safeParse(e).success).toBe(true);
-}
 
 const skill: SkillRecord = {
   id: "sk1",
@@ -26,57 +19,6 @@ const skill: SkillRecord = {
   createdAt: "2026-07-28T00:00:00Z",
   updatedAt: "2026-07-28T01:00:00Z",
 };
-
-describe("harvestSkill", () => {
-  it("projects the skill node plus about edges for each version-pinned ref", () => {
-    const r = harvestSkill(skill);
-    assertValid(r);
-    expect(r.nodes[0]?.nodeId).toBe(nodeId("acme", { type: "skill", key: "sk1" }));
-    const abouts = r.edges.filter((e) => e.predicate === "about");
-    expect(abouts.map((e) => e.objectNodeId)).toEqual([
-      nodeId("acme", { type: "harness", key: "web-agent", version: "2.1.0" }),
-      nodeId("acme", { type: "dataset", key: "login-cases", version: "3.0.0" }),
-    ]);
-    // the about edge carries the pin's known-valid interval (subject-time coordinates readable from the graph)
-    expect(abouts[0]?.edgeAttrs).toEqual({ asOf: "2.1.0" });
-    expect(r.edges.some((e) => e.predicate === "created_by")).toBe(true);
-  });
-
-  it("is idempotent — the same record yields the same ids", () => {
-    const a = harvestSkill(skill);
-    const b = harvestSkill(skill);
-    expect(a.edges.map((e) => e.id)).toEqual(b.edges.map((e) => e.id));
-  });
-});
-
-const entry: KnowledgeEntryRecord = {
-  id: "kn1",
-  tenant: "acme",
-  kind: "finding",
-  title: "login cases are flaky on k8s",
-  body: "Variance only shows on the k8s runtime.",
-  refs: [{ type: "harness", key: "web-agent", version: "2.1.0" }],
-  evidence: [{ type: "scorecard", key: "sc-9" }],
-  status: "active",
-  supersedes: "kn0",
-  visibility: "workspace",
-  createdBy: "user-alice",
-  createdAt: "2026-07-28T00:00:00Z",
-  updatedAt: "2026-07-28T01:00:00Z",
-};
-
-describe("harvestKnowledgeEntry", () => {
-  it("projects a knowledge node with about + evidenced_by + supersedes edges", () => {
-    const r = harvestKnowledgeEntry(entry);
-    assertValid(r);
-    expect(r.nodes[0]?.type).toBe("knowledge");
-    expect(r.nodes[0]?.label).toBe(entry.title);
-    const byPredicate = new Map(r.edges.map((e) => [e.predicate, e.objectNodeId]));
-    expect(byPredicate.get("about")).toBe(nodeId("acme", { type: "harness", key: "web-agent", version: "2.1.0" }));
-    expect(byPredicate.get("evidenced_by")).toBe(nodeId("acme", { type: "scorecard", key: "sc-9" }));
-    expect(byPredicate.get("supersedes")).toBe(nodeId("acme", { type: "knowledge", key: "kn0" }));
-  });
-});
 
 describe("assessCoverage — record vs the entity's present", () => {
   const now = "2026-07-28T12:00:00Z";

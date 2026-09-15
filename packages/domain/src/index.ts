@@ -675,48 +675,8 @@ export {
   type UsageTotals,
 } from "./billing/usage.js";
 
-// knowledge — the knowledge-graph kernel: deterministic id derivation + structured harvesters (record → graph spine).
-export { edgeId, mentionId, nodeId } from "./knowledge/ids.js";
-export { type HarvestResult, HarvestBuilder } from "./knowledge/harvest.js";
-export { harvestScorecard, SCORECARD_HARVESTER } from "./knowledge/harvest-scorecard.js";
-export { PREDICATE_PRIORITY, predicateRank } from "./knowledge/ranking.js";
-export {
-  harvestRun,
-  harvestSchedule,
-  RUN_HARVESTER,
-  SCHEDULE_HARVESTER,
-} from "./knowledge/harvest-records.js";
-export {
-  AGENT_HARVESTER,
-  DATASET_HARVESTER,
-  harvestAgent,
-  harvestDataset,
-  harvestHarness,
-  harvestJudge,
-  harvestModel,
-  harvestRubric,
-  harvestRuntime,
-  HARNESS_HARVESTER,
-  JUDGE_HARVESTER,
-  MODEL_HARVESTER,
-  RUBRIC_HARVESTER,
-  RUNTIME_HARVESTER,
-  type SpecHarvestMeta,
-} from "./knowledge/harvest-specs.js";
-export {
-  harvestKnowledgeEntry,
-  harvestSkill,
-  KNOWLEDGE_ENTRY_HARVESTER,
-  SKILL_HARVESTER,
-} from "./knowledge/harvest-knowledge.js";
-export {
-  harvestInitiative,
-  harvestIssue,
-  harvestProject,
-  INITIATIVE_HARVESTER,
-  ISSUE_HARVESTER,
-  PROJECT_HARVESTER,
-} from "./knowledge/harvest-tracker.js";
+// knowledge — the subject-time kernel of knowledge pins: coverage against an entity's present, and a pin's relation
+// to a task anchor's coordinate (context assembly).
 export {
   type AnchorRelation,
   anchorRelation,

@@ -276,11 +276,11 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   names the target from the reference chip that arrived with it. Every mission has an INTENT
   (`AGENT_CHAT_MISSION_INTENTS`): `edit` (skill/tool/harness/dataset/judge/runtime/environment/agentCraft) lands on
   a FRESH DRAFT when a persisted conversation is open and defaults the button caption to "edit by conversation";
-  `analyze`/`ask` (view/scorecard/run/issue · knowledge) keep the open thread — comparing two scorecards in one
-  conversation must survive the entry — and only frame the chat when it is empty. **Framing only shows on an empty
+  `analyze` (view/scorecard/run/issue) keeps the open thread — comparing two scorecards in one
+  conversation must survive the entry — and only frames the chat when it is empty. **Framing only shows on an empty
   chat, so whether an entry starts fresh IS whether its framing is ever seen** — one rule decides it,
   `startsFreshConversation(entry)` in `entities/agent-session` (guarded by `mission-intent.test.ts`), never an
-  inline condition at a call site. An analyze/ask entry whose subject is ONE record rather than whatever thread was
+  inline condition at a call site. An analyze entry whose subject is ONE record rather than whatever thread was
   open — the issue detail, the blank analysis canvas — passes `fresh` to get the edit-intent start for that one
   entry, instead of bending the mission's intent. `fresh` rides the same path as `mission` (button prop →
   `useMentionInChat`/`askAgent` → the framed `postMessage` → `PendingMention`). Mission state clears on
@@ -453,12 +453,9 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
   `contentWindow.location`, never the src prop, or React would undo the user's in-iframe navigation).
   The **files** tab is purpose-built like work/agent (no iframe, no rail button): Settings › Files calls
   `useInfraPanel().openFile(path)` → the panel renders `FileViewer` (features/browse-files) interactively;
-  panel-side mutations bump `fsRevision` so the selecting tree refetches in place. The **knowledge** tab follows the
-  same shape for the graph map: Settings › Knowledge publishes its graph (`publishKnowledgeGraph`) and picks nodes
-  (`openKnowledgeNode`), and the tab renders the picked node's detail FROM THAT PUBLISHED DATA — never a re-fetch of
-  the neighbourhood, so the map and the detail cannot disagree; picking a neighbour in the panel writes the selection
-  back, which re-centres the map. A feature must not reach up into the panel: like `SettingsFilesExplorer`, the
-  page-level `SettingsKnowledgeMap` owns `useInfraPanelOptional()` and passes `selectedId`/`onSelect` down.
+  panel-side mutations bump `fsRevision` so the selecting tree refetches in place. A feature must not reach up into
+  the panel: the page-level `SettingsFilesExplorer` owns `useInfraPanelOptional()` and passes
+  `selectedPath`/`onOpenFile` down.
   Entry actions belong to `FileTreePane`, never to `FileViewer` (which only reads/edits the open document — no
   Move, no Delete): the tree owns the folder context and the multi-select. Moving is drag-and-drop (dragging a
   checked row carries the whole selection) plus a "Move to…" folder picker for destinations a drag can't reach;

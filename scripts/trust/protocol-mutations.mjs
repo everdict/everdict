@@ -2779,7 +2779,7 @@ const MUTATIONS = [
   },
   {
     // evolution-lineage Track A follow-through (save_agent). A bump's ancestor is known only at this write;
-    // dropping the stamp reverts the agent family to versions with no succeeds lineage — the counterexample
+    // dropping the stamp reverts the agent family to versions with no recorded lineage — the counterexample
     // asserting the bump's origin must notice.
     name: "Track A — the agent save stops stamping the base its bump succeeds",
     file: "apps/api/src/core/agent/agent-service.ts",
@@ -2810,8 +2810,8 @@ const MUTATIONS = [
     suite: ["--root", "packages/application-execution", "src/run-case-observations.counterexample.test.ts"],
   },
   {
-    // review wave C. A declared origin naming its own family would mint the version-lineage `succeeds`
-    // edge for a derivation that never happened — only the platform's re-pin/bump writes may say it (L3).
+    // review wave C. A declared origin naming its own family would record a version lineage for a
+    // derivation that never happened — only the platform's re-pin/bump writes may say it (L3).
     name: "wave C — a register may declare its own family as its origin",
     file: "apps/api/src/api/capability-origin.ts",
     from: "  if (from !== undefined && from.type === self.type && from.id === self.id) {",
@@ -3417,17 +3417,6 @@ const MUTATIONS = [
     to: "          const observed = undefined;",
     build: "@everdict/backends",
     suite: ["--root", "packages/backends", "src/orchestrators/k8s-image-observation.counterexample.test.ts"],
-  },
-  {
-    // evolution-lineage Track A. A recorded same-family origin IS the version lineage; collapsing the
-    // succeeds arm back into born_from leaves the `succeeds` predicate declared-but-dead again — the state
-    // the whole track exists to end. The harvest suite must notice.
-    name: "Track A — the harvester files a same-family origin as born_from instead of succeeds",
-    file: "packages/domain/src/knowledge/harvest-specs.ts",
-    from: "      if (ft.data === self.type && from.id === self.key && hasVersion) {",
-    to: '      if (ft.data === self.type && from.id === self.key && hasVersion && from.id === "") {',
-    build: "@everdict/domain",
-    suite: ["--root", "packages/domain", "src/knowledge/harvest-specs.test.ts"],
   },
   {
     // ── LONG-HORIZON TRACE READS (docs/architecture/long-horizon-trace-reads.md) ────────────────────

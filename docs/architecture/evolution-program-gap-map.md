@@ -2,7 +2,7 @@
 kind: wiki
 title: "Evolution program — the four pillars, what holds today, and the gap each spec closes"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/contracts/src/harness/harness-spec.ts, packages/contracts/src/harness/harness-template.ts, packages/contracts/src/execution/environment.ts, packages/contracts/src/records/tracker.ts, packages/db/src/evolution/experiment-family.ts]
 ---
 # Evolution program — the four pillars, what holds today, and the gap each spec closes
@@ -56,21 +56,22 @@ profile's agent (that carriage was fixed on 2026-09-02). The environments a case
 
 **Holds.** Instance versions are immutable and resolve to a document whose digest (`specDigest`) a scorecard
 manifest seals (`packages/contracts/src/records/scorecard.ts`). Every register carries a `CapabilityOrigin`
-— the channel, the intent it was born from, a note — and the knowledge graph records `succeeds` (same id,
-version to version) and `born_from` (version to issue/scorecard/run) edges
-(`packages/contracts/src/knowledge/predicate.ts`, `docs/architecture/evolution-lineage.md` Track A).
+— the channel, the intent it was born from, a note — and `harnessLineage` reads it as the version's predecessor
+(same id) or the intent it was born from (an issue, scorecard or run)
+(`packages/application-control/src/harness/harness-lineage-service.ts`, `docs/architecture/evolution-lineage.md`
+Track A).
 `diff_harness_versions` says which slot moved between two versions; `repinHarnessImages` mints a version from
 digest pins. Skills (`packages/contracts/src/records/skill.ts`) and knowledge entries
 (`packages/contracts/src/records/knowledge-entry.ts`) are versioned records with `refs: KnowledgePin[]` —
-claims ABOUT an entity version's validity interval (`packages/contracts/src/knowledge/knowledge-node.ts`).
+claims ABOUT an entity version's validity interval (`packages/contracts/src/knowledge/node-ref.ts`).
 
 **Gaps.**
 
 | id | gap | closed by |
 |---|---|---|
-| G2.1 | **No fork, no family.** `succeeds` is same-id only. A harness derived from another id — a Codex variant of the Claude scaffold, a workspace copy of a `_shared` template — records nothing about where it came from. | `harness-identity-and-seeds-spec.md` §1 — **landed 2026-09-02** |
+| G2.1 | **No fork, no family.** A recorded predecessor is same-id only. A harness derived from another id — a Codex variant of the Claude scaffold, a workspace copy of a `_shared` template — records nothing about where it came from. | `harness-identity-and-seeds-spec.md` §1 — **landed 2026-09-02** |
 | G2.2 | **Seeds hang off nothing.** A `KnowledgePin` is a claim about a version; it is not a declaration that a harness version SHIPS with a skill or a wiki page. No field on the instance names its seeds, so they are outside `specDigest`, outside the manifest seal, and nothing materializes them into the sandbox. Two runs of "the same version" can run with different skills. | `harness-identity-and-seeds-spec.md` §2 — **landed 2026-09-02** |
-| G2.3 | **Lineage is three reads.** Origins live on the registry record, the version diff is a separate read, the graph edges a third; nobody composes "where did this version come from, what changed, and what did it ship with". | `harness-identity-and-seeds-spec.md` §3 — **landed 2026-09-02** |
+| G2.3 | **Lineage is three reads.** Origins live on the registry record, the version diff is a separate read, the lineage edges a third; nobody composes "where did this version come from, what changed, and what did it ship with". | `harness-identity-and-seeds-spec.md` §3 — **landed 2026-09-02** |
 | G2.4 | **Seed leakage is a rule nobody enforces.** The evolve skill says the candidate never receives the findings; a knowledge seed born from THIS campaign's evidence is exactly that leak, and nothing refuses it. | `harness-identity-and-seeds-spec.md` §4 — **landed 2026-09-02** |
 
 ## Pillar 3 — honest benchmarks, exact evidence

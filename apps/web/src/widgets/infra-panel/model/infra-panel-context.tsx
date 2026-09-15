@@ -11,7 +11,6 @@ import {
 } from 'react'
 
 import type { AgentChatMission, AgentReference } from '@/entities/agent-session'
-import type { KnowledgeGraph } from '@/entities/knowledge'
 import { membersSchema } from '@/entities/member'
 import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
@@ -23,15 +22,7 @@ import { queueSnapshotSchema, type QueueSnapshot } from '@/entities/queue'
 
 export type WorkAuthor = { name: string; avatarUrl?: string }
 
-export type InfraTab =
-  | 'schedules'
-  | 'runtimes'
-  | 'runs'
-  | 'work'
-  | 'agent'
-  | 'files'
-  | 'knowledge'
-  | 'playground'
+export type InfraTab = 'schedules' | 'runtimes' | 'runs' | 'work' | 'agent' | 'files' | 'playground'
 
 // A deep-open request into a page tab's iframe — e.g. openRun() points the runs tab at that run's REAL detail
 // page. seq forces re-application even for a repeated identical target (the user may have navigated away inside
@@ -47,7 +38,7 @@ export type FrameRequest = { tab: InfraTab; path: string; seq: number }
 // STRUCTURE is unchanged and only the empty screen's writing and suggestions are framed for that work. The generic "analyze in conversation" entry carries no mission and uses the default wording.
 // `fresh` marks a CREATION entry ("new analysis" → the blank analysis canvas): the thing being made IS the
 // conversation, so the panel starts a new one instead of appending to whatever thread was open. Edit-intent
-// missions already do this by their intent; fresh is for entries whose mission is analyze/ask.
+// missions already do this by their intent; fresh is for entries whose mission is analyze.
 export type PendingMention = {
   ref?: AgentReference
   prompt?: string
@@ -127,14 +118,6 @@ type InfraPanelValue = {
   // Bumped after every panel-side filesystem mutation (save / move / delete) so a host tree refetches in place.
   fsRevision: number
   notifyFsMutation: () => void
-  // The knowledge tab — Settings › Knowledge publishes the map it draws, then picks nodes in it; the panel renders
-  // the picked node's identity and the relationships around it from that same data, so the map and the detail can
-  // never disagree. Picking a neighbour in the panel writes back here, which re-centres the map. Purpose-built like
-  // the files tab (no iframe, no rail button).
-  knowledgeGraph: KnowledgeGraph | null
-  publishKnowledgeGraph: (graph: KnowledgeGraph) => void
-  knowledgeNodeId: string | null
-  openKnowledgeNode: (nodeId: string | null) => void
   snapshot: QueueSnapshot | null
   // Immediate re-poll after a queue mutation (cancel/promote a scheduler entry) — the periodic poll is too
   // slow to reflect an action the member just took.
@@ -336,18 +319,6 @@ export function InfraPanelProvider({
   const closeFile = useCallback(() => setFilePath(null), [])
   const notifyFsMutation = useCallback(() => setFsRevision((revision) => revision + 1), [])
 
-  // The knowledge tab. The published map outlives the graph screen (navigating the left half never empties the
-  // panel); clearing the SELECTION keeps the tab open on its empty state, which is what tapping empty canvas means.
-  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraph | null>(null)
-  const [knowledgeNodeId, setKnowledgeNodeId] = useState<string | null>(null)
-  const publishKnowledgeGraph = useCallback((graph: KnowledgeGraph) => setKnowledgeGraph(graph), [])
-  const openKnowledgeNode = useCallback((nodeId: string | null) => {
-    setKnowledgeNodeId(nodeId)
-    if (nodeId === null) return
-    setTab('knowledge')
-    setOpen(true)
-  }, [])
-
   return (
     <InfraPanelContext.Provider
       value={{
@@ -376,10 +347,6 @@ export function InfraPanelProvider({
         closeFile,
         fsRevision,
         notifyFsMutation,
-        knowledgeGraph,
-        publishKnowledgeGraph,
-        knowledgeNodeId,
-        openKnowledgeNode,
         snapshot,
         refreshQueue: poll,
         authors,

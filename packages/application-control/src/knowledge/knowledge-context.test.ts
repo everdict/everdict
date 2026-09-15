@@ -1,22 +1,9 @@
 import type { KnowledgeEntryRecord, SkillRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import type { KnowledgeStore } from "../ports/knowledge-store.js";
 import { KnowledgeService } from "./knowledge-service.js";
 
-// Context assembly reads the RECORDS (always current), the graph only for structural facts — so a bare KnowledgeStore
-// with no harvested edges still yields the knowledge/skill lanes.
-const emptyGraph: KnowledgeStore = {
-  putMentions: async () => {},
-  putEdges: async () => {},
-  putNodes: async () => {},
-  getNode: async () => undefined,
-  outgoing: async () => [],
-  incoming: async () => [],
-  listMentions: async () => [],
-  notesForNode: async () => [],
-  listNodeIds: async () => [],
-  deleteNodes: async () => {},
-};
+// Context assembly reads the knowledge-entry and skill RECORDS directly (always current) — the anchors select them by
+// entity family, and the anchor's version is the coordinate every match is positioned against.
 
 const skill = (
   id: string,
@@ -62,30 +49,24 @@ describe("KnowledgeService.assembleContext", () => {
 
   it("family-matches records to anchors (version-agnostic), labels relations, decorates coverage, and keeps skills listing-level", async () => {
     const svc = new KnowledgeService({
-      store: emptyGraph,
-      contextSources: {
-        skills: {
-          list: async () => [
-            skill("triage", [{ ...webAgent, version: "2.1.0" }]),
-            skill("unrelated", [{ type: "dataset", key: "other" }]),
-          ],
-        },
-        knowledgeEntries: {
-          list: async () => [
-            entry("old-deprecated", [{ ...webAgent, version: "2.0.0" }], "deprecated", "2026-07-10T00:00:00.000Z"),
-            entry("live-claim", [{ ...webAgent, version: "2.1.0" }], "active", "2026-07-05T00:00:00.000Z"),
-            entry("unrelated", [{ type: "judge", key: "j1" }]),
-          ],
-        },
-        latestVersionOf: async (_t, ref) => (ref.key === "web-agent" ? "2.3.0" : undefined),
+      skills: {
+        list: async () => [
+          skill("triage", [{ ...webAgent, version: "2.1.0" }]),
+          skill("unrelated", [{ type: "dataset", key: "other" }]),
+        ],
       },
+      knowledgeEntries: {
+        list: async () => [
+          entry("old-deprecated", [{ ...webAgent, version: "2.0.0" }], "deprecated", "2026-07-10T00:00:00.000Z"),
+          entry("live-claim", [{ ...webAgent, version: "2.1.0" }], "active", "2026-07-05T00:00:00.000Z"),
+          entry("unrelated", [{ type: "judge", key: "j1" }]),
+        ],
+      },
+      latestVersionOf: async (_t, ref) => (ref.key === "web-agent" ? "2.3.0" : undefined),
     });
 
     // The task anchors a NEWER version of the harness — family matching still surfaces claims pinned to 2.1.0.
     const ctx = await svc.assembleContext("acme", "alice", [{ ...webAgent, version: "2.3.0" }]);
-
-    expect(ctx.anchors[0]?.nodeId).toBe("harness:acme:web-agent@2.3.0");
-    expect(ctx.anchors[0]?.facts).toEqual([]);
 
     expect(ctx.knowledge.map((k) => k.id)).toEqual(["live-claim", "old-deprecated"]); // same tier → active first
     expect(ctx.knowledge[0]?.relation).toBe("earlier"); // pinned at 2.1.0 — an earlier point of the 2.3.0 anchor
@@ -98,18 +79,16 @@ describe("KnowledgeService.assembleContext", () => {
 
   it("projects onto a PAST anchor coordinate: a superseded claim covering it outranks an active claim from its future", async () => {
     const svc = new KnowledgeService({
-      store: emptyGraph,
-      contextSources: {
-        knowledgeEntries: {
-          list: async () => [
-            // the then-truth: pinned at 2.1.0, since superseded by the fix note
-            entry("then-truth", [{ ...webAgent, version: "2.1.0" }], "superseded", "2026-07-01T00:00:00.000Z"),
-            // the fix, observed at 2.2.0 — this coordinate's FUTURE
-            entry("the-fix", [{ ...webAgent, version: "2.2.0" }], "active", "2026-07-20T00:00:00.000Z"),
-          ],
-        },
-        latestVersionOf: async () => "2.3.0",
+      skills: { list: async () => [] },
+      knowledgeEntries: {
+        list: async () => [
+          // the then-truth: pinned at 2.1.0, since superseded by the fix note
+          entry("then-truth", [{ ...webAgent, version: "2.1.0" }], "superseded", "2026-07-01T00:00:00.000Z"),
+          // the fix, observed at 2.2.0 — this coordinate's FUTURE
+          entry("the-fix", [{ ...webAgent, version: "2.2.0" }], "active", "2026-07-20T00:00:00.000Z"),
+        ],
       },
+      latestVersionOf: async () => "2.3.0",
     });
 
     // analyzing an old scorecard that ran harness@2.1.0 — the anchor's version IS the as-of coordinate
@@ -119,11 +98,23 @@ describe("KnowledgeService.assembleContext", () => {
     expect(ctx.knowledge[1]?.relation).toBe("later"); // the "what happened next" trail, ranked after
   });
 
-  it("returns empty lanes when no context sources are wired (graph-only deployment)", async () => {
-    const svc = new KnowledgeService({ store: emptyGraph });
+  it("leaves proposed candidates and non-anchor families out, and decorates nothing without a resolver", async () => {
+    const svc = new KnowledgeService({
+      skills: { list: async () => [skill("unrelated", [{ type: "dataset", key: "other" }])] },
+      knowledgeEntries: {
+        list: async () => [
+          entry("candidate", [{ ...webAgent, version: "2.1.0" }], "proposed"),
+          entry("claim", [{ ...webAgent, version: "2.1.0" }]),
+        ],
+      },
+    });
+    // an unversioned anchor with no resolver has no coordinate: its match carries no relation and no coverage
     const ctx = await svc.assembleContext("acme", "alice", [webAgent]);
-    expect(ctx.knowledge).toEqual([]);
+    expect(ctx.knowledge).toHaveLength(1);
+    expect(ctx.knowledge[0]?.id).toBe("claim");
+    expect(ctx.knowledge[0]?.relation).toBeUndefined();
+    expect(ctx.knowledge[0]?.coverage).toBeUndefined();
     expect(ctx.skills).toEqual([]);
-    expect(ctx.anchors).toHaveLength(1);
+    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "skills"]);
   });
 });

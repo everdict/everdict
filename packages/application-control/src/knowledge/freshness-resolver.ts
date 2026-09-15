@@ -9,8 +9,7 @@ import type { RubricRegistry } from "../ports/rubric-registry.js";
 import type { RuntimeRegistry } from "../ports/runtime-registry.js";
 
 // Latest-version resolution for the subject-time kernel (domain `assessCoverage` / `anchorRelation`): "where is the
-// entity's present?" is answered against the registries' LATEST today (`get` with no ref = latest); a graph-native
-// `succeeds` join can back the same resolver signature later.
+// entity's present?" is answered against the registries' LATEST (`get` with no ref = latest).
 export type LatestVersionResolver = (tenant: string, ref: NodeRef) => Promise<string | undefined>;
 
 export interface VersionedRegistries {
