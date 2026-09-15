@@ -21,13 +21,13 @@ import { useTranslations } from 'next-intl'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
 import { MentionInChatButton, OpenConversationButton } from '@/widgets/infra-panel'
+import { AttestDatasetButton } from '@/features/attest-dataset'
 import { CapabilityLineage, loadLinkedIssues } from '@/features/capability-lineage'
 import { VersionSwitcher } from '@/features/dataset-versions'
 import { DeleteDatasetButton } from '@/features/delete-dataset'
 import { CommentsSection } from '@/features/discuss'
 import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
-import { AttestDatasetButton } from '@/features/attest-dataset'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { pickOrigin } from '@/entities/capability-origin'
 import {
@@ -406,9 +406,7 @@ export default async function DatasetDetailPage({
       />
 
       {/* Lineage/provenance — where this data came from. Original source (HF link) · official provenance · production path. */}
-      {dataset.producedBy && (
-        <DatasetLineage workspace={workspace} provenance={dataset.producedBy} />
-      )}
+      {dataset.producedBy && <DatasetLineage provenance={dataset.producedBy} />}
 
       {/* Related harnesses — harnesses evaluated with this dataset (derived from scorecards). A summary of the activity timeline below. */}
       {relation && relation.harnesses.length > 0 && (
@@ -522,13 +520,7 @@ function LinkChip({
 
 // Lineage/provenance card — "where this data came from". Original source (HF link) · official provenance · production path.
 // For datasets, lineage is central (preserving the provenance of official open benchmarks) — label-value rows instead of a definition grid, for readability.
-function DatasetLineage({
-  workspace,
-  provenance,
-}: {
-  workspace: string
-  provenance: DatasetProvenance
-}) {
+function DatasetLineage({ provenance }: { provenance: DatasetProvenance }) {
   const t = useTranslations('datasetsPage')
   const { source, origin } = provenance
   const hfFileUrl =
@@ -652,15 +644,13 @@ function DatasetLineage({
           {t('lineagePath')}
         </span>
         {provenance.via === 'recipe' ? (
-          <Link
-            href={`/${workspace}/recipes/${encodeURIComponent(provenance.id)}`}
-            className="inline-flex items-center gap-1 font-mono text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
+          // Not a link: the recipes pages were removed from the web, so there is no page to open.
+          <span className="inline-flex items-center gap-1 font-mono text-muted-foreground">
             <ScrollText className="size-3.5" />
             {provenance.id}
             {provenance.version ? <span className="text-faint">@{provenance.version}</span> : null}
             <span className="text-faint">{t('lineageRecipe')}</span>
-          </Link>
+          </span>
         ) : (
           <span className="font-mono text-muted-foreground">
             {provenance.via === 'catalog' ? t('lineageCatalog') : t('lineageInline')}
