@@ -2,7 +2,7 @@
 kind: decision
 title: "Evolution research directions: experience, candidate search, and reusable capability"
 status: proposed
-updated: 2026-09-10
+updated: 2026-09-13
 ---
 # Evolution research directions
 
@@ -12,9 +12,7 @@ candidate proposals, and a bounded archive of alternative candidates. Then expan
 harness edits, and evolution of the learning procedure itself. This is a proposed engineering direction,
 not a shipped implementation or an accepted performance claim.
 
-The [literature review](evolution-literature-review.md) inventories WikiSkill, all 46 of its direct
-references, and 13 complementary papers. Paper IDs below refer to that catalogue. Source observations use
-main at `42f5c7abc724b2e914b4efee9666cf68794f6748`; measurements proposed below have not been run.
+The [literature review](evolution-literature-review.md) inventories WikiSkill, its 46 direct references, and 13 complementary papers. The [detailed companion](evolution-papers/README.md) now explains all 60 sources in English and Korean, including methods, experiments, and source discrepancies. Paper IDs below refer to that catalogue. Original source observations are pinned to main at `42f5c7abc724b2e914b4efee9666cf68794f6748`; measurements proposed below have not been run. The later [first-loop proposal](evolution-first-loop.md), checked at `d33dfd3866c9bb8556649659d95a8c8101e45535`, narrows the delivery order: establish selection/confirmation separation and declared artifact edits before measuring a driver-owned curated projection over the existing ledger. It remains a proposal, not shipped behavior.
 
 ## The choice and the alternatives
 
@@ -193,6 +191,8 @@ total spend. Measure invalid candidates filtered, strong candidates mistakenly f
 confirmation outcomes. The cascade is useful only if its savings lead to more effective search without
 silently changing the claimed benchmark population.
 
+The full-paper review strengthens this separation. SkillOpt shows selection and test curves diverging; Self-Harness uses its held-out partition for adaptive acceptance; FunSearch registers partially evaluated programs in its simplified search pseudocode. These can be useful search procedures, but none supplies an independent adoption contract. Following the first-loop proposal, the platform should own the split, confirmation-family accounting, disclosure tiers, exact artifact reconstruction, and advice digests; the driver should own curation, minibatches, ranking, and exploratory retention. See [R38](evolution-papers/R38.md), [R43](evolution-papers/R43.md), and [E12](evolution-papers/E12.md).
+
 ## C6 — Broaden evolution from prompt text to harness components
 
 **Decision proposed.** Offer a small explicit set of mutation operators for tools, memory selection,
@@ -212,6 +212,8 @@ edit against an executable helper or workflow edit. Reuse existing build and evi
 [code evolution](code-evolution-loop.md) and [evolution routing](evolution-routing-spec.md).
 Do not edit the benchmark oracle as an agent-improvement operator. The existing merge-base check that
 closed the [September 10 review finding](evolution-review-2026-09-10.md) remains a prerequisite.
+
+A bounded compilation experiment can precede broader workflow search. [DSPy](evolution-papers/E13.md) motivates exposing module inputs/outputs and selecting stage-specific demonstrations; [FunSearch](evolution-papers/E12.md) motivates a fixed skeleton with one evolving function. Compare these changes with the same model, architecture, token budget, and evaluation population before adding ensembles or stronger teachers. Final-answer success permits examining an intermediate trace, not automatically trusting its explanations. Record the full compiled artifact, including selected examples and their order, rather than only the unchanged top-level source.
 
 ## C7 — Evaluate transfer and then evolve the optimizer
 
@@ -262,7 +264,7 @@ of claiming equal-cost superiority.
 
 | Stage | Comparison | Primary question | Evidence required before expanding |
 |---|---|---|---|
-| 1: Knowledge, C1–C2 | Current notes vs equal-budget flat history vs curated lessons | Does experience improve later proposals? | Source-faithful lessons, fewer repeated mistakes, future-case utility and complete cost |
+| 1: Knowledge, C1–C2 after C5 boundaries | Current notes vs equal-budget flat history vs curated lessons | Does experience improve later proposals? | Source-faithful lessons, fewer repeated mistakes, future-case utility and complete cost |
 | 2: Search, C3–C5 | Greedy parent choice vs specialist archive; with/without cascade | Does search find better candidates per budget? | Independent confirmation, archive coverage, filter misses, all attempts counted |
 | 3: Deployed skills, C4 | No skills vs supplied relevant skills vs actual retrieval | Does the agent realize the generated skill’s benefit? | Version-bound loads, observable use, task success, irrelevant-load and latency costs |
 | 4: Structure, C6 | Text change vs component change and targeted ablations | Is the failure better addressed in code or workflow? | Full-task gains, preserved successful behavior, verified executable artifacts |
@@ -283,11 +285,7 @@ not to relax adoption after seeing the result.
 
 ## Delivery order and reopening conditions
 
-The first implementation should combine **C1 and C2** in one reference driver experiment over existing
-records. It should produce linked knowledge snapshots, pre-edit proposals, immutable candidates, and a
-learning curve against the current procedure. Follow with **C3 and C5**, then **C4 and C6** as failures reveal
-whether search, discovery, or executable behavior is limiting progress. C7 and C8 depend on measured
-benefits in those earlier stages; they are separate research branches rather than prerequisites.
+The first implementation follows the [first-loop proposal](evolution-first-loop.md) and combines **C1, C2, and C5**. First establish the train/selection/confirmation boundary; then require declared edits that rebuild the registered artifact and a digest of proposal advice; then run the three-arm curator experiment over the existing append-only ledger. This produces a learning curve whose artifact and evidence identities can be checked. Follow with **C3**, then **C4 and C6** as measured failures reveal the bottleneck. C7 and C8 remain separate branches dependent on demonstrated benefit.
 
 Before implementation, use the repository’s [intent process](https://github.com/everdict/everdict/blob/42f5c7abc724b2e914b4efee9666cf68794f6748/intent/README.md) to turn the selected
 experiment into an intent and scoped design. Any new effect path must name the durable operation before
@@ -307,7 +305,7 @@ before acceptance, or supersede it after acceptance.
 [^2]: Zhang et al., [ACE, v3](https://arxiv.org/abs/2510.04618v3), and Ouyang et al., [ReasoningBank, v2](https://arxiv.org/abs/2509.25140v2). E08–E09.
 [^3]: Yang et al., [SkillOpt, v2](https://arxiv.org/abs/2605.23904v2); Wang et al., [SkillGrad, v1](https://arxiv.org/abs/2605.27760v1); Lin et al., [Agentic Harness Engineering, v4](https://arxiv.org/abs/2604.25850v4). R38, R34, R17.
 [^4]: Agrawal et al., [GEPA, v2](https://arxiv.org/abs/2507.19457v2); Zhang et al., [DGM, v3](https://arxiv.org/abs/2505.22954v3) and [AFlow, v4](https://arxiv.org/abs/2410.10762v4); Mouret and Clune, [MAP-Elites](https://arxiv.org/abs/1504.04909v1). R01, E06, E05, E10.
-[^5]: Li et al., [SkillsBench, v4](https://arxiv.org/abs/2602.12670v4); Zheng et al., [SkillRouter, v5](https://arxiv.org/abs/2603.22455v5); Cho et al., [SkillRet, v3](https://arxiv.org/abs/2605.05726v3); Su et al., [Skill Retrieval Augmentation, v3](https://arxiv.org/abs/2604.24594v3). R15, R45, R06, R33.
+[^5]: Li et al., [SkillsBench, v4](https://arxiv.org/abs/2602.12670v4); Zheng et al., [SkillRouter, v5](https://arxiv.org/abs/2603.22455v5); Kang et al., [SkillRet, v3](https://arxiv.org/abs/2605.05726v3); Su et al., [Skill Retrieval Augmentation, v3](https://arxiv.org/abs/2604.24594v3). R15, R45, R06, R33.
 [^6]: Novikov et al., [AlphaEvolve](https://arxiv.org/abs/2506.13131v1), and Zhang et al., [CoEvoSkills, v3](https://arxiv.org/abs/2604.01687v3). E07, R44.
 [^7]: Lee et al., [Meta-Harness](https://arxiv.org/abs/2603.28052v1); Chen et al., [HarnessX, v3](https://arxiv.org/abs/2606.14249v3); Hu et al., [ADAS, v2](https://arxiv.org/abs/2408.08435v2); AHE and AFlow above. R14, R05, E04.
 [^8]: Ye et al., [Meta Context Engineering, v2](https://arxiv.org/abs/2601.21557v2), and Ouyang et al., [SkillOS](https://arxiv.org/abs/2605.06614v1). R40, R24.

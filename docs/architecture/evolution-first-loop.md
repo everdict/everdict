@@ -2,13 +2,12 @@
 kind: decision
 title: "The first evolution loop: a selection split, advice with a digest, and declared edits"
 status: proposed
-updated: 2026-09-11
+updated: 2026-09-13
 ---
 # The first evolution loop
 
-[Research directions](evolution-research-directions.md) catalogues eight directions (C1–C8) and says the first
-implementation should combine C1 and C2. This decision is narrower and answers the question that document
-left open: **what does the platform own, in which order is it built, and what refuses to be built at all.**
+[Research directions](evolution-research-directions.md) catalogues eight directions (C1–C8). This decision
+supplies the narrower first implementation sequence now reflected in that document and answers: **what does the platform own, in which order is it built, and what refuses to be built at all.**
 
 It settles C1, C2 and C5 into ONE loop. C3, C4, C6, C7 and C8 stay exactly as proposed there; nothing here
 narrows them and nothing here depends on them.
