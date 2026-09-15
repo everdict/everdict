@@ -3,8 +3,8 @@ import https from "node:https";
 
 // LLM usage proxy (sidecar) — sits in front of a BYO endpoint (LiteLLM/OpenAI etc.), passes traffic through, and
 // collects the response's token usage per run. Even a black-box harness (aider etc., trace:none) can be measured for
-// tokens with no code change (the harness just points OPENAI_API_BASE at this proxy). Cost ($) isn't collected for now
-// — tokens only (a decision). Metered-model $ can later be added from the upstream's x-litellm-response-cost header.
+// tokens with no code change (the harness's OpenAI-compatible base URL is pointed at this proxy). Cost ($) is read
+// from the upstream's x-litellm-response-cost header when the gateway sends one, and is 0 otherwise.
 
 export interface RunUsage {
   promptTokens: number;

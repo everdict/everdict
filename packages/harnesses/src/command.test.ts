@@ -422,6 +422,45 @@ describe("CommandHarness", () => {
     expect(calls.closed).toBe(true);
   });
 
+  // ── A REGISTERED MODEL'S BINDING INJECTS `OPENAI_BASE_URL`, AND METERING WATCHED ONLY `OPENAI_API_BASE` ─────────
+  //
+  // The model binding (`packages/domain/src/model/model-binding.ts`) hands a harness its endpoint as
+  // OPENAI_BASE_URL. A trace:none harness bound that way, with metering on, started no proxy and recorded no
+  // usage — the run read as a run that spent nothing.
+  it("meterUsage: meters the base a model binding injects (OPENAI_BASE_URL)", async () => {
+    const { compute, execs } = fakeCompute();
+    const { start, calls } = fakeMeter();
+    const h = new CommandHarness(spec({ env: { OPENAI_BASE_URL: "http://litellm:4000" } }), {
+      runId: () => "rid",
+      meterUsage: true,
+      startUsageProxy: start,
+    });
+    const events = await collect(h.run(compute, "t", ctx));
+    expect(calls.upstream).toBe("http://litellm:4000");
+    expect(execs[0]?.env?.OPENAI_BASE_URL).toBe("http://127.0.0.1:9999");
+    expect(events.filter((e) => e.kind === "llm_call")).toHaveLength(1);
+    expect(calls.closed).toBe(true);
+  });
+
+  it("meterUsage: a harness given the same base under both names goes through one proxy", async () => {
+    const { compute, execs } = fakeCompute();
+    const started: string[] = [];
+    const { start } = fakeMeter();
+    const counting: typeof start = async (opts) => {
+      started.push(opts.upstreamBaseUrl);
+      return start(opts);
+    };
+    const h = new CommandHarness(
+      spec({ env: { OPENAI_API_BASE: "http://litellm:4000", OPENAI_BASE_URL: "http://litellm:4000" } }),
+      { runId: () => "rid", meterUsage: true, startUsageProxy: counting },
+    );
+    const events = await collect(h.run(compute, "t", ctx));
+    expect(started).toEqual(["http://litellm:4000"]);
+    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://127.0.0.1:9999");
+    expect(execs[0]?.env?.OPENAI_BASE_URL).toBe("http://127.0.0.1:9999");
+    expect(events.filter((e) => e.kind === "llm_call")).toHaveLength(1);
+  });
+
   it("even with meterUsage, don't meter when trace isn't none (use its own trace — avoid double-counting)", async () => {
     const { compute, execs } = fakeCompute();
     const { start, calls } = fakeMeter();

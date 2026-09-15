@@ -51,9 +51,10 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
 2. `runCaseJob` uses `job.meterUsage` (falls back to the `EVERDICT_METER_USAGE` env only for direct
    `LocalBackend.dispatch` with no control plane), forces it off for a containerized case (`resolveMeterUsage`)
    → passes `meterUsage` to `makeHarness`.
-3. `CommandHarness.run` (only when `trace:none` + the model-base env var `OPENAI_API_BASE` is present in the
-   command env — avoids double-counting a harness that already reports its own cost) starts a per-run `startUsageProxy(upstream = OPENAI_API_BASE)`,
-   **rewrites `OPENAI_API_BASE` to the proxy**, runs the command (aider/any CLI — **zero harness code**), then
+3. `CommandHarness.run` (only when `trace:none` — avoids double-counting a harness that already reports its own
+   cost) meters every OpenAI-compatible base URL present in the command env: `OPENAI_API_BASE` (aider-style CLIs)
+   and `OPENAI_BASE_URL` (what a registered model's binding injects). It starts one `startUsageProxy` per distinct
+   upstream, **rewrites each of those vars to its proxy**, runs the command (aider/any CLI — **zero harness code**), then
    emits the captured tokens **and cost** as a synthetic **`llm_call`** trace event (`cost: { inputTokens,
    outputTokens, usd }` — `usd` from the gateway cost header, `0` for subscription models).
 4. That event rides `runCase` → `result.trace`, so the **existing** settle path picks it up: `RunService` loops

@@ -20,6 +20,10 @@ import {
 import { flattenEnv } from "@everdict/domain";
 import { type StartedUsageProxy, type TraceSource, buildTraceSource, startUsageProxy } from "@everdict/trace";
 
+// The env names a harness is handed its OpenAI-compatible endpoint under: OPENAI_API_BASE (aider-style CLIs) and
+// OPENAI_BASE_URL (a registered model's binding, packages/domain/src/model/model-binding.ts).
+const METERED_BASE_ENV_VARS: readonly string[] = ["OPENAI_API_BASE", "OPENAI_BASE_URL"];
+
 export interface CommandHarnessOptions {
   workDir?: string;
   // Test injection: trace-source factory (default buildTraceSource, 5 kinds) + runId generator + retry wait.
@@ -34,7 +38,9 @@ export interface CommandHarnessOptions {
   // Usage metering (opt-in): route a trace:none black-box harness's model calls through a local usage-proxy to
   // recover tokens, emitted as synthetic llm_call trace events (→ aggregated by the budget/cost grader via the existing path). BYO + Everdict-owned budget.
   meterUsage?: boolean;
-  meterEnvVar?: string; // The model base-URL env var (default OPENAI_API_BASE). Its value becomes the proxy upstream.
+  // The model base-URL env var to meter. Default: every name a harness is handed its OpenAI-compatible endpoint under —
+  // OPENAI_API_BASE (what aider-style CLIs read) and OPENAI_BASE_URL (what a registered model's binding injects).
+  meterEnvVar?: string;
   // Test injection: swap the proxy starter instead of using a real socket.
   startUsageProxy?: typeof startUsageProxy;
   clock?: () => number; // Event-time source; defaults to the wall clock (`Date.now`). Injected for deterministic tests.
@@ -227,13 +233,25 @@ export class CommandHarness implements EvaluableHarness {
     };
     const trace = this.spec.trace;
     // Usage metering applies only to harnesses without their own trace (trace:none) — avoids double-counting cost. Meaningful only if the base env exists.
-    const meterVar = this.opts.meterEnvVar ?? "OPENAI_API_BASE";
-    const upstream = env[meterVar];
-    let proxy: StartedUsageProxy | undefined;
-    if (this.opts.meterUsage === true && trace.kind === "none" && upstream) {
+    // Every base-URL name present is metered. Watching only OPENAI_API_BASE missed a harness bound to a registered
+    // model, whose binding injects OPENAI_BASE_URL — metering was on and the run recorded nothing. One proxy per
+    // distinct upstream, so a harness handed one endpoint under both names is counted once.
+    const meterVars = this.opts.meterEnvVar !== undefined ? [this.opts.meterEnvVar] : METERED_BASE_ENV_VARS;
+    const proxies: StartedUsageProxy[] = [];
+    if (this.opts.meterUsage === true && trace.kind === "none") {
       const start = this.opts.startUsageProxy ?? startUsageProxy;
-      proxy = await start({ upstreamBaseUrl: upstream, defaultRunId: runId });
-      env[meterVar] = proxy.url; // The child (aider etc.) goes to the proxy → the proxy passes through to upstream + recovers usage
+      const byUpstream = new Map<string, StartedUsageProxy>();
+      for (const name of meterVars) {
+        const upstream = env[name];
+        if (!upstream) continue;
+        let proxy = byUpstream.get(upstream);
+        if (proxy === undefined) {
+          proxy = await start({ upstreamBaseUrl: upstream, defaultRunId: runId });
+          byUpstream.set(upstream, proxy);
+          proxies.push(proxy);
+        }
+        env[name] = proxy.url; // The child goes to the proxy → the proxy passes through to upstream + recovers usage
+      }
     }
 
     // The {{model}} slot is a plain string: the control plane's ModelResolvingDispatcher normalizes spec.model to the
@@ -335,21 +353,26 @@ export class CommandHarness implements EvaluableHarness {
 
       // Emit the metered tokens+cost as a synthetic llm_call — aggregated by the sumCost/cost grader via the existing path.
       // usd is recovered from the gateway cost header (real cost for metered models, 0 for subscription models).
-      if (proxy) {
-        const u = proxy.tally.get(runId);
-        if (u.calls > 0)
+      if (proxies.length > 0) {
+        const tallies = proxies.map((p) => p.tally.get(runId));
+        const sum = (pick: (u: (typeof tallies)[number]) => number) => tallies.reduce((n, u) => n + pick(u), 0);
+        if (sum((u) => u.calls) > 0)
           yield {
             ...stamp(this.now),
             kind: "llm_call",
             model: modelSlot,
-            cost: { inputTokens: u.promptTokens, outputTokens: u.completionTokens, usd: u.usd },
+            cost: {
+              inputTokens: sum((u) => u.promptTokens),
+              outputTokens: sum((u) => u.completionTokens),
+              usd: sum((u) => u.usd),
+            },
           };
       }
 
       // Platform traces (otel/mlflow) are not pulled here — runCase pulls them via collectTrace(runId)
       // after releasing compute (correlated by the same runId). run() emits execution events only.
     } finally {
-      await proxy?.close();
+      await Promise.all(proxies.map((p) => p.close()));
     }
   }
 }
