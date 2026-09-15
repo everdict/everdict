@@ -17,7 +17,7 @@ import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 
-import type { IssueViewBase, IssueViewData } from '../api/issue-view-data'
+import type { IssueViewData } from '../api/issue-view-data'
 import { loadIssueViewAction } from '../api/load-issue-view'
 import { loadIssuePageAction } from '../api/load-issues'
 import type { IssueDirectories } from '../model/directories'
@@ -30,8 +30,8 @@ import { IssueRow } from './issue-row'
 // The body of the issue list — the toolbar and the rows. That the VIEW (filters and display) is held **here** is the heart of this screen.
 //
 // It used to be `router.push` for a filter and a server action plus `router.refresh()` for a grouping change. Both re-render the whole
-// route, so the screen emptied into a skeleton and every read unrelated to the list (members, projects, labels, the cycle roster, GitHub
-// App state) ran again each time. Now only the list changes, and **the previous list stays on screen** until the new one arrives —
+// route, so the screen emptied into a skeleton and every read unrelated to the list (members, projects, labels, GitHub App state) ran again
+// each time. Now only the list changes, and **the previous list stays on screen** until the new one arrives —
 // exactly as Linear does.
 //
 // The address FOLLOWS: only the filters are written, with `history.replaceState` (the door that causes no server render). So the property of
@@ -41,7 +41,6 @@ export function IssueListBody({
   workspace,
   basePath,
   viewKey,
-  base,
   initialView,
   initialData,
   directories,
@@ -52,16 +51,12 @@ export function IssueListBody({
   workspace: string
   basePath: string
   viewKey: string
-  // The narrowing the address decides (team, triage, cycle) — unchanged when the view changes.
-  base: IssueViewBase
   initialView: IssueView
   initialData: IssueViewData
   directories: IssueDirectories
   projects: { id: string; name: string }[]
   canWrite: boolean
   timeZone: string
-  // The team chips on the workspace-wide list — drawn and passed by the server (unrelated to the view, and only links).
-  // The bulk edit bar — only on a screen with something to select.
 }) {
   const t = useTranslations('issuesPage')
   const [view, setView] = useState(initialView)
@@ -80,7 +75,7 @@ export function IssueListBody({
       const seq = sequence.current + 1
       sequence.current = seq
       setPending(true)
-      void loadIssueViewAction({ base, view: merged })
+      void loadIssueViewAction({ view: merged })
         .then((fresh) => {
           if (sequence.current !== seq) return
           setData(fresh)
@@ -96,7 +91,7 @@ export function IssueListBody({
           setPending(false)
         })
     },
-    [base, basePath, viewKey]
+    [basePath, viewKey]
   )
 
   const error =
@@ -147,20 +142,8 @@ export function IssueListBody({
         ) : empty ? (
           <EmptyState
             icon={<CircleDot strokeWidth={1.75} />}
-            title={
-              base.cycle !== undefined
-                ? t('cycleEmptyTitle')
-                : base.triage === true
-                  ? t('triageEmptyTitle')
-                  : t('emptyTitle')
-            }
-            hint={
-              base.cycle !== undefined
-                ? t('cycleEmptyHint')
-                : base.triage === true
-                  ? t('triageEmptyHint')
-                  : t('emptyHint')
-            }
+            title={t('emptyTitle')}
+            hint={t('emptyHint')}
           />
         ) : view.grouping === 'none' ? (
           <FlatIssues

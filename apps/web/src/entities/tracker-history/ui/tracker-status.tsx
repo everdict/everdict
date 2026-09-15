@@ -7,13 +7,11 @@ import { Badge } from '@/shared/ui/badge'
 
 // A tracker record with a history. The status vocabulary differs per kind (issue 7 · project 4 · initiative 3), so it is used only for
 // choosing the status chip.
-export type TrackerKind = 'issue' | 'cycle' | 'project' | 'initiative'
+export type TrackerKind = 'issue' | 'project' | 'initiative'
 
 // The status chip is the SAME badge the lists and details use — a different shape only in the history would make one status look different per screen.
-// The value is unvalidated free text (a history detail, a platform event payload), so a string outside the vocabulary falls back to a raw chip.
-// This file has no hooks and no 'use client' — so the tracker history (a client island) and the home activity feed (a server
-// component) draw the same one set of chips.
-export function TrackerStatusChip({ kind, value }: { kind: TrackerKind; value: string }) {
+// The value is unvalidated free text (a history detail), so a string outside the vocabulary falls back to a raw chip.
+function TrackerStatusChip({ kind, value }: { kind: TrackerKind; value: string }) {
   if (kind === 'issue') {
     const parsed = issueStatusSchema.safeParse(value)
     if (parsed.success) return <IssueStatusBadge status={parsed.data} />

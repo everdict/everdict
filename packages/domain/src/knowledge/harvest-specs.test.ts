@@ -136,7 +136,7 @@ describe("harvestRuntime", () => {
   });
 });
 
-describe("spec harvest — the born_from lineage and team scoping", () => {
+describe("spec harvest — the born_from lineage", () => {
   const ds: Dataset = { id: "web-bench", version: "2.0.0", cases: [], tags: [] };
 
   it("projects the version's CapabilityOrigin.from as a born_from edge with the channel on the edge", () => {

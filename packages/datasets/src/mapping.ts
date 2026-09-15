@@ -154,11 +154,6 @@ export function importJsonl(text: string, meta: DatasetMeta, m: CaseMapping): Da
   return rowsToDataset(rows, meta, m);
 }
 
-// Arbitrary CSV (header row + data rows) → Dataset.
-export function importCsv(text: string, meta: DatasetMeta, m: CaseMapping): Dataset {
-  return rowsToDataset(parseCsv(text), meta, m);
-}
-
 // WebVoyager (github.com/MinorJerry/WebVoyager) preset: web→startUrl, ques→task, answer→answer-match, +steps.
 export const WEBVOYAGER_MAPPING: CaseMapping = {
   idField: "id",

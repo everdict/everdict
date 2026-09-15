@@ -234,7 +234,6 @@ function matchesScorecardFilter(
   if (filter.dataset !== undefined && c.dataset.id !== filter.dataset) return false;
   if (filter.harness !== undefined && c.harness.id !== filter.harness) return false;
   if (filter.status !== undefined && c.status !== filter.status) return false;
-  // Ownership ceiling — another team's batch is not visible at all; an unowned one is the workspace's.
   if (filter.judge !== undefined && !(c.orchestration?.judges ?? []).some((j) => j.id === filter.judge)) return false;
   if (filter.scheduleId !== undefined && c.origin?.scheduleId !== filter.scheduleId) return false;
   if (filter.productId !== undefined && c.origin?.productId !== filter.productId) return false;

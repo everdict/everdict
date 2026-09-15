@@ -15,16 +15,6 @@ export const VersionTagsBodySchema = z.object({
 
 // The minimal contract shared by the registries (harness/dataset/judge/runtime/rubric) — this is all the
 // service sees.
-//
-// ── AND THE OWNER, REQUIRED (arch-review 119) ────────────────────────────────────────────────────
-//
-// This used to be the write alone, and the gate below asked `authorize(principal, action)` with nothing to
-// authorize it AGAINST — so a member of any team could retag any team's version through any of the twelve
-// doors this core serves. Version tags are how a release is labelled and found, and editing another team's
-// labels is editing their asset; the documented invariant (docs/auth.md §"The team axis") refuses it.
-//
-// REQUIRED, not optional: an optional owner reader is indistinguishable from a registry that chose not to
-// answer, and the arm that skips the gate is the permissive one (rule `protocol`).
 export interface VersionTaggable {
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
 }

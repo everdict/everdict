@@ -42,7 +42,7 @@ export function RerunScorecardButton({
   judges?: JudgePickerChoice[] // registered Agent Judges available to pick, with their versions
   runtimes?: { id: string }[] // registered runtimes
   runners?: { id: string; label: string }[] // my personal runners
-  hasWorkspaceRunners?: boolean // team shared runner pool available (self:ws)
+  hasWorkspaceRunners?: boolean // workspace-shared runner pool available (self:ws)
 }) {
   const t = useTranslations('rerunScorecard')
   const tr = useTranslations('runScorecard') // reuse the creation form's judge/runtime picker copy

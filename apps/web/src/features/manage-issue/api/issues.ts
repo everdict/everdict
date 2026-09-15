@@ -35,7 +35,6 @@ export async function createIssueAction(input: {
   dueDate?: string
   // Filed as a sub-issue — the parent must be in this workspace (the control plane refuses with a 404).
   parentId?: string
-  // Put straight into an iteration. It must be the issue's own team's cycle (the control plane refuses otherwise).
   projectId?: string
   assignee?: string
   labelIds?: string[]
@@ -61,9 +60,7 @@ export async function updateIssueAction(
     assignee?: string | null
     projectId?: string | null
     priority?: IssuePriority
-    // Adding to and removing from an iteration. Pulling work into a cycle is a change of PLAN rather than a workflow transition, so it is an
-    // ordinary edit (and the control plane sees it the same way). Only the issue's own team's cycles are accepted — another team's are refused.
-    // The project checkpoint. The same rule one level up from cycles — only a milestone of the issue's own project is accepted
+    // The project checkpoint — only a milestone of the issue's own project is accepted
     // (attaching one on an issue with no project is refused with "put it in a project first").
     milestoneId?: string | null
     // null CLEARS: no estimate, no due date, detach from the parent.
@@ -78,37 +75,6 @@ export async function updateIssueAction(
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
-  }
-}
-
-// Move several issues into one iteration — Linear's bulk edit. `null` removes them from the cycle.
-//
-// It fans out per-issue edits rather than adding a new bulk endpoint to the control plane: the server has to judge "is this the issue's own
-// team's cycle" for EACH issue (a separate bulk path would make that judgement exist twice), and partial failure is a normal outcome.
-// So the result states partial failure as it is — reporting "failed" when nineteen moved makes people press it again.
-export async function moveIssuesToCycleAction(
-  ids: string[],
-): Promise<{ moved: number; failed: number; error?: string }> {
-  const ctx = await authContext()
-  const results = await Promise.all(
-    ids.map((id) =>
-      controlPlane
-        .updateIssue(ctx, id, {})
-        .then(() => ({ ok: true }) as const)
-        .catch(
-          (e: unknown) =>
-            ({ ok: false, error: e instanceof Error ? e.message : String(e) }) as const
-        )
-    )
-  )
-  const failures = results.filter((r) => !r.ok)
-  const first = failures[0]
-  return {
-    moved: results.length - failures.length,
-    failed: failures.length,
-    ...(first !== undefined && !first.ok && first.error !== undefined
-      ? { error: first.error }
-      : {}),
   }
 }
 

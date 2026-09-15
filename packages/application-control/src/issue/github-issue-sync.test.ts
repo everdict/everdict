@@ -12,7 +12,7 @@ import type { OutboxEvent } from "../ports/run-store.js";
 import { GithubIssueSync } from "./github-issue-sync.js";
 import { IssueService } from "./issue-service.js";
 
-// Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
+// Numbering is a peer concern: an issue is numbered by its workspace, and the tests only need that to be deterministic.
 const numberAllocator = (() => {
   let n = 0;
   return {

@@ -567,7 +567,7 @@ describe("RunService", () => {
     expect(seen).toBe(false);
   });
 
-  it("private repo: env.source.connectionId → resolved via repoTokenFor and carried as job.repoToken", async () => {
+  it("private repo: the workspace GitHub App token is resolved per git case and carried as job.repoToken", async () => {
     const seen: Array<CaseJob["repoToken"]> = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
@@ -575,36 +575,29 @@ describe("RunService", () => {
         return resultFor(job);
       },
     };
-    // The connection is personally owned → repoTokenFor resolves by owner (submitter subject) ("clone with my connection").
-    const calls: Array<{ owner: string; connectionId: string }> = [];
+    // The installation is the workspace's, so the token is resolved by workspace + git URL, never by submitter.
+    const calls: Array<{ workspace: string; gitUrl: string }> = [];
     const svc = new RunService({
       dispatcher,
       store: new InMemoryRunStore(),
       newId: ids,
-      repoTokenFor: async (owner, connectionId) => {
-        calls.push({ owner, connectionId });
-        return connectionId === "conn-alice" ? "gho_resolved" : undefined;
+      installationTokenFor: async (workspace, gitUrl) => {
+        calls.push({ workspace, gitUrl });
+        return gitUrl.includes("acme/p") ? "ghs_resolved" : undefined;
       },
     });
-    const gitCase = (connectionId?: string): EvalCase => ({
-      ...CASE,
-      env: {
-        kind: "repo",
-        source: { git: "https://github.com/acme/p.git", ref: "main", ...(connectionId ? { connectionId } : {}) },
-      },
-    });
+    const gitCase = (git: string): EvalCase => ({ ...CASE, env: { kind: "repo", source: { git, ref: "main" } } });
     const submit = (c: EvalCase) =>
       svc.submit({ tenant: "acme", submittedBy: "u-alice", harness: { id: "s", version: "0" }, case: c });
-    await submit(gitCase("conn-alice")); // resolved (my connection)
-    await submit(gitCase("conn-missing")); // unresolved
-    await submit(gitCase()); // no connectionId (public)
+    await submit(gitCase("https://github.com/acme/p.git")); // resolved (the App covers this repo)
+    await submit(gitCase("https://github.com/other/q.git")); // unresolved
     await submit(CASE); // files seed (non-git)
     await flush();
-    expect(seen).toEqual(["gho_resolved", undefined, undefined, undefined]);
-    // Cases with no connectionId / non-repo cases never call repoTokenFor. owner is the submitter subject.
+    expect(seen).toEqual(["ghs_resolved", undefined, undefined]);
+    // A non-git case never calls the resolver.
     expect(calls).toEqual([
-      { owner: "u-alice", connectionId: "conn-alice" },
-      { owner: "u-alice", connectionId: "conn-missing" },
+      { workspace: "acme", gitUrl: "https://github.com/acme/p.git" },
+      { workspace: "acme", gitUrl: "https://github.com/other/q.git" },
     ]);
   });
 

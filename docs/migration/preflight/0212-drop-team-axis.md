@@ -40,9 +40,11 @@ it — it is idempotent and resumable per workspace) before applying.
 
 ## What is deliberately NOT preserved
 
-- **Old identifiers stop resolving.** `ENG-12` is not an address any more; the issue's `former_identifiers`
-  records what it used to be called, and nothing serves a redirect. This was the maintainer's choice over
-  freezing old prefixes — stated here because a link in a pull request is where it will be noticed.
+- **Old identifiers are no longer the issue's name.** Every issue is renumbered under the workspace prefix; the
+  maintainer chose that over freezing the old prefixes. `ENG-12` goes into `former_identifiers`, and the
+  identifier lookup still falls back to it (the current spelling wins), so a pasted link lands on the issue and
+  the web redirects to its new name. The one case that does not survive: when the new sequence mints the SAME
+  string for a different issue (a workspace whose prefix equals an old team key), the link opens that other issue.
 - **Cycles and triage are gone**, not migrated. "Cycle 7" existed once per team, so collapsing them into one
   sequence would renumber windows that retrospectives cite by number.
 - **Team privacy is gone.** See condition 3.

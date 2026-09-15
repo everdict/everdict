@@ -28,7 +28,7 @@ function isOnline(lastSeenAt?: string): boolean {
   return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 }
 
-// Workspace-shared runner (team resource) — once an admin registers a headless runner (team build server/CI),
+// Workspace-shared runner — once an admin registers a headless runner (a shared build server/CI),
 // any member of this workspace can target it via self:ws:<id>. Unlike personal runners (account page, one-click
 // desktop), the token is shown once and attached on the server via `everdict runner --pair`. Register/revoke is
 // admin-only (settings:write) — the control plane enforces it.

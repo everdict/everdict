@@ -76,7 +76,7 @@ sentence as the other direction.
 
 `CaseAttemptSchema` · `ExecutionRevisionSchema` · `ExecutionPassSchema` · `ScorecardRetrySummarySchema`, wired
 onto `ScorecardRecordSchema`; `packages/domain/src/scorecard/execution-revision.ts` holds the pure answers:
-`attemptsForCase` · `attemptCounts` · `retrySummaryOf` · `nextExecutionRevision` · `retryReasonRequired` ·
+`attemptsForCase` · `retrySummaryOf` · `nextExecutionRevision` · `retryReasonRequired` ·
 `keysRequiringReason` · `supersedeAttempts`.
 
 Six invariants, each driven RED by neutralizing it in the production file and restored:

@@ -51,10 +51,6 @@ function escapeCaseId(caseId: string): string {
   return caseId.replaceAll("%", "%25").replaceAll(CASE_KEY_SEPARATOR, "%23");
 }
 
-function unescapeCaseId(escaped: string): string {
-  return escaped.replaceAll("%23", CASE_KEY_SEPARATOR).replaceAll("%25", "%");
-}
-
 // The canonical KEY — what maps, sets and digest planes index a (case, trial) pair by.
 //
 // Absent trial collapses to 0 here on purpose: a single-run case and trial 0 of the same case are never both
@@ -62,16 +58,6 @@ function unescapeCaseId(escaped: string): string {
 // byte-identical to what every stored digest was computed under.
 export function encodeCaseKey(key: CaseKey): string {
   return `${escapeCaseId(key.caseId)}${CASE_KEY_SEPARATOR}${key.trial ?? 0}`;
-}
-
-// The inverse — total over anything `encodeCaseKey` produced. A string with no separator has no trial axis
-// to recover, so it decodes as the bare case (which is exactly what `caseKeyAddress` writes for one).
-export function decodeCaseKey(encoded: string): CaseKey {
-  const cut = encoded.lastIndexOf(CASE_KEY_SEPARATOR);
-  if (cut < 0) return { caseId: unescapeCaseId(encoded) };
-  const trial = Number(encoded.slice(cut + 1));
-  if (!Number.isInteger(trial) || trial < 0) return { caseId: unescapeCaseId(encoded) };
-  return { caseId: unescapeCaseId(encoded.slice(0, cut)), trial };
 }
 
 // The canonical ADDRESS — what a durable coordinate (an object-store key, a materialized trajectory's runId)

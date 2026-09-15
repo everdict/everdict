@@ -3,7 +3,7 @@ import { type WorkflowStateRecord, WorkflowStateRecordSchema } from "@everdict/c
 import type { SqlClient } from "../client.js";
 import { iso } from "./row.js";
 
-// A team's named workflow states — same contract in-memory and on Postgres. Always ordered by `position`: the
+// A workspace's named workflow states — same contract in-memory and on Postgres. Always ordered by `position`: the
 // board IS the order, so a store that returned them by name would be returning a different thing.
 
 export class InMemoryWorkflowStateStore implements WorkflowStateStore {
@@ -20,23 +20,6 @@ export class InMemoryWorkflowStateStore implements WorkflowStateStore {
 
   async listByTenant(tenant: string): Promise<WorkflowStateRecord[]> {
     return [...this.byId.values()].filter((record) => record.tenant === tenant).sort((a, b) => a.position - b.position);
-  }
-
-  async update(
-    tenant: string,
-    id: string,
-    patch: Partial<WorkflowStateRecord>,
-  ): Promise<WorkflowStateRecord | undefined> {
-    const current = this.byId.get(id);
-    if (!current || current.tenant !== tenant) return undefined;
-    const next: WorkflowStateRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    this.byId.set(id, next);
-    return next;
-  }
-
-  async remove(tenant: string, id: string): Promise<void> {
-    const current = this.byId.get(id);
-    if (current && current.tenant === tenant) this.byId.delete(id);
   }
 }
 
@@ -102,26 +85,5 @@ export class PgWorkflowStateStore implements WorkflowStateStore {
       [tenant],
     );
     return rows.map(rowToRecord);
-  }
-
-  async update(
-    tenant: string,
-    id: string,
-    patch: Partial<WorkflowStateRecord>,
-  ): Promise<WorkflowStateRecord | undefined> {
-    const current = await this.get(tenant, id);
-    if (!current) return undefined;
-    const next: WorkflowStateRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
-    const { rows } = await this.client.query<WorkflowStateRow>(
-      `UPDATE everdict_workflow_states
-         SET name=$3, description=$4, status=$5, color=$6, position=$7, updated_at=$8::timestamptz
-       WHERE tenant=$1 AND id=$2 RETURNING *`,
-      [tenant, id, next.name, next.description ?? null, next.status, next.color, next.position, next.updatedAt],
-    );
-    return rows[0] ? rowToRecord(rows[0]) : undefined;
-  }
-
-  async remove(tenant: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM everdict_workflow_states WHERE tenant=$1 AND id=$2", [tenant, id]);
   }
 }

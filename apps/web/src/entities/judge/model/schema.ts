@@ -9,9 +9,6 @@ import { versionOriginsSchema } from '@/entities/capability-origin'
 export const judgeSummarySchema = z.object({
   id: z.string(),
   owner: z.string(),
-  // The owning team (mig 0106). It decides who may CHANGE this and — for a private team — who sees it at
-  // all, and it is re-fileable (`POST /<resource>/:id/team`), so the detail shows it and offers the move.
-  // Absent = unowned (a `_shared` entry, or one from before the axis), which is the workspace's.
   versions: z.array(z.string()),
   // Who first registered it and when, plus the most recent registration time. The grounds on which a judge detail says "who made this and when",
   // and together with versionOrigins below it forms one line of lineage (a seed or `_shared` has no registering subject).

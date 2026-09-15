@@ -272,7 +272,7 @@ export class InitiativeService {
         { initiative: id },
         "This initiative still holds projects — move them out first.",
       );
-    // Same reason a team with sub-teams cannot be deleted: the children would point at an id that resolves to
+    // Same reason an issue with sub-issues cannot be deleted: the children would point at an id that resolves to
     // nothing, and where they should go instead is the member's decision.
     const children = (await this.deps.store.list(tenant)).filter((initiative) => initiative.parentId === id);
     if (children.length > 0)

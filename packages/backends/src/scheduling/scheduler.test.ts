@@ -4,7 +4,7 @@ import { inMemoryBudget } from "@everdict/domain";
 import { describe, expect, it, vi } from "vitest";
 import type { Backend, DispatchOptions } from "../backend.js";
 import { BackendRegistry } from "../placement/registry.js";
-import { Scheduler, binPackPolicy } from "./scheduler.js";
+import { Scheduler } from "./scheduler.js";
 
 function result(id: string): CaseResult {
   return {
@@ -221,20 +221,6 @@ describe("Scheduler", () => {
     expect(b.handled).toBe(1);
 
     b.releaseAll();
-    await p;
-  });
-
-  it("the binPack policy fills the tightest backend first", async () => {
-    const a = new ControlledBackend("a", 1);
-    const b = new ControlledBackend("b", 3);
-    const sched = new Scheduler(new BackendRegistry().register("a", a).register("b", b), { policy: binPackPolicy });
-
-    const p = sched.dispatch(job());
-    await flush();
-    expect(a.handled).toBe(1); // a, which has the least free, first
-    expect(b.handled).toBe(0);
-
-    a.releaseAll();
     await p;
   });
 

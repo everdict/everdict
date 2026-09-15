@@ -2,7 +2,7 @@
 kind: wiki
 title: "Usage metering (gateway sidecar)"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/trace/src/usage-proxy.ts, packages/job-runner/src/run.ts, apps/api/src/composition/env-policy.ts, apps/api/src/api/workspace/settings.mcp.ts]
 ---
 # Usage metering (gateway sidecar)
@@ -89,8 +89,8 @@ disables metering fail-safe for `containerize` jobs (warn logged) — meter thos
 - **HTTP**: `PUT/GET /workspace/settings` (`settings:write`/`settings:read`, `apps/api/src/api/workspace/settings.routes.ts`).
 - **MCP**: `get_workspace_settings` / `set_workspace_settings` tools (`apps/api/src/api/workspace/settings.mcp.ts`,
   admin-gated, workspace-scoped).
-- **Web**: no page offers the toggle today. `SettingsForm` (`apps/web/src/features/workspace-settings/ui/settings-form.tsx`)
-  renders a `meterUsage` switch and is exported from the feature, but no route mounts it.
+- **Web**: no page offers the toggle, and the web client calls neither route (the unmounted form that once rendered
+  a `meterUsage` switch was deleted on 2026-09-16).
 
 ## Note
 `$` capture reads `0` on workclaw's LiteLLM because its models are subscription (unpriced); it yields real `$`

@@ -19,7 +19,7 @@ import { FacetFilterMenu, type FacetOption, type FacetSpec } from '@/shared/ui/l
 
 import type { IssueDirectories } from '../model/directories'
 
-// The unspecified bucket's value. A query parameter has no null, so the empty string is its name — no assignee, no project and no cycle are
+// The unspecified bucket's value. A query parameter has no null, so the empty string is its name — no assignee and no project are
 // groups people genuinely filter by and have to be reachable as filters.
 const UNSET = ''
 
@@ -41,7 +41,7 @@ export function IssueFilterMenu({
   const t = useTranslations('issuesPage')
   const tracker = useTranslations('tracker')
 
-  // The value list per axis. A closed vocabulary (status, priority) comes from the catalog; an open one (people, labels, projects, cycles) from the directory.
+  // The value list per axis. A closed vocabulary (status, priority) comes from the catalog; an open one (people, labels, projects) from the directory.
   const facets = useMemo((): FacetSpec[] => {
     const optionsOf = (facet: IssueFilterFacet): FacetOption[] => {
       switch (facet) {

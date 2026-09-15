@@ -11,7 +11,6 @@ import type {
   IssueRecord,
   IssueResolution,
   IssueStatus,
-  IssueStatusCategory,
   IssueStatusCause,
   IssueSummary,
 } from "@everdict/contracts";
@@ -90,7 +89,7 @@ export interface IssueEditInput {
 
 export interface IssueStatusChangeOptions {
   cause?: IssueStatusCause;
-  // The team state the issue landed in, when the caller moved it by board column rather than by canonical
+  // The workflow state the issue landed in, when the caller moved it by board column rather than by canonical
   // status. The status is still what everything programmatic reads; this records which column that was.
   stateId?: string;
   scorecardId?: string;
@@ -125,14 +124,10 @@ export const ISSUE_PRIORITIES_BY_RANK: readonly IssuePriority[] = [...ISSUE_PRIO
 // OPEN = not done and not cancelled. `regressed` is deliberately open: a resolution that stopped holding is
 // unfinished work, and the initiative readiness must treat it exactly like an unstarted issue.
 // The closed half is `CLOSED_ISSUE_STATUSES` in the contracts, shared with the stores' aggregate counts — the
-// SQL that counts open issues per team passes that same array, so the two readings cannot drift apart.
+// SQL that counts open issues per group passes that same array, so the two readings cannot drift apart.
 // The category IS the judgment: a status is open unless its category is completed or canceled. Derived rather
-// than listed, so a state a team renames (or adds) can never change what "open" means — and `regressed`, whose
+// than listed, so a state a workspace renames (or adds) can never change what "open" means — and `regressed`, whose
 // category is `started`, keeps blocking a release exactly like unstarted work.
-export function issueStatusCategory(status: IssueStatus): IssueStatusCategory {
-  return ISSUE_STATUS_CATEGORY[status];
-}
-
 export function isOpenIssueStatus(status: IssueStatus): boolean {
   const category = ISSUE_STATUS_CATEGORY[status];
   return category !== "completed" && category !== "canceled";
@@ -860,7 +855,7 @@ export class Issue {
         status: to,
         // The board column the move landed in, when the caller moved by column. A move made by canonical status
         // (the regression watch, a GitHub sync, an agent) leaves it alone — the issue is then in no column, and
-        // a reader falls back to the team's default state for that status, which is the honest reading.
+        // a reader falls back to the workspace's default state for that status, which is the honest reading.
         ...(options.stateId !== undefined ? { stateId: options.stateId } : {}),
         history: appendHistory(this.record.history, { at: now, by, event, detail }),
         updatedAt: now,

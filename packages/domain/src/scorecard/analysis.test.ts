@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  type AnalysisCard,
-  type AnalysisConfig,
-  analysisDimensionValue,
-  analysisMetricNames,
-  computeAnalysis,
-} from "./analysis.js";
+import { type AnalysisCard, type AnalysisConfig, analysisDimensionValue, computeAnalysis } from "./analysis.js";
 
 // Fixtures mirror the web engine's semantics (apps/web/.../analyze-scorecards/model/analysis.ts) — these tests
 // are the lockstep guard for the server-side twin.
@@ -50,17 +44,6 @@ describe("analysisDimensionValue", () => {
     expect(analysisDimensionValue(c, "day")).toBe("2026-06-15");
     expect(analysisDimensionValue(c, "month")).toBe("2026-06");
     expect(analysisDimensionValue(c, "week")).toBe("2026-W25");
-  });
-});
-
-describe("analysisMetricNames", () => {
-  it("orders metric names by frequency", () => {
-    const names = analysisMetricNames([
-      card("a", { summary: [{ metric: "judge", count: 1, mean: 1 }] }),
-      card("b", { summary: [{ metric: "cost", count: 1, mean: 1 }] }),
-      card("c", { summary: [{ metric: "cost", count: 1, mean: 1 }] }),
-    ]);
-    expect(names).toEqual(["cost", "judge"]);
   });
 });
 

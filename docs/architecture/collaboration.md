@@ -725,7 +725,7 @@ flowchart LR
   workflow sandbox code. **Workflow code must stay deterministic** — all I/O lives in the activity.
 - **`runWorker(opts)`** — long-running; builds the `Scheduler` from `BackendsConfig` (auth env via
   `collectAuthEnv`), registers every workflow in `packages/orchestrator/src/workflows.ts` (`evalCaseWorkflow`,
-  `suiteWorkflow`, `scorecardBatchWorkflow`, `scheduledScorecardWorkflow`, …) and the activities (`dispatchCase`,
+  `scorecardBatchWorkflow`, `scheduledScorecardWorkflow`, …) and the activities (`dispatchCase`,
   `runBatchCase`, …). **Called by:** `apps/cli` (`everdict worker`).
 
 ---
@@ -776,9 +776,6 @@ classDiagram
   class ServiceTopologyBackend {
     +dispatch(job) CaseResult
   }
-  class EnvironmentManager {
-    +keysFor(runId) RunKeys
-  }
   class TraceSource {
     <<interface>>
     +fetch(runId) TraceEvents
@@ -790,7 +787,6 @@ classDiagram
   ServiceTopologyBackend --> TopologyRuntime
   ServiceTopologyBackend --> TraceSource
   ServiceTopologyBackend ..> Grader : grade
-  ServiceTopologyBackend ..> EnvironmentManager : per-run keys
 ```
 
 ```mermaid
@@ -817,7 +813,7 @@ sequenceDiagram
 - **`TopologyRuntime`** — `NomadTopologyRuntime` / `K8sTopologyRuntime` / `DockerTopologyRuntime`; warm topology pool
   keyed by `spec@version@zoneId` (no cross-tenant sharing), per-case target env (`TargetEnvHandle`: `cdpBase?` +
   `snapshot`/`dispose`), acquired through `targetAcquirerFor`.
-- **`EnvironmentManager` / `keysFor(runId)`** — deterministic per-run isolation keys mapped onto
+- **`keysFor(runId)` / `wiringVars`** — deterministic per-run isolation keys mapped onto
   `TopologyDependency.isolateBy` (`thread_id` / `key-prefix` / `object-prefix` / `schema` / `external`).
 - **Builders:** `buildNomadTopologyJob` / `buildK8sManifests` (+ browser variants such as `buildBrowserJob`), `resolvePort`.
   See `docs/service-harness.md`.
@@ -934,8 +930,7 @@ classDiagram
 
 - **Version resolution** — `compareVersions` / `sortVersions` (the version algebra is `@everdict/domain`); `latest` =
   highest semver; `specsEqual` guards immutability (re-registering a version with a different spec → conflict).
-- **GitOps source** — `loadHarnessTaxonomyDir` / `loadDatasetDir` / `loadJudgeDir` / `loadRubricDir` / `loadModelDir` /
-  `loadRuntimeDir` seed from files.
+- **GitOps source** — `loadHarnessTaxonomyDir` seeds the harness template and instance registries from files.
 - **Consumed by:** `apps/api` (route + service resolution; it also wires `ServiceTopologyBackend.specFor` to the
   harness instance registry — `@everdict/topology` never imports the registry) and `apps/agent`. See `docs/registry.md`, `docs/datasets.md`, `docs/judges.md`, `docs/runtimes.md`.
 

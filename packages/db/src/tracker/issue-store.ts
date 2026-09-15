@@ -99,7 +99,6 @@ function matchesFilter(record: IssueRecord, filter: IssueListFilter | undefined)
   if (filter.assignee !== undefined && record.assignee !== filter.assignee) return false;
   if (filter.priority !== undefined && record.priority !== filter.priority) return false;
   if (filter.milestoneId !== undefined && record.milestoneId !== filter.milestoneId) return false;
-  if (filter.stateId !== undefined && record.stateId !== filter.stateId) return false;
   // `null` means "top-level only", so it is checked against absence rather than against an id.
   if (filter.parentId === null && record.parentId !== undefined) return false;
   if (typeof filter.parentId === "string" && record.parentId !== filter.parentId) return false;
@@ -153,7 +152,7 @@ export class InMemoryIssueStore implements IssueStore {
     return record && record.tenant === tenant ? record : undefined; // another workspace's row reads as nonexistent
   }
 
-  // Current name first, then the names this issue used to have — a team move re-mints the identifier, and the
+  // Current name first, then the names this issue used to have — a re-mint changes the identifier, and the
   // link somebody pasted last month has to keep landing here. Ordering matters: a name only ever appears in one
   // issue's `formerIdentifiers`, but the live spelling always wins.
   async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
@@ -422,7 +421,7 @@ export class PgIssueStore implements IssueStore {
 
   // Served by the (tenant, identifier) unique index from migration 0105 — the same index that makes the
   // identifier a safe URL key in the first place — with the GIN-indexed `former_identifiers` (0108) as the
-  // fallback, so a link minted before a team move still lands on the issue it named. The ORDER BY is what makes
+  // fallback, so a link minted before a re-mint still lands on the issue it named. The ORDER BY is what makes
   // the live spelling win: both branches can only ever match one row, but never the same one.
   async getByIdentifier(tenant: string, identifier: string): Promise<IssueRecord | undefined> {
     const { rows } = await this.client.query<IssueRow>(
@@ -472,10 +471,6 @@ export class PgIssueStore implements IssueStore {
     if (filter?.milestoneId !== undefined) {
       conds.push(`milestone_id = ${next()}`);
       params.push(filter.milestoneId);
-    }
-    if (filter?.stateId !== undefined) {
-      conds.push(`state_id = ${next()}`);
-      params.push(filter.stateId);
     }
     if (filter?.parentId === null) conds.push("parent_id IS NULL");
     else if (typeof filter?.parentId === "string") {
@@ -665,7 +660,7 @@ export class PgIssueStore implements IssueStore {
     return orderIssueGroupCounts(rows.map((row) => ({ key: row.key, count: Number(row.count) })));
   }
 
-  // One GROUP BY over the issue table instead of a fetch per team. `FILTER` is what keeps "how many, and how
+  // One GROUP BY over the issue table instead of a fetch per group. `FILTER` is what keeps "how many, and how
   // many open" a single pass; the closed vocabulary rides in as a parameter so the SQL and `isOpenIssueStatus`
   // are the same statement.
 

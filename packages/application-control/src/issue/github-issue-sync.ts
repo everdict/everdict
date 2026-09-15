@@ -55,7 +55,7 @@ export interface GithubIssueSyncDeps {
   store: IssueStore;
   // Transitions go back through the service so a sync-driven close emits the SAME fact a member's close does.
   issues: IssueService;
-  // Same collaborator IssueService uses — an imported copy is numbered by the team it lands in.
+  // Same collaborator IssueService uses — an imported copy is numbered by the workspace it lands in.
   numbers: IssueNumberAllocator;
   // GitHub owns labels by NAME, everdict stores ids — so every pull maps the remote names onto the workspace
   // registry (defining what is missing) before the pure aggregate sees them. Absent = the deployment has no

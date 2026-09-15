@@ -36,14 +36,6 @@ export const PLATFORM_EVENT_KINDS = [
   "harness.registered",
   "dataset.registered",
   "judge.registered",
-  // NOTHING EMITS THESE FOUR KINDS. They recorded an ownership transfer between teams (a capability, or the
-  // scorecard its evidence landed in, re-filed under another team); the team axis was dropped in migrations
-  // 0211/0212, so no transfer exists to report. The kinds are still in the vocabulary, and an event already on the
-  // log still parses only while they are (the store validates `kind` against this list).
-  "harness.moved",
-  "dataset.moved",
-  "judge.moved",
-  "scorecard.moved",
   "scorecard.gate.decided", // a release-gate decision was recorded against a candidate (payload: decision/baseline)
   "scorecard.gate.overridden", // a blocking decision was forced through — who and why ride the payload
   // A workspace-filesystem write published an attributed revision — the revision ledger is the state, this is

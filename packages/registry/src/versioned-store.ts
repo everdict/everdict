@@ -11,13 +11,10 @@ interface Entry<T> {
   seq: number;
   createdAt: string; // registration time (ISO)
   createdBy?: string; // registering subject (absent for seed/file)
-  // The OWNING TEAM. Metadata like createdBy, deliberately outside the versioned content: ownership can be
-  // transferred, and rewriting a spec to do it would mint a new version of something that did not change.
-  // Absent = unowned (seed/_shared/legacy) → the team gate does not apply. See can() in @everdict/domain.
   deletedAt?: number; // soft-delete tombstone — once set, excluded from every read (content preserved, same pattern as datasets)
   tags?: string[]; // version tags — free-form labels attached because a version is hard to tell apart by number alone. Mutable metadata (outside content immutability, on par with createdBy)
   // WHERE this version came from (the issue it was built for, the agent + conversation that shaped it). Metadata
-  // beside createdBy for the same reason ownership is: provenance must not mint a version of unchanged content.
+  // beside createdBy, outside the versioned content: provenance must not mint a version of unchanged content.
   origin?: CapabilityOrigin;
 }
 

@@ -29,10 +29,6 @@ const INTERPRETERS: Record<string, Interpreter> = {
   ts: { image: "node:22-alpine", run: (f) => `node --experimental-strip-types ${f}` },
 };
 
-export function isRunnableFilePath(path: string): boolean {
-  return interpreterFor(path) !== undefined;
-}
-
 // The plan for a path, or undefined when nothing in the table knows how to run it. `image` overrides the
 // interpreter's default image but never the command — running a Python file stays `python <file>` whatever
 // image it runs in.

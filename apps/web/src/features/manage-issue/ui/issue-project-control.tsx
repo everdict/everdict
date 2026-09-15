@@ -34,7 +34,7 @@ function ProjectName({ project }: { project: IssueProjectOption }) {
   )
 }
 
-// The project an issue belongs to — changed right where status, priority, team and labels are (the attribute column). It used to appear as a
+// The project an issue belongs to — changed right where status, priority and labels are (the attribute column). It used to appear as a
 // single link line only when attached, and the way to add or remove was inside the ⋯ menu's edit dialog — opening a whole issue form to put
 // an issue into a project is not Linear's path.
 //
@@ -50,9 +50,7 @@ export function IssueProjectControl({
   workspace: string
   id: string
   project: IssueProjectOption | undefined
-  // The projects this issue's team is on (the calling screen filters with `?team=`). A project is worked by several teams, but not any team
-  // can be put on one — an issue can only enter a project its OWN team is on, and the control plane enforces that. So everything here is
-  // genuinely selectable.
+  // The workspace's projects — every one of them is genuinely selectable.
   projects: IssueProjectOption[]
   canWrite: boolean
 }) {

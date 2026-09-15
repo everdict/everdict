@@ -222,8 +222,8 @@ export const WorkspaceSettingsSchema = z.object({
   // Per-harness span-attribute mapping overlay (harness id → SpanAttrMapping). The mutable conversion layer that sits
   // BETWEEN a harness (which produces spans in its own instrumentation shape) and a judge (which consumes normalized
   // TraceEvents) — independently editable without bumping the immutable harness/judge version. Overrides the harness
-  // spec's traceSource.mapping when resolving a trace source (resolveHarnessTraceMapping). Authored in the judge wizard
-  // against a real picked trace; applied at the control-plane trace-collection seams (dispatch-after judge + pull-eval).
+  // spec's traceSource.mapping when resolving a trace source. Authored in the judge wizard against a real picked trace;
+  // applied at the control-plane trace-collection seams (dispatch-after judge + pull-eval).
   // Same jsonb-merge / service-managed replace semantics as traceSourceByHarness. Design: docs/architecture/judge-input-contract.md
   spanAttrMappingByHarness: z.record(SpanAttrMappingSchema).optional(),
   // BYO egress proxies (browser-profiles S4) — per-country proxy pool for the interactive login browser (and eval

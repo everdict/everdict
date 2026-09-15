@@ -78,7 +78,7 @@ export function CreateScheduleForm({
   runtimes: { id: string; capabilities?: string[] }[]
   judges?: JudgePickerChoice[]
   runners?: { id: string; label: string }[]
-  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
+  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when workspace-shared runners exist
   traceSources?: TraceSourceConfig[] // registered observability sources — enable the "evaluate traces" (pull) mode
   initial?: Partial<Values>
   scheduleId?: string
@@ -560,7 +560,7 @@ export function CreateScheduleForm({
                             : {}),
                         }
                       }),
-                      // Team shared runner pool.
+                      // Workspace-shared runner pool.
                       ...(hasWorkspaceRunners
                         ? [
                             {

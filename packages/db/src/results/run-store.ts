@@ -233,12 +233,10 @@ export class InMemoryRunStore implements RunStore {
     // together). Applied BEFORE paging, like the query does.
     const viewer = opts?.viewer;
     const audience = viewer === undefined ? inTenant : inTenant.filter((r) => canReadRun(r, viewer));
-    // A private team's runs are that team's work — the same ceiling every other team-owned read stays under.
-    const teamScoped = audience;
     // …and the lifecycle narrowing the adapter applies in its WHERE (perf review). Before the page, like
     // every other predicate here: a twin that filtered after paging would answer a different size.
     const statuses = opts?.statuses;
-    const scoped = statuses === undefined ? teamScoped : teamScoped.filter((r) => statuses.includes(r.status));
+    const scoped = statuses === undefined ? audience : audience.filter((r) => statuses.includes(r.status));
     // runnerId → runs this self-hosted runner executed (provenance), newest first, capped. Implies children included
     // (a runner mostly runs scorecard cases). Mirrors the Pg jsonb filter.
     if (opts?.runnerId) {

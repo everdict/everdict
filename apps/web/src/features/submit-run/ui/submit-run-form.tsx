@@ -35,7 +35,7 @@ export function SubmitRunForm({
   harnesses: Harness[]
   runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
-  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
+  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when workspace-shared runners exist
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -164,7 +164,7 @@ export function SubmitRunForm({
                         : {}),
                     }
                   }),
-                  // Team shared runner pool — takes any registered team runner that meets capability (multiple runners = concurrency).
+                  // Workspace-shared runner pool — takes any registered workspace runner that meets capability (multiple runners = concurrency).
                   ...(hasWorkspaceRunners
                     ? [
                         {

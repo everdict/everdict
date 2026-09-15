@@ -57,7 +57,7 @@ export interface BuildSession {
 
 export interface CampaignBuildDeps {
   builds: CampaignBuildStore;
-  // The campaign the build is for — its subject (the harness family and baseline) and its team.
+  // The campaign the build is for — its subject (the harness family and baseline).
   campaigns: {
     get(
       tenant: string,

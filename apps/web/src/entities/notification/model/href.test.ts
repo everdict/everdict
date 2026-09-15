@@ -29,11 +29,10 @@ describe('notificationHref', () => {
     )
   })
 
-  // The regression that started this: an @mention on an issue or a cycle had no mapping at all, so the click
+  // The regression that started this: an @mention on an issue had no mapping at all, so the click
   // went to the workspace home and the mention was consumed unread-to-read on the way.
   it.each([
     ['issue', '/acme/issue/i1?comment=c1'],
-    ['cycle', '/acme/cycle/i1?comment=c1'],
     ['project', '/acme/project/i1?comment=c1'],
     ['initiative', '/acme/initiative/i1?comment=c1'],
     ['dataset', '/acme/dataset/i1?comment=c1'],

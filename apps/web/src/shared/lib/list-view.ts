@@ -94,7 +94,7 @@ export interface ListViewSpec<T> {
   groupKey: (item: T, grouping: string) => string | null
   compare: (a: T, b: T, order: string) => number
   // The order the groups stand in. For a closed vocabulary the vocabulary IS the order (status); where the values have an order of their own
-  // (a date) it is a comparator. Returning nothing means largest group first — the only sensible ordering for an axis whose names have no order (people, teams).
+  // (a date) it is a comparator. Returning nothing means largest group first — the only sensible ordering for an axis whose names have no order (people).
   groupOrder?: (
     grouping: string
   ) => readonly string[] | ((a: string, b: string) => number) | undefined

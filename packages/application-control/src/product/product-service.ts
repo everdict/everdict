@@ -279,7 +279,7 @@ export class ProductService {
 
   // A product answers to two names: its slug (what a URL carries) and its id (what every stored pointer
   // carries). Resolution lives in the SERVICE rather than in the routes, so HTTP, MCP and every headless
-  // caller accept both forms without any of them learning the rule — the team-key precedent.
+  // caller accept both forms without any of them learning the rule — the issue-identifier precedent.
   async get(tenant: string, ref: string): Promise<ProductRecord> {
     const record = await findProductByRef(this.deps.store, tenant, ref);
     if (!record) throw new NotFoundError("NOT_FOUND", { id: ref }, `product '${ref}' not found.`);

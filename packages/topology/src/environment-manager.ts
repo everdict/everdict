@@ -93,10 +93,3 @@ export function perRunFields(perRun: string[], vocab: Record<string, string>, se
 export function newRunId(): string {
   return randomUUID();
 }
-
-// (Phase 2 extends this to warm-pool/lease management)
-export class EnvironmentManager {
-  newRun(): RunKeys {
-    return keysFor(newRunId());
-  }
-}

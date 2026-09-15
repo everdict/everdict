@@ -43,8 +43,8 @@ export type CapabilityOriginSourceType = z.infer<typeof CapabilityOriginSourceTy
 
 export const CapabilityOriginRefSchema = z.object({
   type: CapabilityOriginSourceTypeSchema,
-  // The STABLE id, never the display name: an issue's identifier is re-minted when it moves team, and a
-  // provenance stamp that dies on a team move is worse than none.
+  // The STABLE id, never the display name: an issue's identifier can be re-minted (the team axis
+  // folding into the workspace did exactly that), and a provenance stamp that dies on a re-mint is worse than none.
   id: z.string().min(1).max(200),
   version: z.string().max(100).optional(),
   // Denormalized display text (`ENG-12 Judge misses truncated answers`), so a detail view draws the chip without

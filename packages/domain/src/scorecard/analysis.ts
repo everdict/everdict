@@ -304,13 +304,6 @@ function maybe<K extends string, V>(key: K, value: V | undefined): Partial<Recor
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
 
-// All metric names across the cards, most frequent first — the vocabulary a caller (web picker / agent) selects from.
-export function analysisMetricNames(cards: AnalysisCard[]): string[] {
-  const freq = new Map<string, number>();
-  for (const card of cards) for (const s of card.summary ?? []) freq.set(s.metric, (freq.get(s.metric) ?? 0) + 1);
-  return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m);
-}
-
 function passesFilters(card: AnalysisCard, c: AnalysisConfig, resolveOwner: (subject: string) => string): boolean {
   const f = c.filters;
   if (

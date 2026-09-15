@@ -17,7 +17,7 @@ export const NODE_TYPES = [
   "workspace", // the tenant / trust-zone root that scopes every other node
   "user", // an authenticated subject (OIDC sub or api-key/runner identity), unifying UserProfile + Principal.subject
 
-  // WHY — the intent stratum (the eval tracker, records/tracker.ts + team.ts + cycle.ts). The ISSUE is the graph's
+  // WHY — the intent stratum (the eval tracker, records/tracker.ts). The ISSUE is the graph's
   // hub: it gathers the capabilities that verify it (`verified_by`), the scorecard that closed it (`resolved_by`),
   // and its place in the plan (`part_of` / `child_of` / `belongs_to`) — so the massive resource strata hang off the
   // problem they exist to answer, not the other way round.

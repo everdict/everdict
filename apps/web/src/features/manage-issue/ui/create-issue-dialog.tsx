@@ -1,13 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { useRefresh } from '@/shared/lib/use-refresh'
 import { useRouter } from 'next/navigation'
 import { Loader2 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { ISSUE_PRIORITIES, issueHref, type IssuePriority, type IssueStatus } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
@@ -28,10 +28,6 @@ const CREATABLE_STATUSES: IssueStatus[] = [
 export interface CreateIssueDialogProps {
   workspace: string
   projects: { id: string; name: string }[]
-  // This team's open iterations. Filled only on a team-scoped screen — on a list mixing several teams there is no answer to "whose cycle 3 is
-  // this", and an issue only enters its own team's cycles.
-  // With only one team there is nothing to pick — the field hides and the server sends it to the default team.
-  teams?: { id: string; key: string; name: string }[]
   // The parent to file this under as a sub-issue. Present, the title reads "add sub-issue" and it STAYS on the parent screen after creation —
   // being bounced to the child screen every time makes it impossible to keep writing the next piece while splitting work up.
   parentId?: string

@@ -1,6 +1,6 @@
 import { PLATFORM_EVENT_KINDS, activityAxisOf } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { activityTrend, calendarSpan, flowTrend, meanPassRate, qualityTrend, weightedMeanPassRate } from "./pulse.js";
+import { activityTrend, calendarSpan, flowTrend, qualityTrend, weightedMeanPassRate } from "./pulse.js";
 
 describe("the activity axis vocabulary", () => {
   it("places every recorded event kind on exactly one axis", () => {
@@ -105,16 +105,6 @@ describe("the quality trend", () => {
   it("counts a batch that reported no rate but does not let it drag the mean to zero", () => {
     const points = qualityTrend([{ day: "2026-08-03", passRate: 0.8 }, { day: "2026-08-03" }], days);
     expect(points[2]).toEqual({ date: "2026-08-03", scorecards: 2, passRate: 0.8 });
-  });
-});
-
-describe("the window's headline pass rate", () => {
-  it("is the mean of what was reported", () => {
-    expect(meanPassRate([0.5, 1])).toBe(0.75);
-  });
-
-  it("is absent when nothing was", () => {
-    expect(meanPassRate([])).toBeUndefined();
   });
 });
 

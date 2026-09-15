@@ -36,9 +36,6 @@ function build() {
   const projectStore = new InMemoryProjectStore();
   const initiativeStore = new InMemoryInitiativeStore();
   const scorecardStore = new InMemoryScorecardStore();
-  // The real team service, not a stand-in: an issue and a project have to land on the SAME default team, since
-  // an issue may only join a project its own team is on. A fake allocator that answered with a team the project
-  // store never heard of made that invariant untestable here — the wiring is production's.
   const app = buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     issueService: new IssueService({
@@ -145,7 +142,7 @@ describe("issue routes", () => {
     await app.close();
   });
 
-  // The web addresses an issue by the name its team minted — `/{workspace}/issues/ENG-12` — so the same ref has
+  // The web addresses an issue by the name its workspace minted — `/{workspace}/issues/ENG-12` — so the same ref has
   // to reach the control plane's reads AND mutations, or a link people paste only half works.
   it("addresses an issue by its identifier as well as its id, on reads and mutations alike", async () => {
     const { app } = build();

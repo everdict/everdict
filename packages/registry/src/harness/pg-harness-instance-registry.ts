@@ -92,8 +92,7 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);
   }
-  // Only what this tenant registered directly (no `_shared` fallback) — see the InMemory twin for why the
-  // private-team ceiling and the ownership transfer both depend on it.
+  // Only what this tenant registered directly (no `_shared` fallback) — see the InMemory twin.
   ownVersions(tenant: string, id: string): Promise<string[]> {
     return this.store.ownVersions(tenant, id);
   }

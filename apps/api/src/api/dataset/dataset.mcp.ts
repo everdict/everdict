@@ -27,9 +27,7 @@ export function registerDatasetTools(server: McpServer, ctx: McpToolContext): vo
       },
       () =>
         run(principal, "datasets:read", async () => {
-          // Same ownership ceiling the BFF list stays under — an agent acts as its creator, so it sees that
-          const visible = await datasets.list(ws);
-          return ok(visible);
+          return ok(await datasets.list(ws));
         }),
     );
 

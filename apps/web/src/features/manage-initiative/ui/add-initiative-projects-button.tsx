@@ -15,7 +15,7 @@ import { addProjectsToInitiativeAction } from '../api/initiatives'
 
 // "What else counts toward this goal" — asked and answered on the goal's own screen. The link is still a field
 // on the project, so this picker offers EXISTING projects rather than creating one: a goal is a way of grouping
-// work that already has a team and a shape, and inventing a project from here would mean inventing those too.
+// work that already has a shape, and inventing a project from here would mean inventing that too.
 export function AddInitiativeProjectsButton({
   initiativeId,
   candidates,

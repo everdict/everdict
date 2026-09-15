@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  type CipherLike,
-  type TokenIo,
-  clearToken,
-  loadToken,
-  loadTokens,
-  saveToken,
-  saveTokens,
-} from "./token-store.js";
+import { type CipherLike, type TokenIo, clearToken, loadToken, loadTokens, saveTokens } from "./token-store.js";
 
 // A fake cipher at the XOR level — substitutes the real safeStorage (verifies the path, not cryptographic strength).
 function fakeCipher(available = true): CipherLike {
@@ -36,20 +28,17 @@ function memoryIo(): TokenIo & { data: Buffer | null } {
   return io;
 }
 
-describe("token-store", () => {
-  it("save → load round-trip — what is stored is ciphertext that went through the cipher", () => {
-    const io = memoryIo();
-    saveToken(fakeCipher(), io, "rnr_abc");
-    expect(io.data?.toString().startsWith("enc:")).toBe(true); // via encryptString (not a plaintext direct write)
-    expect(loadToken(fakeCipher(), io)).toBe("rnr_abc");
-  });
+// The legacy single-token file — what an older desktop wrote before the multi-runner map. This desktop only reads
+// and clears it (the migration into the map), so the fixture writes the ciphertext the way that version did.
+function legacyTokenFile(token: string): TokenIo & { data: Buffer | null } {
+  const io = memoryIo();
+  io.write(fakeCipher().encryptString(token));
+  return io;
+}
 
-  it("rejects saving a non-rnr_ token", () => {
-    expect(() => saveToken(fakeCipher(), memoryIo(), "ak_notrunner")).toThrow(/rnr_/);
-  });
-
-  it("rejects saving when safeStorage is unavailable (no plaintext fallback)", () => {
-    expect(() => saveToken(fakeCipher(false), memoryIo(), "rnr_abc")).toThrow(/safeStorage/);
+describe("token-store (legacy single token)", () => {
+  it("reads a legacy pairing back through the cipher", () => {
+    expect(loadToken(fakeCipher(), legacyTokenFile("rnr_abc"))).toBe("rnr_abc");
   });
 
   it("returns null on decryption failure / missing file / unavailable environment (treated as unpaired, does not block startup)", () => {
@@ -57,13 +46,15 @@ describe("token-store", () => {
     expect(loadToken(fakeCipher(), io)).toBeNull();
     io.write(Buffer.from("garbage"));
     expect(loadToken(fakeCipher(), io)).toBeNull();
-    saveToken(fakeCipher(), io, "rnr_abc");
-    expect(loadToken(fakeCipher(false), io)).toBeNull();
+    expect(loadToken(fakeCipher(false), legacyTokenFile("rnr_abc"))).toBeNull();
+  });
+
+  it("does not hand back a legacy value that is not an rnr_ token", () => {
+    expect(loadToken(fakeCipher(), legacyTokenFile("ak_notrunner"))).toBeNull();
   });
 
   it("clearToken removes the stored token", () => {
-    const io = memoryIo();
-    saveToken(fakeCipher(), io, "rnr_abc");
+    const io = legacyTokenFile("rnr_abc");
     clearToken(io);
     expect(loadToken(fakeCipher(), io)).toBeNull();
   });

@@ -377,7 +377,7 @@ export class ScorecardBatchService {
   async track(
     id: string,
     tenant: string,
-    owner: string, // submitter subject — for resolving private-repo case tokens (personally-owned connection)
+    owner: string, // submitter subject — the personal secret tier and self-hosted dispatch ownership
     dataset: Dataset,
     harnessId: string,
     harnessVersion: string,

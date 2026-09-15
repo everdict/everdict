@@ -39,9 +39,6 @@ export interface IssueBoardColumn {
 // The board — a column IS a group, and dragging a card changes that axis' value. Dropping onto the done column on the status axis raises the
 // resolution dialog: closing an issue means recording "what proved it", so one drag cannot be allowed to skip that record
 // (exactly the same rule as the list's status control).
-//
-// Only the cycle axis has no dragging: the control plane has no surface yet for adding an issue to and removing it from an iteration. Not
-// being draggable from the start is more honest than looking draggable and then doing nothing.
 export function IssueBoard({
   workspace,
   groupBy,

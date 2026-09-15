@@ -108,15 +108,13 @@ export function originSource(via: string): string {
 
 export interface RunScorecardInput {
   campaignEvaluation?: CampaignEvaluationRequest;
-  submitterTeamId?: string;
   tenant: string;
   // INTERNAL (experiment façade only — routes never expose these two): group kind stamped on the record, and a
   // pre-resolved dataset that BYPASSES the registry lookup (the ad-hoc task path / the graders-stripped copy).
   // docs/architecture/execution-model.md P1.
   kind?: "experiment";
   inlineDataset?: Dataset;
-  // submitter (principal.subject) — the owner used to resolve a private-repo case's personally-owned connection ("clone via my connection").
-  // Consequently a private-repo dataset is effectively single-owner (a case's connectionId only resolves when that owner submits).
+  // submitter (principal.subject) — record createdBy, the personal secret tier, and self-hosted dispatch ownership.
   submittedBy?: string;
   // The submitter's roles (principal.roles) — the constitution seed reads them: a run-time grader declaring
   // ground_truth authority redefines what passing MEANS, and that is an admin's call, not any member's.

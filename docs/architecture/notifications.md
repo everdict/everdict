@@ -123,7 +123,7 @@ the thread isn't, and every resource link lost its `#comment-…` anchor on the 
 - **Singular addresses, and the anchor is a QUERY parameter.** `/{ws}/datasets/{id}` still 307s to the singular
   form, but a redirect DROPS a fragment — measured. So the link is built singular, and what on the page it is
   about rides as `?comment=<id>` / `?artifact=<id>` (`useAnchorHighlight`, `shared/lib/use-anchor-highlight.ts`),
-  which the two normalizing gateways (issue uuid → `ENG-12`, cycle uuid → the team's numbered cycle) carry
+  which the normalizing gateway (issue uuid → `EVD-12`) carries
   through with `searchSuffix`. `#comment-<id>` is still honoured for a hand-copied link.
 - **The desktop shell must parse what it navigates by.** Its watcher schema had a nested `z.object` for `link`
   that silently stripped `resourceType`/`resourceId`, so every mention/tracker/regression notification was a

@@ -14,8 +14,6 @@ import {
   Plus,
   RotateCcw,
   Unlink,
-  UserMinus,
-  UserPlus,
   type LucideIcon,
 } from 'lucide-react'
 import { useLocale, useTimeZone, useTranslations } from 'next-intl'
@@ -389,33 +387,6 @@ function HistoryRow({
           tone: health === 'off_track' ? 'danger' : health === 'at_risk' ? 'warning' : 'success',
           text: t('history.updatePosted'),
           values: health ? <Badge tone="outline">{t(`health.${health}`)}</Badge> : null,
-        }
-      }
-      case 'moved': {
-        // A team move is the only event where the NAME changes — which name it went from and to is the whole of this row.
-        const from = detailString(detail, 'fromIdentifier')
-        const to = detailString(detail, 'toIdentifier')
-        return {
-          icon: ArrowRightLeft,
-          tone: 'neutral',
-          text: t('history.moved'),
-          values: (
-            <>
-              {from && <Badge tone="outline">{from}</Badge>}
-              {to && <Badge tone="neutral">{to}</Badge>}
-            </>
-          ),
-        }
-      }
-      case 'member_added':
-      case 'member_removed': {
-        const added = entry.event === 'member_added'
-        const member = detailString(detail, 'subject')
-        return {
-          icon: added ? UserPlus : UserMinus,
-          tone: 'neutral',
-          text: t(added ? 'history.memberAdded' : 'history.memberRemoved'),
-          values: member ? <Badge tone="neutral">{memberNameOf(actors, member)}</Badge> : null,
         }
       }
       default:

@@ -24,7 +24,7 @@ releases/issues stay the raw source, and everdict binds them to evaluation evide
   tracker-shaped (NOT a registry entity: it has no immutable versions of its own).
   - `slug` — how it is ADDRESSED (mig 0169). Derived from the name at creation (`productSlugStem`, unicode
     kept — a workspace naming its products in its own language would otherwise get `product-1`, `product-2`,
-    a worse address than the uuid this replaces) and immutable afterwards, for the reason a team key is: an
+    a worse address than the uuid this replaces) and immutable afterwards, for the reason an issue key is: an
     address that follows a rename breaks every link that was ever shared. Unique per workspace, and the
     service mints it because uniqueness is a question only the store can answer. Resolution is one function,
     `findProductByRef` (`application-control` `product/product-ref.ts`), shared by `ProductService` and

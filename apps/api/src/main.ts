@@ -1337,8 +1337,8 @@ async function main(): Promise<void> {
   // weakening the "one choke point for facts and pushes" invariant — the pusher closure reads the holder at
   // CALL time, by which point it is populated.
   const githubSyncRef: { current?: GithubIssueSync } = {};
-  // The workspace's board — one board, edited from Settings.
-  const workflowStateService = new WorkflowStateService({ store: workflowStateStore, issues: issueStore });
+  // The workspace's board — one board, seeded on first read and read-only over HTTP.
+  const workflowStateService = new WorkflowStateService({ store: workflowStateStore });
   // The label registry the tracker classifies with — also the name→id resolver a GitHub import needs.
   const issueLabelService = new IssueLabelService({
     labels: issueLabelStore,
@@ -2035,7 +2035,7 @@ async function main(): Promise<void> {
     ...(campaignBuildService !== undefined ? { campaignBuild: campaignBuildService } : {}),
     checkpointService,
     taskService,
-    workflowStateService, // the workspace's board — /workflow-states, edited from Settings
+    workflowStateService, // the workspace's board — GET /workflow-states (read-only)
     issueService,
     issueLabelService,
     issueSync: githubIssueSync,

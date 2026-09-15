@@ -142,27 +142,25 @@ not an untouched `todo`: it carries the resolution it fell from, and it reads as
 
 ### Workflow states — the workspace's own names for its board
 
-The board is `WorkflowState` rows (`/workflow-states`): name · colour · position · and the **canonical status
-the state is a view onto**. Rename "Todo" to "Up next", recolour it, reorder the board, add "In QA" beside "In
-review" — and the completion gate, the rollups, the regression watch and the GitHub sync keep reading `status`,
-so none of it can be broken by a rename.
+The board is `WorkflowState` rows (`GET /workflow-states`): name · colour · position · and the **canonical
+status the state is a view onto**. The completion gate, the rollups, the regression watch and the GitHub sync
+read `status`, never the column, so what a column is called cannot reach any of them.
 
 This is the one place we deliberately stop short of Linear: **the canonical vocabulary stays closed**. Minting
 arbitrary statuses would mean either teaching every programmatic reader an open vocabulary, or adding a category
 field that duplicates the status enum we already have — and the progress arithmetic is the product's central
-claim, so it does not get to depend on what somebody named a column. `regressed` is not offerable as a column at
-all: an issue reaches it by a resolution falling, never by somebody dragging a card.
+claim, so it does not get to depend on what somebody named a column. `regressed` is not a column in the default
+board: an issue reaches it by a resolution falling, never by somebody dragging a card.
 
-The board is seeded with the default six on the list path, idempotently, so a workspace that has never read
-its board still has one. An issue names its column with `stateId`; absent means "the default state for that
-status", which is what every issue that predates the board reads as — and what the regression watch leaves
-behind, honestly, because nobody put that issue in a column.
+The board is **read-only**. It is seeded with the default six on the list path, idempotently, so a workspace
+that has never read its board still has one, and that seed is the board a workspace uses. No surface — no page,
+no MCP tool, no HTTP route — adds, renames, recolours, reorders, re-maps or removes a column; the editor went
+with the team settings screen, and its routes went with it. Columns a workspace added before then stay in the
+table and stay readable, in position order. An issue names its column with `stateId`; absent means "the default
+state for that status", which is what every issue that predates the board reads as — and what the regression
+watch leaves behind, honestly, because nobody put that issue in a column.
 
-Reading the board is `issues:read` (viewer+ — knowing the column names is as benign as knowing the issues);
-every write is `settings:write`, because shaping a workspace is administration.
-
-Re-mapping a column's `status` MOVES every issue in it in the same operation, and a state still holding issues
-cannot be deleted (409 naming the count) — the board and the record can never disagree.
+Reading the board is `issues:read` (viewer+ — knowing the column names is as benign as knowing the issues).
 
 ### Transitions
 
@@ -489,7 +487,7 @@ Cross-workspace reads are `404`, never `403` (no existence leak).
 ## Surface
 
 BFF↔MCP parity for issues, projects, initiatives and labels; HTTP under `/issues`, `/projects`, `/initiatives`,
-`/issue-labels`, `/workflow-states` (the board has no MCP tools, and no settings screen in the web). The issue MCP twins
+`/issue-labels`, and the read-only `GET /workflow-states` (the board has no MCP tools and no editor). The issue MCP twins
 are `create_issue`, `list_issues`, `get_issue`, `update_issue`, `set_issue_status`, `add_issue_link`,
 `remove_issue_link`, `list_issue_scorecards`, `delete_issue` plus the eight-tool sets for projects and
 initiatives —
@@ -537,7 +535,7 @@ packages/domain/src/tracker/                   Issue/Project/Initiative aggregat
                                                + the calendar algebra the target dates use
 packages/application-control/src/{issue,project,initiative}/   use-cases; IssueService.applyTransition is
                                                the ONE choke point for facts AND the GitHub push
-packages/application-control/src/workflow-state/               the workspace's board (seed, re-map, delete gate)
+packages/application-control/src/workflow-state/               the workspace's board (seed on first read, read-only)
 packages/application-control/src/issue/github-issue-sync.ts    import + manual two-way sync (no webhook, no sweep)
 packages/application-control/src/issue/regression-watch.ts     scorecard.completed → auto-reopen as regressed
 packages/db/src/tracker/issue-number-store.ts  the workspace's counter — one conditional UPDATE … RETURNING

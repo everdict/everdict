@@ -24,7 +24,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { DatasetList } from './dataset-list'
 
-// The list of evaluation case bundles — the same rules as the harness list. One address per workspace, the owning team as one filter axis, and
+// The list of evaluation case bundles — the same rules as the harness list. One address per workspace, and
 // filtering, grouping and ordering all happening in the browser.
 export async function DatasetListView({
   workspace,

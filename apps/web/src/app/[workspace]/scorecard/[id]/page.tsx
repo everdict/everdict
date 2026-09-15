@@ -282,8 +282,6 @@ export default async function ScorecardDetailPage({
     authorName = m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(createdBy)
   }
 
-  // The roster, so the owning team can be called by name and anyone who may transfer it can re-assign on the spot. The batch
-
   const summary = record.summary ?? []
   const summaryMetrics = summary.map((m) => m.metric) // sibling context for judge-metric disambiguation
   const judges = record.orchestration?.judges ?? [] // Agent Judges applied to this batch → entity links in the meta card
@@ -631,16 +629,18 @@ export default async function ScorecardDetailPage({
                 record.retryableUnmeasured !== undefined &&
                 record.retryableUnmeasured > 0 && (
                   <RescoreScorecardButton id={record.id} count={record.retryableUnmeasured} />
-              )}
+                )}
               {/* Two acts a settled batch owes a reader: prove it is still what it claims, and let somebody
                   override a block ON THE RECORD rather than in a conversation. `gates` reaches the web now
                   (census slice 1), so the override appears only when there IS a block. */}
               {(record.status === 'succeeded' || record.status === 'failed') && (
                 <ScorecardEvidenceActions
                   id={record.id}
-                  blocked={(record.gates ?? []).some((g) => (g as { outcome?: string }).outcome === 'block')}
+                  blocked={(record.gates ?? []).some(
+                    (g) => (g as { outcome?: string }).outcome === 'block'
+                  )}
                 />
-                )}
+              )}
               {canRun && (
                 <RerunScorecardButton
                   id={record.id}

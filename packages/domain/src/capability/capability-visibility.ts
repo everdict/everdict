@@ -30,11 +30,3 @@ export function canConsumeCapability(cap: CapabilityAccess, consumer: Capability
   // a different workspace may read ONLY a `subset` capability explicitly shared to it (never private/workspace).
   return cap.visibility === "subset" && cap.sharedWith.includes(consumer.tenant);
 }
-
-// Browse helper — filter a set to what the consumer may use (the Pg store filters the same rules in SQL).
-export function filterConsumableCapabilities<T extends CapabilityAccess>(
-  caps: readonly T[],
-  consumer: CapabilityConsumer,
-): T[] {
-  return caps.filter((c) => canConsumeCapability(c, consumer));
-}

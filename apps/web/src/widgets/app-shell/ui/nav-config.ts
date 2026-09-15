@@ -6,8 +6,10 @@ import {
   CircleDot,
   ClipboardCheck,
   Database,
+  FlaskConical,
   FolderKanban,
   Gavel,
+  Handshake,
   LayoutDashboard,
   MonitorDown,
   Network,
@@ -17,12 +19,10 @@ import {
   Store,
   Target,
   Terminal,
+  TrendingUp,
   Users,
   Wrench,
   type LucideIcon,
-  FlaskConical,
-  Handshake,
-  TrendingUp,
 } from 'lucide-react'
 
 import { singularSegment } from '@/shared/lib/resource-routes'
@@ -47,13 +47,10 @@ export interface NavSection {
 }
 
 // A section does not collapse — a heading is a label rather than a button, and the rows beneath it are always visible (as the workspace group's are).
-// What collapses is an **item**, not a section (Workspace › More, Team › Evaluation): pushing a few rarely-visited destinations one row back
+// What collapses is an **item**, not a section (Workspace › More): pushing a few rarely-visited destinations one row back
 // and hiding a whole AXIS are different things. Agents start expanded again, reverting the collapsed default — a collapsed group erases from
 // the screen the very fact that the product HAS such a thing.
 
-// Issues ARE a top-level entry. They were not, while a team minted the identifier and owned the list, and the
-// sidebar's "Your teams" group was where you found them; the workspace is the only boundary now, so there is
-// ONE list and it belongs at the top with the rest of the tracker.
 // The sidebar leads with the TRACKER (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue. That is the deliberate
 // order of the product's questions: "why are we evaluating this, and can we ship" comes first, and the eval
 // The second group is the AGENT — what it can use and what it knows. Tools · skills · knowledge were
@@ -61,9 +58,7 @@ export interface NavSection {
 // material of the agent and belong beside it. Their pages MOVED out of /settings rather than being copied, so the
 // product still has exactly one Skills page and one Tools page.
 // The third group is EVALUATION — the primitives that answer "what ran, against what, judged how". ONE address
-// per collection. They were scoped under an owning team for a while, which put four collections under every
-// team and turned that group into a wall in front of the issues; the workspace is the only boundary now, so
-// there is nothing left for a path to scope by.
+// per collection, because the workspace is the only boundary and there is nothing else for a path to scope by.
 // Infra concerns (runs · schedules · runtimes · work queue) are NOT sidebar entries — they live on the vertical
 // infra rail (widgets/infra-panel) on the right; their full pages remain routable (panel "full page" links,
 // command palette infra group).
@@ -83,8 +78,7 @@ export const NAV_SECTIONS: NavSection[] = [
       },
     ],
   },
-  // Workspace — what spans every team. Initiatives group projects; a project spans teams (it NAMES them, at
-  // least one, so this list and a team's are two addresses onto one collection); Views are the saved analysis
+  // Workspace — Initiatives group projects; Views are the saved analysis
   // lenses. `More` holds the workspace rosters, which
   // are configuration screens you visit rarely — they live under /settings and are LINKED here rather than moved,
   // so there is exactly one Members page in the product.
@@ -229,13 +223,13 @@ export const RESOURCES_SECTION: NavSection = {
   ],
 }
 
-// The workspace-wide issue list has no sidebar row (issues belong to a team — see the note above), but it stays
-// in the palette: cross-team triage is a real question, and Cmd+K is where you ask one without leaving a team.
+// The workspace-wide issue list has no sidebar row, but it stays in the palette: Cmd+K is where you reach it
+// without leaving the screen you are on.
 const WORKSPACE_ISSUES_ITEM: NavItem = {
   href: '/issues',
   labelKey: 'allIssues',
   icon: CircleDot,
-  keywords: 'issue bug regression triage tracker all teams 이슈 회귀 트래커 전체',
+  keywords: 'issue bug regression triage tracker all 이슈 회귀 트래커 전체',
 }
 
 // The agent fleet has no sidebar row for now: a permanent row is a promise that there is a day's work behind it,

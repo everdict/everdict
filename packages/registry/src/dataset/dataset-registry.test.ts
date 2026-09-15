@@ -1,12 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { SHARED_TENANT } from "../registry.js";
 import { InMemoryDatasetRegistry } from "./dataset-registry.js";
-import { loadDatasetDir } from "./load-datasets.js";
 import { PgDatasetRegistry } from "./pg-dataset-registry.js";
 
 // Minimal dataset — one empty repo seed case. Use extra to change content (for immutability checks).
@@ -184,20 +180,6 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     await expect(r.creatorOf("acme", "bench", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
     // Another tenant's owned dataset can't be deleted either.
     await expect(r.softDelete("beta", "mine", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
-  });
-});
-
-describe("loadDatasetDir", () => {
-  it("loads into SHARED by default (file SSOT) → every tenant sees it via fallback", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "everdict-ds-"));
-    try {
-      writeFileSync(join(dir, "bench-1.0.0.json"), JSON.stringify(ds("bench", "1.0.0")));
-      writeFileSync(join(dir, "bench-1.1.0.json"), JSON.stringify(ds("bench", "1.1.0")));
-      const r = await loadDatasetDir(dir);
-      expect((await r.get("whoever", "bench")).version).toBe("1.1.0");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

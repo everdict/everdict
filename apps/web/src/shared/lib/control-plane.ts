@@ -117,14 +117,10 @@ export interface IssueListQuery {
   // The empty string is "unassigned" — a query parameter has no null, so that is what the bucket is called.
   assignee?: string[]
   project?: string[]
-  cycle?: string[]
   label?: string[]
-  team?: string
-  mine?: boolean
   // One parent's sub-issues, or `none` for top level only. A board uses the latter so a child is not drawn twice
   // (its own row, and again under its parent).
   parent?: string
-  triage?: boolean
   linkType?: string
   linkId?: string
   // Find issues by name (partial match on identifier/title). A picker that takes one page and filters client-side
@@ -145,10 +141,7 @@ function issueListParams(filter?: IssueListQuery): URLSearchParams {
   for (const facet of ISSUE_FACETS) {
     for (const value of filter?.[facet] ?? []) q.append(facet, value)
   }
-  if (filter?.team) q.set('team', filter.team)
-  if (filter?.mine) q.set('mine', 'true')
   if (filter?.parent) q.set('parent', filter.parent)
-  if (filter?.triage !== undefined) q.set('triage', filter.triage ? 'true' : 'false')
   // The reverse lookup ("which issues watch this harness") needs both halves or the route 400s.
   if (filter?.linkType && filter.linkId) {
     q.set('linkType', filter.linkType)
@@ -167,17 +160,15 @@ export interface ScorecardListQuery {
   schedule?: string
   dataset?: string
   harness?: string
-  team?: string
   day?: string
   q?: string
-  // Facets — sets. An empty string names the UNSET bucket (no runtime, no creator, no team), because a query
+  // Facets — sets. An empty string names the UNSET bucket (no runtime, no creator), because a query
   // string has no null and "none" is a bucket people filter to.
   statuses?: readonly string[]
   datasets?: readonly string[]
   harnesses?: readonly string[]
   runtimes?: readonly string[]
   creators?: readonly string[]
-  teams?: readonly string[]
   // The page: a size, and the last row you drew.
   limit?: number
   before?: { createdAt: string; id: string }
@@ -191,8 +182,6 @@ function scorecardQueryString(query?: ScorecardListQuery): URLSearchParams {
   else if (query.judge) q.set('judge', query.judge)
   if (query.dataset) q.set('dataset', query.dataset)
   if (query.harness) q.set('harness', query.harness)
-  // Team scope composes with the narrowing above — "which of these are ours" is what the team sidebar asks.
-  if (query.team) q.set('team', query.team)
   if (query.day) q.set('day', query.day)
   if (query.q) q.set('q', query.q)
   for (const [key, values] of [
@@ -201,7 +190,6 @@ function scorecardQueryString(query?: ScorecardListQuery): URLSearchParams {
     ['harnesses', query.harnesses],
     ['runtimes', query.runtimes],
     ['creators', query.creators],
-    ['teams', query.teams],
   ] as const) {
     for (const value of values ?? []) q.append(key, value)
   }
@@ -299,8 +287,10 @@ export const controlPlane = {
     call<T>(auth, '/knowledge/annotate', { method: 'POST', body: JSON.stringify(body) }),
   // A TYPED relationship — the predicate vocabulary is closed at the control plane, so this cannot invent
   // an edge kind the graph has no rule for.
-  relateKnowledge: <T>(auth: AuthContext, body: { from: unknown; to: unknown; predicate: string }) =>
-    call<T>(auth, '/knowledge/relate', { method: 'POST', body: JSON.stringify(body) }),
+  relateKnowledge: <T>(
+    auth: AuthContext,
+    body: { from: unknown; to: unknown; predicate: string }
+  ) => call<T>(auth, '/knowledge/relate', { method: 'POST', body: JSON.stringify(body) }),
   // Mine a discussion thread for entry CANDIDATES — proposed entries awaiting review, never published
   // knowledge. A real billable model call, like skill-generate.
   extractKnowledge: <T>(auth: AuthContext, body: unknown) =>
@@ -628,7 +618,11 @@ export const controlPlane = {
       body: JSON.stringify(body),
     }),
   // Push the working tree to its remote, optionally opening a pull request.
-  pushSandboxGit: <T>(auth: AuthContext, id: string, body: { branch?: string; pullRequest?: boolean } = {}) =>
+  pushSandboxGit: <T>(
+    auth: AuthContext,
+    id: string,
+    body: { branch?: string; pullRequest?: boolean } = {}
+  ) =>
     call<T>(auth, `/sandboxes/${encodeURIComponent(id)}/git/push`, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -642,10 +636,7 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  // `team` keeps only what one team owns — what ownership does to a READ is filter, never 403.
-  // The team sidebar's harnesses, datasets and judges narrow through this parameter.
-  listHarnesses: <T>(auth: AuthContext, team?: string) =>
-    call<T>(auth, team ? `/harnesses?team=${encodeURIComponent(team)}` : '/harnesses'),
+  listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
   // GET /harnesses/:id — a harness's instance version tag list.
   getHarness: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}`),
@@ -710,10 +701,7 @@ export const controlPlane = {
     call<T>(auth, '/harness-templates', { method: 'POST', body: JSON.stringify(spec) }),
   validateHarnessTemplate: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/harness-templates/validate', { method: 'POST', body: JSON.stringify(spec) }),
-  // `team` keeps only what one team owns — what ownership does to a READ is filter, never 403.
-  // The team sidebar's harnesses, datasets and judges narrow through this parameter.
-  listDatasets: <T>(auth: AuthContext, team?: string) =>
-    call<T>(auth, team ? `/datasets?team=${encodeURIComponent(team)}` : '/datasets'),
+  listDatasets: <T>(auth: AuthContext) => call<T>(auth, '/datasets'),
   getDataset: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // Diff between versions — base↔candidate case additions/deletions/changes + meta changes. version can be "latest".
@@ -796,15 +784,6 @@ export const controlPlane = {
     callVoid(auth, `/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // The workspace's board — column names, colours and order, and which canonical status each column is.
   listWorkflowStates: <T>(auth: AuthContext) => call<T>(auth, '/workflow-states'),
-  createWorkflowState: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/workflow-states', { method: 'POST', body: JSON.stringify(body) }),
-  updateWorkflowState: <T>(auth: AuthContext, stateId: string, patch: unknown) =>
-    call<T>(auth, `/workflow-states/${encodeURIComponent(stateId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
-  deleteWorkflowState: (auth: AuthContext, stateId: string) =>
-    call<unknown>(auth, `/workflow-states/${encodeURIComponent(stateId)}`, { method: 'DELETE' }),
   listIssueLabels: <T>(auth: AuthContext) => call<T>(auth, '/issue-labels'),
   createIssueLabel: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/issue-labels', { method: 'POST', body: JSON.stringify(body) }),
@@ -851,8 +830,6 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  // Team move — a dedicated endpoint for the same reason a status move is: it re-stamps the identifier, so it must not
-  // happen as a side effect of a rename. The response's identifier is the new name (the old one still resolves).
   // Project update — the only JUDGEMENT the tracker records (a verdict, and why it reads that way).
   postProjectUpdate: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/projects/${encodeURIComponent(id)}/updates`, {
@@ -924,16 +901,13 @@ export const controlPlane = {
   // fetches them with the workspace App installation instead. Gated by one issues:read, and the url is checked over there against that issue's GitHub host.
   getIssueAttachment: (auth: AuthContext, id: string, url: string) =>
     callBytes(auth, `/issues/${encodeURIComponent(id)}/attachment?url=${encodeURIComponent(url)}`),
-  // `team` is derived server-side (a project has no team of its own — it means "the projects this team has
-  // issues in"), which is why the sidebar's per-team Projects entry can be a plain query param.
   listProjects: <T>(
     auth: AuthContext,
-    filter?: { status?: string; initiative?: string; team?: string; limit?: number }
+    filter?: { status?: string; initiative?: string; limit?: number }
   ) => {
     const q = new URLSearchParams()
     if (filter?.status) q.set('status', filter.status)
     if (filter?.initiative) q.set('initiative', filter.initiative)
-    if (filter?.team) q.set('team', filter.team)
     if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
     const qs = q.toString()
     return call<T>(auth, qs ? `/projects?${qs}` : '/projects')
@@ -1082,7 +1056,7 @@ export const controlPlane = {
   // filter.schedule = only the runs a schedule fired (the schedule detail's run history);
   // filter.dataset / filter.harness = every batch that exercised a capability (the tracker's evaluation history).
   // The scorecards LIST. Two shapes of narrow, deliberately distinct on the wire:
-  //  · the SCOPES a detail-history read asks with (a judge's evaluations, a schedule's runs, one team's page)
+  //  · the SCOPES a detail-history read asks with (a judge's evaluations, a schedule's runs)
   //  · the FACETS a list's filter menu asks with — sets, repeated keys, "any of these"
   // …plus the page. Absent `limit` this is the unbounded read it has always been.
   listScorecards: <T>(auth: AuthContext, query?: ScorecardListQuery) => {
@@ -1167,10 +1141,14 @@ export const controlPlane = {
   // Per-version labels — mutable metadata, deliberately OUTSIDE the spec so a label can be added to a
   // version that already exists (immutability is content-only).
   setJudgeVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
-    call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
-      method: 'PUT',
-      body: JSON.stringify({ tags }),
-    }),
+    call<T>(
+      auth,
+      `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ tags }),
+      }
+    ),
 
   // ── SCORECARD: THE FIVE THE DETAIL PAGE COULD NOT REACH ──────────────────────────────────────────
   //
@@ -1185,7 +1163,8 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  estimateScorecard: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/scorecards/estimate${qs}`),
+  estimateScorecard: <T>(auth: AuthContext, qs: string) =>
+    call<T>(auth, `/scorecards/estimate${qs}`),
   // The release gate — the CI-facing decision over a baseline↔candidate comparison, recorded on the
   // candidate. It has always been the CI's door and never a person's, so the decision a release rests on
   // could not be rehearsed before a pipeline made it. Census slice 5.
@@ -1211,7 +1190,10 @@ export const controlPlane = {
     auth: AuthContext,
     thresholds: { name: string; metric: string; value: number }[]
   ) =>
-    call<T>(auth, '/workspace/trace-thresholds', { method: 'PUT', body: JSON.stringify({ thresholds }) }),
+    call<T>(auth, '/workspace/trace-thresholds', {
+      method: 'PUT',
+      body: JSON.stringify({ thresholds }),
+    }),
   // The OTLP door's admission: events/hour and retention. `null` means "no ceiling", which is a DIFFERENT
   // setting from a large number and the wire says so with null rather than a sentinel.
   traceIngestion: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-ingestion'),
@@ -1226,8 +1208,10 @@ export const controlPlane = {
   // Mirror copies an external image into the workspace's managed namespace — the provenance baseline a
   // harness pin rests on. The push grant mints the credential `everdict image push` consumes; a member who
   // has to ask an agent for their own push credential is the gap this closes.
-  mirrorWorkspaceImage: <T>(auth: AuthContext, body: { image: string; repository?: string; tag?: string }) =>
-    call<T>(auth, '/workspace/images/mirror', { method: 'POST', body: JSON.stringify(body) }),
+  mirrorWorkspaceImage: <T>(
+    auth: AuthContext,
+    body: { image: string; repository?: string; tag?: string }
+  ) => call<T>(auth, '/workspace/images/mirror', { method: 'POST', body: JSON.stringify(body) }),
   mintImagePushGrant: <T>(auth: AuthContext, repository: string) =>
     call<T>(auth, '/workspace/images/push-grant', {
       method: 'POST',
@@ -1256,7 +1240,8 @@ export const controlPlane = {
   // surface, and an experiment nobody outside an agent loop could audit. Census slice 5.
   // docs/architecture/web-runtime-gap-census-spec.md
   listCampaigns: <T>(auth: AuthContext) => call<T>(auth, '/campaigns'),
-  getCampaign: <T>(auth: AuthContext, id: string) => call<T>(auth, `/campaigns/${encodeURIComponent(id)}`),
+  getCampaign: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/campaigns/${encodeURIComponent(id)}`),
   // The gate, asked without touching anything: `continue` | `adopt` | `halt`. The arithmetic is the FRAME's
   // — a reader who counted rounds themselves would be answering a different question.
   // Log a round. The driver is "a human or an outside agent" (skill `evolve`), so this door is a person's
@@ -1309,7 +1294,10 @@ export const controlPlane = {
     }),
 
   listCheckpoints: <T>(auth: AuthContext, envelopeId?: string) =>
-    call<T>(auth, `/checkpoints${envelopeId ? `?envelopeId=${encodeURIComponent(envelopeId)}` : ''}`),
+    call<T>(
+      auth,
+      `/checkpoints${envelopeId ? `?envelopeId=${encodeURIComponent(envelopeId)}` : ''}`
+    ),
   getCheckpoint: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/checkpoints/${encodeURIComponent(id)}`),
   // Independent verification — a verifier spawned inside an EVIDENCE-ONLY envelope (empty write list), so
@@ -1323,7 +1311,8 @@ export const controlPlane = {
   // phase 2. The second phase never re-executes phase 1 — which is the whole point, and was reachable only
   // by an agent.
   listGroups: <T>(auth: AuthContext) => call<T>(auth, '/groups'),
-  getGroup: <T>(auth: AuthContext, id: string) => call<T>(auth, `/groups/${encodeURIComponent(id)}`),
+  getGroup: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/groups/${encodeURIComponent(id)}`),
   scoreGroup: <T>(auth: AuthContext, id: string, judges: { id: string; version: string }[]) =>
     call<T>(auth, `/groups/${encodeURIComponent(id)}/score`, {
       method: 'POST',
@@ -1332,12 +1321,19 @@ export const controlPlane = {
 
   listEnvironments: <T>(auth: AuthContext) => call<T>(auth, '/environments'),
   getEnvironmentVersion: <T>(auth: AuthContext, id: string, version: string) =>
-    call<T>(auth, `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+    call<T>(
+      auth,
+      `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`
+    ),
   setEnvironmentVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
-    call<T>(auth, `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
-      method: 'PUT',
-      body: JSON.stringify({ tags }),
-    }),
+    call<T>(
+      auth,
+      `/environments/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ tags }),
+      }
+    ),
 
   // ── THE REST OF THE BATCH ────────────────────────────────────────────────────────────────────────
   //
@@ -1345,10 +1341,14 @@ export const controlPlane = {
   // before a submit may rest on it (rule `suite`: an authorization that leaves no artifact authorizes
   // nothing). Skill verification, the product's imported version ledger, and a benchmark's official scorer.
   attestDatasetVersion: <T>(auth: AuthContext, id: string, version: string, body: unknown) =>
-    call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/attest`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+    call<T>(
+      auth,
+      `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/attest`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
   verifySkill: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/skills/${encodeURIComponent(id)}/verify`, { method: 'POST' }),
   listProductVersions: <T>(auth: AuthContext, id: string) =>
@@ -1361,7 +1361,7 @@ export const controlPlane = {
   retryScorecardCases: <T>(
     auth: AuthContext,
     id: string,
-    body: { cases: Array<{ caseId: string; trial?: number }>; reason?: string },
+    body: { cases: Array<{ caseId: string; trial?: number }>; reason?: string }
   ) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}/retry-cases`, {
       method: 'POST',
@@ -1413,10 +1413,7 @@ export const controlPlane = {
   },
   // Agent Judges (workspace-owned + _shared defaults) — model (LLM/VLM call) | harness (delegate to an agent).
   // Read judges:read (viewer+), register/validate judges:write (member+) — the control plane enforces.
-  // `team` keeps only what one team owns — what ownership does to a READ is filter, never 403.
-  // The team sidebar's harnesses, datasets and judges narrow through this parameter.
-  listJudges: <T>(auth: AuthContext, team?: string) =>
-    call<T>(auth, team ? `/judges?team=${encodeURIComponent(team)}` : '/judges'),
+  listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // GET /judges/:id/diff — field-level diff between two judge versions (base↔candidate). version can be "latest".
@@ -1533,10 +1530,6 @@ export const controlPlane = {
     call<T>(auth, `/agents/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
   // The platform event log (lifecycle facts, newest first) — the crafting studio's replay picker. events:read (viewer+).
   listPlatformEvents: <T>(auth: AuthContext, limit = 20) => call<T>(auth, `/events?limit=${limit}`),
-  // The workspace pulse — the home screen's single read (state + trends). The metrics are not assembled out of eight lists,
-  // and not only because of eight round trips: the arithmetic is the SERVER's, and a web re-implementation is two that diverge.
-  getWorkspacePulse: <T>(auth: AuthContext, days?: number) =>
-    call<T>(auth, days === undefined ? '/workspace/pulse' : `/workspace/pulse?days=${days}`),
   saveAgent: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/agents/${encodeURIComponent(id)}`, {
       method: 'PUT',
@@ -1673,9 +1666,6 @@ export const controlPlane = {
   // A failure is a RESULT, not an error (pullable:false + reason) — the authoring screen renders it as a badge.
   verifyImage: <T>(auth: AuthContext, image: string) =>
     call<T>(auth, `/workspace/image-registries/verify?image=${encodeURIComponent(image)}`),
-  getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
-  setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
-    call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),
   // Workspace secrets (model/provider keys + cluster credentials) — values are never returned (list = name + updatedAt).
   // At-rest encryption is the control plane's SecretStore. set/delete return 204 (no body) → callVoid.
   listSecrets: <T>(auth: AuthContext) => call<T>(auth, '/secrets'),
@@ -1859,8 +1849,8 @@ export const controlPlane = {
     call<T>(auth, '/runners', { method: 'POST', body: JSON.stringify(body) }),
   revokeRunner: (auth: AuthContext, id: string) =>
     callVoid(auth, `/runners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // Workspace-shared runners (team resource, owner=ws:<workspace>). An admin registers (settings:write) → any member can target self:ws:<id>.
-  // owned = team-owned runners only (the roster [GET /workspace/runners] includes personal runners), pair returns the plaintext token once, revoke 204.
+  // Workspace-shared runners (owner=ws:<workspace>). An admin registers (settings:write) → any member can target self:ws:<id>.
+  // owned = workspace-owned runners only (the roster [GET /workspace/runners] includes personal runners), pair returns the plaintext token once, revoke 204.
   listWorkspaceOwnedRunners: <T>(auth: AuthContext) => call<T>(auth, '/workspace/runners/owned'),
   // Workspace runner roster (members:read) — runner metadata paired to this workspace. For deciding whether to expose the self:ws pool.
   listWorkspaceRunners: <T>(auth: AuthContext) => call<T>(auth, '/workspace/runners'),

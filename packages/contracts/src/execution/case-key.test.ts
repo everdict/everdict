@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { caseKeyAddress, caseKeyOf, decodeCaseKey, encodeCaseKey } from "./case-key.js";
+import { caseKeyAddress, caseKeyOf, encodeCaseKey } from "./case-key.js";
 
 describe("CaseKey — the (case, trial) identity", () => {
   it("keeps the spelling every stored digest was computed under", () => {
@@ -21,14 +21,18 @@ describe("CaseKey — the (case, trial) identity", () => {
     // Then they are distinct keys — the collision mattered because these maps are how a receipt is matched
     // to the case it vouches for.
     expect(encodeCaseKey(withHashInId)).not.toBe(encodeCaseKey(trialOne));
-    expect(decodeCaseKey(encodeCaseKey(withHashInId))).toEqual(withHashInId);
-    expect(decodeCaseKey(encodeCaseKey(trialOne))).toEqual(trialOne);
   });
 
-  it("round-trips ids containing the delimiter and the escape character", () => {
-    for (const caseId of ["a#1", "100%", "%23", "a#b%c", "plain"]) {
-      expect(decodeCaseKey(encodeCaseKey(caseKeyOf(caseId, 3)))).toEqual({ caseId, trial: 3 });
-    }
+  it("spells every id carrying the delimiter or the escape character as a key of its own", () => {
+    // Given ids that differ only by what the escape rewrites (`#` vs its escape `%23`, `%` vs `%25`), each at
+    // two trials
+    const keys = ["a#1", "a", "#", "%23", "100%", "100%25", "a#b%c", "a%23b%25c", "plain"].flatMap((caseId) => [
+      caseKeyOf(caseId, 0),
+      caseKeyOf(caseId, 3),
+    ]);
+    expect(keys).toHaveLength(18);
+    // Then no two of them share an encoding — the escape is injective
+    expect(new Set(keys.map(encodeCaseKey)).size).toBe(keys.length);
   });
 
   it("addresses a case with no trial axis exactly as it is already stored", () => {

@@ -2,17 +2,12 @@ import { Suspense } from 'react'
 import { cookies } from 'next/headers'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import {
-  IssueListBody,
-  loadIssueViewData,
-  type IssueDirectories,
-  type IssueViewBase,
-} from '@/features/browse-issues'
+import { IssueListBody, loadIssueViewData, type IssueDirectories } from '@/features/browse-issues'
 import {
   ISSUE_DISPLAY_COOKIE,
   issueDisplayFor,
-  WORKSPACE_ISSUES_VIEW_KEY,
   issueViewOf,
+  WORKSPACE_ISSUES_VIEW_KEY,
   type IssueViewParams,
 } from '@/entities/issue'
 import { issueLabelDirectoryOf, issueLabelsSchema, type IssueLabel } from '@/entities/issue-label'
@@ -61,13 +56,10 @@ export async function IssueListView({
   // toggles): those ride issues:write and never touch the App configuration.
   const canReadIntegrations = can(principal?.roles ?? [], 'github:read')
 
-  // The narrowing the address decides — the part that does not change when the view does.
-  const base: IssueViewBase = {}
-
   // These reads have no reason to wait for each other — awaited in sequence, their round trips simply add up. Only the LIST surfaces a failure;
   // the rest just leave their own slot empty.
   const [data, projects, labels, members] = await Promise.all([
-    loadIssueViewData(ctx, { base, view }),
+    loadIssueViewData(ctx, { view }),
     // Projects power both the filter and the per-row project name; a failure here must not blank the list.
     controlPlane
       .listProjects(ctx, undefined)
@@ -106,18 +98,18 @@ export async function IssueListView({
       <PageHeader
         title={t('title')}
         description={t('description')}
-          actions={
-            canWrite ? (
-              // Three buttons wait on the GitHub App installation state and the synced-repository list — that wait is taken off the list's
-              // critical path and put behind its own boundary.
-              <Suspense fallback={<IssueListActionsSkeleton />}>
-                <IssueListActions
-                  workspace={workspace}
-                  projects={projects.map((p) => ({ id: p.id, name: p.name }))}
-                  canReadIntegrations={canReadIntegrations}
-                />
-              </Suspense>
-            ) : null
+        actions={
+          canWrite ? (
+            // Three buttons wait on the GitHub App installation state and the synced-repository list — that wait is taken off the list's
+            // critical path and put behind its own boundary.
+            <Suspense fallback={<IssueListActionsSkeleton />}>
+              <IssueListActions
+                workspace={workspace}
+                projects={projects.map((p) => ({ id: p.id, name: p.name }))}
+                canReadIntegrations={canReadIntegrations}
+              />
+            </Suspense>
+          ) : null
         }
       />
 
@@ -125,7 +117,6 @@ export async function IssueListView({
         workspace={workspace}
         basePath={basePath}
         viewKey={viewKey}
-        base={base}
         initialView={view}
         initialData={data}
         directories={directories}

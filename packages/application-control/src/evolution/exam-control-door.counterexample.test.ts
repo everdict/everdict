@@ -102,7 +102,7 @@ function buildService(cards: { get: (id: string) => Promise<unknown> }) {
       get: async (_t: string, id: string) => rows.get(id),
     },
     scorecards: cards,
-    issues: { get: async (_t: string, ref: string) => ({ id: ref, teamId: undefined, links: [] }) },
+    issues: { get: async (_t: string, ref: string) => ({ id: ref, links: [] }) },
     datasets: { get: async () => ({ cases: [] }) },
     // `open` stages no evidence; the real store lives in @everdict/db, which this layer may not import.
     evidence: { stage: async () => undefined, get: async () => undefined },

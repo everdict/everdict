@@ -1,6 +1,6 @@
 import { DatasetSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { importBenchmark, importCsv, importJsonl, importWebVoyager, parseCsv } from "./index.js";
+import { importBenchmark, importJsonl, importWebVoyager, parseCsv } from "./index.js";
 
 describe("importWebVoyager", () => {
   const jsonl = [
@@ -79,26 +79,13 @@ describe("importJsonl (generic mapping)", () => {
   });
 });
 
-describe("importCsv / parseCsv", () => {
+describe("parseCsv", () => {
   it("handles commas inside quotes / escaping", () => {
     const rows = parseCsv('id,q,ans\n1,"a, b","he said ""hi"""\n2,plain,x');
     expect(rows).toEqual([
       { id: "1", q: "a, b", ans: 'he said "hi"' },
       { id: "2", q: "plain", ans: "x" },
     ]);
-  });
-  it("CSV → Dataset", () => {
-    const ds = importCsv(
-      "id,question,expected\nc1,what,42",
-      { id: "csvds", version: "1" },
-      {
-        idField: "id",
-        taskField: "question",
-        answerField: "expected",
-      },
-    );
-    expect(ds.cases[0]?.id).toBe("c1");
-    expect(ds.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "42" } }]);
   });
 });
 

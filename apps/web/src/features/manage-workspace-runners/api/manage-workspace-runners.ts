@@ -13,9 +13,9 @@ import {
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// Workspace-shared runner (team resource, owner=ws:<workspace>) — unlike personal runners (manage-runners), an
+// Workspace-shared runner (owner=ws:<workspace>) — unlike personal runners (manage-runners), an
 // admin (settings:write) registers/lists/revokes it. A registered runner is targetable via self:ws:<id> by any
-// member of this workspace (team build server/CI). Pairing is headless (not one-click desktop) — it shows the
+// member of this workspace (a shared build server/CI). Pairing is headless (not one-click desktop) — it shows the
 // plaintext token once and attaches on the server via `everdict runner --pair`.
 
 export interface PairWorkspaceRunnerResult {

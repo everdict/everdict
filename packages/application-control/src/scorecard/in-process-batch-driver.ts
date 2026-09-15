@@ -118,7 +118,7 @@ export interface TrackOptions {
 export interface InProcessBatchInputs {
   id: string;
   tenant: string;
-  owner: string; // submitter subject — for resolving private-repo case tokens (personally-owned connection)
+  owner: string; // submitter subject — the personal secret tier and self-hosted dispatch ownership
   dataset: Dataset;
   harnessId: string;
   harnessVersion: string;
@@ -482,7 +482,6 @@ export class InProcessBatchDriver {
           target: ranOn,
           job: winnerJob,
         } = await this.cases.run(dispatchable, {
-          owner,
           targets,
           tenant,
           secretMap,

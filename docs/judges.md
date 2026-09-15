@@ -119,8 +119,8 @@ Dataset → run/scorecard → trace → [agent-judge] → scorecard → dashboar
 Judges reuse the `HarnessRegistry`/`DatasetRegistry` model (`packages/registry`):
 - **Workspace-owned** — each tenant registers and versions its own judges (`tenant = workspace = trust-zone`).
 - **`_shared` default tier** — judges owned by `_shared` are readable/runnable by every tenant (owner-first,
-  `_shared`-fallback). Nothing is auto-seeded on boot; `loadJudgeDir` (default owner `_shared`) remains for explicit
-  `_shared` seeding when a deployment wants it.
+  `_shared`-fallback). Nothing is auto-seeded on boot, and there is no directory loader: a `_shared` judge is
+  registered through the same doors as any other.
 - **Immutable versions** — re-registering `(id, version)` with different content → `CONFLICT`; evolve by a new
   version. So a scorecard graded by `judge@1.0.0` stays reproducible.
 - **Role-gating** — `judges:read` = viewer+, `judges:write` = **member+** (users self-register their judges).

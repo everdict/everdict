@@ -289,12 +289,11 @@ export function buildDispatch(deps: {
       ? new StoreRunnerHub(runnerJobStore, hubDeps)
       : new RunnerHub(hubDeps);
 
-  // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
-  // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model
-  // fails clearly in the driver (no rendezvous). Assumes a single control-plane process (in-process dispatch) — distribution via a store-backed rendezvous is a follow-up.
-  // Store-backed rendezvous: the inbound POST may land on ANY replica — deliver persists to the shared store and
-  // the driving replica's wait claims it (Pg store when DATABASE_URL is set; in-memory store = the single-process
-  // dev shape, equivalent to the old in-process rendezvous).
+  // Front-door callback completion model: when a public base URL is set, build one rendezvous shared by the topology
+  // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback
+  // model fails clearly in the driver (no rendezvous). Store-backed: the inbound POST may land on ANY replica — deliver
+  // persists to the shared store and the driving replica's wait claims it (Pg store when DATABASE_URL is set; the
+  // in-memory store is the single-process dev shape).
   const callbackRendezvous = process.env.EVERDICT_CALLBACK_BASE_URL
     ? new StoreCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL, callbackStore)
     : undefined;

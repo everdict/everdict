@@ -211,11 +211,7 @@ export type { SubscriptionStore } from "./ports/subscription-store.js";
 export type { UsageStore } from "./ports/usage-store.js";
 export type { AgentTaskStore } from "./ports/agent-task-store.js";
 export type { WorkflowStateStore } from "./ports/workflow-state-store.js";
-export {
-  type CreateWorkflowStateInput,
-  WorkflowStateService,
-  type WorkflowStateServiceDeps,
-} from "./workflow-state/workflow-state-service.js";
+export { WorkflowStateService, type WorkflowStateServiceDeps } from "./workflow-state/workflow-state-service.js";
 export type { IssueListFilter, IssuePageFilter, IssueStore } from "./ports/issue-store.js";
 export {
   type CreateIssueLabelInput,
@@ -424,7 +420,6 @@ export {
   COMMENT_AGENT_AUTHOR,
   COMMENT_RESOURCE_TYPES,
   type CommentAgentAttribution,
-  type CommentResourceType,
   CommentService,
   type CommentServiceDeps,
 } from "./comment/comment-service.js";
@@ -449,7 +444,6 @@ export {
 export { deleteHarnessVersion, harnessIsPrivate, harnessVisibleTo } from "./harness/harness-service.js";
 export { deleteJudgeVersion } from "./judge/judge-service.js";
 export {
-  type PairRunnerBody,
   PairRunnerBodySchema,
   RUNNER_CAPABILITIES,
   RunnerService,
@@ -683,7 +677,6 @@ export {
   type TraceSourceServiceDeps,
   unifiedTraceSources,
 } from "./trace-source/trace-source-service.js";
-export { resolveHarnessTraceMapping } from "./trace-source/resolve-harness-mapping.js";
 export { SpanAttrMappingService } from "./trace-source/span-attr-mapping-service.js";
 export {
   ARTIFACT_REF_SCHEME,
@@ -735,9 +728,7 @@ export { assertRuntimeTarget } from "./require-runtime/require-runtime.js";
 // cron-schedule lifecycle (Temporal driver stays in apps/api), and the work-queue snapshot.
 export {
   type LiveTraceRef,
-  type RunFsEntry,
   type RunFsFile,
-  type RunFsStatus,
   type RunFsTree,
   type ResumeResult,
   RunService,

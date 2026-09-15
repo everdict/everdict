@@ -6,4 +6,4 @@ export {
   type WorkflowState,
   type WorkflowStateColor,
 } from './model/schema'
-export { orderWorkflowStates, WORKFLOW_COLUMN_STATUSES } from './lib/order'
+export { orderWorkflowStates } from './lib/order'

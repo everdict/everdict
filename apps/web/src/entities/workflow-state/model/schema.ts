@@ -6,7 +6,7 @@ import { z } from 'zod'
 
 import { issueStatusSchema } from '@/entities/issue'
 
-// A team's workflow states — the names a team attached to the slots of its own workflow (docs/tracker.md).
+// A workspace's workflow states — the names the workspace attached to the slots of its own workflow (docs/tracker.md).
 // The canonical vocabulary (`status`) is CLOSED and a state is a "named view" over it: which is why renaming a column leaves the release gate,
 // the rollups and regression watching entirely unaffected.
 export const WORKFLOW_STATE_COLORS = [

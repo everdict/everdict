@@ -51,8 +51,8 @@ Version-controlled files are reviewable, immutable, diffable. See `examples/harn
   "pins": { "agent-server": "mendhak/http-https-echo:latest" } }
 ```
 
-Sibling loaders: `loadDatasetDir`, `loadJudgeDir`, `loadRubricDir`, `loadModelDir`, `loadRuntimeDir`. Nothing in
-`apps/` seeds from files on boot — seeding is explicit.
+It is the only file loader: datasets, judges, rubrics, models and runtimes are registered through the API
+(REST and MCP), and nothing in `apps/` seeds from files on boot.
 
 ## How it plugs in
 `ServiceTopologyBackend` takes `specFor: (tenant, id, version) => ServiceHarnessSpec` — wire it straight to the
@@ -86,8 +86,7 @@ to the **`_shared`** owner for first-party assets (the file loaders register und
 Rubrics — HOW to judge: freeform `text` and/or named `criteria` plus an optional `promptTemplate`
 (`docs/architecture/eval-domain-model.md` S3) — are their own versioned entity, mirroring the judge registry:
 `register / get / has / versions / ownVersions / list`, `(tenant, id, version)` keyed, **immutable** versions
-(different content → `ConflictError`), owner-first + `_shared` fallback, and explicit file seeding via `loadRubricDir`
-(default owner `_shared`).
+(different content → `ConflictError`), owner-first + `_shared` fallback.
 `InMemoryRubricRegistry` (dev/test) + `PgRubricRegistry` (Postgres, `rubric` jsonb, PK `(tenant,id,version)`,
 migration `0053_create_rubrics`). One rubric serves many judges: `JudgeSpec.rubric` accepts `{id, version}` as
 well as the inline string, resolved at judge-run time (see `docs/judges.md`). The HTTP/MCP surface

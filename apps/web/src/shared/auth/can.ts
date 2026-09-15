@@ -68,7 +68,7 @@ const PERMS: Record<string, WebAction[]> = {
     'capabilities:read', // browsing the Capability Store (own + shared + public) is viewer+
     'runtimes:read',
     'runtimes:write', // runtime registration (+connection test) is role-agnostic — same as harnesses:register
-    'members:read', // team read is viewer+
+    'members:read', // roster read is viewer+
     'comments:read', // comment read is viewer+
     'issues:read', // reading the tracker (what the team is evaluating) is viewer+
   ],
@@ -158,4 +158,3 @@ const PERMS: Record<string, WebAction[]> = {
 export function can(roles: string[] | undefined, action: WebAction): boolean {
   return (roles ?? []).some((role) => PERMS[role]?.includes(action))
 }
-

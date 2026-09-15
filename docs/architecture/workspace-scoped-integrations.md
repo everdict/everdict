@@ -52,8 +52,9 @@ repositories, and GitHub issues short-lived **installation tokens** scoped to ex
     one, and an unknown name is a 404 rather than a post to the wrong channel.
 - **Personal Connected accounts are gone**: the services, routes, MCP tools, web pages, the
   `GITHUB_OAUTH_CLIENT_*` env, and the `everdict_connections` table (dropped by
-  `packages/db/migrations/0046_drop_connections.sql`). Residue: `env.source.connectionId` still parses, and
-  `repoTokenFor` is still an optional port on the run and scorecard services, but the API binds nothing to it.
+  `packages/db/migrations/0046_drop_connections.sql`). Residue: `env.source.connectionId` still parses (it is
+  part of the stored case schema), but nothing reads it — a private repo seed is cloned only with the workspace
+  GitHub App's installation token.
 - **No inbound GitHub webhooks.** For GitHub, Everdict is the *client* that mints outbound installation
   tokens; webhook-fired evaluation stays deferred ([github-actions-trigger.md](github-actions-trigger.md)).
   **Mattermost is the deliberate exception**: two-way chat needs a verified inbound surface.

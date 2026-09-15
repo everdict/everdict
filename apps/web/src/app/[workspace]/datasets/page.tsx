@@ -2,7 +2,7 @@ import { DatasetListView } from '@/widgets/dataset-list'
 
 export const dynamic = 'force-dynamic'
 
-// The workspace's dataset list — the same as harnesses. `?team=` is read as a FILTER on this list rather than as a path.
+// The workspace's dataset list — the only address, the same as harnesses.
 export default async function DatasetsPage({
   params,
   searchParams,

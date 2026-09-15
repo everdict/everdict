@@ -41,7 +41,6 @@ export { DockerBackend } from "./orchestrators/docker-backend.js";
 export {
   Scheduler,
   leastLoadedPolicy,
-  binPackPolicy,
   type PlacementPolicy,
   type BackendSlot,
   Admission,

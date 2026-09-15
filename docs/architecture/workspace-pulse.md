@@ -2,18 +2,20 @@
 kind: wiki
 title: "Workspace pulse — how the workspace is doing, in one read"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/contracts/src/records/workspace-pulse.ts, apps/api/src/core/workspace/workspace-pulse-service.ts, apps/api/src/api/workspace/pulse.routes.ts]
 ---
 # Workspace pulse — how the workspace is doing, in one read
 
 > How is this workspace doing, and which way is it moving?
 
-`GET /workspace/pulse?days=30` (1–90) · MCP `get_workspace_pulse` · web widget `apps/web/src/widgets/workspace-pulse`
+`GET /workspace/pulse?days=30` (1–90) · MCP `get_workspace_pulse`
 
-**The pulse is no longer the home screen.** On 2026-08-08 the web home `/{workspace}` became the product
-timeline (`apps/web/src/app/[workspace]/page.tsx`); the read and its MCP tool remain, but no web page currently
-mounts `WorkspacePulseView`.
+**The web does not render the pulse.** On 2026-08-08 the web home `/{workspace}` became the product timeline
+(`apps/web/src/app/[workspace]/page.tsx`), and on 2026-09-16 the widget that had drawn the pulse — the state tiles,
+the three trend charts and the activity feed — was deleted, since no page mounted it. The contract
+(`WorkspacePulseSchema`), the route and the MCP tool remain; the web's reachability check records the route as
+read by agents (`scripts/check-web-reach.mjs`).
 
 ## Why it exists
 
@@ -28,17 +30,18 @@ The pulse replaced it with two halves and nothing else:
 - **the trend** — the same workspace over the last N days, so "we have 42 open issues" comes with "and that
   number has been falling".
 
-It is deliberately NOT a per-team comparison (user decision, 2026-08-04). A dashboard that stands teams beside
-each other becomes a scoreboard, and the question it was built to answer disappears from it.
+It was deliberately never a side-by-side comparison of groups inside the workspace (user decision, 2026-08-04). A
+dashboard that stands groups beside each other becomes a scoreboard, and the question it was built to answer
+disappears from it.
 
 ## Why it is ONE endpoint
 
-The web could assemble this from eight list endpoints. It should not, for two reasons:
+A client could assemble this from eight list endpoints. It should not, for two reasons:
 
 1. **The arithmetic is the control plane's.** What counts as an OPEN issue (`regressed` is open — it is work in
    flight), which metric is the headline pass rate (`headlinePassRate`, the
    same ranking `caseVerdict` uses), when a goal is AT RISK (somebody reported it; silence is not an alarm) —
-   each of those is a domain decision with exactly one right answer. A web that re-derives them is a second
+   each of those is a domain decision with exactly one right answer. A client that re-derives them is a second
    answer waiting to drift from the first.
 2. **A dashboard that fans out gets slower every time the product grows an axis.** The counts come from
    aggregates the stores already answer (`countByGroup`, one grouped query over the event log), never from
@@ -91,8 +94,8 @@ the route and the MCP tool call one service.
 ## Adding to it
 
 - A new state number: add it to `WorkspacePulseSchema`, compute it in `WorkspacePulseService` from a STORE (not
-  a peer service — the api-layer rule), and render it. A field with no tile drawing it is removal grounds.
+  a peer service — the api-layer rule). A field no consumer reads is removal grounds.
 - A new event kind: classify it in `ACTIVITY_AXIS_BY_KIND` (the typecheck will insist) — nothing else needed,
   the series pick it up.
-- A new axis: it changes the chart's band count and every locale's label. Four is already the readable limit
-  for a stacked series; prefer widening an existing axis's meaning.
+- A new axis: every consumer of the series has to learn it, and four is already a lot to read at once; prefer
+  widening an existing axis's meaning.

@@ -337,7 +337,7 @@ export interface Persistence {
   // Per-MEMBER agent overlay — which of the workspace's tools + skills each member wants their own agent to carry
   agentMemberPreferenceStore: AgentMemberPreferenceStore;
   // Front-door callback bodies (multi-replica rendezvous) — Pg-backed when DATABASE_URL is set, else in-memory
-  // (single process; the in-process rendezvous is equivalent there). docs/architecture/completion-stream-callback.md
+  // (the single-process dev shape). docs/architecture/completion-stream-callback.md
   callbackStore: CallbackStore;
   usageStore: UsageStore; // durable meter-only billing usage — the in-memory UsageMeter write-throughs + hydrates from it
   budgetStore: BudgetStore; // durable per-tenant budget (usage + limits) — the in-memory BudgetTracker write-throughs + hydrates from it

@@ -1,4 +1,26 @@
-import { Boxes, Building2, Container, Cpu, Fingerprint, GitBranch, Globe, HardDrive, KeyRound, Lock, Plug, Shield, SlidersHorizontal, Sparkles, Tag, Telescope, UserCircle, Users, Wallet, Zap, type LucideIcon } from 'lucide-react'
+import {
+  Boxes,
+  Building2,
+  Container,
+  Cpu,
+  Fingerprint,
+  GitBranch,
+  Globe,
+  HardDrive,
+  KeyRound,
+  Lock,
+  Plug,
+  Shield,
+  SlidersHorizontal,
+  Sparkles,
+  Tag,
+  Telescope,
+  UserCircle,
+  Users,
+  Wallet,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react'
 
 import type { WebAction } from '@/shared/auth/can'
 
@@ -24,7 +46,7 @@ export interface SettingsNavGroup {
 // Gates mirror the former settings-tabs.tsx `show:` flags exactly:
 // General/Integrations/CI = settings:read · Members = members:read · Secrets = secrets:read · Models = models:read
 // · Budget = scorecards:read. Account items are ungated (self-scoped).
-// (Team shared runners moved to the Runtimes surface — a runner is one flavor of execution runtime, not a settings tab.)
+// (Workspace-shared runners moved to the Runtimes surface — a runner is one flavor of execution runtime, not a settings tab.)
 export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   {
     headingKey: 'groupAccount',
@@ -46,7 +68,7 @@ export const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
         exact: true,
       },
       { href: '/members', labelKey: 'members', icon: Users, requiredAction: 'members:read' },
-      // The tracker vocabulary — directly under teams. Its permissions use the same pair as issues (it is not a separate surface).
+      // The tracker vocabulary. Its permissions use the same pair as issues (it is not a separate surface).
       { href: '/labels', labelKey: 'labels', icon: Tag, requiredAction: 'issues:read' },
       { href: '/secrets', labelKey: 'secrets', icon: Shield, requiredAction: 'secrets:read' },
       { href: '/models', labelKey: 'models', icon: Cpu, requiredAction: 'models:read' },

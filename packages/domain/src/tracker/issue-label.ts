@@ -2,7 +2,7 @@ import type { DomainFact, IssueLabelColor, IssueLabelRecord } from "@everdict/co
 import { BadRequestError } from "@everdict/contracts";
 
 // The IssueLabel aggregate (docs/tracker.md) — the workspace's classification vocabulary. Transitions return
-// {patch, facts} like Issue/Project/Initiative/Team, so the store persists state and its fact in one transaction
+// {patch, facts} like Issue/Project/Initiative, so the store persists state and its fact in one transaction
 // (E0). Transitions must never be spread — always use .patch.
 //
 // A label is deliberately thin: it owns a name, a colour token and a description, and nothing about the issues
@@ -30,14 +30,10 @@ export interface IssueLabelEditInput {
 }
 
 // Names are compared case- and whitespace-insensitively so "Flaky", "flaky " and "flaky" cannot coexist. The
-// STORED name keeps the author's casing (it is what a reader sees); only the comparison is folded — which is
-// also the key a GitHub import matches a remote label name against.
+// STORED name keeps the author's casing (it is what a reader sees); only the comparison is folded, in the label
+// store's name lookup.
 export function normalizeIssueLabelName(raw: string): string {
   return raw.trim();
-}
-
-export function issueLabelNameKey(raw: string): string {
-  return normalizeIssueLabelName(raw).toLocaleLowerCase();
 }
 
 export class IssueLabel {

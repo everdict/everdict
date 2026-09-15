@@ -9,8 +9,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // (there is no cache to invalidate, and Next 16 throws away the whole client prefetch cache and imposes a 300ms cooldown on the
 // DECLARATION alone). The grounds are in `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface IngestScorecardInput {
-  // The owning team — an ingested batch is a result, and a result belongs to a team. Absent = the control
-  // plane's own fallback (the caller's team).
   datasetId: string
   datasetVersion: string
   harnessId: string
@@ -51,7 +49,6 @@ export async function ingestScorecardAction(
 }
 
 export interface PullScorecardInput {
-  // Same owner rule as the push twin — absent = the control plane's own fallback (the caller's team).
   datasetId: string
   datasetVersion: string
   harnessId: string
@@ -96,7 +93,6 @@ export async function pullScorecardAction(
 }
 
 export interface EvaluateTracesInput {
-  // The owning team, when the form was opened under one — a judged trace set is a team's result like any run.
   sourceName: string // a REGISTERED workspace trace source (Settings › Observability) — pull by name (credential from the pool)
   traceIds: string[] // the selected trace ids to evaluate; each becomes one case (caseId = trace id)
   judges: { id: string; version: string }[] // Agent Judges (id + version) to score each pulled trace (empty = control-plane default scoring)

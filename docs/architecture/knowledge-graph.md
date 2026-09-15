@@ -310,16 +310,16 @@ Three paths fill the layer:
    append-only mention/edge tables (idempotent by id), an upsert-by-`nodeId` node table, and
    `listNodeIds`/`deleteNodes` for pruning. `DATABASE_URL` selects Postgres; without it the store is in-memory.
 2. **Harvesters** — pure projectors built on the shared `HarvestBuilder`, each stamped with a versioned `extractor`:
-   `scorecard` / `run` / `schedule` / `comment` / `membership`, `issue` / `project` / `initiative`, the registry-spec
+   `scorecard` / `run` / `schedule`, `issue` / `project` / `initiative`, the registry-spec
    harvesters `harness` / `dataset` / `judge` / `runtime` / `model` / `rubric` / `agent` (which take a
    `SpecHarvestMeta` since a spec carries no tenant/timestamp; they also emit `uses_model` / `uses_rubric` /
-   `uses_secret` / `adopts`, including cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`), `capability`,
-   and `skill` / `knowledge_entry`.
+   `uses_secret` / `adopts`, including cross-tenant `adopts` via `HarvestBuilder.ref`'s `objectTenant`), and
+   `skill` / `knowledge_entry`.
 3. **Reindex** — `KnowledgeService.reindex` (`POST /knowledge/reindex`, `settings:write`) pulls initiatives,
    projects, issues, schedules, each registry entity at its latest version (dataset/judge/runtime/model/rubric/
    harness/agent, with `versionOrigins`), workspace-visible skills and entries, and then only the referenced
-   scorecards and runs; it returns `{scanned, nodes, edges, pruned}`. The `comment`, `membership` and `capability`
-   harvesters have no caller, so comment and user nodes are never materialised.
+   scorecards and runs; it returns `{scanned, nodes, edges, pruned}`. Nothing harvests comments, memberships or
+   capability records, so comment and user nodes are never materialised.
 4. **Authored write path** — `annotate` stores an `authored` mention resolved to its node (read back via
    `GET /knowledge/annotations` / `knowledge_notes`); `relate` stores an `authored` edge over the closed vocabulary,
    idempotent by (author, subject, predicate, object). The `authored` origin lets a query separate what the system
@@ -365,7 +365,7 @@ Three paths fill the layer:
   messages or PR comments, and no resolver moves a `pending` mention to `resolved`.
 - **A reduce layer** — nothing aggregates evidence across mentions into node rows or validates predicate shapes.
 - **Harvesters** for `view`, `browser_profile`, `trace_source`, `agent_session`, `repository`, `runner`, `image`,
-  `case`, and wiring for the existing `comment` / `membership` / `capability` harvesters.
+  `case`, `comment`, `membership` and `capability` records.
 - **A coverage-gap agenda** — coverage is computed per listing and per context request; nothing collects the gaps.
 
 ## References

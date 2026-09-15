@@ -44,11 +44,6 @@ export async function readOrUnknown<T>(read: () => Promise<T>, what: string): Pr
   }
 }
 
-// Did this read establish what is there? `false` for `unknown` ONLY — an absent subject is established.
-export function readEstablished<T>(result: ReadResult<T>): boolean {
-  return result.kind !== "unknown";
-}
-
 // ── WHAT A RECOVERY DECIDED, ACROSS EVERY LANE IT ASKED (arch-review 54, Phase 2) ────────────────────
 //
 // The control-plane-side answer, folded from the per-backend `AdoptOutcome`s (@everdict/backends) of every runtime a record

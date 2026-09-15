@@ -42,7 +42,7 @@ export interface ProjectEditInput {
 }
 
 // Deduped, order preserved: the caller's order is the display order, and a list that silently kept a repeat
-// would double-count the same team in every rollup that walks it.
+// would double-count the same entry in every rollup that walks it.
 function normalizeIds(ids: readonly string[]): string[] {
   return [...new Set(ids)];
 }

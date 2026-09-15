@@ -276,7 +276,7 @@ export function registryProfileResolver(opts: {
     }
 
     // THIS member's agent — not the workspace's. The AgentSpec + the authored skill library are the shared baseline
-    // (hand-wired servers, adopted capabilities, default opt-outs, the team's skills); the caller's own overrides sit
+    // (hand-wired servers, adopted capabilities, default opt-outs, the workspace's skills); the caller's own overrides sit
     // on top, so the same assistant answers two members of one workspace with different tools AND different
     // procedures. Best-effort: a lookup failure degrades to fewer tools/skills, never to a failed turn.
     const mcpServers: ResolvedMcpServer[] = [];

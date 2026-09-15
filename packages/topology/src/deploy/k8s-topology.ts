@@ -274,11 +274,6 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
   return out;
 }
 
-// Namespace = the tenant (zone) isolation boundary. The primary means of separating the warm pool per zone.
-export function namespaceManifest(ns: string): K8sManifest {
-  return { apiVersion: "v1", kind: "Namespace", metadata: { name: ns } };
-}
-
 export function browserDeployName(runId: string): string {
   return `everdict-browser-${runId}`;
 }

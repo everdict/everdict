@@ -175,9 +175,7 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
     return this.store.versions(tenant, id);
   }
   // Only what this tenant registered directly (no `_shared` fallback). It is what tells "the workspace's own
-  // harness" from "a first-party one it can see" — which is the question BOTH the private-team read ceiling
-  // (`assertEntityVisible`) and the ownership transfer ask. Its absence here made every one of those answer
-  // "unowned", so a private team's harness was visible to the whole workspace.
+  // harness" from "a first-party one it can see" — the question a register's version-conflict check asks.
   async ownVersions(tenant: string, id: string): Promise<string[]> {
     return this.store.ownVersions(tenant, id);
   }

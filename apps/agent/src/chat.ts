@@ -38,9 +38,7 @@ import {
 import type { LlmTransport, ReasoningCarrier } from "@everdict/llm";
 import { type AgentDraft, buildAgentDraftTools } from "./agent-draft-tool.js";
 import type { AgentTryEvent, AgentTryResult } from "./agent-try.js";
-import { buildRunAnalysisTool } from "./analysis-script-tool.js";
 import { buildArtifactTools } from "./artifact-tools.js";
-import type { CodeToolRuntime } from "./code-tools.js";
 import type { ToolProvider } from "./mcp-tools.js";
 import {
   MEMORY_DIRECTORY,
@@ -512,9 +510,6 @@ export interface ChatDeps {
   // Analysis-artifact persistence (docs/architecture/analysis-studio.md V2). Present → the agent gets the
   // render_chart/render_table/write_report emission tools; absent → no artifact tools (dev without a store).
   artifacts?: AnalysisArtifactStore;
-  // run_analysis sandbox (analysis-studio V5) — present AND isolated → the agent may run model-authored analysis
-  // scripts (HITL-gated). Wired only when the operator opts in (AGENT_ALLOW_RUN_ANALYSIS); absent → no tool.
-  analysisScriptRuntime?: CodeToolRuntime;
   resolveModel: ModelResolver;
   // THE VERIFIER'S OWN INSTRUMENT (arch-review 26 P0). Resolved from the PLATFORM namespace, pinned to an
   // exact version, digest returned — never through the ordinary owner-first resolver, which answers with the
@@ -1132,13 +1127,7 @@ export async function runChat(
         ...(hooks.tryAgentDraft ? { tryDraft: hooks.tryAgentDraft } : {}),
       })
     : [];
-  const analysisScriptTool = deps.analysisScriptRuntime ? buildRunAnalysisTool(deps.analysisScriptRuntime) : undefined;
-  const extraTools = [
-    ...artifactTools,
-    ...canvasTools,
-    ...draftTools,
-    ...(analysisScriptTool ? [analysisScriptTool] : []),
-  ];
+  const extraTools = [...artifactTools, ...canvasTools, ...draftTools];
   const composed: ToolDefinition[] = [...tools.registry.list(), ...extraTools];
   // THE READER CONSUMES THE PIN (arch-review 26 P0). A verification plan resolves each piece of evidence's
   // identity before the turn starts, but what the model is handed is a LOCATOR — the tool returns whatever

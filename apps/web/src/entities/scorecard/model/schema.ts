@@ -229,9 +229,6 @@ export const scorecardRecordSchema = z.object({
   judgeModels: z.array(z.string()).optional(), // the judge model(s) that graded this run — separate from the model axis (the grader)
   origin: scorecardOriginSchema.optional(), // trigger provenance — lightweight, so also included in the list. Unset on legacy records.
   createdBy: z.string().optional(), // the runner (submitter subject) — the 'who' paired with origin (the 'where'). Unset on legacy records.
-  // The owning team (mig 0106). It decides who may CHANGE this and — for a private team — who sees it at
-  // all, and it is re-fileable (`POST /<resource>/:id/team`), so the detail shows it and offers the move.
-  // Absent = unowned (a `_shared` entry, or one from before the axis), which is the workspace's.
   runtime: z.string().optional(), // the runtime the batch ran on (placement.target: registered runtime id | self:* runner). Unset = legacy·ingest records. Lightweight → also included in the list.
   // Batch-on-Temporal ownership — when set, a durable workflow drives this batch (shown as a chip on the detail).
   orchestration: z
@@ -312,7 +309,7 @@ export const scorecardRecordSchema = z.object({
           createdAt: z.string(),
           createdBy: z.string().optional(),
         })
-        .passthrough(),
+        .passthrough()
     )
     .optional(),
   // …and the EXECUTION revision ledger beside it: which retry replaced which attempt, when, by whom, why.
@@ -326,7 +323,7 @@ export const scorecardRecordSchema = z.object({
           createdAt: z.string(),
           createdBy: z.string().optional(),
         })
-        .passthrough(),
+        .passthrough()
     )
     .optional(),
   // The decision context a release read off this batch.
@@ -346,7 +343,7 @@ export const scorecardRecordSchema = z.object({
         revision: z.number().int(),
         supersededAt: z.string(),
         supersededBy: z.string().optional(),
-      }),
+      })
     )
     .optional(),
   // …and the light count a LIST can afford: distinct cases re-executed, and the attempts that cost.
@@ -409,7 +406,7 @@ export const scorecardsSchema = z.array(scorecardRecordSchema)
 
 // GET /scorecards/counts — how many batches are in each bucket under the same narrow the list takes. The
 // number a paged screen cannot get from its own rows: counting what it received reports the page size back.
-// `key: null` is the unset bucket (no team, no creator); buckets with no rows are simply absent.
+// `key: null` is the unset bucket (no creator, no runtime); buckets with no rows are simply absent.
 export const scorecardGroupCountsSchema = z.object({
   groupBy: z.string(),
   groups: z.array(z.object({ key: z.string().nullable(), count: z.number().int() })),
@@ -716,22 +713,57 @@ type _recordFieldsOnWire = AssertAssignable<
 //             Serving it is fine; rendering it would be leaking the machine into the product.
 export const SCORECARD_WIRE_FIELD_KIND = {
   // Identity and the batch's own answer.
-  id: 'product', tenant: 'product', kind: 'product', dataset: 'product', harness: 'product',
-  status: 'product', summary: 'product', verdictSummary: 'product', trialSummary: 'product',
-  headlinePassRate: 'product', casePass: 'product', scorecard: 'product', caseRuns: 'product',
-  models: 'product', judgeModels: 'product', origin: 'product', createdBy: 'product',
-  runtime: 'product', subset: 'product', orchestration: 'product', requested: 'product',
-  createdAt: 'product', updatedAt: 'product', error: 'product', steps: 'product', runIds: 'product',
-  export: 'product', analysisRef: 'product', manifest: 'product', verdictPolicy: 'product',
-  retryableUnmeasured: 'product', outcomes: 'product', policyResolution: 'product',
+  id: 'product',
+  tenant: 'product',
+  kind: 'product',
+  dataset: 'product',
+  harness: 'product',
+  status: 'product',
+  summary: 'product',
+  verdictSummary: 'product',
+  trialSummary: 'product',
+  headlinePassRate: 'product',
+  casePass: 'product',
+  scorecard: 'product',
+  caseRuns: 'product',
+  models: 'product',
+  judgeModels: 'product',
+  origin: 'product',
+  createdBy: 'product',
+  runtime: 'product',
+  subset: 'product',
+  orchestration: 'product',
+  requested: 'product',
+  createdAt: 'product',
+  updatedAt: 'product',
+  error: 'product',
+  steps: 'product',
+  runIds: 'product',
+  export: 'product',
+  analysisRef: 'product',
+  manifest: 'product',
+  verdictPolicy: 'product',
+  retryableUnmeasured: 'product',
+  outcomes: 'product',
+  policyResolution: 'product',
   // The six the census found, plus the two ledgers the in-place retry added.
-  gates: 'product', scoring: 'product', executions: 'product', world: 'product',
-  decision: 'product', etaSeconds: 'product', caseAttempts: 'product', retrySummary: 'product',
+  gates: 'product',
+  scoring: 'product',
+  executions: 'product',
+  world: 'product',
+  decision: 'product',
+  etaSeconds: 'product',
+  caseAttempts: 'product',
+  retrySummary: 'product',
   // Control-plane machinery. `ownerReplica`/`ownerEpoch` fence a driver, the two pass markers say a plane is
   // mid-repair, `publication` is the settlement's owed outward effects, and `traceProjectionVersion` says
   // which era judged it. A reader of a scorecard is not reading any of those.
-  ownerReplica: 'internal', ownerEpoch: 'internal', scoringPass: 'internal', executionPass: 'internal',
-  publication: 'internal', traceProjectionVersion: 'internal',
+  ownerReplica: 'internal',
+  ownerEpoch: 'internal',
+  scoringPass: 'internal',
+  executionPass: 'internal',
+  publication: 'internal',
+  traceProjectionVersion: 'internal',
 } as const satisfies Record<keyof ScorecardResponse, 'product' | 'internal'>
 
 type ProductScorecardField = {

@@ -3,12 +3,7 @@ import { registryAuthSecretName } from "@everdict/domain";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_BROWSER_IMAGE } from "./deploy/browser-image.js";
 import { K8sTopologyRuntime } from "./deploy/k8s-runtime.js";
-import {
-  browserDeployName,
-  buildBrowserManifests,
-  buildK8sManifests,
-  namespaceManifest,
-} from "./deploy/k8s-topology.js";
+import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./deploy/k8s-topology.js";
 import type { Kubectl, PortForward } from "./deploy/kubectl.js";
 
 const SPEC: ServiceHarnessSpec = {
@@ -154,13 +149,6 @@ describe("buildBrowserManifests (K8s)", () => {
     const dep = m[0]?.spec as { template: { spec: { containers: Array<{ image: string; args: string[] }> } } };
     expect(dep.template.spec.containers[0]?.image).toBe(DEFAULT_BROWSER_IMAGE);
     expect(dep.template.spec.containers[0]?.args).toEqual(["--remote-allow-origins=*"]);
-  });
-  it("namespaceManifest", () => {
-    expect(namespaceManifest("everdict-x")).toEqual({
-      apiVersion: "v1",
-      kind: "Namespace",
-      metadata: { name: "everdict-x" },
-    });
   });
 });
 

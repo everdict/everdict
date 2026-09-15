@@ -48,10 +48,6 @@ export default async function WorkspaceLayout({
   const isMember = principal.workspaces?.some((w) => w.id === slug) ?? false
   if (!isMember) redirect(`/${principal.workspace}`)
 
-  // The sidebar's team section (Linear's "Your teams") — only the teams I belong to. Reading the team list IS the invariant recovery point
-  // (with no default team the server creates one), so even a new workspace has one team on its first render. The shell must not die over teams,
-  // so a failure is absorbed as an empty list — only the section disappears and the rest of the navigation stands.
-
   return (
     <ShellSwitch
       embedHint={embedHint}

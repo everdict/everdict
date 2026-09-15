@@ -60,7 +60,6 @@ export function registerScorecardRoutes(app: FastifyInstance, deps: ServerDeps):
     }
     try {
       // Dataset not found → NotFoundError → 404. On pass, 202 + a queued record (the batch runs in the background).
-      // submittedBy=subject → clone private-repo cases with the submitter's personal connection.
       // origin.source is decided server-side (via mapping) — only the client coordinates (repo/sha/…) come from the body.
       return reply.code(202).send(
         await deps.scorecardService.submit({

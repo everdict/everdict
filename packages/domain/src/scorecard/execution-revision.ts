@@ -36,17 +36,6 @@ export function attemptsForCase(attempts: readonly CaseAttempt[] | undefined, ke
   return 1 + attempts.filter((a) => keyOf(a) === wanted).length;
 }
 
-// Every case that has run more than once, with its count — what a detail view shows next to a case, and
-// what makes "this ran 3 times" answerable without loading the heavy ledger entries themselves.
-export function attemptCounts(attempts: readonly CaseAttempt[] | undefined): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const attempt of attempts ?? []) {
-    const key = keyOf(attempt);
-    counts[key] = (counts[key] ?? 1) + 1;
-  }
-  return counts;
-}
-
 // The light summary a LIST may carry. `cases` counts DISTINCT (case, trial) keys that were re-executed;
 // `attempts` counts the superseded executions. They differ whenever one case was retried twice, which is
 // exactly the situation a single number would hide.

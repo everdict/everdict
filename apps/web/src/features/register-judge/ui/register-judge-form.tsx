@@ -139,8 +139,7 @@ export interface JudgeFormInitial {
 // judge context, sandboxed via dispatch. (model/harness judges remain engine-internal for already-registered specs.)
 // runtimes = this workspace's runtimes (judge execution infra; empty = co-locate only).
 // models = registered LLM models — the optional Model binding the code may call (env-injected at dispatch).
-// initial prefill + lockId (a new version of the same judge — id fixed, team ownership stays the detail's move
-// control) + redirectDetailId (return to that judge's detail on success/cancel instead of the list).
+// initial prefill + lockId (a new version of the same judge — id fixed) + redirectDetailId (return to that judge's detail on success/cancel instead of the list).
 export function RegisterJudgeForm({
   workspace,
   runtimes = [],
@@ -236,10 +235,7 @@ export function RegisterJudgeForm({
   function onSubmit() {
     if (!precheck()) return
     startSave(async () => {
-      // The owning team rides BESIDE the spec (the route reads it, the spec schema strips it) — kept out of
-      // buildSpec so validate/preview/try keep sending the pure spec.
-      const spec = buildSpec() as Record<string, unknown>
-      const r = await createJudgeAction(spec)
+      const r = await createJudgeAction(buildSpec())
       if (r.ok) {
         toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
         router.push(doneHref)
@@ -283,8 +279,6 @@ export function RegisterJudgeForm({
           autoComplete="off"
         />
       </Field>
-
-      {/* A new version keeps the judge's owning team — re-filing is the detail's TeamOwnerControl, not here. */}
 
       {/* The code — the judge itself. Contract: argv[1] = context JSON path; print Score[] last on stdout. */}
       <div className="space-y-2.5">

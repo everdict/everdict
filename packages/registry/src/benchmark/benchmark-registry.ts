@@ -6,8 +6,6 @@ import { VersionedStore } from "../versioned-store.js";
 // This is the core of the "per-user/per-tenant benchmark" generalization — turning the catalog (code) into data a tenant registers.
 export interface BenchmarkRegistry {
   register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void>;
-  // The owning team — the value the authorization kernel's team axis reads (undefined = no owner).
-  teamOfVersion?(tenant: string, id: string, version: string): string | undefined | Promise<string | undefined>;
   get(tenant: string, id: string, ref?: string): Promise<BenchmarkAdapterSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // owner-first / _shared fallback
   ownVersions(tenant: string, id: string): Promise<string[]>; // this tenant's owned only (conflict check)

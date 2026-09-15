@@ -1,7 +1,6 @@
 import type {
   AgentSpec,
   CapabilityOrigin,
-  CapabilityRecord,
   Dataset,
   HarnessSpec,
   JudgeSpec,
@@ -27,7 +26,6 @@ export const RUNTIME_HARVESTER = "runtime_harvester_v1";
 export const MODEL_HARVESTER = "model_harvester_v1";
 export const RUBRIC_HARVESTER = "rubric_harvester_v1";
 export const AGENT_HARVESTER = "agent_harvester_v1";
-export const CAPABILITY_HARVESTER = "capability_harvester_v1";
 
 // The registry metadata a spec does not carry itself. `tags` is here (not on the spec) for harnesses — a HarnessSpec has
 // no tags field; dataset/judge/runtime carry their own on the spec and ignore this. `origin` is the version's birth
@@ -56,13 +54,13 @@ function rubricRefNode(rubric: string | RubricRef | undefined): NodeRef | undefi
   return { type: "rubric", key: rubric.id, version: rubric.version };
 }
 
-// The edges every spec shares: workspace scoping, ownership, tag classification, team scoping, and the origin
+// The edges every spec shares: workspace scoping, ownership, tag classification, and the origin
 // lineage. An origin whose `from` names the SPEC'S OWN family (same type, same id, a version to point at) is
 // the version lineage itself — the re-pin/derivation base — and becomes the `succeeds` edge, version-pinned;
 // any other `from` is the intent edge `born_from` (WHY this exists). One recorded fact, one predicate — and
 // never version adjacency: a version with no recorded same-family origin gets NO `succeeds` edge, because an
 // inferred ancestor is exactly the re-derivation rule `protocol` L3 forbids. Origin `from.type` values that
-// are not node types (`trace`, `benchmark`) are skipped by the safeParse, same idiom as harvestComment.
+// are not node types (`trace`, `benchmark`) are skipped by the safeParse.
 function common(
   b: HarvestBuilder,
   tenant: string,
@@ -253,27 +251,5 @@ export function harvestAgent(meta: SpecHarvestMeta, spec: AgentSpec): HarvestRes
       b.ref("uses_secret", { type: "secret", key: secretName }, `capabilities[${i}].secretBindings.${logical}`);
     }
   });
-  return b.result();
-}
-
-// A CapabilityRecord — a published tool/code/skill/environment. Unlike the versioned specs it IS a record (carries
-// tenant/createdAt/createdBy), so it needs no SpecHarvestMeta.
-export function harvestCapability(record: CapabilityRecord): HarvestResult {
-  const b = new HarvestBuilder(
-    record.tenant,
-    "capability_spec",
-    record.id,
-    CAPABILITY_HARVESTER,
-    record.createdAt,
-    record.createdAt,
-  ).self({ type: "capability", key: record.id, version: record.version }, `${record.name} (${record.spec.type})`, {
-    type: record.spec.type,
-    visibility: record.visibility,
-  });
-  b.ref("in_workspace", { type: "workspace", key: record.tenant }, "tenant");
-  if (record.createdBy !== undefined && record.createdBy !== "") {
-    b.ref("created_by", { type: "user", key: record.createdBy }, "createdBy");
-  }
-  record.tags.forEach((t, i) => b.ref("tagged_with", { type: "tag", key: t }, `tags[${i}]`));
   return b.result();
 }

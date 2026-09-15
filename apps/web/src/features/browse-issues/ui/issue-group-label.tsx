@@ -16,7 +16,7 @@ import { Avatar } from '@/shared/ui/avatar'
 import type { IssueDirectories } from '../model/directories'
 
 // One group's name plate — an icon plus the name. It resolves the different vocabularies of each axis in ONE place: status and priority are a
-// closed vocabulary and come from the catalog; people, projects and cycles come from the directory join. `null` is the unspecified bucket and it
+// closed vocabulary and come from the catalog; people and projects come from the directory join. `null` is the unspecified bucket and it
 // needs a name too — a nameless group reads as a fault.
 export function IssueGroupLabel({
   groupBy,

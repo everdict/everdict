@@ -14,7 +14,7 @@ export function navGroupOpen({
   // The record of the user opening or closing this group themselves (including a value restored from localStorage). Absent, undefined.
   recorded: boolean | undefined
   holdsActive: boolean
-  // The default when there is neither a record nor an active item (with only one team, for example, there is no reason to collapse it).
+  // The default when there is neither a record nor an active item.
   whenUnrecorded?: boolean
 }): boolean {
   return recorded ?? (holdsActive || whenUnrecorded)

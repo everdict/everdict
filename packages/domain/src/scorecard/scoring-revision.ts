@@ -70,13 +70,6 @@ export function observationSetDigest(
   );
 }
 
-// The plane's own observation set: childKey → the EXECUTION's digest (scores and judge:* evidence spans
-// excluded — see caseObservationDigest), so a legitimate re-judgment of the same execution digests
-// identically and only a change to what was observed moves it.
-export function inputObservationSetDigest(results: readonly CaseResult[]): string {
-  return observationSetDigest(results.map((r) => [childKey(r.caseId, r.trial), caseObservationDigest(r)] as const));
-}
-
 // WHETHER THE RECEIPT LEDGER COULD BE READ AT ALL — stated by the caller, never inferred from an empty
 // array. "No receipts exist" and "the receipts could not be fetched" are opposite facts about a comparison,
 // and collapsing them is how absence becomes agreement.

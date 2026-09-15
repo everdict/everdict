@@ -21,7 +21,7 @@ const view = (over: Partial<IssueView> = {}): IssueView => ({
 describe('issue view — the URL carries the filters, and only the filters', () => {
   it('round-trips the filters through the query string', () => {
     const href = issueViewHref(
-      '/acme/team/ENG',
+      '/acme/issues',
       view({ filters: { status: ['todo'], label: ['bug', 'flaky'] } })
     )
     const parsed = issueViewOf(
@@ -29,14 +29,14 @@ describe('issue view — the URL carries the filters, and only the filters', () 
       DEFAULT_ISSUE_DISPLAY
     )
     expect(parsed.filters.status).toEqual(['todo'])
-    expect(issueViewHref('/acme/team/ENG', view())).toBe('/acme/team/ENG')
+    expect(issueViewHref('/acme/issues', view())).toBe('/acme/issues')
   })
 
   it('never writes the display into the address — a shared link must not re-arrange the reader’s screen', () => {
     // Grouping, ordering and layout are the READER's, stored per user. Putting them in the URL is how a pasted
     // link ends up imposing the sender's board on someone who wanted their list.
     const href = issueViewHref(
-      '/acme/team/ENG',
+      '/acme/issues',
       view({
         grouping: 'assignee',
         order: 'priority',
@@ -45,13 +45,15 @@ describe('issue view — the URL carries the filters, and only the filters', () 
         subIssues: 'top',
       })
     )
-    expect(href).toBe('/acme/team/ENG')
+    expect(href).toBe('/acme/issues')
   })
 
   it('takes the display from the reader, not from whatever the address happens to say', () => {
     // The old display parameters are now just unknown words in the query: they are ignored rather than obeyed,
     // so a link someone saved before the split cannot override the recipient's preference.
-    const savedBeforeTheSplit = Object.fromEntries(new URLSearchParams('group=cycle&layout=board'))
+    const savedBeforeTheSplit = Object.fromEntries(
+      new URLSearchParams('group=priority&layout=board')
+    )
     const parsed = issueViewOf(savedBeforeTheSplit, {
       ...DEFAULT_ISSUE_DISPLAY,
       grouping: 'assignee',

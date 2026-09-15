@@ -99,8 +99,6 @@ export function IssueActions({
         </DropdownItem>
       </DropdownMenu>
 
-      {/* A sub-issue is born in its PARENT's team — the team stamps the identifier, so without inheriting it a child of `ENG-12` would be
-          stamped `PLAT-3` in the workspace default team. */}
       <CreateIssueDialog
         workspace={workspace}
         projects={projects}

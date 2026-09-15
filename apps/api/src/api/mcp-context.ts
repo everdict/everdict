@@ -1,5 +1,4 @@
 import type { CiLinkService, ConstitutionApprovalStore, ConstitutionalPublisher } from "@everdict/application-control";
-import type { WorkflowStateService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
 import type { ApprovalService } from "@everdict/application-control";
@@ -107,7 +106,6 @@ export type AgentTryRelay = (input: AgentTryRelayInput) => Promise<unknown>;
 
 export interface McpDeps {
   service: RunService;
-  workflowStateService?: WorkflowStateService;
   scorecardService?: ScorecardService;
   // The receipts constitutional declarations leave — the MCP twin of the attest route (BFF↔MCP parity).
   constitutionApprovals?: ConstitutionApprovalStore;

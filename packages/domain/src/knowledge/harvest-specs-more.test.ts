@@ -1,13 +1,6 @@
-import {
-  type AgentSpec,
-  type CapabilityRecord,
-  EdgeMentionSchema,
-  MentionSchema,
-  type ModelSpec,
-  type RubricSpec,
-} from "@everdict/contracts";
+import { type AgentSpec, EdgeMentionSchema, MentionSchema, type ModelSpec, type RubricSpec } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { type SpecHarvestMeta, harvestAgent, harvestCapability, harvestModel, harvestRubric } from "./harvest-specs.js";
+import { type SpecHarvestMeta, harvestAgent, harvestModel, harvestRubric } from "./harvest-specs.js";
 import { nodeId } from "./ids.js";
 
 const meta: SpecHarvestMeta = {
@@ -81,36 +74,6 @@ describe("harvestAgent", () => {
     const secrets = res.edges.filter((e) => e.predicate === "uses_secret").map((e) => e.objectNodeId);
     expect(secrets).toContain(nodeId("acme", { type: "secret", key: "MCP_TOKEN" }));
     expect(secrets).toContain(nodeId("acme", { type: "secret", key: "MY_SEARCH_KEY" }));
-    valid(res);
-  });
-});
-
-describe("harvestCapability", () => {
-  it("materialises the capability node from a record (no meta needed) with its owner + tags", () => {
-    const record: CapabilityRecord = {
-      id: "web-search",
-      tenant: "_everdict",
-      version: "3.0.0",
-      name: "Web Search",
-      description: "search the web",
-      spec: {
-        type: "mcp",
-        url: "https://mcp.example",
-        args: [],
-        provides: ["search"],
-        requiredSecrets: [],
-        write: false,
-      },
-      visibility: "public",
-      sharedWith: [],
-      tags: ["search"],
-      createdBy: "sys",
-      createdAt: "2026-07-27T00:00:00Z",
-    };
-    const res = harvestCapability(record);
-    expect(res.nodes[0]?.nodeId).toBe(nodeId("_everdict", { type: "capability", key: "web-search", version: "3.0.0" }));
-    expect(preds(res.edges).get("created_by")).toBe(nodeId("_everdict", { type: "user", key: "sys" }));
-    expect(res.edges.some((e) => e.predicate === "tagged_with")).toBe(true);
     valid(res);
   });
 });

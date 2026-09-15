@@ -175,8 +175,8 @@ describe("capability origin — a registration records where it came from", () =
     });
     expect(res.statusCode).toBe(201);
 
-    // Then: what is stored is the record id — an identifier is re-minted when an issue moves team, and a stamp
-    // that dies on a team move is worse than none. The label is the snapshot the detail view draws.
+    // Then: what is stored is the record id — an identifier can be re-minted, and a stamp that dies on a
+    // re-mint is worse than none. The label is the snapshot the detail view draws.
     expect(await judgeOrigin(app, "truncation", "1.0.0")).toEqual({
       via: "web",
       from: {

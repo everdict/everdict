@@ -140,9 +140,7 @@ function makeDeps(
   return {
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
-    // Opening a campaign resolves the issue's TEAM, so the tracker is a REQUIRED dependency of that tool
-    // now (arch-review 79). These cases run with no teams configured — the unowned shape, which is the
-    // workspace's and writable by every member.
+    // Opening a campaign reads its issue, so the tracker is a REQUIRED dependency of that tool (arch-review 79).
     issueService: {
       async get(_t: string, ref: string) {
         return ref === "iss_1" ? { id: "iss_1" } : undefined;

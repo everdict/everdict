@@ -60,7 +60,7 @@ export default async function NewSchedulePage({
     } catch {
       // Even if the runner list fails, the form still works
     }
-    // If the workspace has team-shared runners, expose the self:ws pool option. Not shown if it fails/is empty.
+    // If the workspace has shared runners, expose the self:ws pool option. Not shown if it fails/is empty.
     try {
       hasWorkspaceRunners =
         runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0

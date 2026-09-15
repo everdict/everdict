@@ -9,7 +9,7 @@ import type {
 import { InMemoryModelRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import type { ScopedSecretTiers } from "./judge-auth-dispatcher.js";
-import { ModelResolvingDispatcher, resolveJobModel } from "./model-resolving-dispatcher.js";
+import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 
 function commandSpec(model?: ModelBinding, env: CommandHarnessSpec["env"] = {}): CommandHarnessSpec {
   return {
@@ -85,38 +85,58 @@ async function registry(): Promise<InMemoryModelRegistry> {
   return models;
 }
 
-describe("resolveJobModel", () => {
+// What the inner dispatcher is handed — the job after the one resolution point production runs.
+async function resolvedBy(models: InMemoryModelRegistry, submitted: CaseJob, secrets?: ReturnType<typeof secretsFor>) {
+  let seen: CaseJob | undefined;
+  const inner = {
+    async dispatch(j: CaseJob): Promise<CaseResult> {
+      seen = j;
+      return {
+        caseId: j.evalCase.id,
+        harness: "aider@1.0.0",
+        trace: [],
+        snapshot: { kind: "prompt", output: "" },
+        scores: [],
+      };
+    },
+  };
+  await new ModelResolvingDispatcher(models, inner, secrets).dispatch(submitted);
+  if (seen === undefined) throw new Error("the inner dispatcher was never called");
+  return seen;
+}
+
+describe("ModelResolvingDispatcher — model resolution", () => {
   it("resolves command.model to the underlying model identifier when it's a registered Model id", async () => {
     const models = await registry();
-    const resolved = await resolveJobModel(models, job(commandSpec("opus")));
+    const resolved = await resolvedBy(models, job(commandSpec("opus")));
     expect((resolved.harnessSpec as CommandHarnessSpec).model).toBe("claude-opus-4-8");
   });
 
   it("leaves the raw model string as-is when it's not a registered id (fallback)", async () => {
     const models = await registry();
-    const resolved = await resolveJobModel(models, job(commandSpec("gpt-5.4-mini")));
+    const resolved = await resolvedBy(models, job(commandSpec("gpt-5.4-mini")));
     expect((resolved.harnessSpec as CommandHarnessSpec).model).toBe("gpt-5.4-mini");
   });
 
   it("doesn't resolve another workspace's model id (tenant scope)", async () => {
     const models = await registry(); // "opus" is owned by acme
-    const resolved = await resolveJobModel(models, job(commandSpec("opus"), "beta"));
+    const resolved = await resolvedBy(models, job(commandSpec("opus"), "beta"));
     expect((resolved.harnessSpec as CommandHarnessSpec).model).toBe("opus");
   });
 
   it("returns the job unchanged if it's not a command harness or model is unset", async () => {
     const models = await registry();
     const noModel = job(commandSpec(undefined));
-    expect(await resolveJobModel(models, noModel)).toBe(noModel);
+    expect(await resolvedBy(models, noModel)).toBe(noModel);
     const noSpec = job(undefined);
-    expect(await resolveJobModel(models, noSpec)).toBe(noSpec);
+    expect(await resolvedBy(models, noSpec)).toBe(noSpec);
   });
 });
 
-describe("resolveJobModel — connection env injection", () => {
+describe("ModelResolvingDispatcher — connection env injection", () => {
   it("injects a command harness's model connection (baseUrl + key + model) from the linked secret", async () => {
     const models = await registry();
-    const resolved = await resolveJobModel(
+    const resolved = await resolvedBy(
       models,
       job(commandSpec("litellm-mini")),
       secretsFor({ MY_LITELLM_KEY: "sk-live" }),
@@ -132,7 +152,7 @@ describe("resolveJobModel — connection env injection", () => {
 
   it("falls back to the submitter's personal secret when the workspace tier lacks the key", async () => {
     const models = await registry();
-    const resolved = await resolveJobModel(
+    const resolved = await resolvedBy(
       models,
       job(commandSpec("litellm-mini")),
       secretsFor({}, { MY_LITELLM_KEY: "sk-personal" }),
@@ -142,21 +162,21 @@ describe("resolveJobModel — connection env injection", () => {
 
   it("throws a fail-fast 400 when the model's named apiKeySecret is set in no tier", async () => {
     const models = await registry();
-    await expect(resolveJobModel(models, job(commandSpec("litellm-mini")), secretsFor({}))).rejects.toThrow(
+    await expect(resolvedBy(models, job(commandSpec("litellm-mini")), secretsFor({}))).rejects.toThrow(
       /MY_LITELLM_KEY/,
     );
   });
 
   it("throws when an explicit ModelRef object references an unregistered model", async () => {
     const models = await registry();
-    await expect(resolveJobModel(models, job(commandSpec({ ref: "ghost" })), secretsFor({}))).rejects.toThrow(
+    await expect(resolvedBy(models, job(commandSpec({ ref: "ghost" })), secretsFor({}))).rejects.toThrow(
       /no such model/,
     );
   });
 
   it("runs without a key when the model relies on the provider default and it isn't set (own-pays)", async () => {
     const models = await registry();
-    const resolved = await resolveJobModel(models, job(commandSpec("opus")), secretsFor({}));
+    const resolved = await resolvedBy(models, job(commandSpec("opus")), secretsFor({}));
     const spec = resolved.harnessSpec as CommandHarnessSpec;
     expect(spec.model).toBe("claude-opus-4-8");
     expect(spec.env).toEqual({ ANTHROPIC_MODEL: "claude-opus-4-8" }); // no baseUrl, no key
@@ -165,7 +185,7 @@ describe("resolveJobModel — connection env injection", () => {
   it("injects into the service that carries the model binding, not its peers, preserving static env", async () => {
     const models = await registry();
     const spec = serviceSpec([svc("db"), svc("agent", { model: "litellm-mini", env: { LOG_LEVEL: "info" } })]);
-    const resolved = await resolveJobModel(models, job(spec), secretsFor({ MY_LITELLM_KEY: "sk-live" }));
+    const resolved = await resolvedBy(models, job(spec), secretsFor({ MY_LITELLM_KEY: "sk-live" }));
     const services = (resolved.harnessSpec as ServiceHarnessSpec).services;
     expect(services.find((s) => s.name === "db")?.env).toEqual({});
     expect(services.find((s) => s.name === "agent")?.env).toEqual({
@@ -183,7 +203,7 @@ describe("resolveJobModel — connection env injection", () => {
         model: { ref: "litellm-mini", env: { apiKey: "LLM_KEY", baseUrl: "LLM_URL", model: "LLM_MODEL" } },
       }),
     ]);
-    const resolved = await resolveJobModel(models, job(spec), secretsFor({ MY_LITELLM_KEY: "sk-live" }));
+    const resolved = await resolvedBy(models, job(spec), secretsFor({ MY_LITELLM_KEY: "sk-live" }));
     expect((resolved.harnessSpec as ServiceHarnessSpec).services[0]?.env).toEqual({
       LLM_MODEL: "gpt-5.4-mini",
       LLM_URL: "https://litellm.internal/v1",
@@ -195,7 +215,7 @@ describe("resolveJobModel — connection env injection", () => {
     const models = await registry();
     const spec = serviceSpec([svc("agent", { model: "litellm-mini" })]);
     const j = job(spec);
-    expect(await resolveJobModel(models, j)).toBe(j); // no secretsFor → nothing to inject on a service
+    expect(await resolvedBy(models, j)).toBe(j); // no secretsFor → nothing to inject on a service
   });
 });
 

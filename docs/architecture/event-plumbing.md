@@ -94,8 +94,8 @@ payload filter rather than a new kind. The families on the log today:
 
 `agent.run.*` is the older spelling of `run.*`: `AGENT_RUN_EVENT_KIND_ALIASES` and `canonicalEventKind` normalize
 it for readers, while emission keeps the old names so the family stays outside `TRIGGERABLE_EVENT_KINDS`.
-`harness.moved`, `dataset.moved`, `judge.moved` and `scorecard.moved` are still in the vocabulary but have had no
-emit point since the team axis was removed (migrations `0211`/`0212`). Not emitted at all: runner online/offline,
+The ownership-transfer kinds from the team era left the vocabulary in migration `0215`, which also deleted the
+stored events. Not emitted at all: runner online/offline,
 budget-threshold crossings short of a refusal, queue-depth bands.
 
 ## §4 Delivery semantics

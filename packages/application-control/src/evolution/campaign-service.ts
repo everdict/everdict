@@ -482,16 +482,6 @@ export interface NewCampaignInput {
   // A full frame, or `{ fromIssue: true, … }` — everything but the exam, which the service derives from the
   // issue's `case` links and the dataset version they pin (evolution-routing-spec.md §3).
   frame: CampaignFrame | CampaignFrameFromIssue;
-  // ── THE TEAM THE TRANSPORT AUTHORIZED AGAINST (arch-review 115) ─────────────────────────────────
-  //
-  // The route reads the issue to gate `scorecards:run` on its team, and `open` below reads the SAME issue
-  // again to stamp the campaign's own team. Between the two, `POST /issues/:id/team` can move it — so a
-  // caller authorized for Team A files a Team B campaign, and every later gate on that campaign answers for
-  // a team this caller was never cleared for.
-  //
-  // Same law as the registry's `expectedOwnerTeamId`: an authorization and the effect it authorizes read the
-  // mutable fact ONCE. Absent means the caller stated no expectation (a headless or seeded open); present
-  // and different is a refusal, not a quiet re-file.
 }
 
 export interface NewRoundInput {
@@ -889,8 +879,7 @@ export class CampaignService {
     //
     // So the population is the whole tree the chain's members root: every campaign whose `continues` names a
     // member, transitively. Read across the whole tenant, unfiltered by subject — a sibling spent the rows just
-    // the same, and only a count leaves this function. (There is no team ceiling to bypass any more: the team
-    // axis was dropped in migrations 0211/0212.)
+    // the same, and only a count leaves this function.
     const everyCampaign = await this.deps.store.list(tenant);
     const tree = new Set(seen);
     for (let grew = true; grew; ) {

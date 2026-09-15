@@ -136,7 +136,7 @@ dispatcher is a `Dispatcher` — an in-process `Scheduler` (default) or the Temp
 ## Three concerns: execution · orchestration · scoring (don't re-tangle)
 See `docs/architecture/execution-scoring-orchestration.md`. Both files below are in
 `packages/application-control/src/execution/`.
-- **Execution** = `execute-case.ts` `executeCase(deps, owner, job, opts?) → CaseResult` — **pure**. No
+- **Execution** = `execute-case.ts` `executeCase(deps, job, opts?) → CaseResult` — **pure**. No
   settle/offload/notify. `RunService` and `ScorecardService` both call it (never route the batch through
   `RunService.submit`).
 - **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how they were

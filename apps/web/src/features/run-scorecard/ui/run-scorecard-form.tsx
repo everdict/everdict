@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
+import { EstimateLine } from '@/features/estimate-scorecard'
 import { JudgePicker, type JudgePickerChoice, type JudgeRef } from '@/entities/judge'
 import { CapabilityBadge, capabilityFit, CapabilityFitNote } from '@/entities/runtime'
 import { versionOptions } from '@/shared/lib/version-options'
@@ -15,7 +16,6 @@ import { FieldError, Input, Label } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 import { runScorecardAction } from '../api/run-scorecard'
-import { EstimateLine } from '@/features/estimate-scorecard'
 
 interface Values {
   datasetId: string
@@ -52,7 +52,7 @@ export function RunScorecardForm({
   judges?: JudgePickerChoice[] // Registered Agent Judges (model|harness) selectable to score each case, with their versions
   runtimes?: { id: string; capabilities?: string[] }[] // capabilities = latest version's declared caps (for fit preview)
   runners?: { id: string; label: string }[]
-  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
+  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when workspace-shared runners exist
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -269,7 +269,7 @@ export function RunScorecardForm({
                         : {}),
                     }
                   }),
-                  // Team shared runner pool — takes any registered team runner that meets capability (multiple runners = concurrency).
+                  // Workspace-shared runner pool — takes any registered workspace runner that meets capability (multiple runners = concurrency).
                   ...(hasWorkspaceRunners
                     ? [
                         {

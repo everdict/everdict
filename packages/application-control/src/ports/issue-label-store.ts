@@ -2,7 +2,7 @@ import type { IssueLabelRecord } from "@everdict/contracts";
 import type { OutboxEvent } from "./run-store.js";
 
 // The workspace's label registry (docs/tracker.md). `events` is the E0 outbox: implementations persist facts
-// ATOMICALLY with the write they describe, the same contract IssueStore and TeamStore hold.
+// ATOMICALLY with the write they describe, the same contract IssueStore and ProjectStore hold.
 export interface IssueLabelStore {
   // Rejects a duplicate name (case-insensitive, per workspace) with a ConflictError — the uniqueness is the
   // store's to guarantee, because two members defining "flaky" at the same moment is a concurrency question.

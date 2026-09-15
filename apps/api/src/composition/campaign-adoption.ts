@@ -134,8 +134,6 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
         // the byte-for-byte document a later `get` returns.
         const would = digestOf(parsed);
         if (measured !== undefined && would !== measured) refuseDigest(would);
-        // ── THE ADOPTED VERSION STAYS WITH ITS TEAM, WITHOUT A WINDOW (wave C · 74 · 77) ─────────────
-        //
         // ── LOCAL EXISTENCE, NOT RESOLVE-EXISTENCE (arch-review 115) ──────────────────────────────
         //
         // `has()` falls back to `_shared`, so a candidate that exists only there answered TRUE while this
@@ -183,8 +181,6 @@ export function buildCampaignAdoption(deps: CampaignAdoptionWiring): CampaignAdo
       const would = digestOf(wouldResolve);
       if (measured !== undefined && would !== measured) refuseDigest(would);
       const existed = (await deps.harnesses.ownVersions(tenant, id)).includes(version);
-      // Same authority precondition and same initial owner as the agent lane — one shape, both lanes, because
-      // a guarantee one lane carries and the other does not is how this axis has come apart every time.
       await deps.harnesses.register(tenant, parsed, by, origin);
       const held = digestOf(await deps.harnesses.get(tenant, id, version));
       return {

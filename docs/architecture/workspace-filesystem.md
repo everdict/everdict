@@ -318,7 +318,7 @@ ledger instead of storage, so `history` / `readRevision` / `diffRevisions` carry
 Rules that hold at every door:
 
 - **Absence is NOT FOUND, never FORBIDDEN.** "You may not read this" still confirms the file exists, and what a
-  member wrote privately includes the fact that they wrote it. Same rule the private-team reads follow.
+  member wrote privately includes the fact that they wrote it.
 - **Listing `memory/members` shows the viewer their own directory and nothing else** — a name alone already says
   who has memory here.
 - **A recursive delete from ABOVE the member areas is refused** (`memory/`, the tree root): the scope must not be

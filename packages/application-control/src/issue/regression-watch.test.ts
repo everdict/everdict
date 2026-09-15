@@ -22,7 +22,7 @@ import {
 import { IssueService } from "./issue-service.js";
 import { regressionWatch } from "./regression-watch.js";
 
-// Teams are a peer concern: an issue is numbered by its team, and the tests only need that to be deterministic.
+// Numbering is a peer concern: an issue is numbered by its workspace, and the tests only need that to be deterministic.
 const numberAllocator = (() => {
   let n = 0;
   return {

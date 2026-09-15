@@ -7,11 +7,9 @@ import { Skeleton } from '@/shared/ui/skeleton'
 // trailer for the list, and once one screenful is filled nobody looks below it.
 const SKELETON_ROWS = 8
 
-export function IssueListSkeleton({ scoped = false }: { scoped?: boolean }) {
+export function IssueListSkeleton() {
   return (
     <div className="@container space-y-6">
-      {/* The team scope bar — it exists only on screens under a team, so it reserves space only there. */}
-      {scoped && <Skeleton className="h-8 w-64" />}
       <div className="space-y-1">
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-3.5 w-72" />

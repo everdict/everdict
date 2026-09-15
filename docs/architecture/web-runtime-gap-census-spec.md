@@ -2,7 +2,7 @@
 kind: spec
 title: "What the runtime supports and the web does not — a counted census"
 status: landed
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [scripts/check-web-reach.mjs, apps/web/src/entities/scorecard/model/schema.ts, apps/web/src/entities/run/model/schema.ts, apps/web/src/entities/campaign/model/schema.ts]
 ---
 # What the runtime supports and the web does not — a counted census
@@ -370,10 +370,14 @@ reads as permission.
 
 It was listed last because it would have been red, and a gate that lands before its fix teaches people to
 bypass gates. It was green at **364 routes, 72 decided, 55 of them OWED**, then at **365 routes, 18 decided,
-none OWED** when slice 5 closed, and on 2026-09-15 it reads **367 routes, 20 decided, none OWED** (the two
-added entries are the campaign `evidence-view` and `evidence-grants` doors). The debt is paid, and what remains is routes whose caller
-is a runner, a CI job, another service, a delegate holding an evidence grant, or (in one case) a door whose
-body a browser cannot honestly fill.
+none OWED** when slice 5 closed, and on 2026-09-15 it read **367 routes, 20 decided, none OWED** (the two
+added entries are the campaign `evidence-view` and `evidence-grants` doors). On 2026-09-16 it reads **366 routes,
+22 decided, none OWED**: the web stopped calling `/workspace/pulse` and `/workspace/settings` (no page drew either;
+agents read both over MCP), and the board-column editor's mutation routes (`POST /workflow-states`,
+`PATCH`/`DELETE /workflow-states/:id`) were removed — the editor went with the team settings screen, nothing
+called them, and the board is read-only. What remains is routes whose caller is a runner, a CI job, another
+service, an agent over MCP, a delegate holding an evidence grant, or (in one case) a door whose body a browser
+cannot honestly fill.
 
 ⚠️ **An empty OWED list is not the end of the convention, and reading it that way is how the next gap becomes
 invisible.** The next unreachable route needs somewhere honest to sit while its surface is built; what the

@@ -126,13 +126,6 @@ export const leastLoadedPolicy: PlacementPolicy = {
   },
 };
 
-// The one with the least room but ≥1 (pack/bin-pack). Favorable for scale-to-zero of idle pools.
-export const binPackPolicy: PlacementPolicy = {
-  choose(candidates) {
-    return [...candidates].sort((a, b) => a.free - b.free || a.name.localeCompare(b.name))[0]?.name;
-  },
-};
-
 interface QueueEntry {
   id: string; // stable snapshot handle (q<seq>) — what the queue page cancels/promotes by
   permitId?: string; // the fleet-wide admission permit this entry holds (AdmissionLedger.tryAdmit) — released at settle

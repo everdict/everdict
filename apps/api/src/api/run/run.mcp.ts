@@ -347,7 +347,7 @@ export function registerRunTools(server: McpServer, ctx: McpToolContext): void {
         });
         const rec = await deps.service.submit({
           tenant: ws,
-          submittedBy: principal.subject, // clone the private-repo seed via my personal connection
+          submittedBy: principal.subject, // the submitter's personal secret tier + self-hosted dispatch ownership
           harness: { id: harness_id, version: version ?? "latest" },
           case: evalCase,
           trigger: "mcp", // activity-view source axis — submitted by the agent over MCP

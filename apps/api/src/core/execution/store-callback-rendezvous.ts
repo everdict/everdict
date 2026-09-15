@@ -1,11 +1,10 @@
 import type { CallbackStore } from "@everdict/db";
 import type { CallbackSink, CallbackRendezvous as OutboundRendezvous } from "@everdict/topology";
 
-// Store-backed callback rendezvous — the multi-replica form of InProcessCallbackRendezvous
-// (docs/architecture/completion-stream-callback.md). The inbound POST /frontdoor-callback/:runId may land on a
-// replica that isn't driving the run: deliver() persists to the shared store, and the driving replica's wait()
-// polls a CLAIM (atomic single-consume) until its timeout. Same object implements both roles, so the route and
-// the topology backend wire it exactly like the in-process one.
+// Store-backed callback rendezvous (docs/architecture/completion-stream-callback.md). The inbound
+// POST /frontdoor-callback/:runId may land on a replica that isn't driving the run: deliver() persists to the shared
+// store, and the driving replica's wait() polls a CLAIM (atomic single-consume) until its timeout. Same object
+// implements both roles, so the route and the topology backend wire the one instance.
 export class StoreCallbackRendezvous implements OutboundRendezvous, CallbackSink {
   private readonly pollMs: number;
   private readonly sleep: (ms: number) => Promise<void>;

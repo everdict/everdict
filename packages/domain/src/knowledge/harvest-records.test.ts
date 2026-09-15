@@ -1,13 +1,6 @@
-import {
-  type CommentRecord,
-  EdgeMentionSchema,
-  type MemberRecord,
-  MentionSchema,
-  type RunRecord,
-  type ScheduleRecord,
-} from "@everdict/contracts";
+import { EdgeMentionSchema, MentionSchema, type RunRecord, type ScheduleRecord } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
-import { harvestComment, harvestMembership, harvestRun, harvestSchedule } from "./harvest-records.js";
+import { harvestRun, harvestSchedule } from "./harvest-records.js";
 import { nodeId } from "./ids.js";
 
 function predicates(edges: { predicate: string; objectNodeId?: string }[]): Map<string, string | undefined> {
@@ -91,43 +84,5 @@ describe("harvestSchedule", () => {
     );
     expect(p.get("pulls_from")).toBe(nodeId("acme", { type: "trace_source", key: "prod-mlflow" }));
     expect(p.has("evaluates")).toBe(false);
-  });
-});
-
-describe("harvestComment", () => {
-  const comment: CommentRecord = {
-    id: "c1",
-    tenant: "acme",
-    resourceType: "scorecard",
-    resourceId: "sc1",
-    author: "user-bob",
-    body: "why did this regress?",
-    createdAt: "2026-07-27T00:00:00Z",
-    updatedAt: "2026-07-27T00:00:00Z",
-  };
-
-  it("links a comment to the resource it discusses and its author", () => {
-    const p = predicates(harvestComment(comment).edges);
-    expect(p.get("discusses")).toBe(nodeId("acme", { type: "scorecard", key: "sc1" }));
-    expect(p.get("created_by")).toBe(nodeId("acme", { type: "user", key: "user-bob" }));
-    assertValid(harvestComment(comment));
-  });
-
-  it("links a reply to its parent comment", () => {
-    const p = predicates(harvestComment({ ...comment, id: "c2", parentId: "c1" }).edges);
-    expect(p.get("reply_to")).toBe(nodeId("acme", { type: "comment", key: "c1" }));
-  });
-});
-
-describe("harvestMembership", () => {
-  it("materialises the user node and a role-bearing member_of edge", () => {
-    const m: MemberRecord = { subject: "user-alice", role: "admin", name: "Alice", addedAt: "2026-07-27T00:00:00Z" };
-    const res = harvestMembership("acme", m);
-    expect(res.nodes[0]?.nodeId).toBe(nodeId("acme", { type: "user", key: "user-alice" }));
-    expect(res.nodes[0]?.label).toBe("Alice");
-    const edge = res.edges.find((e) => e.predicate === "member_of");
-    expect(edge?.objectNodeId).toBe(nodeId("acme", { type: "workspace", key: "acme" }));
-    expect(edge?.edgeAttrs).toMatchObject({ role: "admin" });
-    assertValid(res);
   });
 });

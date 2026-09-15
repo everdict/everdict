@@ -17,7 +17,7 @@ export type PersistentFilters<T extends Record<string, string>> = {
 }
 
 export function usePersistentFilters<T extends Record<string, string>>(
-  // Storage key per screen/workspace (e.g. `harnesses:acme`). Workspace-scoped so another team's filters never leak.
+  // Storage key per screen/workspace (e.g. `harnesses:acme`). Workspace-scoped so another workspace's filters never leak.
   key: string,
   defaults: T
 ): PersistentFilters<T> {

@@ -2,8 +2,7 @@ import { HarnessListView } from '@/widgets/harness-list'
 
 export const dynamic = 'force-dynamic'
 
-// The workspace's harness list — the only address. Narrowing by owning team is a FILTER on this list, so a `?team=` link from the days when the
-// team axis was a path still opens: a query parameter of the same name is now that filter's spelling.
+// The workspace's harness list — the only address.
 export default async function HarnessesPage({
   params,
   searchParams,

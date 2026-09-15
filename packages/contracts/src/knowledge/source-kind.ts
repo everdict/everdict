@@ -23,7 +23,7 @@ export const SOURCE_KINDS = [
   "run",
   "schedule",
 
-  // STRUCTURED tracker records (the intent stratum — records/tracker.ts, team.ts, cycle.ts)
+  // STRUCTURED tracker records (the intent stratum — records/tracker.ts)
   "issue",
   "project",
   "initiative",

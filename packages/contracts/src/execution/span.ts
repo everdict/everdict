@@ -106,10 +106,6 @@ function hex(bytes: Uint8Array): string {
   return out;
 }
 
-export function newTraceId(random: RandomBytes = defaultRandomBytes): string {
-  return hex(random(16));
-}
-
 export function newSpanId(random: RandomBytes = defaultRandomBytes): string {
   return hex(random(8));
 }
@@ -153,18 +149,4 @@ export interface TraceContext {
 // `00-<32 hex trace>-<16 hex span>-<2 hex flags>`
 export function formatTraceparent(ctx: TraceContext): string {
   return `00-${ctx.traceId}-${ctx.spanId}-${ctx.sampled ? "01" : "00"}`;
-}
-
-// Undefined on anything malformed — a caller that cannot parse the parent starts its own trace rather than
-// hanging spans off an id it guessed. Version `00` only: a future version's extra fields are not ours to
-// interpret, but its first three fields are positionally stable, so we accept them and ignore the rest.
-export function parseTraceparent(value: string | undefined): TraceContext | undefined {
-  if (value === undefined) return undefined;
-  const parts = value.trim().split("-");
-  const [version, traceId, spanId, flags] = parts;
-  if (parts.length < 4 || version === undefined || version === "ff" || !/^[0-9a-f]{2}$/.test(version)) return undefined;
-  if (traceId === undefined || !/^[0-9a-f]{32}$/.test(traceId) || /^0+$/.test(traceId)) return undefined;
-  if (spanId === undefined || !/^[0-9a-f]{16}$/.test(spanId) || /^0+$/.test(spanId)) return undefined;
-  if (flags === undefined || !/^[0-9a-f]{2}$/.test(flags)) return undefined;
-  return { traceId, spanId, sampled: (Number.parseInt(flags, 16) & 0x01) === 0x01 };
 }

@@ -12,11 +12,9 @@ import { type CollectTraceDeps, collectDeferredTrace } from "./collect-trace.js"
 // the collectDeferredTrace call below. docs/architecture/execution-scoring-orchestration.md
 export interface ExecuteCaseDeps extends CollectTraceDeps {
   dispatcher: Dispatcher;
-  // Resolve a token for seeding a private repo (preferred) — workspace-owned GitHub App. If the case git URL's owner matches the workspace
+  // Resolve a token for seeding a private repo — workspace-owned GitHub App. If the case git URL's owner matches the workspace
   // installation account, issue a repo-scoped installation token via that App (independent of the submitter's personal login, workspace-shared).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
-  // (legacy) personal connection — evalCase.env.source.connectionId → external-account connection token (personally owned, resolved by owner). Removed in S6.
-  repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
   // Image pull credentials for THESE images (best-effort) — the images are passed in because a managed-store grant
   // is minted for exactly the repositories in flight, not handed out as a standing credential; the BYO half
   // ignores them and answers with the workspace's registered registries. docs/architecture/managed-image-store.md
@@ -50,22 +48,18 @@ async function resolveRegistryAuths(deps: ExecuteCaseDeps, job: CaseJob): Promis
   return registryAuthsForImages(auths, images);
 }
 
-// If the case repo seed is private (git), resolve a token. Try the workspace GitHub App (installation) first and
-// (if no matching installation) fall back to the legacy personal connection (connectionId). Returns undefined for public/non-repo/unset.
+// If the case repo seed is private (git), resolve a token through the workspace GitHub App installation that matches
+// the git URL's owner. Returns undefined for public/non-repo/unset. `env.source.connectionId` is not read: the
+// personal-connection resolver it once selected is gone, and no deployment supplies a token for it.
 // Module-internal helper (executeCase only) — not exposed externally.
-async function resolveRepoToken(deps: ExecuteCaseDeps, owner: string, job: CaseJob): Promise<string | undefined> {
+async function resolveRepoToken(deps: ExecuteCaseDeps, job: CaseJob): Promise<string | undefined> {
   const env = job.evalCase.env;
   if (env.kind !== "repo") return undefined;
   const src = env.source;
   if (!("git" in src)) return undefined;
-  // 1) Workspace-owned GitHub App — if the git URL owner matches the workspace installation, use that App's token (preferred).
-  if (deps.installationTokenFor && job.tenant) {
-    const t = await deps.installationTokenFor(job.tenant, src.git).catch(() => undefined);
-    if (t) return t;
-  }
-  // 2) (legacy) personal connection — resolve connectionId under the submitter (owner). Removed in S6.
-  if (deps.repoTokenFor && src.connectionId) return deps.repoTokenFor(owner, src.connectionId).catch(() => undefined);
-  return undefined;
+  if (!deps.installationTokenFor || !job.tenant) return undefined;
+  const token = await deps.installationTokenFor(job.tenant, src.git).catch(() => undefined);
+  return token;
 }
 
 // Promote a command harness's declared execution image (spec.image — the field a CI re-pin `pins.image` lands on) to the
@@ -84,14 +78,9 @@ function withHarnessImage(job: CaseJob): CaseJob {
 // budget admit/settle are the orchestration's (caller's) accounting concern — not done here (a run just runs). The caller passes the job
 // already enriched (tenant/harnessSpec/judge/meterUsage/submittedBy). opts threads cancellation (signal) + the onStarted
 // hook (fires when compute actually begins → the caller flips the run record queued→running) down to the dispatcher.
-export async function executeCase(
-  deps: ExecuteCaseDeps,
-  owner: string,
-  job: CaseJob,
-  opts?: DispatchOptions,
-): Promise<CaseResult> {
+export async function executeCase(deps: ExecuteCaseDeps, job: CaseJob, opts?: DispatchOptions): Promise<CaseResult> {
   const normalized = withHarnessImage(job);
-  const repoToken = await resolveRepoToken(deps, owner, normalized);
+  const repoToken = await resolveRepoToken(deps, normalized);
   const registryAuths = await resolveRegistryAuths(deps, normalized);
   const enriched: CaseJob = {
     ...normalized,

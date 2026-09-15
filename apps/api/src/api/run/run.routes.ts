@@ -17,11 +17,8 @@ export function registerRunRoutes(app: FastifyInstance, deps: ServerDeps): void 
     } catch (err) {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
-    // The owning team of the RESULT — the same rule as a scorecard.
     try {
-      // Resolving the team ref (an id or a key) happens here — a team that does not exist is a 404, and that answer has to leave from the same place as the gate.
       gate(principal, "runs:submit");
-      // submittedBy=subject → clone a private-repo seed with the submitter's personal connection ("clone with my connection").
       return reply.code(202).send(
         await deps.service.submit({
           tenant: principal.workspace,

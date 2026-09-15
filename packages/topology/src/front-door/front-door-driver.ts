@@ -369,10 +369,19 @@ export interface FrontDoorDriver {
 }
 
 // Rendezvous for the callback completion model — Everdict exposes a per-run callback URL ({{callback_url}}) and waits for the agent's inbound POST.
-// A seam split out of the driver (injectable): in-process (self-hosted/dev) | control-plane endpoint (SaaS). The inbound counterpart of egress observation.
+// A seam split out of the driver (injectable); the control plane implements it over a shared store so the inbound POST
+// may land on any replica (StoreCallbackRendezvous). The inbound counterpart of egress observation.
+// Design: docs/architecture/completion-stream-callback.md.
 export interface CallbackRendezvous {
   url(runId: string): string; // the {{callback_url}} value (per-run — the receiver correlates by runId)
   wait(runId: string, timeoutMs: number): Promise<{ body: unknown } | undefined>; // the next inbound POST body (undefined = timeout if none)
+}
+
+// The receiving side of callback — the HTTP receiver (the control-plane route) calls this on a matching POST.
+// Role-separated from the driver-side CallbackRendezvous (url/wait); one object implements both so a delivery and
+// its waiter pair up.
+export interface CallbackSink {
+  deliver(runId: string, body: unknown): void;
 }
 
 export interface HttpFrontDoorDriverIo {

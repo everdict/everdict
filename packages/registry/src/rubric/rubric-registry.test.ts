@@ -1,11 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { ConflictError, NotFoundError, type RubricSpec, RubricSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { SHARED_TENANT } from "../registry.js";
-import { loadRubricDir } from "./load-rubrics.js";
 import { PgRubricRegistry } from "./pg-rubric-registry.js";
 import { InMemoryRubricRegistry } from "./rubric-registry.js";
 
@@ -77,19 +73,6 @@ describe("InMemoryRubricRegistry (tenant-owned)", () => {
     await r.register("acme", rubric("mine", "1.1.0"), "user-dave");
     const list = await r.list("acme");
     expect(list[0]?.createdBy).toBe("user-carol"); // subject of the first-registered version
-  });
-});
-
-describe("loadRubricDir", () => {
-  it("loads as SHARED by default (file SSOT) → every tenant sees it via fallback", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "everdict-rubric-"));
-    try {
-      writeFileSync(join(dir, "correctness-1.0.0.json"), JSON.stringify(rubric("correctness", "1.0.0")));
-      const r = await loadRubricDir(dir);
-      expect((await r.get("whoever", "correctness")).version).toBe("1.0.0");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

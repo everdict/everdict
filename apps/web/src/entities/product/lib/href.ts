@@ -1,4 +1,4 @@
-// Every product and release address is built here (the same rule as team slugs — strings are never assembled by hand).
+// Every product and release address is built here (the same rule as issue addresses — strings are never assembled by hand).
 // A collection is plural (/products) and one of them is singular (/product/:slug, /release/:id).
 export function productsHref(workspace: string): string {
   return `/${workspace}/products`

@@ -69,16 +69,9 @@ export interface IssueFilters {
   assignee?: string[]
   label?: string[]
   project?: string[]
-  cycle?: string[]
 }
 
-export const ISSUE_FILTER_FACETS = [
-  'status',
-  'priority',
-  'assignee',
-  'label',
-  'project',
-] as const
+export const ISSUE_FILTER_FACETS = ['status', 'priority', 'assignee', 'label', 'project'] as const
 export type IssueFilterFacet = (typeof ISSUE_FILTER_FACETS)[number]
 
 // Completed/cancelled — what "show completed issues" turns back on. A regression is deliberately not here: an
@@ -93,7 +86,6 @@ export type IssueViewParams = {
   assignee?: string | string[]
   label?: string | string[]
   project?: string | string[]
-  cycle?: string | string[]
   cursor?: string
 }
 
@@ -127,7 +119,6 @@ export function issueViewOf(params: IssueViewParams, display: IssueDisplay): Iss
     ...(asArray(params.assignee) !== undefined ? { assignee: asArray(params.assignee) } : {}),
     ...(asArray(params.label) !== undefined ? { label: asArray(params.label) } : {}),
     ...(asArray(params.project) !== undefined ? { project: asArray(params.project) } : {}),
-    ...(asArray(params.cycle) !== undefined ? { cycle: asArray(params.cycle) } : {}),
   }
   return { ...display, filters }
 }
@@ -182,7 +173,7 @@ export function issueQueryFilters(view: IssueView): IssueFilters & { parent?: st
 }
 
 // The order the groups are drawn in. For status and priority the vocabulary IS the order (in-progress has to sit above backlog for it to
-// read as a board); people, projects and cycles have no name order, so the control plane's "largest group first" is followed verbatim.
+// read as a board); people and projects have no name order, so the control plane's "largest group first" is followed verbatim.
 const STATUS_BOARD_ORDER: IssueStatus[] = [
   'regressed',
   'in_progress',

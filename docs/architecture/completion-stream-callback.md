@@ -3,7 +3,7 @@ kind: wiki
 title: "Front-door completion — sync, poll, stream, callback and trace modes"
 status: current
 updated: 2026-09-15
-anchors: [packages/topology/src/front-door/front-door-driver.ts, packages/topology/src/front-door/callback-rendezvous.ts, apps/api/src/core/execution/store-callback-rendezvous.ts, apps/api/src/api/execution/frontdoor-callback.routes.ts]
+anchors: [packages/topology/src/front-door/front-door-driver.ts, apps/api/src/core/execution/store-callback-rendezvous.ts, apps/api/src/api/execution/frontdoor-callback.routes.ts]
 ---
 # Front-door completion — sync, poll, stream, callback and trace modes
 
@@ -39,7 +39,7 @@ Tests inject a fake async iterable.
 ## `callback`
 
 Submit is fire-and-forget; the driver then waits on a `CallbackRendezvous` (`url(runId)` / `wait(runId,
-timeoutMs)`). When the completion mode is `callback`, `ServiceTopologyBackend` adds `callback_url =
+timeoutMs)`); the receiving half is `CallbackSink` (`deliver(runId, body)`), both in `front-door-driver.ts`. When the completion mode is `callback`, `ServiceTopologyBackend` adds `callback_url =
 rendezvous.url(runId)` to the per-run wiring so a `bodyTemplate` can hand it to the agent. A posted body that does
 not match `done` is treated as an interim update and the driver waits for the next POST.
 
@@ -52,8 +52,6 @@ not match `done` is treated as an interim update and the driver waits for the ne
   even with several replicas. Consumed rows and rows older than an hour are swept on deliver. The composition
   (`apps/api/src/composition/dispatch.ts`) builds it only when `EVERDICT_CALLBACK_BASE_URL` is set, over the Pg store
   when `DATABASE_URL` is set and the in-memory store otherwise; without it a `callback` drive fails explicitly.
-- `InProcessCallbackRendezvous` (`packages/topology/src/front-door/callback-rendezvous.ts`, with the `CallbackSink`
-  inbound interface) is the single-process form; it is exported, and nothing in the control plane wires it today.
 
 ## `trace` — the trace is the terminal signal
 

@@ -16,8 +16,6 @@ export const SubscriptionSelectorSchema = z
   .strict();
 export type SubscriptionSelector = z.infer<typeof SubscriptionSelectorSchema>;
 
-export const SUBSCRIPTION_REACTION_KINDS = ["agent", "webhook", "workflow"] as const;
-
 // One durable multi-step chain link: wake this agent, hand it the event (plus an optional standing
 // instruction), and only proceed to the next step once its run settles successfully.
 export const SubscriptionWorkflowStepSchema = z

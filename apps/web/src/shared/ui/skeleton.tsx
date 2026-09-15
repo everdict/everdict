@@ -23,19 +23,9 @@ export function SkeletonLines({ lines = 3, className }: { lines?: number; classN
 
 // The default loading boundary for a list screen — a title, a description and rows. Most of this app's screens are this shape, so every route
 // that does not put a `loading.tsx` in its own segment inherits this one (a more distinctive screen overrides it with its own).
-//
-// `scoped` is the slot for the scope bar on screens under a team. Not reserved, everything below shifts down once that line arrives —
-// and that jump is the one thing a placeholder must never cause.
-export function ListPageSkeleton({
-  scoped = false,
-  rows = 6,
-}: {
-  scoped?: boolean
-  rows?: number
-}) {
+export function ListPageSkeleton({ rows = 6 }: { rows?: number }) {
   return (
     <div className="space-y-6">
-      {scoped && <Skeleton className="h-8 w-64" />}
       <div className="space-y-1">
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-3.5 w-72" />

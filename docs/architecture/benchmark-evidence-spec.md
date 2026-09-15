@@ -73,7 +73,7 @@ trace reads (`docs/architecture/long-horizon-trace-reads.md`), per-call cost on 
 `POST /datasets`, the image-provenance helper, the web wizard (`docs/architecture/standard-task-formats.md`).
 There is no adapter for WebArena, tau-bench or BrowseComp, and SWE-bench exists only as `swe-bench-lite`.
 First-party seeding of `_shared` was removed, so a fresh deployment holds zero benchmarks until an operator
-runs `loadDatasetDir` (`docs/datasets.md`) — and nothing at boot says so.
+registers one under `_shared` (`docs/datasets.md`) — and nothing at boot says so.
 
 **Decision.**
 - Terminal-Bench slices 2–3 (ingestion edge + source kind on both doors) before 4–5; the source kind is the

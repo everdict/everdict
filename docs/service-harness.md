@@ -2,7 +2,7 @@
 kind: wiki
 title: "Service-topology harnesses"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/contracts/src/harness/harness-spec.ts, packages/topology/src/deploy/topology-runtime.ts, packages/contracts/src/infra/trust-zone.ts, packages/topology/src/deploy/store-binding.ts, packages/topology/src/deploy/inject-env.ts]
 ---
 # Service-topology harnesses
@@ -335,7 +335,7 @@ The same period verified capabilities that are not topology-specific; their refe
 [execution-backends.md](execution-backends.md):
 - **Benchmark import** (`@everdict/datasets`): `BENCHMARK_CATALOG` adapters (`mind2web`, `gsm8k`, `gaia`, `webvoyager`,
   `tau-bench`, `browsecomp`, `webarena`, `swe-bench-lite`, `swe-bench-verified`, `osworld`, plus the travel set),
-  `fetchHfRows`, `importWebVoyager`/`importJsonl`/`importCsv`, tenant recipes as `BenchmarkAdapterSpec` in a
+  `fetchHfRows`, `importWebVoyager`/`importJsonl`, tenant recipes as `BenchmarkAdapterSpec` in a
   `BenchmarkRegistry` (`/benchmark-recipes`) — `hf-benchmark-eval.mjs`, `tenant-benchmark-registry.mjs`,
   `webvoyager-eval.mjs`, `webvoyager-diff.mjs`.
 - **SWE-bench**: `SweBenchGrader` (gold `test_patch` + `FAIL_TO_PASS`/`PASS_TO_PASS`), `sweBenchImage` prebuilt images as
@@ -343,10 +343,13 @@ The same period verified capabilities that are not topology-specific; their refe
   `swe-bench-grade.mjs`, `swe-bench-image-seed.mjs`, `swe-bench-env-container.mjs`, `swe-bench-in-image.mjs`,
   `swe-bench-real-instance.mjs`; a user-defined test benchmark through `CommandGrader` — `user-benchmark-selfserve.mjs`.
 - **Environments**: `PromptEnvironment` (`prompt-env-qa.mjs`) and `OsUseEnvironment` driving real desktop apps with
-  `xdotool` and a VLM judge over the screenshot (`JudgeGrader` `useScreenshot`) — `os-use-desktop.mjs`,
+  `xdotool` and a VLM judge over the screenshot (`JudgeGrader` `useScreenshot`) —
+  [`os-use-desktop.mjs`](https://github.com/everdict/everdict/blob/32879892f/scripts/live/os-use-desktop.mjs),
   `os-use-hermes-drive.mjs`, `os-use-hermes-ssh-task.mjs`, `os-use-vlm-judge.mjs`, `os-use-dispatch.mjs`; the OSWorld
   adapter grades with the judge plus a `state-check` grader from each row's `verify` command
   (`examples/benchmarks/osworld-sample.jsonl`).
 - **Judge configuration**: `judgeFromEnv` / `makeGradersFromEnv`, `CaseJob.judge` → `judgeEnv`, the workspace default
   (`WorkspaceSettings.judge`) and per-job key resolution (`JudgeAuthDispatcher`) — `judge-dispatch-e2e.mjs`,
-  `judge-config-injection.mjs`, `workspace-judge-default.mjs`, `judge-grading.mjs`.
+  `judge-config-injection.mjs`,
+  [`workspace-judge-default.mjs`](https://github.com/everdict/everdict/blob/32879892f/scripts/live/workspace-judge-default.mjs),
+  [`judge-grading.mjs`](https://github.com/everdict/everdict/blob/32879892f/scripts/live/judge-grading.mjs).

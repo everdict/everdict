@@ -110,8 +110,6 @@ import { failedCaseResult } from "../run-suite.js";
 // @everdict/domain (workbench-fs) — ONE implementation shared with the self-hosted runner's in-case servicing.
 export type RunFsTree = CaseFsTreePayload;
 export type RunFsFile = CaseFsFilePayload;
-export type RunFsEntry = CaseFsTreePayload["files"][number];
-export type RunFsStatus = NonNullable<RunFsEntry["status"]>;
 
 // Where a running case's platform trace is accumulating (derived on read; docs/architecture/live-observability.md).
 export interface LiveTraceRef {
@@ -269,11 +267,9 @@ export interface RunServiceDeps {
   meterUsageFor?: (tenant: string) => boolean | Promise<boolean>;
   // The workspace default judge model (for inline judge-grader scoring). A per-request override (SubmitInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
-  // Token resolution for a private-repo seed — evalCase.env.source.connectionId → an external account (Connected accounts) token.
-  // The connection is personally owned, so resolve by owner (= submitter subject) ("clone with my connection"). If unset/unresolved, public clone.
-  // The token is carried transiently on the job (CaseJob.repoToken) only and never stored on the record/case.
-  repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
-  // Workspace-owned GitHub App token (preferred) — if the case git URL owner matches a workspace installation, issued via that App.
+  // Token resolution for a private-repo seed — workspace-owned GitHub App: if the case git URL owner matches a workspace
+  // installation, a token is issued via that App. If unset/unresolved, public clone. The token is carried transiently on
+  // the job (CaseJob.repoToken) only and never stored on the record/case.
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // Workspace image-registry pull credentials — if the job image is from that registry, attach as job.registryAuth (executeCase).
   registryAuthsFor?: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
@@ -1299,7 +1295,7 @@ export class RunService {
       // placement / all capable runners offline) — announce it ONCE per run so subscriptions/agents can react
       // while the run is alive, instead of a person polling the placement read.
       let waitingAnnounced = false;
-      const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun, {
+      const result = await executeCase(this.deps, jobToRun, {
         signal: abort.signal,
         onStarted: () => void this.markRunning(id),
         // ── THE ATTEMPT THAT RAN, NOT THE ONE THIS DISPATCH OPENED (arch-review 41 P0-evidence) ────────
@@ -1349,7 +1345,7 @@ export class RunService {
         },
       });
       // Cost attribution, itemized per model: managed = the job's tenant · workspace-shared runner = that workspace ·
-      // personal runner = own-pays, EXCEPT calls that used a workspace-billed model (the team's key paid) → the
+      // personal runner = own-pays, EXCEPT calls that used a workspace-billed model (the workspace's key paid) → the
       // workspace. The same lines feed the meter (usage display) + the enforcement budget.
       let caseUsd = 0;
       for (const c of billingCharges(result, input.tenant)) {

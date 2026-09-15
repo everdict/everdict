@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 //
 // 48 files here construct a Fastify app with the full route surface inside their `it()`, and that is the
 // PATTERN rather than an oversight: each case needs a differently-wired server (a different principal, a
-// different team ceiling, a feature deliberately left unwired), so hoisting the build into `beforeAll` would
+// different workspace, a feature deliberately left unwired), so hoisting the build into `beforeAll` would
 // mean asserting one wiring per file.
 //
 // Vitest's default per-test budget is 5s, which is enough on an idle box — the two slowest of these run in

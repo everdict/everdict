@@ -20,7 +20,7 @@ export function CreateInitiativeButton({
   initiatives,
 }: {
   workspace: string
-  // The initiatives it can hang from. It is a place that picks ONE, so a Combobox — unlike a project's teams and initiatives, a parent
+  // The initiatives it can hang from. It is a place that picks ONE, so a Combobox — unlike a project's initiatives, a parent
   // is singular.
   initiatives: { id: string; name: string }[]
   // The basis for judging whether the target date has already passed. It has to use the same timezone as the list's "overdue" badge, or why

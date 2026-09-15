@@ -21,9 +21,7 @@ import type { IssueDirectories } from '../model/directories'
 // One list row. It differs from the old row in exactly one way, and that is Linear's central speed: status, priority and assignee are changed
 // **here**. Which is why the whole row cannot be a `<Link>` — a button inside a link is not valid markup either, and the click that opens a
 // dropdown would navigate to the issue. Only the title area is the link and the controls stand as its SIBLINGS (the same composition as Linear).
-// The row's stable identity in the DOM. It survived the bulk-selection feature it was written for — that
-// feature's only action was "move these into this cycle", and cycles went with teams — because a test and a
-// future range-select both address a row by it rather than by position.
+// The row's stable identity in the DOM — a test and a future range-select both address a row by it rather than by position.
 export const ISSUE_ROW_ATTR = 'data-issue-id'
 
 export const IssueRow = memo(function IssueRow({

@@ -1,12 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { SHARED_TENANT } from "../registry.js";
 import { InMemoryJudgeRegistry } from "./judge-registry.js";
-import { loadJudgeDir } from "./load-judges.js";
 import { PgJudgeRegistry } from "./pg-judge-registry.js";
 
 // Minimal judge — model kind. extra changes content (for immutability checks).
@@ -126,19 +122,6 @@ describe("InMemoryJudgeRegistry (tenant-owned)", () => {
     await r.register("acme", judge("mine", "1.1.0"), "user-dave");
     const list = await r.list("acme");
     expect(list[0]?.createdBy).toBe("user-carol"); // subject of the first-registered version
-  });
-});
-
-describe("loadJudgeDir", () => {
-  it("loads as SHARED by default (file SSOT) → every tenant sees it via fallback", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "everdict-judge-"));
-    try {
-      writeFileSync(join(dir, "correctness-1.0.0.json"), JSON.stringify(judge("correctness", "1.0.0")));
-      const r = await loadJudgeDir(dir);
-      expect((await r.get("whoever", "correctness")).version).toBe("1.0.0");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

@@ -22,7 +22,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 import { JudgeList } from './judge-list'
 
 // Agent Judges (model | harness) — workspace-owned plus the shared defaults. The same rules as harnesses and datasets:
-// one address per workspace, the owning team as one filter axis, and filtering and grouping happening in the browser.
+// one address per workspace, and filtering and grouping happening in the browser.
 export async function JudgeListView({
   workspace,
   params,
@@ -41,7 +41,7 @@ export async function JudgeListView({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // The creator and team NAMES are a supporting read for the axes' name plates — on a failure only that axis quietly disappears.
+  // The creator NAMES are a supporting read for the axis' name plate — on a failure only that axis quietly disappears.
   const members = await controlPlane
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))

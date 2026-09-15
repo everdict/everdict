@@ -77,9 +77,9 @@ no default-to-first**. Discriminated unions carry the shape variants:
   field for field: hex `traceId`/`spanId`/`parentSpanId`, `kind`, `status`, absolute `startedAt`/`endedAt`,
   `attributes`, `events[]`, `links[]`, `resource` (kept SEPARATE from attributes), `scope`. OTel's model is two
   layers and we long had only the lower one: a **span is an interval**, a **span event is a point inside it** —
-  which is why the placement plane could only ever be two instants for a 23-second job. Also here: `newTraceId`/
-  `newSpanId` (injectable entropy), `traceIdForRun` (DERIVED per run, so planes sealed by different processes
-  agree on one trace without coordinating), and W3C `formatTraceparent`/`parseTraceparent` + `TRACEPARENT_ENV`.
+  which is why the placement plane could only ever be two instants for a 23-second job. Also here: `newSpanId`
+  (injectable entropy), `traceIdForRun` (DERIVED per run, so planes sealed by different processes agree on one
+  trace without coordinating), and W3C `formatTraceparent` + `TRACEPARENT_ENV`.
 - `semconv.ts` — the attribute vocabulary. **The standard first, `everdict.*` only for what has none**:
   `GEN_AI.*` for models/tokens/tools, `OTEL_RESOURCE.*` (`service.name`/`k8s.node.name`/`container.id`) for the
   placement plane's identity, `EVERDICT_ATTR.*` for the plane axis, cost (no GenAI key exists), and the

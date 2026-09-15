@@ -1784,7 +1784,7 @@ describe("ScorecardService.ingestPull", () => {
 });
 
 describe("ScorecardService.submit — private-repo repoToken injection (per case)", () => {
-  it("case env.source.connectionId → repoTokenFor resolve → per-case job.repoToken; public/non-git are not injected", async () => {
+  it("a git case → workspace GitHub App token resolve → per-case job.repoToken; non-git cases are not injected", async () => {
     const seen: Array<{ caseId: string; repoToken?: string }> = [];
     const cap: Dispatcher = {
       async dispatch(job) {
@@ -1806,7 +1806,7 @@ describe("ScorecardService.submit — private-repo repoToken injection (per case
       cases: [
         {
           id: "git-priv",
-          env: { kind: "repo", source: { git: "https://github.com/acme/p.git", ref: "main", connectionId: "conn-1" } },
+          env: { kind: "repo", source: { git: "https://github.com/acme/p.git", ref: "main" } },
           task: "t",
           graders: [],
           timeoutSec: 60,
@@ -1823,16 +1823,16 @@ describe("ScorecardService.submit — private-repo repoToken injection (per case
       ],
     });
     const store = new InMemoryScorecardStore();
-    // Connections are personally owned → repoTokenFor resolves by owner (submitter subject).
-    const calls: Array<{ owner: string; connectionId: string }> = [];
+    // The installation is the workspace's → resolved by workspace + git URL.
+    const calls: Array<{ workspace: string; gitUrl: string }> = [];
     const service = new ScorecardService({
       dispatcher: cap,
       store,
       datasets,
       newId: () => "sc-priv",
-      repoTokenFor: async (owner, connectionId) => {
-        calls.push({ owner, connectionId });
-        return connectionId === "conn-1" ? "gho_sc" : undefined;
+      installationTokenFor: async (workspace, gitUrl) => {
+        calls.push({ workspace, gitUrl });
+        return gitUrl === "https://github.com/acme/p.git" ? "ghs_sc" : undefined;
       },
     });
     await service.submit({
@@ -1843,9 +1843,9 @@ describe("ScorecardService.submit — private-repo repoToken injection (per case
     });
     await waitTerminal(store, "sc-priv");
     const byCase = Object.fromEntries(seen.map((s) => [s.caseId, s.repoToken]));
-    expect(byCase["git-priv"]).toBe("gho_sc");
+    expect(byCase["git-priv"]).toBe("ghs_sc");
     expect(byCase["files-pub"]).toBeUndefined();
-    expect(calls).toEqual([{ owner: "u-alice", connectionId: "conn-1" }]); // the files case does not call the resolver
+    expect(calls).toEqual([{ workspace: "acme", gitUrl: "https://github.com/acme/p.git" }]); // the files case does not call the resolver
   });
 
   it("failure after dispatch (judges phase) → status=failed + error.phase=judges + partial results preserved (visibility)", async () => {

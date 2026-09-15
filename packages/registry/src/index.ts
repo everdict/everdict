@@ -5,16 +5,12 @@ export { PgHarnessInstanceRegistry } from "./harness/pg-harness-instance-registr
 export { loadHarnessTaxonomyDir } from "./harness/load-harness-taxonomy.js";
 export { type DatasetRegistry, InMemoryDatasetRegistry } from "./dataset/dataset-registry.js";
 export { PgDatasetRegistry } from "./dataset/pg-dataset-registry.js";
-export { loadDatasetDir } from "./dataset/load-datasets.js";
 export { type JudgeRegistry, InMemoryJudgeRegistry } from "./judge/judge-registry.js";
 export { PgJudgeRegistry } from "./judge/pg-judge-registry.js";
-export { loadJudgeDir } from "./judge/load-judges.js";
 export { type RubricRegistry, InMemoryRubricRegistry } from "./rubric/rubric-registry.js";
 export { PgRubricRegistry } from "./rubric/pg-rubric-registry.js";
-export { loadRubricDir } from "./rubric/load-rubrics.js";
 export { type ModelRegistry, InMemoryModelRegistry } from "./model/model-registry.js";
 export { PgModelRegistry } from "./model/pg-model-registry.js";
-export { loadModelDir } from "./model/load-models.js";
 export { type AgentRegistry, InMemoryAgentRegistry } from "./agent/agent-registry.js";
 export { PgAgentRegistry } from "./agent/pg-agent-registry.js";
 export { type RuntimeRegistry, type RuntimeListEntry, InMemoryRuntimeRegistry } from "./runtime/runtime-registry.js";
@@ -25,6 +21,5 @@ export {
   InMemoryEnvironmentRegistry,
 } from "./environment/environment-registry.js";
 export { PgEnvironmentRegistry } from "./environment/pg-environment-registry.js";
-export { loadRuntimeDir } from "./runtime/load-runtimes.js";
 export { type BenchmarkRegistry, InMemoryBenchmarkRegistry } from "./benchmark/benchmark-registry.js";
 export { PgBenchmarkRegistry } from "./benchmark/pg-benchmark-registry.js";

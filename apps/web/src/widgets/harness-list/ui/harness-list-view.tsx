@@ -23,9 +23,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { HarnessList } from './harness-list'
 
-// The registered harness list — one address per workspace. The same list also lived under a team for a while (the ones that team owned), but
-// that axis was removed: the owning team remains and decides "who may edit it", while there is ONE route to find things, and
-// "only our team's" is one filter axis (team) on this list.
+// The registered harness list — one address per workspace.
 //
 // What the server does ends at reading the collection once and handing it over — filtering, grouping and ordering all happen in the browser.
 // These lists have no pagination so the whole collection is in hand, and there is no reason to re-render the route every time a filter changes

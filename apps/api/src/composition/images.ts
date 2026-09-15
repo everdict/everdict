@@ -4,7 +4,6 @@ import type { RegistryAuth as SourceAuth } from "@everdict/contracts";
 import type { RegistryAuth } from "@everdict/contracts";
 import {
   ImageTokenService,
-  InMemoryImageStore,
   ManagedImageStore,
   type RegistryAccess,
   RegistryTokenIssuer,
@@ -145,12 +144,6 @@ export function buildManagedImages(
       );
     },
   };
-}
-
-// Dev/test store — an in-process registry with the same semantics, for a stack that wants the managed surfaces
-// without running a registry. Never wired by default: it enforces no real authorization boundary.
-export function inMemoryManagedImages(endpoint?: string): ManagedImages {
-  return { images: new InMemoryImageStore(endpoint ? { endpoint } : {}) };
 }
 
 // The one answer to "what credentials does this job need to pull its images" — the seam executeCase and the

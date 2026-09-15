@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { useRefresh } from '@/shared/lib/use-refresh'
 import { Check, ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { issueHref, IssueStatusIcon, type IssueStatus } from '@/entities/issue'
+import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
@@ -25,7 +25,7 @@ export interface IssueParentOption {
 // Past this many choices a search line appears — the same threshold as the project picker.
 const SEARCH_FROM = 7
 
-// The parent issue this one was split out of — read and changed right where status, project and cycle are (the attribute column).
+// The parent issue this one was split out of — read and changed right where status and project are (the attribute column).
 //
 // The parent used to exist only as a fragment of an identifier in the breadcrumb. So opening a sub-issue left "what is this a sub-issue OF"
 // to be guessed from that short `ENG-11`, and there was nowhere on screen to attach or detach one (only an agent could). The attribute column
@@ -40,7 +40,7 @@ export function IssueParentControl({
   workspace: string
   id: string
   parent: IssueParentOption | undefined
-  // The issues that could be set as parent — the screen filters to the same team's. Itself and its own sub-issues are excluded
+  // The issues that could be set as parent — the workspace's. Itself and its own sub-issues are excluded
   // (setting your own descendant as parent closes a cycle). Deeper descendants are judged by the control plane, and its refusal is shown verbatim.
   options: IssueParentOption[]
   canWrite: boolean

@@ -230,8 +230,8 @@ reasoning before touching that driving logic.
 - **#2 completion — DONE (5 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
   await; `frontDoor.completion` in `@everdict/contracts`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
   (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`
-  (fire-and-forget → `CallbackRendezvous` awaits the agent's POST to `{{callback_url}}`; in-process rendezvous +
-  control-plane `POST /frontdoor-callback/:runId`) | `trace` (the submit BLOCKS/returns nothing useful — completion =
+  (fire-and-forget → `CallbackRendezvous` awaits the agent's POST to `{{callback_url}}`; store-backed
+  `StoreCallbackRendezvous` + control-plane `POST /frontdoor-callback/:runId`) | `trace` (the submit BLOCKS/returns nothing useful — completion =
   the run's trace reaching a terminal state; the driver fires the submit monitored-but-not-awaited [a rejection fails
   the drive on the next probe tick, never a silent budget burn] and polls an injected `TraceReadyFn` the backend builds
   from the pre-drive-resolved trace source [`TraceSource.status?` = MLflow `TraceInfo.state`, else presence]; `returned`

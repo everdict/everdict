@@ -20,7 +20,7 @@ const MAX_SYNCED_ROSTER = 200
 // The list header's write buttons — "import", "pull" and "new issue".
 //
 // These three are their own component because of **waiting** rather than rendering. Drawing three buttons requires the GitHub App installation
-// state plus the synced-repository list (200 issue rows) plus the team list, and those three used to be bound into the same `Promise.all` as
+// state plus the synced-repository list (200 issue rows), and those used to be bound into the same `Promise.all` as
 // the list: fifty issue rows had already arrived and the whole screen stood still because the toolbar had not. Now this component streams
 // behind a Suspense boundary and the list waits only for its own data.
 export async function IssueListActions({
@@ -74,9 +74,6 @@ export async function IssueListActions({
       })
   }
 
-  // The team a new issue first lands in: the team whose list it was opened from, else the workspace's default team. So an issue is never
-  // created somewhere it will not appear in the list being looked at.
-
   return (
     <div className="flex flex-wrap items-center gap-2">
       <PullGithubIssuesButton repositories={syncedRepositories} />
@@ -94,10 +91,7 @@ export async function IssueListActions({
           </Link>
         )
       )}
-      <CreateIssueButton
-        workspace={workspace}
-        projects={projects}
-      />
+      <CreateIssueButton workspace={workspace} projects={projects} />
     </div>
   )
 }

@@ -114,12 +114,6 @@ export function qualityTrend(
   });
 }
 
-// The mean of what was actually reported — `undefined` when nothing was, for the same reason the series leaves
-// a gap. Exported because the window's headline number and its preceding-window twin are the same arithmetic.
-export function meanPassRate(rates: readonly number[]): number | undefined {
-  return rates.length > 0 ? mean(rates) : undefined;
-}
-
 // Case-weighted mean — a rate is a ratio, and a plain mean of per-batch rates lets a 3-case smoke run move
 // the workspace headline as much as a 500-case suite (the same failure mode the analysis engine documents).
 // Weight = the cases behind each batch's rate; a batch that cannot say (pre-summary rows) weighs 1.

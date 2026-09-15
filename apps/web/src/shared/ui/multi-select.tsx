@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState } from 'react'
 import { Check, X } from 'lucide-react'
 
 import { cn } from '@/shared/lib/utils'
@@ -9,8 +9,6 @@ import { Input } from '@/shared/ui/input'
 export interface MultiSelectOption {
   value: string
   label: string
-  // The mark in front of a row and a chip (a team key badge, say). Absent, only the name stands.
-  badge?: ReactNode
 }
 
 // The shared grammar for a place that picks SEVERAL — what is picked stands above as chips, what can be picked below as a searchable list.
@@ -24,7 +22,6 @@ export function MultiSelect({
   placeholder,
   emptyLabel,
   removeLabel,
-  minSelected = 0,
 }: {
   id?: string
   options: MultiSelectOption[]
@@ -35,9 +32,6 @@ export function MultiSelect({
   emptyLabel: string
   // The accessible name on a chip's remove button — it takes the name and builds the sentence.
   removeLabel: (name: string) => string
-  // Removal stops here — a remove button that would go below this is not drawn at all (a place where "at least one" is the rule, like a
-  // project's teams). The default 0 is the ordinary multi-select where everything can be removed.
-  minSelected?: number
 }) {
   const [query, setQuery] = useState('')
   const byValue = useMemo(() => Object.fromEntries(options.map((o) => [o.value, o])), [options])
@@ -62,23 +56,17 @@ export function MultiSelect({
           {chips.map((chip) => (
             <span
               key={chip.value}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full border border-border py-0.5 pl-2 text-[11.5px] text-muted-foreground',
-                selected.length > minSelected ? 'pr-1' : 'pr-2'
-              )}
+              className="inline-flex items-center gap-1.5 rounded-full border border-border py-0.5 pl-2 pr-1 text-[11.5px] text-muted-foreground"
             >
-              {chip.badge}
               <span className="truncate">{chip.label}</span>
-              {selected.length > minSelected && (
-                <button
-                  type="button"
-                  onClick={() => toggle(chip.value)}
-                  aria-label={removeLabel(chip.label)}
-                  className="rounded-full p-0.5 transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <X className="size-3" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => toggle(chip.value)}
+                aria-label={removeLabel(chip.label)}
+                className="rounded-full p-0.5 transition-colors hover:bg-accent hover:text-foreground"
+              >
+                <X className="size-3" />
+              </button>
             </span>
           ))}
         </div>
@@ -104,7 +92,6 @@ export function MultiSelect({
               )}
             >
               <Check className="size-3 shrink-0 opacity-0" />
-              {option.badge}
               <span className="truncate">{option.label}</span>
             </button>
           ))

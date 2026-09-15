@@ -78,7 +78,7 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   one case it opened.
 - **Every collection is workspace-wide.** Harness · dataset · judge · scorecard · issue · project have ONE
   address each — the workspace is the only boundary, so there is no second axis for a path to carry and no
-  ownership facet on the list. Addresses from the era that had one 307 in `next.config.ts`.
+  ownership facet on the list. Addresses from the era that had one do not resolve (nothing redirects them).
 - **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (**Linear-style**: indigo `#5e6ad2` primary,
   tight radius `0.5rem`, near-black `#08090a` dark surface, thin low-alpha borders, top indigo glow + subtle
   grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the

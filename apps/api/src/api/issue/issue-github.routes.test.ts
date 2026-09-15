@@ -6,7 +6,7 @@ import { InMemoryIssueStore, InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
 
-// An issue is numbered by its owning team; these transport tests only need that to be deterministic.
+// An issue is numbered by its workspace; these transport tests only need that to be deterministic.
 const numberAllocator = (() => {
   let n = 0;
   return {

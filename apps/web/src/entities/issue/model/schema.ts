@@ -53,7 +53,7 @@ export const issuePrioritySchema = z.enum(ISSUE_PRIORITIES)
 
 // `issue` is the cross-reference GitHub writes as `#123` — one issue mentioning another. It is stored exactly like every other link,
 // one-directionally on the **mentioning** record, and the mentioned issue is read by the same reverse query a harness uses.
-// The id is the target's UUID (not its identifier): moving team re-stamps `ENG-12` as `PLT-3`.
+// The id is the target's UUID (not its identifier): an identifier can be re-minted, and a pointer that survives that is worth more.
 export const ISSUE_LINK_TYPES = [
   'harness',
   'dataset',
@@ -101,12 +101,8 @@ export const trackerHistoryEventSchema = z.enum([
   // A release went out (records/product.ts) — its own word, because "released" is what a reader scans a
   // product's history for, and a forced release must read as shipped-with-overrides, not done.
   'released',
-  // A team move — its own event, because it is the only transition that RE-STAMPS the identifier.
-  'moved',
   // A project update was posted — what someone sweeping the timeline is looking for is these, not the edits between them.
   'update_posted',
-  'member_added',
-  'member_removed',
 ])
 
 export const trackerHistoryEntrySchema = z.object({
@@ -151,11 +147,11 @@ export const issueGithubSchema = z.object({
 export const issueSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // An issue belongs to exactly one team and carries the name that team stamped (`ENG-12`).
+  // The workspace sequence and the name it renders as (`EVD-12`).
   number: z.number(),
   identifier: z.string(),
-  // Moving team re-stamps the identifier — an old name still resolves, so links already pasted stay alive and the detail page
-  // redirects to the canonical slug.
+  // Every name this issue answered to before a re-mint — an old name still resolves, so links already pasted stay alive and the detail
+  // page redirects to the canonical slug.
   formerIdentifiers: z.array(z.string()).default([]),
   title: z.string(),
   description: z.string().optional(),
@@ -166,11 +162,8 @@ export const issueSchema = z.object({
   estimate: z.number().optional(),
   dueDate: z.string().optional(),
   parentId: z.string().optional(),
-  // The team iteration this issue was pulled into.
   // The project checkpoint the issue belongs to — it can only point at one of its OWN project's.
   milestoneId: z.string().optional(),
-  // Triage — arrived from outside the team workflow (an import, an agent, a request) and not yet accepted. It is a FLAG rather than a
-  // status because the status vocabulary IS the workflow, and something not yet in the workflow cannot be said in that vocabulary.
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   // Registry ids (entities/issue-label), not names — join against listIssueLabels to draw a chip.
@@ -208,10 +201,7 @@ export const issueSummarySchema = z.object({
   estimate: z.number().optional(),
   dueDate: z.string().optional(),
   parentId: z.string().optional(),
-  // The team iteration this issue was pulled into.
   milestoneId: z.string().optional(),
-  // Triage — arrived from outside the team workflow (an import, an agent, a request) and not yet accepted. It is a FLAG rather than a
-  // status because the status vocabulary IS the workflow, and something not yet in the workflow cannot be said in that vocabulary.
   projectId: z.string().optional(),
   assignee: z.string().optional(),
   labelIds: z.array(z.string()).default([]),

@@ -21,7 +21,7 @@ So the split to hold in mind, because every mistake below is a confusion of the 
 
 ## Before the first round
 
-- **An issue.** `POST /campaigns` takes `issueId` and the campaign inherits that issue's team. With no
+- **An issue.** `POST /campaigns` takes `issueId`, and the campaign journals into that issue. With no
   tracker configured the door answers 404 — a campaign whose authority cannot be established is not opened.
 - **The subject registered, and the baseline too.** The candidate of every round must be a real registered
   version by the time its scorecard runs.

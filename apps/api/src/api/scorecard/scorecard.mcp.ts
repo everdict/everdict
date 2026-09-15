@@ -180,7 +180,7 @@ export function registerScorecardTools(server: McpServer, ctx: McpToolContext): 
             await scorecards.submit({
               tenant: ws,
               ...(campaign_evaluation ? { campaignEvaluation: campaign_evaluation } : {}),
-              submittedBy: principal.subject, // clone private-repo cases via my personal connection
+              submittedBy: principal.subject, // the submitter's personal secret tier + self-hosted dispatch ownership
               submitterRoles: principal.roles, // constitution seed (ground_truth declarations are admin-only)
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
               harness: {

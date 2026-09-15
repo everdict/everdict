@@ -7,8 +7,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 // (there is no cache to invalidate, and Next 16 throws away the whole client prefetch cache and imposes a 300ms cooldown on the
 // DECLARATION alone). The grounds are in `docs/web.md` §"A mutation refreshes; it must not revalidate".
 export interface RunScorecardInput {
-  // The team this batch belongs to — the form's explicit pick. Absent = the control plane files the batch
-  // under the team that owns the harness (the "follow the harness" default).
   datasetId: string
   datasetVersion: string
   harnessId: string

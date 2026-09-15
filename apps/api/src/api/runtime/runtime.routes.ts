@@ -13,10 +13,7 @@ export function registerRuntimeRoutes(app: FastifyInstance, deps: ServerDeps): v
       return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // The owning team of a new asset is decided FIRST and the gate is applied against that team — registering means "make this the team's",
-    // so registering under a team you do not belong to is the same grounds for refusal as editing another team's asset.
     try {
-      // Resolving the team ref (an id or a key) happens here — a team that does not exist is a 404, and that answer has to leave from the same place as the gate.
       gate(principal, "runtimes:write");
     } catch (err) {
       return sendError(reply, err); // no permission 403 (execution infra = admin)

@@ -12,7 +12,7 @@ import { ListDisplayMenu } from './list-display-menu'
 // One line on a list screen — the left is **what to look at** (search + filters) and the right is **how to look at it** (the count + display).
 // It exists so the four evaluation resource lists use a line identical down to the last character, and it is the same arrangement as the issue list's toolbar.
 //
-// The grouping and ordering names come from the shared vocabulary (`listView.groupBy` / `listView.orderBy`): there is no reason for "team" to be
+// The grouping and ordering names come from the shared vocabulary (`listView.groupBy` / `listView.orderBy`): there is no reason for "creator" to be
 // called by a different word on the harness list and the scorecard list.
 export function ListToolbar({
   search,

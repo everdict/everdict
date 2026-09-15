@@ -16,10 +16,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { ScorecardCreate } from './scorecard-create'
 
-// Starting a batch evaluation — one address, `/{workspace}/scorecards/new`. By default the batch inherits the
-// team that owns the harness chosen, so choosing what to run is also choosing whose result it is; the form's
-// team field is the explicit override. (The team-pinned twin under `…/team/ENG/scorecards/new` is gone with
-// the team eval axis.)
+// Starting a batch evaluation — one address, `/{workspace}/scorecards/new`.
 export async function ScorecardCreateView({ workspace }: { workspace: string }) {
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('scorecardsPage')
@@ -62,7 +59,7 @@ export async function ScorecardCreateView({ workspace }: { workspace: string }) 
     } catch {
       // Even if the runner list fails, the form still works
     }
-    // If the workspace has team-shared runners, expose the self:ws pool option (members:read roster). Not shown if it fails/is empty.
+    // If the workspace has shared runners, expose the self:ws pool option (members:read roster). Not shown if it fails/is empty.
     try {
       hasWorkspaceRunners =
         runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0

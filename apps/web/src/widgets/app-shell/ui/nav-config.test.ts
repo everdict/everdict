@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-
 import { ALL_NAV_ITEMS, ALL_SIDEBAR_ROWS, isNavItemActive } from './nav-config'
 
 // The sidebar has one way of saying where you are: a single active row. Two rows lit at once makes that statement FALSE —
@@ -22,8 +21,8 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme/store/mine')).toEqual(['store'])
   })
 
-  // Evaluation resources are a WORKSPACE axis — living only under a team for a while meant they had no sidebar row at all, and that erases
-  // from the screen the very fact that the product HAS them.
+  // Evaluation resources are a WORKSPACE axis, and each has a sidebar row — a collection with no row erases from the screen the very
+  // fact that the product HAS it.
   it('gives every evaluation collection a workspace row of its own', () => {
     for (const collection of ['harnesses', 'datasets', 'judges', 'scorecards']) {
       expect(activeRows(`/acme/${collection}`)).toEqual([collection])

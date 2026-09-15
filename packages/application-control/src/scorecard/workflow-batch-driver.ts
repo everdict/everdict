@@ -519,7 +519,6 @@ export class WorkflowBatchDriver {
             driverEpoch: ctx.driverEpoch,
           });
           const outcome = await this.cases.run(currentJob, {
-            owner: ctx.owner,
             targets: ctx.targets,
             tenant: ctx.tenant,
             secretMap: ctx.secretMap,

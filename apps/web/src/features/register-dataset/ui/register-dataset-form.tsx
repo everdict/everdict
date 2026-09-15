@@ -65,7 +65,6 @@ export function RegisterDatasetForm({
     return {
       id,
       version,
-      // The owning team rides BESIDE the spec — the route reads it, the spec schema strips it.
       ...(description ? { description } : {}),
       cases: JSON.parse(casesText),
       tags: tagsText

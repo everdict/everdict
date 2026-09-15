@@ -16,8 +16,8 @@ import { Input } from '@/shared/ui/input'
 import { ResetFiltersButton } from '@/shared/ui/reset-filters-button'
 import { Tooltip } from '@/shared/ui/tooltip'
 
-// One person = a workspace membership plus the team rosters they are on. Team membership is not on the member record
-// (it is a separate roster), so the server joins them and passes them down — this widget draws only already-joined rows.
+// One person = a workspace membership joined with their profile — the server joins them and passes them down, so this widget draws only
+// already-joined rows.
 export interface MemberRow {
   subject: string
   role: string
@@ -40,10 +40,10 @@ const ROLE_KEYS: Record<string, string> = {
 }
 const ROLE_RANK: Record<string, number> = { admin: 0, member: 1, viewer: 2, ci: 3 }
 
-// Person · teams · role · joined — the header and the rows have to share the same tracks or the columns misalign, so they live in one place.
+// Person · role · joined — the header and the rows have to share the same tracks or the columns misalign, so they live in one place.
 // It is a CONTAINER query (not the viewport): the same list is drawn at full width and in a narrow column with the infra panel open.
 const ROW =
-  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 @lg:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_88px] @2xl:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_88px_96px]'
+  'grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 @lg:grid-cols-[minmax(0,1fr)_88px] @2xl:grid-cols-[minmax(0,1fr)_88px_96px]'
 
 // A person's name — name > the email local part > an abbreviated subject. Standing an opaque Keycloak sub as-is turns a people list into an id list.
 function labelOf(m: MemberRow): string {
@@ -75,7 +75,6 @@ export function MemberList({
     return key ? t(key) : value
   }
 
-
   const roleOptions = useMemo(() => {
     const seen = [...new Set(members.map((m) => m.role))].sort(
       (a, b) => (ROLE_RANK[a] ?? 9) - (ROLE_RANK[b] ?? 9)
@@ -91,13 +90,7 @@ export function MemberList({
     const matched = members.filter((m) => {
       if (role && m.role !== role) return false
       if (!q) return true
-      const hay = [
-        m.name ?? '',
-        m.email ?? '',
-        m.subject,
-      ]
-        .join(' ')
-        .toLowerCase()
+      const hay = [m.name ?? '', m.email ?? '', m.subject].join(' ').toLowerCase()
       return hay.includes(q)
     })
     const by: Record<Sort, (a: MemberRow, b: MemberRow) => number> = {
@@ -170,7 +163,6 @@ export function MemberList({
             )}
           >
             <span>{t('colName')}</span>
-            <span className="hidden @lg:block">{t('colTeams')}</span>
             <span>{t('colRole')}</span>
             <span className="hidden @2xl:block">{t('colJoined')}</span>
           </div>

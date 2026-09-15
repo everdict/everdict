@@ -56,10 +56,7 @@ export const projectSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   status: projectStatusSchema,
-  // Teams and initiatives are both N:M — a project is worked by several teams and can sit under several umbrellas at once.
-  // At least one team is guaranteed by the control plane (a project cannot be created with none). It is deliberately not enforced with min(1)
-  // here — this is the READING side, and drawing is better than failing to draw a whole screen over one old record on a deployment that has
-  // not migrated yet.
+  // Initiatives are N:M — a project can sit under several umbrellas at once.
   initiativeIds: z.array(z.string()).default([]),
   // The lead and the participants. And the health of the most recent update — carried on the project so a list row can take its colour without
   // reading the timeline (absent = nobody posted an update, which is different from "fine").

@@ -17,8 +17,6 @@ export interface IssueListFilter {
   priority?: IssuePriority;
   // One project checkpoint's issues.
   milestoneId?: string;
-  // One board column's issues — what a state's delete gate counts and what a re-mapped state re-stamps.
-  stateId?: string;
   // The sub-issues of one parent. `null` selects the TOP-LEVEL issues instead — "everything that is not
   // somebody's sub-issue", which is what a board wants to show so a child never appears twice.
   parentId?: string | null;

@@ -13,7 +13,7 @@ and deliver it stay separate.
 
 | Concern | Essence | Owner (`packages/application-control/src/`) |
 |---|---|---|
-| **Execution** | run one case → a `CaseResult`. Nothing after. | `execution/execute-case.ts` `executeCase(deps, owner, job, opts?)` |
+| **Execution** | run one case → a `CaseResult`. Nothing after. | `execution/execute-case.ts` `executeCase(deps, job, opts?)` |
 | **Scoring** | over results/traces: resolve judges · apply them · collect judge models | `execution/scoring-service.ts` `ScoringService` (aggregation stays pure in `@everdict/domain`) |
 | **Orchestration** | admit · fan out · settle budget · offload · persist · deliver · progress | `run/run-service.ts` `RunService` (single) · `scorecard/` batch collaborators |
 

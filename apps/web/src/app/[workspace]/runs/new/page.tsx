@@ -42,7 +42,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
     } catch {
       // Even if the runner list fails, the form still works
     }
-    // If the workspace has team-shared runners, show the self:ws pool option (members:read roster). Not shown on failure/absence.
+    // If the workspace has shared runners, show the self:ws pool option (members:read roster). Not shown on failure/absence.
     try {
       hasWorkspaceRunners =
         runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0

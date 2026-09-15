@@ -173,7 +173,6 @@ export function proposeServices(input: ProposeServicesInput): ProductServiceSugg
 // Which files mark a deployable unit, and what the unit is called. Kept here rather than in the adapter
 // because "what counts as a service in a monorepo" is a product decision, and the adapter's job is bytes.
 export const PACKAGE_MANIFESTS = ["package.json", "go.mod", "pyproject.toml", "Cargo.toml", "Dockerfile"] as const;
-export type PackageManifest = (typeof PACKAGE_MANIFESTS)[number];
 
 // How deep a manifest may sit before it stops describing a top-level component. `apps/api/package.json` is a
 // service; `apps/api/node_modules/x/package.json` is a dependency, and a vendored tree would otherwise

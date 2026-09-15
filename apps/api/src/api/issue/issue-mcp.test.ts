@@ -61,16 +61,11 @@ function makeDeps(): { deps: McpDeps; pushed: OutboxEvent[] } {
     },
   });
   const writers: GithubRepoWriterFactory = { for: () => idleWriter };
-  // The real team service, so an issue and a project land on the SAME default team — an issue may only join a
-  // project its own team is on, and a fake allocator naming a team the project store never heard of would make
-  // every tool that puts an issue in a project fail for a reason production does not have.
   const issueService = new IssueService({
     numbers: numberAllocator,
     store: issueStore,
     scorecards: new InMemoryScorecardStore(),
     projects: projectStore,
-    // "Does this cycle exist, and whose is it" — production's wiring, so an agent moving an issue into an
-    // iteration meets the same team check a member does.
     events,
   });
   return {

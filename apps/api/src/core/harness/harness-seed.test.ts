@@ -1,6 +1,8 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { storedExecutionId } from "@everdict/contracts";
-import { loadDatasetDir, loadHarnessTaxonomyDir, loadRuntimeDir } from "@everdict/registry";
+import { DatasetSchema, RuntimeSpecSchema, storedExecutionId } from "@everdict/contracts";
+import { loadHarnessTaxonomyDir } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 
 // Guards the first-party harness taxonomy presets (examples/harness-templates) — that templates+instances match the
@@ -57,11 +59,19 @@ describe("first-party harness taxonomy seed", () => {
   });
 });
 
-// Guards that the first-party dataset/runtime example catalogs also load schema-valid (reference files — not auto-seeded).
-describe("first-party dataset·runtime catalog seed", () => {
-  it("examples/datasets parses and the os-use benchmark (hermes-desktop-ssh, multi-case) is in _shared", async () => {
-    const reg = await loadDatasetDir(DATASET_DIR);
-    const ds = await reg.get("any-tenant", "hermes-desktop-ssh"); // _shared fallback
+// Guards that the first-party dataset/runtime example catalogs are schema-valid (reference files — not auto-seeded,
+// and nothing loads them from a directory: a workspace registers what it wants through the API).
+const readJson = (dir: string, file: string): unknown => JSON.parse(readFileSync(join(dir, file), "utf8"));
+
+describe("first-party dataset·runtime example catalogs", () => {
+  it("every examples/datasets file parses, and the os-use benchmark (hermes-desktop-ssh, multi-case) is intact", () => {
+    const datasets = readdirSync(DATASET_DIR)
+      .filter((file) => file.endsWith(".json"))
+      .map((file) => DatasetSchema.parse(readJson(DATASET_DIR, file)));
+    expect(datasets.length).toBeGreaterThan(0);
+    const ds = datasets.find((d) => d.id === "hermes-desktop-ssh");
+    expect(ds, "examples/datasets no longer carries hermes-desktop-ssh").toBeDefined();
+    if (ds === undefined) return;
     expect(ds.cases.length).toBeGreaterThanOrEqual(2); // scorecard batch (multiple cases)
     expect(ds.cases.map((c) => c.id)).toEqual(["hermes-ssh-connect", "hermes-open-settings"]);
     expect(ds.cases.every((c) => c.env.kind === "os-use")).toBe(true);
@@ -72,9 +82,9 @@ describe("first-party dataset·runtime catalog seed", () => {
   });
 
   // Reference example (not auto-seeded — workspaces register runtimes themselves): only ensures the file parses schema-valid.
-  it("the examples/runtimes example file parses (reference — not auto-seeded)", async () => {
-    const reg = await loadRuntimeDir(RUNTIME_DIR);
-    const rt = await reg.get("any-tenant", "local");
+  it("the examples/runtimes example file parses (reference — not auto-seeded)", () => {
+    const rt = RuntimeSpecSchema.parse(readJson(RUNTIME_DIR, "local-1.0.0.json"));
+    expect(rt.id).toBe("local");
     expect(rt.kind).toBe("local");
   });
 });

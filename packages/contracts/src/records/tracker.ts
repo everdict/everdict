@@ -2,13 +2,13 @@ import { z } from "zod";
 
 // The EVAL TRACKER — Initiative ⊃ Project ⊃ Issue (docs/tracker.md). Everdict's primitives (harnesses, datasets,
 // judges, scorecards) answer "what ran"; the tracker answers "why we evaluate at all". An Issue is the unit of
-// intent — the problem under evaluation — and it gathers the capabilities that verify it, so a team discusses at
+// intent — the problem under evaluation — and it gathers the capabilities that verify it, so a workspace discusses at
 // the issue level: how it was resolved, which scorecard closed it, and why it came back. Projects group issues
 // under a target date; an Initiative is a GOAL several projects work toward — Linear's meaning, not a release
 // train. Its progress is the live arithmetic over everything underneath, and completing it is a gate only
 // because a goal with open work under it has not been reached yet.
-// Teams (records/team.ts) group ISSUES inside a workspace and name them (`ENG-12`); projects and initiatives stay
-// workspace-level on purpose, so a release several teams contribute to is still one readiness gate.
+// The workspace is the only boundary: it names every issue (`EVD-12`, records/issue-identifier.ts), and projects and
+// initiatives sit beside the issues in the same workspace.
 
 // --- Issue status (Linear's six + one) ---
 // `regressed` is our addition and the reason the tracker exists: a done issue whose evaluation later degraded is
@@ -29,7 +29,7 @@ export type IssueStatus = z.infer<typeof IssueStatusSchema>;
 // --- Status CATEGORIES (Linear's five) ---
 // Every status belongs to exactly one category, and category is what PROGRAMMATIC decisions read: the release
 // gate, the rollups, the regression watch. Linear calls these the workflow-state `type`, and it is the reason a
-// team can rename or add states without breaking anything — the name is for humans, the category is for code.
+// workspace can rename or add states without breaking anything — the name is for humans, the category is for code.
 //
 // `regressed` maps to `started`, which is the whole argument for having categories at all: a resolution that
 // stopped holding is WORK IN FLIGHT, not an untouched backlog item and not a finished one. Every open/closed
@@ -93,7 +93,7 @@ export type IssuePriority = z.infer<typeof IssuePrioritySchema>;
 // `issue` is the cross-reference GitHub spells with `#123`: one issue naming another. It is stored like every
 // other link — on the MENTIONING issue, one-directional — and the mentioned issue reads its backlinks with the
 // same reverse query a harness uses (`?linkType=issue&linkId=`). The id is the target's UUID, not its
-// identifier: a team move re-mints `ENG-12` into `PLT-3`, and a pointer that survives the move is worth more
+// identifier: a re-issue re-mints `ENG-12` into `EVD-3`, and a pointer that survives it is worth more
 // than one that reads nicely in the raw record (the screen resolves it to the identifier anyway).
 // `product`/`release` point into the product timeline (records/product.ts): "this issue blocks the 2026.3
 // release" is a link, and the release's gate counts its open linked issues through the same reverse query.
@@ -154,8 +154,8 @@ export function issueLinkDefects(link: { type: IssueLinkType; dataset?: string; 
 // --- Issue labels: a workspace-level registry, referenced by id ---
 // Labels are RECORDS, not the free strings they used to be (mig 0107 promoted the old string arrays). An issue
 // stores `labelIds`, so renaming a label or recolouring it is one write that every issue sees at once — the
-// property the string model could never have. The registry is workspace-wide (not per-team) because a workspace
-// IS the tenant here, and one shared vocabulary is what makes a cross-team filter mean anything.
+// property the string model could never have. The registry is workspace-wide because a workspace IS the tenant
+// here, and one shared vocabulary is what makes a filter mean the same thing on every list.
 //
 // Colour is a CLOSED vocabulary, not a hex string: the web maps each token to a theme token, so a label stays
 // legible in light and dark and nobody can author an off-theme (or invisible) chip. Same rule as charts.
@@ -208,18 +208,9 @@ export const TRACKER_HISTORY_EVENTS = [
   // A release went out (records/product.ts). Its own word rather than `completed` because "released" is what a
   // reader scans a product's history for — and a forced release must read as shipped-with-overrides, not done.
   "released",
-  // An issue changed hands between teams. It is its own event rather than an `updated` with a changed field
-  // because it re-mints the issue's IDENTIFIER: the durable answer to "why is this issue called PLT-3 when every
-  // link in the pull request says ENG-12" lives here, and nowhere else once the event log is swept.
-  "moved",
   // A project update was posted — the health judgment plus the sentence explaining it. Its own event because a
   // reader scanning the timeline is looking for exactly these, not for the edits between them.
   "update_posted",
-  // Team roster changes (records/team.ts) — who could file under this prefix, and when. The durable half of the
-  // matching `team.member_*` facts, for the same reason every other tracker history entry exists: the event log
-  // is swept, and "who was on this team when that issue was filed" is a question asked long after.
-  "member_added",
-  "member_removed",
 ] as const;
 export const TrackerHistoryEventSchema = z.enum(TRACKER_HISTORY_EVENTS);
 export type TrackerHistoryEvent = z.infer<typeof TrackerHistoryEventSchema>;
@@ -305,13 +296,13 @@ export type IssueGithub = z.infer<typeof IssueGithubSchema>;
 export const IssueRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  // The team-scoped sequence and its rendered form (`ENG-12`). Stored rather than derived: the team key is
-  // immutable, so the identifier is stable for the life of the issue and readable without loading the team.
+  // The workspace sequence and its rendered form (`EVD-12`). Stored rather than derived: the issue key is
+  // immutable, so the identifier is stable for the life of the issue and readable without loading the workspace.
   number: z.number().int().positive(),
   identifier: z.string().min(1),
-  // Every identifier this issue has answered to before, oldest first. Moving an issue to another team re-mints
-  // its name from the new team's counter (that is what makes the prefix mean "whose list is this on"), which
-  // would otherwise break every link already pasted into a pull request or a chat message. Keeping the old
+  // Every identifier this issue has answered to before, oldest first. Folding the team axis into the workspace
+  // (`scripts/live/migrate-teams-to-workspace.mjs`) re-minted names from the workspace counter, which would
+  // otherwise break every link already pasted into a pull request or a chat message. Keeping the old
   // names resolvable — the lookup falls back to this list and the web redirects to the canonical slug — is what
   // lets the address change without any of its existing spellings dying.
   formerIdentifiers: z.array(z.string()).default([]),
@@ -322,24 +313,22 @@ export const IssueRecordSchema = z.object({
   // one can be nobody's priority. Defaulted rather than optional because "unprioritised" is a real answer that
   // every list has to draw, and an absent field would make every consumer invent the same fallback.
   priority: IssuePrioritySchema.default("none"),
-  // Team-scoped points. A bare number here on purpose: the SCALE (linear / fibonacci / t-shirt) is a team
-  // setting, so the same 3 renders as "3" or "M" depending on the owning team — the record stores the value,
-  // never its rendering.
+  // Points. A bare number on purpose: the record stores the value, never a rendering of it.
   estimate: z.number().int().nonnegative().max(1000).optional(),
   // When this issue is due — a calendar date like a project's target date, and for the same reason: "is it late"
   // is a date question, and the literal YYYY-MM-DD round-trips with no timezone reinterpretation.
   dueDate: CalendarDateSchema.optional(),
   // The issue this one breaks out of. Sub-issues are ordinary issues in every other respect — they carry their
-  // own status, their own team, and count in every rollup — so this is a pointer, not a containment. The
+  // own status and count in every rollup — so this is a pointer, not a containment. The
   // service refuses a cycle (nothing may be its own ancestor) and refuses deleting an issue that still has
   // children rather than silently orphaning them.
   parentId: z.string().optional(),
   // The project checkpoint this issue belongs to. Only ever one of ITS project's milestones — the service
   // refuses another project's, because a checkpoint an issue cannot appear under is work made invisible.
   milestoneId: z.string().optional(),
-  // Which of the owning team's named workflow states the issue sits in (records/workflow-state.ts). The
-  // canonical `status` above stays the programmatic answer; this is the team's spelling of it, and absent means
-  // "the team's default state for that status" — which is every issue that predates the board, and every one
+  // Which of the workspace's named workflow states the issue sits in (records/workflow-state.ts). The
+  // canonical `status` above stays the programmatic answer; this is the workspace's spelling of it, and absent
+  // means "the default state for that status" — which is every issue that predates the board, and every one
   // the regression watch moved (nobody dragged it into a column).
   stateId: z.string().optional(),
   projectId: z.string().optional(),

@@ -269,7 +269,7 @@ export function ScorecardList({
       options: (data.facets[facet] ?? [])
         .map((option) => ({
           value: option.value,
-          label: option.value === '' ? (unset ?? list('unset.team')) : labelOf(option.value),
+          label: option.value === '' && unset !== undefined ? unset : labelOf(option.value),
         }))
         .sort((a, b) => a.label.localeCompare(b.label)),
     })
@@ -328,7 +328,6 @@ export function ScorecardList({
       case 'harness':
       case 'dataset':
         return refName(key)
-      case 'team':
       case 'creator':
         return creatorName(key)
       default:

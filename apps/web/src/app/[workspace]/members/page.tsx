@@ -12,9 +12,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Members — the app-level PEOPLE DIRECTORY (members:read = viewer+). It answers "who is here and which teams
-// are they on"; Settings › Members answers "invite, change a role, remove" (members:write = admin). The split
-// is the same one Teams has: looking someone up should not hand the sidebar over to configuration.
+// Members — the app-level PEOPLE DIRECTORY (members:read = viewer+). It answers "who is here"; Settings › Members
+// answers "invite, change a role, remove" (members:write = admin): looking someone up should not hand the sidebar
+// over to configuration.
 export default async function MembersDirectoryPage({
   params,
 }: {

@@ -155,7 +155,7 @@ export class ScorecardService {
   private readonly newId: () => string;
   private readonly now: () => string;
   private readonly concurrency: number;
-  // Cooperative-cancellation handles for in-flight batches (for supersede) — assumes a single control-plane process (same as the in-process rendezvous).
+  // Cooperative-cancellation handles for in-flight batches (for supersede) — assumes a single control-plane process.
   // abort only goes as far as "don't fire the remaining cases": force-killing already-fired backend jobs is a separate problem (follow-up).
   private readonly inFlight = new Map<string, AbortController>();
   // Lifecycle collaborators — the facade is the only composer (they never see each other).
@@ -961,8 +961,6 @@ grade the batch with an explicit run-time plan.`.replace(/\n/g, " "),
     return this.submit({
       tenant: src.tenant,
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
-      // A re-run belongs to whoever the original belonged to. Recomputing the owner would quietly move the batch
-      // to the re-runner's team, and the pair would stop being comparable as one team's history.
       dataset: { id: src.dataset.id, version: src.dataset.version },
       harness: {
         id: src.harness.id,

@@ -16,13 +16,6 @@ export interface TokenIo {
 
 // --- Legacy single-token store (pre-multi) — kept only to read + migrate a pairing made by an older desktop. ---
 
-export function saveToken(cipher: CipherLike, io: TokenIo, token: string): void {
-  if (!token.startsWith("rnr_")) throw new Error("Not an rnr_ pairing token.");
-  if (!cipher.isEncryptionAvailable())
-    throw new Error("Cannot store the pairing token — OS secure storage (safeStorage) is unavailable.");
-  io.write(cipher.encryptString(token));
-}
-
 export function loadToken(cipher: CipherLike, io: TokenIo): string | null {
   const data = io.read();
   if (data === null) return null;

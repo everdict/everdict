@@ -101,7 +101,7 @@ Two dispatchers (both satisfy `Dispatcher` — `dispatch(job)→CaseResult`; dep
 - `Router(registry, defaultTarget)` — static (pin via `evalCase.placement.target`, else default). Dev.
 - `Scheduler(registry, opts)` — the SaaS path; the `everdict worker` and `apps/api` use it. It composes:
   - **capacity-aware placement**: `free = total − max(used, in-flight)` per backend; `PlacementPolicy`
-    (`leastLoadedPolicy` spread default / `binPackPolicy` consolidate); honors `placement.target` as a hard pin.
+    (`leastLoadedPolicy` spread, the default and only shipped policy); honors `placement.target` as a hard pin.
   - **tenant fairness**: `FairQueue` (WFQ by virtual-finish time, keyed by `tenant`; `weightFor`) so one
     tenant's batch can't starve another; `tenantQuota` caps a tenant's concurrent in-flight.
   - **replica-global vs per-replica admission**: the scheduler's five in-flight maps are per PROCESS. The

@@ -453,8 +453,8 @@ export class ScorecardAnalyticsService {
     return { scanned: records.length, updated };
   }
 
-  // Ensure workspace scope + team scope + completion (scorecard exists). 404 if missing OR owned by a team the
-  // caller cannot see (no existence leak — the same answer another workspace's id gets), 400 if incomplete.
+  // Ensure workspace scope + completion (scorecard exists). 404 if missing OR another workspace's (no existence
+  // leak — both get the same answer), 400 if incomplete.
   private async requireSucceeded(
     tenant: string,
     id: string,

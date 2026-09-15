@@ -7,7 +7,7 @@ import type { ResumeResult } from "../run/run-service.js";
 import { tombstoneInterrupted } from "./tombstone.js";
 
 // Reclaim orphaned work on boot — batches (scorecards) and runs are tracked in-process inside the control-plane process
-// (the single-process assumption, same as inFlight supersede / in-process rendezvous). So when the process restarts, the
+// (the single-process assumption, same as inFlight supersede). So when the process restarts, the
 // queued/running records the previous process was driving become ghosts with no owner to resume them.
 //
 // Batches are RESUMED, not tombstoned (docs/architecture/batch-resilience.md): results persist per case (child runs),

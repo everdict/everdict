@@ -43,8 +43,6 @@ export interface CreateIssueInput {
   title: string;
   description?: string;
   status?: IssueStatus;
-  // File it into the team's triage inbox instead of straight into the workflow — what an import or an agent
-  // does when the team asked for a queue in front of it.
   priority?: IssuePriority;
   estimate?: number;
   dueDate?: string;
@@ -61,8 +59,8 @@ export interface CreateIssueInput {
 
 export interface SetIssueStatusInput {
   status: IssueStatus;
-  // Which board column the move landed in, when the caller moved by column. Validated against the issue's own
-  // team, and its canonical status wins over `status` — the column IS the status, so a body that disagreed
+  // Which board column the move landed in, when the caller moved by column. Validated against the workspace's
+  // workflow states, and its canonical status wins over `status` — the column IS the status, so a body that disagreed
   // with itself would otherwise silently pick one.
   stateId?: string;
   resolution?: { scorecardId?: string; note?: string };
@@ -87,12 +85,12 @@ export interface IssueNumberAllocator {
 }
 
 // "Is this checkpoint one of that project's" — the only question an issue asks about a milestone. Composed like
-// the cycle resolver; absent = milestones are not validated in this deployment.
+// the number allocator; absent = milestones are not validated in this deployment.
 export interface IssueStateResolver {
   get(tenant: string, id: string): Promise<{ id: string; status: IssueStatus } | undefined>;
 }
 
-// "Does this project exist, whose is it, and what checkpoints does it have" — composed like the cycle resolver;
+// "Does this project exist, and what checkpoints does it have" — composed like the number allocator;
 // absent = projects are not composed in this deployment and the field is simply not validated. `ProjectStore`
 // satisfies it structurally, so the two stay peers instead of one service reaching into the other.
 export interface IssueProjectResolver {
@@ -101,7 +99,7 @@ export interface IssueProjectResolver {
 
 export interface IssueServiceDeps {
   store: IssueStore;
-  // Required: an issue cannot exist without an owning team, so there is no degraded mode to fall back to.
+  // Required: an issue cannot exist without its number, so there is no degraded mode to fall back to.
   numbers: IssueNumberAllocator;
   // Evidence validation only — `resolution.scorecardId` must exist in this workspace. Plain links stay
   // unvalidated pointers (platform-event subject semantics).
@@ -144,7 +142,7 @@ export class IssueService {
 
   async create(input: CreateIssueInput): Promise<IssueRecord> {
     // A parent has to exist in this workspace before it can be one — the child's whole meaning is the link.
-    // What is STORED is the resolved id, never what the caller spelled: `get` takes the name a team cites
+    // What is STORED is the resolved id, never what the caller spelled: `get` takes the name people cite
     // (`ENG-12`) just as readily as the uuid, and the sub-issue query keys on the id — so filing by identifier
     // used to mint a child that its own parent's detail could never list. Re-parenting already resolved.
     const parent = input.parentId === undefined ? undefined : await this.get(input.tenant, input.parentId);
@@ -185,7 +183,7 @@ export class IssueService {
   // same history shape) — only the record assembly differs, and that lives in the domain.
   async createImported(record: IssueRecord, agent?: IssueAgentAttribution): Promise<IssueRecord> {
     // The record arrives assembled, so the project edge is checked HERE — an import that files a batch into a
-    // project the destination team is not on would otherwise be the one way into the state every other path
+    // project this workspace does not have would otherwise be the one way into the state every other path
     // refuses, and it is the path that files the most issues at once.
     if (record.projectId !== undefined) await this.assertProjectExists(record.tenant, record.projectId);
     return this.persistNew(record, agent);
@@ -222,7 +220,7 @@ export class IssueService {
     return this.deps.store.countByGroup(tenant, groupBy, filter);
   }
 
-  // An issue is addressed by its id OR by the identifier its team minted (`ENG-12`) — the name that appears in
+  // An issue is addressed by its id OR by the identifier the workspace minted (`ENG-12`) — the name that appears in
   // URLs, pull requests and chat. Resolving here rather than per transport means every caller (HTTP, MCP, the
   // regression watch) accepts both without a second lookup path, and every mutation below routes through it.
   // An identifier-shaped ref is read off the identifier index FIRST and falls back to the id, so the two
@@ -255,14 +253,10 @@ export class IssueService {
           "That issue is a sub-issue of this one — making it the parent would close the loop.",
         );
     }
-    // A cycle belongs to a team, so an issue can only be pulled into one of ITS team's iterations — otherwise
-    // the issue sits on a board it can never appear on, which is work made invisible rather than planned.
-    // (A re-address used to be `move`; with one workspace there is nowhere to move to.)
-    // of a rename, so the issue's team here is the one it already has.)
     if (fields.projectId !== undefined && fields.projectId !== null)
       await this.assertProjectExists(tenant, fields.projectId);
-    // A checkpoint belongs to a project, so an issue can only sit under one of ITS project's — the same reason
-    // a cycle has to be its team's. `projectId` may be changing in the same edit, so the check reads whichever
+    // A checkpoint belongs to a project, so an issue can only sit under one of ITS project's — otherwise the
+    // issue sits under a checkpoint it can never appear on. `projectId` may be changing in the same edit, so the check reads whichever
     // project the issue will end up in.
     if (fields.milestoneId !== undefined && fields.milestoneId !== null) {
       const projectId =

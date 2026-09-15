@@ -13,13 +13,6 @@ export function addCalendarDays(date: string, days: number): string {
   return at.toISOString().slice(0, 10);
 }
 
-// The weekday of a calendar date, read in UTC for the same reason. 0 = Sunday … 6 = Saturday.
-export function weekdayOf(date: string): number {
-  const at = new Date(`${date}T00:00:00.000Z`);
-  if (Number.isNaN(at.getTime())) throw new BadRequestError("BAD_REQUEST", { date }, "Expected a YYYY-MM-DD date.");
-  return at.getUTCDay();
-}
-
 // Whole days from `from` to `to`, both calendar dates. Negative when `to` precedes `from`.
 export function daysBetween(from: string, to: string): number {
   const start = new Date(`${from}T00:00:00.000Z`).getTime();

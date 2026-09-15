@@ -67,19 +67,7 @@ export interface CampaignAdoptionDeps {
     via: CapabilityOriginChannel;
     proof: CampaignAdoptionProof;
     spec: unknown;
-    // ── THE OWNER THE CALLER WAS AUTHORIZED AGAINST (arch-review 115) ──────────────────────────────
-    //
-    // The transport reads the candidate entity's owning team to gate `agents:write` / `harnesses:register`
-    // and then this effect re-reads it to write. A transfer landing between them files the successor under
-    // a team the caller may not write to — owner preservation succeeded, authorization is what did not. So
-    // the gate's input travels as a PRECONDITION the write asserts, and `undefined` is a real claim
-    // (the entity was unowned when it was authorized), not "no opinion".
-    //
-    // Carried through here rather than resolved in the effect, because only the transport knows what it
-    // actually gated on.
-    expectedOwnerTeamId?: string;
-    //
-    // ── AND IT ANSWERS WITH THE WHOLE IDENTITY, NOT JUST A VERSION (arch-review 75 P1-high) ─────────
+    // ── IT ANSWERS WITH THE WHOLE IDENTITY, NOT JUST A VERSION (arch-review 75 P1-high) ─────────────
     //
     // The first version returned `{version}` and the service recorded whatever came back. An adapter bound
     // to a server-side-versioning door — `save_agent` auto patch-bumps a changed spec — would answer 1.1.1
@@ -150,10 +138,6 @@ export interface AdoptionRequest {
   // `register` for why the digest a proof carries is not a hash of this document.
   spec: unknown;
   by: string; // the subject the registration is attributed to
-  // What the transport's `agents:write` / `harnesses:register` gate was granted against — the candidate
-  // entity's owning team AT AUTHORIZATION TIME. Forwarded to the effect, which asserts it still holds where
-  // the successor is written (arch-review 115). `undefined` claims the entity was unowned then.
-  expectedOwnerTeamId?: string;
   // ── …AND THE AGENT THAT ACTED, WHEN ONE DID (arch-review 85, rule `events`) ──────────────────────
   //
   // `adopt_campaign_candidate` is an MCP tool, so the ordinary caller here IS an agent — and loop guard #1
@@ -258,7 +242,6 @@ export class CampaignAdoptionService {
       via: input.via,
       proof: recorded.proof,
       spec: input.spec,
-      ...(input.expectedOwnerTeamId !== undefined ? { expectedOwnerTeamId: input.expectedOwnerTeamId } : {}),
     });
     // ── …AND WHAT LANDED IS WHAT WAS MEASURED (arch-review 73) ──────────────────────────────────────
     //

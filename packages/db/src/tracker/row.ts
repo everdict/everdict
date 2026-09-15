@@ -19,7 +19,7 @@ export function trackerHistory(value: unknown): TrackerHistoryEntry[] {
   return Array.isArray(value) ? (value as TrackerHistoryEntry[]) : [];
 }
 
-// The tracker's jsonb id lists (a project's teams and initiatives, an issue's former identifiers). Same
+// The tracker's jsonb id lists (a project's initiatives and members, an issue's former identifiers). Same
 // treatment as history: hand the record schema a well-formed array so a NULL column from a row written before
 // the column existed parses instead of throwing, and drop anything that is not a string rather than letting a
 // malformed element reach the domain.

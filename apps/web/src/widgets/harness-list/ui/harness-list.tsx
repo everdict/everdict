@@ -120,7 +120,7 @@ export function HarnessList({
   harnesses: Harness[]
   relations: Record<string, HarnessRelation>
   authors: Record<string, Author>
-  // The team axis' name plate — used only to turn an id into the name people call it by.
+  // The list's address, and the filters/search/display it opened with.
   scope: ListViewScope
   // Admin — reveal a per-row delete (removes the whole harness); all listed harnesses are workspace-owned (delete-eligible).
   canDelete?: boolean
@@ -178,7 +178,6 @@ export function HarnessList({
       of('kind', (value) => value, list('unset.kind')),
       of('creator', creatorName, list('unset.creator')),
       of('tag', (value) => value, list('unset.tag')),
-      // Standing a team axis in a workspace with no teams leaves nothing to pick.
     ].filter((facet) => facet.options.length > 0)
   }, [harnesses, list, authors])
 
@@ -192,7 +191,7 @@ export function HarnessList({
     [harnesses, view.filters, view.search, view.display]
   )
 
-  // One group's name plate. The vocabulary differs per axis (a shape is an identifier, teams and people are names), so it is resolved in one place.
+  // One group's name plate. The vocabulary differs per axis (a shape is an identifier, people are names), so it is resolved in one place.
   function groupLabel(key: string | null) {
     if (key === null) return list(`unset.${view.display.grouping}`)
     if (view.display.grouping === 'template')

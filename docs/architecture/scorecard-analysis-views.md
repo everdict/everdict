@@ -2,7 +2,7 @@
 kind: wiki
 title: "Scorecard Analysis + Views (SSOT)"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/domain/src/scorecard/analysis.ts, apps/web/src/features/analyze-scorecards/model/analysis.ts, packages/application-control/src/view/view-service.ts, packages/contracts/src/records/view.ts]
 ---
 # Scorecard Analysis + Views (SSOT)
@@ -105,7 +105,8 @@ interface ViewRecord {
 - `/{ws}/views` — the sidebar's Views entry (`apps/web/src/widgets/app-shell/ui/nav-config.ts`). `ViewList` cards
   show the name, a visibility badge, `describeConfig` chips and the owner; the owner or an admin can toggle
   sharing or delete.
-- `/{ws}/views/[id]` — opens a View in `CustomAnalyzer`, live; a missing or foreign-private View is `notFound()`.
+- `/{ws}/view/[id]` — opens a View in `CustomAnalyzer`, live; a missing or foreign-private View is `notFound()`. The
+  plural spelling `/{ws}/views/{id}` redirects here (`apps/web/next.config.ts`).
 - `loadAnalysisData()` (`apps/web/src/features/analyze-scorecards/api/load-analysis-data.ts`) is the shared
   server loader for the analyze canvas and both Views pages.
 

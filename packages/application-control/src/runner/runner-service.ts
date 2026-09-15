@@ -32,7 +32,6 @@ export const PairRunnerBodySchema = z.object({
   os: z.string().min(1).max(40).optional(),
   capabilities: z.array(CapabilityNameSchema).optional(),
 });
-export type PairRunnerBody = z.infer<typeof PairRunnerBodySchema>;
 
 // A runner-reported status older than this is stale (the runner stopped heartbeating), so it's dropped from the read
 // overlay — a stale "running" note on a runner that has since died would mislead. Aligns with the roster's online window.

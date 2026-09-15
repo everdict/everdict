@@ -15,10 +15,6 @@ export interface VariationChip {
   label: string;
 }
 
-// How many chips a caller should render before folding the rest into "+N" — one number, so the list and the
-// picker truncate identically instead of each inventing a cap.
-export const VARIATION_CHIP_DISPLAY_LIMIT = 3;
-
 // An image ref's identifying tail — a 71-char digest would push every other chip off the row.
 function shortImage(ref: string): string {
   const at = ref.indexOf("@");

@@ -7,7 +7,7 @@ import type { OutboxEvent } from "./run-store.js";
 // point of the facts/hypotheses split is that the record says what was actually known when work stopped.
 //
 // `events` is the E0 outbox: implementations persist facts ATOMICALLY with the write they describe, the same
-// contract IssueLabelStore and TeamStore hold. The VALIDATION (dangling refs, self-verification) lives in the
+// contract IssueLabelStore and IssueStore hold. The VALIDATION (dangling refs, self-verification) lives in the
 // service, not here — a store that decides what is admissible is a store two callers will disagree with.
 export interface HandoffCheckpointStore {
   create(record: HandoffCheckpointRecord, events?: OutboxEvent[]): Promise<void>;

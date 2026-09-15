@@ -34,8 +34,7 @@ import {
 import type { StoreSeedPlan } from "./deploy/store-seed.js";
 import type { TargetEnvHandle, TopologyRuntime } from "./deploy/topology-runtime.js";
 import { keysFor } from "./environment-manager.js";
-import { InProcessCallbackRendezvous } from "./front-door/callback-rendezvous.js";
-import type { FrontDoorDriver } from "./front-door/front-door-driver.js";
+import type { CallbackRendezvous, CallbackSink, FrontDoorDriver } from "./front-door/front-door-driver.js";
 import type { AcquireRequestFn } from "./front-door/target-acquirer.js";
 import { ServiceTopologyBackend, type SubmitFn } from "./service-backend.js";
 
@@ -2174,8 +2173,45 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(acqCalls).toContainEqual({ method: "DELETE", url: "http://agent-server:8000/sessions/sess-9" }); // close
   });
 
+  // A rendezvous that answers the way the store-backed one does: a delivery that lands before its waiter is queued
+  // and claimed once, a waiter that arrives first is woken by the delivery, and a wait that sees nothing within its
+  // timeout answers undefined.
+  function callbackRendezvous(baseUrl: string): CallbackRendezvous & CallbackSink {
+    const pending = new Map<string, unknown[]>();
+    const waiters = new Map<string, (body: unknown) => void>();
+    return {
+      url: (runId) => `${baseUrl}/${runId}`,
+      deliver(runId, body) {
+        const waiter = waiters.get(runId);
+        if (waiter) {
+          waiters.delete(runId);
+          waiter(body);
+          return;
+        }
+        pending.set(runId, [...(pending.get(runId) ?? []), body]);
+      },
+      wait(runId, timeoutMs) {
+        const queued = pending.get(runId) ?? [];
+        if (queued.length > 0) {
+          pending.set(runId, queued.slice(1));
+          return Promise.resolve({ body: queued[0] });
+        }
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            waiters.delete(runId);
+            resolve(undefined);
+          }, timeoutMs);
+          waiters.set(runId, (body) => {
+            clearTimeout(timer);
+            resolve({ body });
+          });
+        });
+      },
+    };
+  }
+
   it("completion=callback: injects callback_url into the body vocabulary and is done from the inbound result (C2)", async () => {
-    const rendezvous = new InProcessCallbackRendezvous("http://cb");
+    const rendezvous = callbackRendezvous("http://cb");
     let sent: Record<string, unknown> = {};
     const SPEC_CB: ServiceHarnessSpec = {
       ...SPEC,

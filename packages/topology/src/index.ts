@@ -1,5 +1,5 @@
 export type { TopologyRuntime, TopologyHandle, TargetEnvHandle } from "./deploy/topology-runtime.js";
-export { type RunKeys, keysFor, newRunId, wiringVars, EnvironmentManager } from "./environment-manager.js";
+export { type RunKeys, keysFor, newRunId, wiringVars } from "./environment-manager.js";
 export {
   type StoreDef,
   type StoreValues,
@@ -66,7 +66,6 @@ export {
   buildK8sManifests,
   buildDependencyManifests,
   buildBrowserManifests,
-  namespaceManifest,
   browserDeployName,
   type K8sManifest,
   type K8sTopologyOptions,
@@ -108,6 +107,7 @@ export {
   type OpenStreamFn,
   type FrontDoorRequestOpts,
   type CallbackRendezvous,
+  type CallbackSink,
   type HttpFrontDoorDriverIo,
   HttpFrontDoorDriver,
   fetchStream,
@@ -123,7 +123,6 @@ export {
   type FrontDoorSessionOptions,
   type FrontDoorTurnOutcome,
 } from "./front-door/front-door-session.js";
-export { InProcessCallbackRendezvous, type CallbackSink } from "./front-door/callback-rendezvous.js";
 export {
   type TargetAcquirer,
   type AcquireRequest,

@@ -41,9 +41,9 @@ export function IssueStatusControl({
   // `icon` is the list row's density — the icon alone, with the name in a tooltip. The SAME control used at two densities rather than a
   // row-specific copy: the status vocabulary, the reachable transitions and the resolution dialog on done must live in one place.
   variant?: 'default' | 'icon'
-  // The board columns of this issue's team. Present, the choice is by the names the TEAM attached (the same path as Linear); absent, it falls
+  // The workspace's board columns. Present, the choice is by the names the WORKSPACE attached (the same path as Linear); absent, it falls
   // back to the canonical vocabulary — either way what the server receives is the same transition. `position` is used to re-establish the
-  // board's order (orderWorkflowStates) — the order within a slot is the team's decision and must not be invented by the screen.
+  // board's order (orderWorkflowStates) — the order within a slot is the workspace's decision and must not be invented by the screen.
   states?: { id: string; name: string; status: IssueStatus; position: number }[]
 }) {
   const t = useTranslations('issuesPage')
@@ -121,9 +121,9 @@ export function IssueStatusControl({
         )}
       >
         <DropdownLabel>{t('statusMoveTo')}</DropdownLabel>
-        {/* With a team board, by ITS names — only columns mapped to a reachable canonical status are offered.
+        {/* With a board, by ITS names — only columns mapped to a reachable canonical status are offered.
             The order is re-established as the BOARD's (canonical status → the position within it): the server sorts by `position` alone and a new
-            column is appended at the board's end, so a team adding another column to "in review" would otherwise see it appear below "cancelled". */}
+            column is appended at the board's end, so another column added to "in review" would otherwise appear below "cancelled". */}
         {(states.length > 0
           ? orderWorkflowStates(states)
               .filter((state) => reachableFrom(status).includes(state.status))

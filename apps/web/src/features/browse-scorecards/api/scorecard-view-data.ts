@@ -44,14 +44,12 @@ export function scorecardQueryOf(view: ScorecardView): ScorecardListQuery {
   const harnesses = set('harness')
   const runtimes = set('runtime')
   const creators = set('creator')
-  const teams = set('team')
   return {
     ...(statuses !== undefined ? { statuses } : {}),
     ...(datasets !== undefined ? { datasets } : {}),
     ...(harnesses !== undefined ? { harnesses } : {}),
     ...(runtimes !== undefined ? { runtimes } : {}),
     ...(creators !== undefined ? { creators } : {}),
-    ...(teams !== undefined ? { teams } : {}),
     ...(view.search.trim() !== '' ? { q: view.search.trim() } : {}),
   }
 }

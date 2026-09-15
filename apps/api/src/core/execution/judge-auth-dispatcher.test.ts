@@ -46,7 +46,7 @@ const tiers =
     t;
 
 describe("JudgeAuthDispatcher (per-job judge credential resolution)", () => {
-  it("attaches the WORKSPACE tier key (and base url) — the team key wins over the submitter's personal one", async () => {
+  it("attaches the WORKSPACE tier key (and base url) — the workspace key wins over the submitter's personal one", async () => {
     const { inner, seen } = innerSpy();
     const d = new JudgeAuthDispatcher({
       inner,

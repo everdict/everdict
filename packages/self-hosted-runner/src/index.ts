@@ -1,7 +1,7 @@
 // Self-hosted runner core — the lease loop / resilient MCP session / job-kind-branched execution shared by CLI and desktop.
 // Design: docs/architecture/desktop-app.md (+ self-hosted-runner.md). GUI-agnostic, kept transport-injectable (DI).
 export { detectCapabilities, probeDocker } from "./capabilities.js";
-export { resetSharedTopologyRuntime, runLeasedJob, sharedTopologyRuntime } from "./run-leased-job.js";
+export { runLeasedJob, sharedTopologyRuntime } from "./run-leased-job.js";
 export {
   RunnerHost,
   type RunnerHostOpts,

@@ -104,9 +104,8 @@ function build(snapshot: CampaignSnapshot, withAuth = false) {
       : {}),
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
     campaignService,
-    // Opening a campaign resolves the issue's TEAM, so the tracker is a REQUIRED dependency of that route
-    // now (arch-review 79: an optional call there deleted the whole team check). These cases run with no
-    // teams configured, which is the unowned shape — the workspace's, writable by every member.
+    // Opening a campaign reads its issue, so the tracker is a REQUIRED dependency of that route (arch-review 79:
+    // an optional call there made the read evaporate).
     issueService: {
       async get(_t: string, ref: string) {
         return ref === "iss_1" ? { id: "iss_1" } : undefined;

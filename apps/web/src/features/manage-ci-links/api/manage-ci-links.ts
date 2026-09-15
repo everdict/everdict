@@ -46,7 +46,7 @@ export interface UpsertCiLinkInput {
   trigger?: 'auto' | 'comment' | 'both' // PR evaluation trigger mode — unset = both (automatic + /evaluate comment)
 }
 
-// Workspace shared runners (team-owned) list — CI dispatch is always self-hosted (default self:ws pool), so the connect dialog
+// Workspace shared runners (workspace-owned) list — CI dispatch is always self-hosted (default self:ws pool), so the connect dialog
 // shows runner readiness. Control-plane gate = settings:write — only call when canWrite (admin).
 export async function listSharedRunnersAction(): Promise<SharedRunnersResult> {
   const ctx = await authContext()

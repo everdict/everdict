@@ -29,7 +29,6 @@ export const COMMENT_RESOURCE_TYPES = [
   "project",
   "initiative",
 ] as const;
-export type CommentResourceType = (typeof COMMENT_RESOURCE_TYPES)[number];
 
 const MAX_BODY = 10_000; // cap the body (plenty for rich discussion, blocks DoS)
 

@@ -94,8 +94,7 @@ export function buildIntegrations(deps: {
   // Per-harness span-attribute mapping overlay — the mutable conversion layer between a harness and a judge, authored
   // in the judge wizard against a real trace. Each trace-collection seam reads the overlay inline from
   // `WorkspaceSettings.spanAttrMappingByHarness[harnessId]`: TraceSourceService.resolve (dispatch-after-judge collect)
-  // and `spanMappingFor` in composition/scorecard.ts (pull-eval ingest). `resolveHarnessTraceMapping` (overlay > spec)
-  // is exported but no production path calls it.
+  // and `spanMappingFor` in composition/scorecard.ts (pull-eval ingest).
   const spanAttrMappingService = new SpanAttrMappingService(settingsStore);
   // Discussion-agent bridge (@everdict in a comment thread) — the report-runner twin: POST the agent service's
   // internal trigger, which acks 202 and runs the turn DETACHED (progress comes back via /internal/comment-activity).

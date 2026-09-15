@@ -1,7 +1,7 @@
 import 'server-only'
 
-import { headers } from 'next/headers'
 import { cache } from 'react'
+import { headers } from 'next/headers'
 
 import { keycloakConfigured } from '@/shared/config/env'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
@@ -29,9 +29,6 @@ export interface WebPrincipal {
   subject: string
   workspace: string // current active workspace id
   roles: string[]
-  // The teams I belong to in this workspace. Together with the roles it is an authorization input the control plane fills on every request —
-  // a request using another team's asset is blocked by the control plane with a 403, and the web uses it only to hide that button ahead of time (can.ts).
-  teams?: string[]
   via: 'oidc' | 'api-key'
   email?: string // OIDC email/preferred_username claim (display-only·read-only)
   workspaces?: WebWorkspace[] // list of workspaces I belong to (when a membership store exists)

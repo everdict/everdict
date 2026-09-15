@@ -12,7 +12,6 @@ import {
   IssueTimelineLinkControl,
   type CapabilityOption,
 } from '@/features/issue-links'
-import { productsSchema, releaseSchema, type Product as TimelineProduct, type Release } from '@/entities/product'
 import {
   CreateIssueButton,
   IssueActions,
@@ -45,6 +44,12 @@ import {
 import { issueLabelsSchema, type IssueLabel } from '@/entities/issue-label'
 import { judgesSchema, type JudgeSummary } from '@/entities/judge'
 import { memberDirectoryOf, memberNameOf, membersSchema, type Member } from '@/entities/member'
+import {
+  productsSchema,
+  releaseSchema,
+  type Release,
+  type Product as TimelineProduct,
+} from '@/entities/product'
 import { isPastDue, projectsSchema, type Project } from '@/entities/project'
 import { TrackerHistory } from '@/entities/tracker-history'
 import { workflowStatesSchema, type WorkflowState } from '@/entities/workflow-state'
@@ -69,7 +74,7 @@ import { SectionHeader } from '@/shared/ui/section-header'
 export const dynamic = 'force-dynamic'
 
 // The window of sibling issues up/down navigation sweeps. It re-reads the list screen's default order (most recent
-// activity) scoped to the team, so it is "the next issue in the list you were looking at". An issue pushed out of the window leaves the arrows disabled — better than pulling the whole team.
+// activity), so it is "the next issue in the list you were looking at". An issue pushed out of the window leaves the arrows disabled — better than pulling the whole workspace.
 const SIBLING_WINDOW = 200
 
 // How many mentions one issue is worth hand-linking — in either direction. An issue with more than this did not get
@@ -129,7 +134,7 @@ function SiblingLink({
 // One issue — the unit of intent, with the evidence that verifies it gathered in one place: what it links,
 // how it was evaluated, what closed it, and (when it regressed) the baseline it fell from.
 //
-// The layout is Linear's issue view. ① The top breadcrumb (issue → team → identifier) answers "where does this issue
+// The layout is Linear's issue view. ① The top breadcrumb (issues → parent → identifier) answers "where does this issue
 // live", with the actions on this issue beside it (copy link, ⋯) and sibling up/down at the right end.
 // ② The title stands alone, large. ③ The body (description, evidence, discussion) is the left column and ④ every
 // attribute is one right column. Not mixing where you READ with where you CHANGE is the whole of this layout.
@@ -169,7 +174,7 @@ export default async function IssueDetailPage({
     )
   }
   const current = issue
-  // Normalize the address — a link that arrived as a uuid, or was pasted lower-cased, becomes the name the team stamped.
+  // Normalize the address — a link that arrived as a uuid, or was pasted lower-cased, becomes the identifier the issue carries.
   // A `?comment=` carried by a notification is passed straight through (skip the redirect and the mentioned comment is unreachable).
   if (ref !== current.identifier)
     redirect(

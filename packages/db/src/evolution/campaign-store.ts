@@ -166,8 +166,7 @@ export class InMemoryEvolutionCampaignStore implements EvolutionCampaignStore {
     return record && record.tenant === tenant ? record : undefined; // another workspace's row reads as nonexistent
   }
 
-  // The list is tenant-scoped and optionally narrowed to one subject — the Pg twin's predicates. (It was also
-  // team-filtered, arch-review 76; the team axis was dropped in migrations 0211/0212.)
+  // The list is tenant-scoped and optionally narrowed to one subject — the Pg twin's predicates.
   async list(tenant: string, subject?: CampaignSubjectRef): Promise<EvolutionCampaignRecord[]> {
     return [...this.byId.values()]
       .filter((r) => r.tenant === tenant)
@@ -528,8 +527,7 @@ export class PgEvolutionCampaignStore implements EvolutionCampaignStore {
   async list(tenant: string, subject?: CampaignSubjectRef): Promise<EvolutionCampaignRecord[]> {
     // Every narrowing is a predicate IN THE STATEMENT — today the tenant and the subject
     // (evolution-routing-spec.md §5); a page filtered after the read lets one filter's rows push another's off
-    // it. No subject = no subject predicate. (The team ceiling of arch-review 76 went with the team axis,
-    // migrations 0211/0212.)
+    // it. No subject = no subject predicate.
     const where = ["tenant=$1"];
     const params: unknown[] = [tenant];
     if (subject !== undefined) {

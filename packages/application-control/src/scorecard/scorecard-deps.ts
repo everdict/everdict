@@ -236,10 +236,8 @@ export interface ScorecardServiceDeps {
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
   scopedSecretsFor?: (tenant: string, subject?: string) => Promise<HarnessSecretMaps>;
-  // Resolve a token for seeding a private repo — case env.source.connectionId → external-account connection token. Same as a single run (RunService.repoTokenFor).
-  // The connection is personally owned, so resolve by owner (=submitter subject). Applied to every case in the dataset → private-repo dataset batch eval. The token is transient, only on the job (repoToken).
-  repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
-  // Workspace-owned GitHub App token (preferred) — if the case git URL owner matches the workspace installation, issue via that App (same as a single run).
+  // Workspace-owned GitHub App token — if the case git URL owner matches the workspace installation, issue via that App (same as a
+  // single run). Applied to every case in the dataset → private-repo dataset batch eval. The token is transient, only on the job (repoToken).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // Workspace image-registry pull credentials — if the job image belongs to that registry, attach via job.registryAuth (executeCase, same as a single run).
   registryAuthsFor?: (workspace: string, images: string[]) => Promise<RegistryAuth[]>;
@@ -379,7 +377,6 @@ export type ScorecardBatchDeps = Pick<
   | "buildTraceSource"
   | "registeredTraceSources"
   | "installationTokenFor"
-  | "repoTokenFor"
   | "registryAuthsFor"
 >;
 

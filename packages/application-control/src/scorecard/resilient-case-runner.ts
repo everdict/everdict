@@ -112,7 +112,6 @@ export class ResilientCaseRunner {
   run(
     job: CaseJob,
     cfg: {
-      owner: string; // executeCase requires it (private-repo token resolution); both drivers have a defined owner
       targets: string[];
       tenant: string;
       secretMap?: HarnessSecretMaps;
@@ -163,7 +162,7 @@ export class ResilientCaseRunner {
     const exec = (j: CaseJob): Promise<{ result: CaseResult; target?: string; job: CaseJob }> =>
       executeWithSpillover(
         (jj) =>
-          executeCase(this.deps, cfg.owner, jj, {
+          executeCase(this.deps, jj, {
             onWaiting: cfg.onWaiting,
             // The dispatched job rides into the hook — `jj` is THIS physical dispatch's job (a reattempt
             // rebuilt it), so the caller's executing-stamp names the attempt that actually started.

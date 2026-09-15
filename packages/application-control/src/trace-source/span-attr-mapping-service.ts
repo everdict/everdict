@@ -4,7 +4,8 @@ import type { WorkspaceSettingsStore } from "../ports/workspace-settings-store.j
 // Per-harness span-attribute mapping overlay (WorkspaceSettings.spanAttrMappingByHarness) — the mutable conversion
 // layer between a harness version and a judge version, authored in the judge wizard against a real trace. Same
 // name-keyed / whole-map-replace semantics as traceSourceByHarness (jsonb-merge replaces the top-level key). The HTTP
-// route and MCP tool share this core. Resolution (overlay > spec) at run time lives in resolveHarnessTraceMapping.
+// route and MCP tool share this core. Each trace-collection seam reads the overlay itself: TraceSourceService.resolve
+// (dispatch-after-judge collect) and the scorecard composition's `spanMappingFor` (pull-eval ingest).
 export class SpanAttrMappingService {
   constructor(private readonly settings: WorkspaceSettingsStore) {}
 

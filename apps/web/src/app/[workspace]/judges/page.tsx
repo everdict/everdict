@@ -2,7 +2,7 @@ import { JudgeListView } from '@/widgets/judge-list'
 
 export const dynamic = 'force-dynamic'
 
-// The workspace's Agent Judge list — the same as harnesses. `?team=` is read as a filter on this list.
+// The workspace's Agent Judge list — the only address, the same as harnesses.
 export default async function JudgesPage({
   params,
   searchParams,

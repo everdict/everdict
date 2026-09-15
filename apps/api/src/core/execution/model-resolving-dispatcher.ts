@@ -178,12 +178,6 @@ async function resolveJob(
   };
 }
 
-// Resolve a job's harness Model binding(s) → the rewritten job (the provenance/connection normalization). The billing
-// signal is available via resolveJob; this thin wrapper preserves the pure job-rewrite surface its callers/tests use.
-export async function resolveJobModel(models: ModelRegistry, job: CaseJob, secretsFor?: SecretsFor): Promise<CaseJob> {
-  return (await resolveJob(models, job, secretsFor)).job;
-}
-
 // A Dispatcher decorator that resolves the harness model at a single point right before dispatch. Kept separate from
 // RuntimeDispatcher, which is a placement concern — since the run/scorecard/harness-judge paths all share the same
 // dispatcher, wrapping in one place means every dispatch runs with the same resolved model + injected connection env,

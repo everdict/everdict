@@ -2,7 +2,7 @@
 kind: wiki
 title: "Execution backends (Backend vs Driver)"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/backends/src/scheduling/scheduler.ts, packages/backends/src/placement/config.ts, packages/application-control/src/ops/scheduling-config.ts, apps/api/src/composition/trust-zones.ts, packages/application-control/src/require-runtime/require-runtime.ts]
 ---
 # Execution backends (Backend vs Driver)
@@ -109,8 +109,8 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   derives capacity from the topology's session pool, clamped by `maxConcurrent`. A probe that cannot count
   reports `used: "unknown"`, which the scheduler spends as no room.
 - **placement** — for each queued job the scheduler computes `free = total − max(used, in-flight)`
-  per eligible backend and picks one via a `PlacementPolicy`: `leastLoadedPolicy` (spread, default) or
-  `binPackPolicy` (consolidate → enables scale-to-zero). `placement.target` is honored as a hard pin.
+  per eligible backend and picks one via a `PlacementPolicy` — `leastLoadedPolicy` (spread) is the default
+  and the only one shipped. `placement.target` is honored as a hard pin.
 - **fair queue (multi-tenant)** — pending jobs are ordered by a **weighted fair queue** (`FairQueue`,
   `@everdict/domain`) keyed by `CaseJob.tenant`, so one tenant's large batch can't starve another: each job gets a
   virtual-finish time `max(globalClock, tenantLastFinish) + 1/weight`, and the scheduler serves lowest
@@ -246,7 +246,7 @@ Two more multi-tenant guarantees, both keyed by `CaseJob.tenant`:
   persistent budget (per-tenant limits from the DB, `EVERDICT_TENANT_RUNS` / `EVERDICT_TENANT_USD` as the env
   fallback) and settles each execution's cost.
 
-Live proof: `scripts/live/budget-nomad.mjs` — tenant `free` capped at `runs=3`; submitting 5 at once runs exactly
+Live proof: [`budget-nomad.mjs`](https://github.com/everdict/everdict/blob/32879892f/scripts/live/budget-nomad.mjs) — tenant `free` capped at `runs=3`; submitting 5 at once runs exactly
 3 and rejects 2 with `402 BUDGET_EXCEEDED`, while `acme`/`globex` jobs each carry only their own injected key.
 
 ## Nomad from the CLI

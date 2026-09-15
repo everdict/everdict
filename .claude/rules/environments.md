@@ -18,8 +18,8 @@ takes the observation the graders and judges read. Implementations: `RepoEnviron
   and not the working tree. That is what makes it transportable: `runVerifierJob` applies it with `git apply`
   to rebuild the agent's work somewhere else.
 - **Credentials are transient and never stored on the case.** A private clone's token arrives as
-  `CaseJob.repoToken`, resolved by the control plane from `env.source.connectionId` at dispatch; the case
-  document carries the connection id, never the secret.
+  `CaseJob.repoToken`, resolved by the control plane at dispatch from the workspace's GitHub App installation
+  for the repository's owner; the case document never carries the secret.
 - A new environment kind adds its snapshot variant to `EnvSnapshotSchema` (`@everdict/contracts`) and states
   what a grader may read from it. A kind with no file tree (prompt, browser, os-use) cannot be judged by a
   verifier job — `withVerifierPass` records that as `unmeasured` rather than judging an empty container.

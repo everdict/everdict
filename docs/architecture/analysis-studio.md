@@ -16,7 +16,7 @@ result reaches the team without anyone asking. The feature composes
 [agent-teams.md](./agent-teams.md) (request-less agent turns).
 
 Code comments cite this page by slice label: **V1** server-side query · **V2** artifacts · **V3** the studio
-surface (section C) · **V4** scheduled reports · **V5** `run_analysis`.
+surface (section C) · **V4** scheduled reports.
 
 ## Principles
 
@@ -27,14 +27,13 @@ surface (section C) · **V4** scheduled reports · **V5** `run_analysis`.
    free-form `html` kind runs only in an opaque-origin sandboxed iframe (`sandbox="allow-scripts"`, no
    `allow-same-origin`) under a shell-injected CSP (`default-src 'none'`; inline style/script; `data:`/`blob:`
    images) — no parent DOM, no cookies, no network.
-3. **Model-authored code runs only on an isolated runtime**, and every call passes the permission gate (V5).
-4. **No new authz surface.** Views gate on `scorecards:read`/`scorecards:run`, schedules on
+3. **No new authz surface.** Views gate on `scorecards:read`/`scorecards:run`, schedules on
    `schedules:read`/`schedules:write`; artifacts inherit the View's `private|workspace` visibility, and a private
    View's artifacts 404 to non-owners (no existence leak).
-5. **Reports are schedules.** A third `ScheduleRunTemplate` mode reuses the one scheduling engine — cron,
+4. **Reports are schedules.** A third `ScheduleRunTemplate` mode reuses the one scheduling engine — cron,
    timezone, overlap, enable, fire-now, history, `origin.scheduleId` provenance — instead of a parallel
    scheduler.
-6. **Unattended turns are bounded**: a read-scoped one-shot token, a turn cap, and no canvas tool.
+5. **Unattended turns are bounded**: a read-scoped one-shot token, a turn cap, and no canvas tool.
 
 ## A. Server-side analysis query (V1)
 
@@ -113,16 +112,7 @@ bounced as design. The frame measures its content and reports the height up.
 
 Agent sessions carry no `viewId`; mentioning a View (`@view`) is how a conversation is given its context.
 
-## D. Sandboxed analysis scripts (V5)
-
-`run_analysis {language: python|node, code, input?}` (`apps/agent/src/analysis-script-tool.ts`) runs the model's
-script through the code-tool contract (`buildCodeTool`: provision → input file → interpreter → stdout) with an
-empty `env` and a 60-second timeout. `isReadOnly: false` puts every call behind the permission gate, and the
-builder returns no tool at all on a non-isolated runtime. It is wired through `ChatDeps.analysisScriptRuntime`
-only when the operator sets `AGENT_ALLOW_RUN_ANALYSIS=true` — but the agent service's own code runtime is a
-non-isolated `LocalDriver` (`apps/agent/src/main.ts`), so as shipped the flag registers nothing.
-
-## E. Scheduled reports (V4)
+## D. Scheduled reports (V4)
 
 - **Template** — `packages/contracts/src/records/schedule.ts`: `runTemplate.report = {view, instructions?,
   compare?: "previous-period"}`, exactly one of batch / pull / report. MCP `create_schedule` takes `report_view`.

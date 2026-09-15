@@ -16,7 +16,7 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 
 import { updateIssueAction } from '../api/issues'
 
-// The same house grammar as status and team (an icon plus a dropdown). Priority is a CONTENT EDIT rather than a workflow transition, so it goes
+// The same house grammar as status (an icon plus a dropdown). Priority is a CONTENT EDIT rather than a workflow transition, so it goes
 // through `updateIssueAction` — leaving one `updated{changed:[priority]}` line in the history.
 export function IssuePriorityControl({
   id,

@@ -83,9 +83,9 @@ the canonical spelling — the same normalization the issue detail does for a lo
 **Every collection has ONE workspace address.** Some were scoped under a team for a while — the team axis is
 gone (migrations `0211`/`0212`), so there is no second boundary for a path to name and no ownership facet on a
 list. The evaluation collections sit in the sidebar's Evaluation group (`평가` in ko) beside the agent group; the tracker's live at
-`/{workspace}/{issues,projects,initiatives}`. Every old team spelling 307s to the workspace list in
-`next.config.ts`. Status, priority, project and the page cursor stay query parameters, because those really are
-filters over the one list the path names.
+`/{workspace}/{issues,projects,initiatives}`. Old team spellings do not resolve — nothing redirects them
+(the maintainer's call, `docs/migration/preflight/0212-drop-team-axis.md`). Status, priority, project and the
+page cursor stay query parameters, because those really are filters over the one list the path names.
 
 **Gating is the ROLE, and only the role.** `can(principal?.roles, action)` (`shared/auth/can.ts`) mirrors the
 domain's matrix — the workspace is the only boundary, so everything it holds is readable by everyone in it and
@@ -125,13 +125,13 @@ in default grey, and `border-transparent` (an inline editor meant to look like t
 - **Image refs** render through `shared/lib/image-ref.ts` (`displayImageRef`, with the raw ref on `title`), never
   raw: a digest is 71 characters, so a truncated line shows the digest head and eats the TAG — the only thing that
   says which version is running. Same file owns `imageRepositoryOf` (tag/digest-blind repository matching).
-- **A dashboard reads ONE aggregate, and the aggregate is the server's.** The home screen
-  (`widgets/workspace-pulse`, `GET /workspace/pulse`) does not fan out over the list endpoints of every domain
-  it summarizes: the arithmetic behind each number — what counts as an OPEN issue, what an active goal
+- **A dashboard reads ONE aggregate, and the aggregate is the server's.** A summary screen does not fan out
+  over the list endpoints of every domain it summarizes (the workspace pulse, `GET /workspace/pulse`, is the
+  reference aggregate — agents read it; the web no longer draws it): the arithmetic behind each number — what counts as an OPEN issue, what an active goal
   committed to, which metric is the headline pass rate, when a goal is at risk — is a domain decision with one
   right answer, and a screen re-deriving it is a second answer waiting to drift. A trend over time comes from
   the platform-event log's day aggregate, never from paging records to tally them. The page's own job is the
-  split: the counts and the feed are separate `Suspense` boundaries, so the slower one never holds the other.
+  split: independent reads are separate `Suspense` boundaries, so the slower one never holds the other.
   Two meanings that must survive into the render: a day with no rows is a ZERO, a measurement nobody took is
   ABSENT (`passRate` optional → `null` into `LineChart`, which breaks the line rather than drawing a cliff).
   See `docs/architecture/workspace-pulse.md`.

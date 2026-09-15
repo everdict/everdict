@@ -43,10 +43,6 @@ export function mcpToolToDefinition(
   };
 }
 
-export function bridgeMcpTools(specs: McpToolSpec[], invoke: McpInvoke): ToolDefinition[] {
-  return specs.map((s) => mcpToolToDefinition(s, invoke));
-}
-
 // WHICH OBJECT each evidence-reader tool addresses, DECLARED (arch-review 11 P0). An object-scoped envelope —
 // today only a verifier's — refuses any tool that has not stated this, so the table is what makes such an
 // envelope usable at all rather than a task that can call nothing.

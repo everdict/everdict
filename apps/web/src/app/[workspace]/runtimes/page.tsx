@@ -1,4 +1,3 @@
-import { WorkspaceRunnersSection } from './workspace-runners'
 import { Server } from 'lucide-react'
 import { getTranslations } from 'next-intl/server'
 
@@ -16,10 +15,11 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Link } from '@/shared/ui/link'
 import { PageHeader } from '@/shared/ui/page-header'
 
+import { WorkspaceRunnersSection } from './workspace-runners'
 
 export const dynamic = 'force-dynamic'
 
-// Section title + one-line description — distinguishes the execution-target axes (registered infra / my machine / team runners).
+// Section title + one-line description — distinguishes the execution-target axes (registered infra / my machine / workspace runners).
 function Section({
   title,
   description,
@@ -43,7 +43,7 @@ function Section({
 // Runtimes — the single surface for "where evaluations run", consolidating all three execution targets:
 // ① Registered infra (push: docker/nomad/k8s/topology the control plane connects to — workspace-owned)
 // ② My machine (pull: personal self-hosted runner — a personally-owned device pulls jobs via lease)
-// ③ Team runners (pull: workspace-owned self-hosted runners — shared build servers / CI, admin-managed).
+// ③ Workspace runners (pull: workspace-owned self-hosted runners — shared build servers / CI, admin-managed).
 // Consolidating ③ here (it used to live in Settings › Runners) makes "a runner" read as one flavor of runtime.
 export default async function RuntimesPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
@@ -65,7 +65,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
     // Control-plane runner service unconfigured/failed — fall back to an empty list.
   }
 
-  // Team shared runners — workspace-owned (build servers / CI). Admin-managed, so fetched only for admins (the
+  // Workspace-shared runners — workspace-owned (build servers / CI). Admin-managed, so fetched only for admins (the
   // owned-roster read + GitHub-App snapshot are settings:write-gated); members target the pool via the run form.
   const canManageWorkspaceRunners = can(principal?.roles, 'settings:write')
   let workspaceRunners: RunnerMeta[] = []

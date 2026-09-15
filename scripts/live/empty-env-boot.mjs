@@ -57,12 +57,9 @@ async function main() {
   // 3) Every route is feature-gated on its service being present on ServerDeps ("… not configured" → 404). A service
   //    the composition root BUILDS but forgets to hand to buildServer is therefore invisible everywhere EXCEPT here:
   //    it typechecks, and the route tests inject their own deps, so only a booted process can tell. Reaching each
-  //    surface once is what makes that miss a CI failure instead of a bug report. `/teams/…/states` names a team that
-  //    does not exist on purpose — an unwired service answers "not configured" before it ever looks the team up.
+  //    surface once is what makes that miss a CI failure instead of a bug report.
   const WIRED = [
-    "/cycles",
-    "/teams",
-    "/teams/__no_such_team__/states",
+    "/workflow-states",
     "/issues",
     "/projects",
     "/initiatives",

@@ -4,18 +4,8 @@ import type { Harness } from './schema'
 
 // What the harness list knows about itself — which axes it filters on, how it groups, and what it sorts by. The vocabulary lives here because
 // the list screen and the address parsing have to use the SAME words (an unknown axis is dropped from the address).
-//
-// Team being one of the axes is this list's central change. Team was a PATH for a while (`…/team/ENG/harnesses`), but people do not look for
-// "our team's harnesses" on a team screen — they narrow to them from the harness list.
 export const HARNESS_FACETS = ['category', 'kind', 'creator', 'tag'] as const
-export const HARNESS_GROUPINGS = [
-  'none',
-  'template',
-  'category',
-  'kind',
-  'team',
-  'creator',
-] as const
+export const HARNESS_GROUPINGS = ['none', 'template', 'category', 'kind', 'creator'] as const
 export const HARNESS_ORDERS = ['name', 'updated', 'created', 'versions'] as const
 
 // The default is grouping by shape (template) — a variation differing in one env value or one model is not an unrelated harness but a SIBLING

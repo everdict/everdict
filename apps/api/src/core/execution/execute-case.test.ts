@@ -46,49 +46,27 @@ const capture = (): { dispatcher: Dispatcher; seen: () => CaseJob | undefined } 
 };
 
 describe("executeCase — pure execution (token resolve+attach → dispatch)", () => {
-  it("for a private-repo (git+connectionId) case, resolves the owner's token, attaches it to the job, then dispatches", async () => {
-    const cap = capture();
-    const gitJob: CaseJob = {
-      ...JOB,
-      evalCase: {
-        ...JOB.evalCase,
-        env: { kind: "repo", source: { git: "https://x/r.git", ref: "main", connectionId: "conn1" } },
-      },
-    };
-    await executeCase(
-      deps({
-        dispatcher: cap.dispatcher,
-        repoTokenFor: async (owner, cid) => (owner === "alice" && cid === "conn1" ? "tok" : undefined),
-      }),
-      "alice",
-      gitJob,
-    );
-    expect(cap.seen()?.repoToken).toBe("tok");
-  });
-
-  it("tries the workspace GitHub App token before the personal connection and attaches it to the job", async () => {
+  it("for a private-repo git case, resolves the workspace GitHub App token, attaches it to the job, then dispatches", async () => {
     const cap = capture();
     const gitJob: CaseJob = {
       ...JOB,
       tenant: "acme",
       evalCase: {
         ...JOB.evalCase,
-        env: { kind: "repo", source: { git: "https://github.com/acme/api", ref: "main", connectionId: "conn1" } },
+        env: { kind: "repo", source: { git: "https://github.com/acme/api", ref: "main" } },
       },
     };
     await executeCase(
       deps({
         dispatcher: cap.dispatcher,
         installationTokenFor: async (ws, git) => (ws === "acme" && git.includes("acme/api") ? "app-tok" : undefined),
-        repoTokenFor: async () => "personal-tok",
       }),
-      "alice",
       gitJob,
     );
-    expect(cap.seen()?.repoToken).toBe("app-tok"); // App first
+    expect(cap.seen()?.repoToken).toBe("app-tok");
   });
 
-  it("falls back to the personal connection (connectionId) when there's no workspace App match", async () => {
+  it("a git case no workspace installation covers attaches no token, even when it names a connectionId", async () => {
     const cap = capture();
     const gitJob: CaseJob = {
       ...JOB,
@@ -98,27 +76,19 @@ describe("executeCase — pure execution (token resolve+attach → dispatch)", (
         env: { kind: "repo", source: { git: "https://x/r.git", ref: "main", connectionId: "conn1" } },
       },
     };
-    await executeCase(
-      deps({
-        dispatcher: cap.dispatcher,
-        installationTokenFor: async () => undefined,
-        repoTokenFor: async (owner, cid) => (owner === "alice" && cid === "conn1" ? "personal-tok" : undefined),
-      }),
-      "alice",
-      gitJob,
-    );
-    expect(cap.seen()?.repoToken).toBe("personal-tok");
+    await executeCase(deps({ dispatcher: cap.dispatcher, installationTokenFor: async () => undefined }), gitJob);
+    expect(cap.seen()?.repoToken).toBeUndefined();
   });
 
-  it("public/non-repo cases attach no token (even when repoTokenFor exists)", async () => {
+  it("public/non-repo cases attach no token (even when installationTokenFor exists)", async () => {
     const cap = capture();
-    await executeCase(deps({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }), "alice", JOB);
+    await executeCase(deps({ dispatcher: cap.dispatcher, installationTokenFor: async () => "tok" }), JOB);
     expect(cap.seen()?.repoToken).toBeUndefined();
   });
 
   it("returns the result as-is — no settlement/notification/offload (that's the orchestrator's job)", async () => {
     const cap = capture();
-    const result = await executeCase(deps({ dispatcher: cap.dispatcher }), "u", JOB);
+    const result = await executeCase(deps({ dispatcher: cap.dispatcher }), JOB);
     expect(result.caseId).toBe("c1");
     expect(cap.seen()?.evalCase.id).toBe("c1");
   });
@@ -132,7 +102,6 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
     const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
     await executeCase(
       deps({ dispatcher: cap.dispatcher, registryAuthsFor: async (ws) => (ws === "acme" ? [AUTH] : []) }),
-      "u",
       job,
     );
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
@@ -141,7 +110,7 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
   it("when the job image isn't on that registry's host, no credentials are attached (avoids needless leakage)", async () => {
     const cap = capture();
     const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
-    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), job);
     expect(cap.seen()?.registryAuth).toBeUndefined();
   });
 
@@ -163,7 +132,7 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
       traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
     };
     const job: CaseJob = { ...JOB, harnessSpec: serviceSpec };
-    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH, QUAY] }), "u", job);
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH, QUAY] }), job);
     expect(cap.seen()?.registryAuths).toEqual([AUTH, QUAY]);
   });
 
@@ -193,7 +162,6 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
           return [AUTH];
         },
       }),
-      "u",
       job,
     );
     // Pins win over the spec image — the pin is what the runtime will actually pull.
@@ -204,7 +172,7 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
   it("dual-writes the deprecated singular field so an older self-hosted runner still authenticates", async () => {
     const cap = capture();
     const job: CaseJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
-    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), job);
     expect(cap.seen()?.registryAuths).toEqual([AUTH]);
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
@@ -224,7 +192,7 @@ describe("executeCase — attach image pull credentials (job.registryAuths)", ()
     };
     // the spec image is external, but the pin overrides to a workspace registry → attach.
     const job: CaseJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
-    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), "u", job);
+    await executeCase(deps({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }), job);
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 });
@@ -244,7 +212,7 @@ describe("executeCase — command-harness image promotion (evalCase.image ??= ha
 
   it("when a case specifies no image, promotes the command harness's image (the CI re-pin target) as the execution container", async () => {
     const cap = capture();
-    await executeCase(deps({ dispatcher: cap.dispatcher }), "u", { ...JOB, harnessSpec: commandSpec("codex:v2") });
+    await executeCase(deps({ dispatcher: cap.dispatcher }), { ...JOB, harnessSpec: commandSpec("codex:v2") });
     expect(cap.seen()?.evalCase.image).toBe("codex:v2");
   });
 
@@ -255,13 +223,13 @@ describe("executeCase — command-harness image promotion (evalCase.image ??= ha
       evalCase: { ...JOB.evalCase, image: "case:v9" },
       harnessSpec: commandSpec("codex:v2"),
     };
-    await executeCase(deps({ dispatcher: cap.dispatcher }), "u", jobWithImage);
+    await executeCase(deps({ dispatcher: cap.dispatcher }), jobWithImage);
     expect(cap.seen()?.evalCase.image).toBe("case:v9");
   });
 
   it("for a harness with no image, the case image stays as-is with no promotion (host-native preserved)", async () => {
     const cap = capture();
-    await executeCase(deps({ dispatcher: cap.dispatcher }), "u", { ...JOB, harnessSpec: commandSpec() });
+    await executeCase(deps({ dispatcher: cap.dispatcher }), { ...JOB, harnessSpec: commandSpec() });
     expect(cap.seen()?.evalCase.image).toBeUndefined();
   });
 });
@@ -304,7 +272,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           },
         }),
       }),
-      "u",
       jobWithGraders,
     );
     expect(fetchedBy).toBe("otel:http://collector:rid-9"); // pull by traceRef coordinates + correlation key
@@ -326,7 +293,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           },
         }),
       }),
-      "u",
       jobWithGraders,
     );
     expect(result.trace.some((e) => e.kind === "error" && e.message.includes("collector down"))).toBe(true);
@@ -362,7 +328,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           },
         }),
       }),
-      "u",
       jobWithGraders,
     );
     expect(result.failure).toBeUndefined(); // recovered — the classification is shed
@@ -390,7 +355,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           },
         }),
       }),
-      "u",
       jobWithGraders,
     );
     expect(result.failure).toMatchObject({ stage: "collect", code: "TRACE_COLLECT_FAILED" });
@@ -430,7 +394,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           };
         },
       }),
-      "u",
       jobWithGraders,
     );
     expect(seenCfg?.headers?.authorization).toBe("Basic abc"); // name → value re-resolution (verbatim Authorization)
@@ -453,7 +416,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           },
         }),
       }),
-      "u",
       jobWithGraders,
     );
     expect(fetches).toBe(3);
@@ -474,7 +436,6 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
           },
         }),
       }),
-      "u",
       jobWithGraders,
     );
     expect(missing.trace.some((e) => e.kind === "error" && e.message.includes("NOPE"))).toBe(true);
@@ -483,9 +444,9 @@ describe("executeCase — out-of-job trace collection (traceRef completion)", ()
   });
 
   it("a result with no traceRef (default job collection) passes through unchanged (no regression) + an unset buildTraceSource is surfaced", async () => {
-    const plain = await executeCase(deps({ dispatcher: dispatcherOf(resultFor) }), "u", jobWithGraders);
+    const plain = await executeCase(deps({ dispatcher: dispatcherOf(resultFor) }), jobWithGraders);
     expect(plain.trace).toEqual([]); // untouched
-    const noSource = await executeCase(deps({ dispatcher: dispatcherOf(deferredResult) }), "u", JOB);
+    const noSource = await executeCase(deps({ dispatcher: dispatcherOf(deferredResult) }), JOB);
     expect(noSource.trace.some((e) => e.kind === "error" && e.message.includes("buildTraceSource"))).toBe(true);
   });
 });

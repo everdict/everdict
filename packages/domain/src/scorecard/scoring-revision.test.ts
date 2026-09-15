@@ -1,13 +1,14 @@
 import type { CaseCommitReceipt, CaseResult, JudgmentReceipt, Score, TraceEvent } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { caseObservationDigest } from "./case-result-digest.js";
+import { childKey } from "./scoring-plan.js";
 import {
   appendScoringRevision,
   currentScoringPin,
   decisionInputTrustOf,
   inputObservationOf,
-  inputObservationSetDigest,
   judgmentReceiptSetDigest,
+  observationSetDigest,
   scorePlaneDigest,
   scoringPinInputDiverged,
 } from "./scoring-revision.js";
@@ -207,7 +208,19 @@ describe("appendScoringRevision / currentScoringPin — the append-only ledger",
 // The revision pinned its own output and nothing about its input, so verdicts could be certified over an
 // execution the receipt ledger had since replaced with every digest in the record agreeing with itself.
 
-describe("inputObservationSetDigest — the execution set a pass judged", () => {
+// The plane's own observation set, digested the way `inputObservationOf` states it: childKey → the EXECUTION's
+// digest (scores and judge:* evidence spans excluded), so a legitimate re-judgment digests identically.
+function expectedSetDigest(results: readonly CaseResult[]): string {
+  return observationSetDigest(results.map((r) => [childKey(r.caseId, r.trial), caseObservationDigest(r)] as const));
+}
+
+// What production records as the set digest — read off the revision's input observation, with the ledger
+// unavailable so only the plane's own half is computed.
+function recordedSetDigest(results: readonly CaseResult[]): string | undefined {
+  return inputObservationOf(results, { kind: "unavailable", reason: "not read in this test" }).setDigest;
+}
+
+describe("the input observation set digest — the execution set a pass judged", () => {
   const step: TraceEvent = { kind: "message", t: 0, role: "assistant", text: "step one" };
 
   it("is invariant under a re-score — the same executions, judged again, are the same input", () => {
@@ -218,7 +231,8 @@ describe("inputObservationSetDigest — the execution set a pass judged", () => 
         { graderId: "j", metric: "judge:j", status: "unmeasured", reason: "grader_error", retryable: false },
       ]),
     ];
-    expect(inputObservationSetDigest(reScored)).toBe(inputObservationSetDigest(executed));
+    expect(recordedSetDigest(executed)).toMatch(/\S/); // a digest, not an absent one on both sides
+    expect(recordedSetDigest(reScored)).toBe(recordedSetDigest(executed));
     // …and it is emphatically NOT the plane digest: the judgments did move
     expect(scorePlaneDigest(reScored)).not.toBe(scorePlaneDigest(executed));
   });
@@ -228,16 +242,17 @@ describe("inputObservationSetDigest — the execution set a pass judged", () => 
     const after = [
       result("c1", [verdict(1, true)], undefined, [{ kind: "message", t: 0, role: "assistant", text: "step two" }]),
     ];
-    expect(inputObservationSetDigest(after)).not.toBe(inputObservationSetDigest(before));
+    expect(recordedSetDigest(after)).not.toBe(recordedSetDigest(before));
   });
 
   it("is stable under storage order and keeps trials apart", () => {
     const a = [result("c1", [], 0, [step]), result("c1", [], 1)];
     const b = [result("c1", [], 1), result("c1", [], 0, [step])];
-    expect(inputObservationSetDigest(a)).toBe(inputObservationSetDigest(b));
+    expect(recordedSetDigest(a)).toMatch(/\S/);
+    expect(recordedSetDigest(a)).toBe(recordedSetDigest(b));
     // c1#0 and c1#1 are different rows: swapping which trial saw which trace is a different set
     const swapped = [result("c1", [], 0), result("c1", [], 1, [step])];
-    expect(inputObservationSetDigest(swapped)).not.toBe(inputObservationSetDigest(a));
+    expect(recordedSetDigest(swapped)).not.toBe(recordedSetDigest(a));
   });
 });
 
@@ -264,7 +279,7 @@ describe("inputObservationOf — the judgment's input, checked against the ledge
     expect(observed.completed).toBe(true);
     expect(observed.diverged).toBe(0);
     expect(observed.cases).toBe(2);
-    expect(observed.setDigest).toBe(inputObservationSetDigest(judged));
+    expect(observed.setDigest).toBe(expectedSetDigest(judged));
     expect(observed.receiptSetDigest).toBe(observed.setDigest);
     expect(observed.divergedCases).toBeUndefined();
   });
@@ -286,7 +301,7 @@ describe("inputObservationOf — the judgment's input, checked against the ledge
     expect(observed.failure).toContain("no receipt carrying an execution digest");
     expect(observed.diverged).toBeUndefined();
     // The plane's own digest still stands — only the comparison is missing
-    expect(observed.setDigest).toBe(inputObservationSetDigest(judged));
+    expect(observed.setDigest).toBe(expectedSetDigest(judged));
   });
 
   it("refuses a PARTIAL rebuild — one judged case with no receipt voids the comparison, not just its row", () => {

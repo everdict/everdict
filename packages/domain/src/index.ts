@@ -30,7 +30,6 @@ export {
   scorecardOutcomes,
 } from "./scorecard/case-outcome.js";
 export {
-  attemptCounts,
   attemptsForCase,
   keysRequiringReason,
   nextExecutionRevision,
@@ -106,7 +105,6 @@ export {
   appendScoringRevision,
   currentScoringPin,
   inputObservationOf,
-  inputObservationSetDigest,
   judgmentReceiptSetDigest,
   initialScoringPassId,
   judgmentReceiptsFromPlane,
@@ -191,7 +189,6 @@ export {
   type AnalysisViz,
   analysisConfigFromStored,
   analysisDimensionValue,
-  analysisMetricNames,
   computeAnalysis,
 } from "./scorecard/analysis.js";
 
@@ -247,12 +244,10 @@ export {
   type IssueTransition,
   type NewIssueInput,
   type NewIssueLinkInput,
-  issueStatusCategory,
 } from "./tracker/issue.js";
 export {
   IssueLabel,
   type IssueLabelEditInput,
-  issueLabelNameKey,
   type IssueLabelTransition,
   type NewIssueLabelInput,
   normalizeIssueLabelName,
@@ -305,7 +300,6 @@ export {
   type DetectedVersionStream,
   detectVersionStreams,
   PACKAGE_MANIFESTS,
-  type PackageManifest,
   proposeServices,
   type ProposeServicesInput,
   versionTagPrefix,
@@ -353,7 +347,6 @@ export {
   MAX_VERIFIER_FOCUS,
   judgedPlane,
   observedEvidenceIdentity,
-  observedScorecardIdentity,
   PINNABLE_EVIDENCE_KINDS,
   type VerificationClaim,
   verificationClaimDigest,
@@ -407,7 +400,6 @@ export {
 // harness — what makes ONE instance different from its template (the display answer to "which one is this?")
 export {
   summarizeInstanceVariation,
-  VARIATION_CHIP_DISPLAY_LIMIT,
   type VariationChip,
 } from "./harness/instance-variation.js";
 
@@ -427,7 +419,6 @@ export {
   activityTrend,
   calendarSpan,
   flowTrend,
-  meanPassRate,
   qualityTrend,
   type WeightedRate,
   weightedMeanPassRate,
@@ -588,7 +579,6 @@ export {
   type CapabilityAccess,
   type CapabilityConsumer,
   canConsumeCapability,
-  filterConsumableCapabilities,
 } from "./capability/capability-visibility.js";
 // delegation — the handoff brief rendered as the markdown the delegate reads (one renderer: the seeded file,
 // the trajectory marker and any later surface must not disagree about what was asked).
@@ -677,8 +667,6 @@ export {
 export {
   inMemoryUsageMeter,
   type TenantUsage,
-  totalUsage,
-  USAGE_SOURCES,
   usageDay,
   type UsageDayItem,
   type UsageItem,
@@ -693,21 +681,15 @@ export { type HarvestResult, HarvestBuilder } from "./knowledge/harvest.js";
 export { harvestScorecard, SCORECARD_HARVESTER } from "./knowledge/harvest-scorecard.js";
 export { PREDICATE_PRIORITY, predicateRank } from "./knowledge/ranking.js";
 export {
-  COMMENT_HARVESTER,
-  harvestComment,
-  harvestMembership,
   harvestRun,
   harvestSchedule,
-  MEMBERSHIP_HARVESTER,
   RUN_HARVESTER,
   SCHEDULE_HARVESTER,
 } from "./knowledge/harvest-records.js";
 export {
   AGENT_HARVESTER,
-  CAPABILITY_HARVESTER,
   DATASET_HARVESTER,
   harvestAgent,
-  harvestCapability,
   harvestDataset,
   harvestHarness,
   harvestJudge,
@@ -752,7 +734,7 @@ export {
 export { mergeThreeWay } from "./workspace-file/merge.js";
 // …and the line diff between two revisions of one file, over the SAME line matching the merge uses.
 export { diffFileText } from "./workspace-file/diff.js";
-export { type FileRunPlan, fileRunPlanFor, isRunnableFilePath } from "./workspace-file/run-plan.js";
+export { type FileRunPlan, fileRunPlanFor } from "./workspace-file/run-plan.js";
 
 // subscription — the one event-selection predicate shared by agent triggers and E3 subscriptions (kinds
 // allowlist + declarative payload filters): every reaction executor matches events through this law.
@@ -768,6 +750,6 @@ export {
   verifierReceiptOf,
 } from "./execution/verifier-receipt.js";
 
-export { addCalendarDays, daysBetween, weekdayOf } from "./tracker/calendar.js";
+export { addCalendarDays, daysBetween } from "./tracker/calendar.js";
 
 export { nonInferiorityOf } from "./evolution/non-inferiority.js";

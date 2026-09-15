@@ -13,25 +13,25 @@ import {
 
 interface Row {
   id: string
-  team: string | undefined
+  owner: string | undefined
   tags: string[]
   updatedAt: string
 }
 
 const spec: ListViewSpec<Row> = {
   facetValues: (row, facet) =>
-    facet === 'team' ? (row.team === undefined ? [] : [row.team]) : row.tags,
+    facet === 'owner' ? (row.owner === undefined ? [] : [row.owner]) : row.tags,
   searchText: (row) => row.id,
-  groupKey: (row, grouping) => (grouping === 'team' ? (row.team ?? null) : null),
+  groupKey: (row, grouping) => (grouping === 'owner' ? (row.owner ?? null) : null),
   compare: (a, b, order) =>
     order === 'name' ? a.id.localeCompare(b.id) : b.updatedAt.localeCompare(a.updatedAt),
 }
 
 const rows: Row[] = [
-  { id: 'alpha', team: 'eng', tags: ['smoke'], updatedAt: '2026-08-01' },
-  { id: 'bravo', team: 'eng', tags: ['smoke', 'nightly'], updatedAt: '2026-08-03' },
-  { id: 'charlie', team: 'des', tags: [], updatedAt: '2026-08-02' },
-  { id: 'delta', team: undefined, tags: ['nightly'], updatedAt: '2026-08-04' },
+  { id: 'alpha', owner: 'eng', tags: ['smoke'], updatedAt: '2026-08-01' },
+  { id: 'bravo', owner: 'eng', tags: ['smoke', 'nightly'], updatedAt: '2026-08-03' },
+  { id: 'charlie', owner: 'des', tags: [], updatedAt: '2026-08-02' },
+  { id: 'delta', owner: undefined, tags: ['nightly'], updatedAt: '2026-08-04' },
 ]
 
 const view = (over: Partial<Parameters<typeof applyListView<Row>>[1]> = {}) => ({
@@ -43,50 +43,50 @@ const view = (over: Partial<Parameters<typeof applyListView<Row>>[1]> = {}) => (
 
 describe('list filters — a facet is "any of these", and an empty one is no facet at all', () => {
   it('turns a value on and off, dropping the facet when the last value goes', () => {
-    const one = toggleListFilter({}, 'team', 'eng')
-    expect(one).toEqual({ team: ['eng'] })
-    const two = toggleListFilter(one, 'team', 'des')
-    expect(two.team).toEqual(['eng', 'des'])
-    expect(toggleListFilter(toggleListFilter(two, 'team', 'des'), 'team', 'eng')).toEqual({})
+    const one = toggleListFilter({}, 'owner', 'eng')
+    expect(one).toEqual({ owner: ['eng'] })
+    const two = toggleListFilter(one, 'owner', 'des')
+    expect(two.owner).toEqual(['eng', 'des'])
+    expect(toggleListFilter(toggleListFilter(two, 'owner', 'des'), 'owner', 'eng')).toEqual({})
   })
 
   it('counts every selected value across facets', () => {
-    expect(listFilterCount({ team: ['eng', 'des'], tags: ['smoke'] })).toBe(3)
+    expect(listFilterCount({ owner: ['eng', 'des'], tags: ['smoke'] })).toBe(3)
   })
 
   // Anything can be typed into an address bar — an unknown axis is DROPPED rather than made into a 400.
   it('reads only the facets this list knows about', () => {
-    expect(listFiltersOf({ team: 'eng', nonsense: 'x' }, ['team', 'tags'])).toEqual({
-      team: ['eng'],
+    expect(listFiltersOf({ owner: 'eng', nonsense: 'x' }, ['owner', 'tags'])).toEqual({
+      owner: ['eng'],
     })
-    expect(listFiltersOf({ team: ['eng', 'des'] }, ['team'])).toEqual({ team: ['eng', 'des'] })
+    expect(listFiltersOf({ owner: ['eng', 'des'] }, ['owner'])).toEqual({ owner: ['eng', 'des'] })
   })
 
   it('spells a set as a repeated parameter, and carries the search text as q', () => {
-    expect(listViewQuery({ team: ['eng', 'des'] }, ['team'], 'alp').toString()).toBe(
-      'team=eng&team=des&q=alp'
+    expect(listViewQuery({ owner: ['eng', 'des'] }, ['owner'], 'alp').toString()).toBe(
+      'owner=eng&owner=des&q=alp'
     )
-    expect(listViewQuery({}, ['team'], '').toString()).toBe('')
+    expect(listViewQuery({}, ['owner'], '').toString()).toBe('')
   })
 })
 
 describe('applyListView — filtering, searching, ordering and grouping in one pass', () => {
   it('keeps an item when it matches ANY value of every filtered facet', () => {
-    const { groups, total } = applyListView(rows, view({ filters: { team: ['eng'] } }), spec)
+    const { groups, total } = applyListView(rows, view({ filters: { owner: ['eng'] } }), spec)
     expect(total).toBe(2)
     expect(groups[0]?.items.map((r) => r.id)).toEqual(['bravo', 'alpha'])
   })
 
   // An item with no value at all has to be filterable as "unspecified" — it is a bucket people genuinely look for.
   it('lets an item with no value on a facet be filtered as unset', () => {
-    const { groups } = applyListView(rows, view({ filters: { team: [''] } }), spec)
+    const { groups } = applyListView(rows, view({ filters: { owner: [''] } }), spec)
     expect(groups[0]?.items.map((r) => r.id)).toEqual(['delta'])
   })
 
   it('intersects across facets and unions within one', () => {
     const { total } = applyListView(
       rows,
-      view({ filters: { team: ['eng'], tags: ['nightly'] } }),
+      view({ filters: { owner: ['eng'], tags: ['nightly'] } }),
       spec
     )
     expect(total).toBe(1)
@@ -110,7 +110,7 @@ describe('applyListView — filtering, searching, ordering and grouping in one p
   it('puts the biggest group first and the unset bucket last', () => {
     const { groups } = applyListView(
       rows,
-      view({ display: { grouping: 'team', order: 'updated' } }),
+      view({ display: { grouping: 'owner', order: 'updated' } }),
       spec
     )
     expect(groups.map((g) => g.key)).toEqual(['eng', 'des', null])
@@ -121,7 +121,7 @@ describe('applyListView — filtering, searching, ordering and grouping in one p
     const ordered = { ...spec, groupOrder: () => ['des', 'eng'] as const }
     const { groups } = applyListView(
       rows,
-      view({ display: { grouping: 'team', order: 'updated' } }),
+      view({ display: { grouping: 'owner', order: 'updated' } }),
       ordered
     )
     expect(groups.map((g) => g.key)).toEqual(['des', 'eng', null])
@@ -130,19 +130,19 @@ describe('applyListView — filtering, searching, ordering and grouping in one p
 
 describe('the display cookie — per reader, per view, and never trusted', () => {
   const vocabulary = {
-    groupings: ['none', 'team'],
+    groupings: ['none', 'owner'],
     orders: ['updated', 'name'],
     fallback: { grouping: 'none', order: 'updated' },
   }
 
   it('remembers one view’s choice without touching another’s', () => {
     const cookie = withListDisplay(
-      withListDisplay(undefined, 'harnesses', { grouping: 'team', order: 'name' }),
+      withListDisplay(undefined, 'harnesses', { grouping: 'owner', order: 'name' }),
       'datasets',
       { grouping: 'none', order: 'updated' }
     )
     expect(listDisplayFor(cookie, 'harnesses', vocabulary)).toEqual({
-      grouping: 'team',
+      grouping: 'owner',
       order: 'name',
     })
     expect(listDisplayFor(cookie, 'judges', vocabulary)).toEqual(vocabulary.fallback)
@@ -160,9 +160,9 @@ describe('the display cookie — per reader, per view, and never trusted', () =>
   it('evicts the least recently changed view rather than growing without bound', () => {
     let cookie = ''
     for (let i = 0; i < 14; i += 1) {
-      cookie = withListDisplay(cookie, `view-${i}`, { grouping: 'team', order: 'name' })
+      cookie = withListDisplay(cookie, `view-${i}`, { grouping: 'owner', order: 'name' })
     }
-    expect(listDisplayFor(cookie, 'view-13', vocabulary).grouping).toBe('team')
+    expect(listDisplayFor(cookie, 'view-13', vocabulary).grouping).toBe('owner')
     expect(listDisplayFor(cookie, 'view-0', vocabulary)).toEqual(vocabulary.fallback)
   })
 })

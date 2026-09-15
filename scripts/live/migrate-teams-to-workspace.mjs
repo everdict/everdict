@@ -9,8 +9,8 @@
 //      much.
 //   ② IDENTIFIERS are RE-ISSUED. `ENG-12` is a public address; the maintainer chose one workspace prefix over
 //      freezing the old ones, so every issue is renumbered in `created_at` order under `<KEY>-<n>`. The old
-//      name is appended to `former_identifiers` — the field a team move already used — so the history still
-//      says what an issue used to be called even though the address stops resolving.
+//      name is appended to `former_identifiers`, which the identifier lookup falls back to, so an old link still
+//      lands on the issue — unless the new sequence minted that same string for another issue, which then wins.
 //   ③ PRIVACY is LOST, and this script's most important output is the number attached to that. Assets of a
 //      private team become visible to every member of the workspace the moment `0212` drops `is_private`.
 //      That is irreversible and it is counted BEFORE anything is written, so an operator can answer "how many
@@ -198,7 +198,7 @@ async function main() {
       // named after its team looks like.
       //
       // `identifier` is NOT NULL, so the rows cannot be parked at NULL. They are parked under a name no key
-      // can mint instead: `ISSUE_KEY_PATTERN` is `^[A-Z][A-Z0-9]{1,5}$` and an identifier is `<key>-<digits>`,
+      // can mint instead: a key is `^[A-Z][A-Z0-9]{1,5}$` (`deriveIssueKey`) and an identifier is `<key>-<digits>`,
       // so nothing with a `~` or a lowercase stem is reachable by any real prefix. Both passes are inside the
       // workspace's own transaction, so a failure in either leaves the identifiers exactly as they were.
       const plan_ = ordered.map((issue, i) => ({ issue, n: i + 1, next: `${plan.key}-${i + 1}` }));

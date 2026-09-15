@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileRunPlanFor, isRunnableFilePath } from "./run-plan.js";
+import { fileRunPlanFor } from "./run-plan.js";
 
 describe("fileRunPlanFor — how a workspace file gets run", () => {
   it("picks the interpreter from the extension and runs the file by its own name", () => {
@@ -25,7 +25,6 @@ describe("fileRunPlanFor — how a workspace file gets run", () => {
     expect(fileRunPlanFor("README.md")).toBeUndefined();
     expect(fileRunPlanFor("main.go")).toBeUndefined(); // needs a build step — a different feature
     expect(fileRunPlanFor("Dockerfile")).toBeUndefined();
-    expect(isRunnableFilePath("notes.txt")).toBe(false);
-    expect(isRunnableFilePath("run.sh")).toBe(true);
+    expect(fileRunPlanFor("notes.txt")).toBeUndefined();
   });
 });

@@ -97,7 +97,7 @@ describe("InMemoryIssueStore", () => {
 
     expect((await store.list("acme", { query: "eng-12" })).map((r) => r.id)).toEqual(["a"]); // case-insensitive
     expect((await store.list("acme", { query: "rubric" })).map((r) => r.id)).toEqual(["b"]); // part of the title
-    // Re-stamped with a new name on a team move, it is still found by the old name people still call it by.
+    // Re-stamped with a new name, it is still found by the old name people still call it by.
     expect((await store.list("acme", { query: "ENG-40" })).map((r) => r.id)).toEqual(["b"]);
     expect(await store.list("acme", { query: "nothing here" })).toEqual([]);
   });
@@ -411,7 +411,7 @@ describe("PgIssueStore", () => {
     expect(queries[2]?.params).toEqual(["acme"]);
 
     // A facet opened with nothing selected selects NOTHING, expressed as a false predicate rather than an
-    // `IN ()` the parser rejects — the same shape the empty team roster already uses.
+    // `IN ()` the parser rejects.
     await store.list("acme", { priorities: [] });
     expect(queries[3]?.text).toContain("false");
   });
@@ -472,8 +472,8 @@ describe("PgIssueStore", () => {
   it("looks the identifier up on the unique index, falling back to the names the issue used to have", async () => {
     const { client, queries } = fakeClient();
     await new PgIssueStore(client).getByIdentifier("acme", "ENG-7");
-    // Both spellings in one statement, current-first: a team move re-mints the identifier, and a link pasted
-    // before the move still has to land on the issue it named.
+    // Both spellings in one statement, current-first: a re-mint changes the identifier, and a link pasted
+    // before it still has to land on the issue it named.
     expect(queries[0]?.text).toContain("identifier=$2 OR former_identifiers @> $3::jsonb");
     expect(queries[0]?.text).toContain("ORDER BY (identifier=$2) DESC");
     expect(queries[0]?.params).toEqual(["acme", "ENG-7", JSON.stringify(["ENG-7"])]);

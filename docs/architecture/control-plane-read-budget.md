@@ -2,7 +2,7 @@
 kind: wiki
 title: "Control-plane read budget — no read grows with the workspace"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [packages/db/src/client.ts, packages/contracts/src/infra/outbound-deadline.ts]
 ---
 # Control-plane read budget — no read grows with the workspace
@@ -244,5 +244,5 @@ Two things the numbers said that reading did not:
 
 - [long-horizon-trace-reads.md](./long-horizon-trace-reads.md) — the other axis: one run's trace.
 - [native-observability.md](./native-observability.md) — the owned store, the OTLP door, quota + retention.
-- [workspace-pulse.md](./workspace-pulse.md) — what the home screen reads.
+- [workspace-pulse.md](./workspace-pulse.md) — the workspace's one status read (agents read it; the web does not).
 - Rule `protocol` L2 — why an unreadable quota is a refusal rather than "no override".

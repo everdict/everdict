@@ -21,23 +21,7 @@ const DETAIL_MOVES = DETAIL_ROUTES
 // Not permanent (307, not 308) on purpose: a browser caches a permanent redirect hard enough that reverting the
 // scheme would strand anyone who had followed one. Promote these to `permanent: true` once the singular
 // addresses have been confirmed live.
-// ── EVERY ADDRESS A TEAM USED TO OWN ──────────────────────────────────────────────────────────────
 //
-// The team axis is gone (migrations `0211`/`0212`) and every collection has ONE workspace address, so a link
-// pasted while teams existed must land on that address rather than a 404. `cycles` and `triage` had no
-// workspace twin — the concepts went with the team — so they land on the issue list, which is where the work
-// they held now lives.
-const FORMER_TEAM_SECTIONS = {
-  scorecards: 'scorecards',
-  harnesses: 'harnesses',
-  datasets: 'datasets',
-  judges: 'judges',
-  projects: 'projects',
-  issues: 'issues',
-  triage: 'issues',
-  cycles: 'issues',
-} as const
-
 // Only an address whose FIRST segment is a workspace is subject to these rules — a reserved word such as `api` is not a workspace
 // (`RESERVED_TOP_LEVEL`, the same list the middleware reads). Without the guard our BFF routes are caught wholesale:
 // `/api/issues/:id/attachment` 307s to `/api/issue/:id/attachment` (an address that does not exist), and the GitHub attachment images in an
@@ -48,25 +32,6 @@ const WORKSPACE = `:workspace((?!(?:${[...RESERVED_TOP_LEVEL].join('|')})(?:/|$)
 
 async function movedDetailRoutes() {
   return [
-    ...Object.entries(FORMER_TEAM_SECTIONS).flatMap(([section, landing]) =>
-      // Both spellings of the team segment, and anything under them (`…/scorecards/new` included).
-      ['team', 'teams'].map((segment) => ({
-        source: `/${WORKSPACE}/${segment}/:key/${section}/:rest*`,
-        destination: `/:workspace/${landing}`,
-        permanent: false,
-      }))
-    ),
-    // A bare team address was that team's issue list. Matched AFTER the section rules above, which are more
-    // specific, and it also catches `…/settings/teams/:key` because a team has no settings to open any more.
-    ...['team', 'teams'].map((segment) => ({
-      source: `/${WORKSPACE}/${segment}/:key/:rest*`,
-      destination: '/:workspace/issues',
-      permanent: false,
-    })),
-    { source: `/${WORKSPACE}/teams`, destination: '/:workspace/members', permanent: false },
-    { source: `/${WORKSPACE}/cycles/:rest*`, destination: '/:workspace/issues', permanent: false },
-    { source: `/${WORKSPACE}/cycle/:rest*`, destination: '/:workspace/issues', permanent: false },
-    { source: `/${WORKSPACE}/settings/teams/:rest*`, destination: '/:workspace/settings', permanent: false },
     ...DETAIL_MOVES.map(({ plural, singular, reserved }) => {
       const guard = reserved.length === 0 ? '' : `(?!(?:${reserved.join('|')})$)`
       return {

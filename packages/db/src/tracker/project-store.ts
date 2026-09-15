@@ -164,8 +164,8 @@ export class PgProjectStore implements ProjectStore {
       conds.push(`status = ANY($${i++}::text[])`);
       params.push([...filter.statuses]);
     }
-    // Containment over the jsonb lists (GIN-indexed in migration 0108) — a project belongs to every initiative
-    // and every team it names, so both filters are `@>`, never an equality on a scalar column.
+    // Containment over the jsonb list (GIN-indexed in migration 0108) — a project belongs to every initiative
+    // it names, so the filter is `@>`, never an equality on a scalar column.
     if (filter?.initiativeId !== undefined) {
       conds.push(`initiative_ids @> $${i++}::jsonb`);
       params.push(JSON.stringify([filter.initiativeId]));

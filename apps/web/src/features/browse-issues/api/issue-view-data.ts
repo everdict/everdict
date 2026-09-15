@@ -20,8 +20,8 @@ import type { IssuePageQuery } from '../model/page-query'
 // call the SAME function: with two copies, the list after changing a filter and the list after a refresh could differ.
 //
 // Why a view change does not re-render the whole route is obvious once counted. It used to be that turning on one filter made
-// `router.push` re-render the page, and that render re-read everything unrelated to the list (members, projects, cycles, labels, the team
-// roster, GitHub App state) before drawing anything — and the screen was a skeleton the whole time.
+// `router.push` re-render the page, and that render re-read everything unrelated to the list (members, projects, labels, GitHub App state)
+// before drawing anything — and the screen was a skeleton the whole time.
 // Now only what this function returns is re-fetched, and the previous list stays on screen while it is.
 
 // How many rows one group draws first. A grouped screen gives each group its own page, and "show more" extends only that group.
@@ -34,16 +34,7 @@ const BOARD_PAGE = 20
 // leaving the fact that it truncated ON the screen (a silent cap reads as "you have seen everything").
 const MAX_GROUPS = 20
 
-// What this is a list OF — the narrowing decided by the **address** rather than by filters. Team, triage and cycle are where the screen
-// STANDS, so they do not change when the view does.
-export interface IssueViewBase {
-  team?: string
-  triage?: boolean
-  cycle?: string
-}
-
 export interface IssueViewRequest {
-  base: IssueViewBase
   view: IssueView
 }
 
@@ -70,18 +61,6 @@ export interface IssueViewData {
   error?: { kind: 'counts' } | { kind: 'load'; message: string }
 }
 
-// This list's narrowing. Built once so that the rows and the group counts use the **same** filters.
-// A cycle scope OVERRIDES the URL's cycle filter — this screen is "that iteration's board" rather than "the issue list narrowed by cycle",
-// so a filter must not be able to overturn what the address already answered.
-export function issueScopeOf({ base, view }: IssueViewRequest): IssuePageQuery {
-  return {
-    ...issueQueryFilters(view),
-    ...(base.team !== undefined ? { team: base.team } : {}),
-    ...(base.triage === true ? { triage: true } : {}),
-    ...(base.cycle !== undefined ? { cycle: [base.cycle] } : {}),
-  }
-}
-
 // The query that picks ONE group — the whole list's narrowing plus that group's single value. The unspecified bucket is the empty string
 // (a query parameter has no null). It overrides even an existing filter on that axis: this request is "this group", not
 // "this group ∩ the values the user picked", and the group list itself already came through those filters.
@@ -100,9 +79,7 @@ function groupQuery(
         ? { priority: [value] }
         : groupBy === 'assignee'
           ? { assignee: [value] }
-          : groupBy === 'project'
-            ? { project: [value] }
-            : { cycle: [value] }
+          : { project: [value] }
   return { ...scope, ...facet, order, limit }
 }
 
@@ -111,7 +88,8 @@ export async function loadIssueViewData(
   request: IssueViewRequest
 ): Promise<IssueViewData> {
   const { view } = request
-  const scope = issueScopeOf(request)
+  // This list's narrowing. Built once so that the rows and the group counts use the **same** filters.
+  const scope: IssuePageQuery = issueQueryFilters(view)
 
   if (view.grouping === 'none') {
     const query: IssuePageQuery = { ...scope, order: view.order, limit: FLAT_PAGE }

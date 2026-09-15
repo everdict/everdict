@@ -65,10 +65,10 @@ is named in the placement comments as a future registration; there is no Windows
 
 Fan out cases × harness-versions; regression = run a suite against `harness@vA` and `@vB`, diff
 scorecards. Durable dispatch+await is implemented in `@everdict/orchestrator` (Temporal):
-`evalCaseWorkflow`/`suiteWorkflow` call the `dispatchCase` activity (which runs a `Dispatcher`); the
+`evalCaseWorkflow` calls the `dispatchCase` activity (which runs a `Dispatcher`); the
 `everdict worker` holds the registry + a capacity-aware `Scheduler` (gates on `Backend.capacity()`,
 queues when full, backpressure via `RateLimitError`), the client (`everdict run --orchestrator temporal`)
-starts+awaits. `suiteWorkflow` fan-out is bounded. See `docs/orchestration.md` + `docs/execution-backends.md`.
+starts+awaits. The batch and score workflows' fan-out is bounded. See `docs/orchestration.md` + `docs/execution-backends.md`.
 
 ## How new things plug in (no core rewrite)
 - New compute target (Nomad / K8s / Windows pool) → new `Backend`; the job-runner + loop are unchanged.

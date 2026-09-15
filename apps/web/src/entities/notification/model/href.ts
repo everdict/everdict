@@ -30,9 +30,6 @@ const RESOURCE_SEGMENT: Record<string, string> = {
   run: 'run',
   runtime: 'runtime',
   issue: 'issue',
-  // The uuid address is a gateway that redirects to the team's numbered cycle — the only spelling a
-  // notification can build, since the row records the id and nothing else.
-  cycle: 'cycle',
   project: 'project',
   initiative: 'initiative',
 }
@@ -43,9 +40,9 @@ function sectionFor(kind: NotificationItem['kind'], resourceType: string): strin
   return kind === 'tracker_update_posted' && resourceType === 'initiative' ? '/updates' : ''
 }
 
-// What on that page the click is really about, as a QUERY parameter rather than a `#fragment`: the issue and
-// cycle addresses normalize server-side (uuid → `ENG-12`, uuid → the team's cycle number) and a fragment does
-// not survive a redirect, while a search parameter does — the pages forward it.
+// What on that page the click is really about, as a QUERY parameter rather than a `#fragment`: the issue
+// address normalizes server-side (uuid → `ENG-12`) and a fragment does not survive a redirect, while a search
+// parameter does — the pages forward it.
 function anchorOf(n: NotificationItem): string {
   if (n.link?.commentId) return `?comment=${encodeURIComponent(n.link.commentId)}`
   if (n.link?.artifactId) return `?artifact=${encodeURIComponent(n.link.artifactId)}`

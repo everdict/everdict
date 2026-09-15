@@ -67,7 +67,6 @@ open-ended**). The T-a…T-d labels are the ones code comments cite.
 | Workflow | workflowId | Started by | Done when |
 |----------|------------|------------|-----------|
 | `evalCaseWorkflow` | `everdict-<caseId>-<pid>` | `TemporalOrchestrator` (CLI `--orchestrator temporal`) | its one `dispatchCase` activity returns |
-| `suiteWorkflow` | — | nothing in the repository (registered on the worker only) | every case dispatched, at most 8 lanes |
 | `scorecardBatchWorkflow` | `everdict-batch-<scorecardId>` | `TemporalBatchDriver.start` | every (case, trial) ran via `runBatchCase`, then `finalizeBatch` |
 | `scoreGroupWorkflow` (T-c) | `everdict-score-<groupId>-<passId>` | `TemporalBatchDriver.startScore` | the replanned worklist is empty, or the stall guard abandons |
 | `approvalWorkflow` (T-a) | `everdict-approval-<approvalId>` | `TemporalBatchDriver.startApproval` | the `decided` signal, or the timer → `expireApproval` |
@@ -75,7 +74,7 @@ open-ended**). The T-a…T-d labels are the ones code comments cite.
 | `reactionWorkflow` (T-d) | `everdict-reaction-<eventId>-<subscriptionId>` | the `subscriptions:reactions` cursor consumer | every step completed, or the first step skipped/failed/timed out |
 | `scheduledScorecardWorkflow` | `everdict-sched-run-<scheduleId>` (+ fire time) | a Temporal Schedule `everdict-sched-<scheduleId>` (`TemporalScheduleDriver`) | the fired scorecard is terminal → finalize, or the ~4 h poll cap |
 
-Every workflow except `evalCaseWorkflow`/`suiteWorkflow` drives the control plane over the internal HTTP
+Every workflow except `evalCaseWorkflow` drives the control plane over the internal HTTP
 bridge (`/internal/batches/**`, `/internal/groups/**`, `/internal/approvals/**`, `/internal/sandboxes/:id/reap`,
 `/internal/reactions/**`, `/internal/schedules/**`), enabled on the worker by `EVERDICT_API_URL` +
 `EVERDICT_INTERNAL_TOKEN`. The workflow owns durability; the control plane owns the semantics.

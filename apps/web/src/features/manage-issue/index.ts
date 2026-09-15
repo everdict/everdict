@@ -1,7 +1,6 @@
 export {
   createIssueAction,
   deleteIssueAction,
-  moveIssuesToCycleAction,
   setIssueStatusAction,
   updateIssueAction,
   type IssueActionResult,

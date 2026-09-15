@@ -1,5 +1,3 @@
-import { z } from "zod";
-
 // ── THE HUMAN NAME OF AN ISSUE, MINTED BY THE WORKSPACE ──────────────────────────────────────────────
 //
 // These lived on the Team record, because the prefix used to say whose list an issue was on and the sequence
@@ -8,13 +6,10 @@ import { z } from "zod";
 // identifier is a public address (`GET /issues/EVD-12`, `/{workspace}/issues/EVD-12`) that people paste into
 // pull requests and chat, and it should keep reading like a name rather than becoming a uuid.
 
-// 2–6 characters, uppercase, starting with a letter. Immutable after the workspace is created: it is baked
-// into every identifier the workspace has ever minted.
-export const ISSUE_KEY_PATTERN = /^[A-Z][A-Z0-9]{1,5}$/;
-export const IssueKeySchema = z
-  .string()
-  .regex(ISSUE_KEY_PATTERN, "An issue key is 2–6 characters, uppercase letters or digits, starting with a letter.");
-
+// A key is 2–6 characters, uppercase letters or digits, starting with a letter (`^[A-Z][A-Z0-9]{1,5}$` — what
+// `deriveIssueKey` below produces). Immutable after the workspace is created: it is baked into every identifier the
+// workspace has ever minted.
+//
 // `<key>-<number>`. Computed at creation and STORED on the issue, so a read never has to join the workspace
 // row to learn what an issue is called.
 export function formatIssueIdentifier(key: string, issueNumber: number): string {

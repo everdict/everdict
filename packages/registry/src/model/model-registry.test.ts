@@ -1,11 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { ConflictError, type ModelSpec, ModelSpecSchema, NotFoundError } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { SHARED_TENANT } from "../registry.js";
-import { loadModelDir } from "./load-models.js";
 import { InMemoryModelRegistry } from "./model-registry.js";
 import { PgModelRegistry } from "./pg-model-registry.js";
 
@@ -99,19 +95,6 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
     await expect(r.creatorOf("acme", "opus", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
     // Another tenant's owned model can't be deleted either.
     await expect(r.softDelete("beta", "mine", "1.0.0")).rejects.toBeInstanceOf(NotFoundError);
-  });
-});
-
-describe("loadModelDir", () => {
-  it("loads as SHARED by default (file SSOT) → every tenant sees it via fallback", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "everdict-model-"));
-    try {
-      writeFileSync(join(dir, "opus-1.0.0.json"), JSON.stringify(model("opus", "1.0.0")));
-      const r = await loadModelDir(dir);
-      expect((await r.get("whoever", "opus")).version).toBe("1.0.0");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

@@ -22,9 +22,6 @@ const AXIS_OF: Record<string, NodeAxis> = {
   issue: 'intent',
   project: 'intent',
   initiative: 'intent',
-  // team/cycle are organisational scoping around the intent stratum — quiet, like the other actors.
-  team: 'actor',
-  cycle: 'actor',
   workspace: 'actor',
   user: 'actor',
   harness: 'subject',

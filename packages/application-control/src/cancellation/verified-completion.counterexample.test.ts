@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { CancellationCertificate, CancellationStore, CancellationTarget } from "../ports/cancellation-store.js";
-import { CANCELLATION_OPERATION_STATES } from "../ports/cancellation-store.js";
 import { runDurableTeardown } from "./cancellation-coordinator.js";
 
 // ── COMPLETION IS A VERIFIED STATE, NOT A COMMAND RECEIPT (arch-review 53, Wave E) ───────────────────
@@ -107,17 +106,6 @@ describe("[R53 WAVE-E COUNTEREXAMPLE #23 — CLOSED] the certificate states what
 // RED as of 186f9fd9: the operation had `requested | completed` and no verifying step, so a teardown whose
 // readback was unavailable had only two options — lie or throw forever.
 describe("[R53 WAVE-E COUNTEREXAMPLE #24 — CLOSED] an unverifiable readback keeps the operation owed, bounded", () => {
-  it("has a verifying state and a stated unverifiable end", () => {
-    expect(
-      CANCELLATION_OPERATION_STATES,
-      "no verifying state — a readback that cannot be taken has nowhere to live",
-    ).toContain("verifying");
-    // `unverifiable` remains in the vocabulary for rows written before mig 0190 — it is no longer PRODUCED
-    // (arch-review 54, Phase 5): a debt whose compute may still be running does not belong outside the sweep,
-    // so the alert became a field on an owed row. See the escalation case below.
-    expect(CANCELLATION_OPERATION_STATES).toContain("unverifiable");
-  });
-
   it("escalates — and keeps the operation owed — once the readback budget is spent", async () => {
     const { store, escalated } = ledger();
     const failing = async (): Promise<CancellationCertificate> => {

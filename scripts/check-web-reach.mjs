@@ -89,14 +89,21 @@ const DECIDED = new Map([
   ["/ops/driver/:p/:p/terminate", "operator driver control — a runbook"],
   ["/runs/:p/live/stream", "an SSE stream the run page opens directly, not through the shared client"],
   ["/runs/:p/logs/stream", "an SSE stream the run page opens directly, not through the shared client"],
+  ["/workspace/pulse", "the web no longer draws the pulse; agents read it through MCP `get_workspace_pulse`"],
+  [
+    "/workspace/settings",
+    "no page draws the metering/default-judge policy; it is set through MCP `get_/set_workspace_settings`",
+  ],
 
   // ── OWED — a real gap with a person behind it ─────────────────────────────────────────────────────
   //
-  // EMPTY, as of the census's slice 5: every route a person needs is reachable. The convention stays,
-  // because the next unreachable route will need somewhere honest to sit while its surface is built —
+  // The convention: the next unreachable route needs somewhere honest to sit while its surface is built —
   // `OWED — <why a person needs it>` keeps this check green AND keeps the debt visible, and removing the
   // line is the definition of done. What it must never become is a parking space: an entry that is not
   // OWED claims the caller is not a browser, and that is a decision, not a delay.
+  //
+  // EMPTY. The census's slice 5 emptied it; the board-column editor's routes (`/workflow-states/:p`) were the
+  // last entry and were removed with the editor rather than rebuilt, since no surface called them.
 ]);
 
 const walk = (dir, out = []) => {

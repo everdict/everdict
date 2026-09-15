@@ -2,7 +2,7 @@ import { ScorecardListView } from '@/widgets/scorecard-list'
 
 export const dynamic = 'force-dynamic'
 
-// The workspace's batch evaluation list — the same as harnesses. `?team=` is read as a FILTER on this list rather than as a path.
+// The workspace's batch evaluation list — the only address, the same as harnesses.
 export default async function ScorecardsPage({
   params,
   searchParams,

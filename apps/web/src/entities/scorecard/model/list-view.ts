@@ -12,21 +12,13 @@ import type { ScorecardRow } from './list-row'
 // ② status is a closed vocabulary and its groups have an order — running above finished, so the screen
 //    answers "what is happening" before "what happened" — and a batch can be grouped by the day it RAN,
 //    because what people ask an event list is "what ran yesterday".
-export const SCORECARD_FACETS = [
-  'team',
-  'status',
-  'harness',
-  'dataset',
-  'runtime',
-  'creator',
-] as const
+export const SCORECARD_FACETS = ['status', 'harness', 'dataset', 'runtime', 'creator'] as const
 export const SCORECARD_GROUPINGS = [
   'none',
   'status',
   'day',
   'harness',
   'dataset',
-  'team',
   'creator',
 ] as const
 
@@ -62,7 +54,7 @@ export function scorecardGroupKeyOf(row: ScorecardRow, grouping: string): string
 }
 
 // How the server's group rows are stood up. A closed vocabulary IS its own order; a date reads newest-first
-// (yesterday standing below last month is not a list); everything else — people, teams, capabilities — has no
+// (yesterday standing below last month is not a list); everything else — people, capabilities — has no
 // order of its own, so the biggest group leads. The unset bucket goes last wherever it came from.
 export function orderScorecardGroups<T extends { key: string | null; count: number }>(
   groups: readonly T[],

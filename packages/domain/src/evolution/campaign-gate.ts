@@ -173,9 +173,6 @@ export function adoptionProofOf(
     provingScorecardId: answer.provingScorecardId,
     ...(answer.candidateSource !== undefined ? { candidateSource: answer.candidateSource } : {}),
     issueId: campaign.issueId,
-    // …and the authority this campaign decided under. Carried so a registry write is gated against the team
-    // frozen at open rather than whatever the entity's team happens to be when somebody spends it
-    // (arch-review 76 P1-security).
     gateDigest: contentDigest(answer),
   };
 }

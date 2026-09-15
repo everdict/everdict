@@ -95,9 +95,9 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   parentId nesting where the platform exposes it) — powering the Settings › Observability browser (a row-click opens
   the observability-grade detail dialog that renders the waterfall) and the judge wizard's live conversion authoring. The wizard-authored
   `SpanAttrMapping` is stored as a per-harness **overlay** (`WorkspaceSettings.spanAttrMappingByHarness`), the
-  mutable conversion layer between a harness version and a judge version; `resolveHarnessTraceMapping` (overlay >
-  spec) applies it at both production seams — `TraceSourceService.resolve` (dispatch-after-judge collect) and
-  `ScorecardIngestService.trackPull`'s `spanMappingFor` (periodic pull-eval). See
+  mutable conversion layer between a harness version and a judge version; each production seam reads it directly —
+  `TraceSourceService.resolve` (dispatch-after-judge collect) and `ScorecardIngestService.trackPull`'s
+  `spanMappingFor` (periodic pull-eval). See
   docs/architecture/judge-input-contract.md.
 - **Evidence slots (finalAnswer/dom/screenshot + custom) + snapshot synthesis.** `SpanAttrMapping` also carries
   evidence slots (NO built-in defaults — explicit mapping only): each slot is an ordered list of

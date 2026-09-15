@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getBenchmark, getBenchmarkJudge, listBenchmarks } from "./catalog.js";
-import { BENCHMARK_JUDGES, type BenchmarkJudge } from "./judges.js";
+import { type BenchmarkJudge, GAIA_QUESTION_SCORER, GSM8K_EXACT_MATCH } from "./judges.js";
 
 // The bar these ports have to clear is DISCRIMINATION: a scorer that passes everything is worthless, so every case
 // below asserts both directions — the benchmark's own correct answer passes and a wrong one fails. This used to be a
@@ -40,8 +40,7 @@ const contextOf = (expected: string, answer: string): unknown => ({
 });
 
 describe("GAIA question_scorer port", () => {
-  const judge = BENCHMARK_JUDGES.gaia;
-  if (!judge) throw new Error("gaia judge missing");
+  const judge = GAIA_QUESTION_SCORER;
 
   it("scores a numeric ground truth after stripping $ , % — and rejects a different number", () => {
     expect(runJudge(judge, contextOf("17000", "FINAL ANSWER: $17,000")).pass).toBe(true);
@@ -78,8 +77,7 @@ describe("GAIA question_scorer port", () => {
 });
 
 describe("GSM8K exact-match port", () => {
-  const judge = BENCHMARK_JUDGES.gsm8k;
-  if (!judge) throw new Error("gsm8k judge missing");
+  const judge = GSM8K_EXACT_MATCH;
 
   it("takes the marked final answer over any number quoted while reasoning", () => {
     expect(runJudge(judge, contextOf("18", "She has 16 eggs, eats 3, bakes 4.\nFINAL ANSWER: 18")).pass).toBe(true);
@@ -141,7 +139,12 @@ describe("listBenchmarks exposure", () => {
 
 describe("catalog wiring", () => {
   it("every shipped judge is attached to the benchmark it scores, and both claim `official`", () => {
-    for (const [benchmarkId, judge] of Object.entries(BENCHMARK_JUDGES)) {
+    // Every official scorer this package ships, by the catalog id it scores.
+    const shipped: Array<[string, BenchmarkJudge]> = [
+      ["gaia", GAIA_QUESTION_SCORER],
+      ["gsm8k", GSM8K_EXACT_MATCH],
+    ];
+    for (const [benchmarkId, judge] of shipped) {
       // getBenchmark throws on an id the catalog does not know — a judge for a benchmark nobody can import is
       // exactly the drift this assertion exists to catch.
       const adapter = getBenchmark(benchmarkId);

@@ -13,7 +13,7 @@ import { updateIssueAction } from '../api/issues'
 import { toggleLabelId, withCreatedLabels } from '../lib/label-selection'
 import { IssueLabelOptions, RemovableLabelChip } from './issue-label-picker'
 
-// An issue's labels — changed right where status, priority and team are (the attribute column). It used to draw the chips only, with editing
+// An issue's labels — changed right where status and priority are (the attribute column). It used to draw the chips only, with editing
 // living inside the ⋯ menu's dialog, and opening a whole issue form to remove one label is not Linear's path.
 //
 // Attaching and detaching save immediately (this is a control, not a form). The chips show as changed while the save is in flight, and on a

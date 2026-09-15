@@ -141,9 +141,3 @@ export const GSM8K_EXACT_MATCH: BenchmarkJudge = {
   officialEvaluator: "openai/grade-school-math exact-match on the #### answer",
   code: GSM8K_CODE,
 };
-
-// Every official scorer this package ships, by the catalog id it scores.
-export const BENCHMARK_JUDGES: Record<string, BenchmarkJudge> = {
-  gaia: GAIA_QUESTION_SCORER,
-  gsm8k: GSM8K_EXACT_MATCH,
-};

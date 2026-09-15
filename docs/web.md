@@ -2,7 +2,7 @@
 kind: wiki
 title: "SaaS web (apps/web)"
 status: current
-updated: 2026-09-15
+updated: 2026-09-16
 anchors: [apps/web/src/widgets/app-shell/ui/nav-config.ts, apps/web/src/widgets/app-shell/ui/settings-nav-config.ts, apps/web/src/middleware.ts, apps/web/src/shared/auth/can.ts, apps/web/src/widgets/infra-panel/model/infra-panel-context.tsx]
 ---
 # SaaS web (`apps/web`)
@@ -89,13 +89,10 @@ panel/list guidance is not.
 - **Workspace switcher** (sidebar top, every screen) — the current-workspace (name+role) dropdown switches between
   the workspaces I belong to (= navigate to `/{id}`; the first URL segment is the authority for the active workspace, the middleware syncs the cookie) + **new workspace**
   (`/new-workspace` → `create-workspace`, the creator is admin). The list and active workspace are authoritative from `GET /me.workspaces`. See `docs/tenancy.md`.
-- **Overview `/{workspace}`** — the workspace PULSE, not an eval dashboard: eight state tiles (open issues ·
-  regressed · goals · agent runs · executions · pass rate vs. the previous window · recorded
-  activity), three trend charts (activity by axis · issues in vs. out · pass rate over time), then the
-  all-axis activity feed. One aggregate read (`GET /workspace/pulse`) rather than a fan-out of list endpoints,
-  because the arithmetic (what counts as open, which metric is the headline pass rate) is the control plane's —
-  see `docs/architecture/workspace-pulse.md`. Deliberately not a leaderboard: a status board that ranks people
-  stops answering "how are we doing".
+- **Overview `/{workspace}`** — the PRODUCT TIMELINE: one timeline per product (releases, the service versions
+  that moved beneath them, the watched quality trend), each streaming behind its own `Suspense`. The workspace
+  pulse (`GET /workspace/pulse`) is no longer drawn by the web — the read remains for agents, see
+  `docs/architecture/workspace-pulse.md`.
 - **Runs `/{workspace}/runs`** — full runs table (rows link to detail). Like schedules/runtimes, not linked
   from the UI at all — the infra panel is THE surface for infra concerns (sidebar is eval-only, the palette's
   infra group opens the panel); the route remains URL-reachable only.
@@ -222,10 +219,10 @@ panel/list guidance is not.
   connections — one bot + channel per purpose; completion/regression notifications go to every connection that has
   a channel, plus slash commands/buttons; `GET/PUT /workspace/mattermost` + `DELETE /workspace/mattermost/:name`. The
   server URL is operator env and is never shown or entered). See `architecture/workspace-scoped-integrations.md`.
-  The workspace's issue board (`/workflow-states`) has no settings screen: the web reads it for the issue status
-  control (`entities/workflow-state` `orderWorkflowStates`), and renaming/adding states is HTTP-only
-  (`/workflow-states`; there are no MCP tools for it). The
-  usage-metering toggle (`SettingsForm`) is exported by `features/workspace-settings` but mounted on no page.
+  The workspace's issue board (`GET /workflow-states`) has no settings screen: the web reads it for the issue status
+  control (`entities/workflow-state` `orderWorkflowStates`), and no surface edits it — a workspace uses the
+  columns the control plane seeded. No page offers the usage-metering toggle either
+  (`GET/PUT /workspace/settings` is set through MCP `set_workspace_settings`).
 - **Account `/{workspace}/account`** — a redirect into Settings (`?tab=secrets` → Personal secrets, `?tab=keys` →
   API keys, otherwise Profile), kept so old links still land.
 - **Download `/{workspace}/download`** (`features/download-desktop`) — the desktop-installer download page.

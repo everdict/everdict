@@ -399,7 +399,7 @@ describe("[R73 COUNTEREXAMPLE] a deployment can actually spend a campaign's auth
   });
 });
 
-// ── [R115] A `_shared` SHADOW IS A BIRTH, AND IT BELONGS TO THE CAMPAIGN'S TEAM ────────────────────
+// ── [R115] A `_shared` SHADOW IS A BIRTH ─────────────────────────────────────────────────────────────
 //
 // `VersionedStore.has()` resolves through the `_shared` fallback, so a candidate that exists only there
 // answered TRUE while this closure went on to create the workspace's FIRST local version — the fact said

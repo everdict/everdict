@@ -22,12 +22,6 @@
 //                   survives in this union only because rows written before mig 0190 carry it; nothing
 //                   produces it now, and 0190 returned those rows to the sweep as `verifying`.
 export type CancellationOperationState = "requested" | "verifying" | "completed" | "unverifiable";
-export const CANCELLATION_OPERATION_STATES: readonly CancellationOperationState[] = [
-  "requested",
-  "verifying",
-  "completed",
-  "unverifiable",
-];
 
 // ── WHAT WAS CANCELLED (arch-review 52, Wave 3) ─────────────────────────────────────────────────────
 //

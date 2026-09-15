@@ -22,8 +22,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 import { ScorecardList } from './scorecard-list'
 
-// The batch evaluation result list — one address per workspace. The owning team remains in the registry and decides "who may edit it", while
-// there is ONE route to find things and "only our team's" is one filter axis on this list.
+// The batch evaluation result list — one address per workspace.
 export async function ScorecardListView({
   workspace,
   params,

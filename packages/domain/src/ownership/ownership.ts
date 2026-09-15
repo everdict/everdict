@@ -457,7 +457,7 @@ export type EvidenceIdentity =
   // over those verdicts would have compared equal to a document whose verdicts had since changed.
   //
   // Computed over what a verifier actually reasons about — each case's id, trial and scores — and
-  // deliberately NOT over the whole record: a team move or a description edit changes bytes the reader
+  // deliberately NOT over the whole record: a rename or a description edit changes bytes the reader
   // displays and says nothing about the claim. Naming which bytes are evidence is the honest form of that
   // boundary; pretending the whole document is evidence would make every rename a moved artifact.
   | { kind: "scorecard"; scoringRevision?: number; scorePlaneDigest?: string; planeDigest?: string }
@@ -546,11 +546,6 @@ export function judgedPlane(doc: Record<string, unknown>): { planeDigest?: strin
     })
     .sort((a, b) => `${a.caseId}#${a.trial ?? ""}`.localeCompare(`${b.caseId}#${b.trial ?? ""}`));
   return { planeDigest: contentDigest(plane) };
-}
-
-// Kept as the scorecard-only entry point the release vocabulary already speaks.
-export function observedScorecardIdentity(document: unknown): EvidenceIdentity {
-  return observedEvidenceIdentity("scorecard", document) ?? { kind: "scorecard" };
 }
 
 // Do the two identities name the same artifact? Kind must match, then every coordinate. Absent-on-both is

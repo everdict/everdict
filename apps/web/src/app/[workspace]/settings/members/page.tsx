@@ -1,8 +1,8 @@
 import { getTranslations } from 'next-intl/server'
 
-import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager } from '@/features/manage-members'
+import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -12,7 +12,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// Workspace › Members — team roster + invitations (members:read; role change/invite/remove = members:write = admin).
+// Workspace › Members — workspace roster + invitations (members:read; role change/invite/remove = members:write = admin).
 export default async function MembersPage() {
   const t = await getTranslations('settingsNav')
   const s = await getTranslations('settingsPage')

@@ -1,11 +1,7 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { ConflictError, NotFoundError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/contracts";
 import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { SHARED_TENANT } from "../registry.js";
-import { loadRuntimeDir } from "./load-runtimes.js";
 import { PgRuntimeRegistry } from "./pg-runtime-registry.js";
 import { InMemoryRuntimeRegistry } from "./runtime-registry.js";
 
@@ -78,19 +74,6 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
     await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
     await expect(r.setVersionTags("acme", "shared", "1.0.0", ["x"])).rejects.toBeInstanceOf(NotFoundError);
     await expect(r.setVersionTags("acme", "mine", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
-  });
-});
-
-describe("loadRuntimeDir", () => {
-  it("loads as SHARED by default (file SSOT)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "everdict-rt-"));
-    try {
-      writeFileSync(join(dir, "local-1.0.0.json"), JSON.stringify(rt("shared-local", "1.0.0")));
-      const r = await loadRuntimeDir(dir);
-      expect((await r.get("whoever", "shared-local")).kind).toBe("local");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 });
 

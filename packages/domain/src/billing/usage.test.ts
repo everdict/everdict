@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inMemoryUsageMeter, totalUsage } from "./usage.js";
+import { inMemoryUsageMeter } from "./usage.js";
 
 describe("inMemoryUsageMeter", () => {
   it("records cost by source, model, and in the total; evaluations default to 0", () => {
@@ -84,14 +84,5 @@ describe("inMemoryUsageMeter", () => {
     expect(meter.usage("acme").bySource.harness.usd).toBe(1);
     expect(meter.usage("acme").items[0]?.usd).toBe(1);
     expect(meter.usage("acme").daily[0]?.usd).toBe(1);
-  });
-});
-
-describe("totalUsage", () => {
-  it("sums metered usage across tenants (operator rollup)", () => {
-    const meter = inMemoryUsageMeter();
-    meter.record("acme", "harness", "opus", { usd: 0.1, tokens: 100 }, 1);
-    meter.record("beta", "harness", "opus", { usd: 0.4, tokens: 400 }, 1);
-    expect(totalUsage(meter, ["acme", "beta"])).toEqual({ usd: 0.5, tokens: 500, evaluations: 2 });
   });
 });

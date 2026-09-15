@@ -147,7 +147,7 @@ export type ProductAutoEval = z.infer<typeof ProductAutoEvalSchema>;
 // --- The product's ADDRESS ---
 // A product is read far more often than it is written, and it is read by people who arrived from a link. The
 // uuid in `/{workspace}/product/{id}` told the reader nothing about which product they were opening, so a
-// product carries a SLUG for the same reason a team carries its key and an issue its identifier: the URL should
+// product carries a SLUG for the same reason an issue carries its identifier: the URL should
 // read as the thing people name in conversation.
 //
 // Unicode is deliberately KEPT (`제품-타임라인` is a legitimate slug). What a slug must not contain is anything
@@ -196,7 +196,7 @@ export const ProductRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   // How the product is ADDRESSED (mig 0169) — unique within the workspace, derived from the name at creation
-  // and immutable afterwards (a team's key precedent: an address that moves breaks every link that was ever
+  // and immutable afterwards (the issue key's precedent: an address that moves breaks every link that was ever
   // shared). Optional because rows written before the column existed carry none; a reader falls back to the id,
   // which still resolves.
   //

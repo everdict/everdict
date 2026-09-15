@@ -10,7 +10,6 @@ import { USAGE_LEGACY_DAY, type UsageCost, type UsageSource } from "@everdict/co
 
 // UsageSource is the SSOT in @everdict/contracts — re-export it so `@everdict/domain` consumers keep their import.
 export type { UsageSource } from "@everdict/contracts";
-const SOURCES: readonly UsageSource[] = ["harness", "judge", "agent"];
 
 export interface UsageTotals {
   usd: number;
@@ -122,17 +121,3 @@ export function inMemoryUsageMeter(): UsageMeter {
   };
   return meter;
 }
-
-// Total metered usage across the given tenants (for an operator/rollup view).
-export function totalUsage(meter: UsageMeter, tenants: string[]): UsageTotals {
-  const total = emptyTotals();
-  for (const tenant of tenants) {
-    const u = meter.usage(tenant);
-    total.usd += u.usd;
-    total.tokens += u.tokens;
-    total.evaluations += u.evaluations;
-  }
-  return total;
-}
-
-export { SOURCES as USAGE_SOURCES };

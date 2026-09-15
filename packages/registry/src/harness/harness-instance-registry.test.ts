@@ -43,11 +43,6 @@ describe("HarnessInstanceRegistry", () => {
     expect(resolved.version).toBe("pr-1");
   });
 
-  // Regression: the harness instance registry was the ONE versioned registry with no `ownVersions`, and the
-  // call sites (`registry?.ownVersions?.(…)`) meant its absence was not a type error and not a runtime error —
-  // it just answered "no versions", so every harness looked UNOWNED: a private team's harness stayed visible to
-  // the whole workspace, and the re-pin gate authorized against no team at all.
-
   it("instance register without a template → NotFoundError", async () => {
     await expect(instances.register("acme", instance("x", { planner: "p", browser: "b" }))).rejects.toBeInstanceOf(
       NotFoundError,
@@ -253,8 +248,7 @@ describe("an override the template's kind cannot apply", () => {
 
   // Regression: the harness instance registry was the ONE versioned registry with no `ownVersions`, and the
   // call sites (`registry?.ownVersions?.(…)`) meant its absence was not a type error and not a runtime error —
-  // it just answered "no versions", so every harness looked UNOWNED: a private team's harness stayed visible to
-  // the whole workspace, and the re-pin gate authorized against no team at all.
+  // it just answered "no versions", so every harness looked like a `_shared` one to the caller asking.
   it("ownVersions reports what this tenant registered directly, so a caller can tell own from _shared", async () => {
     await templates.register("acme", buTemplate);
     await templates.register(SHARED_TENANT, { ...buTemplate, id: "shared-bu" });

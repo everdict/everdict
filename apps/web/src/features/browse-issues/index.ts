@@ -1,9 +1,4 @@
-export {
-  loadIssueViewData,
-  type IssueViewBase,
-  type IssueViewData,
-  type IssueViewRequest,
-} from './api/issue-view-data'
+export { loadIssueViewData, type IssueViewData, type IssueViewRequest } from './api/issue-view-data'
 export { loadIssuePageAction } from './api/load-issues'
 export type { IssueDirectories } from './model/directories'
 export type { IssuePageQuery } from './model/page-query'

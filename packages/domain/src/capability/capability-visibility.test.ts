@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { type CapabilityAccess, canConsumeCapability, filterConsumableCapabilities } from "./capability-visibility.js";
+import { type CapabilityAccess, canConsumeCapability } from "./capability-visibility.js";
 
 const cap = (over: Partial<CapabilityAccess>): CapabilityAccess => ({
   tenant: "acme",
@@ -42,19 +42,5 @@ describe("canConsumeCapability", () => {
   it("never leaks a workspace capability to another workspace (only subset/public cross the boundary)", () => {
     const c = cap({ visibility: "workspace", tenant: "acme" });
     expect(canConsumeCapability(c, { tenant: "beta", subject: "bob" })).toBe(false);
-  });
-});
-
-describe("filterConsumableCapabilities", () => {
-  it("keeps only the capabilities the consumer may use", () => {
-    const consumer = { tenant: "beta", subject: "carol" };
-    const caps = [
-      cap({ visibility: "public", tenant: "acme" }),
-      cap({ visibility: "subset", tenant: "acme", sharedWith: ["beta"] }),
-      cap({ visibility: "workspace", tenant: "acme" }), // not beta's → excluded
-      cap({ visibility: "private", tenant: "beta", createdBy: "carol" }), // carol's own private
-      cap({ visibility: "private", tenant: "beta", createdBy: "dave" }), // someone else's private → excluded
-    ];
-    expect(filterConsumableCapabilities(caps, consumer)).toHaveLength(3);
   });
 });
