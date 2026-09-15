@@ -21,13 +21,14 @@ anchors: [packages/contracts/src/records/knowledge-entry.ts, packages/contracts/
 
 **This repository is the counterexample, measured.** It ran the AI-native SDLC loop on itself, in files: 34
 change directories of `intent.md → spec.md → plan.md`, 10 lessons, 47 controls, a findings ledger, release
-authorizations and an eval history (`docs/sdlc/README.md`). It works, and it has three properties no amount of
-care fixes:
+authorizations and an eval history — removed from the repository on 2026-09-15 and readable at `ddecfe1a`
+(`docs/architecture/sdlc-out-of-the-repository.md`). It worked, and it had three properties no amount of care
+fixes:
 
 - **It is per repository.** A second repository starts from nothing; a decision that spans two services has no
   home; nothing can answer "what do we know about this service" across the repositories that compose it.
 - **It is per person.** Review and release approval need a second person, and a repository of markdown has no
-  identities to separate — declared as a limit this deployment cannot satisfy (`docs/sdlc/declared-limits.md`).
+  identities to separate — declared as a limit that deployment could not satisfy.
 - **Knowledge rots where nothing owns it.** The 2026-09-15 audit rewrote nearly every product page; the user
   guide had gone 467 code commits without an edit (`docs/architecture/repository-layout.md`).
 
@@ -80,7 +81,7 @@ the request" because commits cannot be back-dated without rewriting history. In 
 order of durable writes (rule `protocol` L1 — authority before effect), and the bar that keeps the two sources
 honest is **linkage in both directions**: a commit trailer names the issue, and the issue records the commit
 SHA. A record whose linked commit does not exist, or a commit naming an issue that was accepted after it, is
-refused — the same checks `pnpm intent-chain` makes today, asked of a different store.
+refused — the same checks the repository's removed intent-chain gate made, asked of a different store.
 
 ### Knowledge
 
@@ -171,13 +172,13 @@ workspace" — never a workspace's files, images or knowledge text.
 
 Product code; product documentation (guide, reference, design records like this one); the conventions of that
 code (`CLAUDE.md`, `.claude/rules/`, codebase skills); and the quality gates that read the code — lint, types,
-tests, the scanners under `scripts/`, `pnpm doc-anchors`. `docs/sdlc/` leaves this repository when its contents
-have a home in an Everdict workspace.
+tests, the scanners under `scripts/`. This repository's own process records already left it
+(`docs/architecture/sdlc-out-of-the-repository.md`).
 
 ## What was rejected
 
 - **Keeping the loop in each repository.** It is what this repository did, and the three properties under
-  *Why* are the result. A template repository or a copy of `docs/sdlc/` per project reproduces them per project.
+  *Why* are the result. A template repository or a copy of that process per project reproduces them per project.
 - **Shipping the methodology as documentation or skills alone.** A skill is advisory; a policy that must hold
   needs something that refuses (`.claude/skills/README.md`, the enforcement table). A seed without the plugin's
   gates is guidance, and guidance is what drifted here.
@@ -197,7 +198,7 @@ have a home in an Everdict workspace.
    domain.
 4. **The service reference.** A new reference type naming a product service or a harness, or a graph node only.
 5. **Bootstrap.** Everdict's own development would run on a deployed Everdict, so a broken deployment gates its
-   own repair. It needs a declared limit and a break-glass before `docs/sdlc/` leaves this repository.
+   own repair. It needs a declared limit and a break-glass.
 6. **What crosses workspaces to improve the seed.** Recommendation: opt-in, aggregate evaluation outcomes only.
 7. **Retention.** Keeping every work image and output costs storage without bound; each needs a retention policy
    per workspace, and a released or adopted digest is never collected while something references it.
@@ -211,7 +212,8 @@ Each slice gets its own spec (`*-spec.md`) before code.
 3. Seed v1 under `_everdict` — workflow states, skills, agent templates, gate definitions — and adoption as a fork.
 4. The plugin loop: session context, the push gate against Everdict, knowledge capture — and pushing the work's
    images to the store and its outputs to the filesystem.
-5. Migrate this repository's `docs/sdlc/` into an Everdict workspace and remove it here.
+5. Develop this product through Everdict and verify the record accumulates there (the repository's own process
+   records were removed first, so there is nowhere local for it to go).
 6. The seed's eval cases as scorecards; seed skills as evolution-campaign subjects (opt-in aggregate evidence
    across workspaces); product skills improved through the code-evolution loop's pull-request mode.
 

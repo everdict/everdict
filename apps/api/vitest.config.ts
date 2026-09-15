@@ -8,7 +8,7 @@ import { defineConfig } from "vitest/config";
 // mean asserting one wiring per file.
 //
 // Vitest's default per-test budget is 5s, which is enough on an idle box — the two slowest of these run in
-// about a second alone — and not enough under `pnpm ci:commits`, which runs every package's suite at once.
+// about a second alone — and not enough when every package's suite runs at once on a loaded machine.
 // Two DIFFERENT route files have now failed that way (`cycle-visibility.routes.test.ts`,
 // `issue.routes.test.ts`), each on a run where nothing near them had changed.
 //

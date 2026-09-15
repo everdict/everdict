@@ -10,8 +10,7 @@
       ".next",
       "apps/cli/bundle",
       "apps/desktop/bundle",
-      "apps/desktop/release",
-      "scripts/evals/.results"
+      "apps/desktop/release"
     ]
   },
   "formatter": {

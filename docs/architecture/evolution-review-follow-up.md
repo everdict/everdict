@@ -14,7 +14,7 @@ The [2026-09-09 follow-up review](https://github.com/everdict/everdict/blob/a958
 provenance, attempt-aware endings, first-party execution paths and criterion identity. All
 four are now closed; that page carries each repair, its committed regression test and the
 neutralization under which the test was observed red; the requests are in
-`docs/sdlc/intent/2026-09-09-evolution-follow-up-findings/intent.md`. The sections below are updated to
+[the follow-up findings intent](https://github.com/everdict/everdict/blob/a958dc36d772615a1de0dc81f59f4bb2f4b366d7/intent/2026-09-09-evolution-follow-up-findings/intent.md). The sections below are updated to
 describe what is in force.
 
 ## Subject and oracle identity

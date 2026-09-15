@@ -14,38 +14,28 @@ clients/     published non-TypeScript clients (python)
 plugin/      the Claude Code / Codex plugin (.claude-plugin/marketplace.json points at it)
 examples/    sample agents, bundles, benchmarks, servers
 deploy/      compose · keycloak · postgres · temporal · grafana
-docs/        every document — guide/ (users) · architecture/ (design records) · sdlc/ (how this repo is
-             built and gated: intent, lessons, releases, the gate catalog) · runbooks/ · migration/
-scripts/     every gate and harness tool — check-*.mjs · ci-local · hooks/ · evals/ · bands/ · scan/ · review/
-             · design/ · telemetry/ · trust/ · live/
-.claude/     rules (pushed by `paths:` glob) · skills (pulled by name) · agents · settings (hooks)
+docs/        product documentation — guide/ (users) · architecture/ (design records) · runbooks/ · migration/
+scripts/     code checks (check-*.mjs) · trust/ (the trust suite, protocol mutations) · live/ · dev/
+.claude/     rules (pushed by `paths:` glob) · skills (pulled by name) · settings
 ```
-Root files are the community set, tool configs, this file and `REVIEW.md` (the policy `pnpm review` applies).
-**A new top-level directory needs a recorded reason** — `docs/architecture/repository-layout.md` says why the
-root was folded to these and what reopens it. `docs/sdlc/README.md` is the map of the SDLC harness itself.
+This repository holds the PRODUCT only: code, product documentation, and the conventions of this code. **How
+the work is planned, decided, reviewed and remembered is not kept here** — requests, specs, plans, decisions,
+lessons and review findings accumulate in Everdict, through the Everdict plugin
+(`docs/architecture/development-system-of-record.md`). A new top-level directory needs a recorded reason
+(`docs/architecture/repository-layout.md`).
 
 ## 🚨 Documentation-first — read before you code
 Always read the relevant skill in `.claude/skills/` **before** writing code. No exceptions.
 Read the matching `<area>/SKILL.md` first, then pull `references/*.md` on demand.
-`.claude/` is the **single source of truth** for how we build; skill `documenting` says which layer — doc,
-rule or skill — a piece of knowledge belongs in.
-
-## 🚨 Review-first — load skill `code-review` before reviewing anything
-ANY review — a diff, a branch, a PR, a batch before push, or a **self-review of what you just wrote** — starts
-by loading skill `code-review` and running its passes. Reading the diff is the last pass, not the first: ask who
-can author each value the change made load-bearing, and what EXISTING code it now depends on — a parser it cited
-instead of opening, a sibling query it forgot to teach. A review that stops at "the gates are green" has
-reported the gates' opinion; no gate here can see a forged capability or a bound composed with an unbounded
-neighbour. The two times this skill failed are in `.claude/skills/code-review/references/why-reviews-miss.md`.
+`.claude/` is the **single source of truth** for how this code is built.
 
 ## Language policy (public repo — English-only source)
 - Everything in the repo is **English**: docs, code comments, log/error messages, OpenAPI summaries,
   test descriptions, commit messages, PR titles/bodies.
 - The ONLY Korean in the repo is **ko-locale product data**: `apps/web/messages/ko.json` and inline
   ko-locale dictionaries/fallbacks (e.g. `shared/lib/{format,clipboard,cron}`), plus test assertions
-  on that ko output, plus an agent-eval stimulus whose language IS the fixture. Each one is argued and listed
-  individually in `scripts/check-language-policy.mjs`, never by directory. The Korean is always an input under
-  test, never the repository's own prose.
+  on that ko output. Each one is listed individually in `scripts/check-language-policy.mjs`, never by
+  directory. The Korean is always an input under test, never the repository's own prose.
 - Web UI strings → **message catalogs** (`ko`/`en`), never hardcoded in components (see `docs/web.md`).
 - Conversation with the maintainer stays Korean (preference); repo artifacts do not.
 
@@ -58,30 +48,20 @@ neighbour. The two times this skill failed are in `.claude/skills/code-review/re
 
 ⚠️ `biome check --write` does NOT apply Biome's **unsafe** fixes and exits 0 anyway, so a file can come back
 from it reporting success and still fail `pnpm lint`. Running the formatter is not evidence; `pnpm lint` after
-it is. (It lives here, not only in rule `ci`, because that rule is injected while you EDIT and this question is
-asked before anything is touched.)
+it is.
 
-**Before ANY `git push`: `pnpm ci:local`** — the five commands plus every bespoke check under `scripts/`, the
-self-contained web job and full-history gitleaks. It stamps `.git/everdict-ci-ok` on a clean green tree, and a
-PreToolUse hook denies unstamped pushes. **There is NO remote CI** (every workflow was deleted on 2026-09-11,
-C3 in `docs/sdlc/declared-limits.md`): `ci:local` IS the pipeline and there is no run to watch after a push.
-Never push red. Rule `ci` is the pushed short form, skill `ci` the recipe, `docs/sdlc/gates.md` the why.
+**No CI runs anywhere.** Every GitHub Actions workflow was deleted on 2026-09-11 and there is no local pipeline
+or push hook either: the five commands above, plus the check under `scripts/` for what a change touches
+(`pnpm run` lists them — `swallowed-reads`, `untrusted-ingress`, `web-imports`, `docs-check`, …), are the
+evidence there is.
 
-**`ci:local` does NOT run the trust suite**, and **skipping is the local default**. Two env vars, deliberately
+**`pnpm test` does NOT run the trust suite**, and **skipping is the local default**. Two env vars, deliberately
 separate (`apps/api/src/trust/trust-context.ts`): `EVERDICT_TRUST_SUITE=1` runs the suite AT ALL — absent,
 every `*.trust.test.ts` is `describe.skip` and vitest exits 0 — while `EVERDICT_TRUST_DATABASE_URL` (and the
 S3/ClickHouse vars) only select which infrastructure a scenario drives once inside that gate. A scenario that
 skipped certified NOTHING, and a skip and a pass are the same exit code. `pnpm trust-fast` carries the required
-subset and `pnpm trust-full` the whole tree; `pnpm trust-certified` (inside `ci:local`) reports how long it has
-been and what has changed since.
-
-## The change chain — `docs/sdlc/intent/` before code
-A change whose *why* someone else would have to reconstruct starts as
-`docs/sdlc/intent/<YYYY-MM-DD>-<slug>/intent.md`, gains a `plan.md` **in a later commit**, and closes with
-`Status: shipped` + `Shipped: <sha>`. An accepted intent has a `spec.md` (`pnpm design`) or one line declining
-it — `Design: none — <why>`. `pnpm intent-chain` asks git for that ordering, because a plan written after the
-diff reads exactly like one written before it. A one-line fix needs none; the test is whether the reason
-survives in the commit message alone. See `docs/sdlc/intent/README.md`.
+subset against throwaway containers and `pnpm trust-full` the whole tree; `pnpm trust-certified` reports how
+long since anything certified and what has changed since (`docs/trust-certification.md`).
 
 ## Architecture — one-way dependency, by concern
 ```
@@ -152,7 +132,7 @@ to look at reads exactly like coverage, and the failure is silent for as long as
 ## Key principles
 1. **Read first, code second — NO EXCEPTIONS.**
 2. **Quality is non-negotiable** — format/lint/typecheck/test/build all green.
-3. **Skills and docs travel with the code** — a change to a convention/invariant updates the matching skill *in the same PR*, and a change to a file a document anchors updates that document or declares `Docs-unchanged: <doc> — <why>` (`pnpm doc-anchors`).
+3. **Skills and docs travel with the code** — a change to a convention/invariant updates the matching skill *in the same PR*, and a change that makes a product document false updates the document (its `anchors:` name the files it describes).
 4. **Reinterpret, don't copy** — proven idioms from prior codebases are adapted to TS, not transplanted verbatim; note the source idea when non-obvious.
 5. **New top-level domains pass the trust gate** — a new domain enters the spine only if it strengthens the
    trust harness (execution→evidence→measurement→verdict→regression→reproduction) or the owner protocol;
@@ -162,6 +142,4 @@ to look at reads exactly like coverage, and the failure is silent for as long as
 
 ## Commits
 Conventional Commits, scoped: `feat(drivers): ...`, `fix(runner): ...`. Body explains the *why*.
-Every `fix:` ships a regression test that fails on the pre-fix code — `pnpm fix-proof` reads the first half (a
-fix under `packages/**`/`apps/**` carries a `*.test.ts`, or declares `Regression-test: none — <why>` in its body)
-and `pnpm ci:commits` proves the second (the test is RED with the source reverted to the parent).
+Every `fix:` ships a regression test that fails on the pre-fix code.

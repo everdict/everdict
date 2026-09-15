@@ -1,11 +1,9 @@
 # Convention system — the map
 
-Everdict's build knowledge is split by **how the knowledge fails**, not by topic. Three layers, one guard.
-
-The two below are the CONVENTION layers, and they are what the guards police. The third is `docs/` — the
-RECORD layer, whose failure is a different one: not a convention forgotten or a context missed, but a reason
-lost, so the same argument is had again. Choosing between the three is skill `documenting`; it is a choice,
-and writing into all three is how they diverge.
+Everdict's build knowledge for THIS codebase is split by **how the knowledge fails**, not by topic: rules
+(pushed while you edit) and skills (pulled when you need them), with `docs/` as the product's record layer —
+reasons and design records. How the work itself is planned, reviewed and remembered is not kept in this
+repository: it accumulates in Everdict (`docs/architecture/development-system-of-record.md`).
 
 | | PUSH — `.claude/rules/*.md` | PULL — `.claude/skills/*/` |
 |---|---|---|
@@ -14,7 +12,7 @@ and writing into all three is how they diverge.
 | Failure mode it prevents | a convention nobody remembers at the moment of editing | a design decided without the context that already exists |
 | Size | thin (~20–40 lines): the non-default rules inline, plus a pointer to the skill. Incident history is a record and goes to `docs/` | slim `SKILL.md` (≤~100 lines) + `references/` for depth |
 
-**Two CI-required checks keep this map honest**, because a rule is documentation the MODEL reads: it arrives
+**Two checks keep this map honest**, because a rule is documentation the MODEL reads: it arrives
 by a glob at the moment of editing, and nobody is reading it deliberately enough to notice that it went stale.
 `pnpm docs-check` verifies that every repo path a rule or skill cites still exists (the same predicate it
 applies to `docs/**` — widening it found 29 dead paths across 7 skills) AND that every backticked symbol is
@@ -33,7 +31,7 @@ two reviews after it was deleted). A name that is gone may still be written — 
 
 ---
 
-## PUSH — the 28 rules, by what they govern
+## PUSH — the 27 rules, by what they govern
 
 **Always on** (repo-wide, so they stay short)
 - `typescript` `**/*.ts` — no `any`, no `!`, no silent nullable defaults; Zod at every boundary; `AppError`
@@ -41,9 +39,6 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `testing` `**/*.test.ts` — Vitest idioms, and the **vacuous-pass rules**: a counterexample is seen RED *for
   the stated reason*, a fixture comes from the production builder and must actually reach the predicate, a
   deleted subject re-proves its tests by mutation, an empty `describe` fails the suite.
-- `ci` `**/*` — never push before `pnpm ci:local` is green; the pre-push hook enforces it and the stamps a push
-  owes; what a green gate does not say (skipped trust scenarios, unsafe Biome fixes). There is nothing to
-  confirm after a push. Why each control exists is `docs/sdlc/gates.md`, not the rule.
 
 **The cross-cutting one**
 - `protocol` — the **five laws** for the seam between a decision and an effect, pushed across the kernel and
@@ -82,19 +77,12 @@ two reviews after it was deleted). A name that is gone may still be written — 
 
 ---
 
-## PULL — the 19 skills, by what they answer
+## PULL — the 16 skills, by what they answer
 
-- `code-review/` — **how to review**: the seven passes a diff cannot do (authorship / blast radius / the
-  neighbour you now lean on / composition of bounds / adversarial counterexample / adapter certification and
-  atomicity / stop-on-passes), the two measured failures that produced them, and the report shape. Fires on
-  any review request.
 - `protocol/` — **effects and authority**: the five laws in full, the design checklist to run BEFORE writing
   an effect path, the **case law** (every recurring defect with file, line, and the wrong reasoning verbatim),
   the **corollaries** the rule indexes by heading, and the verification protocol (mutation-first, non-vacuous
   fixtures, when a scanner is legitimate).
-- `documenting/` — **which layer knowledge goes in**: a doc, a rule or a skill, chosen by the failure each
-  one prevents; what a design record owes (the alternative it rejected, counted rather than adjectival); and
-  the three things the gates above cannot see. Read before writing or moving any of the three.
 - `foundation/` — module dependencies, the spine, the error model, repo-wide conventions.
 - `core-contracts/` — the interfaces, Zod schemas and `AppError` model in `packages/contracts` (the dependency
   root) and the kernel in `packages/domain`.
@@ -116,44 +104,25 @@ two reviews after it was deleted). A name that is gone may still be written — 
 - `agent-runtime/` — the agent kernel: `runAgentLoop`, `ToolDefinition`/`ToolRegistry`, the envelope + consent
   gates, sub-agents, MCP bridging.
 - `testing/` — Vitest, fake-injection units, `buildServer`+`inject`, env-gated live E2E (no Testcontainers).
-- `ci/` — the push gate: `pnpm ci:local` is the whole pipeline (there is no remote CI), the stamps a push owes,
-  the trust suite the gate does not run, and the failure protocol.
 
 ---
 
-## Must-hold policies, and what enforces each
+## Product invariants, and the check that refuses each
 
-A skill is advisory: nothing forces a session to comply, and the AI-native SDLC playbook says so outright.
-Every policy that must ALWAYS hold therefore has a pair — the skill or rule that teaches it, and the gate or
-hook that refuses its absence. This table is that pairing, and `pnpm controls-documented` reads it: a row
-whose enforcer is not a script in `package.json` (or a hook file in the tree) fails the gate, because a
-policy whose named enforcer is gone is back to being advisory with a table that says otherwise.
+A rule or skill is advisory; each invariant below also has a check under `scripts/` that fails when it breaks.
+Run the one a change touches; none of them runs on its own.
 
-| Policy | Taught by | Enforced by |
+| Invariant | Taught by | Checked by |
 |---|---|---|
-| never push before the full local gate is green, every commit in the push | skill `ci`, rule `ci` | `scripts/hooks/pre-push-gate.mjs` · `pnpm guardrails` |
-| the configuration that steers the agent is regression-tested before it ships | skill `ci`, `scripts/evals/README.md` | `pnpm agent-evals` (stamp) · the eval arm of the push hook |
-| product code gets the same review every time | skill `code-review`, `REVIEW.md` | `pnpm review` (stamp) · the review arm of the push hook |
-| a release tag needs a committed authorization | `docs/sdlc/releases/README.md` | the release arm of the push hook |
-| a change starts as an intent, and a plan descends from it | `docs/sdlc/intent/README.md`, skill `documenting` | `pnpm intent-chain` |
-| an accepted intent is designed or declines the pass in one line | `docs/sdlc/intent/README.md` | `pnpm intent-chain` · `pnpm design` |
-| every fix ships a test that was red on the pre-fix code | skill `testing`, CLAUDE.md | `pnpm fix-proof` · the proof in `pnpm ci:commits` |
-| a failed read is a third value, never an empty result | skill `protocol`, rule `protocol` | `pnpm swallowed-reads` · `pnpm gated-doors` · `pnpm scan` |
-| a field the platform authors is not read off a producer's document | skill `protocol`, rule `protocol` | `pnpm untrusted-ingress` · `pnpm authz-optional` · `pnpm scan` |
-| a scanner states the vocabulary it watches, and it must be live | rule `ci` | `pnpm scanner-watches` · `pnpm convention-harness` |
-| every control that exists is named by the conventions | rule `ci`, this file | `pnpm controls-documented` |
-| a lesson that says it produced an eval case has one | `docs/sdlc/lessons/README.md` | `pnpm lesson-evals` |
-| a change that makes an anchored document false updates it or says why not | skill `documenting`, rule `ci` | `pnpm doc-anchors` · the documentation pass in `REVIEW.md` |
+| a failed read is a third value, never an empty result | skill `protocol`, rule `protocol` | `pnpm swallowed-reads` · `pnpm gated-doors` |
+| a field the platform authors is not read off a producer's document | skill `protocol`, rule `protocol` | `pnpm untrusted-ingress` · `pnpm authz-optional` |
+| a protocol's test goes red when the protocol is removed | rule `protocol`, rule `testing` | `pnpm protocol-mutations --only <rung>` · `pnpm mutation-leak` |
+| a scanner states the vocabulary it watches, and it must be live | this file | `pnpm scanner-watches` |
 | a rule reaches live paths and a skill has a description to match on | this file | `pnpm convention-harness` · `pnpm docs-check` |
 | the web app imports nothing from the runtime | rule `web`, skill `web` | `pnpm web-imports` · `pnpm web-reach` |
 | the job runner's dependency cone is closed | rule `job-runner` | `pnpm cone` · `pnpm import-cycles` |
 | the source is English; Korean is product data under test | CLAUDE.md | `pnpm language-policy` |
-| a breach of a control band files an intent before the push proceeds | rule `ci` | `pnpm watch-bands` (dry-run in `pnpm ci:local`) |
-
-Not paired, and said so: the protocol laws' mutation gate (`pnpm protocol-mutations`) is author-run since
-2026-08-29 — ninety minutes of real builds per push was the cost that switched it off — so L1/L4/L5 are
-taught by the skill and read only by `pnpm scan` on its rotation. That is coverage, not a gate, and the row
-is absent from the table on purpose.
+| a trust scenario that skipped certified nothing | rule `testing`, CLAUDE.md | `pnpm trust-fast` · `pnpm trust-certified` |
 
 ## Working rules for this map
 

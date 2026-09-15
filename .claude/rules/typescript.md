@@ -57,7 +57,7 @@ Non-default rules — see skill `foundation` for rationale.
   `TrajectoryStore.usage` broke two `apps/api` doubles — and both times the working tree said green. Nine
   ports currently carry hand-written doubles in more than one package, so it is the default hazard of
   touching one rather than a rarity.
-  What answers the question is a build from CLEAN: `pnpm ci:commits` (a throwaway worktree per commit) or
+  What answers the question is a build from CLEAN: a throwaway worktree (`git worktree add`) or
   `rm -rf packages/*/dist apps/*/dist && pnpm build`. An incremental `pnpm typecheck` in a long-lived working
   tree is evidence about the contract that was BUILT, not the one in the file.
 - **Model a decision as a discriminated union, never `{ value?: T; ok: boolean }`.** A caller can read the

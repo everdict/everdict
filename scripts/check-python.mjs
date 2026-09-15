@@ -67,13 +67,13 @@ const SELF_TESTS = ["examples/bundles/spreadsheetbench/scripts/sbench_position.p
 
 // Test files this gate cannot run, each with the module it is missing and what closing it costs. The value
 // is the import that fails FIRST; any other failure from these files is a real violation, not a gap.
-// ⚠️ THIS LIST WAS FIVE ENTRIES AND 477 LINES, AND THREE OF THEM NEEDED NOTHING. `docs/sdlc/intent/2026-09-05-
-// python-suites-that-have-never-run` was filed against this list: every one of those files looked like
+// ⚠️ THIS LIST WAS FIVE ENTRIES AND 477 LINES, AND THREE OF THEM NEEDED NOTHING. The intent
+// `2026-09-05-python-suites-that-have-never-run` was filed against this list: every one of those files looked like
 // coverage and none had ever been executed by anything. Reading what each actually imports split them
 // cleanly — the published client used pytest for one thing (`pytest.raises`, eight lines of `contextlib`),
 // the registry suite imports only stdlib-reachable modules, and four of the launch suite's five claims need
 // no dependency at all. Those now RUN, on every `pnpm python`, with nothing but the interpreter — the same
-// move `sbench_pairing.py` made, and the reason `pnpm ci:local` still works on a clean checkout.
+// move `sbench_pairing.py` made, and the reason `pnpm python` still works on a clean checkout.
 //
 // What is left is the half that genuinely needs the example server's declared dependencies (fastapi, httpx,
 // psutil). Installing them is a decision about CI minutes and about somebody's machine, and a gate that ran

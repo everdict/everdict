@@ -6,7 +6,7 @@ the same artifact — and a reader opening `clients/python/` saw a `tests/` dire
 was tested. `pnpm python` runs each `test_*.py` by EXECUTING it, so the file collects and runs its own
 functions at the bottom, and the only thing pytest was ever used for (`pytest.raises`) is eight lines of
 `contextlib` here. That is the same move `sbench_pairing.py` made for the staging decision: standard-library
-only, so the counterexamples need nothing but python3 and `pnpm ci:local` stays runnable on a clean checkout.
+only, so the counterexamples need nothing but python3 and `pnpm python` stays runnable on a clean checkout.
 """
 
 import contextlib

@@ -1,9 +1,10 @@
 ---
 kind: decision
 title: "Repository layout — the root holds products, docs hold records, and rules stay thin"
-status: accepted
+status: superseded
+superseded-by: architecture/sdlc-out-of-the-repository.md
 updated: 2026-09-15
-anchors: [scripts/check-docs.mjs, scripts/check-intent-chain.mjs, scripts/hooks/gate-decision.mjs, scripts/check-controls-documented.mjs]
+anchors: [scripts/check-docs.mjs]
 ---
 # Repository layout — the root holds products, docs hold records, and rules stay thin
 

@@ -545,7 +545,7 @@ describe("StoreRunnerHub — a claim mints its attempt inside the claim", () => 
     // must not both be true, so the claim itself is undone.
     //
     // ⚠️ THE WAIT BUDGET IS NOT A STATEMENT ABOUT THIS CODE. It used to be 50ms, and a `leaseWait` that
-    // expires resolves `null` instead of rejecting — so under `pnpm ci:commits`, which builds and tests every
+    // expires resolves `null` instead of rejecting — so on a loaded machine building and testing every
     // package at once, this failed as `promise resolved "null" instead of rejecting`, which reads as "the
     // rollback did not throw" and sends the next reader into the hub. The number was about how loaded the
     // machine is, exactly as `apps/api/vitest.config.ts` records for the route suites.

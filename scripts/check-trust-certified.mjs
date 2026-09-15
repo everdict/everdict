@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `pnpm trust-certified` — how many trust scenarios this push has NOT certified, and when anything last did.
+// `pnpm trust-certified` — how many trust scenarios this tree has NOT certified, and when anything last did.
 //
 // ── THE INCIDENT ─────────────────────────────────────────────────────────────────────────────────────
 //
@@ -9,21 +9,18 @@
 // hold. All six shipped, and stayed red for days.
 //
 // Nothing here could see it, and not by accident: `*.trust.test.ts` gates on `EVERDICT_TRUST_SUITE === "1"`,
-// so `pnpm test` reports them SKIPPED and exits 0, `pnpm ci:local` boots no Postgres/MinIO/ClickHouse by
-// design, and `pnpm ci:commits` skips them once per commit. The one thing that runs them is the `trust-fast`
-// workflow — which was `disabled_manually` from 2026-08-21 and DELETED with every other workflow on 2026-09-11
-// (`docs/sdlc/declared-limits.md` C3). `.claude/rules/ci.md` has carried the warning — *"a
-// trust scenario that SKIPS is not a passing one, and locally that is the default"* — the whole time, and
-// prose is what it was. See `docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`.
+// so `pnpm test` reports them SKIPPED and exits 0, and no local command boots Postgres/MinIO/ClickHouse for
+// them. The one thing that ran them was the `trust-fast` workflow — `disabled_manually` from 2026-08-21 and
+// DELETED with every other workflow on 2026-09-11. The warning — *"a trust scenario that SKIPS is not a passing
+// one, and locally that is the default"* — was written down the whole time, and prose is what it was.
 //
 // ── WHAT THIS DOES, AND WHAT IT DELIBERATELY DOES NOT ────────────────────────────────────────────────
 //
-// It does NOT run them. Booting three containers inside the push gate is the cost the maintainer chose not to
-// pay, and a gate that needs infrastructure it cannot start teaches people to bypass gates.
+// It does NOT run them — that is `pnpm trust-fast`, against three throwaway containers.
 //
-// It also does NOT fail. Same reason: `ci:local` cannot certify these, so refusing the push would make the
-// only available move a bypass. What it refuses is that **skipped and passed look alike** in the summary a
-// person actually reads. It prints the count, the last certification's sha and date, and — the number that
+// It also does NOT fail on an old or missing certification: nothing that reads it can certify these, so a
+// refusal would only teach a bypass. What it refuses is that **skipped and passed look alike** in the summary
+// a person actually reads. It prints the count, the last certification's sha and date, and — the number that
 // matters — which files in the certified scope have CHANGED since, because those are the scenarios standing
 // on evidence that no longer describes them.
 //
@@ -44,8 +41,8 @@ const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" })
 // ── THE SCOPE IS `pnpm trust-fast`'S OWN, READ RATHER THAN RESTATED ──────────────────────────────────
 //
 // It used to be parsed out of `.github/workflows/trust-fast.yml`, which was the SSOT while a workflow ran it.
-// The workflows were DELETED on 2026-09-11 (declared-limits C3 — remote CI is not merely off, it is gone, and
-// the trust suite is run locally when it is needed), so the scope moved to the command a person actually
+// The workflows were DELETED on 2026-09-11 (remote CI is not merely off, it is gone, and the trust suite is
+// run locally when it is needed), so the scope moved to the command a person actually
 // types. Same discipline either way: a second copy here would drift the way every second copy in this
 // repository has drifted (rule `protocol` L3), and it would drift SILENTLY — the count below would go on
 // looking authoritative while describing a different population.
@@ -101,11 +98,11 @@ const gitDir = git("rev-parse", "--absolute-git-dir");
 const commonDir = path.resolve(root, git("rev-parse", "--git-common-dir"));
 const marker = [gitDir, commonDir].map((d) => path.join(d, "everdict-trust-ok")).find((f) => existsSync(f));
 
-console.log("▶ trust certification — NOT run here (three containers; declared-limits C3)");
+console.log("▶ trust certification — NOT run here (it needs three containers; run `pnpm trust-fast`)");
 console.log(`  ${files.length} scenario file(s) in the required check's scope: ${scope.join(" ")}`);
 
 const RECIPE =
-  "  run it: docs/trust-certification.md, or `.claude/rules/ci.md`'s EVERDICT_TRUST_* recipe against throwaway containers.";
+  "  run it: docs/trust-certification.md — `pnpm trust-fast` with the EVERDICT_TRUST_* variables, against throwaway containers.";
 
 if (!marker) {
   console.log(
@@ -120,8 +117,7 @@ const [sha, at, executed, ...certifiedScope] = readFileSync(marker, "utf8").trim
 const days = at ? Math.floor((Date.now() - Date.parse(at)) / 86_400_000) : undefined;
 // ANCESTOR, not merely present. `cat-file -e` answers yes for an object the repository still holds and no
 // ref reaches — which is every commit a history rewrite orphaned, and this session rewrote its own twice.
-// A certification of a commit this branch does not descend from says nothing about this tree; same predicate
-// `scripts/review/run.mjs` uses to decide whether a stamp may be resumed from.
+// A certification of a commit this branch does not descend from says nothing about this tree.
 const known =
   sha !== undefined && spawnSync("git", ["merge-base", "--is-ancestor", sha, "HEAD"], { cwd: root }).status === 0;
 console.log(

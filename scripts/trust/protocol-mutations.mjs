@@ -12,6 +12,28 @@
 //
 // Every mutation is reverted in a `finally`, and the script refuses to start on a dirty worktree for those
 // files — an interrupted run must never leave a neutered guard behind.
+// ── OPERATING IT — WHAT A PERSON RUNNING THIS MUST KNOW ──────────────────────────────────────────────
+//
+// It is AUTHOR-RUN, not a gate: a full pass is ~90 minutes of real builds and suites. Run the rung you added or
+// moved with `--only <substring>` (seconds); `--shard <i>/<n>` splits a full pass. Unrecognised flags refuse.
+//
+// ⚠️ IT MUTATES PRODUCTION FILES WHILE IT RUNS. Stage by explicit file list, never a directory, and read back
+// `git diff --cached --name-only` before committing beside it (`pnpm mutation-leak` catches what slips). A
+// KILLED run leaves its in-flight mutation in the tree, because a `finally` does not run on a kill: after
+// stopping it for any reason, `git diff HEAD --name-only` and restore what it names.
+//
+// ⚠️ NEVER `import()` THIS FILE to see whether it parses — importing runs it. `node --check` never executes.
+//
+// A RED TEST PROCESS IS NOT A RED ASSERTION. A failed pre-test build, a failed restore-build, or a
+// `pnpm -F <renamed>` that matches nothing and exits 0 all look like enforcement; builds are consumed
+// (`rebuildOrThrow`) and every rung's build target is checked against the workspace at startup.
+//
+// THE TWO KINDS OF UNCOMPILABLE RUNG. When a neutralized tree does not compile, read the `tsc` error:
+//   · the TYPE SYSTEM refuses — the mutation defeats a narrowing or drops a `| undefined` guard, so the
+//     consumer stops compiling. That is enforcement stronger than a red suite: declare `compilerEnforced: true`.
+//   · the compiler objects to the SHAPE of the mutation — an unused import or local, an untyped `= []`, a
+//     property the type never had. That is not the protocol: rewrite `to:` so it builds (`void <symbol>;`,
+//     a typed empty) and let the SUITE refuse. Declaring this kind `compilerEnforced` certifies nothing.
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
@@ -2804,8 +2826,8 @@ const MUTATIONS = [
     // trace, not showing it", while the re-score path in the same file passed the flag with a comment saying
     // why. Neutralizing the exact collector back to the plain one is that defect exactly.
     // Aimed at the DEFINITION rather than the call site: neutralizing the call would leave an unused import
-    // and the tree would not build, which says nothing about the protocol (rule `ci`, the uncompilable-rung
-    // split). Here the removal is exactly "stop asking for the bytes", and it compiles.
+    // and the tree would not build, which says nothing about the protocol (the two kinds of uncompilable rung,
+    // in the header). Here the removal is exactly "stop asking for the bytes", and it compiles.
     name: "payload offload — the owned-trace scorecard judges the preview",
     file: "packages/application-control/src/ports/trajectory-store.ts",
     from: "  return collectTrajectoryEvents(store, tenant, runId, { ...window, resolve: true });",
@@ -3220,7 +3242,7 @@ const MUTATIONS = [
     file: "packages/application-control/src/evolution/campaign-service.ts",
     from: '    if (parentOperation?.code !== undefined && parentOperation.code.state !== "merged")',
     // `state` is `owed | merged`, so excluding both is a condition that never fires and still type-checks — the
-    // SUITE is what refuses, not the compiler (rule `ci`, the two kinds of uncompilable rung).
+    // SUITE is what refuses, not the compiler (the two kinds of uncompilable rung, in the header).
     to: '    if (parentOperation?.code !== undefined && parentOperation.code.state !== "merged" && parentOperation.code.state !== "owed")',
     build: "@everdict/application-control",
     suite: ["--root", "packages/db", "src/evolution/campaign-store.test.ts"],
@@ -3767,8 +3789,8 @@ const MUTATIONS = [
 // ⚠️ AN UNKNOWN FLAG RAN THE WHOLE SUITE IN SILENCE (arch-review 111). `--filter <name>` — a plausible spelling
 // of the flag below, and not the one this script has — was accepted without comment and the run became a full
 // one: ninety minutes instead of one rung, mutating files the author was editing at the time, and an answer to
-// a question nobody asked. The tool said nothing, and nothing is not confirmation (rule `ci`, the same shape as
-// `biome check --write` exiting 0 over unapplied fixes). Anything not recognised here is now a refusal.
+// a question nobody asked. The tool said nothing, and nothing is not confirmation (the same shape as `biome check --write`
+// exiting 0 over unapplied fixes). Anything not recognised here is now a refusal.
 const ARGS = process.argv.slice(2);
 const KNOWN_FLAGS = new Set(["--only", "--shard"]);
 for (let i = 0; i < ARGS.length; i++) {

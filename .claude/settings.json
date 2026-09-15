@@ -21,41 +21,5 @@
       "Bash(curl *)",
       "Bash(wget *)"
     ]
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/pre-push-gate.mjs\"",
-            "timeout": 10,
-            "statusMessage": "pre-push CI parity gate"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/scripts/telemetry/ensure-sink.mjs\"",
-            "timeout": 10,
-            "statusMessage": "telemetry sink"
-          }
-        ]
-      }
-    ]
-  },
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "OTEL_METRICS_EXPORTER": "otlp",
-    "OTEL_LOGS_EXPORTER": "otlp",
-    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/json",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318",
-    "OTEL_LOG_TOOL_DETAILS": "1",
-    "OTEL_METRIC_EXPORT_INTERVAL": "10000"
   }
 }

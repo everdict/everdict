@@ -36,7 +36,7 @@ hardest possible starting point, because the endpoints that time out are mostly 
    rows away, the filter is in the wrong place — and the cost of the screen then grows with everything the
    workspace has ever done rather than with what it is showing.
 3. **A bounded page followed by an unbounded step is unbounded.** Read what happens AFTER every limit with
-   that limit in force (skill `code-review`, pass 4).
+   that limit in force.
 4. **A background lane gets its own POOL, never a longer deadline on the shared one.** Raising
    `statement_timeout` to accommodate a sweep hands that allowance to every request handler.
    Where a sweep's statements can be scoped to fit the ordinary deadline instead, that is better still: it

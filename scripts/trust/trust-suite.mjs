@@ -191,18 +191,16 @@ if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMM
 
 // ── A CERTIFICATION THAT LEAVES NO TRACE CANNOT BE MISSED ────────────────────────────────────────────
 //
-// These scenarios gate on `EVERDICT_TRUST_SUITE=1`, so `pnpm test` SKIPS them and exits 0, `pnpm ci:local`
-// boots no database by design, and `pnpm ci:commits` skips them once per commit. The one thing that runs them
-// is the `trust-fast` workflow — and every workflow in this repository has been `disabled_manually` since
-// 2026-08-21 (declared-limits C3). So a change shipped with six certifications red and nothing anywhere could
-// say how long it had been since anything ran them
-// (`docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md`).
+// These scenarios gate on `EVERDICT_TRUST_SUITE=1`, so `pnpm test` SKIPS them and exits 0, and no other local
+// command boots a database for them. The one thing that ran them was the `trust-fast` workflow — deleted with
+// every workflow in this repository. So a change shipped with six certifications red and nothing anywhere could
+// say how long it had been since anything ran them.
 //
 // A PASS therefore records WHAT it certified and WHERE: `pnpm trust-certified` reads this back and reports the
-// gap on every `ci:local`, so "skipped" and "passed" stop looking alike in the summary a person actually reads.
+// gap, so "skipped" and "passed" stop looking alike in the summary a person actually reads.
 // Written on PASS only — a failed or skipped run certifies nothing and must not move the marker forward.
-// Both the worktree's git dir and the COMMON one, for the reason `ci-local.mjs` gives: a linked worktree's
-// `.git` is a file, and the reader looks in the shared repository.
+// Both the worktree's git dir and the COMMON one: a linked worktree's `.git` is a file, and the reader looks in
+// the shared repository.
 if (certified) {
   const head = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
   const dirOf = (flag) => spawnSync("git", ["rev-parse", flag], { encoding: "utf8" }).stdout.trim();

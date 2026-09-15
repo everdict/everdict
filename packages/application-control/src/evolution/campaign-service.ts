@@ -245,7 +245,7 @@ function sideOf(
 // be open at the close for anything to be lost.
 //
 // It is stated rather than papered over with a clock, and it is FILED rather than only stated:
-// `docs/sdlc/intent/2026-09-11-a-reservation-and-its-batch-are-one-durable-act/`. Two candidate repairs, and choosing
+// intent `2026-09-11-a-reservation-and-its-batch-are-one-durable-act` (removed from the tree; in git at a958dc36). Two candidate repairs, and choosing
 // between them is the design pass — the reservation and the batch row commit together (which needs a
 // transaction seam neither store has: `PgScorecardStore.create` is a single data-modifying CTE, and
 // `reserveInFamily` reads a family and enforces a budget before it writes, so it cannot become one), or an

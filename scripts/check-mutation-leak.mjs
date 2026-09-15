@@ -2,17 +2,17 @@
 // ── A COMMIT MAY NOT CARRY A NEUTRALIZED PROTOCOL (arch-review 112) ─────────────────────────────────
 //
 // `pnpm protocol-mutations` writes one neutralization at a time into a production file and reverts it in a
-// `finally`. Rule `ci` already warns that a killed run leaves its in-flight mutation in the tree; what it does
-// not cover is the run that is alive and WORKING while somebody commits beside it. The gate's own guard —
+// `finally`. A killed run leaves its in-flight mutation in the tree, and that is warned about; what the warning
+// does not cover is the run that is alive and WORKING while somebody commits beside it. The gate's own guard —
 // refusing to start on a dirty worktree — protects the gate, not the author: between two rungs the tree is
 // clean, and while a rung is in flight it is dirty in a file the author never opened.
 //
 // That is how `cdef2c2a` shipped `const state = "written" as const; void evaluateRef;` — the arch-review 70 P1
 // defect, put back — in a commit about something else entirely. It took a history rewrite of two commits to
-// remove, because `pnpm ci:commits` runs lint+typecheck+test on EVERY commit ahead of the remote and a rung
+// remove, because the per-commit gate of the time ran the suites on EVERY commit ahead of the remote and a rung
 // exists precisely so that its suite goes red: the batch was unpushable until the leak was gone.
 //
-// `ci:commits` would have caught it, eventually, slowly. This is the same question asked in two seconds, from
+// A per-commit test run catches it eventually, slowly. This is the same question asked in two seconds, from
 // the text the rungs already declare, so the answer arrives while the author still remembers what they staged.
 //
 // It compares each commit's ADDED lines against every rung's `to:` replacement. The rung definition file is
@@ -60,7 +60,7 @@ const joined = [...source.matchAll(/^\s*to:\s*\[([\s\S]*?)\]\.join\("\\n"\)/gm)]
 const replacements = [...single, ...joined]
   .map((text) => text.trim())
   // A fingerprint has to be long enough to mean something. `to: "false"` is a rung too, and matching it would
-  // flag every commit that writes the word — a check that cries wolf is one nobody reads (rule `ci`).
+  // flag every commit that writes the word — a check that cries wolf is one nobody reads.
   .filter((text) => text.length > 18);
 
 if (single.length + joined.length < declared) {
@@ -95,8 +95,8 @@ for (const commit of commits) {
   //
   // The correct code contains `baselineSpecDigest !== undefined &&`, whose prefix IS the replacement — so the
   // commit that INTRODUCED that guard was reported as carrying its own neutralization, permanently, and no
-  // later commit could clear it. A gate that fires on correct code is worse than no gate: rule `ci` says a
-  // failure blocks the push, so the only paths left are a history rewrite that removes a real guard, or
+  // later commit could clear it. A gate that fires on correct code is worse than no gate: a failure blocks the
+  // change, so the only paths left are a history rewrite that removes a real guard, or
   // learning to bypass the gate.
   //
   // Comparing LINES keeps the multi-line fingerprint the `+`-stripping exists for, and `&&` at the end of a

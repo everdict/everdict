@@ -68,7 +68,7 @@ so `curl -f` fails instead of piping an error page into `sh`. `renderRunnerInsta
 ## Publishing binaries
 
 ⚠️ The `cli-v*` release workflow that built the binaries on a three-OS matrix and attached them to a GitHub Release
-was DELETED on 2026-09-11 with every other workflow (declared-limits C3, `docs/sdlc/declared-limits.md`). The
+was DELETED on 2026-09-11 with every other workflow. The
 installer still downloads from `releases/latest`, so it works only once the assets under the names above have been
 built with `package:runner` on each platform and uploaded to a release by hand.
 

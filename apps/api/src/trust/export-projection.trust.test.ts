@@ -15,8 +15,8 @@ import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-co
 // time; a settlement can be perfectly recorded and still be invisible.
 //
 // This is the shape of check that catches it: a real database, a real schema, and the three writes in the
-// order that matters. `pnpm ci:local` boots no database on purpose, so this scenario lives in the
-// `trust fast (real Postgres)` lane, which is a required check.
+// order that matters. `pnpm test` boots no database on purpose, so this scenario lives in the
+// `pnpm trust-fast` lane (real Postgres).
 //
 // RED as of 26147830, observed:
 //   error: column "export" does not exist

@@ -12,12 +12,13 @@ discipline that closes the gap, written from three suites that were green over t
    helper threw proves nothing about the invariant. If the message does not describe the defect, the fixture
    is wrong — fix the fixture, not the assertion.
 3. **Make the change.** Un-skip / flip the counterexample to green.
-4. **Neutralize the protocol and require RED.** `pnpm protocol-mutations --only <rung>` (author-run; it was
-   removed from `ci:local` and CI on 2026-08-29 for cost, so nothing checks that you did) — it edits one production file to
+4. **Neutralize the protocol and require RED.** `pnpm protocol-mutations --only <rung>` (author-run; no gate
+   runs it, so nothing checks that you did) — it edits one production file to
    remove the protocol, runs the owning suite, requires red, and reverts in a `finally`. Add the mutation for
    your new protocol in the same change. A mutation whose target line no longer exists **fails**, so a deleted
    subject can never silently stop being tested.
-5. **Delete the escape hatch** (see rule `protocol` L1–L5). Then `pnpm ci:local`, then push, then confirm green.
+5. **Delete the escape hatch** (see rule `protocol` L1–L5). Then the essential commands in `CLAUDE.md`, and
+   `pnpm trust-fast` when a trust scenario is the subject.
 
 ## The three ways a test goes vacuous
 
@@ -95,8 +96,8 @@ For any derived collection (receipts, outcomes, handles, effects):
 ## Layer-specific notes
 - **Postgres semantics that matter to a protocol** (zero-row updates, claim/lease expiry, CTE snapshot
   visibility) are NOT provable against the fake `SqlClient` — that asserts SQL text. Put them in
-  `apps/api/src/trust/*.trust.test.ts`, which runs against a real database and is a required check
-  (`trust fast (real Postgres)`); `pnpm ci:local` deliberately boots no database and cannot pre-run it.
+  `apps/api/src/trust/*.trust.test.ts`, which runs against a real database under
+  `pnpm trust-fast`; `pnpm test` boots no database and skips them.
 - **`apps/api` trust scenarios that boot the built artifact** (e.g. TRUST-127 spawns `apps/api/dist/main.js`)
   need `pnpm build --filter @everdict/api` first — a source-only fix runs the old binary and reports red.
 - **Adapter semantics** (what Nomad answers on a 5xx, what K8s answers on a 404) belong in the shared

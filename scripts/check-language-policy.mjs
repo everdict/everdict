@@ -54,17 +54,6 @@ const KO_LOCALE = [
   "apps/web/src/shared/lib/format.ts",
   "apps/web/src/shared/lib/clipboard.ts",
   "apps/web/src/shared/lib/cron.ts",
-  // ONE agent-eval case, named, not the directory. The language IS the fixture here: `english-only-source`
-  // asks in Korean whether a Korean source comment is acceptable, and the correct answer is that it is not.
-  // Translating the prompt would delete the case — an English request for a Korean comment tests a trigger
-  // this repository's maintainer does not produce. Same category as the ko test assertions the policy already
-  // exempts: the Korean is the input under test, never the repository's own prose.
-  //
-  // ⚠️ The first version of this entry read `scripts/evals/cases`, exempting the whole directory — so any later case
-  // that picked up Hangul by accident would have passed silently. It was caught by `pnpm review` on its first
-  // real run: a change entirely about tightening a ratchet had quietly widened another one. Each further
-  // stimulus case is argued and listed here on its own line.
-  "scripts/evals/cases/english-only-source.json",
 ];
 const isKoLocale = (file) => KO_LOCALE.some((p) => file === p || file.startsWith(`${p}/`));
 

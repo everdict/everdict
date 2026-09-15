@@ -17,8 +17,8 @@ import { TRUST_PG_ENABLED, type TrustPg, openTrustPg, trustId } from "./trust-co
 //
 // That is a defect no unit test could reach. The in-memory twin has no `PARENT_AUTHORIZES` to take the wrong
 // branch of, and a fake `SqlClient` answers whatever it is asked. The claim is about a SQL predicate against
-// a real schema, so this scenario lives in the `trust fast (real Postgres)` lane, which is a required check
-// and which `pnpm ci:local` deliberately cannot cover.
+// a real schema, so this scenario lives in the `pnpm trust-fast` lane (real Postgres), which `pnpm test`
+// deliberately cannot cover.
 //
 // Both directions matter here. The reservation must SUCCEED under a live batch (that is the fix), and it must
 // still be REFUSED once the batch is settled (that is what the guard is for, and a fix that bought the first

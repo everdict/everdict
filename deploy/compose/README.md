@@ -104,10 +104,9 @@ The four server images are built from one commit but versioned separately: a git
 one version.
 
 ⚠️ **NOTHING PUBLISHES THEM AUTOMATICALLY ANY MORE.** The `images` workflow that watched these tags was
-deleted on 2026-09-11 with every other GitHub Actions workflow (`docs/sdlc/declared-limits.md`
-C3). Pushing one of the tags below builds and publishes NOTHING; the table is the naming contract a manual
-`docker buildx build --push` has to honour, not a description of something that runs. The `docs/sdlc/releases/<tag>.md`
-authorization gate is unaffected and still refuses a tag push without one.
+deleted on 2026-09-11 with every other GitHub Actions workflow. Pushing one of the tags below builds and
+publishes NOTHING; the table is the naming contract a manual `docker buildx build --push` has to honour, not a
+description of something that runs.
 
 | tag | publishes |
 |---|---|

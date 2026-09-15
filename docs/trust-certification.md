@@ -21,20 +21,19 @@ restore is not today's policy. A replica that stopped answering is not a replica
 budget is not a budget.
 
 - ⚠️ **Where it runs: A PERSON'S MACHINE.** Both workflows that used to run this — a nightly full pass and a
-  per-push subset — were DELETED on 2026-09-11 along with every other GitHub Actions workflow
-  (`docs/sdlc/declared-limits.md` C3). Nothing runs this on a schedule or on a push any more.
+  per-push subset — were DELETED on 2026-09-11 along with every other GitHub Actions workflow, and there is
+  no local pipeline either. Nothing runs this on a schedule or on a push.
   What survives is the two commands, and the scope that used to live in the yml now lives in them:
   - **`pnpm trust-fast`** — the subset that needs a real Postgres, object store and ClickHouse
     (`apps/api/src/trust` minus the Temporal files, plus `packages` and `apps/agent`).
   - **`pnpm trust-full`** — the whole tree, which is what the deleted nightly ran; Temporal additionally needs
     `EVERDICT_TRUST_TEMPORAL`.
-  - **`pnpm trust-certified`**, inside `pnpm ci:local`, is the only thing that now NOTICES: it reports how
-    long it has been since anything certified and which files in scope have changed since. It does not run
-    the suite and does not fail on it, so reading its line is the whole mechanism.
+  - **`pnpm trust-certified`** is the only thing that NOTICES, when somebody runs it: it reports how long it
+    has been since anything certified and which files in scope have changed since. It does not run the suite
+    and does not fail on it, so reading its line is the whole mechanism.
 - **What that costs, stated rather than implied**: certifying invariants only when somebody remembers means
-  certifying them after the change that broke them shipped. That already happened once —
-  `docs/sdlc/lessons/2026-09-10-five-certifications-went-red-and-pnpm-test-said-green.md` — and it is the reason
-  `trust-certified` exists.
+  certifying them after the change that broke them shipped. That already happened once — six certifications went
+  red while `pnpm test` said green (2026-09-10) — and it is the reason `trust-certified` exists.
 - **The subset that used to gate a push** was a required check on every push and pull request, because
   certifying invariants only at 03:00 meant certifying them after the change that broke them merged. MinIO
   joined it in arch-review 68 for that reason: four consecutive reviews had repaired the two-phase case's
@@ -360,7 +359,7 @@ EVERDICT_TRUST_DATABASE_URL=postgresql://everdict:PASSWORD@127.0.0.1:5435/everdi
 The env vars are deliberately two:
 
 - `EVERDICT_TRUST_SUITE=1` — run the trust suite at all. Without it every trust file skips, which is what
-  keeps `pnpm test` (and therefore the push gate) fast.
+  keeps `pnpm test` fast.
 - `EVERDICT_TRUST_DATABASE_URL` — the database the Pg-backed scenarios drive. Falls back to `DATABASE_URL`.
 - `EVERDICT_TRUST_CLICKHOUSE_URL` — the ClickHouse the engine-level trajectory scenarios drive (TRUST-192),
   e.g. `http://127.0.0.1:8123`.
@@ -407,13 +406,12 @@ EVERDICT_E2E_S3_ACCESS_KEY=… EVERDICT_E2E_S3_SECRET_KEY=… \
   silently no-ops when a key is missing is exactly the false green the suite exists to prevent.
 - **Other operating systems.** Nothing runs any test on Windows or macOS any more: the nightly Windows lane
   (`@everdict/contracts`, `@everdict/domain`, `@everdict/self-hosted-runner` on `windows-latest`) and the release
-  workflows' macOS builds were deleted with every other workflow (`docs/sdlc/declared-limits.md` C3).
+  workflows' macOS builds were deleted with every other workflow.
 
-## Why the suite is not in `pnpm ci:local`
+## Why the suite is not in `pnpm test`
 
-`scripts/ci-local.mjs` is the push gate, and its value is that it is fast enough that nobody is tempted to work
-around it, so it does not require a database before every push. It runs `pnpm trust-certified` instead, which
-reports staleness and fails nothing. Reproducing a certification means pointing `EVERDICT_TRUST_DATABASE_URL`,
+`pnpm test` has to stay fast enough that nobody is tempted to skip it, so it does not require a database.
+`pnpm trust-certified` reports staleness and fails nothing. Reproducing a certification means pointing `EVERDICT_TRUST_DATABASE_URL`,
 `EVERDICT_TRUST_S3_*` and `EVERDICT_TRUST_CLICKHOUSE_URL` at throwaway services and running `pnpm trust-fast`
 (or `pnpm trust-full`, which also wants a Temporal). The subset's scope is a PATH PREFIX rather than a file list,
 so a trust scenario added under `apps/api/src/trust`, `packages` or `apps/agent` is in scope from the moment it
@@ -450,8 +448,8 @@ in-process one certifies nothing. All of them have landed:
 
 Several rules here are conditions a call site must remember, and every review in this series found one of them
 forgotten somewhere new. A guard that lives only in a comment is a guard that will be missing from the next
-writer, so the recurring ones are now scanned in `pnpm test` — the push gate, not the trust suite, because they
-are about code that has not shipped yet.
+writer, so the recurring ones are now scanned in `pnpm test` — not in the trust suite, because they are about code
+that has not shipped yet.
 
 | Guard | What it refuses | Where |
 | --- | --- | --- |

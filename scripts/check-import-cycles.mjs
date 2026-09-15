@@ -40,7 +40,7 @@ const ROOTS = [
 // shortcut re-bases every path it prints (`domain/src/…` instead of `packages/domain/src/…`) — which would
 // rewrite all sixteen baseline entries for a speed change, and a baseline that moves for a reason other than
 // a repaid debt is a ratchet nobody can read. So the roots stay separate and are merely no longer serialized:
-// this was 52.6s and the single largest step in `pnpm ci:local`, against ~2.7s of actual work per root.
+// this was 52.6s and the single largest step in the local gate of the time, against ~2.7s of actual work per root.
 async function cyclesIn(root) {
   // madge prints `1) a.ts > b.ts` per cycle; anything else (headers, the "no circular" line) is noise.
   // ⚠️ madge EXITS 1 when it finds cycles, which is its whole job — so a plain throw-on-non-zero would throw

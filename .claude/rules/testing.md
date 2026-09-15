@@ -27,7 +27,7 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
 - **A deleted or refactored subject re-proves its tests by MUTATION, not by staying green.** An assertion like
   "X was not called" becomes vacuously true the moment X stops existing. After any deletion, run
   `pnpm protocol-mutations --only <the rung>`; a protocol that stays green under its own neutralization has
-  lost its test. No gate runs this any more (see rule `ci`) — the author does, and `--only` takes seconds.
+  lost its test. No gate runs this — the author does, and `--only` takes seconds.
 - **A BARE `.rejects.toThrow()` CANNOT TELL A REFUSAL FROM THE CRASH A MISSING REFUSAL CAUSES.** A guard's
   counterexample asserts that the call rejects; delete the guard and the next line reads a field off the row
   that is not there, so the call rejects with a `TypeError` and the counterexample is GREEN over a protocol

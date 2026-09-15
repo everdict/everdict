@@ -41,5 +41,3 @@ __pycache__/
 # A private key in git is a real secret, not a fixture — the gitleaks gate would be right to stop it.
 deploy/compose/certs/
 
-# Agent-eval transcripts — one JSON per case, rewritten on every run.
-scripts/evals/.results/

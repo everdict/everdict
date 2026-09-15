@@ -11,7 +11,8 @@ Every document in this tree is listed here. Conventions (single source of truth)
 
 > **Two audiences, one tree.** [`guide/`](guide/README.md) is the product documentation — written for
 > someone *using* Everdict. Everything else here is maintainer-facing: reference pages, design records,
-> runbooks, and [`harness/`](sdlc/README.md) — how this repository itself is built and gated. Every
+> runbooks. How the work on this repository is planned, reviewed and remembered is not documented here — it
+> accumulates in Everdict ([architecture/sdlc-out-of-the-repository.md](architecture/sdlc-out-of-the-repository.md)). Every
 > document declares which of four kinds it is — see [architecture/document-kinds.md](architecture/document-kinds.md). Nothing is published outside this
 > repository: [architecture/docs-site-removal.md](architecture/docs-site-removal.md).
 
@@ -29,16 +30,6 @@ Every document in this tree is listed here. Conventions (single source of truth)
 - [architecture/collaboration.md](architecture/collaboration.md) — module collaboration diagrams (Mermaid): bird's-eye dependency/eval-loop/control-plane + one detailed diagram per package & app
 - [architecture/execution-scoring-orchestration.md](architecture/execution-scoring-orchestration.md) — the three concerns, and why they stay apart
 - [architecture/evolution-program-gap-map.md](architecture/evolution-program-gap-map.md) — the four-pillar program (define any harness · one identity + seeds on the version · honest benchmarks + exact evidence · routed evolution), what holds, and the spec that closes each gap
-- [sdlc/README.md](sdlc/README.md) — **the SDLC harness**: how this repository is built, gated and remembered — what lives in `.claude/`, `scripts/` and `docs/sdlc/`
-- [sdlc/gates.md](sdlc/gates.md) — the gate catalog: every control, what it refuses, and the incident behind it
-- [sdlc/intent/README.md](sdlc/intent/README.md) — where a change starts: the `intent.md` → `plan.md` chain, and the commit ordering `pnpm intent-chain` enforces
-- [sdlc/lessons/README.md](sdlc/lessons/README.md) — what an incident taught, in the four sentences no diff records
-- [sdlc/releases/README.md](sdlc/releases/README.md) — the authorization a release tag needs before it may leave, and why it is committed rather than kept locally
-- [sdlc/declared-limits.md](sdlc/declared-limits.md) — the five harness clauses this deployment cannot satisfy and the one it declines — why, what their absence does NOT mean, and what reopens each
-- [sdlc/observability.md](sdlc/observability.md) — what the harness can see about ITSELF: the three ledgers in `.git/`, the eval history, and the session facts only telemetry can answer
-- [sdlc/drill-certificates.md](sdlc/drill-certificates.md) — what was tried against the controls and what happened: the dated removal / reconstruction / containment certificates the audit reads, expiring at ninety days
-- [sdlc/finding-dispositions.md](sdlc/finding-dispositions.md) · [sdlc/scan-dismissals.md](sdlc/scan-dismissals.md) — the two committed ledgers: what happened to each reviewer/scanner finding, and which scan findings were dismissed and why
-- [scripts/evals/README.md](https://github.com/everdict/everdict/blob/main/scripts/evals/README.md) — the regression suite over the configuration that steers the agent, its removal drill, and what five runs of calibration found
 - [dev.md](dev.md) — local development: Postgres + Keycloak + control-plane API + web hot-reload (`scripts/dev/up.sh`)
 
 ## Surfaces
@@ -237,7 +228,8 @@ Every document in this tree is listed here. Conventions (single source of truth)
 ## The documentation itself
 - [architecture/document-kinds.md](architecture/document-kinds.md) — the four kinds a document can be (wiki · decision · spec · runbook), what each owes, and how each is allowed to change
 - [architecture/docs-site-removal.md](architecture/docs-site-removal.md) — documentation ships in this repository; the published site was removed as a duplicate surface
-- [architecture/repository-layout.md](architecture/repository-layout.md) — the root holds products, `docs/` holds records (the harness's included), `scripts/` holds tools, and rules stay thin — what moved on 2026-09-15, what was rejected, and what it cost
+- [architecture/sdlc-out-of-the-repository.md](architecture/sdlc-out-of-the-repository.md) — the development process left the repository on 2026-09-15: what was removed, what stays, what is no longer enforced, and how accumulating it in Everdict will be verified
+- [architecture/repository-layout.md](architecture/repository-layout.md) — *(superseded)* the root folded to 11 directories with the process records under `docs/sdlc/`, kept for its measured rejections
 - [architecture/docs-site.md](architecture/docs-site.md) — *(superseded)* the plan for the Docusaurus site, kept for §2.0's measured rejection of relocating files
 
 ## Internals — historical design records

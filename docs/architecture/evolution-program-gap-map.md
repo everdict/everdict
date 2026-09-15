@@ -150,7 +150,7 @@ wizard's third source kind), and BrowseComp and WebArena ship as adapters that d
 approximate, enforced for every adapter by a test.
 
 Landed 2026-09-03, after a `trust-fast` run against a real Postgres and a real object store (the lane
-`pnpm ci:local` cannot reach) found three reds — two from this program's own commits and one older: the
+the local gate of the time could not reach) found three reds — two from this program's own commits and one older: the
 dataset doors' image advice; `docs/architecture/world-and-engagement-model.md`, which models the case space
 evolution has to support and names the two axes the domain was missing; and every slice of it that can be
 landed honestly — an environment carries its world's BYTES and its build RECIPE (a campaign builds the world
