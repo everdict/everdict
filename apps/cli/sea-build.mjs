@@ -1,7 +1,8 @@
 // Turn the esbuild bundle into a standalone Node SEA (Single Executable Application) binary — a real
 // `everdict-runner` executable with node baked in, so a headless host needs NEITHER everdict NOR node.
-// Run AFTER `pnpm bundle` (needs bundle/everdict-runner.cjs). Cross-platform: run once per OS in the release
-// matrix (.github/workflows/cli-release.yml). Design: docs/architecture/runner-distribution.md.
+// Run AFTER `pnpm bundle` (needs bundle/everdict-runner.cjs). Cross-platform: run once per OS. The cli-release
+// workflow that ran it on a 3-OS matrix was DELETED on 2026-09-11, so the binaries are now built by hand
+// (`pnpm package:runner` on each OS) and uploaded to a GitHub Release by hand. Design: docs/architecture/runner-distribution.md.
 import { execFileSync } from "node:child_process";
 import { copyFileSync, readFileSync } from "node:fs";
 import { inject } from "postject";

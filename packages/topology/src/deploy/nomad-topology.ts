@@ -136,8 +136,8 @@ export interface NomadTopologyOptions {
   // covers. One per registry host, so a topology may pull from several. docs/architecture/managed-image-store.md
   registryAuths?: RegistryAuth[];
   // The address `host.docker.internal` resolves to (the docker-host gateway a service uses to reach a host-local model
-  // gateway etc.). Default `host-gateway` = the Docker-CLI magic keyword (the DockerDriver path); a Nomad docker driver
-  // that doesn't translate that keyword can override with the concrete bridge-gateway IP (e.g. "172.17.0.1"). See gap 5.
+  // gateway etc.). A concrete IP only (e.g. the bridge gateway "172.17.0.1"): unset, or the Docker-CLI `host-gateway`
+  // keyword, renders no alias, because Nomad's docker driver rejects the keyword — see `serviceConfig`. See gap 5.
   hostGatewayAddr?: string;
   // Per-store effective tuning, overriding what would be resolved from `spec.dependencies`. Needed by the pool/silo
   // builders that route a SYNTHESIZED spec through buildDependencyGroups (so the real purpose is supplied here): pool =

@@ -1,6 +1,8 @@
 // The `curl … | sh` bootstrap for a headless host that has NEITHER everdict NOR node: the control plane serves
 // `GET /install.sh?token=…`, which renders `renderRunnerInstallScript` — it downloads the standalone `everdict-runner`
-// binary (built by the cli-release workflow, S2) matching the host's OS/arch and installs + pairs in one paste.
+// binary matching the host's OS/arch and installs + pairs in one paste. The cli-release workflow (S2) that built and
+// published those binaries was DELETED on 2026-09-11; they are now built by hand (`pnpm package:runner` in apps/cli, on
+// each OS) and uploaded to the release by hand, so this installer works only once that has been done.
 // `renderRunnerInstallCommand` is the one-liner the register dialog shows. Design: docs/architecture/runner-distribution.md.
 
 // A pairing token is `rnr_` + base64url (A–Z a–z 0–9 _ -). Reject anything else BEFORE embedding it in a served shell

@@ -36,15 +36,13 @@ export const PLATFORM_EVENT_KINDS = [
   "harness.registered",
   "dataset.registered",
   "judge.registered",
-  // Ownership moved between teams. A capability's owning team decides who may change it and (for a private
-  // team) who may see it at all, so a transfer is workspace-shaping news in the way a rename is not — the same
-  // split the issue aggregate makes between `update` and `issue.moved`. Subject is the entity (a harness
-  // TEMPLATE transfer carries `subject.type: "harness_template"` under the same harness kind), payload carries
-  // `{ from?, to }` teams. Facts, not judgments: the transfer happened; whether it was right is not ours to say.
+  // NOTHING EMITS THESE FOUR KINDS. They recorded an ownership transfer between teams (a capability, or the
+  // scorecard its evidence landed in, re-filed under another team); the team axis was dropped in migrations
+  // 0211/0212, so no transfer exists to report. The kinds are still in the vocabulary, and an event already on the
+  // log still parses only while they are (the store validates `kind` against this list).
   "harness.moved",
   "dataset.moved",
   "judge.moved",
-  // A result batch was re-filed under a different team — the same fact for the evidence a capability produced.
   "scorecard.moved",
   "scorecard.gate.decided", // a release-gate decision was recorded against a candidate (payload: decision/baseline)
   "scorecard.gate.overridden", // a blocking decision was forced through — who and why ride the payload

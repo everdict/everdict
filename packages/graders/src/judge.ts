@@ -309,7 +309,7 @@ export class JudgeGrader implements Grader {
     // The consistency answer is folded into the DURABLE detail (review wave B): JudgeVerdict lives for one
     // call, the Score is what the scorecard stores and an analyst reads — parsed-then-dropped was
     // diagnosable only while the process lived. Prose on detail, deliberately: nothing downstream may
-    // re-derive a decision from it (L3); a gate that wants to weigh it needs the field on the contract.
+    // re-derive a decision from it (L3); a gate that wants to weigh it reads `observationAssessment` below.
     const consistency = verdict.observationConsistency;
     const overall: MeasuredScore = {
       graderId: this.id,

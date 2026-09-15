@@ -54,7 +54,7 @@ function usage(): void {
       "  POST /benchmarks/import (source kind terminal-bench). The [environment] block travels with the task —",
       "  an under-provisioned task reads as an agent that failed (docs/architecture/standard-task-formats.md)",
       "",
-      "everdict image bake <base-ref> [--agent-image <ref>] [--tag <target-ref>]",
+      "everdict image bake <base-ref> [--job-runner-image <ref>] [--tag <target-ref>]",
       "  wrap a BYO eval image with the everdict in-job agent (entrypoint) so it runs on MANAGED",
       "  runtimes (nomad/k8s run the case.image AS the task — it must boot the agent itself)",
       "",

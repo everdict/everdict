@@ -888,8 +888,9 @@ export class CampaignService {
     // rows (its frame passed the same-exam check to open at all), and the family forgot them.
     //
     // So the population is the whole tree the chain's members root: every campaign whose `continues` names a
-    // member, transitively. Read across the tenant WITHOUT the caller's team ceiling on purpose — a private
-    // team's sibling spent the rows just the same, and only a count leaves this function.
+    // member, transitively. Read across the whole tenant, unfiltered by subject — a sibling spent the rows just
+    // the same, and only a count leaves this function. (There is no team ceiling to bypass any more: the team
+    // axis was dropped in migrations 0211/0212.)
     const everyCampaign = await this.deps.store.list(tenant);
     const tree = new Set(seen);
     for (let grew = true; grew; ) {
@@ -1187,8 +1188,8 @@ export class CampaignService {
         ended.detail,
       );
     // The verdict is DERIVED from the production diff. A missing/unfinished/invisible scorecard throws
-    // inside the read (requireSucceeded, under the caller's team ceiling) and the round is refused with that
-    // reason — never logged half-known (L2), never read around the team axis.
+    // inside the read (requireSucceeded, scoped to this tenant) and the round is refused with that
+    // reason — never logged half-known (L2).
     // ── AND IT IS JUDGED AT THE LEVEL THE FRAME PRE-REGISTERED, DIVIDED BY THE FAMILY ──────────────
     //
     // `fdrAlpha` corrects across the CASES of this round — the only family the diff can see. A campaign asks

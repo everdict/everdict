@@ -82,14 +82,15 @@ export interface ReleaseStore {
       expectStatus?: ReleaseStatus;
       expectVersion?: number;
       // WHICH POLICY the decision stood on (mig 0154). `policyDigest` is the precise identity — a content
-      // digest of every series' {key, required, allowNoBaseline} — and `version` is the LEGACY fallback the
-      // store uses only while a product predates the column. The version alone conflated content, policy and
+      // digest of every series' {key, required, allowNoBaseline}. The version alone conflated content, policy and
       // sync-watermark revisions in one counter, so a background sweep could conflict a ship its policy had
       // nothing to do with.
       // BOTH digests (mig 0154 + 0160): the governance policy AND the evaluation definition a decision stood
       // on. The policy digest was narrowed to governance so a rename stops conflicting a ship, which left
       // "which dataset/harness/judges does this series ask" unguarded — and a ship resolves exactly that.
-      // `version` remains the legacy fallback for a product written before either column existed.
+      // `version` is still carried but no store consults it: the legacy version fallback for a product written
+      // before either column existed was removed (arch-review 23, legacy sweep), so a product with a NULL digest
+      // cannot have a ship decided against it.
       expectProduct?: { id: string; version: number; policyDigest: string; definitionDigest: string };
       // THE REST OF THE DECISION'S READ-SET (arch-review 22 P0-1).
       //

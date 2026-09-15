@@ -575,7 +575,8 @@ export function nomadWorld(
   };
 }
 
-// CaseJob → Nomad batch job spec. The job payload is carried in the EVERDICT_CASE_JOB(base64) env.
+// CaseJob → Nomad batch job spec. The job payload is a template rendered into the task directory; the env carries
+// only its path, in EVERDICT_CASE_JOB_FILE (EVERDICT_VERIFIER_JOB_FILE for the verifier).
 export function buildNomadJob(
   job: CaseJob,
   opts: NomadBackendOptions,

@@ -40,8 +40,8 @@ CI test.
    It pairs a new workspace-shared Everdict runner, mints a **short-lived** GitHub registration token via the App
    installation, and returns `installScript`, `workflowHint` (`runs-on` label + run-eval `runtime`),
    `runtimeTarget` and `registrationExpiresAt`. The App not being installed on the owner is a `404`.
-   `scripts/live/github-self-hosted-runner.mjs` predates the App and still calls the removed Connected-accounts
-   API (`GET /connections`), so it fails at its first request — use one of the entry points above.
+   `scripts/live/github-self-hosted-runner.mjs` drives the same `POST /workspace/runners/github-install` for a live
+   check (`HOST` optional) and points back at this runbook when the App is not installed.
 
 2. **Run the install script on the build server (GitHub side — manual).** It configures `actions/runner`
    (`config.sh`, with `--runnergroup` for org runners) **and** starts `everdict runner --pair …` — both workers on

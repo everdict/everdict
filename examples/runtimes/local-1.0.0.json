@@ -2,6 +2,6 @@
   "kind": "local",
   "id": "local",
   "version": "1.0.0",
-  "description": "first-party shared runtime — in-process execution on the control-plane host (dev only). For 'run on my machine', use a self-hosted runner (personally owned, on the account page). No external credentials needed.",
+  "description": "first-party shared runtime — in-process execution on the control-plane host (dev only). For 'run on my machine', use a self-hosted runner (personally owned, paired on the Runtimes page under 'Connect my machine'). No external credentials needed.",
   "tags": ["shared", "dev"]
 }

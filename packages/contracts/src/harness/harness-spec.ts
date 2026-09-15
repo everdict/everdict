@@ -357,7 +357,8 @@ export type ObservationDelivery = z.infer<typeof ObservationDeliverySchema>;
 // Target acquisition strategy (B2) — how the target environment is obtained. Unset = provision (current: the runtime spins up a per-case browser container).
 // service = open the session API of a declared topology service and map response fields to wiring coordinates, close on dispose.
 // → expresses a harness that has its own session browser (playwright-server/Browserbase-style) without an Everdict container.
-// The open request body/header templates are follow-up (together with front-door request.headers). Design: docs/architecture/target-acquisition-generalization.md.
+// The open request body/header templates are follow-up (front-door `request.headers` — FrontDoorRequestSchema — has shipped;
+// acquire.open still sends no body or headers). Design: docs/architecture/target-acquisition-generalization.md.
 export const TargetAcquireSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("provision") }),
   z.object({

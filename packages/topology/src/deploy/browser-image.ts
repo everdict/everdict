@@ -5,8 +5,10 @@
 //
 // PINNED BY DIGEST (infra rule: ban `:latest`, reproducible at pull time). This digest is
 // `chromedp/headless-shell:latest`'s multi-arch (linux/amd64 + arm64) manifest index as of 2026-07-17. To bump:
-// re-resolve `docker buildx imagetools inspect chromedp/headless-shell:latest`, update the digest here, then re-run
-// the mirror workflow (.github/workflows/browser-image.yml).
+// re-resolve `docker buildx imagetools inspect chromedp/headless-shell:latest`, update the digest here, then re-mirror
+// it to GHCR. The browser-image workflow that did the mirroring was DELETED on 2026-09-11, so the mirror is now
+// refreshed by hand (`docker buildx imagetools create --tag ghcr.io/everdict/headless-shell:<tag> <source@digest>`,
+// which is the command that workflow ran — it copies the manifest by reference and preserves the digest).
 //
 // OVERRIDABLE per deployment: `EVERDICT_BROWSER_IMAGE` (the interactive session provisioner) /
 // `RuntimeSpec.browserImage` (the per-case eval browser) — point managed/air-gapped deployments at the GHCR mirror

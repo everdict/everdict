@@ -75,9 +75,10 @@ def main():
         rc, rbody = get(s, f"/{WS}/runs/new")
         run_form = "권한이 없습니다" not in rbody  # member+ may submit (asserts ko-locale UI output — KEEP)
         hc, hbody = get(s, f"/{WS}/harnesses/new")
-        harness_form = "권한이 없습니다" not in hbody  # admin only (asserts ko-locale UI output — KEEP)
+        harness_form = "권한이 없습니다" not in hbody  # viewer+ (asserts ko-locale UI output — KEEP)
 
-        want_harness = role == "admin"
+        # harnesses:register has no role gate (viewer+ in packages/domain/src/auth/authz.ts), so a member gets the form too.
+        want_harness = True
         print(f"           runs/new form:{run_form} (want True)   harnesses/new form:{harness_form} (want {want_harness})")
         if not run_form:
             failures.append(f"{username}: runs/new should allow submit")

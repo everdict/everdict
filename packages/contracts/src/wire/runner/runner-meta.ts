@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// One paired runner's metadata (@everdict/db RunnerMeta). Never carries a token in any form —
+// One paired runner's metadata (the RunnerMeta record, records/runner.ts in this package). Never carries a token in any form —
 // the pairing token is stored as a hash and its plaintext exists only in the pair response.
 export const RunnerMetaSchema = z.object({
   id: z.string(),

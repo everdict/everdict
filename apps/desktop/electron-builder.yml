@@ -1,12 +1,14 @@
-# Packaging — bundle only (no node_modules; see esbuild.mjs). Build/release runs on the CI 3-OS matrix
-# (.github/workflows/desktop-release.yml, tag desktop-v* → GitHub Releases). Currently unsigned —
+# Packaging — bundle only (no node_modules; see esbuild.mjs). The desktop-release GitHub Actions workflow that
+# built this on a 3-OS matrix (tag desktop-v* → GitHub Releases) was DELETED on 2026-09-11; a release is now
+# built by hand (`pnpm package` on each OS) and its assets uploaded to the GitHub Release by hand. Currently unsigned —
 # add signing once certificates are obtained (mac: CSC_LINK/CSC_KEY_PASSWORD + notarize, win: sign config).
 appId: dev.everdict.desktop
 productName: Everdict
 # Auto-update feed (design D6). everdict/everdict is a public repo, so electron-updater reads
 # releases without a token; this block makes electron-builder bundle app-update.yml into the app
 # (which main.ts's resolveAutoUpdater gate detects) and emit a provider-correct latest*.yml.
-# Publishing the assets themselves is done by the release workflow (softprops), so builds use --publish never.
+# Publishing the assets themselves is not electron-builder's job (it was the deleted release workflow's; it is
+# now a manual upload), so builds use --publish never.
 publish:
   provider: github
   owner: everdict

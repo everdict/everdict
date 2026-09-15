@@ -69,9 +69,11 @@ if (un.status !== 401 || !wa.includes("resource_metadata")) fails.push("401-chal
   const sr = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "mcp e2e" } });
   console.log("[alice] submit_run isError:", !!sr.isError, "|", txt(sr).slice(0, 50).replace(/\n/g, " "));
   if (sr.isError) fails.push("alice.submit_run");
+  // harnesses:register has no role gate (viewer+ in packages/domain/src/auth/authz.ts): a member is NOT refused. The
+  // empty spec still fails validation, so the call errors — but for the spec, never as FORBIDDEN.
   const rh = await client.callTool({ name: "register_harness", arguments: { spec: "{}" } });
   console.log("[alice] register_harness isError:", !!rh.isError, "|", txt(rh));
-  if (!rh.isError || !txt(rh).includes("FORBIDDEN")) fails.push("alice.register should be FORBIDDEN");
+  if (txt(rh).includes("FORBIDDEN")) fails.push("alice.register_harness should not be FORBIDDEN (viewer+)");
   await transport.close();
 }
 

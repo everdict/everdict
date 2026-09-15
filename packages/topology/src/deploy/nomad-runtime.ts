@@ -143,8 +143,8 @@ export interface NomadTopologyRuntimeOptions {
   // stores as a dedicated silo (parity with Docker + K8s), false → external (BYO, connect via storeEnv). Mirrors the
   // K8sTopologyRuntime option of the same name.
   provisionDependencies?: boolean;
-  // Override for `host.docker.internal` (gap 5) — default `host-gateway` keyword; a Nomad docker driver that doesn't
-  // translate it takes a concrete bridge-gateway IP (e.g. "172.17.0.1").
+  // The concrete IP `host.docker.internal` resolves to (gap 5), e.g. the bridge gateway "172.17.0.1". Unset (or the
+  // `host-gateway` keyword, which Nomad's docker driver rejects) renders no alias — see `serviceConfig` in nomad-topology.ts.
   hostGatewayAddr?: string;
   // Warm-topology reclamation (A9): tear down warm entries idle past this TTL (default 30 min; <=0 disables).
   warmIdleTtlMs?: number;

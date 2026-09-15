@@ -46,10 +46,11 @@ const topologyConfig = {
   // override this fixed source via the workspace trace-source registry.
   traceSource: TraceSourceSpecSchema.optional(),
   browserImage: z.string().optional(), // per-case browser image (falls back to the runtime default)
-  // The concrete IP `host.docker.internal` maps to inside topology services (the model-gateway alias). Unset =
-  // docker's `host-gateway` keyword. REQUIRED on a Nomad whose docker driver builds /etc/hosts itself (bridge
-  // networking rejects the keyword as "invalid IP address" — live-found: every topology deploy on such a cluster
-  // fails at alloc) and on K8s (hostAliases takes IPs only). e.g. "172.17.0.1" (the docker0 gateway).
+  // The concrete IP `host.docker.internal` maps to inside topology services (the model-gateway alias). The alias is
+  // rendered ONLY for a concrete IP: unset (or docker's `host-gateway` keyword) renders no alias at all on Nomad and
+  // K8s, because Nomad's docker driver rejects the keyword as "invalid IP address" (live-found: every topology
+  // deploy failed at alloc while it was the default) and K8s hostAliases takes IPs only. So set it wherever a
+  // service must reach the host, e.g. "172.17.0.1" (the docker0 gateway).
   hostGatewayAddr: z.string().optional(),
   // Store isolation when there is NO trust zone (single-tenant / dev): true → deploy the topology's declared
   // dependency stores as a dedicated silo, false → external (BYO, reached via the runtime's store env). The

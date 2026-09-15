@@ -3,7 +3,7 @@ import { CaseResultSchema, ScorecardSchema } from "../../execution/eval-case.js"
 import { MeasurementIdentitySchema } from "../../execution/grader.js";
 import { ScorecardOutcomesSchema, ScorecardRecordSchema } from "../../records/scorecard.js";
 
-// Response DTO — a scorecard record (batch eval). The @everdict/db ScorecardRecordSchema is the SSOT shape.
+// Response DTO — a scorecard record (batch eval). ScorecardRecordSchema (records/scorecard.ts, in this package) is the SSOT shape.
 // get() also carries the heavy detail fields (scorecard/steps/runIds/export) — all optional on the record.
 //
 // The detail response additionally carries server-computed derivations (re-architecture P1g) so no

@@ -29,7 +29,6 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
       via: p.via,
       roles: [...p.roles].sort(),
       scopes: p.scopes ? [...p.scopes].sort() : null,
-      teams: [...(p.teams ?? [])].sort(),
       runnerId: p.runnerId,
       evidenceGrant: p.evidenceGrant?.tokenHash,
     });

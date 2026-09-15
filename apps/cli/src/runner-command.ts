@@ -17,7 +17,9 @@ import { loginMountsFor } from "./login-mounts.js";
 export async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const token = flags.get("pair") ?? process.env.EVERDICT_RUNNER_TOKEN;
   if (!token || !token.startsWith("rnr_")) {
-    console.error("✗ --pair <rnr_…> (or EVERDICT_RUNNER_TOKEN) is required — pair a device on the account page.");
+    console.error(
+      "✗ --pair <rnr_…> (or EVERDICT_RUNNER_TOKEN) is required — pair a device on the Runtimes page (/<workspace>/runtimes, 'Connect my machine').",
+    );
     process.exitCode = 1;
     return;
   }

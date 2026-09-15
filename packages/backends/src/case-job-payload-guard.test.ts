@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 
 // ── ONE SERIALIZER, OR THE BOUNDARY IS A CONVENTION (arch-review 56, Wave B) ─────────────────────────
 //
-// A `CaseJob` becomes a dispatch payload by base64-ing it into `EVERDICT_CASE_JOB`, and the harness under
-// evaluation runs inside the container that env belongs to. So the payload is, in practice, readable by the
+// A `CaseJob` becomes a dispatch payload — when this guard was written, base64 in the `EVERDICT_CASE_JOB` env; now
+// a file named by `EVERDICT_CASE_JOB_FILE` — and the harness under evaluation runs inside the container it is
+// delivered to. So the payload is, in practice, readable by the
 // thing being measured — which is why `caseJobPayload` refuses a case whose grading depends on material the
 // agent must not see (an imported task's hidden `tests/` bytes and its verifier credentials).
 //

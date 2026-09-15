@@ -1206,7 +1206,9 @@ const PAYLOAD_ENV = "EVERDICT_JOB_PAYLOAD";
 // The one-field patch that makes an inert Job runnable — see `suspend: true` in the manifest.
 const SUSPEND_OFF = '{"spec":{"suspend":false}}';
 
-// CaseJob → K8s batch Job. The payload is the EVERDICT_CASE_JOB(base64) env. Isolation is runtimeClassName.
+// CaseJob → K8s batch Job. The payload is a file an init container writes into an emptyDir; the agent's env
+// carries only its path, in EVERDICT_CASE_JOB_FILE (EVERDICT_VERIFIER_JOB_FILE for the verifier). Isolation is
+// runtimeClassName.
 export function buildK8sJob(
   job: CaseJob,
   opts: K8sBackendOptions,

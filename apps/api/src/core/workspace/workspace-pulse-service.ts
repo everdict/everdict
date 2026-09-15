@@ -92,13 +92,14 @@ export class WorkspacePulseService {
       this.deps.issues.countByGroup(tenant, "status"),
       // ── EVERY READ HERE IS NARROWED IN THE STORE (perf review) ──────────────────────────────────
       //
-      // This aggregate is the home screen: one request, eleven reads, issued together. Three of them used to
+      // This aggregate is one request, eleven reads, issued together (`GET /workspace/pulse` and its MCP twin; it
+      // was the web home screen's read until the home became the product timeline). Three of them used to
       // be unfiltered — `projects.list(tenant)`, `initiatives.list(tenant)` and `scorecards.list(tenant, {})`
       // — and the narrowing that mattered happened in JavaScript a few lines below (`LIVE_*_STATUSES`,
-      // `batchesBetween`). So the cost of drawing this screen grew with everything the workspace had ever
-      // done, on a connection pool every other route shares, once per page view.
+      // `batchesBetween`). So the cost of answering it grew with everything the workspace had ever
+      // done, on a connection pool every other route shares, once per read.
       //
-      // What the screen actually needs is what the filters now say: the LIVE planning records, and the
+      // What the pulse actually needs is what the filters now say: the LIVE planning records, and the
       // batches of this window plus the one before it (`priorFrom` is the earliest instant `batchesBetween`
       // can return, so nothing is lost — the JS filters below still run, over a set that is already the
       // right size).

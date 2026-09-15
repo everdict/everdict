@@ -55,13 +55,12 @@ function makeDeps(): { deps: McpDeps; agents: InMemoryAgentRegistry; issues: Iss
   return { deps, agents, issues };
 }
 
-async function connect(deps: McpDeps, teams?: string[]): Promise<Client> {
+async function connect(deps: McpDeps): Promise<Client> {
   const principal: Principal = {
     subject: "user-a",
     workspace: "acme",
     roles: ["member"],
     via: "oidc",
-    ...(teams !== undefined ? { teams } : {}),
   };
   const server = buildMcpServer(deps, principal);
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();

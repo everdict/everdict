@@ -11,9 +11,9 @@ import type { ImageManifestInfo } from "./registry-reader.js";
 // "a grant scoped to another workspace's namespace is never minted, so it cannot exist". The invariant is unchanged;
 // only its enforcement point moves from storage to signature. Do not "fix" this back to a bucket per tenant.
 //
-// Implementations: ManagedImageStore (bundled OCI registry + our token server), ByoImageStore (the workspace's own
-// registered registries — today's `WorkspaceSettings.imageRegistries[]`, demoted from the model to one adapter),
-// InMemoryImageStore (dev/test). Design: docs/architecture/managed-image-store.md
+// Implementations: ManagedImageStore (bundled OCI registry + our token server) and InMemoryImageStore (dev/test),
+// both in @everdict/images. There is no BYO adapter: the workspace's own registered registries
+// (`WorkspaceSettings.imageRegistries[]`) are managed by ImageRegistryService, not behind this port. Design: docs/architecture/managed-image-store.md
 export interface WorkspaceImages {
   // The endpoint refs in this store are addressed by — registry host[:port], reachable from EVERY execution node
   // (including a self-hosted runner on a user's machine), so it is an operator-configured URL, not a container name.

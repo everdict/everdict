@@ -411,9 +411,11 @@ export class ProductService {
     //
     // ATOMICALLY (arch-review 12 P1). This used to walk: list releases, delete each, delete versions, delete
     // the product — and across replicas that walk has a gap a `createRelease` can insert into, leaving a
-    // release under a product that no longer exists and that nothing ever collects. The schema has no foreign
-    // keys by choice, which means the aggregate boundary is a transaction's job, and imitating a cascade from
-    // application code is exactly where that obligation went missing.
+    // release under a product that no longer exists and that nothing ever collects. The schema originally had no
+    // foreign keys, which made the aggregate boundary a transaction's job, and imitating a cascade from
+    // application code is exactly where that obligation went missing. Migration 0156 has since made releases and
+    // the version ledger foreign keys to the product (ON DELETE CASCADE), so a child insert also serializes
+    // against this delete.
     await this.deps.store.removeAggregate(tenant, record.id);
   }
 
