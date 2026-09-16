@@ -41,3 +41,6 @@ __pycache__/
 # A private key in git is a real secret, not a fixture — the gitleaks gate would be right to stop it.
 deploy/compose/certs/
 
+
+# The workspace this checkout records into — deployment-specific, like .env (plugin/hooks/session-start.mjs)
+.everdict/
