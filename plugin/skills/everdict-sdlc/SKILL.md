@@ -71,11 +71,16 @@ envelope with no write capability, and a `verified` citing a reference nobody re
 
 ## File what retrieval gave you
 
-`write_file` to `knowledge/retrievals/<YYYY-MM-DD>/<branch-or-topic>.json`:
-`{at, anchors, returned:[{id,title,relation,status}], capped, used:[id…], outcome}`. `returned` is what the
-assembly answered; **`used` is the half only you can know**, and it is what makes "was the anchor enough"
-answerable later instead of arguable. A capped result (20 items) is worth saying so — that is the cap
-deciding what you saw.
+The assembly files what it ANSWERED by itself — its path comes back in your `get_task_context` result as
+`receipt.path`. Beside it, write the half only you can know:
+
+    write_file  knowledge/retrievals/<YYYY-MM-DD>/<sessionId>/used.json
+      { "used": ["<entry id>", …], "outcome": "one line: what the work did with it" }
+
+**An empty `used` is a real answer** and worth writing: it says the workspace had nothing for this work, which
+is the measurement that decides whether this layer is earning its keep. A session that retrieved and then
+said nothing about it **is refused at Stop** — the obligation is created by the answer, not by the question,
+so a session that never asked owes nothing.
 
 ## Close the session by recording
 

@@ -51,6 +51,7 @@ const CHANGED_AND_RECORDED = transcript("changed-and-recorded", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
+  toolUse("mcp__everdict__write_file", { path: "knowledge/retrievals/2026-09-16/s-1/used.json" }),
 ]);
 const COMMITTED_ONLY = transcript("committed-only", [toolUse("Bash", { command: "git commit -m x" })]);
 // A session whose record is its JUDGEMENT rather than a knowledge entry has recorded (the ownership
@@ -60,12 +61,26 @@ const CHANGED_AND_JUDGED = transcript("changed-and-judged", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__publish_checkpoint", { role: "executor" }),
+  toolUse("mcp__everdict__write_file", { path: "knowledge/retrievals/2026-09-16/s-2/used.json" }),
 ]);
 // Recorded, but never ASKED. The two halves fail differently and are repaired differently, so the refusal
 // has to say which one is missing — a session told "record something" when it already did learns nothing.
 const RECORDED_NOT_RETRIEVED = transcript("recorded-not-retrieved", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
+]);
+// Asked, recorded, and never said what any of it was FOR. The obligation is created by the answer: a session
+// that never retrieved owes no `used.json`, which is why the read-only and never-retrieved branches stay green.
+const RETRIEVED_NO_USED = transcript("retrieved-no-used", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
+  toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
+]);
+const USED_FILED = transcript("used-filed", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
+  toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
+  toolUse("mcp__everdict__write_file", { path: "knowledge/retrievals/2026-09-16/s-42/used.json" }),
 ]);
 const READ_ONLY = transcript("read-only", [toolUse("Read", { file_path: "/x/y.ts" })]);
 
@@ -123,6 +138,18 @@ check(
   (out) =>
     blocks(out) && out.reason.includes("without asking what workspace") && !out.reason.includes("recorded nothing"),
   "a block about retrieval only — the recording half was satisfied",
+);
+check(
+  "capture/retrieved but never said what it used → blocked, naming THAT half",
+  run(hooks.capture, { cwd: work, transcript_path: RETRIEVED_NO_USED }, { EVERDICT_WORKSPACE: "acme" }),
+  (out) => blocks(out) && out.reason.includes("never said what it used"),
+  "a block about the used half only",
+);
+check(
+  "capture/used.json filed → allowed",
+  run(hooks.capture, { cwd: work, transcript_path: USED_FILED }, { EVERDICT_WORKSPACE: "acme" }),
+  allows,
+  "no decision — both halves of the retrieval record exist",
 );
 check(
   "capture/read-only session → allowed",
@@ -189,5 +216,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 12 branches — both refusals, allowance, the resolutions and the anchored call`,
+  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 14 branches — three refusals, allowance, the resolutions and the anchored call`,
 );

@@ -158,6 +158,11 @@ every later measurement read like coverage (protocol L2). A read never fails for
 Two authors, two files: the session's `used.json` sits beside the assembly's files and never in them, so a
 transcription can never be mistaken for a stamp.
 
+**And the session's half is gated.** A session that retrieved, changed code and never filed `used.json` is
+refused once at Stop, with its own reason. The obligation is created by the ANSWER rather than the question —
+a session that never asked owes nothing — and an empty `used` is a real answer: "the workspace had nothing
+for this work" is exactly the measurement that decides whether the layer earns its keep.
+
 ### The half that needs no store: an entry names what it was built on
 
 `NODE_TYPES` already contains `knowledge`, so an entry can pin the entry it relied on:

@@ -68,12 +68,20 @@ const CODE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 // not the model was failing without them. A session that changed code having never asked is refused for that
 // reason, separately from having recorded nothing, because they are different failures with different repairs.
 const RETRIEVAL_TOOLS = /^mcp__[^_]*everdict[^_]*__(get_task_context|list_knowledge_entries|get_knowledge_entry)$/;
+// …and the half of the retrieval record only the session can write. The assembly files what it ANSWERED;
+// whether any of it was USED is knowable nowhere else, and it is the measurement that decides every later
+// question about this layer (is an index worth building, which entries are dead weight, does curation help).
+// Asked for at session start, so a session that retrieved and then said nothing about it is a gap with an
+// owner rather than an oversight.
+const WRITE_TOOL = /^mcp__[^_]*everdict[^_]*__write_file$/;
+const USED_PATH = /^knowledge\/retrievals\/[^/]+\/[^/]+\/used\.json$/;
 const RECORDING_TOOLS =
   /^mcp__[^_]*everdict[^_]*__(create_knowledge_entry|create_issue|update_issue|set_issue_status|create_comment|create_task|update_task|open_campaign|log_campaign_round|settle_campaign|campaign_decision|publish_checkpoint|request_verification)$/;
 
 let changedCode = false;
 let recorded = false;
 let retrieved = false;
+let filedUsed = false;
 const transcript = typeof input.transcript_path === "string" ? input.transcript_path : undefined;
 if (transcript && existsSync(transcript)) {
   for (const line of readFileSync(transcript, "utf8").split("\n")) {
@@ -92,11 +100,15 @@ if (transcript && existsSync(transcript)) {
       else if (block.name === "Bash" && /\bgit\s+commit\b/.test(String(block.input?.command ?? ""))) changedCode = true;
       if (RECORDING_TOOLS.test(block.name)) recorded = true;
       if (RETRIEVAL_TOOLS.test(block.name)) retrieved = true;
+      if (WRITE_TOOL.test(block.name) && USED_PATH.test(String(block.input?.path ?? ""))) filedUsed = true;
     }
   }
 }
 
-if (!changedCode || (recorded && retrieved)) allow();
+// A session that never retrieved owes no `used.json` — there is nothing to report using. The obligation is
+// created by the answer, not by the question.
+const owesUsed = retrieved && !filedUsed;
+if (!changedCode || (recorded && retrieved && !owesUsed)) allow();
 
 const breakGlass = process.env.EVERDICT_BREAK_GLASS?.trim();
 if (breakGlass) {
@@ -138,6 +150,21 @@ process.stdout.write(
             "   entry — a refusal someone can read is a decision; silence is not.",
             "",
           ]),
+      ...(owesUsed
+        ? [
+            "This session asked what the workspace knows and never said what it used.",
+            "",
+            "The assembly filed what it ANSWERED — its path came back in the `receipt` of your",
+            "`get_task_context` call. Beside it, write the half only you can know:",
+            "",
+            "    write_file  knowledge/retrievals/<YYYY-MM-DD>/<sessionId>/used.json",
+            '      { "used": ["<entry id>", …], "outcome": "one line: what the work did with it" }',
+            "",
+            "An empty `used` is a real answer and worth writing: it says the workspace had nothing for this work,",
+            "which is the measurement that decides whether the knowledge layer is earning its keep.",
+            "",
+          ]
+        : []),
       "`/everdict:record` walks this. To leave without it, restart with EVERDICT_BREAK_GLASS='<reason>'.",
     ].join("\n"),
   }),
