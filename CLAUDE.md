@@ -53,7 +53,11 @@ it is.
 **No CI runs anywhere.** Every GitHub Actions workflow was deleted on 2026-09-11 and there is no local pipeline
 or push hook either: the five commands above, plus the check under `scripts/` for what a change touches
 (`pnpm run` lists them — `swallowed-reads`, `untrusted-ingress`, `web-imports`, `docs-check`, …), are the
-evidence there is.
+evidence there is. `main`'s branch protection asked for four status checks those workflows used to produce,
+so every push answered "Bypassed rule violations … 4 of 4 required status checks are expected" — a gate that
+could never pass and therefore never blocked, training its readers to skip the line. The required checks were
+removed on 2026-09-17 to match the decision that deleted their workflows; **re-adding one means restoring the
+workflow that produces it in the same change**, or it is decoration again.
 
 **`pnpm test` does NOT run the trust suite**, and **skipping is the local default**. Two env vars, deliberately
 separate (`apps/api/src/trust/trust-context.ts`): `EVERDICT_TRUST_SUITE=1` runs the suite AT ALL — absent,
