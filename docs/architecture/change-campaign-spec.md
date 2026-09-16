@@ -164,6 +164,72 @@ This is the seed's idiom for the other refusals (`Design: none — …`, `Regres
 is a decision someone can read, and silence is not one. "Accepted ≠ gone" (protocol L5) applied to learning:
 a campaign that closes with nothing recorded has not finished, it has only stopped.
 
+## The division of labour — Everdict verifies, the repository's agent builds
+
+The maintainer's stance (2026-09-16): **Everdict supports the AI-SDLC method and holds evaluation and
+verification tightly; the actual build is delegated to an agent running in a repository workspace** (Codex,
+Claude Code, any registered profile).
+
+Everdict already owns the delegation half. `create_sandbox { profile, brief, repo:{git, ref} }` boots a
+profile's image with the repository cloned in; `submit_sandbox_task` sends one turn at a time;
+`read_sandbox_task_trace` shows what the delegate did; `sandbox_exec` runs the repository's own checks; and
+`sandbox_git_push` publishes the branch with a token minted for that one call — a guarded action that pauses
+for a member. The delegation profile's own contract states the relationship: **the delegate is EMPLOYED, not
+under test.**
+
+That distinction is load-bearing here. **The change is the evaluated subject; the builder is not.** Measuring
+the coding agent is a different product (agent benchmarking, which Everdict also does — as a `harness` under a
+frozen frame). Confusing the two turns every ordinary bug fix into an evaluation of Claude Code.
+
+| Concern | Owner |
+|---|---|
+| the request, and the acceptance criteria declared **before** work starts | Everdict |
+| reading the repository, writing the code, running that repository's gates | the delegated agent, in its workspace |
+| what the gates answered, as a **record** rather than a sentence | Everdict |
+| whether the criteria were met, and whether the change may be adopted | Everdict |
+| what the work taught | Everdict (knowledge, pinned to the campaign and the request) |
+
+### What crosses the seam, and in what shape
+
+This is where verification is not yet tight. `delegate_work` instructs the driver to "verify the result
+yourself, then land it … and report with evidence" — so today verification arrives as **prose in a report**,
+and `sandbox_exec` leaves a trace nobody parses. `GatePolicy` / the release gate decision is a verdict over a
+baseline↔candidate **scorecard** comparison; there is no record for "this repository's own gates ran and this
+is what they said".
+
+A `change` campaign's round therefore needs a **gate-run receipt**, declared before and produced after:
+
+```ts
+verification: {
+  declared: [{ id: "test", command: "pnpm test" }, { id: "types", command: "pnpm typecheck" }, …],
+  runs: [{ id, exitCode, startedAt, endedAt, summary?, outputDigest }],
+  criteria: [{ id, statement, met: true | false | "not run" }],
+}
+```
+
+Three properties it owes, each from a law this repository already holds:
+
+- **Declared before, not collected after.** A verification list assembled from whatever happened to run is a
+  description, not a gate (the frozen-frame discipline, applied to a weaker verdict).
+- **"Not run" is a third value, never a pass** (protocol L2). A gate the sandbox could not reach is an
+  escalation field, not silence.
+- **An empty declared list is not a pass** — the repository's own "an empty corpus is not a pass" law. A
+  service that declares no verification says so, and the campaign's verdict states it.
+
+### What must not cross
+
+Authority. A delegate may propose, push a branch, open a pull request and report; **adoption stays with the
+platform**, which is already how `sandbox_git_push` behaves (guarded, pauses for a member) and how a campaign
+adoption is a spendable proof rather than a claim in a report. A verdict a delegate writes about its own work
+is evidence of what it believes, not a decision.
+
+### Why the plugin is the instrument
+
+The record has to be captured where the work happens — inside the delegated agent's session, not in a UI the
+builder never opens. That is what the session-start and Stop hooks are: **Everdict's hand inside the
+builder's workspace**, injecting the service's knowledge before the work and refusing to let the session end
+having recorded nothing after it.
+
 ## What the plugin enforces
 
 Four seams, all of them in the plugin because that is where a coding session actually is:
