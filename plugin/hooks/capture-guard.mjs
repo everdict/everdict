@@ -63,11 +63,17 @@ if (!workspace) allow();
 // partial read can only UNDER-report, and under-reporting a code change means not refusing — the safe
 // direction for a guard that blocks.
 const CODE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+// Asking the workspace what it already knows is the OTHER half, and the one a model skips most reliably:
+// SRA-Bench measured weak need awareness — skills were loaded on roughly the same share of tasks whether or
+// not the model was failing without them. A session that changed code having never asked is refused for that
+// reason, separately from having recorded nothing, because they are different failures with different repairs.
+const RETRIEVAL_TOOLS = /^mcp__[^_]*everdict[^_]*__(get_task_context|list_knowledge_entries|get_knowledge_entry)$/;
 const RECORDING_TOOLS =
   /^mcp__[^_]*everdict[^_]*__(create_knowledge_entry|create_issue|update_issue|set_issue_status|create_comment|create_task|update_task|open_campaign|log_campaign_round|settle_campaign|campaign_decision|publish_checkpoint|request_verification)$/;
 
 let changedCode = false;
 let recorded = false;
+let retrieved = false;
 const transcript = typeof input.transcript_path === "string" ? input.transcript_path : undefined;
 if (transcript && existsSync(transcript)) {
   for (const line of readFileSync(transcript, "utf8").split("\n")) {
@@ -85,17 +91,18 @@ if (transcript && existsSync(transcript)) {
       if (CODE_TOOLS.has(block.name)) changedCode = true;
       else if (block.name === "Bash" && /\bgit\s+commit\b/.test(String(block.input?.command ?? ""))) changedCode = true;
       if (RECORDING_TOOLS.test(block.name)) recorded = true;
+      if (RETRIEVAL_TOOLS.test(block.name)) retrieved = true;
     }
   }
 }
 
-if (!changedCode || recorded) allow();
+if (!changedCode || (recorded && retrieved)) allow();
 
 const breakGlass = process.env.EVERDICT_BREAK_GLASS?.trim();
 if (breakGlass) {
   allow(
-    `everdict: capture guard bypassed — break-glass reason: ${breakGlass}. Nothing about this session is on ` +
-      `the record in workspace '${workspace}'.`,
+    `everdict: capture guard bypassed — break-glass reason: ${breakGlass}. This session's work is not fully ` +
+      `on the record in workspace '${workspace}'.`,
   );
 }
 
@@ -103,18 +110,35 @@ process.stdout.write(
   JSON.stringify({
     decision: "block",
     reason: [
-      `This session changed code but recorded nothing in Everdict (workspace '${workspace}').`,
-      "",
-      "Record it before stopping — the request this served, and what the work taught:",
-      "",
-      "1. `create_issue` (or `update_issue` on the one you worked under) — the request and where it stands.",
-      "2. `create_knowledge_entry` for each durable claim: `decision` (and what it was chosen against),",
-      "   `finding` (a defect's cause, a trap), `convention`. `refs` must name the issue and the repository,",
-      "   so the request is one read away from what it produced.",
-      "3. If there is genuinely nothing to record, say which of the two it is and record THAT as a `context`",
-      "   entry — a refusal someone can read is a decision; silence is not.",
-      "",
-      "`/everdict:record` walks this. To leave without recording, restart with EVERDICT_BREAK_GLASS='<reason>'.",
+      ...(retrieved
+        ? []
+        : [
+            `This session changed code without asking what workspace '${workspace}' already knows.`,
+            "",
+            "Run the anchored call the session opened with — `get_task_context` with the repository (and the",
+            "issue, harness or dataset this work concerns). A convention already decided, a finding that already",
+            "names this trap, a decision you are about to re-argue: reading them is cheaper than rediscovering",
+            "them. Then say, in what you record, which entries you were given and which ones you used.",
+            "",
+          ]),
+      ...(recorded
+        ? []
+        : [
+            `This session changed code but recorded nothing in Everdict (workspace '${workspace}').`,
+            "",
+            "Record it before stopping — the request this served, and what the work taught:",
+            "",
+            "1. `create_issue` (or `update_issue` on the one you worked under) — the request and where it stands.",
+            "2. `create_knowledge_entry` for each durable claim: `decision` (and what it was chosen against),",
+            "   `finding` (a defect's cause, a trap), `convention`. `refs` must name the issue and the repository —",
+            '   and `{type:"knowledge", key}` for every entry you built on, or repetition reads as corroboration.',
+            '3. `publish_checkpoint` (`role: "executor"`) for your judgement: what you claimed, with the evidence',
+            "   you can point at; anything you cannot goes in `hypotheses`.",
+            "4. If there is genuinely nothing to record, say which of the two it is and record THAT as a `context`",
+            "   entry — a refusal someone can read is a decision; silence is not.",
+            "",
+          ]),
+      "`/everdict:record` walks this. To leave without it, restart with EVERDICT_BREAK_GLASS='<reason>'.",
     ].join("\n"),
   }),
 );

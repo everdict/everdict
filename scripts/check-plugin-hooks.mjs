@@ -49,6 +49,7 @@ const toolUse = (name, input = {}) => ({
 const CHANGED_ONLY = transcript("changed-only", [toolUse("Edit", { file_path: "/x/y.ts" })]);
 const CHANGED_AND_RECORDED = transcript("changed-and-recorded", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
 ]);
 const COMMITTED_ONLY = transcript("committed-only", [toolUse("Bash", { command: "git commit -m x" })]);
@@ -57,7 +58,14 @@ const COMMITTED_ONLY = transcript("committed-only", [toolUse("Bash", { command: 
 // recording vocabulary is a regex and a regex that silently stops matching one name looks like a quiet session.
 const CHANGED_AND_JUDGED = transcript("changed-and-judged", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__publish_checkpoint", { role: "executor" }),
+]);
+// Recorded, but never ASKED. The two halves fail differently and are repaired differently, so the refusal
+// has to say which one is missing — a session told "record something" when it already did learns nothing.
+const RECORDED_NOT_RETRIEVED = transcript("recorded-not-retrieved", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
 ]);
 const READ_ONLY = transcript("read-only", [toolUse("Read", { file_path: "/x/y.ts" })]);
 
@@ -108,6 +116,13 @@ check(
   run(hooks.capture, { cwd: work, transcript_path: CHANGED_AND_JUDGED }, { EVERDICT_WORKSPACE: "acme" }),
   allows,
   "no decision (the session filed its judgement)",
+);
+check(
+  "capture/recorded but never asked → blocked, naming the RETRIEVAL half",
+  run(hooks.capture, { cwd: work, transcript_path: RECORDED_NOT_RETRIEVED }, { EVERDICT_WORKSPACE: "acme" }),
+  (out) =>
+    blocks(out) && out.reason.includes("without asking what workspace") && !out.reason.includes("recorded nothing"),
+  "a block about retrieval only — the recording half was satisfied",
 );
 check(
   "capture/read-only session → allowed",
@@ -174,5 +189,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 11 branches — refusal, allowance, both resolutions and the anchored call`,
+  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 12 branches — both refusals, allowance, the resolutions and the anchored call`,
 );

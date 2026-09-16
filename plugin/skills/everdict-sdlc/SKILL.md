@@ -69,6 +69,14 @@ the cost of checking it, call `request_verification` — an independent verifier
 envelope with no write capability, and a `verified` citing a reference nobody read comes back
 `inconclusive` with the gap named.
 
+## File what retrieval gave you
+
+`write_file` to `knowledge/retrievals/<YYYY-MM-DD>/<branch-or-topic>.json`:
+`{at, anchors, returned:[{id,title,relation,status}], capped, used:[id…], outcome}`. `returned` is what the
+assembly answered; **`used` is the half only you can know**, and it is what makes "was the anchor enough"
+answerable later instead of arguable. A capped result (20 items) is worth saying so — that is the cap
+deciding what you saw.
+
 ## Close the session by recording
 
 Write one entry per durable claim, not one per session:

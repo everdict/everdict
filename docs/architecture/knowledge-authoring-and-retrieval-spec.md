@@ -135,8 +135,22 @@ That leaves a fork worth deciding deliberately rather than by habit:
   answer "was the anchor sufficient" and avoids write-on-read on a hot path.
 
 Recommendation: **session-scoped, on the filesystem**, because the question being measured is per session
-("did this session get what it needed") and not per call. Not landed; it is the next slice, and half-building
-it — a record nobody reads — would be worse than none.
+("did this session get what it needed") and not per call.
+
+**Landed (2026-09-16), as far as it can be without a platform surface:**
+
+- the convention — `knowledge/retrievals/<YYYY-MM-DD>/<branch-or-topic>.json` carrying
+  `{at, anchors, returned:[{id,title,relation,status}], capped, used:[id…], outcome}` — asked for by the
+  session-start hook and the `everdict-sdlc` skill;
+- **the read itself is now gated**: the Stop hook refuses a session that changed code and never asked what
+  the workspace knows, with a reason distinct from having recorded nothing, because the two failures are
+  repaired differently. SRA-Bench is why it is a gate rather than advice: models showed weak *need
+  awareness*, loading on roughly the same share of tasks whether or not they were failing without help.
+
+**Still not landed, deliberately:** the platform's own half. `assembleContext` cannot attribute a session
+today — the MCP session id is not plumbed into the service — so "what was returned" is currently transcribed
+by the session rather than stamped by the producer, which is the weaker of the two shapes (protocol L3). The
+receipt belongs at the assembly, and it needs the session identity to get there.
 
 ### The half that needs no store: an entry names what it was built on
 
