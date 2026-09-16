@@ -46,10 +46,12 @@ export interface LineageKnowledge {
   kind: string;
   title: string;
   status: string;
-  // HOW it is reachable from the request — pinned to the issue itself, or to one of its campaigns. Two
-  // different claims: the second only became expressible when `campaign` joined the reference vocabulary.
-  via: "issue" | "campaign";
-  campaignId?: string;
+  // HOW it is reachable from the request — BOTH ways, not the first one found. An entry that pins the issue
+  // AND the campaign is reachable twice, and an earlier version of this returned only "issue" for it: since
+  // the plugin's own skill tells every session to pin the issue, the campaign edge would have been invisible
+  // exactly when it existed. Found by exercising the read against a deployment, never by a unit test that
+  // pinned one ref at a time.
+  reachedBy: { issue: boolean; campaigns: string[] };
 }
 
 // WHAT COULD NOT BE READ, per source. A lineage assembled from optional collaborators must not let "this
@@ -127,8 +129,9 @@ export class IssueLineageService {
     if (knowledgeStore) {
       const campaignIds = new Set(campaigns.map((c) => c.id));
       for (const entry of await knowledgeStore.list(tenant, subject)) {
-        const via = reachFrom(entry, issueId, campaignIds);
-        if (via) knowledge.push({ id: entry.id, kind: entry.kind, title: entry.title, status: entry.status, ...via });
+        const reachedBy = reachFrom(entry, issueId, campaignIds);
+        if (reachedBy.issue || reachedBy.campaigns.length > 0)
+          knowledge.push({ id: entry.id, kind: entry.kind, title: entry.title, status: entry.status, reachedBy });
       }
     }
 
@@ -146,16 +149,16 @@ export class IssueLineageService {
   }
 }
 
-// An entry is reachable from the request directly, or through a campaign the request caused. The campaign
-// edge is the one that only became expressible when `campaign` joined `NODE_TYPES` — before it, what an
-// attempt TAUGHT could be found only if someone had also pinned the issue.
+// An entry is reachable from the request directly, through a campaign the request caused, or both. The
+// campaign edge only became expressible when `campaign` joined `NODE_TYPES` — and it is only VISIBLE because
+// this returns every way in rather than the first.
 function reachFrom(
   entry: KnowledgeEntryRecord,
   issueId: string,
   campaignIds: Set<string>,
-): { via: LineageKnowledge["via"]; campaignId?: string } | undefined {
-  for (const ref of entry.refs) if (ref.type === "issue" && ref.key === issueId) return { via: "issue" };
-  for (const ref of entry.refs)
-    if (ref.type === "campaign" && campaignIds.has(ref.key)) return { via: "campaign", campaignId: ref.key };
-  return undefined;
+): LineageKnowledge["reachedBy"] {
+  return {
+    issue: entry.refs.some((ref) => ref.type === "issue" && ref.key === issueId),
+    campaigns: entry.refs.filter((ref) => ref.type === "campaign" && campaignIds.has(ref.key)).map((ref) => ref.key),
+  };
 }

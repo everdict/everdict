@@ -354,7 +354,11 @@ campaigns are filtered by issue in memory, because that store lists by subject.
    campaign's evidence as heavy as an evaluated one's.
 3. **One campaign per branch, or per issue?** A long-lived branch that serves three issues has no single
    campaign, and forcing one would invent a parent nobody asked for.
-4. **Cross-service atomicity.** A request satisfied only when four services are in has no "half adopted"
+4. **Is one-commit-per-round scoped to the campaign or to the request?** It is implemented per campaign, so
+   two campaigns under one issue can each claim the same commit — and the lineage then shows it twice, which
+   is the ambiguity the rule exists to prevent, one level up. Widening it makes every round append read all of
+   the issue's campaigns first. Seen live on 2026-09-17; recorded rather than guessed at.
+5. **Cross-service atomicity.** A request satisfied only when four services are in has no "half adopted"
    state today. Whether a campaign closes when the last service lands, or each service's change closes
    independently under one campaign, changes what "the issue is resolved" means.
 

@@ -87,23 +87,30 @@ describe("IssueLineageService", () => {
     expect(lineage.changes.every((c) => c.campaignId === "cc-1")).toBe(true);
   });
 
-  it("reaches knowledge pinned to the CAMPAIGN, not only to the issue", async () => {
+  it("reports EVERY way in, not the first — an entry pinning both is reachable both ways", async () => {
     const svc = new IssueLineageService({
       changeCampaigns: { list: async () => [campaign("cc-1", "i-1")] },
       knowledgeEntries: {
         list: async () => [
           entry("k-issue", [{ type: "issue", key: "i-1" }]),
           entry("k-campaign", [{ type: "campaign", key: "cc-1" }]),
+          // The common case, and the one that broke: the plugin's skill tells every session to pin the issue,
+          // so an entry about a campaign almost always pins both. A first-match `via` reported only "issue"
+          // and the campaign edge was invisible exactly where it existed.
+          entry("k-both", [
+            { type: "issue", key: "i-1" },
+            { type: "campaign", key: "cc-1" },
+          ]),
           entry("k-elsewhere", [{ type: "issue", key: "i-9" }]),
         ],
       },
     });
     const lineage = await svc.assemble("acme", "alice", "i-1");
-    expect(lineage.knowledge.map((k) => [k.id, k.via])).toEqual([
-      ["k-issue", "issue"],
-      ["k-campaign", "campaign"],
+    expect(lineage.knowledge.map((k) => [k.id, k.reachedBy.issue, k.reachedBy.campaigns])).toEqual([
+      ["k-issue", true, []],
+      ["k-campaign", false, ["cc-1"]],
+      ["k-both", true, ["cc-1"]],
     ]);
-    expect(lineage.knowledge[1]?.campaignId).toBe("cc-1");
   });
 
   // The failure this exists to prevent: a deployment with no evolution store answering as though the request
