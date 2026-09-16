@@ -27,7 +27,13 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
         },
       },
       ({ refs }) =>
-        run(principal, "scorecards:read", async () => ok(await knowledge.assembleContext(ws, principal.subject, refs))),
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await knowledge.assembleContext(ws, principal.subject, refs, {
+              ...(ctx.sessionId?.() !== undefined ? { sessionId: ctx.sessionId() as string } : {}),
+            }),
+          ),
+        ),
     );
   }
 

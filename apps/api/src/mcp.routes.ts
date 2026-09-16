@@ -109,6 +109,9 @@ export function registerMcpRoutes(app: FastifyInstance, deps: ServerDeps): void 
         // Read at INITIALIZE, which is when a client identifies itself — apps/agent opens one session per
         // conversation, so this labels everything the session authors with that agent + conversation.
         agentAttributionFrom(req.headers),
+        // Lazily, because the id does not exist yet: the transport generates it while handling `initialize`,
+        // which happens after this server is built and connected.
+        () => transport?.sessionId,
       ).connect(transport);
     }
     touch(transport.sessionId); // activity → keep this live session out of the idle sweep

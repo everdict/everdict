@@ -158,8 +158,15 @@ describe("knowledge entries — reified claims", () => {
     const ctx = res.json() as {
       knowledge: Array<{ title: string; relation?: string; coverage?: { state: string } }>;
       skills: Array<{ id: string; relation?: string }>;
+      receipt: { recorded: boolean; reason?: string };
     };
-    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "skills"]);
+    // Three keys since the assembly began filing what it answered, and the outcome travels to HTTP callers
+    // too — a client that cannot tell a deployment which records from one which does not is the thing the
+    // third value exists to prevent. This harness composes no writer, so it is `unconfigured`: the absence of
+    // a writer is checked BEFORE the absence of a session, because with no writer the session is moot.
+    // (The no-session branch is pinned where it is decided — KnowledgeService's own tests.)
+    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "receipt", "skills"]);
+    expect(ctx.receipt).toEqual({ recorded: false, reason: "unconfigured" });
     expect(ctx.knowledge).toHaveLength(1);
     expect(ctx.knowledge[0]?.title).toBe(entryPayload.title);
     expect(ctx.knowledge[0]?.coverage?.state).toBe("behind");

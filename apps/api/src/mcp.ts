@@ -70,14 +70,25 @@ export type { McpDeps, McpToolContext } from "./api/mcp-context.js";
 // MCP composition root — the second transport over the same service core as the HTTP routes.
 // Tool bodies live in the owning resource slice (<domain>/<resource>.mcp.ts, next to <resource>.routes.ts);
 // this file only builds the per-Principal server (stateless per-request instance) and registers each slice's tools.
-export function buildMcpServer(deps: McpDeps, principal: Principal, agent?: AgentAttribution): McpServer {
+export function buildMcpServer(
+  deps: McpDeps,
+  principal: Principal,
+  agent?: AgentAttribution,
+  sessionId?: () => string | undefined,
+): McpServer {
   const server = new McpServer(
     { name: "everdict", version: "0.1.0" },
     { instructions: "Everdict eval control plane. Workspace-scoped run/harness tools." },
   );
   // The session is bound to the caller AND (when declared at initialize) to the agent holding it, so anything the
   // session authors is attributed to that agent rather than looking like the member typed it.
-  const ctx: McpToolContext = { deps, principal, ws: principal.workspace, ...(agent ? { agent } : {}) };
+  const ctx: McpToolContext = {
+    deps,
+    principal,
+    ws: principal.workspace,
+    ...(agent ? { agent } : {}),
+    ...(sessionId ? { sessionId } : {}),
+  };
 
   if (principal.evidenceGrant) {
     registerCampaignEvidenceTools(server, ctx);

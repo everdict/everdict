@@ -221,6 +221,11 @@ export interface McpToolContext {
   // The bearer already says which MEMBER — this says which agent ran on their behalf, so authorship of what the
   // session writes (workspace files today) names the agent and its conversation instead of just the member.
   agent?: AgentAttribution;
+  // THE SERVER'S OWN correlator for this MCP session, read lazily because the transport generates it at
+  // initialize — after the tools are registered. It labels what an assembly FILED (the retrieval receipt),
+  // and it is deliberately not a client-supplied header: a receipt keyed by a value the caller chooses
+  // could be written into another session's directory.
+  sessionId?: () => string | undefined;
 }
 
 export function ok(data: unknown): CallToolResult {

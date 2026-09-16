@@ -25,6 +25,7 @@ import {
   cleanupProbe,
   cleanupRemover,
   collectDeferredTrace,
+  fsRetrievalReceiptWriter,
   registryLatestVersionResolver,
   seedFirstPartyAgents,
   settleOrphanSessionRuns,
@@ -409,6 +410,9 @@ async function main(): Promise<void> {
     skills: skillStore,
     knowledgeEntries: knowledgeEntryStore,
     latestVersionOf,
+    // What an assembly ANSWERED, filed by the assembly (rule `protocol` L3) — through the SAME revisioned
+    // filesystem every other write uses, so each receipt publishes an attributed revision like anything else.
+    receipts: fsRetrievalReceiptWriter(workspaceFs),
   });
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the

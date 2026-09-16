@@ -115,6 +115,83 @@ describe("KnowledgeService.assembleContext", () => {
     expect(ctx.knowledge[0]?.relation).toBeUndefined();
     expect(ctx.knowledge[0]?.coverage).toBeUndefined();
     expect(ctx.skills).toEqual([]);
-    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "skills"]);
+    // Three keys, not two: `receipt` joined the payload when the assembly began filing what it answered.
+    // The key set stays pinned because this payload is a HOT one — it feeds every agent turn and every
+    // plugin session, and a field that arrives unnoticed is a field nobody decided to pay for.
+    expect(Object.keys(ctx).sort()).toEqual(["knowledge", "receipt", "skills"]);
+    expect(ctx.receipt).toEqual({ recorded: false, reason: "unconfigured" });
+  });
+});
+
+// ── THE RECEIPT — what the assembly answered, filed by the assembly ──────────────────────────────────
+//
+// The four outcomes are one contract: a caller can always tell a deployment that records from one that does
+// not, and a failed write from a read nobody attributed. The read itself never fails for any of them — the
+// context is the product — which is exactly why the outcome has to be IN the result rather than in a log.
+describe("KnowledgeService.assembleContext — the retrieval receipt", () => {
+  const anchor = { type: "repository" as const, key: "acme/widget" };
+  const stores = (count: number) => ({
+    skills: { list: async () => [] },
+    knowledgeEntries: {
+      list: async () => Array.from({ length: count }, (_, i) => entry(`e${i}`, [anchor])),
+    },
+  });
+
+  it("reports `unconfigured` when no writer is composed — never silence", async () => {
+    const svc = new KnowledgeService(stores(1));
+    const ctx = await svc.assembleContext("acme", "alice", [anchor], { sessionId: "s-1" });
+    expect(ctx.knowledge).toHaveLength(1); // the read still answered
+    expect(ctx.receipt).toEqual({ recorded: false, reason: "unconfigured" });
+  });
+
+  it("reports `unattributed` rather than inventing a session for an unattributed caller", async () => {
+    const written: unknown[] = [];
+    const svc = new KnowledgeService({
+      ...stores(1),
+      receipts: {
+        write: async (r) => {
+          written.push(r);
+          return { recorded: true, path: "p" };
+        },
+      },
+    });
+    const ctx = await svc.assembleContext("acme", "alice", [anchor]);
+    expect(ctx.receipt).toEqual({ recorded: false, reason: "unattributed" });
+    expect(written).toHaveLength(0); // nothing filed under a guessed key
+  });
+
+  it("files what was ANSWERED, and says what the page cut", async () => {
+    // 25 matches, page is 20: the returned list alone cannot show that five were dropped, so the counts do.
+    let filed: { counts: Record<string, number>; knowledge: unknown[]; sessionId: string } | undefined;
+    const svc = new KnowledgeService({
+      ...stores(25),
+      receipts: {
+        write: async (r) => {
+          filed = r as never;
+          return { recorded: true, path: `knowledge/retrievals/d/${r.sessionId}/assembly-x.json` };
+        },
+      },
+    });
+    const ctx = await svc.assembleContext("acme", "alice", [anchor], { sessionId: "s-42" });
+
+    expect(ctx.receipt).toEqual({
+      recorded: true,
+      path: "knowledge/retrievals/d/s-42/assembly-x.json",
+    });
+    expect(filed?.sessionId).toBe("s-42");
+    expect(filed?.counts).toMatchObject({ knowledgeAvailable: 25, knowledgeReturned: 20 });
+    expect(filed?.knowledge).toHaveLength(20);
+  });
+
+  it("a failed write is reported, and does not fail the read", async () => {
+    const svc = new KnowledgeService({
+      ...stores(2),
+      receipts: {
+        write: async () => ({ recorded: false, reason: "write_failed", detail: "storage down" }),
+      },
+    });
+    const ctx = await svc.assembleContext("acme", "alice", [anchor], { sessionId: "s-1" });
+    expect(ctx.knowledge).toHaveLength(2);
+    expect(ctx.receipt).toEqual({ recorded: false, reason: "write_failed", detail: "storage down" });
   });
 });

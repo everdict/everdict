@@ -807,6 +807,10 @@ export {
   type TaskContextSkill,
 } from "./knowledge/knowledge-service.js";
 export {
+  fsRetrievalReceiptWriter,
+  type RetrievalReceiptWriter,
+} from "./knowledge/retrieval-receipt-writer.js";
+export {
   type LatestVersionResolver,
   registryLatestVersionResolver,
   resolveCoverage,

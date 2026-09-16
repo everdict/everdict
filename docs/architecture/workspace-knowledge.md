@@ -126,6 +126,14 @@ assembleContext(anchors: NodeRef[]) →                      anchor.version ?? l
 - **What is left out.** `proposed` entries (unreviewed), and private items that are not the caller's own.
 - **Decoration.** Each item carries its present-coverage state when the latest-version resolver is composed. At most
   20 entries and 20 skills are returned.
+- **Receipt.** Every assembly files what it ANSWERED — anchors, the returned items at listing level, and the counts
+  that say whether the workspace or the *page* decided what the caller saw (`knowledgeAvailable` vs
+  `knowledgeReturned`) — to `knowledge/retrievals/<YYYY-MM-DD>/<mcpSessionId>/assembly-<stamp>.json` on the workspace
+  filesystem. The correlator is the **server's** MCP session id, never a client-supplied label. The outcome rides the
+  result (`receipt`): `recorded` with its path, or `unconfigured` (no writer composed) · `unattributed` (no session —
+  an HTTP caller or a job) · `write_failed`. A read never fails for its receipt, and never hides that one did not
+  land. What the session then OPENED and USED is the session's own file beside it (`used.json`) — two authors, two
+  files, so a transcription can never be read as a stamp.
 
 The in-product agent calls it itself (`apps/agent/src/system-prompt.ts` directs it to open entity-anchored tasks with
 `get_task_context`), and a turn carrying `@`-references asks it once for those references (`apps/agent/src/chat.ts`).
@@ -170,7 +178,9 @@ only when its service is (extraction also needs the entry service).
 ## What is not built
 
 - **A coverage-gap agenda** — coverage is computed per listing and per context request; nothing collects the gaps.
-- **Retrieval beyond anchors** — no embedding or text search; a task with no anchors gets no context.
+- **Retrieval beyond anchors** — no embedding or text search; a task with no anchors gets no context. (The
+  plugin now hands the session an anchored call at session start, and the receipt above is what will say
+  whether anchors are enough — `docs/architecture/knowledge-authoring-and-retrieval-spec.md`.)
 - **Extraction from agent sessions or pull-request comments** — both are source kinds; only comment threads have an
   extractor.
 

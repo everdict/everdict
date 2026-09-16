@@ -1,8 +1,9 @@
-import type { KnowledgeEntryRecord, KnowledgePin, NodeRef } from "@everdict/contracts";
+import type { KnowledgeEntryRecord, KnowledgePin, NodeRef, RetrievalReceiptOutcome } from "@everdict/contracts";
 import { type AnchorRelation, type Coverage, anchorRelation } from "@everdict/domain";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
 import type { SkillStore } from "../ports/skill-store.js";
 import { type LatestVersionResolver, resolveCoverage } from "./freshness-resolver.js";
+import type { RetrievalReceiptWriter } from "./retrieval-receipt-writer.js";
 
 // What task-time context assembly reads: the knowledge-entry and skill RECORDS themselves (always current — there is
 // no projection to wait for), plus the latest-version resolver that places each anchor on its family's timeline and
@@ -12,6 +13,9 @@ export interface KnowledgeServiceDeps {
   skills: Pick<SkillStore, "list">;
   knowledgeEntries: Pick<KnowledgeEntryStore, "list">;
   latestVersionOf?: LatestVersionResolver;
+  // Absent = this deployment files no retrieval receipts, and every assembly SAYS so in its result rather
+  // than answering as though it had. See `RetrievalReceiptOutcome`.
+  receipts?: RetrievalReceiptWriter;
 }
 
 // A skill candidate in the assembled context — listing-level only (name/description/refs/coverage/relation), never
@@ -34,6 +38,10 @@ export interface TaskContextSkill {
 export interface TaskContext {
   knowledge: (KnowledgeEntryRecord & { coverage?: Coverage; relation?: AnchorRelation })[];
   skills: TaskContextSkill[];
+  // WHETHER WHAT WAS RETURNED WAS RECORDED. Not optional: a caller that never sees the outcome cannot tell a
+  // deployment that files receipts from one that silently does not, and every measurement over the receipt
+  // series would then be computed on a corpus with invisible holes (rule `protocol` L2).
+  receipt: RetrievalReceiptOutcome;
 }
 
 // The most entries and the most skill candidates one context carries.
@@ -53,7 +61,16 @@ export class KnowledgeService {
   // harness@2.1.0 anchor projects onto that point. Each matched item carries its ANCHOR RELATION
   // (`covers | earlier | later | general`), and the ranking is relation > status > recency — at a past coordinate a
   // SUPERSEDED claim that covers it outranks an active claim pinned later (time is a coordinate, not decay).
-  async assembleContext(tenant: string, subject: string, anchors: NodeRef[]): Promise<TaskContext> {
+  // `observer.sessionId` is the SERVER'S correlator (the MCP transport's generated id), never a client label:
+  // a receipt keyed by something the caller chooses could be filed into another session's directory. Absent
+  // is legal and answered honestly — an HTTP caller or a background job has no session, and the assembly
+  // says `unattributed` instead of inventing one.
+  async assembleContext(
+    tenant: string,
+    subject: string,
+    anchors: NodeRef[],
+    observer?: { sessionId?: string },
+  ): Promise<TaskContext> {
     const { skills: skillStore, knowledgeEntries, latestVersionOf } = this.deps;
     const now = new Date().toISOString();
 
@@ -139,6 +156,59 @@ export class KnowledgeService {
       };
     });
 
-    return { knowledge, skills };
+    const receipt = await this.fileReceipt(tenant, subject, anchors, observer?.sessionId, {
+      knowledge,
+      skills,
+      knowledgeAvailable: entriesWithRelation.length,
+      skillsAvailable: skillsWithRelation.length,
+      at: now,
+    });
+    return { knowledge, skills, receipt };
+  }
+
+  // The receipt is written by the assembly because only the assembly knows what it answered — including what
+  // the page CUT, which the returned list cannot show. Failure is reported, never thrown and never swallowed.
+  private async fileReceipt(
+    tenant: string,
+    subject: string,
+    anchors: NodeRef[],
+    sessionId: string | undefined,
+    answered: {
+      knowledge: TaskContext["knowledge"];
+      skills: TaskContextSkill[];
+      knowledgeAvailable: number;
+      skillsAvailable: number;
+      at: string;
+    },
+  ): Promise<RetrievalReceiptOutcome> {
+    const writer = this.deps.receipts;
+    if (!writer) return { recorded: false, reason: "unconfigured" };
+    if (sessionId === undefined || sessionId === "") return { recorded: false, reason: "unattributed" };
+    return writer.write({
+      at: answered.at,
+      tenant,
+      subject,
+      sessionId,
+      anchors,
+      knowledge: answered.knowledge.map((e) => ({
+        id: e.id,
+        kind: e.kind,
+        title: e.title,
+        status: e.status,
+        ...(e.relation !== undefined ? { relation: e.relation } : {}),
+        ...(e.coverage !== undefined ? { coverage: e.coverage.state } : {}),
+      })),
+      skills: answered.skills.map((sk) => ({
+        id: sk.id,
+        name: sk.name,
+        ...(sk.relation !== undefined ? { relation: sk.relation } : {}),
+      })),
+      counts: {
+        knowledgeAvailable: answered.knowledgeAvailable,
+        knowledgeReturned: answered.knowledge.length,
+        skillsAvailable: answered.skillsAvailable,
+        skillsReturned: answered.skills.length,
+      },
+    });
   }
 }
