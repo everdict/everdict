@@ -1,0 +1,27 @@
+-- 0217_drop_flat_harness_registry — the flat harness-version table goes.
+--
+-- `0002_create_harnesses` created `everdict_harnesses`, the version SSOT of the FLAT harness registry
+-- (`PgHarnessRegistry`), and `0004_harness_tenant` added tenant ownership, repointing the PK to
+-- `(tenant, id, version)` with the `_shared` first-party fallback. The registry that owned it was replaced by
+-- the harness taxonomy and deleted on 2026-06-23 (`e4686b4f`): `0016_create_harness_taxonomy` created
+-- `everdict_harness_templates` (the structural skeleton) and `everdict_harness_instances` (a template
+-- reference plus pins), and `PgHarnessTemplateRegistry` / `PgHarnessInstanceRegistry` have owned harness
+-- versions ever since. Nothing has read or written `everdict_harnesses` since — it is
+-- the only table these migrations create with neither a reader nor a writer anywhere in the tree — and no
+-- migration had dropped it, so every database still carries it. Its own preflight pages (0002, 0004) have
+-- recorded it as dormant and named this drop as their rollback.
+--
+-- Dropping it is compatible in both directions. A replica on the new code never looks for the table, and a
+-- replica still on the previous release does not either: the flat registry is gone from every shipped
+-- version, so the rolling-deploy window has no reader to break. No code changes with this migration —
+-- `PgWorkspaceStore.delete()` derives its tenant-scoped sweep from `information_schema` rather than from a
+-- hand-maintained list, so it simply stops naming a table that is no longer there.
+--
+-- No foreign key, view or later migration references the table, and `DROP TABLE` takes its indexes
+-- (`everdict_harnesses_id_idx`, `everdict_harnesses_tenant_id_idx`) with it. Irreversible: any rows still in
+-- it are gone, and the template/instance tables are a different shape — a flat `spec` is not an instance's
+-- `{ template, pins }`, so there is no backfill that would restore them.
+--
+-- The preflight for this file lives in `docs/migration/preflight/0217-drop-flat-harness-registry.md`.
+
+DROP TABLE IF EXISTS everdict_harnesses;

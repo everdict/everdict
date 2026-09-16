@@ -1,7 +1,8 @@
 // Live verification: persist the harness version SSOT in real Postgres.
 //
-//  1) migrate (create everdict_harnesses, 0001+0002 idempotent)
-//  2) seed file SSOT (examples/harnesses) → PgHarnessRegistry (loadHarnessDir(into=pg))
+//  1) migrate (creates the harness taxonomy tables, idempotent)
+//  2) seed the file SSOT (examples/harness-templates) → PgHarnessTemplateRegistry + PgHarnessInstanceRegistry
+//     (loadHarnessTaxonomyDir(into=pg))
 //  3) versions/getService(latest) + immutability (re-register a different spec → 409 Conflict)
 //  4) resolve the same spec with a fresh pool (simulating a process restart) → proves persistence
 //

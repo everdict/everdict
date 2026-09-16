@@ -223,7 +223,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 
 ## Database migrations
 - [migration/README.md](migration/README.md) — migration discipline (expand → deploy → contract, preflight checks)
-- Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0200_trajectory_events](migration/preflight/0200_trajectory_events.md) · [0212-drop-team-axis](migration/preflight/0212-drop-team-axis.md) · [0215-remove-team-era-facts](migration/preflight/0215-remove-team-era-facts.md) · [0216-drop-knowledge-graph](migration/preflight/0216-drop-knowledge-graph.md)
+- Per-migration preflight records: [0001_create_runs](migration/preflight/0001_create_runs.md) · [0002_create_harnesses](migration/preflight/0002_create_harnesses.md) · [0003_create_tenant_keys](migration/preflight/0003_create_tenant_keys.md) · [0004_harness_tenant](migration/preflight/0004_harness_tenant.md) · [0200_trajectory_events](migration/preflight/0200_trajectory_events.md) · [0212-drop-team-axis](migration/preflight/0212-drop-team-axis.md) · [0215-remove-team-era-facts](migration/preflight/0215-remove-team-era-facts.md) · [0216-drop-knowledge-graph](migration/preflight/0216-drop-knowledge-graph.md) · [0217-drop-flat-harness-registry](migration/preflight/0217-drop-flat-harness-registry.md)
 
 ## The documentation itself
 - [architecture/document-kinds.md](architecture/document-kinds.md) — the four kinds a document can be (wiki · decision · spec · runbook), what each owes, and how each is allowed to change
