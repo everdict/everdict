@@ -4,13 +4,19 @@ Bring the [Everdict](https://github.com/everdict/everdict) agent-evaluation runt
 Claude Code or Codex session. Everdict runs an agent harness (Claude Code, Codex, any CLI, or a
 multi-service topology) and **scores** it — repeatably, with regression tracking and leaderboards.
 
-This plugin gives a session that has **no** Everdict context two things:
+This plugin gives a session that has **no** Everdict context three things:
 
 1. **The Everdict MCP tools** — an `everdict` MCP server (`list_datasets`, `register_harness`,
    `run_scorecard`, `get_scorecard`, `diff_scorecards`, …) pointed at your control plane.
 2. **The domain context** — the `everdict` skill (domain model + eval workflows) so Claude knows
    *what the entities are* and *how to drive an evaluation end-to-end*, plus `/everdict:setup` and
    `/everdict:eval` commands.
+3. **The work's record** — the `everdict-sdlc` skill and two hooks. In a repository that names a workspace
+   (`.everdict/workspace`, or `EVERDICT_WORKSPACE`), the session opens with that service's decisions,
+   conventions and open requests, and **a session that changed code and recorded nothing is refused once**
+   at Stop. `/everdict:campaign` opens the request the work serves; `/everdict:record` writes back what it
+   taught. Break-glass: `EVERDICT_BREAK_GLASS='<reason>'` — the reason is reported, not swallowed.
+   Why: `docs/architecture/development-system-of-record.md` · `docs/architecture/change-campaign-spec.md`.
 
 ## Install
 
@@ -78,10 +84,18 @@ plugin/
 │   ├── plugin.json              # Codex manifest (skills only)
 │   └── mcp.json                 # empty — keeps Codex off the ${…} URL below
 ├── .mcp.json                    # the everdict MCP server (url via ${EVERDICT_MCP_URL})
-├── skills/everdict/
-│   ├── SKILL.md                 # the flagship context: mental model + entities + workflow
-│   └── references/              # domain-model.md · mcp-tools.md · workflows.md (read on demand)
+├── skills/
+│   ├── everdict/
+│   │   ├── SKILL.md             # the flagship context: mental model + entities + workflow
+│   │   └── references/          # domain-model.md · mcp-tools.md · workflows.md (read on demand)
+│   └── everdict-sdlc/SKILL.md   # where the work's record lives: request → campaign → change → knowledge
+├── hooks/
+│   ├── hooks.json               # SessionStart + Stop
+│   ├── session-start.mjs        # resolves the checkout to a workspace/service, loads what it knows
+│   └── capture-guard.mjs        # refuses ONCE a session that changed code and recorded nothing
 └── commands/
-    ├── setup.md                 # /everdict:setup — connect + auth
-    └── eval.md                  # /everdict:eval  — guided evaluation of the current project
+    ├── setup.md                 # /everdict:setup    — connect + auth
+    ├── eval.md                  # /everdict:eval     — guided evaluation of the current project
+    ├── campaign.md              # /everdict:campaign — open the request the work serves
+    └── record.md                # /everdict:record   — write back what the session learned
 ```

@@ -121,6 +121,7 @@ Every document in this tree is listed here. Conventions (single source of truth)
 
 ## Work, knowledge & the product axis
 - [architecture/development-system-of-record.md](architecture/development-system-of-record.md) — *(proposed)* Everdict as the development system of record: a methodology seed, the work chain, and lineage and direction per service — code repositories keep only their product
+- [architecture/change-campaign-spec.md](architecture/change-campaign-spec.md) — *(proposed)* every code change is a campaign: one lineage from the request to what shipped and what it taught, and the plugin seams that refuse a session which recorded nothing
 - [tracker.md](tracker.md) — the eval tracker: Initiative ⊃ Project ⊃ Issue (the "why we evaluate" layer)
 - [architecture/product-timeline.md](architecture/product-timeline.md) — Product ⊃ Release over an imported version ledger (the "what we ship" axis)
 - [architecture/workspace-filesystem.md](architecture/workspace-filesystem.md) — one isolated file tree per workspace, attributed revisions, three-way merge

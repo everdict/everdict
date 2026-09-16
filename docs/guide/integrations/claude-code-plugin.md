@@ -2,8 +2,8 @@
 kind: wiki
 title: "Claude Code plugin"
 status: current
-updated: 2026-09-15
-anchors: [plugin/.mcp.json, plugin/.claude-plugin/plugin.json, plugin/commands/setup.md, plugin/commands/eval.md, .claude-plugin/marketplace.json]
+updated: 2026-09-16
+anchors: [plugin/.mcp.json, plugin/.claude-plugin/plugin.json, plugin/commands/setup.md, plugin/commands/eval.md, plugin/commands/campaign.md, plugin/commands/record.md, plugin/hooks/hooks.json, plugin/skills/everdict-sdlc/SKILL.md, .claude-plugin/marketplace.json]
 ---
 # Claude Code plugin
 
@@ -31,8 +31,12 @@ call `run_scorecard` but does not know what a harness is will flail. The plugin 
 | --- | --- |
 | **MCP server** | the `everdict` tools, pointed at `${EVERDICT_MCP_URL}` |
 | **`everdict` skill** | the domain model and eval workflows, so the session knows what the entities are |
+| **`everdict-sdlc` skill** | where the work's record lives — request, campaign, change, knowledge |
+| **hooks** | session start loads the service's knowledge; Stop refuses a session that changed code and recorded nothing |
 | **`/everdict:setup`** | walks a fresh session through connecting and registering its first harness |
 | **`/everdict:eval`** | runs an evaluation end-to-end and reports the verdict |
+| **`/everdict:campaign`** | opens the request and the campaign the work belongs to |
+| **`/everdict:record`** | writes what the session learned back into Everdict |
 
 The skill uses progressive disclosure: a short `SKILL.md` plus references
 (`domain-model.md`, `workflows.md`, `mcp-tools.md`) pulled in on demand, so it costs little until it is
@@ -48,6 +52,21 @@ Or just say what you want — the session has the tools and the vocabulary:
 
 > "Run the retrieval dataset against my `claude-code` harness, three trials, and tell me whether
 > anything regressed against last week."
+
+## The work's record
+
+A repository that names a workspace gets more than tools. At session start the plugin hands the session that
+service's decisions, conventions and open requests; at the end, a session that **changed code and recorded
+nothing is refused once**, with a break-glass (`EVERDICT_BREAK_GLASS='<reason>'`) whose reason is reported
+rather than swallowed. Opt a repository in with one line:
+
+```bash
+mkdir -p .everdict && echo '<workspace-id>' > .everdict/workspace   # or export EVERDICT_WORKSPACE
+```
+
+Why the record lives there rather than in the repository — and the lineage it buys, from the request to the
+code that shipped and what the work taught — is `docs/architecture/development-system-of-record.md` and
+`docs/architecture/change-campaign-spec.md`.
 
 ## Headless
 

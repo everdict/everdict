@@ -19,6 +19,11 @@ export const NODE_TYPES = [
   "issue", // the unit of intent — the problem under evaluation (IssueRecord; key = record id)
   "project", // issues under one target date (ProjectRecord)
   "initiative", // the GOAL several projects work toward (InitiativeRecord)
+  // The unit of improvement opened against an issue — an evolution campaign today, and the `change` grade a
+  // coding session runs (docs/architecture/change-campaign-spec.md). Knowledge is pinned to it so what a
+  // campaign TAUGHT is reachable from the request it served, not only from the code it changed
+  // (EvolutionCampaignRecord; key = record id).
+  "campaign",
 
   // UNDER TEST — the versioned eval subjects & configuration (registry entities keyed by (tenant, id, version))
   "harness", // the agent under test (process | service | command | agent)

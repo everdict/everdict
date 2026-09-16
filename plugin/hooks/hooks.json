@@ -1,0 +1,31 @@
+{
+  "description": "The Everdict development loop: a session opens with the service's knowledge and may not end having changed code without recording what it learned (docs/architecture/change-campaign-spec.md).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.mjs\"",
+            "timeout": 10,
+            "statusMessage": "everdict: service context"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/capture-guard.mjs\"",
+            "timeout": 10,
+            "statusMessage": "everdict: capture guard"
+          }
+        ]
+      }
+    ]
+  }
+}

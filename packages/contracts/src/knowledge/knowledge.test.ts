@@ -8,7 +8,9 @@ import { SOURCE_KINDS } from "./source-kind.js";
 // extension — and a DROP makes every stored row naming the removed value unreadable.
 describe("knowledge reference vocabularies are closed", () => {
   it("has the expected entity-type and source-kind cardinality with no duplicates", () => {
-    expect(NODE_TYPES).toHaveLength(30); // -team, -cycle (the workspace is the only boundary)
+    // 31: +campaign (2026-09-16) — a knowledge entry pins to the campaign that produced it, so what the work
+    // TAUGHT is reachable from the request it served (docs/architecture/change-campaign-spec.md).
+    expect(NODE_TYPES).toHaveLength(31); // -team, -cycle (the workspace is the only boundary)
     expect(SOURCE_KINDS).toHaveLength(23);
     expect(new Set(NODE_TYPES).size).toBe(NODE_TYPES.length);
     expect(new Set(SOURCE_KINDS).size).toBe(SOURCE_KINDS.length);
