@@ -344,6 +344,12 @@ returns. The fix for the leak was inert on every deployment with a real Postgres
   something else. A double that lacks the method under test proves the other branch.
 
 ## AN AUTHORIZATION AND ITS EFFECT MUST READ THE OWNER ONCE
+
+> **The team axis was removed on 2026-09-16** (migrations `0211`/`0212`), so the symbols these three
+> sections name — `teamOfEntity`, `teamForNew`, `teamOfVersion`, `moveToTeam`, `expectedOwnerTeamId`,
+> `POST /issues/:id/team` — no longer exist and the workspace is now the only owner. The lesson is about
+> the SHAPE (a gate and a write reading one mutable ownership fact twice), which any later owner axis
+> reproduces; the incidents are recorded as they were paid for.
 arch-review 77 closed a read-then-write window inside the WRITER: `registerPreservingOwner` stopped carrying a
 team the caller had read and let the store resolve the current owner where the write happens. That is right,
 and it moved the window rather than closing it, because the AUTHORIZER still reads the same mutable fact:
@@ -482,6 +488,12 @@ own fix one branch up (arch-review 75 P1-medium). Third occurrence of this shape
   about the value's presence; it asked for a level.
 
 ## AN ENTITY HAS ONE OWNER, OR THE GATE AND THE WRITE ARE ABOUT DIFFERENT THINGS
+
+> **The team axis was removed on 2026-09-16** (migrations `0211`/`0212`), so the symbols these three
+> sections name — `teamOfEntity`, `teamForNew`, `teamOfVersion`, `moveToTeam`, `expectedOwnerTeamId`,
+> `POST /issues/:id/team` — no longer exist and the workspace is now the only owner. The lesson is about
+> the SHAPE (a gate and a write reading one mutable ownership fact twice), which any later owner axis
+> reproduces; the incidents are recorded as they were paid for.
 arch-review 118 gave the agent SAVE door a `teamOfEntity` gate. The CREATE door beside it — the same
 registry, one file away — still called `teamForNew`, which answers "where does a NEW asset land". So:
 
@@ -509,6 +521,12 @@ with no race at all.
   says why. An unreachable refusal is a claim that a window is closed, with nothing able to test it.
 
 ## A LANE THAT DID NOT EXIST WHEN THE LESSON WAS PAID FOR STILL HAS TO LEARN IT
+
+> **The team axis was removed on 2026-09-16** (migrations `0211`/`0212`), so the symbols these three
+> sections name — `teamOfEntity`, `teamForNew`, `teamOfVersion`, `moveToTeam`, `expectedOwnerTeamId`,
+> `POST /issues/:id/team` — no longer exist and the workspace is now the only owner. The lesson is about
+> the SHAPE (a gate and a write reading one mutable ownership fact twice), which any later owner axis
+> reproduces; the incidents are recorded as they were paid for.
 The one-lane-only law says: after changing a guarded write's contract, grep every OTHER caller and count
 them in the commit message. That instruction assumes the lanes all exist at the time. arch-review 74 found
 the shape a NEW lane makes, which the counting cannot reach:

@@ -78,9 +78,10 @@ written to close. Each was vacuous in a different way, so each way is a rule. Sk
 - **An `_` prefix on a parameter is a claim that deserves a second reading.** `InMemoryRuntimeRegistry` took
   `_teamId` and passed `undefined` under a comment saying the table has no such column; migration 0106 gave
   it one and the Pg twin was corrected, while this sibling kept the old body under the old justification. Every
-  unit assertion about a runtime's owning team was green against a store that could not hold one. When a
-  method ignores an argument its twin honours, either the twin is wrong or the parameter is — and the comment
-  explaining why is the thing most likely to be out of date.
+  unit assertion about a runtime's owning team was green against a store that could not hold one. (The team
+  axis itself went in `0211`/`0212`; the shape is what recurs.) When a method ignores an argument its twin
+  honours, either the twin is wrong or the parameter is — and the comment explaining why is the thing most
+  likely to be out of date.
 - **A parity test compares the two PRODUCTION entry points.** The durability file compared
   `recoverStagedVerdict` against `recoverVerifiedCase` — two helpers, both missing what the real normal path
   (`withVerifierPass`) adds — so a field present on one path and absent on the other stayed green. Parity is

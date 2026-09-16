@@ -51,7 +51,8 @@ its own identity axis (`docs/architecture/harness-definability-spec.md` §2). Se
 - Validate file/external specs with `HarnessSpecSchema` (`@everdict/contracts`) at the boundary; unknown id/version →
   `NotFoundError`; `getService` narrows to `ServiceHarnessSpec` (throws on process).
 - Keep registry impls interchangeable (in-memory / file loader / Postgres) behind the one **async** interface.
-  `PgHarnessRegistry`/`PgDatasetRegistry` store the spec/dataset as `jsonb` (PK `(tenant,id,version)`), share
+  `PgHarnessTemplateRegistry`/`PgHarnessInstanceRegistry`/`PgDatasetRegistry` store the spec/dataset as `jsonb`
+  (PK `(tenant,id,version)`), share
   `@everdict/db`'s SqlClient + migrator (migrations in `packages/db/migrations`), and compare order-independently
   (`specsEqual`) since jsonb doesn't preserve key order — never use raw `JSON.stringify` to compare a row vs input.
 - `CaseResult.harness` must record the **resolved** `id@version` (never the literal `"latest"`) so scorecards /
