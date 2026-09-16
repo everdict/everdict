@@ -22,7 +22,17 @@ import { UpdateIssueBodySchema } from "./request/update-issue.js";
 // additionally creator-or-admin. Facts issue.created / issue.status_changed / issue.linked feed the event log;
 // the first two are trigger-matchable (payload.cause distinguishes a regression from a member's move).
 export const issueDocs: Record<
-  "create" | "list" | "counts" | "get" | "update" | "setStatus" | "link" | "unlink" | "scorecards" | "delete",
+  | "create"
+  | "list"
+  | "counts"
+  | "get"
+  | "lineage"
+  | "update"
+  | "setStatus"
+  | "link"
+  | "unlink"
+  | "scorecards"
+  | "delete",
   FastifySchema
 > = {
   create: {
@@ -103,6 +113,16 @@ export const issueDocs: Record<
       200: { description: "Issue counts per group, largest first", ...toJsonSchema(IssueGroupCountsSchema) },
       ...errorResponses(400, 401, 403),
     },
+  },
+  lineage: {
+    summary: "Read a request's lineage",
+    description:
+      "Everything this request caused, in one read: the campaigns opened against it (the `change` grade and " +
+      "the evaluated one), each round with the commits it moved in each service, and the knowledge pinned to " +
+      "the issue OR to one of its campaigns. `sources` names any collaborator this deployment could not read, " +
+      "because an unwired source must not read as a request that caused nothing. Requires issues:read.",
+    tags: ["issues"],
+    ...errorResponses,
   },
   get: {
     summary: "Get an issue",

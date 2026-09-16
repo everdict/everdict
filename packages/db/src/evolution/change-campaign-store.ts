@@ -122,7 +122,11 @@ export class PgChangeCampaignStore implements ChangeCampaignStore {
                 jsonb_set(body, '{rounds}', (body->'rounds') || $4::jsonb, true),
                 '{updatedAt}', to_jsonb($5::text), true),
               round_count = round_count + 1,
-              updated_at = $5
+              -- Cast, because the same parameter is pinned to TEXT above by to_jsonb: Postgres infers a
+              -- parameter's type from its FIRST use, and the timestamptz column then refuses it. Found by
+              -- running this against a real database — a fake SqlClient binds nothing, so it cannot
+              -- disagree about a type it never sent.
+              updated_at = $5::timestamptz
         WHERE tenant = $1 AND id = $2 AND state = 'open' AND round_count = $3
         RETURNING id`,
       [tenant, id, expectedRounds, JSON.stringify([round]), at],
@@ -139,7 +143,7 @@ export class PgChangeCampaignStore implements ChangeCampaignStore {
                   '{state}', to_jsonb($3::text), true),
                 '{updatedAt}', to_jsonb($5::text), true),
               state = $3,
-              updated_at = $5
+              updated_at = $5::timestamptz
         WHERE tenant = $1 AND id = $2 AND state = 'open'
         RETURNING id`,
       [tenant, id, close.state, JSON.stringify(close), at],

@@ -325,15 +325,24 @@ the seam that cannot be bypassed is the repository's own push gate, and moving i
 
 1. **Enforcement slice (now).** The plugin's four seams against the entities that exist today (issue,
    knowledge, comment), plus `NODE_TYPES += "campaign"` so the next slice has a reference to write.
-2. **The `change` grade.** Contracts (a discriminated grade, not an optional frame), store, API, MCP tools,
-   and the service reference it needs (system-of-record slice 1).
-3. **The close's knowledge obligation**, with the declared refusal stored on the close.
-4. **The change set** — `round.changes[]` (service · repo · path · commits · pull request), with the
-   one-round-per-commit and closed-at-verdict invariants enforced at write time.
-5. **Lineage read** — one call from an issue returning the graph: campaigns (chained by `continues`, forked),
-   their rounds, each round's change set and verdict, and the knowledge pinned at any node. Nodes and edges
-   from the store, never recomputed from branch history — a lineage derived from git is one a force-push
-   rewrites.
+2. ✅ **The `change` grade** (2026-09-17). A separate record rather than an optional frame; contracts, the
+   domain's refusals, migration 0218 with in-memory and Postgres stores, the service, and both transports in
+   one slice. The service reference it will eventually want (system-of-record slice 1) is approximated by
+   `{repository, path?}` until that exists.
+3. ✅ **The close's knowledge obligation** — the entries it produced, or `knowledgeDeclined` with the reason.
+4. ✅ **The change set** — `round.changes[]` (repository · path · commits · pull request), with
+   one-round-per-commit enforced at write time. Rounds are append-only, so "closed at the verdict" holds by
+   construction rather than by a check.
+5. ✅ **Lineage read** — `GET /issues/:id/lineage` and `get_issue_lineage`: the campaigns of BOTH grades
+   opened against the request, each round with the commits it moved in each service, and the knowledge
+   reachable from the issue **or from one of its campaigns** — the second edge exists only because `campaign`
+   joined the reference vocabulary. Composed from the records rather than materialised (a lineage table would
+   be a second authority that can disagree with them), and it names the sources it could not read, because an
+   unwired collaborator must not read as a request that caused nothing.
+
+**Still open:** the `continues` chain is carried for the evaluated grade only — a change campaign cannot yet
+name the one it continues, so a walk of change campaigns is a list rather than a tree. And the evaluated
+campaigns are filtered by issue in memory, because that store lists by subject.
 
 ## Open questions
 

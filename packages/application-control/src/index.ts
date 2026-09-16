@@ -14,6 +14,14 @@ export type { SkillVersionStore } from "./ports/skill-version-store.js";
 export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
 export type { ChangeCampaignStore } from "./ports/change-campaign-store.js";
 export {
+  IssueLineageService,
+  type IssueLineage,
+  type IssueLineageDeps,
+  type LineageCampaign,
+  type LineageChange,
+  type LineageKnowledge,
+} from "./issue/issue-lineage-service.js";
+export {
   ChangeCampaignService,
   type ChangeCampaignServiceDeps,
   type LogChangeRoundInput,

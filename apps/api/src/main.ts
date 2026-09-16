@@ -9,6 +9,7 @@ import {
   InitiativeService,
   IntermediateCleanupReconciler,
   IssueLabelService,
+  IssueLineageService,
   IssueService,
   KnowledgeEntryService,
   KnowledgeService,
@@ -421,6 +422,15 @@ async function main(): Promise<void> {
   // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
   // one, memory otherwise — the same contract either way.
   const changeCampaignService = new ChangeCampaignService({ store: changeCampaignStore });
+
+  // One read from the request to everything it caused (docs/architecture/change-campaign-spec.md §Lineage).
+  // Composed, never materialised: a lineage table would be a second authority that can disagree with the
+  // records it summarises. Each source is optional and the read SAYS which ones it could not reach.
+  const issueLineageService = new IssueLineageService({
+    changeCampaigns: changeCampaignStore,
+    evolutionCampaigns: campaignStore,
+    knowledgeEntries: knowledgeEntryStore,
+  });
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the
   // late-built ScheduleService (it depends on ScorecardService). The hook closes over this reference, resolved by
@@ -2022,6 +2032,7 @@ async function main(): Promise<void> {
     campaignAdoption: campaignAdoptionService,
     ...(campaignBuildService !== undefined ? { campaignBuild: campaignBuildService } : {}),
     changeCampaignService,
+    issueLineageService,
     checkpointService,
     taskService,
     workflowStateService, // the workspace's board — GET /workflow-states (read-only)

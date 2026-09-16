@@ -25,6 +25,20 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     : undefined;
   const actor = { subject: principal.subject, ...(agent ? { agent } : {}) };
 
+  const lineage = deps.issueLineageService;
+  if (lineage) {
+    server.registerTool(
+      "get_issue_lineage",
+      {
+        annotations: { readOnlyHint: true },
+        description:
+          "Everything a request caused, in one read: the campaigns opened against it (the `change` grade and the evaluated one), each round with the commits it moved in each service, and the knowledge pinned to the issue OR to one of its campaigns — the second edge exists because `campaign` is part of the reference vocabulary. Rejected rounds are included: what failed is what the next attempt was built on. `sources` names any source this deployment could not read, because an unwired one must not read as a request that caused nothing.",
+        inputSchema: { id: z.string().min(1).describe("issue id or identifier") },
+      },
+      ({ id }) => run(principal, "issues:read", async () => ok(await lineage.assemble(ws, principal.subject, id))),
+    );
+  }
+
   server.registerTool(
     "create_issue",
     {

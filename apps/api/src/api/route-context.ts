@@ -8,7 +8,7 @@ import type {
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
-import type { ChangeCampaignService } from "@everdict/application-control";
+import type { ChangeCampaignService, IssueLineageService } from "@everdict/application-control";
 import type { CiLinkService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
@@ -145,6 +145,7 @@ export interface ServerDeps {
   campaignBuild?: CampaignBuildService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/read (routes disabled if absent)
   changeCampaignService?: ChangeCampaignService; // the `change` grade of campaign
+  issueLineageService?: IssueLineageService; // one read from a request to everything it caused
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
   workflowStateService?: WorkflowStateService;

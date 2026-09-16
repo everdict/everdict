@@ -41,7 +41,7 @@ import type {
   ViewService,
   ViewSnapshotService,
 } from "@everdict/application-control";
-import type { ChangeCampaignService } from "@everdict/application-control";
+import type { ChangeCampaignService, IssueLineageService } from "@everdict/application-control";
 import type { BrowserProfileService } from "@everdict/application-control";
 import type { WorkspaceService } from "@everdict/application-control";
 import { type Action, type Principal, authorize } from "@everdict/auth";
@@ -187,6 +187,7 @@ export interface McpDeps {
   commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
   knowledgeService?: KnowledgeService; // task-context assembly — get_task_context
   changeCampaignService?: ChangeCampaignService; // the `change` grade — every code change is a campaign
+  issueLineageService?: IssueLineageService; // one read from a request to everything it caused
   knowledgeEntryService?: KnowledgeEntryService; // knowledge entries (reified claims) — create/list/get/update/delete/verify_knowledge_entry
   knowledgeExtraction?: KnowledgeExtractionService; // extract_knowledge — thread → proposed entries
   runnerHub?: RunnerHubLike; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
