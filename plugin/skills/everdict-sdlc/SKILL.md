@@ -55,6 +55,20 @@ shape, so state it in one:
 5. You judge; you do not authorize. Adoption, release and regression watching stay with the platform, and
    your judgement is what they will later confirm or contradict.
 
+**File it with `publish_checkpoint`, `role: "executor"`** — the platform's own shape for "an actor's claim
+about work it did". It enforces what you cannot enforce on yourself: every `confirmedFacts` entry needs at
+least one evidence reference (`run` · `scorecard` · `commit` · `issue` · `trace` · `file`), **the call is
+refused if a referenced record does not exist**, and the service — not you — stamps whether each reference
+resolved. Anything you believe but cannot point at goes in `hypotheses`; claiming it as a fact is the exact
+failure that contract exists to prevent. `validationPlan` says how a successor would check you;
+`reproduction.command` is the way back in.
+
+**You cannot verify yourself, and should not try.** `assertIndependentVerification` refuses a verdict from
+the actor that did the work, from the same run, and from the same session. When the claim matters more than
+the cost of checking it, call `request_verification` — an independent verifier reads your evidence inside an
+envelope with no write capability, and a `verified` citing a reference nobody read comes back
+`inconclusive` with the gap named.
+
 ## Close the session by recording
 
 Write one entry per durable claim, not one per session:

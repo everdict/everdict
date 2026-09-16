@@ -64,7 +64,7 @@ if (!workspace) allow();
 // direction for a guard that blocks.
 const CODE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 const RECORDING_TOOLS =
-  /^mcp__[^_]*everdict[^_]*__(create_knowledge_entry|create_issue|update_issue|set_issue_status|create_comment|create_task|update_task|open_campaign|log_campaign_round|settle_campaign|campaign_decision)$/;
+  /^mcp__[^_]*everdict[^_]*__(create_knowledge_entry|create_issue|update_issue|set_issue_status|create_comment|create_task|update_task|open_campaign|log_campaign_round|settle_campaign|campaign_decision|publish_checkpoint|request_verification)$/;
 
 let changedCode = false;
 let recorded = false;

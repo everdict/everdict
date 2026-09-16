@@ -29,9 +29,14 @@ someone can read is a decision; silence is not.
 
 ## 3. Judge the criteria you declared
 
-Answer every criterion from the issue — `met` · `not met` · `not run` — and for each say how you know:
-*observed* (name the command and its exit code) or *asserted* (you read the code and concluded). Post it as
-a comment on the issue so the judgement is attributable and frozen next to the request it answers.
+Answer every criterion from the issue — `met` · `not met` · `not run` — with `publish_checkpoint`
+(`role: "executor"`). A criterion you can point at is a `confirmedFacts` entry with its evidence refs (the
+commit, the run, the issue); one you concluded by reading is a `hypothesis`. The platform refuses a fact
+whose reference does not exist and stamps which references resolved, so the split is not yours to fudge.
+Fill `validationPlan` (how a successor checks this) and `reproduction.command`.
+
+If the claim matters more than the cost of checking it, follow with `request_verification` — you cannot
+verify your own work, and the platform refuses the attempt.
 
 `not run` is never `met`, and an empty criteria list is not a pass. If the gates were red and you are
 shipping anyway, that is a judgement too — write it as one, with the reason.

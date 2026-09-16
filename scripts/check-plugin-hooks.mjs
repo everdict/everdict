@@ -52,6 +52,13 @@ const CHANGED_AND_RECORDED = transcript("changed-and-recorded", [
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
 ]);
 const COMMITTED_ONLY = transcript("committed-only", [toolUse("Bash", { command: "git commit -m x" })]);
+// A session whose record is its JUDGEMENT rather than a knowledge entry has recorded (the ownership
+// protocol's executor claim, `docs/architecture/change-campaign-spec.md`). Its own branch, because the
+// recording vocabulary is a regex and a regex that silently stops matching one name looks like a quiet session.
+const CHANGED_AND_JUDGED = transcript("changed-and-judged", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__publish_checkpoint", { role: "executor" }),
+]);
 const READ_ONLY = transcript("read-only", [toolUse("Read", { file_path: "/x/y.ts" })]);
 
 const run = (hook, payload, env = {}) =>
@@ -95,6 +102,12 @@ check(
   run(hooks.capture, { cwd: work, transcript_path: CHANGED_AND_RECORDED }, { EVERDICT_WORKSPACE: "acme" }),
   allows,
   "no decision (the session recorded)",
+);
+check(
+  "capture/a published checkpoint counts as recording",
+  run(hooks.capture, { cwd: work, transcript_path: CHANGED_AND_JUDGED }, { EVERDICT_WORKSPACE: "acme" }),
+  allows,
+  "no decision (the session filed its judgement)",
 );
 check(
   "capture/read-only session → allowed",
@@ -152,5 +165,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 9 branches — refusal, allowance and both resolutions`,
+  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 10 branches — refusal, allowance and both resolutions`,
 );

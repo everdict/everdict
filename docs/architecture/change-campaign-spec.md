@@ -206,31 +206,54 @@ and `sandbox_exec` leaves a trace nobody parses. `GatePolicy` / the release gate
 baseline↔candidate **scorecard** comparison; there is no record for "this repository's own gates ran and this
 is what they said".
 
-A `change` campaign's round therefore needs a **verdict the agent writes**, declared before and answered after:
+A `change` campaign's round therefore needs a **verdict the agent writes** — and that record already exists.
+It is the ownership protocol's, and inventing a second one would have been this repository's own recurring
+defect: the right noun present and a parallel annotation built beside it.
+
+**The agent's judgement is an EXECUTOR'S CLAIM, not a verification.** `assertIndependentVerification`
+(`packages/domain/src/ownership/ownership.ts`) refuses a verdict from the actor that did the work — *"a claim
+wearing a second hat"* — and refuses one from the same run or the same session. Its first line is what makes
+the working agent's judgement legal anyway:
 
 ```ts
-verification: {
-  declared: [{ id: "test", command: "pnpm test" }, { id: "types", command: "pnpm typecheck" }, …],
-  runs: [{ id, exitCode, startedAt, endedAt, summary?, outputDigest }],
-  criteria: [{ id, statement, met: true | false | "not run" }],
-}
+if (verifier.profile.completion !== "verified_verdict") return;   // a report or a change_set claims
+                                                                   // nothing about someone else's work
 ```
 
-The agent fills every field of it. The platform's contribution is to **refuse the shapes that let a
-judgement evade being one** — four properties, each from a law this repository already holds:
+So the session that built the change publishes a **handoff checkpoint** with `role: "executor"`
+(`publish_checkpoint`), and the platform already enforces the part a model cannot be trusted to enforce on
+itself:
 
-- **Declared before, not collected after.** A verification list assembled from whatever happened to run is a
-  description, not a gate (the frozen-frame discipline, applied to a weaker verdict).
-- **"Not run" is a third value, never a pass** (protocol L2). A gate the sandbox could not reach is an
-  escalation field, not silence.
-- **An empty declared list is not a pass** — the repository's own "an empty corpus is not a pass" law. A
-  service that declares no verification says so, and the campaign's verdict states it.
-- **The judge is named, and self-judgement is recorded as self-judgement.** The verdict carries the identity
-  that produced it and whether each criterion was **observed** (a command ran, here is its exit code and the
-  digest of its output) or **asserted** (the agent read the diff and concluded). E09 makes this the
-  difference between a result and an advice field; R24 separates self-judged training feedback from final
-  evaluation for the same reason. A self-judgement is not worthless — it is the only judgement available for
-  most changes — but a platform that cannot tell it apart from an independent one cannot defend either.
+| The judgement's shape | Enforced by | Where |
+|---|---|---|
+| a claimed fact carries **at least one evidence reference** | the schema (`refs.min(1)`) | `confirmedFacts` |
+| **a referenced record must exist** — the call is refused otherwise | the checkpoint service | `publish_checkpoint` |
+| what the platform could resolve vs what it could not | stamped by the service, **never by the producer** | `CheckpointRef.resolution` = `verified` \| `unverified_external` |
+| a belief with no reference is a **hypothesis**, and says so | the schema | `hypotheses` |
+| how a successor would check the work | required field | `validationPlan` |
+| the way back into the exact state | `reproduction.command` | — |
+
+That is the *observed vs asserted* split this spec asked for, already built: **a fact is what you can point
+at; everything else is a hypothesis, and the type refuses to let it claim otherwise.**
+
+What the platform does NOT yet enforce, and what the plugin therefore asks for (until the `change` grade
+carries it in a field):
+
+- **criteria declared before the work**, not assembled from what happened to pass;
+- **every declared criterion answered** — `met` · `not met` · `not run`, with `not run` never counting as met;
+- **an empty criteria list is not a pass**.
+
+### Independence is available, and it is a different call
+
+`request_verification` exists and runs a verifier **inside an evidence-only envelope — no write capability,
+reads restricted to the tools that reach the cited evidence** — and it refuses a verifier that executed the
+work, or one in the same run or session. Its own failure mode is closed too: *a `verified` with a reference
+nobody read comes back `inconclusive` with the gap named*, because an unchecked half is a species of
+could-not-tell.
+
+So the grip is not "the platform judged". It is: the agent's claim is recorded **as a claim**, its evidence
+is resolved or honestly marked unresolvable, and an independent verdict can be demanded over exactly that
+evidence whenever the claim matters more than the cost of checking it.
 
 ### What must not cross
 
