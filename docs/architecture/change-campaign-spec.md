@@ -164,11 +164,18 @@ This is the seed's idiom for the other refusals (`Design: none — …`, `Regres
 is a decision someone can read, and silence is not one. "Accepted ≠ gone" (protocol L5) applied to learning:
 a campaign that closes with nothing recorded has not finished, it has only stopped.
 
-## The division of labour — Everdict verifies, the repository's agent builds
+## The division of labour — the agent judges, Everdict holds the judgement
 
 The maintainer's stance (2026-09-16): **Everdict supports the AI-SDLC method and holds evaluation and
 verification tightly; the actual build is delegated to an agent running in a repository workspace** (Codex,
-Claude Code, any registered profile).
+Claude Code, any registered profile) — and **the gate is judged by that agent**, the one that opened the work
+with this plugin, not by the platform.
+
+⚠️ **This corrects an earlier reading of "holds verification tightly" as "computes the verdict".** The
+platform cannot judge a repository's gates: it does not run them, it does not know which of them constitute
+verification for that service, and a red suite that is a known flake is a judgement someone has to make.
+Holding verification tightly means something else, and it is the harder half — **demanding the judgement,
+giving it a shape, attributing it, freezing it, and making it answerable later.**
 
 Everdict already owns the delegation half. `create_sandbox { profile, brief, repo:{git, ref} }` boots a
 profile's image with the repository cloned in; `submit_sandbox_task` sends one turn at a time;
@@ -183,11 +190,13 @@ frozen frame). Confusing the two turns every ordinary bug fix into an evaluation
 
 | Concern | Owner |
 |---|---|
-| the request, and the acceptance criteria declared **before** work starts | Everdict |
-| reading the repository, writing the code, running that repository's gates | the delegated agent, in its workspace |
-| what the gates answered, as a **record** rather than a sentence | Everdict |
-| whether the criteria were met, and whether the change may be adopted | Everdict |
-| what the work taught | Everdict (knowledge, pinned to the campaign and the request) |
+| the request, and the shape a judgement must take | Everdict |
+| the acceptance criteria, **declared before work starts** | the agent, recorded by Everdict |
+| reading the repository, writing the code, running that repository's gates | the agent, in its workspace |
+| **judging** whether each criterion was met | **the agent** |
+| the judgement as a record — attributed, frozen, unanswerable-by-silence | Everdict |
+| whether the change may be **adopted**, and what that authorizes | Everdict |
+| what the work taught | the agent writes it; Everdict pins it to the campaign and the request |
 
 ### What crosses the seam, and in what shape
 
@@ -197,7 +206,7 @@ and `sandbox_exec` leaves a trace nobody parses. `GatePolicy` / the release gate
 baseline↔candidate **scorecard** comparison; there is no record for "this repository's own gates ran and this
 is what they said".
 
-A `change` campaign's round therefore needs a **gate-run receipt**, declared before and produced after:
+A `change` campaign's round therefore needs a **verdict the agent writes**, declared before and answered after:
 
 ```ts
 verification: {
@@ -207,7 +216,8 @@ verification: {
 }
 ```
 
-Three properties it owes, each from a law this repository already holds:
+The agent fills every field of it. The platform's contribution is to **refuse the shapes that let a
+judgement evade being one** — four properties, each from a law this repository already holds:
 
 - **Declared before, not collected after.** A verification list assembled from whatever happened to run is a
   description, not a gate (the frozen-frame discipline, applied to a weaker verdict).
@@ -215,13 +225,24 @@ Three properties it owes, each from a law this repository already holds:
   escalation field, not silence.
 - **An empty declared list is not a pass** — the repository's own "an empty corpus is not a pass" law. A
   service that declares no verification says so, and the campaign's verdict states it.
+- **The judge is named, and self-judgement is recorded as self-judgement.** The verdict carries the identity
+  that produced it and whether each criterion was **observed** (a command ran, here is its exit code and the
+  digest of its output) or **asserted** (the agent read the diff and concluded). E09 makes this the
+  difference between a result and an advice field; R24 separates self-judged training feedback from final
+  evaluation for the same reason. A self-judgement is not worthless — it is the only judgement available for
+  most changes — but a platform that cannot tell it apart from an independent one cannot defend either.
 
 ### What must not cross
 
-Authority. A delegate may propose, push a branch, open a pull request and report; **adoption stays with the
-platform**, which is already how `sandbox_git_push` behaves (guarded, pauses for a member) and how a campaign
-adoption is a spendable proof rather than a claim in a report. A verdict a delegate writes about its own work
-is evidence of what it believes, not a decision.
+Authority — which is a different thing from judgement, and the distinction is the whole design. The agent
+**judges**: it says whether the criteria were met and stands behind that. The agent does not **authorize**:
+adoption stays with the platform, which is already how `sandbox_git_push` behaves (guarded, pauses for a
+member) and how a campaign adoption is a spendable proof rather than a claim in a report.
+
+The platform's later reads are what make the agent's judgement answerable: an evaluated grade's gate
+arithmetic can contradict it, a regression watch can, and the next campaign that continues from this one
+inherits both the claim and what happened after. **A judgement nobody can contradict later is not being held
+tightly, however carefully it was recorded.**
 
 ### Why the plugin is the instrument
 

@@ -25,6 +25,12 @@ An ordinary code change has no exam yet: the `change` grade that carries it is s
 `docs/architecture/change-campaign-spec.md` and is not built. Until it is, **the issue is the hub**: work
 under it, and make every knowledge entry and every commit name it.
 
-## 4. Say what you did
+## 4. Declare how it will be judged — before you start
+
+Say, in the issue, what would make this work done: the checks you will run (`pnpm test`, that repository's
+own gates) and the observable outcomes that settle the request. You will answer each of them at the end, and
+a criterion invented afterwards is not a gate. If the change genuinely verifies nothing, declare THAT.
+
+## 5. Say what you did
 
 Report the issue's identifier and what it now records, so the user can see where the work will land.

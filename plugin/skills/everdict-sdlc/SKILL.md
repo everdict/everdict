@@ -38,6 +38,23 @@ Before touching code: `list_knowledge_entries` and `list_issues`. A convention a
 that already names this trap, an open request that already describes this work — reading them is cheaper
 than rediscovering them, and rediscovering them is what an unrecorded team does forever.
 
+## You are the judge of your own gate — say so in a shape that can be answered
+
+The platform does not run this repository's checks, does not know which of them constitute verification here,
+and cannot tell a known flake from a real failure. **You judge.** What Everdict holds is the judgement's
+shape, so state it in one:
+
+1. **Declare the criteria when you open the work**, not after it. A criterion assembled from whatever
+   happened to pass is a description of the outcome, not a gate.
+2. **Answer every one** at the end — `met` · `not met` · `not run`. **`not run` is never `met`**: a check you
+   could not reach is an escalation, not a silence.
+3. **Mark how you know.** *Observed* = a command ran, and you can name it with its exit code. *Asserted* =
+   you read the code and concluded. Both are legitimate; a reader who cannot tell them apart can defend
+   neither.
+4. **An empty criteria list is not a pass.** A change that verifies nothing says that.
+5. You judge; you do not authorize. Adoption, release and regression watching stay with the platform, and
+   your judgement is what they will later confirm or contradict.
+
 ## Close the session by recording
 
 Write one entry per durable claim, not one per session:

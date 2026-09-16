@@ -27,11 +27,20 @@ someone can read is a decision; silence is not.
 - `evidence`: what proves it — a scorecard, a run, a comment
 - `visibility: "workspace"` unless the user wants a draft
 
-## 3. Close the loop on the request
+## 3. Judge the criteria you declared
+
+Answer every criterion from the issue — `met` · `not met` · `not run` — and for each say how you know:
+*observed* (name the command and its exit code) or *asserted* (you read the code and concluded). Post it as
+a comment on the issue so the judgement is attributable and frozen next to the request it answers.
+
+`not run` is never `met`, and an empty criteria list is not a pass. If the gates were red and you are
+shipping anyway, that is a judgement too — write it as one, with the reason.
+
+## 4. Close the loop on the request
 
 `update_issue` or `create_comment` on the issue: what landed, the commit, and what is still open.
 `set_issue_status status:"done"` only with the evidence it requires — otherwise leave it `in_review` and say why.
 
-## 4. Report
+## 5. Report
 
 List what you wrote and where, so the user can follow the lineage from the request.
