@@ -371,7 +371,7 @@ The env vars are deliberately two:
 ```bash
 docker run -d --name evd-minio-tmp -p 19110:9000 \
   -e MINIO_ROOT_USER=everdict -e MINIO_ROOT_PASSWORD=everdict-trust \
-  minio/minio:latest server /data
+  quay.io/minio/minio:latest server /data   # Hub's minio/minio is not anonymously pullable
 EVERDICT_TRUST_SUITE=1 EVERDICT_TRUST_S3_ENDPOINT=http://127.0.0.1:19110 \
 EVERDICT_TRUST_S3_ACCESS_KEY=everdict EVERDICT_TRUST_S3_SECRET_KEY=everdict-trust \
   pnpm --filter @everdict/api exec vitest run src/trust/intermediate-artifacts.trust.test.ts

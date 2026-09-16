@@ -89,8 +89,13 @@ services:
   # touch — the bucket is the isolation boundary; skill/knowledge bodies + agent task outputs live there). Run
   # media (screenshots/DOM) offloads to the single EVERDICT_S3_BUCKET as presigned URLs. Data persists on the
   # `minio-data` volume; the web console (:9101 by default) lets an operator inspect a tenant's bucket.
+  #
+  # ⚠️ PULLED FROM QUAY, NOT DOCKER HUB. `docker pull minio/minio:<tag>` answers "pull access denied for
+  # minio/minio, repository does not exist or may require 'docker login'" — anonymous Hub pulls of MinIO's images
+  # are gone, while `quay.io/minio/minio` serves the same pinned tag. So this stack could not be brought up at all
+  # from the repository it named. The registry is a variable for an air-gapped mirror; the TAG stays pinned.
   minio:
-    image: minio/minio:${MINIO_VERSION:-RELEASE.2024-12-18T13-15-44Z}
+    image: ${MINIO_IMAGE:-quay.io/minio/minio}:${MINIO_VERSION:-RELEASE.2024-12-18T13-15-44Z}
     command: ["server", "/data", "--console-address", ":9001"]
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-everdict}
@@ -115,7 +120,7 @@ services:
   # MinIO image because `mc` already ships in it (the minio healthcheck above calls it) — no second pinned tag.
   registry-bucket:
     profiles: ["images"]
-    image: minio/minio:${MINIO_VERSION:-RELEASE.2024-12-18T13-15-44Z}
+    image: ${MINIO_IMAGE:-quay.io/minio/minio}:${MINIO_VERSION:-RELEASE.2024-12-18T13-15-44Z}
     entrypoint: ["sh", "-c"]
     command:
       - >-
