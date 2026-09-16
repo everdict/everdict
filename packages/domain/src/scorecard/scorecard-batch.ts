@@ -1,4 +1,4 @@
-import { BadRequestError, ConflictError, TERMINAL_SCORECARD_STATUSES } from "@everdict/contracts";
+import { BadRequestError, ConflictError, isSettledScorecardStatus } from "@everdict/contracts";
 import type { DomainFact, RunOrigin } from "@everdict/contracts";
 import type {
   RunRecord,
@@ -354,7 +354,7 @@ export class ScorecardBatch {
 
   // Terminal = the batch's outcome is settled; nothing may rewrite it (first terminal write wins).
   isTerminal(): boolean {
-    return (TERMINAL_SCORECARD_STATUSES as readonly string[]).includes(this.record.status);
+    return isSettledScorecardStatus(this.record.status);
   }
 
   // Reclaimed by a newer fire of the same PR — live drivers skip further work on it.

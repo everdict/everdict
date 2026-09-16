@@ -25,6 +25,13 @@ export const TERMINAL_SCORECARD_STATUSES = [
 ] as const satisfies readonly z.infer<typeof ScorecardStatusSchema>[];
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
+// The one predicate over that list. It is exported because the answer travels: the aggregate asks it to refuse a
+// rewrite, and the transport asks it to tell a POLLING CLIENT whether to stop. Every client that kept its own copy
+// of the list had already dropped `cancelled` from it, and then polled a settled batch until its own timeout.
+export function isSettledScorecardStatus(status: string): boolean {
+  return (TERMINAL_SCORECARD_STATUSES as readonly string[]).includes(status);
+}
+
 // …AND ITS COMPLEMENT, AS AN ALLOWLIST (arch-review 56, Wave A). See OPEN_RUN_STATUSES for why the negated
 // form is the bug: `s.status NOT IN ('succeeded', 'failed')` in the reservation guard answered "this batch may
 // still place compute" for a CANCELLED and a SUPERSEDED batch, because those two joined the enum after the

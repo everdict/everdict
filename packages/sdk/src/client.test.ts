@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { EverdictClient, EverdictError } from "./client.js";
+import { EverdictClient } from "./client.js";
 import type { SdkFetch, SdkResponse } from "./types.js";
 
 function res(status: number, body: unknown): SdkResponse {
@@ -49,10 +49,11 @@ describe("EverdictClient.evaluate", () => {
   it("submits string refs then polls to a verdict (auth + workspace headers set)", async () => {
     const { fetch, calls } = fakeFetch([
       res(202, { id: "sc1", status: "queued" }),
-      res(200, { id: "sc1", status: "running" }),
+      res(200, { id: "sc1", status: "running", terminal: false }),
       res(200, {
         id: "sc1",
         status: "succeeded",
+        terminal: true,
         summary: [{ metric: "tests_pass", count: 2, mean: 1, passRate: 1 }],
         headlinePassRate: 1, // served by GET /scorecards/:id (re-architecture P1g)
       }),
@@ -75,7 +76,7 @@ describe("EverdictClient.evaluate", () => {
     const { fetch, calls } = fakeFetch([
       res(201, { workspace: "acme", id: "d", version: "1.0.0" }), // POST /datasets
       res(202, { id: "sc2", status: "queued" }),
-      res(200, { id: "sc2", status: "succeeded" }),
+      res(200, { id: "sc2", status: "succeeded", terminal: true }),
     ]);
     await client(fetch).evaluate({
       harness: "scripted@0",
@@ -96,6 +97,7 @@ describe("EverdictClient.evaluate", () => {
       res(200, {
         id: "sc3",
         status: "succeeded",
+        terminal: true,
         summary: [{ metric: "tool_calls", count: 3, mean: 2 }],
         trialSummary: {
           cases: 1,
@@ -133,14 +135,34 @@ describe("EverdictClient.evaluate", () => {
 });
 
 describe("EverdictClient.poll", () => {
+  // The code is asserted, not just the class: a bare `toBeInstanceOf(EverdictError)` here passed on the refusal
+  // below as happily as on the timeout it is about.
   it("throws a TIMEOUT EverdictError when the batch never finishes in time", async () => {
+    const { fetch } = fakeFetch([res(200, { id: "x", status: "running", terminal: false })]);
+    await expect(client(fetch).poll("x", { intervalMs: 1, timeoutMs: 0 })).rejects.toMatchObject({
+      status: 408,
+      code: "TIMEOUT",
+    });
+  });
+
+  // A poller that keeps its own list of finished statuses eventually misses one. Both clients' lists had lost
+  // `cancelled`, so polling a cancelled batch — settled, nothing left to wait for — spun until the timeout and
+  // reported it as a batch that never finished. Observed RED before the fix, with `timeoutMs: 0`:
+  // "scorecard x did not finish within 0ms (last status: cancelled)".
+  it("a cancelled batch has settled: the poll returns it instead of timing out", async () => {
+    const { fetch } = fakeFetch([res(200, { id: "x", status: "cancelled", terminal: true })]);
+    const rec = await client(fetch).poll("x", { intervalMs: 1, timeoutMs: 0 });
+    expect(rec.status).toBe("cancelled");
+  });
+
+  it("refuses to guess when the server did not say whether the batch settled", async () => {
     const { fetch } = fakeFetch([res(200, { id: "x", status: "running" })]);
-    await expect(client(fetch).poll("x", { intervalMs: 1, timeoutMs: 0 })).rejects.toBeInstanceOf(EverdictError);
+    await expect(client(fetch).poll("x", { intervalMs: 1 })).rejects.toMatchObject({ code: "TERMINAL_NOT_SERVED" });
   });
 
   it("returns as soon as the record is terminal", async () => {
     const { fetch, calls } = fakeFetch([
-      res(200, { id: "x", status: "failed", error: { code: "E", message: "boom" } }),
+      res(200, { id: "x", status: "failed", terminal: true, error: { code: "E", message: "boom" } }),
     ]);
     const rec = await client(fetch).poll("x", { intervalMs: 1 });
     expect(rec.status).toBe("failed");
@@ -159,8 +181,8 @@ describe("EverdictClient.evaluate progress", () => {
   it("fires onProgress on every poll with the latest record", async () => {
     const { fetch } = fakeFetch([
       res(202, { id: "sc1", status: "queued" }),
-      res(200, { id: "sc1", status: "running" }),
-      res(200, { id: "sc1", status: "succeeded" }),
+      res(200, { id: "sc1", status: "running", terminal: false }),
+      res(200, { id: "sc1", status: "succeeded", terminal: true }),
     ]);
     const seen: string[] = [];
     await client(fetch).evaluate({

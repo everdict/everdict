@@ -26,9 +26,12 @@ scorecard pipeline), but using it directly is several HTTP calls: register a har
    a harness **instance** (`{template, id, version, pins}` on a registered template —
    [harness-taxonomy](./harness-taxonomy.md)), so an inline harness must have that shape.
 2. **Submit.** `POST /scorecards { dataset, harness, trials?, judges?, runtime?, campaignEvaluation? }`.
-3. **Poll.** `GET /scorecards/:id` until terminal (`succeeded`/`failed`/`superseded`), with an injectable interval
-   (default 2s) and timeout (default 30 min, then an `EverdictError` 408); `onProgress` receives every polled
-   record.
+3. **Poll.** `GET /scorecards/:id` until the served `terminal` says the batch has SETTLED, with an injectable
+   interval (default 2s) and timeout (default 30 min, then an `EverdictError` 408); `onProgress` receives every
+   polled record. The flag is the server's own answer over `TERMINAL_SCORECARD_STATUSES`
+   (`isSettledScorecardStatus`); both clients used to keep a status list instead, and both had lost `cancelled`
+   from it, so a cancelled batch was polled until the timeout and reported as one that never finished. A control
+   plane that does not send the field is refused (`TERMINAL_NOT_SERVED`, 502) rather than guessed at.
 4. **Verdict.** Reduce the record to a `Verdict`: `passRate` = the server-computed `headlinePassRate`,
    `passAt1`/`passAtK`/`flakeRate` from `trialSummary` when the batch ran trials, the raw `summary`, and the full
    record.
@@ -51,9 +54,17 @@ the SDK never decodes it.
 ## Python client
 
 `clients/python/everdict/client.py` mirrors the same surface in stdlib-only Python: `evaluate`, `poll`, `diff`,
-`leaderboard`, the register/submit/get calls, and `usage()` (`GET /usage`, the workspace's metered usage). One
-difference: its verdict `pass_rate` is derived client-side (`_headline_pass_rate`: `trialSummary.passAt1`, else an
-authority-ordered metric list), not read from `headlinePassRate`.
+`leaderboard`, the register/submit/get calls, and `usage()` (`GET /usage`, the workspace's metered usage). Its
+verdict `pass_rate` is the served `headlinePassRate`, exactly like the TypeScript client — it re-derives
+nothing. It used to rebuild that number from `summary` with its own metric ladder, a second copy of a policy
+the client cannot see, and the copy had diverged: it ranked `tests_pass` above `state` (the server ranks
+`state` first), it never matched a real judge's `judge:<id>` metric, it read `passAt1` even from an empty trial
+summary (a batch that scored nothing headlined as 0%), and its last resort could report an unrelated metric's
+pass rate as the verdict. One difference from the TypeScript client remains: where `@everdict/sdk` reads
+`record.headlinePassRate ?? null`, the Python client REFUSES (`EverdictError` 502 `HEADLINE_NOT_SERVED`) when
+the field is absent from the response — a control plane too old to serve it leaves no way to find out, and
+reporting `None` would state "nothing was pass-deciding", which is a verdict of its own. A served `null` is
+still `None`: that is the answer, not its absence.
 
 ## Margin / pricing (the BYOC-as-strength position)
 

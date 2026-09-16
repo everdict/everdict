@@ -758,6 +758,9 @@ export const SCORECARD_WIRE_FIELD_KIND = {
   // Control-plane machinery. `ownerReplica`/`ownerEpoch` fence a driver, the two pass markers say a plane is
   // mid-repair, `publication` is the settlement's owed outward effects, and `traceProjectionVersion` says
   // which era judged it. A reader of a scorecard is not reading any of those.
+  // A poller's stop signal. The web re-renders from the server on its own schedule and never polls this door,
+  // so nothing here reads it; the SDK and the Python client do.
+  terminal: 'internal',
   ownerReplica: 'internal',
   ownerEpoch: 'internal',
   scoringPass: 'internal',

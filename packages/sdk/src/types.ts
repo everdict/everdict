@@ -65,6 +65,9 @@ export interface ScorecardRecord {
   trialSummary?: TrialSummary;
   // Server-computed headline (GET /scorecards/:id) — trial-aware passAt1, else the highest-authority metric pass rate.
   headlinePassRate?: number | null;
+  // Whether the batch has SETTLED, as the server answers it. Optional here because an older control plane does not
+  // send it — `poll` refuses rather than deciding for itself (see its comment).
+  terminal?: boolean;
   error?: { code: string; message: string };
   [k: string]: unknown;
 }

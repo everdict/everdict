@@ -78,6 +78,12 @@ export const ScorecardResponseSchema = ScorecardRecordSchema.extend({
     .describe(
       "Single headline pass rate — trial-aware (passAt1), else highest-authority metric pass rate; null = nothing pass-deciding",
     ),
+  // Whether the batch has SETTLED, answered by the server over TERMINAL_SCORECARD_STATUSES. A poller stops on
+  // this, never on a status list of its own: every client that kept one had already lost `cancelled` from it,
+  // so polling a cancelled batch spun until the timeout and reported a false TIMEOUT for a settled batch.
+  terminal: z
+    .boolean()
+    .describe("Whether this batch has settled — nothing may rewrite its outcome. A poller stops on this"),
   retryableUnmeasured: z
     .number()
     .int()

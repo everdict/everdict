@@ -24,11 +24,19 @@ print(verdict["pass_rate"], verdict["pass_at_k"], verdict["flake_rate"])
 ```
 
 `evaluate()` resolves a `"id@version"` ref or registers an inline spec, submits, polls to terminal, and
-returns a verdict dict: `scorecard_id`, `status`, `pass_rate` (trial-aware), `pass_at_1` / `pass_at_k` /
-`flake_rate`, `summary`, and the raw `record`.
+returns a verdict dict: `scorecard_id`, `status`, `pass_rate`, `pass_at_1` / `pass_at_k` / `flake_rate`,
+`summary`, and the raw `record`.
+
+`pass_rate` is the control plane's own `headlinePassRate` — trial-aware (`passAt1`), else the highest-authority
+metric that carries a pass rate, `None` when nothing was pass-deciding. The client reads that number; it never
+re-derives one from `summary`, because the ranking follows the batch's stamped verdict policy, which the client
+cannot see. If the response carries no `headlinePassRate` at all (a control plane older than the served
+verdict), `evaluate()` raises `EverdictError` 502 `HEADLINE_NOT_SERVED` rather than guessing — read
+`record["summary"]` yourself if that is the answer you want.
 
 Also: `diff(baseline, candidate, z=…)`, `leaderboard(dataset, …)`, `usage()`. A `{code, message}` error body
 becomes an `EverdictError` carrying the HTTP `status`. Pass a `transport` (and `sleep`) to unit-test without a
-network. Run the tests with `python3 -m pytest` from this directory.
+network. Run the tests with `pnpm python` from the repository root, or `python3 tests/test_client.py` from this
+directory — they need nothing but the interpreter (there is no `pytest` in this repository's tooling).
 
 See `docs/architecture/one-call-sdk.md` for the design.

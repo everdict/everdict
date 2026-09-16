@@ -149,7 +149,11 @@ export class EverdictClient {
     };
   }
 
-  // Poll GET /scorecards/:id until terminal (succeeded|failed|superseded). Injectable interval/timeout; a timeout throws.
+  // Poll GET /scorecards/:id until the batch has SETTLED. Whether it has is the SERVER's answer (`terminal`, over
+  // TERMINAL_SCORECARD_STATUSES): a client list of finished statuses is a second copy of a vocabulary it does not
+  // own, and this one had already lost `cancelled` — so a cancelled batch was polled until the timeout and reported
+  // as one that never finished. A control plane that does not send the field gets a refusal, not a guess: deciding
+  // here would rebuild the copy this removed. Injectable interval/timeout; a timeout throws.
   // onProgress fires on every poll with the latest record (status + steps) — for live progress.
   async poll(
     id: string,
@@ -157,12 +161,17 @@ export class EverdictClient {
   ): Promise<ScorecardRecord> {
     const interval = opts?.intervalMs ?? 2000;
     const timeout = opts?.timeoutMs ?? 30 * 60 * 1000;
-    const terminal = new Set(["succeeded", "failed", "superseded"]);
     let waited = 0;
     for (;;) {
       const record = await this.getScorecard(id);
       opts?.onProgress?.(record);
-      if (terminal.has(record.status)) return record;
+      if (typeof record.terminal !== "boolean")
+        throw new EverdictError(
+          502,
+          "TERMINAL_NOT_SERVED",
+          `scorecard ${id} was served without \`terminal\` — this control plane is older than the field a poller stops on.`,
+        );
+      if (record.terminal) return record;
       if (waited >= timeout)
         throw new EverdictError(
           408,

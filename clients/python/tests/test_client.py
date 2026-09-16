@@ -57,8 +57,19 @@ def test_evaluate_string_refs_submits_then_polls():
     transport, calls = fake_transport(
         [
             (202, {"id": "sc1", "status": "queued"}),
-            (200, {"id": "sc1", "status": "running"}),
-            (200, {"id": "sc1", "status": "succeeded", "summary": [{"metric": "tests_pass", "count": 2, "mean": 1, "passRate": 1}]}),
+            (200, {"id": "sc1", "status": "running", "terminal": False}),
+            # `headlinePassRate` rides every served scorecard read — the fixtures carry it because the control
+            # plane does; the client reads it and derives nothing.
+            (
+                200,
+                {
+                    "id": "sc1",
+                    "status": "succeeded",
+                    "terminal": True,
+                    "headlinePassRate": 1,
+                    "summary": [{"metric": "tests_pass", "count": 2, "mean": 1, "passRate": 1}],
+                },
+            ),
         ]
     )
     v = client(transport).evaluate("h@1", "d@2", poll={"interval_ms": 1})
@@ -79,7 +90,7 @@ def test_evaluate_registers_inline_dataset():
         [
             (201, {"workspace": "acme", "id": "d", "version": "1.0.0"}),
             (202, {"id": "sc2", "status": "queued"}),
-            (200, {"id": "sc2", "status": "succeeded"}),
+            (200, {"id": "sc2", "status": "succeeded", "terminal": True, "headlinePassRate": None}),
         ]
     )
     client(transport).evaluate("scripted@0", {"id": "d", "version": "1.0.0", "cases": []}, poll={"interval_ms": 1})
@@ -97,6 +108,8 @@ def test_evaluate_threads_trials_and_reads_trial_summary():
                 {
                     "id": "sc3",
                     "status": "succeeded",
+                    "terminal": True,
+                    "headlinePassRate": 0.6,  # served: trial-aware, so passAt1
                     "summary": [{"metric": "tool_calls", "count": 3, "mean": 2}],
                     "trialSummary": {"cases": 1, "passAt1": 0.6, "k": 5, "passAtK": 1, "flakeRate": 1},
                 },
@@ -106,6 +119,115 @@ def test_evaluate_threads_trials_and_reads_trial_summary():
     v = client(transport).evaluate("h@1", "d@1", trials=5, poll={"interval_ms": 1})
     assert calls[0]["body"]["trials"] == 5
     assert v["pass_rate"] == 0.6 and v["pass_at_k"] == 1 and v["flake_rate"] == 1
+
+
+# ── THE HEADLINE PASS RATE IS SERVED, NEVER RE-DERIVED ──────────────────────────────────────────────
+# `_headline_pass_rate` used to rebuild the verdict from `summary` with its own metric ladder
+# (`_PASS_RATE_METRICS`) plus a "first entry that carries a passRate" fallback — a second copy of a policy
+# the client cannot see (rule `protocol` L3: a predicate written twice has already diverged). It HAD
+# diverged, in four ways, and each test below is one of them.
+#
+# Observed RED against the pre-fix `client.py`, each for its own stated reason:
+#   FAIL test_absent_served_headline_refuses_instead_of_deriving_one: AssertionError: expected EverdictError and nothing was raised
+#   FAIL test_annihilated_batch_is_not_reported_as_zero_percent: AssertionError: reported 0 as the pass rate of a batch that scored nothing
+#   FAIL test_verdict_follows_the_served_ranking_not_a_client_side_ladder: AssertionError: reported 1 — the client ladder ranked tests_pass above state, the server ranks state first
+#   FAIL test_verdict_reads_the_served_headline_never_an_unrelated_metric: AssertionError: reported 0.9 — an unrelated metric's pass rate served as the verdict
+
+
+def test_verdict_reads_the_served_headline_never_an_unrelated_metric():
+    # The server says nothing was pass-deciding (`headlinePassRate: null`) while the summary still carries a
+    # metric that decides nothing and happens to have a passRate. The old ladder's last resort took it.
+    transport, _ = fake_transport(
+        [
+            (202, {"id": "sc4", "status": "queued"}),
+            (
+                200,
+                {
+                    "id": "sc4",
+                    "status": "succeeded",
+                    "terminal": True,
+                    "headlinePassRate": None,
+                    "summary": [{"metric": "cost_usd", "count": 3, "mean": 0.12, "passRate": 0.9}],
+                },
+            ),
+        ]
+    )
+    v = client(transport).evaluate("h@1", "d@1", poll={"interval_ms": 1})
+    assert v["pass_rate"] is None, f"reported {v['pass_rate']} — an unrelated metric's pass rate served as the verdict"
+
+
+def test_verdict_follows_the_served_ranking_not_a_client_side_ladder():
+    # The server ranks `state` ABOVE `tests_pass` (the verdict policy's ground-truth rung); the deleted client
+    # ladder ranked them the other way round. This record is exactly where the two copies disagreed.
+    transport, _ = fake_transport(
+        [
+            (202, {"id": "sc5", "status": "queued"}),
+            (
+                200,
+                {
+                    "id": "sc5",
+                    "status": "succeeded",
+                    "terminal": True,
+                    "headlinePassRate": 0.25,
+                    "summary": [
+                        {"metric": "tests_pass", "count": 4, "mean": 1, "passRate": 1},
+                        {"metric": "state", "count": 4, "mean": 0.25, "passRate": 0.25},
+                    ],
+                },
+            ),
+        ]
+    )
+    v = client(transport).evaluate("h@1", "d@1", poll={"interval_ms": 1})
+    assert v["pass_rate"] == 0.25, (
+        f"reported {v['pass_rate']} — the client ladder ranked tests_pass above state, the server ranks state first"
+    )
+
+
+def test_annihilated_batch_is_not_reported_as_zero_percent():
+    # Every trial unscored (`cases: 0`): the server's rule is "nothing pass-deciding", never a 0% product. The
+    # pre-fix client returned `trialSummary.passAt1` whenever a trialSummary existed at all, so a batch that
+    # measured nothing headlined as a total failure. The raw trial fields still ride the verdict verbatim.
+    transport, _ = fake_transport(
+        [
+            (202, {"id": "sc6", "status": "queued"}),
+            (
+                200,
+                {
+                    "id": "sc6",
+                    "status": "succeeded",
+                    "terminal": True,
+                    "headlinePassRate": None,
+                    "summary": [],
+                    "trialSummary": {"cases": 0, "passAt1": 0, "k": 3, "passAtK": 0, "flakeRate": 0},
+                },
+            ),
+        ]
+    )
+    v = client(transport).evaluate("h@1", "d@1", trials=3, poll={"interval_ms": 1})
+    assert v["pass_rate"] is None, f"reported {v['pass_rate']} as the pass rate of a batch that scored nothing"
+    assert v["pass_at_1"] == 0 and v["pass_at_k"] == 0
+
+
+def test_absent_served_headline_refuses_instead_of_deriving_one():
+    # A control plane too old to serve the field. The client refuses the verdict rather than inventing one from
+    # the summary — "we could not find out" may not become "nothing was pass-deciding" (rule `protocol` L2).
+    transport, _ = fake_transport(
+        [
+            (202, {"id": "sc7", "status": "queued"}),
+            (
+                200,
+                {
+                    "id": "sc7",
+                    "status": "succeeded",
+                    "terminal": True,
+                    "summary": [{"metric": "tests_pass", "count": 1, "mean": 1, "passRate": 1}],
+                },
+            ),
+        ]
+    )
+    with raises(EverdictError) as exc:
+        client(transport).evaluate("h@1", "d@1", poll={"interval_ms": 1})
+    assert exc.value.code == "HEADLINE_NOT_SERVED" and exc.value.status == 502
 
 
 def test_error_body_maps_to_everdict_error():
@@ -119,8 +241,8 @@ def test_on_progress_fires_per_poll():
     transport, _ = fake_transport(
         [
             (202, {"id": "sc1", "status": "queued"}),
-            (200, {"id": "sc1", "status": "running"}),
-            (200, {"id": "sc1", "status": "succeeded"}),
+            (200, {"id": "sc1", "status": "running", "terminal": False}),
+            (200, {"id": "sc1", "status": "succeeded", "terminal": True, "headlinePassRate": None}),
         ]
     )
     seen = []
@@ -143,6 +265,36 @@ def test_constructor_requires_base_url_and_api_key():
         EverdictClient("", "k")
     with raises(ValueError):
         EverdictClient("http://x", "")
+
+
+# A poller that keeps its own list of finished statuses eventually misses one. This one had lost `cancelled`,
+# so polling a cancelled batch — settled, with nothing left to wait for — spun until the 30-minute timeout and
+# raised TIMEOUT for a batch that had finished. Observed RED before the fix:
+#   FAIL test_a_cancelled_batch_has_settled: EverdictError: TIMEOUT: scorecard sc9 did not finish in time
+#   FAIL test_poll_refuses_when_the_server_did_not_say_whether_the_batch_settled: AssertionError: unexpected
+#       call #2: GET http://cp.test/scorecards/sc10  (it polled on, because it was deciding for itself)
+def test_a_cancelled_batch_has_settled():
+    transport, _calls = fake_transport([(200, {"id": "sc9", "status": "cancelled", "terminal": True})])
+    record = client(transport).poll("sc9", {"interval_ms": 1, "timeout_ms": 0})
+    assert record["status"] == "cancelled"
+
+
+def test_poll_refuses_when_the_server_did_not_say_whether_the_batch_settled():
+    # No `terminal` on the served record: the client may not decide for itself which statuses are final — that
+    # is the copy this removed. It refuses, and the refusal names the field.
+    transport, _calls = fake_transport([(200, {"id": "sc10", "status": "running"})])
+    with raises(EverdictError) as err:
+        client(transport).poll("sc10", {"interval_ms": 1})
+    assert err.value.code == "TERMINAL_NOT_SERVED"
+
+
+def test_poll_still_times_out_on_a_batch_that_never_settles():
+    # The CODE is asserted, not just the class: with a bare `raises(EverdictError)` the refusal above would
+    # satisfy this test too.
+    transport, _calls = fake_transport([(200, {"id": "sc11", "status": "running", "terminal": False})])
+    with raises(EverdictError) as err:
+        client(transport).poll("sc11", {"interval_ms": 1, "timeout_ms": 0})
+    assert err.value.code == "TIMEOUT"
 
 
 if __name__ == "__main__":

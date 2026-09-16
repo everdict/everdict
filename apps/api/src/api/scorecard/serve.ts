@@ -1,4 +1,4 @@
-import type { CaseResult } from "@everdict/contracts";
+import { type CaseResult, isSettledScorecardStatus } from "@everdict/contracts";
 import type { CaseRunRef, ScorecardResponse, ServedCaseResult } from "@everdict/contracts/wire";
 import type { ScorecardRecord } from "@everdict/db";
 import {
@@ -19,7 +19,7 @@ import {
 // List-item enrichment — the authority-ranked headline rides the LIST too, so no client re-derives a
 // "representative metric" from summary order (summary order is not authority).
 export function serveScorecardListItem(record: ScorecardRecord): ScorecardResponse {
-  return { ...record, headlinePassRate: headlinePassRate(record) };
+  return { ...record, headlinePassRate: headlinePassRate(record), terminal: isSettledScorecardStatus(record.status) };
 }
 
 // Evidence completeness rides EVERY served case — a verdict standing on partial evidence says so, and a case
@@ -34,7 +34,10 @@ function withEvidence(result: CaseResult): ServedCaseResult {
 // when the ledger has nothing to say, so a client can tell "no answer" from "this answer".
 export function serveScorecard(record: ScorecardRecord, caseRuns?: CaseRunRef[]): ScorecardResponse {
   const map = caseRuns !== undefined && caseRuns.length > 0 ? { caseRuns } : {};
-  if (!record.scorecard) return { ...record, ...map, headlinePassRate: headlinePassRate(record) };
+  // Whether the batch has settled is the server's answer on every path — a poller reads it instead of keeping a
+  // status list of its own (the copies had all lost `cancelled`).
+  const terminal = isSettledScorecardStatus(record.status);
+  if (!record.scorecard) return { ...record, ...map, headlinePassRate: headlinePassRate(record), terminal };
   // The persisted summary is a snapshot of the aggregation semantics at settle time — a record aggregated
   // before the measurement gate can still carry a dead grader's mean:0 or a diagnostic's poisoned row. When
   // the per-case results are in hand (detail reads), the summary is RE-DERIVED under the current semantics,
@@ -55,6 +58,7 @@ export function serveScorecard(record: ScorecardRecord, caseRuns?: CaseRunRef[])
       ...map,
       summary,
       headlinePassRate: headline,
+      terminal,
       policyResolution: "unresolvable",
       scorecard: { ...record.scorecard, results: record.scorecard.results.map((r) => withEvidence(r)) },
       ...(recoverable > 0 ? { retryableUnmeasured: recoverable } : {}),
@@ -79,6 +83,7 @@ export function serveScorecard(record: ScorecardRecord, caseRuns?: CaseRunRef[])
     scorecard: { ...record.scorecard, results },
     casePass: { pass, total },
     headlinePassRate: headline,
+    terminal,
     policyResolution: resolution.status,
     // Case-fate denominators — 841/970 (verdicted) and 841/1000 (requested) are different claims; an
     // infra-failed case is recovery work with NO product verdict, so it never enters pass/total above either.
