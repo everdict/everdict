@@ -14,6 +14,7 @@ import { registerBrowserSessionRoutes } from "./api/browser-session/browser-sess
 import { registerBundleRoutes } from "./api/bundle/bundle.routes.js";
 import { registerCampaignRoutes } from "./api/campaign/campaign.routes.js";
 import { registerCapabilityRoutes } from "./api/capability/capability.routes.js";
+import { registerChangeCampaignRoutes } from "./api/change-campaign/change-campaign.routes.js";
 import { registerCheckpointRoutes } from "./api/checkpoint/checkpoint.routes.js";
 import { registerCiLinkRoutes } from "./api/ci-link/ci-link.routes.js";
 import { registerCommentRoutes } from "./api/comment/comment.routes.js";
@@ -172,6 +173,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     registerViewRoutes(routes, deps);
     registerCampaignRoutes(routes, deps);
     registerCheckpointRoutes(routes, deps);
+    registerChangeCampaignRoutes(routes, deps);
     registerTaskRoutes(routes, deps);
     registerIssueRoutes(routes, deps);
     registerWorkflowStateRoutes(routes, deps);

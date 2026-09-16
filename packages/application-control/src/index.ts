@@ -12,6 +12,13 @@ export type { BrowserProfileStore } from "./ports/browser-profile-store.js";
 export type { SkillStore } from "./ports/skill-store.js";
 export type { SkillVersionStore } from "./ports/skill-version-store.js";
 export type { KnowledgeEntryStore } from "./ports/knowledge-entry-store.js";
+export type { ChangeCampaignStore } from "./ports/change-campaign-store.js";
+export {
+  ChangeCampaignService,
+  type ChangeCampaignServiceDeps,
+  type LogChangeRoundInput,
+  type OpenChangeCampaignInput,
+} from "./evolution/change-campaign-service.js";
 export type { CapabilityStore } from "./ports/capability-store.js";
 export type { AgentMemberPreferenceStore } from "./ports/agent-member-preference-store.js";
 export type { CallbackStore } from "./ports/callback-store.js";

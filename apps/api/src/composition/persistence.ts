@@ -3,6 +3,7 @@ import type {
   CancellationStore,
   CapabilityGenerationStore,
   CaseReceiptStore,
+  ChangeCampaignStore,
   ConstitutionApprovalStore,
   ConstitutionalPublisher,
   ExecutionAttemptStore,
@@ -65,6 +66,7 @@ import {
   InMemoryCampaignBuildStore,
   InMemoryCampaignEvidenceStore,
   InMemoryCapabilityStore,
+  InMemoryChangeCampaignStore,
   InMemoryCommentStore,
   InMemoryEnvelopeStore,
   InMemoryEventConsumerStateStore,
@@ -123,6 +125,7 @@ import {
   PgCapabilityGenerationStore,
   PgCapabilityStore,
   PgCaseReceiptStore,
+  PgChangeCampaignStore,
   PgCommentStore,
   PgConstitutionApprovalStore,
   PgEnvelopeStore,
@@ -293,6 +296,7 @@ export interface Persistence {
   // Handoff checkpoints (ownership O6) — where an autonomous task's resumable state transfer outlives the
   // process that wrote it. Append-only: a predecessor must not rewrite evidence its successor already used.
   handoffCheckpointStore: HandoffCheckpointStore;
+  changeCampaignStore: ChangeCampaignStore;
   verificationDecisionStore: VerificationDecisionStore;
   taskStore: AgentTaskStore; // workspace task ledger — cross-turn, cross-agent coordination (agent-teams)
   // The eval tracker (docs/tracker.md) — Initiative ⊃ Project ⊃ Issue, the "why we evaluate" layer.
@@ -521,6 +525,7 @@ export async function makePersistence(): Promise<Persistence> {
       subscriptionStore: new InMemorySubscriptionStore(),
       viewStore: new InMemoryViewStore(),
       handoffCheckpointStore: new InMemoryHandoffCheckpointStore(),
+      changeCampaignStore: new InMemoryChangeCampaignStore(),
       verificationDecisionStore: new InMemoryVerificationDecisionStore(),
       taskStore: new InMemoryAgentTaskStore(),
       issueNumberAllocator: new InMemoryIssueNumberAllocator(),
@@ -610,6 +615,7 @@ export async function makePersistence(): Promise<Persistence> {
     subscriptionStore: new PgSubscriptionStore(client),
     viewStore: new PgViewStore(client),
     handoffCheckpointStore: new PgHandoffCheckpointStore(client),
+    changeCampaignStore: new PgChangeCampaignStore(client),
     verificationDecisionStore: new PgVerificationDecisionStore(client),
     taskStore: new PgAgentTaskStore(client),
     issueNumberAllocator: new PgIssueNumberAllocator(client),

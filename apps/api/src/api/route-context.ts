@@ -8,6 +8,7 @@ import type {
 import type { ApprovalService } from "@everdict/application-control";
 import type { SandboxSessionService } from "@everdict/application-control";
 import type { TrajectoryStore } from "@everdict/application-control";
+import type { ChangeCampaignService } from "@everdict/application-control";
 import type { CiLinkService } from "@everdict/application-control";
 import type { CommentService } from "@everdict/application-control";
 import type { PlatformEventService } from "@everdict/application-control";
@@ -143,6 +144,7 @@ export interface ServerDeps {
   // Everdict builds a code-evolution candidate image into its own managed store (code-evolution-loop.md, D2).
   campaignBuild?: CampaignBuildService;
   checkpointService?: CheckpointService; // handoff checkpoints (ownership O6) — publish/read (routes disabled if absent)
+  changeCampaignService?: ChangeCampaignService; // the `change` grade of campaign
   taskService?: TaskService; // workspace task ledger — cross-agent coordination (route disabled if absent)
   // The eval tracker (docs/tracker.md) — the "why we evaluate" layer over the primitives (routes disabled if absent).
   workflowStateService?: WorkflowStateService;

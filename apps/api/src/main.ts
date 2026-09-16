@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import {
   AdoptionCompletionReconciler,
   CampaignService,
+  ChangeCampaignService,
   GithubIssueSync,
   InitiativeService,
   IntermediateCleanupReconciler,
@@ -265,6 +266,7 @@ async function main(): Promise<void> {
     fsRevisionStore,
     subscriptionStore,
     viewStore,
+    changeCampaignStore,
     handoffCheckpointStore,
     verificationDecisionStore,
     taskStore,
@@ -414,6 +416,11 @@ async function main(): Promise<void> {
     // filesystem every other write uses, so each receipt publishes an attributed revision like anything else.
     receipts: fsRetrievalReceiptWriter(workspaceFs),
   });
+
+  // The `change` grade of campaign (docs/architecture/change-campaign-spec.md): every code change belongs to
+  // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
+  // one, memory otherwise — the same contract either way.
+  const changeCampaignService = new ChangeCampaignService({ store: changeCampaignStore });
 
   // The schedule↔membership↔scorecard construction cycle: MembershipService's member-removal hook needs the
   // late-built ScheduleService (it depends on ScorecardService). The hook closes over this reference, resolved by
@@ -2014,6 +2021,7 @@ async function main(): Promise<void> {
     campaignService,
     campaignAdoption: campaignAdoptionService,
     ...(campaignBuildService !== undefined ? { campaignBuild: campaignBuildService } : {}),
+    changeCampaignService,
     checkpointService,
     taskService,
     workflowStateService, // the workspace's board — GET /workflow-states (read-only)

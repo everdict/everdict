@@ -192,6 +192,7 @@ export {
   InMemoryHandoffCheckpointStore,
   PgHandoffCheckpointStore,
 } from "./activity/handoff-checkpoint-store.js";
+export { InMemoryChangeCampaignStore, PgChangeCampaignStore } from "./evolution/change-campaign-store.js";
 export {
   InMemoryVerificationDecisionStore,
   PgVerificationDecisionStore,

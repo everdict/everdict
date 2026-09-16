@@ -22,6 +22,7 @@ export * from "./comment.js";
 export * from "./delegation-brief.js";
 export * from "./event-selector.js";
 export * from "./knowledge-entry.js";
+export * from "./change-campaign.js";
 export * from "./retrieval-receipt.js";
 export * from "./notification.js";
 export * from "./oauth-state.js";

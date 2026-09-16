@@ -523,6 +523,13 @@ export {
   experimentFamilyLimit,
   roundsOnlySpend,
 } from "./evolution/campaign-attempts.js";
+export {
+  assertAnswersCoverCriteria,
+  assertClosable,
+  assertCommitsUnclaimed,
+  deriveRoundOutcome,
+  summariseAnswers,
+} from "./evolution/change-campaign.js";
 export { type SeedEvidence, seedLeakOf } from "./evolution/seed-leak.js";
 export { type HarnessSlot, type JudgedDiagnosis, attributeCase, diagnosesOf } from "./evolution/diagnosis.js";
 export {

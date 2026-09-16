@@ -11,6 +11,7 @@ import { registerBrowserSessionTools } from "./api/browser-session/browser-sessi
 import { registerBundleTools } from "./api/bundle/bundle.mcp.js";
 import { registerCampaignEvidenceTools, registerCampaignTools } from "./api/campaign/campaign.mcp.js";
 import { registerCapabilityTools } from "./api/capability/capability.mcp.js";
+import { registerChangeCampaignTools } from "./api/change-campaign/change-campaign.mcp.js";
 import { registerCheckpointTools } from "./api/checkpoint/checkpoint.mcp.js";
 import { registerCiLinkTools } from "./api/ci-link/ci-link.mcp.js";
 import { registerCommentTools } from "./api/comment/comment.mcp.js";
@@ -139,6 +140,7 @@ export function buildMcpServer(
   registerProxyTools(server, ctx);
   registerCommentTools(server, ctx);
   registerKnowledgeTools(server, ctx);
+  registerChangeCampaignTools(server, ctx);
   registerApiKeyTools(server, ctx);
   registerMemberTools(server, ctx);
   registerInviteTools(server, ctx);
