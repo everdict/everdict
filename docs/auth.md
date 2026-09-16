@@ -205,8 +205,9 @@ client session** (the `session` callback exposes only a non-sensitive `error` fl
 `x-everdict-tenant` path only when Keycloak is unconfigured). Identity comes from `GET /me` — the web never decodes
 the token for `workspace`/roles — and the UI is role-gated off `/me` (`shared/auth/can.ts` mirror), with the
 control plane still the enforcer. `scripts/live/web-auth-flow.py` drives the Auth.js + Keycloak
-authorization-code flow headlessly with a cookie jar and checks that `/api/auth/session` carries **no** access
-token; its per-role page assertions predate the membership role model. See `docs/web.md`.
+authorization-code flow headlessly with a cookie jar and checks that a signed-in `/api/auth/session` carries
+**no** access token; its per-role page assertions match the current matrix and require each gated page to have
+rendered before they read the gate. See `docs/web.md`.
 
 ## MCP (agent-facing)
 The agent surface (`apps/api` `/mcp`) is OAuth-protected the same way Linear's MCP is: `/mcp` returns

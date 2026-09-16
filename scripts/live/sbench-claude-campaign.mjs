@@ -374,17 +374,20 @@ try {
     candidateScorecardId: cand.id,
   });
   if (logged.status >= 300) {
+    // A refused round derived NO verdict — and the walk used to carry on and close with "derived verdict".
     show("ROUND REFUSED", `${logged.status} ${String(logged.json?.message ?? "").slice(0, 300)}`);
-  } else {
-    // The verdict is the PLATFORM's — this script never sends one and the record would refuse it if it did.
-    const v = logged.json.round?.verdict ?? (logged.json.rounds ?? []).at(-1)?.verdict ?? {};
-    show("comparable", v.comparable);
-    if (v.comparable === false) show("why not", v.detail);
-    show("significant +/-", `${v.significantImprovements} / ${v.significantRegressions}`);
-    show("heldOut", v.heldOut);
-    if (v.targets) show("targets", v.targets);
-    show("unverified axes", v.unverifiedAxes);
+    throw new Error(`round refused: ${logged.status} ${String(logged.json?.message ?? "").slice(0, 300)}`);
   }
+  // The verdict is the PLATFORM's — this script never sends one and the record would refuse it if it did.
+  const v = logged.json.round?.verdict ?? (logged.json.rounds ?? []).at(-1)?.verdict;
+  // …and an absent one is not an empty one: `?? {}` printed `undefined` down the whole block and still closed green.
+  if (v === undefined) throw new Error("the round was accepted but carries no verdict — nothing was derived");
+  show("comparable", v.comparable);
+  if (v.comparable === false) show("why not", v.detail);
+  show("significant +/-", `${v.significantImprovements} / ${v.significantRegressions}`);
+  show("heldOut", v.heldOut);
+  if (v.targets) show("targets", v.targets);
+  show("unverified axes", v.unverifiedAxes);
 
   line("⑨ the gate, and the settlement it authorizes");
   const dec = ok(await call("GET", `/campaigns/${camp.id}/decision`), "decision");

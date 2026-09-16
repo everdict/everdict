@@ -15,9 +15,20 @@ WEB = os.environ.get("WEB", "http://localhost:3001")
 WS = os.environ.get("WS", "acme")  # workspace from the test fixture (slug = first URL segment)
 USERS = {"alice": ("alice", "member"), "carol": ("carol", "admin")}
 
+# The ko-locale strings the two gated pages ACTUALLY render (apps/web/messages/ko.json) — the page header,
+# which proves the page rendered at all, and the refusal the role gate shows. Asserted as PRODUCT OUTPUT, so
+# the locale is pinned below rather than left to Accept-Language.
+# (asserts ko-locale UI output — KEEP)
+RUNS_NEW = ("새 실행", "실행을 시작할 권한이 없어요.")  # runsPage.newRun / runsPage.noPermissionTitle
+HARNESSES_NEW = ("하니스 등록", "하니스를 등록할 권한이 없어요.")  # harnessesPage.registerTitle / .noPermTitle
+LOCALE_COOKIE = "everdict-locale"  # shared/i18n/config.ts — an explicit choice beats Accept-Language
+
 
 def login(username, password):
     s = requests.Session()
+    # Pin the locale. Without it the app falls back to `en` for a header-less client, so every assertion on
+    # ko output below would have been reading a page that never contained Korean at all.
+    s.cookies.set(LOCALE_COOKIE, "ko")
     # 1) Auth.js CSRF (sets cookie + returns token)
     csrf = s.get(f"{WEB}/api/auth/csrf", timeout=10).json()["csrfToken"]
     # 2) POST signin/keycloak → follow redirect chain to the Keycloak login form
@@ -54,6 +65,20 @@ def get(s, path):
     return r.status_code, r.text
 
 
+def gate(page, code, body, markers, failures, who, want_form):
+    """Read a role-gated page: it must have RENDERED (200 + its own header), and then either show the form
+    or the refusal. The absence of a refusal string is not evidence of a form — a 500, a redirect to the
+    login screen and an `en` render all contain no refusal either, and each one used to read as "allowed"."""
+    header, refusal = markers
+    if code != 200 or header not in body:
+        failures.append(f"{who}: {page} did not render (HTTP {code}, header {header!r} absent)")
+        return
+    form = refusal not in body
+    print(f"           {page} form:{form} (want {want_form})")
+    if form != want_form:
+        failures.append(f"{who}: {page} gate wrong (form={form}, want {want_form})")
+
+
 def main():
     failures = []
     for username, (password, role) in USERS.items():
@@ -65,25 +90,23 @@ def main():
             failures.append(f"{username}: workspace page missing workspace (code {code})")
 
         # BFF hardening: the client-visible session must NOT carry the access token (no JWT leak).
-        _, sess = get(s, "/api/auth/session")
+        # An endpoint that errored carries no token either, and Auth.js answers `{}` when nobody is signed in —
+        # so the session must first BE one. A 200 carrying a `user` is what makes "no accessToken in it" a
+        # claim about the BFF rather than about an empty body.
+        sc, sess = get(s, "/api/auth/session")
+        if sc != 200 or '"user"' not in sess:
+            failures.append(f"{username}: /api/auth/session is not a signed-in session (HTTP {sc}, body {sess[:80]!r})")
         leaked = ("accessToken" in sess) or ("eyJ" in sess)
         print(f"           /api/auth/session token-leak:{leaked} (want False)")
         if leaked:
             failures.append(f"{username}: access token leaked to client session")
 
-        # role-gated UI (mirrors the control-plane authz matrix, driven by /me roles)
-        rc, rbody = get(s, f"/{WS}/runs/new")
-        run_form = "권한이 없습니다" not in rbody  # member+ may submit (asserts ko-locale UI output — KEEP)
-        hc, hbody = get(s, f"/{WS}/harnesses/new")
-        harness_form = "권한이 없습니다" not in hbody  # viewer+ (asserts ko-locale UI output — KEEP)
-
+        # role-gated UI (mirrors the control-plane authz matrix, driven by /me roles).
         # harnesses:register has no role gate (viewer+ in packages/domain/src/auth/authz.ts), so a member gets the form too.
-        want_harness = True
-        print(f"           runs/new form:{run_form} (want True)   harnesses/new form:{harness_form} (want {want_harness})")
-        if not run_form:
-            failures.append(f"{username}: runs/new should allow submit")
-        if harness_form != want_harness:
-            failures.append(f"{username}: harnesses/new gate wrong (got {harness_form}, want {want_harness})")
+        rc, rbody = get(s, f"/{WS}/runs/new")
+        gate("runs/new", rc, rbody, RUNS_NEW, failures, username, want_form=True)
+        hc, hbody = get(s, f"/{WS}/harnesses/new")
+        gate("harnesses/new", hc, hbody, HARNESSES_NEW, failures, username, want_form=True)
 
     if failures:
         print("\nFAIL:")

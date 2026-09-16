@@ -9,7 +9,7 @@
 // Usage: KUBECONFIG context kind-everdict, kubectl on PATH.
 //   PATH=$HOME/.local/bin:$PATH node scripts/live/service-topology-k8s.mjs
 
-import { perTenantTrustZones } from "../../packages/domain/dist/index.js";
+import { caseOutcome, perTenantTrustZones } from "../../packages/domain/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
 
@@ -72,6 +72,9 @@ async function main() {
         body: JSON.stringify(payload),
       });
       console.log(`    front-door responded: HTTP ${res.status}`);
+      // The header comment says "verify via an HTTP 200 response" — so verify it. A logged status the script
+      // never reads let a 5xx front door stand behind a green run.
+      if (!res.ok) throw new Error(`front door refused the drive: HTTP ${res.status} from ${url}`);
     },
   });
 
@@ -82,10 +85,12 @@ async function main() {
     result = await backend.dispatch(JOB);
   } finally {
     banner("teardown");
-    await runtime
+    // "accepted" is not "gone": report which of the two happened instead of printing the deletion either way.
+    const torn = await runtime
       .teardown(SPEC, perTenantTrustZones().resolve("acme"))
-      .catch((e) => console.log("  teardown:", e.message));
-    console.log("  namespace everdict-acme deleted");
+      .then(() => undefined)
+      .catch((e) => e.message);
+    console.log(torn === undefined ? "  namespace everdict-acme deleted" : `  teardown FAILED: ${torn}`);
   }
 
   banner("RESULT");
@@ -99,10 +104,37 @@ async function main() {
   console.log("elapsed :", ((Date.now() - t0) / 1000).toFixed(1), "s");
 
   banner("per-run wiring delivered over the network (K8s service)");
-  const w = delivered[0] ?? {};
-  console.log("thread_id     :", w.thread_id);
-  console.log("minio_prefix  :", w.minio_prefix);
-  console.log("browser_cdp_url:", w.browser_cdp_url);
+  const w = delivered[0];
+  console.log("thread_id     :", w?.thread_id);
+  console.log("minio_prefix  :", w?.minio_prefix);
+  console.log("browser_cdp_url:", w?.browser_cdp_url);
+
+  // What this script claims is a GRADED case, not a dispatch that returned: the header says
+  // "grade: real browser snapshot + trace → CaseResult". `caseOutcome` is the domain's own reading of that
+  // result, so the verdict is not re-derived here; the graders the case declared must all have reported.
+  const outcome = caseOutcome(result);
+  const graded = new Set(result.scores.map((s) => s.graderId));
+  const missing = JOB.evalCase.graders.map((g) => g.id).filter((id) => !graded.has(id));
+  const problems = [];
+  if (outcome.status === "completed" && !outcome.verdict) problems.push(`case ${result.caseId} FAILED its graders`);
+  if (outcome.status === "unmeasured") problems.push(`case ${result.caseId} measured nothing pass-deciding`);
+  if (outcome.status === "infra_failed" || outcome.status === "cancelled")
+    problems.push(
+      `case ${result.caseId} ${outcome.status} at stage ${outcome.failure.stage}: ${outcome.failure.code} — ${outcome.failure.message}`,
+    );
+  if (missing.length > 0) problems.push(`case ${result.caseId} has no score from grader(s): ${missing.join(", ")}`);
+  // The per-run wiring is the thing "delivered over the network" — an empty delivery is a front door that was
+  // never driven, which every "is it defined?" reading of `delivered[0] ?? {}` used to accept.
+  if (w === undefined) problems.push("no per-run wiring was submitted to the front door");
+  else if (!w.thread_id || !w.browser_cdp_url)
+    problems.push(`per-run wiring incomplete (thread_id=${w.thread_id}, browser_cdp_url=${w.browser_cdp_url})`);
+
+  if (problems.length > 0) {
+    console.log("\nLIVE RUN FAILED:");
+    for (const p of problems) console.log("  -", p);
+    process.exit(1);
+  }
+  console.log("\n✅ the service topology ran on real K8s and the case passed every grader it declared");
 }
 
 main().catch((e) => {

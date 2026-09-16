@@ -13,6 +13,10 @@ const { StreamableHTTPClientTransport } = await import(`${SDK}/client/streamable
 
 const txt = (r) => r?.content?.[0]?.text ?? "";
 const fails = [];
+// The tools this script actually DRIVES. A bare count said nothing about which tools a role got — it stayed
+// green through a rename and through a swap, and it went red for every unrelated tool the API added.
+const DRIVEN = ["list_runs", "submit_run", "register_harness"];
+const missing = (tools) => DRIVEN.filter((t) => !tools.includes(t));
 
 async function ropc(user, pass) {
   const body = new URLSearchParams({
@@ -59,20 +63,26 @@ console.log("no-token POST /mcp →", un.status, "| WWW-Authenticate:", wa);
 if (un.status !== 401 || !wa.includes("resource_metadata")) fails.push("401-challenge");
 
 // 3) alice (member) over OIDC — full MCP session + role gating
+let aliceTools = [];
 {
   const { client, transport } = await connect(await ropc("alice", "alice"));
-  const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-  console.log("[alice/member] tools:", tools.join(","));
-  if (tools.length !== 6) fails.push("alice.tools");
+  aliceTools = (await client.listTools()).tools.map((t) => t.name).sort();
+  console.log("[alice/member] tools:", aliceTools.length, "| driven:", DRIVEN.join(","));
+  if (aliceTools.length === 0) fails.push("alice.tools: the session listed no tools at all");
+  if (missing(aliceTools).length > 0) fails.push(`alice.tools missing: ${missing(aliceTools).join(",")}`);
   const lr = await client.callTool({ name: "list_runs", arguments: {} });
-  if (lr.isError) fails.push("alice.list_runs");
+  // "it returned" is not "it answered": an error-free call with no content says nothing about the session.
+  if (lr.isError || txt(lr) === "")
+    fails.push(`alice.list_runs (isError=${!!lr.isError}, answer ${txt(lr).length} chars)`);
   const sr = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "mcp e2e" } });
   console.log("[alice] submit_run isError:", !!sr.isError, "|", txt(sr).slice(0, 50).replace(/\n/g, " "));
-  if (sr.isError) fails.push("alice.submit_run");
+  if (sr.isError || txt(sr) === "") fails.push(`alice.submit_run (isError=${!!sr.isError})`);
   // harnesses:register has no role gate (viewer+ in packages/domain/src/auth/authz.ts): a member is NOT refused. The
   // empty spec still fails validation, so the call errors — but for the spec, never as FORBIDDEN.
   const rh = await client.callTool({ name: "register_harness", arguments: { spec: "{}" } });
   console.log("[alice] register_harness isError:", !!rh.isError, "|", txt(rh));
+  // …and the tool has to have SAID something, or "FORBIDDEN is not in the answer" is a claim about an empty string.
+  if (txt(rh) === "") fails.push("alice.register_harness answered nothing — the gate below would read an empty string");
   if (txt(rh).includes("FORBIDDEN")) fails.push("alice.register_harness should not be FORBIDDEN (viewer+)");
   await transport.close();
 }
@@ -91,7 +101,9 @@ if (un.status !== 401 || !wa.includes("resource_metadata")) fails.push("401-chal
   });
   const rh = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS } });
   console.log("[carol/admin] register_harness isError:", !!rh.isError, "|", txt(rh).replace(/\n/g, " "));
-  if (rh.isError) fails.push("carol.register_harness should succeed");
+  // A registration that succeeded names what it registered; `!isError` alone accepts an empty answer.
+  if (rh.isError) fails.push(`carol.register_harness should succeed: ${txt(rh).replace(/\n/g, " ")}`);
+  else if (!txt(rh).includes("mcpbu")) fails.push(`carol.register_harness answer does not name mcpbu: ${txt(rh)}`);
   await transport.close();
 }
 
@@ -107,9 +119,14 @@ if (un.status !== 401 || !wa.includes("resource_metadata")) fails.push("401-chal
   if (!issued.apiKey) fails.push("apikey.issue");
   else {
     const { client, transport } = await connect(issued.apiKey);
-    const tools = (await client.listTools()).tools;
+    const tools = (await client.listTools()).tools.map((t) => t.name).sort();
     console.log("[api-key/admin] tools:", tools.length);
-    if (tools.length !== 6) fails.push("apikey.tools");
+    // The claim is that an ak_ Bearer reaches the SAME MCP surface as an OIDC one — so compare the surfaces,
+    // not two counts that happen to agree.
+    if (tools.length === 0) fails.push("apikey.tools: the session listed no tools at all");
+    if (missing(tools).length > 0) fails.push(`apikey.tools missing: ${missing(tools).join(",")}`);
+    if (aliceTools.length > 0 && tools.join(",") !== aliceTools.join(","))
+      fails.push(`apikey.tools differ from the OIDC session (${tools.length} vs ${aliceTools.length})`);
     await transport.close();
   }
 }

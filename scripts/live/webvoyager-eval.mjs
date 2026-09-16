@@ -32,6 +32,9 @@ const dataset = importWebVoyager(readFileSync(DATASET, "utf8"), {
 const registry = new InMemoryDatasetRegistry();
 await registry.register(TENANT, dataset);
 console.log(`imported + registered: ${TENANT}/${DS_ID}@${DS_VER} (${dataset.cases.length} cases)`);
+// An import that yielded nothing would run a suite over zero cases and summarize to an empty scorecard —
+// which reads exactly like coverage (CLAUDE.md: an empty corpus is never a pass).
+if (dataset.cases.length === 0) throw new Error(`${DATASET} imported 0 cases — there is nothing to evaluate`);
 
 // 2) load from the registry (tenant-owned round-trip) → Suite.
 const loaded = await registry.get(TENANT, DS_ID, DS_VER);
@@ -39,6 +42,9 @@ const suite = { id: loaded.id, harness: { id: "browser-use" }, cases: loaded.cas
 console.log(`WebVoyager eval — ${suite.cases.length} cases × real browser-use (${HV}), dataset from registry\n`);
 
 // 3) dispatch = run one case with the real browser-use agent → CaseResult (scored by the registry case's graders).
+// An agent that never ran is not a case the agent failed: it is scored here against an empty answer, so it
+// must be recorded as a FAILURE of the run rather than folded into the pass rate.
+const agentErrors = [];
 const dispatch = async (job) => {
   const c = job.evalCase;
   let r = { final: "", steps: 0, actions: [], urls: [] };
@@ -54,8 +60,10 @@ const dispatch = async (job) => {
     });
     const m = /BU_RESULT=(\{.*\})/.exec(out);
     if (m) r = JSON.parse(m[1]);
+    else agentErrors.push(`${c.id}: the agent printed no BU_RESULT sentinel`);
   } catch (e) {
     console.log(`  [${c.id}] agent error: ${(e.message ?? "").slice(0, 70)}`);
+    agentErrors.push(`${c.id}: ${(e.message ?? String(e)).slice(0, 120)}`);
   }
   const trace = [
     ...(r.actions ?? []).map((a, i) => ({ t: i, kind: "tool_call", id: `a${i}`, name: a, args: {} })),
@@ -98,8 +106,22 @@ for (const s of summary)
   console.log(
     `  ${s.metric}: passRate=${s.passRate === undefined ? "-" : `${(s.passRate * 100).toFixed(0)}%`} mean=${s.mean.toFixed(2)} n=${s.count}`,
   );
-const passRate = summary.find((s) => s.metric === "answer_match")?.passRate ?? 0;
+// The claim is that the dataset was EVALUATED — so the metric this script is about must exist, and it must
+// cover every case. `?? 0` used to turn "answer_match was never measured" into "0% task success", which is a
+// number, which reads like a result.
+const answerMatch = summary.find((s) => s.metric === "answer_match");
+const problems = [];
+for (const e of agentErrors) problems.push(`the agent did not run: ${e}`);
+if (answerMatch === undefined) problems.push("no answer_match metric in the scorecard — nothing was measured");
+else if (answerMatch.passRate === undefined) problems.push("answer_match decided no case pass/fail");
+else if (answerMatch.count !== suite.cases.length)
+  problems.push(`answer_match covers ${answerMatch.count} of ${suite.cases.length} cases`);
+if (problems.length > 0) {
+  console.log("\nLIVE RUN FAILED:");
+  for (const p of problems) console.log("  -", p);
+  process.exit(1);
+}
 console.log(
-  `\n✅ multi-tenant dataset eval e2e: WebVoyager import → tenant-owned registry (${TENANT}) → load → real browser-use evaluation → Scorecard stored. task success (answer_match)=${(passRate * 100).toFixed(0)}%.`,
+  `\n✅ multi-tenant dataset eval e2e: WebVoyager import → tenant-owned registry (${TENANT}) → load → real browser-use evaluation → Scorecard stored. task success (answer_match)=${(answerMatch.passRate * 100).toFixed(0)}% over ${answerMatch.count} cases.`,
 );
 process.exit(0);

@@ -6,7 +6,7 @@
 //
 // Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/registry-k8s.mjs
 
-import { LATEST, perTenantTrustZones } from "../../packages/domain/dist/index.js";
+import { LATEST, caseOutcome, perTenantTrustZones } from "../../packages/domain/dist/index.js";
 import { loadHarnessTaxonomyDir } from "../../packages/registry/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
@@ -20,7 +20,11 @@ const banner = (s) => console.log(`\n=== ${s} ===`);
 async function main() {
   banner("harness taxonomy SSOT (file-backed: templates + instances)");
   const { instances: registry } = await loadHarnessTaxonomyDir(DIR);
-  for (const { id, versions } of await registry.list("_shared")) console.log(`  ${id}: ${versions.join(", ")}`);
+  const listed = await registry.list("_shared");
+  for (const { id, versions } of listed) console.log(`  ${id}: ${versions.join(", ")}`);
+  // An empty SSOT is not a resolution — a registry with nothing in it would let every assertion below read
+  // as coverage (CLAUDE.md: an empty corpus is never a pass).
+  if (listed.length === 0) throw new Error(`harness taxonomy SSOT is empty (${DIR}) — nothing to resolve`);
   const latest = await registry.getService("acme", "bu", LATEST);
   console.log(
     `  resolve bu@latest → ${latest.id}@${latest.version}  (deps: ${latest.dependencies.map((d) => d.store).join("+")})`,
@@ -47,6 +51,9 @@ async function main() {
         body: JSON.stringify(payload),
       });
       console.log(`    front-door responded: HTTP ${res.status}`);
+      // A logged status is not a checked one: a front door answering 5xx used to let the drive continue and
+      // the case still scored, so the ✅ below could stand over a harness that was never driven.
+      if (!res.ok) throw new Error(`front door refused the drive: HTTP ${res.status} from ${url}`);
     },
   });
 
@@ -70,20 +77,38 @@ async function main() {
     result = await backend.dispatch(job);
   } finally {
     banner("teardown");
-    await runtime
+    // "accepted" is not "gone": say which one happened instead of printing the deletion either way.
+    const torn = await runtime
       .teardown(latest, perTenantTrustZones().resolve("acme"))
-      .catch((e) => console.log("  teardown:", e.message));
-    console.log("  namespace everdict-acme deleted");
+      .then(() => undefined)
+      .catch((e) => e.message);
+    console.log(torn === undefined ? "  namespace everdict-acme deleted" : `  teardown FAILED: ${torn}`);
   }
 
   banner("RESULT");
   console.log("harness :", result.harness, "(← resolved from version=latest)");
   console.log("scores  :", result.scores.map((s) => `${s.graderId}:${s.value}`).join(", "));
-  console.log(
-    result.harness === "bu@1.1.0"
-      ? "✅ registry SSOT resolved latest → 1.1.0 and drove a real K8s run"
-      : `ℹ resolved to ${result.harness}`,
-  );
+
+  // The claim is "the registry resolved latest → 1.1.0 AND that spec drove a real K8s run that produced a
+  // verdict". A resolved harness string alone is the first half; `caseOutcome` (the domain's own reading of
+  // a CaseResult) is what answers the second, so the script never re-derives a verdict of its own.
+  const outcome = caseOutcome(result);
+  const problems = [];
+  if (result.harness !== "bu@1.1.0") problems.push(`resolved to ${result.harness}, want bu@1.1.0`);
+  if (result.scores.length === 0) problems.push(`case ${result.caseId} produced no scores`);
+  if (outcome.status === "completed" && !outcome.verdict) problems.push(`case ${result.caseId} FAILED its graders`);
+  if (outcome.status === "unmeasured") problems.push(`case ${result.caseId} measured nothing pass-deciding`);
+  if (outcome.status === "infra_failed" || outcome.status === "cancelled")
+    problems.push(
+      `case ${result.caseId} ${outcome.status} at stage ${outcome.failure.stage}: ${outcome.failure.code} — ${outcome.failure.message}`,
+    );
+
+  if (problems.length > 0) {
+    console.log("\nLIVE RUN FAILED:");
+    for (const p of problems) console.log("  -", p);
+    process.exit(1);
+  }
+  console.log("✅ registry SSOT resolved latest → 1.1.0 and drove a real K8s run that passed its graders");
 }
 
 main().catch((e) => {

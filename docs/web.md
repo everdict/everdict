@@ -324,8 +324,10 @@ dev secret so it doesn't 500.
 `apps/web` self-contained. **Live (headless OAuth, real Keycloak)** via `scripts/live/web-auth-flow.py`: drives
 the Auth.js + Keycloak authorization-code flow with a cookie jar (no browser) for `alice` (member) and `carol`
 (admin) → the web forwards each user's token → `/{workspace}` (=`/acme`) shows `workspace=acme` (from `/me`);
-`/acme/runs/new` is allowed for both. The script still expects `/acme/harnesses/new` to be gated for the member,
-which predates open harness registration and no longer matches `can.ts`.
+`/acme/runs/new` and `/acme/harnesses/new` are both allowed for both (`harnesses:register` is viewer+ in
+`can.ts`). The script pins the locale cookie and reads each gated page POSITIVELY — HTTP 200 plus that page's own
+ko header — before deciding form-vs-refusal, because the absence of a refusal string is also what a 500, a
+redirect to sign-in and an `en` render all look like.
 **BFF hardening proven**: the
 same script asserts `/api/auth/session` carries **no** access token (no `eyJ…`/`accessToken` leak) while the
 server-side path still works — the token lives only in the httpOnly cookie.

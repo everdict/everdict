@@ -90,5 +90,7 @@ Client setup is product documentation: [Claude Code plugin](guide/integrations/c
 - **Live** (`scripts/live/mcp-auth.mjs`, `scripts/live/mcp-oauth.mjs`, real Keycloak): discovery + `401`
   challenge, a Keycloak OIDC token driving a stateful session, an `ak_…` key on `/mcp`, and the full browser flow
   (anonymous DCR → Authorization Code + PKCE → login → consent → loopback `?code` → token exchange → `initialize`
-  + `tools/list`). `mcp-auth.mjs` still asserts the pre-membership role model (a member's `register_harness` →
-  `FORBIDDEN`), which the current matrix no longer produces — re-baseline it before trusting a red run.
+  + `tools/list`). `mcp-auth.mjs` matches the current matrix: a member's `register_harness` is refused for the
+  SPEC, never as `FORBIDDEN` (`harnesses:register` is viewer+), and an admin's registration must name what it
+  registered. Its `tools/list` assertion names the tools the script drives rather than counting them — a count
+  said nothing about which tools a role got, and drifted with every unrelated tool the API added.

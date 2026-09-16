@@ -34,6 +34,9 @@ async function pull(adapter, id, version, limit, token) {
   console.log(
     `\n▶ ${adapter.source.kind === "huggingface" ? adapter.source.dataset : adapter.id} → ${TENANT}/${id}@${version} (${loaded.cases.length} cases)`,
   );
+  // A pull that returned nothing registers an empty dataset, and every check downstream then passes over zero
+  // rows (CLAUDE.md: an empty corpus is never a pass).
+  if (loaded.cases.length === 0) throw new Error(`${adapter.id} pulled 0 cases — the HF source returned nothing`);
   return loaded;
 }
 
@@ -71,6 +74,11 @@ const am = summary.find((s) => s.metric === "answer_match");
 console.log(
   `    eval → answer_match passRate=${am ? `${(am.passRate * 100).toFixed(0)}%` : "-"} (n=${am?.count}) — Scorecard stored`,
 );
+// The dispatch is an ORACLE — it answers every case with that case's own gold answer — so anything short of
+// every case measured and passing means the import/grading plumbing is broken, not that an agent was weak.
+if (am === undefined) throw new Error("no answer_match metric — the oracle eval measured nothing");
+if (am.count !== gsm8k.cases.length) throw new Error(`answer_match covers ${am.count} of ${gsm8k.cases.length} cases`);
+if (am.passRate !== 1) throw new Error(`the oracle scored ${am.passRate} — import or grading is wrong`);
 
 // 2) mind2web(web-agent) — pull 3 from HF and register as a tenant dataset (proves ingest of a real agentic benchmark).
 const m2w = await pull(getBenchmark("mind2web"), "mind2web-mini", "default", 3);
@@ -80,22 +88,24 @@ for (const c of m2w.cases)
   );
 
 // 3) gaia(gated) — attempt ingest if a token is present (else skip). Multi-tenant: token comes from the SecretStore.
+// A token that was SUPPLIED and did not work is a failure of the gated path; an absent token is a path this
+// run did not exercise. The summary below says which of the two happened instead of claiming the first.
 const hfToken = process.env.HF_TOKEN;
+let gated = "skipped (HF_TOKEN unset)";
 if (hfToken) {
-  try {
-    const gaia = await pull(getBenchmark("gaia"), "gaia-mini", "2023_all", 3, hfToken);
-    console.log(`    gaia gated ingest succeeded: ${gaia.cases.length} cases`);
-  } catch (e) {
-    console.log(`    gaia gated ingest failed: ${(e.message ?? "").slice(0, 90)}`);
-  }
+  const gaia = await pull(getBenchmark("gaia"), "gaia-mini", "2023_all", 3, hfToken);
+  console.log(`    gaia gated ingest succeeded: ${gaia.cases.length} cases`);
+  gated = `verified via the token path (${gaia.cases.length} cases)`;
 } else {
   console.log(
     "\n▶ gaia (gated) — HF_TOKEN unset → skip (multi-tenant injects the HF token from the tenant SecretStore)",
   );
 }
 
-console.log(`\nstored scorecards for ${TENANT}: ${(await store.list(TENANT)).length}`);
+const stored = (await store.list(TENANT)).length;
+console.log(`\nstored scorecards for ${TENANT}: ${stored}`);
+if (stored === 0) throw new Error(`no scorecard was stored for ${TENANT}`);
 console.log(
-  `\n✅ benchmark-ecosystem e2e: pull from HF Hub by benchmark ID alone (gsm8k QA + mind2web web-agent) → register a tenant-owned Dataset → eval → Scorecard. Adding a new benchmark = 1 adapter (${Object.keys(BENCHMARK_CATALOG).length} in the catalog). gated verified via the token path.`,
+  `\n✅ benchmark-ecosystem e2e: pull from HF Hub by benchmark ID alone (gsm8k QA + mind2web web-agent) → register a tenant-owned Dataset → eval → Scorecard. Adding a new benchmark = 1 adapter (${Object.keys(BENCHMARK_CATALOG).length} in the catalog). gated: ${gated}.`,
 );
 process.exit(0);
