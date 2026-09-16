@@ -96,10 +96,14 @@ SRA-Bench (`R33.md`) is the reason to resist starting with a better index: **rec
 reranker that improved six models' aggregate still dropped specific benchmarks), and models show weak *need
 awareness* — loading a skill on ~36.9% of tasks whether or not they were failing without one.
 
-1. **Make anchors free.** Derive them from where the session already is: the repository (`repository` is
-   already a `NODE_TYPE`), the branch's issue, the campaign, the services whose files are open. The plugin's
-   session-start hook resolves the repository today and tells the session to read — it should pass that anchor
-   to `get_task_context` instead of asking the model to think of it.
+1. **Make anchors free.** ✅ **Landed for the repository** (2026-09-16): the session-start hook now hands the
+   session the call with the anchor already in it —
+   `get_task_context {"refs":[{"type":"repository","key":"owner/name"}]}` — and names the branch's issue
+   identifier when it carries one, to be resolved with `get_issue` first (a pin's key is the record id, not
+   the identifier). **Measured on this workspace the same day: one repository anchor returned every entry it
+   held (7 of 7), each `coverage: current`.** So the missing input was the anchor, not an index — for a
+   workspace this size. The remaining anchors (campaign, service, the entities a session learns as it works)
+   are still the session's to add.
 2. **Record the retrieval.** What was returned, what the session opened, and what the work then did. This is
    the measurement every later step needs, and it is cheap: one record per assembly.
 3. **Then, and only then, measure a second retriever** — text, embedding, or a router — against the anchor

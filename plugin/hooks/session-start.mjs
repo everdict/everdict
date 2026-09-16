@@ -55,6 +55,11 @@ const originUrl =
   git("remote", "get-url", "origin") ?? (firstRemote ? git("remote", "get-url", firstRemote) : undefined);
 const repository = originUrl ? (/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(originUrl)?.[1] ?? undefined) : undefined;
 
+// A branch commonly carries the request it serves (`fix/DEFAUL-1-…`, `DIGO-7G-…`). It is a HINT, not an
+// anchor: a pin's key for an issue is the record id, so the identifier has to be resolved before it can be
+// asked with — which the session does, because the hook makes no calls of its own.
+const issueHint = branch ? (/\b[A-Z][A-Z0-9]*-\d+\b/.exec(branch)?.[0] ?? undefined) : undefined;
+
 const workspaceFile = root ? path.join(root, ".everdict", "workspace") : undefined;
 const envWorkspace = process.env.EVERDICT_WORKSPACE?.trim();
 const fileWorkspace =
@@ -86,12 +91,25 @@ emit(
     `- workspace: **${workspace}** (from ${workspaceFrom})`,
     `- repository: **${repository ?? "unknown"}**${branch ? ` · branch \`${branch}\`` : ""}`,
     "",
-    "## Before you change code",
+    "## Before you change code — run this, it is already addressed to this service",
     "",
-    "Read what this service already knows and what is already asked of it — the answers are often there:",
+    "```",
+    `get_task_context ${JSON.stringify({ refs: [{ type: "repository", key: repository ?? "" }] })}`,
+    "```",
     "",
-    "1. `list_knowledge_entries` — the decisions, conventions and findings that govern this service.",
-    "2. `list_issues` — the open requests; the work you are about to do probably belongs to one.",
+    "That is the whole of Everdict's retrieval: it answers about the entities you NAME, and a task that names",
+    "none gets nothing. The anchor above is the one this checkout can state for you — everything else you learn",
+    "(the harness, the dataset, the campaign) is another anchor worth asking with.",
+    ...(issueHint !== undefined
+      ? [
+          "",
+          `The branch names **${issueHint}**. Resolve it with \`get_issue\` and anchor on the id it returns — a`,
+          "pin's key is the record id, not the identifier, so the identifier alone matches nothing.",
+        ]
+      : ["", "`list_issues` — the work you are about to do probably belongs to an open request."]),
+    "",
+    "Each item comes back with its relation to the anchor (`covers` · `earlier` · `later` · `general`) and a",
+    "coverage state. A `superseded` entry is returned too, ranked last: read it as history, never as the rule.",
     "",
     "## While you work",
     "",

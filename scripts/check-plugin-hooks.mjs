@@ -158,6 +158,15 @@ check(
   (out) => context(out).includes("workspace: **acme**") && context(out).includes("everdict/everdict"),
   "the resolved branch naming workspace and repository",
 );
+check(
+  // Retrieval here answers about the entities a task NAMES, so handing over a ready call with the anchor
+  // already in it is the difference between context and none. The argument name is part of the contract:
+  // the tool takes `refs`, and an emitted `anchors` would be a call the session has to repair.
+  "session-start/hands over an anchored get_task_context call",
+  run(hooks.sessionStart, { cwd: root }, { EVERDICT_WORKSPACE: "acme" }),
+  (out) => context(out).includes('get_task_context {"refs":[{"type":"repository","key":"everdict/everdict"}]}'),
+  "the exact call, with the repository anchor and the `refs` argument",
+);
 
 if (failures.length > 0) {
   console.error("plugin hook check FAILED:");
@@ -165,5 +174,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 10 branches — refusal, allowance and both resolutions`,
+  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 11 branches — refusal, allowance, both resolutions and the anchored call`,
 );
