@@ -23,7 +23,9 @@ someone can read is a decision; silence is not.
   `convention` · `context`
 - `title`: the claim itself, in one line — not a topic
 - `body`: the mechanism, the evidence, the caveats
-- `refs`: the issue and the repository (`{type:"issue", key}`, `{type:"repository", key:"owner/name"}`)
+- `refs`: the issue and the repository (`{type:"issue", key}`, `{type:"repository", key:"owner/name"}`), plus
+  `{type:"knowledge", key:"<id>"}` for every entry this one was built on or restates — without that edge,
+  repetition reads as corroboration
 - `evidence`: what proves it — a scorecard, a run, a comment
 - `visibility: "workspace"` unless the user wants a draft
 

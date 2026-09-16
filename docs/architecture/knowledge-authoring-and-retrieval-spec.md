@@ -109,6 +109,43 @@ awareness* — loading a skill on ~36.9% of tasks whether or not they were faili
 3. **Then, and only then, measure a second retriever** — text, embedding, or a router — against the anchor
    baseline, with the outcome (not recall) as the metric, and a control arm that retrieves nothing.
 
+### The retrieval record — two halves, and only one of them has a home
+
+Step 2 above ("record the retrieval") is what every later step is measured with, and it splits by who can
+know the answer:
+
+| Half | Who can know it | Status |
+|---|---|---|
+| what was **returned** — the anchors, the ids, the relation labels, what the cap cut off | the assembly, at the moment it answers | **no home** |
+| what was **opened and used**, and what the work then did | only the session | partly available today |
+
+**A platform event is not the home.** `.claude/rules/events.md` is "facts from transitions": a kind exists
+for a lifecycle change, and the same stream is the workspace pulse's activity feed. An assembly is a READ —
+logging it as news would be wrong about what an event is and would flood the feed that answers "what
+happened here".
+
+That leaves a fork worth deciding deliberately rather than by habit:
+
+- **Its own table** — queryable, joinable, and the honest shape for a measurement series. Costs a migration,
+  a store and a surface, and makes a read perform a write.
+- **The workspace filesystem**, the way view captures already accumulate (`views/<id>/<capturedAt>.json`,
+  "no new read endpoint, no new store, no migration"). Same precedent, same attribution — but a view capture
+  is an explicit act, and every `get_task_context` call is not.
+- **Sampled or session-scoped** — record one assembly per session rather than per call, which is enough to
+  answer "was the anchor sufficient" and avoids write-on-read on a hot path.
+
+Recommendation: **session-scoped, on the filesystem**, because the question being measured is per session
+("did this session get what it needed") and not per call. Not landed; it is the next slice, and half-building
+it — a record nobody reads — would be worse than none.
+
+### The half that needs no store: an entry names what it was built on
+
+`NODE_TYPES` already contains `knowledge`, so an entry can pin the entry it relied on:
+`refs: [{type: "knowledge", key: "<id>"}]`. That edge is the *used* half made durable with what exists
+today, and it is the only way to satisfy the claim template's eighth rule — **repetition is not
+corroboration** — because shared provenance can only be counted where it is written down. An entry that
+restates another without naming it is how five pages come to look like five confirmations.
+
 ### Disclosure is part of retrieval
 
 WikiSkill's executor penalty (−2.8) and R42's cost model say the same thing from two directions: more context

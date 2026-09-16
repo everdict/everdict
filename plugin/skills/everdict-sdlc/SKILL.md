@@ -81,6 +81,11 @@ Write one entry per durable claim, not one per session:
 - **`context`** — background a newcomer needs, including a declared refusal ("no knowledge this time,
   because …" is itself a `context` entry).
 
+**Name what you built on.** If an entry, a decision or a convention shaped what you did — or you are
+restating it with new evidence — pin it: `refs: [{type: "knowledge", key: "<id>"}]`. Five entries that
+repeat one claim without naming it look like five confirmations and are one. This edge is also the only
+record that the workspace's knowledge was *used*, not merely returned.
+
 Always set `refs` to the issue and the repository (`{type:"issue", key}` and
 `{type:"repository", key:"owner/name"}`), and `evidence` to what proves it — a scorecard, a run, a comment.
 `visibility: "workspace"` shares it; the default is a private draft.
