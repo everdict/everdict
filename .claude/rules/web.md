@@ -44,7 +44,10 @@ lint` is a separate CI job). Its `build` and `test` DO run in the root turbo gat
   most-recent `everdict-workspace` cookie); `authContext` reads that header (cookie fallback) → forwards
   `x-everdict-workspace`. So pages/actions scope to the URL workspace with NO per-page param threading — don't
   reintroduce a cookie-only or per-page-`params` scoping path. `[workspace]/layout` is the authoritative validator
-  (redirect on non-member / 0-workspace / null principal). Nav hrefs are workspace-relative **suffixes**
+  (redirect on non-member / 0-workspace / null principal) — which is why the middleware CANONICALISES the segment
+  first (`canonicalWorkspacePath`, a 308 to the lowercase address): an id is lowercase and a display name is not,
+  so `/Digo` reached the non-member arm and served the reader their DEFAULT workspace under the address they asked
+  for. A not-a-member fallback cannot tell itself apart from a not-yet-canonical address. Nav hrefs are workspace-relative **suffixes**
   (`nav-config`) prefixed with the active workspace at render; switching workspace = `router.push('/'+id)` (no
   action). Slug-less entry points (`onboarding`/`new-workspace`/`invite`) stay top-level, never under `[workspace]`;
   keep their slugs reserved. Shared URL↔cookie↔header constants live in `shared/auth/workspace-scope.ts`

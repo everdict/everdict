@@ -16,3 +16,17 @@ export function workspaceSlugFromPath(pathname: string): string | undefined {
   if (!seg || RESERVED_TOP_LEVEL.has(seg) || !WORKSPACE_SLUG.test(seg)) return undefined
   return seg
 }
+
+// A workspace id is lowercase, and the display NAME a person reads is usually capitalised — so `/Digo` is the
+// address somebody types for the workspace called "Digo". It used to fall through as a non-slug: no workspace
+// header was injected, the layout found no membership for `Digo`, and it redirected the reader into their
+// DEFAULT workspace — another workspace's data under the address they asked for, which reads as data loss.
+// The first segment is normalised instead, the same courtesy a lowercased issue identifier already gets.
+// Returns the canonical path (first segment lowercased) when the URL is not already canonical, else undefined.
+export function canonicalWorkspacePath(pathname: string): string | undefined {
+  const [, seg, ...rest] = pathname.split('/')
+  if (!seg || seg === seg.toLowerCase()) return undefined
+  const canonical = seg.toLowerCase()
+  if (RESERVED_TOP_LEVEL.has(canonical) || !WORKSPACE_SLUG.test(canonical)) return undefined
+  return ['', canonical, ...rest].join('/')
+}

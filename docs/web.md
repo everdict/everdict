@@ -301,7 +301,9 @@ login) and the workspace/roles come from the control plane's `GET /me` over the 
 The `middleware` injects that segment as the `x-everdict-active-workspace` request header (and syncs the most-recent
 `everdict-workspace` cookie); `authContext` reads the header (cookie fallback) and forwards it as `x-everdict-workspace`,
 so every page/action scopes to the URL workspace with no per-page param threading. Switching workspace = navigating
-to `/{id}`. `onboarding`/`new-workspace`/`invite` are slug-less top-level routes (no workspace context yet).
+to `/{id}`. A workspace id is lowercase and its display name is not, so the middleware first 308s a capitalised
+segment to the canonical address (`/Digo` → `/digo`, suffix and query kept); without that the layout's non-member
+fallback quietly served the reader their default workspace instead. `onboarding`/`new-workspace`/`invite` are slug-less top-level routes (no workspace context yet).
 
 **Auth-exchange gating (entry routing).** The control plane is the auth authority, so the web routes on what
 `GET /me` returns, not just on the Keycloak session:

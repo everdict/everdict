@@ -5,6 +5,7 @@ import {
   ACTIVE_WORKSPACE_COOKIE,
   ACTIVE_WORKSPACE_HEADER,
   ACTIVE_WORKSPACE_MAX_AGE,
+  canonicalWorkspacePath,
   workspaceSlugFromPath,
 } from '@/shared/auth/workspace-scope'
 import { keycloakConfigured } from '@/shared/config/env'
@@ -13,6 +14,11 @@ import { keycloakConfigured } from '@/shared/config/env'
 // sync the most-recent cookie. authContext reads this header and forwards it as the control-plane scope (x-everdict-workspace).
 // Reserved / non-slug first segments (root·onboarding·invite·new-workspace, etc.) have no workspace context, so pass through as-is.
 function injectWorkspace(req: NextRequest): NextResponse {
+  // `/Digo` is the workspace called "Digo" — normalise the address before anything decides membership on it,
+  // or the layout reads a slug nobody is a member of and sends the reader to their default workspace instead.
+  const canonical = canonicalWorkspacePath(req.nextUrl.pathname)
+  if (canonical)
+    return NextResponse.redirect(new URL(canonical + req.nextUrl.search, req.nextUrl.origin), 308)
   const slug = workspaceSlugFromPath(req.nextUrl.pathname)
   if (!slug) return NextResponse.next()
   const headers = new Headers(req.headers)
