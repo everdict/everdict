@@ -139,9 +139,11 @@ Recommendation: **session-scoped, on the filesystem**, because the question bein
 
 **Landed (2026-09-16), as far as it can be without a platform surface:**
 
-- the convention — `knowledge/retrievals/<YYYY-MM-DD>/<branch-or-topic>.json` carrying
-  `{at, anchors, returned:[{id,title,relation,status}], capped, used:[id…], outcome}` — asked for by the
-  session-start hook and the `everdict-sdlc` skill;
+- the session's half is a CHECKED tool, not a raw file write: `record_retrieval_use { assembly_path, used[],
+  outcome }` resolves every cited entry against the workspace and **refuses an id it cannot**, the way
+  `publish_checkpoint` refuses a fact whose evidence is not there — a series built on unresolvable citations
+  is wrong in a way no later reader can see. It lands as `used.json` beside the assembly's own files, never
+  inside one. An empty `used` is accepted and is a real answer;
 - **the read itself is now gated**: the Stop hook refuses a session that changed code and never asked what
   the workspace knows, with a reason distinct from having recorded nothing, because the two failures are
   repaired differently. SRA-Bench is why it is a gate rather than advice: models showed weak *need

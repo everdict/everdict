@@ -1,4 +1,10 @@
-import type { KnowledgeEntryRecord, KnowledgePin, NodeRef, RetrievalReceiptOutcome } from "@everdict/contracts";
+import {
+  BadRequestError,
+  type KnowledgeEntryRecord,
+  type KnowledgePin,
+  type NodeRef,
+  type RetrievalReceiptOutcome,
+} from "@everdict/contracts";
 import { type AnchorRelation, type Coverage, anchorRelation } from "@everdict/domain";
 import type { KnowledgeEntryStore } from "../ports/knowledge-entry-store.js";
 import type { SkillStore } from "../ports/skill-store.js";
@@ -50,6 +56,10 @@ const CONTEXT_PAGE = 20;
 // The control-plane service behind task-time context assembly — the consumption surface of the workspace's knowledge.
 // Both transports (POST /knowledge/context + MCP get_task_context) call this one service.
 export class KnowledgeService {
+  // Injected for the same reason every other service injects it: a test that cannot pin the clock cannot pin
+  // the record it produces.
+  private readonly now: () => string = () => new Date().toISOString();
+
   constructor(private readonly deps: KnowledgeServiceDeps) {}
 
   // For a set of anchors (the entities a task concerns: @-references, the scorecard under discussion, a harness being
@@ -164,6 +174,47 @@ export class KnowledgeService {
       at: now,
     });
     return { knowledge, skills, receipt };
+  }
+
+  // ── THE SESSION'S ACCOUNT ──────────────────────────────────────────────────────────────────────────
+  //
+  // What the session USED is knowable nowhere else, so the platform cannot produce it — but it CAN check the
+  // citations, and that is the difference between a measurement and a note. Every cited entry is resolved
+  // against this workspace's own records and a citation that does not resolve is REFUSED, the way
+  // `publish_checkpoint` refuses a fact whose evidence is not there: a series built on unresolvable ids is
+  // wrong in a way nobody can see later.
+  //
+  // An EMPTY `used` is accepted and is a real answer — "the workspace had nothing for this work" is the
+  // measurement that decides whether this layer earns its keep.
+  async recordUse(
+    tenant: string,
+    subject: string,
+    input: { sessionId: string; assemblyPath: string; used: string[]; outcome: string },
+  ): Promise<RetrievalReceiptOutcome> {
+    const writer = this.deps.receipts;
+    if (!writer) return { recorded: false, reason: "unconfigured" };
+    const entries = await this.deps.knowledgeEntries.list(tenant, subject);
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    const cited: { id: string; title: string }[] = [];
+    for (const id of input.used) {
+      const entry = byId.get(id);
+      if (entry === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { id },
+          `knowledge entry '${id}' is not one this workspace can show you — a citation nobody can resolve makes the measurement wrong in a way no later reader can see.`,
+        );
+      cited.push({ id: entry.id, title: entry.title });
+    }
+    return writer.writeUse({
+      at: this.now(),
+      tenant,
+      subject,
+      sessionId: input.sessionId,
+      assemblyPath: input.assemblyPath,
+      used: cited,
+      outcome: input.outcome,
+    });
   }
 
   // The receipt is written by the assembly because only the assembly knows what it answered — including what

@@ -153,6 +153,7 @@ describe("KnowledgeService.assembleContext — the retrieval receipt", () => {
           written.push(r);
           return { recorded: true, path: "p" };
         },
+        writeUse: async () => ({ recorded: true, path: "used" }),
       },
     });
     const ctx = await svc.assembleContext("acme", "alice", [anchor]);
@@ -170,6 +171,7 @@ describe("KnowledgeService.assembleContext — the retrieval receipt", () => {
           filed = r as never;
           return { recorded: true, path: `knowledge/retrievals/d/${r.sessionId}/assembly-x.json` };
         },
+        writeUse: async () => ({ recorded: true, path: "used" }),
       },
     });
     const ctx = await svc.assembleContext("acme", "alice", [anchor], { sessionId: "s-42" });
@@ -188,10 +190,78 @@ describe("KnowledgeService.assembleContext — the retrieval receipt", () => {
       ...stores(2),
       receipts: {
         write: async () => ({ recorded: false, reason: "write_failed", detail: "storage down" }),
+        writeUse: async () => ({ recorded: false, reason: "write_failed", detail: "storage down" }),
       },
     });
     const ctx = await svc.assembleContext("acme", "alice", [anchor], { sessionId: "s-1" });
     expect(ctx.knowledge).toHaveLength(2);
     expect(ctx.receipt).toEqual({ recorded: false, reason: "write_failed", detail: "storage down" });
+  });
+});
+
+// ── THE SESSION'S ACCOUNT ────────────────────────────────────────────────────────────────────────────
+// The platform cannot produce this half, and it CAN check the citations — which is the difference between a
+// measurement and a note.
+describe("KnowledgeService.recordUse", () => {
+  const anchor = { type: "repository" as const, key: "acme/widget" };
+  const stores = (ids: string[]) => ({
+    skills: { list: async () => [] },
+    knowledgeEntries: { list: async () => ids.map((id) => entry(id, [anchor])) },
+  });
+  const writer = (sink: { use?: unknown }) => ({
+    write: async () => ({ recorded: true as const, path: "a" }),
+    writeUse: async (u: unknown) => {
+      sink.use = u;
+      return { recorded: true as const, path: "knowledge/retrievals/d/s-1/used.json" };
+    },
+  });
+
+  it("refuses a citation this workspace cannot resolve", async () => {
+    const svc = new KnowledgeService({ ...stores(["k-1"]), receipts: writer({}) });
+    await expect(
+      svc.recordUse("acme", "alice", {
+        sessionId: "s-1",
+        assemblyPath: "knowledge/retrievals/d/s-1/assembly-x.json",
+        used: ["k-1", "k-ghost"],
+        outcome: "used the convention",
+      }),
+    ).rejects.toThrow(/'k-ghost' is not one this workspace can show you/);
+  });
+
+  it("accepts an EMPTY used — 'the workspace had nothing for this work' is the measurement", async () => {
+    const sink: { use?: { used: unknown[]; outcome: string } } = {};
+    const svc = new KnowledgeService({ ...stores(["k-1"]), receipts: writer(sink) });
+    const outcome = await svc.recordUse("acme", "alice", {
+      sessionId: "s-1",
+      assemblyPath: "knowledge/retrievals/d/s-1/assembly-x.json",
+      used: [],
+      outcome: "nothing here covered it",
+    });
+    expect(outcome).toEqual({ recorded: true, path: "knowledge/retrievals/d/s-1/used.json" });
+    expect(sink.use?.used).toEqual([]);
+  });
+
+  it("carries the resolved TITLE, so the file is readable without a second lookup", async () => {
+    const sink: { use?: { used: { id: string; title: string }[] } } = {};
+    const svc = new KnowledgeService({ ...stores(["k-1"]), receipts: writer(sink) });
+    await svc.recordUse("acme", "alice", {
+      sessionId: "s-1",
+      assemblyPath: "knowledge/retrievals/d/s-1/assembly-x.json",
+      used: ["k-1"],
+      outcome: "followed it",
+    });
+    expect(sink.use?.used).toEqual([{ id: "k-1", title: "k-1 title" }]);
+  });
+
+  it("says `unconfigured` rather than pretending, when no writer is composed", async () => {
+    const svc = new KnowledgeService(stores(["k-1"]));
+    expect(
+      await svc.recordUse("acme", "alice", {
+        sessionId: "s-1",
+        assemblyPath: "knowledge/retrievals/d/s-1/assembly-x.json",
+        used: [],
+        outcome: "x",
+      }),
+    ).toEqual({ recorded: false, reason: "unconfigured" });
   });
 });

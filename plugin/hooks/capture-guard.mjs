@@ -73,6 +73,10 @@ const RETRIEVAL_TOOLS = /^mcp__[^_]*everdict[^_]*__(get_task_context|list_knowle
 // question about this layer (is an index worth building, which entries are dead weight, does curation help).
 // Asked for at session start, so a session that retrieved and then said nothing about it is a gap with an
 // owner rather than an oversight.
+// The tool that files it: the platform resolves every cited entry and REFUSES an id it cannot, which a raw
+// file write cannot do. A generic `write_file` at the same path still counts — a session that wrote the file
+// before this tool existed accounted for itself, and refusing it would punish the older, honest shape.
+const USE_TOOL = /^mcp__[^_]*everdict[^_]*__record_retrieval_use$/;
 const WRITE_TOOL = /^mcp__[^_]*everdict[^_]*__write_file$/;
 const USED_PATH = /^knowledge\/retrievals\/[^/]+\/[^/]+\/used\.json$/;
 const RECORDING_TOOLS =
@@ -100,7 +104,8 @@ if (transcript && existsSync(transcript)) {
       else if (block.name === "Bash" && /\bgit\s+commit\b/.test(String(block.input?.command ?? ""))) changedCode = true;
       if (RECORDING_TOOLS.test(block.name)) recorded = true;
       if (RETRIEVAL_TOOLS.test(block.name)) retrieved = true;
-      if (WRITE_TOOL.test(block.name) && USED_PATH.test(String(block.input?.path ?? ""))) filedUsed = true;
+      if (USE_TOOL.test(block.name)) filedUsed = true;
+      else if (WRITE_TOOL.test(block.name) && USED_PATH.test(String(block.input?.path ?? ""))) filedUsed = true;
     }
   }
 }
@@ -157,8 +162,8 @@ process.stdout.write(
             "The assembly filed what it ANSWERED — its path came back in the `receipt` of your",
             "`get_task_context` call. Beside it, write the half only you can know:",
             "",
-            "    write_file  knowledge/retrievals/<YYYY-MM-DD>/<sessionId>/used.json",
-            '      { "used": ["<entry id>", …], "outcome": "one line: what the work did with it" }',
+            "    record_retrieval_use  { assembly_path: <the receipt.path you got back>,",
+            '                            used: ["<entry id>", …], outcome: "what the work did with it" }',
             "",
             "An empty `used` is a real answer and worth writing: it says the workspace had nothing for this work,",
             "which is the measurement that decides whether the knowledge layer is earning its keep.",

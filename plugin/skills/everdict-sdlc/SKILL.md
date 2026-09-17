@@ -74,10 +74,11 @@ envelope with no write capability, and a `verified` citing a reference nobody re
 The assembly files what it ANSWERED by itself — its path comes back in your `get_task_context` result as
 `receipt.path`. Beside it, write the half only you can know:
 
-    write_file  knowledge/retrievals/<YYYY-MM-DD>/<sessionId>/used.json
-      { "used": ["<entry id>", …], "outcome": "one line: what the work did with it" }
+    record_retrieval_use  { assembly_path: "<the receipt.path you got back>",
+                            used: ["<entry id>", …], outcome: "what the work did with it" }
 
-**An empty `used` is a real answer** and worth writing: it says the workspace had nothing for this work, which
+The platform resolves every id you cite and **refuses one it cannot** — a measurement built on
+unresolvable citations is wrong in a way no later reader can see. **An empty `used` is a real answer** and worth writing: it says the workspace had nothing for this work, which
 is the measurement that decides whether this layer is earning its keep. A session that retrieved and then
 said nothing about it **is refused at Stop** — the obligation is created by the answer, not by the question,
 so a session that never asked owes nothing.

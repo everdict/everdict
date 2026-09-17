@@ -76,6 +76,14 @@ const RETRIEVED_NO_USED = transcript("retrieved-no-used", [
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
 ]);
+// The dedicated tool is the way now — the platform resolves the citations a raw write cannot check — and the
+// old shape still counts, because a session that wrote the file before the tool existed accounted for itself.
+const USED_BY_TOOL = transcript("used-by-tool", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
+  toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
+  toolUse("mcp__everdict__record_retrieval_use", { assembly_path: "knowledge/retrievals/d/s/assembly-x.json" }),
+]);
 const USED_FILED = transcript("used-filed", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
@@ -144,6 +152,12 @@ check(
   run(hooks.capture, { cwd: work, transcript_path: RETRIEVED_NO_USED }, { EVERDICT_WORKSPACE: "acme" }),
   (out) => blocks(out) && out.reason.includes("never said what it used"),
   "a block about the used half only",
+);
+check(
+  "capture/accounted for with record_retrieval_use → allowed",
+  run(hooks.capture, { cwd: work, transcript_path: USED_BY_TOOL }, { EVERDICT_WORKSPACE: "acme" }),
+  allows,
+  "no decision — the session filed its account through the tool that checks it",
 );
 check(
   "capture/used.json filed → allowed",
@@ -216,5 +230,5 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log(
-  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 14 branches — three refusals, allowance, the resolutions and the anchored call`,
+  `PASS plugin hooks: ${Object.keys(hooks).length} hook(s), 15 branches — three refusals, both ways of accounting, the resolutions and the anchored call`,
 );

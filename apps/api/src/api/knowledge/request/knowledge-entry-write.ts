@@ -40,3 +40,12 @@ export const UpdateKnowledgeEntryBodySchema = z
 export const AssembleContextBodySchema = z.object({
   refs: z.array(NodeRefSchema).min(1).max(KNOWLEDGE_ENTRY_MAX_REFS),
 });
+
+// The session's account of a `get_task_context` call — what it USED and what the work then did. The path is
+// the receipt the assembly returned; the ids are checked against this workspace by the service, which refuses
+// one it cannot resolve.
+export const RecordRetrievalUseBodySchema = z.object({
+  assemblyPath: z.string().min(1).max(600),
+  used: z.array(z.string().min(1)).max(50).default([]),
+  outcome: z.string().min(1).max(2000),
+});

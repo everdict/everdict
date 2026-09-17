@@ -35,6 +35,31 @@ export function registerKnowledgeTools(server: McpServer, ctx: McpToolContext): 
           ),
         ),
     );
+
+    server.registerTool(
+      "record_retrieval_use",
+      {
+        annotations: { readOnlyHint: false },
+        description:
+          "Account for a `get_task_context` call: which of the entries it returned you actually USED, and what the work then did. The assembly already filed what it ANSWERED — pass the `receipt.path` it gave you back as `assembly_path`, and this lands beside it. Every cited entry is resolved against this workspace and an id nobody can resolve is REFUSED, because a measurement built on unresolvable citations is wrong in a way no later reader can see. An EMPTY `used` is a real answer and is accepted: 'the workspace had nothing for this work' is exactly the measurement that decides whether this layer earns its keep.",
+        inputSchema: {
+          assembly_path: z.string().min(1).describe("the `receipt.path` returned by get_task_context"),
+          used: z.array(z.string().min(1)).max(50).default([]),
+          outcome: z.string().min(1).max(2000).describe("one line: what the work did with it"),
+        },
+      },
+      ({ assembly_path, used, outcome }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await knowledge.recordUse(ws, principal.subject, {
+              sessionId: ctx.sessionId?.() ?? "unattributed",
+              assemblyPath: assembly_path,
+              used,
+              outcome,
+            }),
+          ),
+        ),
+    );
   }
 
   // --- knowledge entries: reified claims (multi-anchor, evidenced, revisable) ---

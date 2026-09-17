@@ -4,6 +4,7 @@ import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from ".
 import {
   AssembleContextBodySchema,
   CreateKnowledgeEntryBodySchema,
+  RecordRetrievalUseBodySchema,
   UpdateKnowledgeEntryBodySchema,
 } from "./request/knowledge-entry-write.js";
 import { ExtractKnowledgeBodySchema } from "./request/knowledge-extract.js";
@@ -15,6 +16,31 @@ export function registerKnowledgeRoutes(app: FastifyInstance, deps: ServerDeps):
   // Task-time context assembly — the knowledge entries and skill candidates ABOUT the anchors, each positioned on the
   // anchor's version coordinate and freshness-decorated. POST because anchors are structured NodeRefs (keys may
   // contain '/' / ':').
+  // The session's account of what it USED, beside the assembly's own file. An HTTP caller has no MCP session,
+  // so the correlator is read from the assembly path it names rather than invented here.
+  app.post("/knowledge/context/use", async (req, reply) => {
+    if (!deps.knowledgeService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = RecordRetrievalUseBodySchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(
+        await deps.knowledgeService.recordUse(principal.workspace, principal.subject, {
+          sessionId: parsed.data.assemblyPath.split("/").at(-2) ?? "unattributed",
+          assemblyPath: parsed.data.assemblyPath,
+          used: parsed.data.used,
+          outcome: parsed.data.outcome,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.post("/knowledge/context", async (req, reply) => {
     if (!deps.knowledgeService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "knowledge service not configured" });

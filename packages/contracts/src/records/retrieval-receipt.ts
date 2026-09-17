@@ -66,3 +66,25 @@ export const RetrievalReceiptOutcomeSchema = z.discriminatedUnion("recorded", [
   }),
 ]);
 export type RetrievalReceiptOutcome = z.infer<typeof RetrievalReceiptOutcomeSchema>;
+
+// ── THE SESSION'S HALF ────────────────────────────────────────────────────────────────────────────────
+//
+// The assembly files what it ANSWERED; only the session knows what it then USED, and that half is the
+// measurement every later question about this layer depends on. It is written through a tool rather than a
+// raw file write for the reason `publish_checkpoint` is: the platform can check that a cited entry EXISTS,
+// and a citation nobody resolved is the thing that makes a measurement series quietly wrong.
+//
+// An empty `used` is a real answer and is accepted: "the workspace had nothing for this work" is exactly what
+// decides whether the layer earns its keep, and a session that skips writing it because the honest answer is
+// empty removes the only evidence that would have shown it.
+export const RetrievalUseSchema = z.object({
+  at: z.string(),
+  tenant: z.string().min(1),
+  subject: z.string().min(1),
+  sessionId: z.string().min(1),
+  // The assembly this accounts for — the `receipt.path` that came back from the call.
+  assemblyPath: z.string().min(1),
+  used: z.array(z.object({ id: z.string().min(1), title: z.string() })).max(50),
+  outcome: z.string().min(1).max(2000),
+});
+export type RetrievalUse = z.infer<typeof RetrievalUseSchema>;

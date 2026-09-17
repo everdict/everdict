@@ -1,4 +1,4 @@
-import type { RetrievalReceipt, RetrievalReceiptOutcome } from "@everdict/contracts";
+import type { RetrievalReceipt, RetrievalReceiptOutcome, RetrievalUse } from "@everdict/contracts";
 import type { WorkspaceFs } from "../ports/workspace-fs.js";
 
 // The receipt's home is the workspace filesystem, for the reason view captures live there
@@ -14,6 +14,9 @@ import type { WorkspaceFs } from "../ports/workspace-fs.js";
 // claim unreadable from the stronger one.
 export interface RetrievalReceiptWriter {
   write(receipt: RetrievalReceipt): Promise<RetrievalReceiptOutcome>;
+  // The session's account, beside the assembly's files and never inside one: two authors, two paths, so a
+  // transcription can never be read as a stamp.
+  writeUse(use: RetrievalUse): Promise<RetrievalReceiptOutcome>;
 }
 
 // Path segments accept only [A-Za-z0-9._-]; a session id is a generated uuid today, but sanitising here means
@@ -39,6 +42,28 @@ export function fsRetrievalReceiptWriter(fs: WorkspaceFs): RetrievalReceiptWrite
         // Reported, never thrown: the context is the product and a read must not fail because its receipt
         // could not be filed. Reported, never swallowed: a measurement series with invisible holes reads
         // exactly like coverage.
+        return { recorded: false, reason: "write_failed", detail: err instanceof Error ? err.message : String(err) };
+      }
+    },
+
+    async writeUse(use) {
+      const dir = use.assemblyPath.split("/").slice(0, -1).join("/");
+      if (dir === "" || !dir.startsWith("knowledge/retrievals/"))
+        return {
+          recorded: false,
+          reason: "write_failed",
+          detail: `'${use.assemblyPath}' is not an assembly receipt path — the session's account belongs beside the assembly it accounts for`,
+        };
+      const path = `${dir}/used.json`;
+      try {
+        await fs.write(
+          use.tenant,
+          path,
+          new TextEncoder().encode(`${JSON.stringify(use, null, 2)}\n`),
+          "application/json",
+        );
+        return { recorded: true, path };
+      } catch (err) {
         return { recorded: false, reason: "write_failed", detail: err instanceof Error ? err.message : String(err) };
       }
     },
