@@ -772,6 +772,10 @@ export const controlPlane = {
   },
   getIssue: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}`),
+  // Everything a request caused, in one read — the campaigns of both grades, each round's commits, and the
+  // knowledge reachable from the issue or from one of its campaigns.
+  getIssueLineage: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/lineage`),
   createIssue: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/issues', { method: 'POST', body: JSON.stringify(body) }),
   updateIssue: <T>(auth: AuthContext, id: string, patch: unknown) =>

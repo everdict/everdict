@@ -50,6 +50,24 @@ const DECIDED = new Map([
   // act belongs to the door that already holds the bytes (the agent loop, the CLI, the registry itself).
   // The merge half HAS no bytes — its body is the proof alone — and it is on the page.
   ["/campaigns/:p/adopt", "the body carries the candidate's document bytes, which a browser does not hold"],
+  // ── THE `change` GRADE IS WRITTEN BY THE AGENT THAT DID THE WORK ─────────────────────────────────
+  //
+  // A round is logged by the session that produced it — logging one IS closing it — and the fields it carries
+  // are that session's: the commits it made, the gate runs it ran with their numbers, and its answer to every
+  // criterion. A person cannot supply any of them without retyping what an agent already holds, and a form
+  // that let them would be a form for asserting someone else's observation.
+  //
+  // What a PERSON needs from this grade is the read, and that is built: the request's lineage section on the
+  // issue page shows every campaign, every round with its outcome and answer counts, and the commits each one
+  // moved (`GET /issues/:id/lineage`, widgets/issue-lineage). The campaign's own list/detail doors would show
+  // the same rows one level further from the question anybody asks, which is "what did this request cause".
+  ["/change-campaigns", "the lineage section on the issue page is the human read of these rows"],
+  ["/change-campaigns/:p", "the lineage section on the issue page is the human read of these rows"],
+  ["/change-campaigns/:p/rounds", "a round is logged by the agent that produced it; its fields are that session's"],
+  ["/change-campaigns/:p/close", "the close carries the agent's judgement of its own criteria, not a person's"],
+  // The session's account of what a retrieval was FOR. Only the session knows it, and it is filed through the
+  // tool that resolves the citations — a browser form would be a person guessing which entries an agent used.
+  ["/knowledge/context/use", "only the session that retrieved knows what it used; a person cannot answer for it"],
   // ── THE DELEGATE'S EVIDENCE CREDENTIAL, AND THE ONE DOOR IT OPENS ────────────────────────────────
   //
   // `evidence-view` is not a door a member can reach at all, and that is by construction rather than by

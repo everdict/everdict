@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Github, Link2 } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
+import { IssueLineageSection } from '@/widgets/issue-lineage'
 import { MentionInChatButton } from '@/widgets/infra-panel'
 import { CommentsSection } from '@/features/discuss'
 import { IssueGithubPanel } from '@/features/import-github-issues'
@@ -34,6 +35,7 @@ import {
   issuePageSchema,
   IssuePriorityIcon,
   issueSchema,
+  issueLineageSchema,
   issueScorecardsSchema,
   IssueStatusIcon,
   type Issue,
@@ -198,6 +200,7 @@ export default async function IssueDetailPage({
     mentionedBy,
     timelineProducts,
     releases,
+    lineage,
   ] = await Promise.all([
     controlPlane
       .listIssueScorecards(ctx, current.id)
@@ -265,6 +268,12 @@ export default async function IssueDetailPage({
       .listReleases(ctx)
       .then((r) => releaseSchema.array().parse(r))
       .catch((): Release[] => []),
+    // A THIRD VALUE, not a swallow: a lineage that could not be read renders as "unknown", never as a request
+    // that caused nothing. (The neighbours above predate that rule.)
+    controlPlane
+      .getIssueLineage(ctx, current.id)
+      .then((r) => ({ ok: true as const, lineage: issueLineageSchema.parse(r) }))
+      .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
   ])
 
   // The issues this one mentions — the link holds only a UUID and says nothing by itself. Drawing it needs the identifier,
@@ -785,6 +794,14 @@ export default async function IssueDetailPage({
               />
               <IssueEvaluationHistory workspace={workspace} entries={entries} timeZone={timeZone} />
             </section>
+          )}
+
+          {lineage.ok ? (
+            <IssueLineageSection lineage={lineage.lineage} />
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Lineage could not be read ({lineage.error}) — unknown, not empty.
+            </p>
           )}
 
           {/* The resolution is KEPT across a reopen on purpose — a regressed issue must still show the

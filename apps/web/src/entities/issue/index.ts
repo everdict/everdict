@@ -84,3 +84,9 @@ export { issueStatusTone, type IssueStatusTone } from './model/status'
 export { IssuePriorityBadge, IssuePriorityIcon, issuePriorityIcon } from './ui/issue-priority-badge'
 export { IssueSearchOptions, type IssueOption } from './ui/issue-search-options'
 export { IssueStatusBadge, IssueStatusIcon, issueStatusIcon } from './ui/issue-status-badge'
+export {
+  issueLineageSchema,
+  type IssueLineage,
+  type LineageCampaign,
+  type LineageChange,
+} from './model/lineage-schema'
