@@ -90,7 +90,23 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
     detail: z.unknown().optional(),
     ...STRUCTURE,
   }),
-  z.object({ t: z.number(), kind: z.literal("error"), message: z.string(), ...STRUCTURE }),
+  // `fatal` = THE HARNESS'S OWN TERMINAL VERDICT: this run failed, said by the thing that ran it. An ordinary
+  // error event is "something went wrong during the run" — a tool that errored, a request that was retried —
+  // and a run that recovers from one is a run that worked. The two were the same event, so the only way for a
+  // consumer to tell them apart was to INFER the outcome from the rest of the trace, which is the re-derived
+  // provenance rule `protocol` L3 exists to refuse.
+  //
+  // ⚠️ It was inferred as "did the harness produce any assistant message?", and that shipped a defect: an
+  // unauthenticated Claude Code emits `Not logged in · Please run /login` AS AN ASSISTANT MESSAGE and then
+  // exits non-zero. Message present, so the inference said the harness worked, and a delegate that
+  // authenticated nowhere and did nothing settled `succeeded` — measured live, 2026-09-17.
+  z.object({
+    t: z.number(),
+    kind: z.literal("error"),
+    message: z.string(),
+    fatal: z.boolean().optional(),
+    ...STRUCTURE,
+  }),
   // Raw process output (evidence fallback for black-box harnesses) — stderr progress logs and oversized stdout
   // that don't fit the message/tool vocabulary. Tail-capped by the emitter; judges/sinks may ignore it.
   z.object({

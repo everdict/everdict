@@ -83,6 +83,11 @@ export class ClaudeCodeHarness implements EvaluableHarness {
         yield {
           ...stamp(now),
           kind: "error",
+          // FATAL: the process itself said it failed. Not an inference from the trace — the exit code is the
+          // CLI's own verdict, and it is the only thing that can contradict a run that also printed messages.
+          // An unauthenticated claude prints `Not logged in · Please run /login` as an assistant message and
+          // THEN exits non-zero; without this flag a consumer counting messages calls that a successful run.
+          fatal: true,
           message: (res.stderr.trim() || `claude exited with code ${res.exitCode}`).slice(-2000),
         };
       }

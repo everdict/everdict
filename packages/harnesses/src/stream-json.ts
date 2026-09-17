@@ -75,6 +75,18 @@ export function mapClaudeStreamJson(obj: unknown, now: () => number): TraceEvent
       });
     }
   } else if (type === "result") {
+    // The terminal line carries the run's own verdict, and dropping it was how the outcome came to be
+    // re-derived downstream. `subtype` names WHICH failure (error_during_execution · error_max_turns · …),
+    // which is the part a reader needs and an exit code cannot say.
+    if (o.is_error === true) {
+      const subtype = str(o.subtype);
+      out.push({
+        ...stamp(now),
+        kind: "error",
+        fatal: true,
+        message: subtype === "" ? "the harness reported the run failed" : `the harness reported: ${subtype}`,
+      });
+    }
     const usd = num(o.total_cost_usd);
     if (usd !== undefined) {
       out.push({

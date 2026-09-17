@@ -129,6 +129,20 @@ export class SessionTaskRunner {
 // tells the truth. A run WITH assistant output keeps error events as trace detail (the harness worked;
 // judging what it did is phase 2).
 function hardFailure(events: TraceEvent[]): { code: string; message: string } | undefined {
+  // ⚠️ THE HARNESS'S OWN VERDICT COMES FIRST, and adding it is a fix rather than a refinement. This function
+  // used to ask only "did anything look like assistant output?" and answer `undefined` whenever the answer
+  // was yes — so a harness that DECLARED its run failed was overruled by the fact that it had also spoken.
+  //
+  // Measured live 2026-09-17: an unauthenticated Claude Code emits `Not logged in · Please run /login` as an
+  // ASSISTANT MESSAGE and then exits non-zero. The message satisfied the old test, the trailing error was
+  // read as trace detail, and a delegate that authenticated nowhere and did nothing settled `succeeded` —
+  // which is the shape that would have hidden every later attempt to fix the credential.
+  const declared = [...events].reverse().find((e) => e.kind === "error" && e.fatal === true);
+  if (declared?.kind === "error") return { code: "HARNESS_RUN_FAILED", message: declared.message };
+
+  // The older rule, still right for what it covers: a drain that produced ONLY an error and no output at all
+  // is a harness that never ran. A run WITH output and a non-fatal error keeps it as trace detail — a tool
+  // call that failed and was retried is not a failed run.
   const hasMessage = events.some((e) => e.kind === "message" && e.role === "assistant");
   if (hasMessage) return undefined;
   const err = [...events].reverse().find((e) => e.kind === "error");

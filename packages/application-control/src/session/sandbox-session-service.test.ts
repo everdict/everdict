@@ -496,7 +496,7 @@ async function until(cond: () => boolean, ms = 2000): Promise<void> {
 
 // A controllable harness: install execs into the compute; run yields one assistant message, then (when
 // `hold` is set) parks abort-aware — the close-mid-task drill releases it via the session's abort signal.
-function fakePlaygroundHarness(opts: { hold?: boolean; image?: string | undefined } = {}) {
+function fakePlaygroundHarness(opts: { hold?: boolean; image?: string | undefined; fatal?: boolean } = {}) {
   const installs: string[] = [];
   const runCwds: string[] = [];
   const harness: EvaluableHarness = {
@@ -509,6 +509,16 @@ function fakePlaygroundHarness(opts: { hold?: boolean; image?: string | undefine
     async *run(compute, task, ctx) {
       await compute.exec(`agent ${task}`, { cwd: "work" });
       yield { t: 1, kind: "message" as const, role: "assistant" as const, text: `did: ${task}` };
+      // The live shape this exists for: the CLI SPEAKS and then declares its own failure. An unauthenticated
+      // Claude Code prints `Not logged in · Please run /login` as an assistant message and exits non-zero.
+      if (opts.fatal) {
+        yield {
+          t: 2,
+          kind: "error" as const,
+          fatal: true,
+          message: "Not logged in · Please run /login",
+        };
+      }
       if (opts.hold) {
         await new Promise<void>((resolve) => {
           if (ctx.signal?.aborted) return resolve();
@@ -672,6 +682,71 @@ describe("SandboxSessionService — the harness playground (test cases in a live
     expect(noted).toMatchObject({ delivered: "queued", queued: 2 });
     await service.close(creator, session.id); // releases the held task
     await until(() => runStore.rows.get(first.id)?.status === "failed");
+  });
+
+  // ── THE SUPERVISOR'S LISTING SURVIVES A RESTART ──────────────────────────────────────────────────
+  //
+  // ⚠️ MEASURED 2026-09-17: ten sandbox runs in the digo ledger, `list_sandboxes` answering ZERO. The listing
+  // read `this.sessions` — process memory — and four redeploys had emptied it. A supervisor's one way to find
+  // what it had delegated reported an empty lane, and "no delegate is running" and "this process forgot"
+  // rendered identically.
+  it("lists a session the ledger has and this process does not hold, as orphaned", async () => {
+    const fake = fakePlaygroundHarness();
+    const ctx = build({ resolveSessionHarness: async () => fake.resolved });
+    const record = await ctx.service.create({ tenant: "acme", createdBy: "alice", harness: { id: "cc" } });
+
+    // What a restart does: the ledger row stands, the in-memory handle is gone.
+    const restarted = build({ resolveSessionHarness: async () => fake.resolved, store: ctx.runStore.store });
+    const listed = await restarted.service.listSessions(creator);
+
+    expect(listed.map((v) => v.record.id)).toEqual([record.id]);
+    // Not an absence and not a clean ending — the third value, with the reason a reader needs.
+    expect(listed[0]?.live?.delegate).toMatchObject({ status: "orphaned" });
+    expect(listed[0]?.live?.busy).toBe(false);
+  });
+
+  it("enriches a session it DOES hold instead of reporting it orphaned", async () => {
+    const { service, session } = await boot();
+    const listed = await service.listSessions(creator);
+    expect(listed.map((v) => v.record.id)).toEqual([session.id]);
+    expect(listed[0]?.live?.delegate).toMatchObject({ status: "pending_init" });
+    expect(listed[0]?.live?.harness).toMatchObject({ id: "cc" });
+  });
+
+  // ── A HARNESS THAT SAYS IT FAILED HAS FAILED ─────────────────────────────────────────────────────
+  //
+  // ⚠️ MEASURED LIVE, 2026-09-17, and it is the defect that would have hidden every attempt to fix the
+  // delegate's credential. An unauthenticated Claude Code emits `Not logged in · Please run /login` AS AN
+  // ASSISTANT MESSAGE and then exits non-zero. The old rule asked only "did anything look like assistant
+  // output?" and returned success whenever the answer was yes — so a delegate that authenticated nowhere and
+  // did nothing settled `succeeded`, and the supervisor's read model said `completed`.
+  it("a turn whose harness declared its own failure settles failed, even though it spoke first", async () => {
+    const { service, session, runStore } = await boot({}, { fatal: true });
+    const outcome = await service.submitTask(creator, session.id, { task: "do the thing" });
+    if (outcome.delivered !== "started") throw new Error("expected a turn");
+
+    await until(() => runStore.rows.get(outcome.run.id)?.status === "failed");
+    // The reason travels — "it failed" without the harness's own words sends the reader back to the trace.
+    expect(runStore.rows.get(outcome.run.id)?.error).toMatchObject({
+      code: "HARNESS_RUN_FAILED",
+      message: "Not logged in · Please run /login",
+    });
+
+    // And the supervisor's state says errored rather than completed: the whole point is that a delegate which
+    // did nothing must not read as one that finished.
+    const view = await service.getSession(creator, session.id);
+    expect(view.live?.delegate).toMatchObject({ status: "errored" });
+    await service.close(creator, session.id);
+  });
+
+  // The other half of the rule, kept: a run that worked and hit a non-fatal error along the way is a run that
+  // worked. A tool call that failed and was retried is trace detail, not a verdict.
+  it("keeps a non-fatal error as trace detail on a run that produced output", async () => {
+    const { service, session, runStore } = await boot({});
+    const outcome = await service.submitTask(creator, session.id, { task: "ordinary" });
+    if (outcome.delivered !== "started") throw new Error("expected a turn");
+    await until(() => runStore.rows.get(outcome.run.id)?.status === "succeeded");
+    await service.close(creator, session.id);
   });
 
   // ── STOP THE TURN, KEEP THE DELEGATE ─────────────────────────────────────────────────────────────

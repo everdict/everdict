@@ -1606,14 +1606,56 @@ export class SandboxSessionService {
 
   // The reattach surface: every session live in THIS process for the tenant (bounded by maxTotal — no
   // pagination). Historical sessions stay on /runs.
+  // ── THE LEDGER ANSWERS, THE MAP ENRICHES ─────────────────────────────────────────────────────────
+  //
+  // ⚠️ THIS USED TO READ THE MAP ALONE, and the Map is process memory. Measured 2026-09-17: ten sandbox runs
+  // in the `digo` ledger that day, `list_sandboxes` answering ZERO — four redeploys had emptied it. The
+  // supervisor's one way to find what it had delegated reported an empty lane, and "no delegate is running"
+  // and "this process forgot" rendered identically. That is the L2 collapse in the place a supervisor looks
+  // first, and it is the same shape as a dead cron staying silent.
+  //
+  // So the ledger is the source of WHICH sessions exist and the Map is what enriches them — the merge
+  // codex's own `AgentGraphStore` trait describes when it explains why its listings are stably ordered
+  // ("so callers can merge persisted graph state with live in-memory state"). A row this process does not
+  // hold is `orphaned`: its container died with whatever process owned it, so there is nothing to ask, and
+  // saying so is not the same as claiming it ended cleanly.
   async listSessions(actor: SandboxActor): Promise<SandboxSessionView[]> {
     this.sweep();
+    const rows = await this.deps.store.liveSessions({ tenant: actor.tenant });
     const views: SandboxSessionView[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      seen.add(row.id);
+      const record = await this.deps.store.get(row.id);
+      if (!record || record.tenant !== actor.tenant || record.kind !== "sandbox") continue;
+      const live = this.sessions.get(row.id);
+      views.push({
+        record,
+        live:
+          live !== undefined
+            ? this.liveView(live)
+            : {
+                // Not live HERE. Everything below is what the ledger alone can say; the delegate's state is
+                // the third value rather than a guess in either direction.
+                expiresAt: row.expiresAt ?? record.updatedAt,
+                busy: false,
+                conversation: false,
+                delegate: {
+                  status: "orphaned",
+                  since: record.updatedAt,
+                  cause: "this control plane does not hold the session — its container died with the process that did",
+                },
+                tasks: [],
+              },
+      });
+    }
+    // A session this process holds that the ledger's live query did not return — it settled between the two
+    // reads, or the row was written by a path the query does not cover. Kept rather than dropped: the Map
+    // holding a handle is itself evidence that something is running.
     for (const [id, live] of this.sessions) {
-      if (live.tenant !== actor.tenant) continue;
+      if (live.tenant !== actor.tenant || seen.has(id)) continue;
       const record = await this.deps.store.get(id);
-      if (!record) continue;
-      views.push({ record, live: this.liveView(live) });
+      if (record) views.push({ record, live: this.liveView(live) });
     }
     return views;
   }
