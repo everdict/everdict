@@ -1,7 +1,7 @@
 ---
 kind: spec
 title: "Every code change is a campaign — one lineage from the request to what shipped and what it taught, enforced by the plugin"
-status: proposed
+status: accepted
 updated: 2026-09-16
 anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/contracts/src/knowledge/node-type.ts, packages/contracts/src/records/tracker.ts, plugin/.claude-plugin/plugin.json, plugin/hooks/hooks.json]
 ---
@@ -344,23 +344,33 @@ the seam that cannot be bypassed is the repository's own push gate, and moving i
 name the one it continues, so a walk of change campaigns is a list rather than a tree. And the evaluated
 campaigns are filtered by issue in memory, because that store lists by subject.
 
-## Open questions
+## The questions this spec opened, and how they were answered
 
-1. **What closes a round?** A change set is closed at its verdict, but which event produces the verdict —
-   a pull request merging, a gate run finishing, a person saying so — is unsettled, and it decides whether a
-   long review with three force-pushes is one round or three.
-2. **Where the verdict's bytes live.** A repository gate's output is a log, not a scorecard. Storing the
-   declaration only (what ran, what it answered) is cheap and weak; storing the output makes a change
-   campaign's evidence as heavy as an evaluated one's.
-3. **One campaign per branch, or per issue?** A long-lived branch that serves three issues has no single
-   campaign, and forcing one would invent a parent nobody asked for.
-4. **Is one-commit-per-round scoped to the campaign or to the request?** It is implemented per campaign, so
-   two campaigns under one issue can each claim the same commit — and the lineage then shows it twice, which
-   is the ambiguity the rule exists to prevent, one level up. Widening it makes every round append read all of
-   the issue's campaigns first. Seen live on 2026-09-17; recorded rather than guessed at.
-5. **Cross-service atomicity.** A request satisfied only when four services are in has no "half adopted"
-   state today. Whether a campaign closes when the last service lands, or each service's change closes
-   independently under one campaign, changes what "the issue is resolved" means.
+All five were settled by the maintainer on 2026-09-17 and are now enforced rather than described. They stay
+here with their answers because a reader who meets the code needs to know which of its shapes were CHOSEN.
+
+1. **What closes a round?** → **The agent does, by logging it.** There is no merge event and no external
+   trigger: the moment a round is recorded is the moment the session that produced it judged it finished.
+   That is why the gate runs it judged on travel with the round rather than being collected afterwards.
+2. **Where do the verdict's bytes live?** → **The numbers do; the logs do not.** `GateRun` carries the
+   command, the exit code and at least one `metric` — "4027 passed, 51 of 51 tasks" rather than "the suite is
+   green" — and an `observed` answer must cite one by id. A measurement can be compared to the next round and
+   disagreed with; a sentence cannot. Storing the raw output was rejected as making a change campaign's
+   evidence as heavy as an evaluated one's for a weaker verdict.
+3. **One campaign per branch, or per issue?** → **Per issue, one OPEN at a time.** A second open one is
+   refused with the id of the one in the way, and the next opens after it ends, naming it in `continues`. A
+   request's attempts are a chain rather than a set nobody can order.
+4. **Is one-commit-per-round scoped to the campaign or to the request?** → **To the chain**, which (3) made
+   possible: the check walks `continues` backwards, so a successor cannot re-claim its predecessor's commits
+   and make one sha appear under two attempts in the request's lineage. Bounded and cycle-safe — corrupt data
+   must not turn a write path into a hang.
+5. **Cross-service atomicity.** → **`partially_adopted` exists, and the remainder is a successor's work.** It
+   requires BOTH `landed` and `remaining`: one of them empty is an adoption or an abandonment wearing the
+   middle word, and a full adoption carrying either is a second ending.
+
+**What stays open:** a `change` campaign still cannot carry `continues` *forks* — the chain is linear, where
+the evaluated grade's `continues` admits a tree — and evaluated campaigns are filtered by issue in memory,
+because that store lists by subject.
 
 ## What would reopen it
 

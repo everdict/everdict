@@ -207,9 +207,24 @@ be optimizing the half that is not broken.
    `get_task_context` at session start, instead of naming tools for the model to remember.
 2. **A retrieval record** — assembly id, anchors, what was returned, what was opened, and the work's outcome.
 3. **Role-scoped disclosure** on `assembleContext` (claims vs procedures vs curated+raw).
+   ⏸ **Waiting on a caller, not on effort.** WikiSkill's executor penalty (−2.8) is about an agent UNDER
+   EVALUATION receiving the curated layer during a rollout, and no path in this deployment gives such an agent
+   context: `assembleContext` is called by the in-product agent, by plugin sessions and over HTTP, and all
+   three are authors rather than subjects. Adding the parameter now would be a knob nobody turns — the shape
+   this repository calls a plan wearing a capability's name — and worse, guessing that a *coding* session is
+   the paper's "executor" would withhold exactly the claims it was built to deliver.
 4. **Usefulness counters** derived from (2), and a curator policy that can then be *evaluated* rather than argued.
+   ⏸ **Waiting on data.** Two receipts exist. A counter over them would be arithmetic performed on an anecdote.
 5. **A coverage-gap agenda** — the entities a workspace works on that no active claim covers.
+   ⏸ Ordered after (4) on purpose: what counts as a gap worth closing is a question the usefulness signal
+   answers. Built earlier it is a list of everything nobody has written about, which is every workspace's
+   first week and nobody's second.
 6. **Search, measured** — only after (2) can say whether anchors were insufficient, and judged on outcome.
+   ⏸ The measurement says the opposite so far: one repository anchor returned 7 of 7.
+
+**The pause is the design, not a backlog.** R12's priority is explicit — add infrastructure only once
+navigation measurement shows the simple collection is insufficient — and the only honest way to reach steps
+3–6 is to let sessions run against (1) and (2) until the receipts disagree with them.
 
 ## What would reopen it
 
