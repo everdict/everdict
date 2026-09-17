@@ -853,3 +853,4 @@ export {
 export { RetryCasesInPlace, type RetryCasesSupport, type RunRetryCase } from "./scorecard/retry-cases-in-place.js";
 
 export type { ExperimentFamilyStore, ReserveCampaignEvaluation } from "./ports/evolution-campaign-store.js";
+export { type CliIdentityResolverDeps, cliIdentityResolver } from "./capability/cli-identity-resolver.js";
