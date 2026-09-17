@@ -10,6 +10,12 @@ export const IssueLinkInputSchema = z
     version: z.string().min(1).max(100).optional(),
     // `case` links only: the dataset the case id lives in (docs/architecture/evolution-routing-spec.md §3).
     dataset: z.string().min(1).max(200).optional(),
+    // `commit` links only: "owner/name", and the Enterprise host when the forge is not github.com. Coordinates
+    // are explicit here rather than a pasted URL, the same way link_github_issue takes a repository and a
+    // number — decomposing an address is the SCREEN's affordance, and a door that accepted both shapes would
+    // ask every future caller which one is the real one.
+    repository: z.string().min(1).max(200).optional(),
+    host: z.string().min(1).max(200).optional(),
     note: z.string().max(500).optional(),
   })
   // The coordinates rule at the door (the domain transition enforces it again — one owner, `issueLinkDefects`).

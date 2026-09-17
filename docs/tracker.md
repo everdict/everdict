@@ -59,7 +59,7 @@ for one sequence.
 ## Issue
 
 Every issue carries the identity the workspace minted (`number`, `identifier`). An issue gathers the capabilities that verify it (`links[]`: harness · dataset · judge · scorecard · run ·
-view · issue · product · release · **case**), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
+view · issue · product · release · **case** · **commit**), so the discussion happens where the evidence is. Links are **pointers** — unvalidated, resolved through
 the normal RBAC-gated reads at render time, exactly like a platform event's subject. The one validated
 reference is `resolution.scorecardId`, because that one is evidence rather than navigation.
 
@@ -69,6 +69,26 @@ a campaign opened from the issue (`POST /campaigns` with `frame: { fromIssue: tr
 the linked cases become the frame's `targets`, the version's every other case is held-out, and the gate adopts only
 when every target flipped with zero held-out regressions (`docs/architecture/evolution-routing-spec.md` §3). Case links
 from two datasets are two exams, and the derivation refuses them by name rather than choosing.
+
+**An issue can name the commits that changed it** (`type: "commit"`): `id` is the sha, `repository` is `"owner/name"`,
+and `host` is set only for GitHub Enterprise — all three enforced by the same `issueLinkDefects`, because a sha is
+unique inside one repository and says nothing on its own. It is the first link whose target is NOT ours, so it is the
+only kind with no page here: the web addresses the forge (`issueCommitUrl` in `apps/web/src/entities/issue/lib`,
+which is where it lives because the web may import `@everdict/contracts` type-only) and opens it in a new tab.
+The sha is stored lowercase, so the same commit pasted twice in two cases is one link rather than two nobody can
+tell apart.
+
+Before this existed, a commit was recorded only inside a **change campaign's** round (`ChangeSetEntry.commits`,
+`docs/architecture/change-campaign.md`), so the ordinary question "what closed this issue?" was answerable only by
+someone who already knew a campaign existed. The two are not redundant: the campaign says which commits a round of
+work produced and what gates they passed, and the link says which commits this issue points at — including one from
+work that was never a campaign.
+
+⚠️ **A link's identity is its whole coordinate**, not `type` + `id`: two datasets can each hold a case called `c1`,
+and two repositories can each hold a sha with the same abbreviation. `sameIssueLink` owns that comparison for both
+the duplicate refusal and the removal, and a removal narrows with the second coordinate
+(`DELETE …/links/commit/:sha?repository=owner/name`, `remove_issue_link`'s `dataset`/`repository`). Named without it,
+a removal still matches on type and id — which is what took every case called `c1` before the coordinate existed.
 
 **One issue can point at another** (`type: "issue"`) — the cross-reference GitHub spells `#123`. It is stored like
 every other link, on the MENTIONING issue and one-directional, and the mentioned issue reads its backlinks with the

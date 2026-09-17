@@ -161,13 +161,18 @@ export function LinkChip({
   title,
   children,
   trailing,
+  external,
 }: {
   href: string
   // The full text, for the hover tooltip — the chip shows a truncation, so the whole of it has to be reachable.
   title: string
   children: ReactNode
   trailing?: ReactNode
+  // The target is not this app (a commit on the forge). A next `<Link>` would render it and navigate the tab
+  // away from the issue the reader is working on; an external target opens beside it instead.
+  external?: boolean
 }) {
+  const inner = 'inline-flex min-w-0 items-center gap-1 transition-colors hover:text-foreground'
   return (
     <span
       className={cn(
@@ -175,13 +180,15 @@ export function LinkChip({
         trailing ? 'pl-1.5 pr-1' : 'px-1.5'
       )}
     >
-      <Link
-        href={href}
-        title={title}
-        className="inline-flex min-w-0 items-center gap-1 transition-colors hover:text-foreground"
-      >
-        {children}
-      </Link>
+      {external === true ? (
+        <a href={href} title={title} target="_blank" rel="noreferrer" className={inner}>
+          {children}
+        </a>
+      ) : (
+        <Link href={href} title={title} className={inner}>
+          {children}
+        </Link>
+      )}
       {trailing}
     </span>
   )

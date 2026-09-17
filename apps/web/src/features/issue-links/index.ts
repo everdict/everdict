@@ -1,5 +1,6 @@
 export { addIssueLinkAction, removeIssueLinkAction, type IssueLinkActionResult } from './api/links'
 export { IssueCapabilityControl, type CapabilityOption } from './ui/issue-capability-control'
+export { IssueCommitControl } from './ui/issue-commit-control'
 export { IssueMentionControl } from './ui/issue-mention-control'
 export {
   IssueTimelineLinkControl,

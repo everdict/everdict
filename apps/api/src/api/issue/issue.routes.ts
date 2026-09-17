@@ -255,34 +255,41 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
     }
   });
 
-  app.delete<{ Params: { id: string; type: string; linkId: string } }>(
-    "/issues/:id/links/:type/:linkId",
-    { schema: issueDocs.unlink },
-    async (req, reply) => {
-      if (!deps.issueService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
-      const principal = await resolvePrincipal(req, reply, deps);
-      if (!principal) return reply;
-      try {
-        gate(principal, "issues:write");
-      } catch (err) {
-        return sendError(reply, err);
-      }
-      const type = IssueLinkTypeSchema.safeParse(req.params.type);
-      if (!type.success) return reply.code(400).send({ code: "BAD_REQUEST", message: type.error.message });
-      try {
-        const agent = agentAttributionFrom(req.headers);
-        return reply.send(
-          await deps.issueService.unlink(principal.workspace, req.params.id, type.data, req.params.linkId, {
-            subject: principal.subject,
-            ...(agent ? { agent } : {}),
-          }),
-        );
-      } catch (err) {
-        return sendError(reply, err);
-      }
-    },
-  );
+  app.delete<{
+    Params: { id: string; type: string; linkId: string };
+    Querystring: { dataset?: string; repository?: string };
+  }>("/issues/:id/links/:type/:linkId", { schema: issueDocs.unlink }, async (req, reply) => {
+    if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const type = IssueLinkTypeSchema.safeParse(req.params.type);
+    if (!type.success) return reply.code(400).send({ code: "BAD_REQUEST", message: type.error.message });
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await deps.issueService.unlink(
+          principal.workspace,
+          req.params.id,
+          type.data,
+          req.params.linkId,
+          { subject: principal.subject, ...(agent ? { agent } : {}) },
+          // The second coordinate, where the kind has one. In the path it would be a segment that is empty
+          // for eight of the eleven kinds; as a query it is simply absent, which is what it is.
+          {
+            ...(req.query.dataset !== undefined ? { dataset: req.query.dataset } : {}),
+            ...(req.query.repository !== undefined ? { repository: req.query.repository } : {}),
+          },
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
 
   app.delete<{ Params: { id: string } }>("/issues/:id", { schema: issueDocs.delete }, async (req, reply) => {
     if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });

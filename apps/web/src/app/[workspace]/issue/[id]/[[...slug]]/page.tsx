@@ -9,6 +9,7 @@ import { IssueGithubPanel, LinkGithubIssueButton } from '@/features/import-githu
 import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/issue-evaluation'
 import {
   IssueCapabilityControl,
+  IssueCommitControl,
   IssueMentionControl,
   IssueTimelineLinkControl,
   type CapabilityOption,
@@ -278,6 +279,10 @@ export default async function IssueDetailPage({
         error: e instanceof Error ? e.message : String(e),
       })),
   ])
+
+  // The commits that did the work. Unlike a mention, nothing has to be resolved: the link already carries the
+  // whole address (repository + sha), because the target is not ours to read.
+  const commits = current.links.filter((link) => link.type === 'commit')
 
   // The issues this one mentions — the link holds only a UUID and says nothing by itself. Drawing it needs the identifier,
   // title and status, so they are read one at a time (mentions are hand-made, so there are few, and an unreadable one is
@@ -652,6 +657,14 @@ export default async function IssueDetailPage({
                 </PropertyRow>
               )
             })}
+            {/* The commits that did the work. Not part of ISSUE_MENTION_LINK_TYPES above: that array is the kinds
+                ONE PICKER takes as a parameter, and a commit has no candidate list here — it is pasted, which is a
+                different control. The row is drawn whenever there is one to show, or whenever it can be added. */}
+            {(commits.length > 0 || canWrite) && (
+              <PropertyRow label={tracker('linkType.commit')}>
+                <IssueCommitControl issueId={current.id} links={commits} canWrite={canWrite} />
+              </PropertyRow>
+            )}
             {/* The reverse direction — the issues that mention me. The link lives on somebody else's record, so this is read-only
                 here (the same reason GitHub leaves a cross-reference on the timeline and does not let you delete it from there). None: no row. */}
             {mentionedBy.length > 0 && (

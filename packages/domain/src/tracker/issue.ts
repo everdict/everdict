@@ -22,6 +22,8 @@ import {
   ISSUE_STATUS_CATEGORY,
   NotFoundError,
   issueLinkDefects,
+  normaliseIssueLinkId,
+  sameIssueLink,
 } from "@everdict/contracts";
 import { appendHistory } from "./history.js";
 
@@ -38,6 +40,8 @@ export interface NewIssueLinkInput {
   id: string;
   version?: string;
   dataset?: string; // `case` links only — the dataset the case id lives in (`issueLinkDefects`)
+  repository?: string; // `commit` links only — "owner/name", the repository the sha lives in
+  host?: string; // `commit` links only — unset for github.com, else the Enterprise host
   note?: string;
 }
 
@@ -599,23 +603,23 @@ export class Issue {
         { issue: this.record.id, type: input.type, id: input.id },
         defects.join("; "),
       );
-    // Same type + same id is one link — and for a case, the same DATASET too: two datasets can both hold a
-    // case called `c1`, and they are two different exams.
-    if (
-      this.record.links.some(
-        (existing) => existing.type === input.type && existing.id === input.id && existing.dataset === input.dataset,
-      )
-    )
+    // The identity is the WHOLE coordinate — two datasets can both hold a case called `c1`, and two
+    // repositories can both hold a sha with the same abbreviation. `sameIssueLink` owns that comparison, and
+    // `unlink` asks it the same question, so what refuses a duplicate and what matches a removal cannot drift.
+    const id = normaliseIssueLinkId(input.type, input.id);
+    if (this.record.links.some((existing) => sameIssueLink(existing, { ...input, id })))
       throw new ConflictError(
         "CONFLICT",
-        { issue: this.record.id, type: input.type, id: input.id },
-        `${input.type} ${input.id} is already linked to this issue.`,
+        { issue: this.record.id, type: input.type, id },
+        `${input.type} ${id} is already linked to this issue.`,
       );
     const link: IssueLink = {
       type: input.type,
-      id: input.id,
+      id,
       ...(input.version !== undefined ? { version: input.version } : {}),
       ...(input.dataset !== undefined ? { dataset: input.dataset } : {}),
+      ...(input.repository !== undefined ? { repository: input.repository } : {}),
+      ...(input.host !== undefined ? { host: input.host } : {}),
       ...(input.note !== undefined ? { note: input.note } : {}),
       addedBy: by,
       addedAt: now,
@@ -632,6 +636,7 @@ export class Issue {
             id: link.id,
             ...(link.version !== undefined ? { version: link.version } : {}),
             ...(link.dataset !== undefined ? { dataset: link.dataset } : {}),
+            ...(link.repository !== undefined ? { repository: link.repository } : {}),
           },
         }),
         updatedAt: now,
@@ -653,18 +658,39 @@ export class Issue {
     };
   }
 
-  unlink(type: IssueLinkType, id: string, by: string, now: string): IssueTransition {
-    const remaining = this.record.links.filter((link) => !(link.type === type && link.id === id));
+  // `where` narrows to ONE link when the type carries a second coordinate. Without it a remove filtered on
+  // type and id alone, so removing a case called `c1` removed it from every dataset that had one, and a commit
+  // abbreviation shared by two repositories would take both. Omitted, it still matches by type and id — the
+  // shape every caller had before commits gave the vocabulary its second two-part coordinate.
+  unlink(
+    type: IssueLinkType,
+    id: string,
+    by: string,
+    now: string,
+    where?: { dataset?: string; repository?: string },
+  ): IssueTransition {
+    const wanted = normaliseIssueLinkId(type, id);
+    const matches = (link: IssueLink): boolean =>
+      link.type === type &&
+      normaliseIssueLinkId(link.type, link.id) === wanted &&
+      (where?.dataset === undefined || link.dataset === where.dataset) &&
+      (where?.repository === undefined || link.repository === where.repository);
+    const remaining = this.record.links.filter((link) => !matches(link));
     if (remaining.length === this.record.links.length)
       throw new NotFoundError(
         "NOT_FOUND",
-        { issue: this.record.id, type, id },
-        `${type} ${id} is not linked to this issue.`,
+        { issue: this.record.id, type, id: wanted },
+        `${type} ${wanted} is not linked to this issue.`,
       );
     return {
       patch: {
         links: remaining,
-        history: appendHistory(this.record.history, { at: now, by, event: "unlinked", detail: { type, id } }),
+        history: appendHistory(this.record.history, {
+          at: now,
+          by,
+          event: "unlinked",
+          detail: { type, id: wanted, ...(where?.repository !== undefined ? { repository: where.repository } : {}) },
+        }),
         updatedAt: now,
       },
       facts: [],

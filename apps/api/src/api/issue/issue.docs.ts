@@ -171,8 +171,11 @@ export const issueDocs: Record<
     description:
       "Attach a harness, dataset, judge, scorecard, run, view — or a case (`type: case`, `id` = the case id, " +
       "`dataset` + `version` = the dataset version it lives in; a campaign opened with frame.fromIssue takes the " +
-      "issue's cases as its targets). Links are pointers (resolved through the normal RBAC-gated reads), and the " +
-      "dataset/harness ones widen the issue's evaluation history. Requires issues:write.",
+      'issue\'s cases as its targets), or a COMMIT (`type: commit`, `id` = the sha, `repository` = "owner/name", ' +
+      "`host` only for GitHub Enterprise) — the change that did the work, which before this existed was " +
+      "recorded only inside a change campaign's round. Links are pointers (resolved through the normal " +
+      "RBAC-gated reads), and the dataset/harness ones widen the issue's evaluation history. Requires " +
+      "issues:write.",
     tags: ["issue"],
     body: toJsonSchema(IssueLinkInputSchema),
     response: {
@@ -182,8 +185,18 @@ export const issueDocs: Record<
   },
   unlink: {
     summary: "Remove a link from an issue",
-    description: "Detach a capability from the issue. Requires issues:write.",
+    description:
+      "Detach a capability from the issue. Where the kind carries a second coordinate, name it as a query " +
+      "parameter (`?dataset=` for a case, `?repository=` for a commit) — two datasets can each hold a case " +
+      "called `c1`, so a removal by id alone would take both. Requires issues:write.",
     tags: ["issue"],
+    querystring: {
+      type: "object",
+      properties: {
+        dataset: { type: "string", description: "case links — the dataset that one lives in" },
+        repository: { type: "string", description: "commit links — the repository that sha lives in" },
+      },
+    },
     response: {
       200: { description: "The issue without the link", ...toJsonSchema(IssueRecordSchema) },
       ...errorResponses(400, 401, 403, 404),

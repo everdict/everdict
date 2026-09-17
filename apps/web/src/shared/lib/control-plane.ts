@@ -827,12 +827,25 @@ export const controlPlane = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  removeIssueLink: <T>(auth: AuthContext, id: string, type: string, linkId: string) =>
-    call<T>(
+  // `where` is the second coordinate for the kinds that have one (a case's dataset, a commit's repository).
+  // Without it the removal matches on type and id alone and takes every link that shares them.
+  removeIssueLink: <T>(
+    auth: AuthContext,
+    id: string,
+    type: string,
+    linkId: string,
+    where?: { dataset?: string; repository?: string }
+  ) => {
+    const query = new URLSearchParams()
+    if (where?.dataset !== undefined) query.set('dataset', where.dataset)
+    if (where?.repository !== undefined) query.set('repository', where.repository)
+    const suffix = query.size === 0 ? '' : `?${query.toString()}`
+    return call<T>(
       auth,
-      `/issues/${encodeURIComponent(id)}/links/${encodeURIComponent(type)}/${encodeURIComponent(linkId)}`,
+      `/issues/${encodeURIComponent(id)}/links/${encodeURIComponent(type)}/${encodeURIComponent(linkId)}${suffix}`,
       { method: 'DELETE' }
-    ),
+    )
+  },
   // The issue's evaluation history: pinned evidence ∪ every batch its linked datasets/harnesses ran.
   listIssueScorecards: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/scorecards`),

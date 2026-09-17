@@ -272,13 +272,19 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
         "links widen the issue's evaluation history to every batch that exercised them, which is how a regression " +
         "against a closed issue surfaces. A `case` link (linkId = the case id, `dataset` + `version` = the dataset " +
         "version it lives in) says which cases the issue is about; a campaign opened with frame.fromIssue takes " +
-        "them as its targets and adopts only when every one of them flipped.",
+        "them as its targets and adopts only when every one of them flipped. A `commit` link (linkId = the sha, " +
+        '`repository` = "owner/name") names the change that did the work — the answer to "what closed this?" ' +
+        "that used to live only inside a change campaign's round. Its coordinates are explicit rather than a " +
+        "pasted URL: from https://github.com/acme/app/commit/abc1234, repository is acme/app and linkId is " +
+        "abc1234. Use `note` for what the commit did when the subject line does not say it.",
       inputSchema: {
         id: z.string(),
         type: IssueLinkTypeSchema,
         linkId: z.string(),
         version: z.string().optional(),
         dataset: z.string().optional().describe("case links only — the dataset the case id lives in"),
+        repository: z.string().optional().describe('commit links only — "owner/name", the repo the sha lives in'),
+        host: z.string().optional().describe("commit links only — GitHub Enterprise host; omit for github.com"),
         note: z.string().max(500).optional(),
       },
     },
@@ -293,6 +299,8 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
               id: a.linkId,
               ...(a.version !== undefined ? { version: a.version } : {}),
               ...(a.dataset !== undefined ? { dataset: a.dataset } : {}),
+              ...(a.repository !== undefined ? { repository: a.repository } : {}),
+              ...(a.host !== undefined ? { host: a.host } : {}),
               ...(a.note !== undefined ? { note: a.note } : {}),
             },
             actor,
@@ -305,10 +313,27 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
     "remove_issue_link",
     {
       annotations: { readOnlyHint: false },
-      description: "Detach a capability from an issue.",
-      inputSchema: { id: z.string(), type: IssueLinkTypeSchema, linkId: z.string() },
+      description:
+        "Detach a capability from an issue. Where a kind carries a second coordinate, pass it: two datasets can " +
+        "each hold a case called `c1` and two repositories can each hold a sha with the same abbreviation, so a " +
+        "removal that names only the id would take both.",
+      inputSchema: {
+        id: z.string(),
+        type: IssueLinkTypeSchema,
+        linkId: z.string(),
+        dataset: z.string().optional().describe("case links — the dataset that one lives in"),
+        repository: z.string().optional().describe("commit links — the repository that sha lives in"),
+      },
     },
-    (a) => run(principal, "issues:write", async () => ok(await issues.unlink(ws, a.id, a.type, a.linkId, actor))),
+    (a) =>
+      run(principal, "issues:write", async () =>
+        ok(
+          await issues.unlink(ws, a.id, a.type, a.linkId, actor, {
+            ...(a.dataset !== undefined ? { dataset: a.dataset } : {}),
+            ...(a.repository !== undefined ? { repository: a.repository } : {}),
+          }),
+        ),
+      ),
   );
 
   server.registerTool(

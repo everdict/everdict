@@ -69,6 +69,9 @@ export const ISSUE_LINK_TYPES = [
   // A case the issue is about — `id` is the case id, `dataset` + `version` the dataset version it lives in. A
   // campaign opened from the issue takes these as its targets (docs/architecture/evolution-routing-spec.md §3).
   'case',
+  // The change that did the work — `id` is the sha, `repository` is "owner/name". The first link whose target
+  // is not ours, so it is the only one `issueLinkHref` sends to the forge instead of to a route.
+  'commit',
 ] as const
 export const issueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES)
 
@@ -77,6 +80,8 @@ export const issueLinkSchema = z.object({
   id: z.string(),
   version: z.string().optional(),
   dataset: z.string().optional(), // case links only
+  repository: z.string().optional(), // commit links only — "owner/name"
+  host: z.string().optional(), // commit links only — unset for github.com
   note: z.string().optional(),
   addedBy: z.string(),
   addedAt: z.string(),

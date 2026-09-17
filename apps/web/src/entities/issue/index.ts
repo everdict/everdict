@@ -76,7 +76,10 @@ export {
   ISSUE_CAPABILITY_LINK_TYPES,
   ISSUE_LINK_REF_KIND,
   ISSUE_MENTION_LINK_TYPES,
+  issueCommitUrl,
   issueLinkHref,
+  issueLinkIsExternal,
+  parseIssueCommitRef,
   type IssueCapabilityLinkType,
   type IssueMentionLinkType,
 } from './lib/link-target'

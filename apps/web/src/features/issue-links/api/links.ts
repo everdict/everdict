@@ -20,7 +20,17 @@ export interface IssueLinkActionResult {
 
 export async function addIssueLinkAction(
   id: string,
-  link: { type: IssueLinkType; id: string; version?: string; note?: string }
+  link: {
+    type: IssueLinkType
+    id: string
+    version?: string
+    // `commit` links only — the repository the sha lives in, and the Enterprise host when there is one. A
+    // commit is the first link target outside the workspace, so it is the first that needs an address rather
+    // than an id (contracts `issueLinkDefects` refuses one without it, at this door and at the transition).
+    repository?: string
+    host?: string
+    note?: string
+  }
 ): Promise<IssueLinkActionResult> {
   const ctx = await authContext()
   try {
@@ -34,11 +44,14 @@ export async function addIssueLinkAction(
 export async function removeIssueLinkAction(
   id: string,
   type: IssueLinkType,
-  linkId: string
+  linkId: string,
+  // The second coordinate, for the kinds that carry one. Two datasets can each hold a case called `c1` and two
+  // repositories can each hold a sha with the same abbreviation, so a removal by id alone takes both.
+  where?: { dataset?: string; repository?: string }
 ): Promise<IssueLinkActionResult> {
   const ctx = await authContext()
   try {
-    const issue = issueSchema.parse(await controlPlane.removeIssueLink(ctx, id, type, linkId))
+    const issue = issueSchema.parse(await controlPlane.removeIssueLink(ctx, id, type, linkId, where))
     return { ok: true, issue }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

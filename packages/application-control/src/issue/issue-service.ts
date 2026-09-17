@@ -361,15 +361,23 @@ export class IssueService {
     return this.applyTransition(record, Issue.from(record).link(input, actor.subject, this.now()), actor);
   }
 
+  // `where` narrows to one link where the type has a second coordinate (a case's dataset, a commit's
+  // repository). Absent, the removal matches by type and id, which is what every caller meant before the
+  // vocabulary had a two-part coordinate.
   async unlink(
     tenant: string,
     id: string,
     type: IssueLinkType,
     linkId: string,
     actor: IssueActor,
+    where?: { dataset?: string; repository?: string },
   ): Promise<IssueRecord> {
     const record = await this.get(tenant, id);
-    return this.applyTransition(record, Issue.from(record).unlink(type, linkId, actor.subject, this.now()), actor);
+    return this.applyTransition(
+      record,
+      Issue.from(record).unlink(type, linkId, actor.subject, this.now(), where),
+      actor,
+    );
   }
 
   async setGithubSync(tenant: string, id: string, sync: IssueGithubSync, actor: IssueActor): Promise<IssueRecord> {

@@ -197,6 +197,70 @@ describe("Issue — the tracker's unit of intent", () => {
     expect(() => Issue.from(withLink).unlink("dataset", "missing", "dana", LATER)).toThrow(NotFoundError);
   });
 
+  // ── THE COMMIT THAT DID IT ──────────────────────────────────────────────────────────────────────────
+  //
+  // The transition is where a headless caller lands, so the coordinates rule has to hold here and not only at
+  // the HTTP door — and the sha has to be stored normalised, or the same commit pasted twice in two cases
+  // becomes two links that no reader can tell apart.
+  it("link stores a commit with its repository, lowercased, and refuses one without", () => {
+    const linked = Issue.from(newIssue()).link(
+      { type: "commit", id: "E4FE66E8BFCBEBC342115226033654CD2280F07B", repository: "PPP-Atelier/digo-mobile" },
+      "dana",
+      LATER,
+    );
+    expect(linked.patch.links).toEqual([
+      {
+        type: "commit",
+        id: "e4fe66e8bfcbebc342115226033654cd2280f07b",
+        repository: "PPP-Atelier/digo-mobile",
+        addedBy: "dana",
+        addedAt: LATER,
+      },
+    ]);
+    // The history has to name the repository too, or the durable record of the link cannot say which repo it
+    // was — and the history is what still answers after the link itself is removed.
+    expect(linked.patch.history?.at(-1)?.detail).toMatchObject({ repository: "PPP-Atelier/digo-mobile" });
+
+    expect(() => Issue.from(newIssue()).link({ type: "commit", id: "e4fe66e" }, "dana", LATER)).toThrow(
+      /a sha alone has no address/,
+    );
+  });
+
+  // ⚠️ THE DEFECT THIS PINS WAS ALREADY REACHABLE THROUGH CASE LINKS. `unlink` filtered on type and id alone,
+  // so removing a case called `c1` removed it from every dataset that had one. A commit gave the vocabulary a
+  // second two-part coordinate, which is what made it worth one shared comparison instead of two.
+  it("unlink narrows to one link when the kind carries a second coordinate", () => {
+    const two = [
+      { type: "commit" as const, id: "abc1234", repository: "acme/app", addedBy: "d", addedAt: LATER },
+      { type: "commit" as const, id: "abc1234", repository: "acme/api", addedBy: "d", addedAt: LATER },
+    ];
+    const record = { ...newIssue(), links: two };
+
+    const removed = Issue.from(record).unlink("commit", "abc1234", "dana", LATER, { repository: "acme/app" });
+    expect(removed.patch.links).toEqual([two[1]]);
+
+    // Named without the coordinate, it still matches by type and id — the shape every caller had before, and
+    // the reason this assertion states the count rather than trusting the call not to throw.
+    expect(Issue.from(record).unlink("commit", "abc1234", "dana", LATER).patch.links).toEqual([]);
+
+    // A coordinate that matches nothing is a NotFound, never a silent removal of the other one.
+    expect(() => Issue.from(record).unlink("commit", "abc1234", "dana", LATER, { repository: "acme/web" })).toThrow(
+      NotFoundError,
+    );
+  });
+
+  // Two links for one commit is what a second paste of the same address would make, and the chips would then
+  // be indistinguishable — the duplicate refusal has to compare the normalised sha, not the typed one.
+  it("link refuses the same commit pasted again in a different case", () => {
+    const record = {
+      ...newIssue(),
+      links: [{ type: "commit" as const, id: "abc1234", repository: "acme/app", addedBy: "d", addedAt: LATER }],
+    };
+    expect(() =>
+      Issue.from(record).link({ type: "commit", id: "ABC1234", repository: "acme/app" }, "dana", LATER),
+    ).toThrow(ConflictError);
+  });
+
   it("history is capped so sync churn cannot grow a row without bound", () => {
     const crowded: IssueRecord = {
       ...newIssue(),

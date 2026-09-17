@@ -115,6 +115,18 @@ export const ISSUE_LINK_TYPES = [
   // gate then adopts only when every one of them flipped — the join that makes "the actual issue was resolved"
   // a verified fact rather than a sentence.
   "case",
+  // ── THE COMMIT THAT DID IT (maintainer, 2026-09-17) ─────────────────────────────────────────────────
+  //
+  // Every other kind in this list addresses something INSIDE the workspace, and that was the whole vocabulary:
+  // an issue could name the scorecard that proved it and the issue that duplicates it, and could not name the
+  // change that actually fixed it. The commit lived in a change campaign's round, one aggregate away, reachable
+  // only by someone who already knew a campaign existed — so the ordinary question "what closed this?" had no
+  // ordinary answer.
+  //
+  // A commit is the first link whose target is NOT ours: `id` is the sha, `repository` is "owner/name", and
+  // `host` is unset for github.com (the convention `IssueGithub` and `WorkspaceCiLink` already use). That makes
+  // it the first link with no page here, so `issueLinkHref` sends it out to the forge rather than to a route.
+  "commit",
 ] as const;
 export const IssueLinkTypeSchema = z.enum(ISSUE_LINK_TYPES);
 export type IssueLinkType = z.infer<typeof IssueLinkTypeSchema>;
@@ -128,15 +140,40 @@ export const IssueLinkSchema = z.object({
   // The dataset a `case` link's id lives in. Present exactly on `case` links (`issueLinkDefects`); a case id
   // without its dataset is a name with no address.
   dataset: z.string().min(1).optional(),
+  // The repository a `commit` link's sha lives in ("owner/name"). Present exactly on `commit` links, for the
+  // same reason `dataset` is present exactly on `case` links: a sha is unique within a repository and says
+  // nothing on its own.
+  repository: z.string().min(1).max(200).optional(),
+  // Unset = github.com; set = the GitHub Enterprise host. Without it a GHE workspace's commit link would
+  // render an address on github.com — a link to SOMEBODY ELSE'S repository, which is worse than no link.
+  host: z.string().min(1).max(200).optional(),
   note: z.string().max(500).optional(),
   addedBy: z.string(),
   addedAt: z.string(),
 });
 export type IssueLink = z.infer<typeof IssueLinkSchema>;
 
+// A commit sha as the forges write one: hex, a 7-character abbreviation at the shortest, 64 for sha-256.
+// Compared lowercase, because `ABC1234` and `abc1234` are one commit and would otherwise be two links.
+const COMMIT_SHA = /^[0-9a-f]{7,64}$/;
+
+// Normalised at the border so the stored coordinate is the one every reader compares. A sha that is not hex is
+// not a sha, and the id is returned unchanged for every other link type — their ids are entity ids.
+export function normaliseIssueLinkId(type: IssueLinkType, id: string): string {
+  return type === "commit" ? id.trim().toLowerCase() : id;
+}
+
 // The creation rule for a link's coordinates, one owner for every door (HTTP DTO, MCP input, the domain
-// transition): a `case` needs its dataset and a pinned dataset version; every other type carries no dataset.
-export function issueLinkDefects(link: { type: IssueLinkType; dataset?: string; version?: string }): string[] {
+// transition): a `case` needs its dataset and a pinned dataset version, a `commit` needs its repository and a
+// sha-shaped id, and every other type carries neither.
+export function issueLinkDefects(link: {
+  type: IssueLinkType;
+  id?: string;
+  dataset?: string;
+  version?: string;
+  repository?: string;
+  host?: string;
+}): string[] {
   const defects: string[] = [];
   if (link.type === "case") {
     if (link.dataset === undefined)
@@ -148,7 +185,47 @@ export function issueLinkDefects(link: { type: IssueLinkType; dataset?: string; 
   } else if (link.dataset !== undefined) {
     defects.push(`\`dataset\` belongs to case links only (this link is a ${link.type})`);
   }
+
+  if (link.type === "commit") {
+    if (link.repository === undefined)
+      defects.push('a commit link names its repository (`repository`, "owner/name") — a sha alone has no address');
+    else if (!/^[^/\s]+\/[^/\s]+$/.test(link.repository))
+      defects.push(`\`repository\` is written "owner/name" (got "${link.repository}")`);
+    // The id is the sha itself, so a value that cannot be one is a link that can never resolve — and an
+    // unresolvable pointer is exactly what this function exists to refuse at birth rather than at render.
+    if (link.id !== undefined && !COMMIT_SHA.test(normaliseIssueLinkId("commit", link.id)))
+      defects.push("a commit link's id is the sha — hex, 7 to 64 characters");
+    if (link.version !== undefined) defects.push("a commit link carries no `version` — the sha IS the version");
+  } else {
+    if (link.repository !== undefined)
+      defects.push(`\`repository\` belongs to commit links only (this link is a ${link.type})`);
+    if (link.host !== undefined) defects.push(`\`host\` belongs to commit links only (this link is a ${link.type})`);
+  }
   return defects;
+}
+
+// ⚠️ A COMMIT'S URL AND THE PARSE OF A PASTED ONE ARE NOT HERE, and that is deliberate. The web may import
+// this package TYPE-ONLY (`pnpm web-imports`, the zod-v3/v4 isolation), so a renderer placed here could not be
+// called by the only thing that renders — the issue screen — and would have had to be written a second time in
+// `apps/web/src/entities/issue/lib/link-target.ts`. What lives here is what the DOORS and the transition
+// decide: the coordinates rule, the identity, the normalisation. Where a commit is shown is the screen's.
+
+// WHICH LINKS ARE THE SAME LINK. One owner, because the answer is used twice — the duplicate refusal when a
+// link is added and the match when one is removed — and those two drifting is how a remove takes the wrong row.
+//
+// The identity is the whole coordinate, never just `type` + `id`: two datasets can each hold a case called
+// `c1`, and two repositories can each hold a sha with the same 7-character abbreviation. Before this function
+// existed, `unlink("case", "c1")` filtered on type and id alone and removed BOTH of those links.
+export function sameIssueLink(
+  a: { type: IssueLinkType; id: string; dataset?: string; repository?: string },
+  b: { type: IssueLinkType; id: string; dataset?: string; repository?: string },
+): boolean {
+  return (
+    a.type === b.type &&
+    normaliseIssueLinkId(a.type, a.id) === normaliseIssueLinkId(b.type, b.id) &&
+    a.dataset === b.dataset &&
+    a.repository === b.repository
+  );
 }
 
 // --- Issue labels: a workspace-level registry, referenced by id ---

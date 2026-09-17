@@ -5009,7 +5009,8 @@
       "issue": "Mentions",
       "product": "Product",
       "release": "Release",
-      "case": "Case"
+      "case": "Case",
+      "commit": "Commits"
     },
     "subject": {
       "issue": "issue",
@@ -5251,6 +5252,9 @@
     "searching": "Searching…",
     "noIssueMatch": "No issues match.",
     "mentionControlLabel": "Issues this one mentions",
+    "commitControlLabel": "Commits that changed this",
+    "commitPlaceholder": "Paste a commit URL",
+    "commitHint": "A commit URL, or owner/name@sha.",
     "missingTarget": "deleted target"
   },
   "projectsPage": {
