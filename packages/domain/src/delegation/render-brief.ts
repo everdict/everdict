@@ -25,8 +25,12 @@ export function renderDelegationBrief(brief: DelegationBrief): string {
     for (const c of brief.constraints) lines.push(`- ${c}`);
   }
   if (brief.doneWhen.length > 0) {
+    // ⚠️ THE ID IS RENDERED, and it is not decoration. This is the only place the delegate learns what to call
+    // each check, and its report answers them BY ID — a finish line the delegate can read but not name is one
+    // it can only answer in prose, which is the state this whole handoff exists to leave behind.
     lines.push("", "## Done when");
-    for (const d of brief.doneWhen) lines.push(`- ${d}`);
+    lines.push("", "Answer each of these by its id when you report back.", "");
+    for (const d of brief.doneWhen) lines.push(`- \`${d.id}\` — ${d.statement}`);
   }
   return `${lines.join("\n")}\n`;
 }

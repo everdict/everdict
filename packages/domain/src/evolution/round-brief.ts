@@ -1,4 +1,10 @@
-import type { DelegationBrief, DelegationReference, RoundEvidence, StoredCampaignFrame } from "@everdict/contracts";
+import type {
+  DelegationBrief,
+  DelegationCriterion,
+  DelegationReference,
+  RoundEvidence,
+  StoredCampaignFrame,
+} from "@everdict/contracts";
 
 // ── THE ROUND'S DELEGATION BRIEF, AUTHORED BY THE PLATFORM ────────────────────────────────────────
 //
@@ -239,13 +245,29 @@ export function campaignRoundBrief(input: CampaignRoundBriefInput): DelegationBr
   // Deliberately not the scorecard. The delegate cannot run it, and a finish line it cannot check is not a
   // finish line — it is a wish. Everything here is verifiable inside the sandbox, which is what makes this
   // handoff delegatable to an agent that never talks to Everdict.
-  const doneWhen: string[] = [];
+  // ⚠️ THE IDS ARE SEMANTIC, NOT POSITIONAL. A delegate answers these by id, and a positional `w1..w4` would
+  // silently re-bind every answer the moment a criterion is added above it — so an answer filed against a
+  // brief written five minutes earlier would score a different check while looking perfectly valid. A name
+  // that says what the check IS survives the brief being edited around it.
+  const doneWhen: DelegationCriterion[] = [];
   if (frame.oracleScope.length > 0)
-    doneWhen.push(`The diff against the default branch touches none of: ${frame.oracleScope.join(", ")}.`);
+    doneWhen.push({
+      id: "oracle-scope-untouched",
+      statement: `The diff against the default branch touches none of: ${frame.oracleScope.join(", ")}.`,
+    });
   doneWhen.push(
-    "The repository's own build and tests pass — that is the finish line, not the evaluation.",
-    "The diff is one lever, and you can say in one sentence which mechanism it changes.",
-    `The candidate is registered as a new version of ${frame.subject.id}, and its resolved spec differs from ${frame.subject.baselineVersion}.`,
+    {
+      id: "repo-gates-pass",
+      statement: "The repository's own build and tests pass — that is the finish line, not the evaluation.",
+    },
+    {
+      id: "one-lever",
+      statement: "The diff is one lever, and you can say in one sentence which mechanism it changes.",
+    },
+    {
+      id: "candidate-registered",
+      statement: `The candidate is registered as a new version of ${frame.subject.id}, and its resolved spec differs from ${frame.subject.baselineVersion}.`,
+    },
   );
 
   return { goal, context: context.join("\n"), references, constraints, doneWhen };

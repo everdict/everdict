@@ -20,6 +20,7 @@ export * from "./capability-origin.js";
 export * from "./evolution-campaign.js";
 export * from "./comment.js";
 export * from "./delegation-brief.js";
+export * from "./delegation-session.js";
 export * from "./event-selector.js";
 export * from "./knowledge-entry.js";
 export * from "./change-campaign.js";

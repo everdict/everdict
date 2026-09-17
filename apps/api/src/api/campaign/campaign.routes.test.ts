@@ -941,7 +941,14 @@ describe("GET /campaigns/:id/brief", () => {
     const before = await app.inject({ method: "GET", url: `/campaigns/${id}/brief`, headers: H });
     expect(before.statusCode, before.body).toBe(200);
     expect(before.json().goal).toMatch(/do not change the evaluation/);
-    expect(before.json().doneWhen.join("\n")).toMatch(/build and tests pass/);
+    // Each check is named, because the delegate answers them BY ID when it reports back.
+    expect(
+      before
+        .json()
+        .doneWhen.map((c: { statement: string }) => c.statement)
+        .join("\n"),
+    ).toMatch(/build and tests pass/);
+    expect(before.json().doneWhen.map((c: { id: string }) => c.id)).toContain("repo-gates-pass");
     expect(before.json().context).toMatch(/Round 1 of campaign/);
     expect(JSON.stringify(before.json()), "a held-out id on the wire is the whole defect").not.toMatch(/"c1"|"c2"/);
 

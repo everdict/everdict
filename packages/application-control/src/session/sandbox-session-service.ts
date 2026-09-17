@@ -568,7 +568,12 @@ export class SandboxSessionService {
           goal: "Propose a candidate improvement using the permitted target evidence.",
           context: JSON.stringify(campaignGrant.view),
           references: [],
-          doneWhen: ["Return the proposed change and its rationale to the orchestrator."],
+          doneWhen: [
+            {
+              id: "proposal-returned",
+              statement: "Return the proposed change and its rationale to the orchestrator.",
+            },
+          ],
           constraints: [
             "Read campaign evidence with the credential in CAMPAIGN_EVIDENCE.json. It expires after one hour.",
             "Keep evaluation and adoption with the orchestrator. Workspace credentials must not be passed to this delegate.",

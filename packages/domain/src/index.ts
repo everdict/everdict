@@ -599,6 +599,15 @@ export {
 // delegation — the handoff brief rendered as the markdown the delegate reads (one renderer: the seeded file,
 // the trajectory marker and any later surface must not disagree about what was asked).
 export { renderDelegationBrief } from "./delegation/render-brief.js";
+// delegation — the two decisions a supervised handoff needs: what reaching a delegate does to its turn, and
+// whether a report even answers the brief it was given (the review seam, before any judgement of the work).
+export { planDelivery, interruptedFrom, type DeliveryPlan } from "./delegation/delivery.js";
+export {
+  reviewDelegateReport,
+  tallyDelegateReport,
+  type DelegateReportReview,
+  type DelegateReportTally,
+} from "./delegation/review-report.js";
 // capability — the first-party default-toolset selection kernel (which built-in tools apply to a workspace)
 export {
   type DefaultCapabilityInput,

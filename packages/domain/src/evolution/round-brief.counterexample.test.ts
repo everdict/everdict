@@ -156,7 +156,16 @@ describe("campaignRoundBrief — the handoff the platform authors", () => {
   });
 
   it("states a finish line the delegate can actually check, and never the scorecard", () => {
-    const done = campaignRoundBrief(input()).doneWhen.join("\n");
+    const criteria = campaignRoundBrief(input()).doneWhen;
+    const done = criteria.map((c) => c.statement).join("\n");
+    // The ids are SEMANTIC, so an answer filed against one still binds when a criterion is added above it.
+    // Positional ids would silently re-bind every answer the moment the brief was edited.
+    expect(criteria.map((c) => c.id)).toEqual([
+      "oracle-scope-untouched",
+      "repo-gates-pass",
+      "one-lever",
+      "candidate-registered",
+    ]);
     expect(done).toMatch(/build and tests pass/);
     expect(done).toMatch(/tests\/\*\*/); // the oracle diff check
     expect(done).toMatch(/one lever/);
@@ -167,7 +176,8 @@ describe("campaignRoundBrief — the handoff the platform authors", () => {
   it("says the exam is off-limits even when no oracle scope was declared — the weaker frame is the louder warning", () => {
     const bare = campaignRoundBrief(input({ frame: { ...input().frame, oracleScope: [] } }));
     expect(bare.constraints.join("\n")).toMatch(/declared no oracle scope/);
-    expect(bare.doneWhen.join("\n")).not.toMatch(/touches none of/);
+    expect(bare.doneWhen.map((c) => c.statement).join("\n")).not.toMatch(/touches none of/);
+    expect(bare.doneWhen.map((c) => c.id)).not.toContain("oracle-scope-untouched");
   });
 
   it("round 1 has no predecessor, so it briefs on the goal alone and hands over no traces", () => {

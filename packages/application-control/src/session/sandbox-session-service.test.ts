@@ -2067,7 +2067,7 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     goal: "make the regressed cases pass",
     references: [{ type: "scorecard" as const, id: "sc-9", note: "the batch that regressed" }],
     constraints: ["do not touch the dataset"],
-    doneWhen: ["the two cases pass"],
+    doneWhen: [{ id: "targets-pass", statement: "the two cases pass" }],
   };
 
   it("a campaign delegate receives a platform view and scoped credential, never a caller brief", async () => {

@@ -33,11 +33,18 @@ describe("renderDelegationBrief — the handoff the delegate actually reads", ()
       ...base,
       context: "  two cases started failing after the judge changed  ",
       constraints: ["do not touch the dataset"],
-      doneWhen: ["the two cases pass", "no other case regresses"],
+      doneWhen: [
+        { id: "targets-pass", statement: "the two cases pass" },
+        { id: "no-regression", statement: "no other case regresses" },
+      ],
     });
     expect(rendered).toContain("## Context\ntwo cases started failing after the judge changed"); // trimmed
     expect(rendered).toContain("- do not touch the dataset");
-    expect(rendered).toContain("- the two cases pass");
-    expect(rendered).toContain("- no other case regresses");
+    // The ID IS RENDERED beside the statement. This is the only place the delegate learns what to call each
+    // check, and its report answers them by id — a finish line it can read but not name can only be answered
+    // in prose, which is what leaves a supervisor comparing a paragraph to four sentences by impression.
+    expect(rendered).toContain("- `targets-pass` — the two cases pass");
+    expect(rendered).toContain("- `no-regression` — no other case regresses");
+    expect(rendered).toContain("Answer each of these by its id when you report back.");
   });
 });
