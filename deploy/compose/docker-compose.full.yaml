@@ -334,6 +334,22 @@ services:
       # Needs the docker.sock mount below. Unset = the capability does not exist here (route 404s, tool absent,
       # the web hides the button) — there is deliberately no in-process fallback.
       EVERDICT_FILE_EXECUTION_DRIVER: ${EVERDICT_FILE_EXECUTION_DRIVER:-}
+      # ── Sandbox sessions: the DELEGATION lane, agent worlds, the harness playground ──────────────────────────
+      # This block used to forward the file-run lane and the browser lane and not this one, so a deployment
+      # could set EVERDICT_SANDBOX_DRIVER in .env, see nothing happen, and have no way to tell that the variable
+      # never reached the process: compose forwards only what a service NAMES here. The lane's ten MCP tools
+      # (create_sandbox, submit_sandbox_task, sandbox_exec, sandbox_git_push, …) were simply absent from every
+      # session on this stack, and an absent tool is indistinguishable from a feature nobody built.
+      # `docker` needs the socket mount below, exactly like the file-run lane. `EVERDICT_COMPUTE` sets every
+      # lane's kind at once; the per-lane name is still the lane's own on-switch.
+      EVERDICT_COMPUTE: ${EVERDICT_COMPUTE:-}
+      EVERDICT_SANDBOX_DRIVER: ${EVERDICT_SANDBOX_DRIVER:-}
+      # Caps, all CLOSED-ish by default because a session ends on nothing but its clock: 2 per tenant, 8 total,
+      # and ONE PER AGENT. That last one is the parallelism gate — a delegator holding several sandboxes at once
+      # is exactly the shape of "fan this backlog out", and at the default it can hold one.
+      EVERDICT_SANDBOX_MAX_PER_TENANT: ${EVERDICT_SANDBOX_MAX_PER_TENANT:-}
+      EVERDICT_SANDBOX_MAX_PER_AGENT: ${EVERDICT_SANDBOX_MAX_PER_AGENT:-}
+      EVERDICT_SANDBOX_MAX_TOTAL: ${EVERDICT_SANDBOX_MAX_TOTAL:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -356,10 +372,12 @@ services:
       # an env value so the PEM never enters the process environment. Harmless when the profile is off — the api
       # only reads these when EVERDICT_IMAGE_STORE_ENDPOINT is set.
       - ./certs:/certs:ro
-    # Uncomment for EVERDICT_BROWSER_PROVISIONER=docker, or for EVERDICT_FILE_EXECUTION_DRIVER=docker (the Files
+    # Uncomment for EVERDICT_BROWSER_PROVISIONER=docker, EVERDICT_FILE_EXECUTION_DRIVER=docker (the Files
     # viewer's "Run": one throwaway container per run of a .py/.sh/.js/.ts file — see
-    # docs/architecture/workspace-filesystem.md). Both drive the host Docker daemon, which grants this container
-    # Docker control; leave it commented if that trust is unacceptable — the run route then simply does not exist.
+    # docs/architecture/workspace-filesystem.md), or EVERDICT_SANDBOX_DRIVER=docker (sandbox sessions: the
+    # delegation lane, agent worlds, the harness playground). All three drive the host Docker daemon, which
+    # grants this container Docker control; leave it commented if that trust is unacceptable — the routes and
+    # tools then simply do not exist.
     #   - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "${API_PORT:-8787}:8787"
