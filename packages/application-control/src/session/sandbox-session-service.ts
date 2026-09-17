@@ -830,7 +830,6 @@ export class SandboxSessionService {
         // mine" — a workspace secret outranking it is the precedence this whole record exists to replace.
         delegation.harness.apiKeyEnv = { ...delegation.harness.apiKeyEnv, ...identity.identity.env };
       }
-
       // Clone BEFORE the delegation context is seeded — the ORDER is the fix (2026-09-17).
       //
       // `cloneRepo` runs `rm -rf <dir> && git clone … <dir>`, and both default to "work": the profile's
@@ -941,6 +940,36 @@ export class SandboxSessionService {
                 : {}),
             },
           },
+          // ⚠️ WHO THE DELEGATE RUNS AS, on the ledger — because it is otherwise unobservable. The identity's
+          // env is merged into the HARNESS's environment, not the container's, so `sandbox_exec` and
+          // `printenv` cannot see it (correctly: a credential in the process environment is broader exposure
+          // than the CLI needs). That left a supervisor unable to tell "running as my account" from "running
+          // as nobody" — the two produce identical sessions until the first call fails, far from the person
+          // who could have registered an identity.
+          //
+          // Measured while wiring the credential, 2026-09-17: proving the token had arrived took booting a
+          // session, running a turn, and reading a 401 out of the harness trace. The marker names the
+          // identity and NEVER its value — `env` is the list of variable NAMES it set.
+          ...(delegation !== undefined
+            ? [
+                {
+                  t: 0,
+                  kind: "env_action" as const,
+                  action: "delegation.identity",
+                  detail:
+                    identity === undefined || identity.kind === "none"
+                      ? { resolved: false, reason: "no CLI identity registered for this delegate" }
+                      : {
+                          resolved: true,
+                          // `mine` = the submitter's own, resolved implicitly; `explicit` = one the caller named.
+                          how: identity.kind,
+                          identity: identity.identity.ref,
+                          env: Object.keys(identity.identity.env),
+                          files: identity.identity.home.map((f) => f.path),
+                        },
+                },
+              ]
+            : []),
           // The handoff, on the ledger: WHAT this delegate was actually asked to do, in the same rendering it
           // received as a file. Member-authored text — the profile's resolved env/secrets never come here.
           ...(delegation !== undefined && briefMarkdown !== undefined

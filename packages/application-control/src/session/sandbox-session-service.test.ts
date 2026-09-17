@@ -2258,6 +2258,51 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     expect(written).toContain("REPORT.json");
   });
 
+  // ── WHO THE DELEGATE RUNS AS IS ON THE LEDGER ────────────────────────────────────────────────────
+  //
+  // ⚠️ The identity's env goes into the HARNESS's environment, not the container's — correctly, since a
+  // credential in the process environment is broader exposure than the CLI needs. But that made "running as
+  // my account" and "running as nobody" produce identical sessions until the first call failed. Measured
+  // 2026-09-17: proving a token had arrived took booting a session, running a turn, and reading a 401 out of
+  // the trace.
+  it("records which identity a delegate runs as, by name and never by value", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, trajectories } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveCliIdentity: async () => ({
+        kind: "mine" as const,
+        identity: {
+          ref: { source: "acme", id: "my-claude", version: "1.0.0" },
+          env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat-SECRET" },
+          home: [{ path: ".claude/settings.json", content: "{}" }],
+        },
+      }),
+    });
+    const record = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+    await service.close(creator, record.id); // the session's trajectory seals at teardown
+
+    const sealed = JSON.stringify(trajectories.sealed.get(record.id)?.events ?? []);
+    expect(sealed).toContain("delegation.identity");
+    expect(sealed).toContain("my-claude");
+    // The variable NAME travels so a reader knows what was set; the value never does.
+    expect(sealed).toContain("CLAUDE_CODE_OAUTH_TOKEN");
+    expect(sealed).not.toContain("sk-ant-oat-SECRET");
+  });
+
+  // "Nobody registered one" is a fact the supervisor needs, and it is not the same as the marker being absent
+  // — an absent marker reads as a session from before the marker existed.
+  it("says so when no identity resolved, rather than leaving the question unanswered", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, trajectories } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveCliIdentity: async () => ({ kind: "none" as const }),
+    });
+    const record = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+    await service.close(creator, record.id);
+    const sealed = JSON.stringify(trajectories.sealed.get(record.id)?.events ?? []);
+    expect(sealed).toContain("no CLI identity registered for this delegate");
+  });
+
   it("refuses an issue AND a brief rather than choosing between them", async () => {
     const fake = fakeDelegationProfile();
     const { service } = build({
