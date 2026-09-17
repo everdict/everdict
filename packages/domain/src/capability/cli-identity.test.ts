@@ -1,4 +1,4 @@
-import type { CliIdentitySpec } from "@everdict/contracts";
+import { type CliIdentitySpec, CliIdentitySpecSchema } from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import { assertCliIdentityHandsSomethingOver, chooseCliIdentity } from "./cli-identity.js";
 
@@ -72,5 +72,32 @@ describe("cli identity — one is a choice, two is a refusal", () => {
       kind: "explicit",
       identity: mine("team-ci"),
     });
+  });
+});
+
+// ── A PATH THAT CLIMBS OUT IS A REFUSAL, NOT A SANITISED WRITE ───────────────────────────────────────
+// These files carry a credential and land under $HOME. A caller who wrote `..` meant somewhere else, and
+// quietly writing to a different place than the spec says is worse than saying no — the spec would then
+// describe a file that is not where it claims, which is the version of this that nobody can audit.
+describe("cli identity — where a file may land", () => {
+  const withPath = (path: string) => ({
+    type: "cli-identity" as const,
+    cli: "claude-code" as const,
+    env: {},
+    home: [{ path, content: "x" }],
+  });
+
+  it("accepts the paths a CLI actually reads", () => {
+    for (const path of [".claude/settings.json", ".codex/config.toml", ".config/x/y.json"])
+      expect(CliIdentitySpecSchema.safeParse(withPath(path)).success).toBe(true);
+  });
+
+  it("refuses a path that climbs out of $HOME", () => {
+    expect(CliIdentitySpecSchema.safeParse(withPath("../root/.ssh/authorized_keys")).success).toBe(false);
+    expect(CliIdentitySpecSchema.safeParse(withPath(".claude/../../etc/passwd")).success).toBe(false);
+  });
+
+  it("refuses an absolute path — the container's $HOME is the only base it may have", () => {
+    expect(CliIdentitySpecSchema.safeParse(withPath("/etc/passwd")).success).toBe(false);
   });
 });
