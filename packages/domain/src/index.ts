@@ -526,6 +526,7 @@ export {
 export {
   assertAnswersCoverCriteria,
   assertClosable,
+  assertObservationsMeasured,
   assertCommitsUnclaimed,
   deriveRoundOutcome,
   summariseAnswers,

@@ -4,6 +4,7 @@ import {
   assertAnswersCoverCriteria,
   assertClosable,
   assertCommitsUnclaimed,
+  assertObservationsMeasured,
   deriveRoundOutcome,
   summariseAnswers,
 } from "./change-campaign.js";
@@ -16,12 +17,21 @@ const answer = (
   criterionId: string,
   answerValue: ChangeJudgementAnswer["answer"],
   how: ChangeJudgementAnswer["how"] = "observed",
-): ChangeJudgementAnswer => ({ criterionId, answer: answerValue, how });
+  gateRunIds: string[] = [],
+): ChangeJudgementAnswer => ({ criterionId, answer: answerValue, how, gateRunIds });
+
+const gateRun = (id: string, metrics: { name: string; value: number }[] = [{ name: "passed", value: 1 }]) => ({
+  id,
+  command: `pnpm ${id}`,
+  exitCode: 0,
+  metrics,
+});
 
 const round = (seq: number, outcome: ChangeRound["outcome"], shas: string[] = []): ChangeRound => ({
   seq,
   hypothesis: `h${seq}`,
   changes: [{ repository: "acme/widget", commits: shas.map((sha) => ({ sha })) }],
+  gateRuns: [],
   judgement: { at: "2026-09-16T00:00:00.000Z", by: "agent:builder", answers: [] },
   outcome,
 });
@@ -122,7 +132,7 @@ describe("change campaign — a commit belongs to exactly one round", () => {
 });
 
 describe("change campaign — closing", () => {
-  const learned = { knowledge: ["k-1"], reason: "shipped" };
+  const learned = { knowledge: ["k-1"], reason: "shipped", landed: [], remaining: [] };
 
   it("refuses a close that says nothing about what the work taught", () => {
     expect(() =>
@@ -131,6 +141,8 @@ describe("change campaign — closing", () => {
         reason: "shipped",
         roundSeq: 1,
         knowledge: [],
+        landed: [],
+        remaining: [],
       }),
     ).toThrow(/may not close in silence/);
   });
@@ -142,6 +154,8 @@ describe("change campaign — closing", () => {
         reason: "shipped",
         roundSeq: 1,
         knowledge: [],
+        landed: [],
+        remaining: [],
         knowledgeDeclined: "a one-line typo fix taught nothing",
       }),
     ).not.toThrow();
@@ -165,6 +179,8 @@ describe("change campaign — closing", () => {
         state: "abandoned",
         reason: "the approach cannot work — recorded as a finding",
         knowledge: ["k-9"],
+        landed: [],
+        remaining: [],
       }),
     ).not.toThrow();
   });
@@ -173,5 +189,75 @@ describe("change campaign — closing", () => {
     expect(() =>
       assertClosable(campaign([round(1, "adopted")], "adopted"), { state: "adopted", roundSeq: 1, ...learned }),
     ).toThrow(/already adopted/);
+  });
+});
+
+describe("change campaign — an observation points at a measurement", () => {
+  it("refuses `observed` that names no gate run", () => {
+    expect(() => assertObservationsMeasured([answer("tests", "met")], [])).toThrow(/names no gate run/);
+  });
+
+  it("refuses `asserted` that cites one — if a command produced it, the word is observed", () => {
+    expect(() =>
+      assertObservationsMeasured([answer("tests", "met", "asserted", ["tests"])], [gateRun("tests")]),
+    ).toThrow(/is marked asserted but cites gate runs/);
+  });
+
+  it("refuses a citation the round does not carry", () => {
+    expect(() =>
+      assertObservationsMeasured([answer("tests", "met", "observed", ["ghost"])], [gateRun("tests")]),
+    ).toThrow(/which this round does not carry/);
+  });
+
+  it("accepts an observation backed by a run that reported numbers", () => {
+    expect(() =>
+      assertObservationsMeasured(
+        [answer("tests", "met", "observed", ["tests"]), answer("device", "not_run", "asserted")],
+        [
+          gateRun("tests", [
+            { name: "tests.passed", value: 4027 },
+            { name: "tasks.total", value: 51 },
+          ]),
+        ],
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("change campaign — a request can be satisfied in pieces", () => {
+  const base = { reason: "two of four services are in", knowledge: ["k-1"] };
+
+  it("refuses a partial adoption that names only one side", () => {
+    expect(() =>
+      assertClosable(campaign([round(1, "adopted")]), {
+        state: "partially_adopted",
+        ...base,
+        landed: [{ repository: "acme/api" }],
+        remaining: [],
+      }),
+    ).toThrow(/names BOTH what landed and what is still owed/);
+  });
+
+  it("accepts a partial adoption that names both, without needing an adopted round to point at", () => {
+    expect(() =>
+      assertClosable(campaign([round(1, "rejected")]), {
+        state: "partially_adopted",
+        ...base,
+        landed: [{ repository: "acme/api" }],
+        remaining: [{ repository: "acme/web" }, { repository: "acme/mobile" }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("refuses landed/remaining on a FULL adoption — nothing is owed, and saying otherwise is a second ending", () => {
+    expect(() =>
+      assertClosable(campaign([round(1, "adopted")]), {
+        state: "adopted",
+        roundSeq: 1,
+        ...base,
+        landed: [{ repository: "acme/api" }],
+        remaining: [],
+      }),
+    ).toThrow(/belong to a partial adoption/);
   });
 });

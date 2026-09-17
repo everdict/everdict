@@ -50,8 +50,20 @@ const criteria = [
   { id: "tests", statement: "the suite is green" },
   { id: "device", statement: "verified on a device" },
 ];
-const met = (id: string) => ({ criterionId: id, answer: "met" as const, how: "observed" as const });
-const notRun = (id: string) => ({ criterionId: id, answer: "not_run" as const, how: "asserted" as const });
+// `observed` must point at a measurement now, so the helper carries the gate run every round declares.
+const GATE = { id: "gates", command: "pnpm test", exitCode: 0, metrics: [{ name: "tests.passed", value: 4027 }] };
+const met = (id: string) => ({
+  criterionId: id,
+  answer: "met" as const,
+  how: "observed" as const,
+  gateRunIds: [GATE.id],
+});
+const notRun = (id: string) => ({
+  criterionId: id,
+  answer: "not_run" as const,
+  how: "asserted" as const,
+  gateRunIds: [],
+});
 const changes = (sha: string) => [{ repository: "acme/widget", commits: [{ sha }] }];
 
 describe("ChangeCampaignService", () => {
@@ -65,8 +77,15 @@ describe("ChangeCampaignService", () => {
     svc = new ChangeCampaignService({ store, newId: () => `cc-${++seq}`, now: () => "2026-09-17T00:00:00.000Z" });
   });
 
+  // Each campaign gets its own request: ONE OPEN CAMPAIGN PER ISSUE is the rule now, and a fixture that
+  // opened two for `i-1` is what caught it — a rule refusing a test is the rule working.
+  let issueSeq = 0;
   const open = () =>
-    svc.open("acme", "agent:builder", { issueId: "i-1", service: { repository: "acme/widget" }, criteria });
+    svc.open("acme", "agent:builder", {
+      issueId: `i-${++issueSeq}`,
+      service: { repository: "acme/widget" },
+      criteria,
+    });
 
   it("opens against an issue with the criteria declared before the work", async () => {
     const c = await open();
@@ -77,6 +96,7 @@ describe("ChangeCampaignService", () => {
     const c = await open();
     const adopted = await svc.logRound("acme", "agent:builder", c.id, {
       hypothesis: "disable the sheet's content pan",
+      gateRuns: [GATE],
       changes: changes("aaa1111"),
       answers: [met("tests"), met("device")],
     });
@@ -85,6 +105,7 @@ describe("ChangeCampaignService", () => {
     const c2 = await open();
     const rejected = await svc.logRound("acme", "agent:builder", c2.id, {
       hypothesis: "same, but the device was never available",
+      gateRuns: [GATE],
       changes: changes("bbb2222"),
       answers: [met("tests"), notRun("device")],
     });
@@ -96,6 +117,7 @@ describe("ChangeCampaignService", () => {
     await expect(
       svc.logRound("acme", "agent:builder", c.id, {
         hypothesis: "h",
+        gateRuns: [GATE],
         changes: changes("ccc3333"),
         answers: [met("tests")],
       }),
@@ -106,12 +128,14 @@ describe("ChangeCampaignService", () => {
     const c = await open();
     await svc.logRound("acme", "agent:builder", c.id, {
       hypothesis: "first try",
+      gateRuns: [GATE],
       changes: changes("ddd4444"),
       answers: [met("tests"), notRun("device")],
     });
     await expect(
       svc.logRound("acme", "agent:builder", c.id, {
         hypothesis: "second try, same commit",
+        gateRuns: [GATE],
         changes: changes("ddd4444"),
         answers: [met("tests"), met("device")],
       }),
@@ -128,6 +152,7 @@ describe("ChangeCampaignService", () => {
     const other: ChangeRound = {
       seq: 1,
       hypothesis: "the other agent's round",
+      gateRuns: [GATE],
       changes: changes("eee5555"),
       judgement: { at: "2026-09-17T00:00:00.000Z", by: "agent:other", answers: [] },
       outcome: "rejected",
@@ -160,6 +185,7 @@ describe("ChangeCampaignService", () => {
     await expect(
       svcOnLoss.logRound("acme", "agent:builder", c.id, {
         hypothesis: "mine",
+        gateRuns: [GATE],
         changes: changes("fff6666"),
         answers: [met("tests"), met("device")],
       }),
@@ -170,14 +196,29 @@ describe("ChangeCampaignService", () => {
     const c = await open();
     await svc.logRound("acme", "agent:builder", c.id, {
       hypothesis: "h",
+      gateRuns: [GATE],
       changes: changes("aaa9999"),
       answers: [met("tests"), notRun("device")],
     });
     await expect(
-      svc.close("acme", "alice", c.id, { state: "adopted", reason: "ship it", roundSeq: 1, knowledge: [] }),
+      svc.close("acme", "alice", c.id, {
+        state: "adopted",
+        reason: "ship it",
+        roundSeq: 1,
+        knowledge: [],
+        landed: [],
+        remaining: [],
+      }),
     ).rejects.toThrow(/may not close in silence/);
     await expect(
-      svc.close("acme", "alice", c.id, { state: "adopted", reason: "ship it", roundSeq: 1, knowledge: ["k-1"] }),
+      svc.close("acme", "alice", c.id, {
+        state: "adopted",
+        reason: "ship it",
+        roundSeq: 1,
+        knowledge: ["k-1"],
+        landed: [],
+        remaining: [],
+      }),
     ).rejects.toThrow(/cannot adopt a round whose own criteria/);
   });
 
@@ -185,6 +226,7 @@ describe("ChangeCampaignService", () => {
     const c = await open();
     await svc.logRound("acme", "agent:builder", c.id, {
       hypothesis: "h",
+      gateRuns: [GATE],
       changes: changes("bbb9999"),
       answers: [met("tests"), met("device")],
     });
@@ -193,11 +235,126 @@ describe("ChangeCampaignService", () => {
       reason: "criteria met",
       roundSeq: 1,
       knowledge: ["k-1"],
+      landed: [],
+      remaining: [],
     });
     expect(closed.state).toBe("adopted");
     expect(closed.close?.by).toBe("alice");
     await expect(
-      svc.close("acme", "alice", c.id, { state: "abandoned", reason: "again", knowledge: ["k-2"] }),
+      svc.close("acme", "alice", c.id, {
+        state: "abandoned",
+        reason: "again",
+        knowledge: ["k-2"],
+        landed: [],
+        remaining: [],
+      }),
     ).rejects.toThrow(/already adopted/);
+  });
+});
+
+// ── THE MAINTAINER'S FOUR DECISIONS, 2026-09-17 ──────────────────────────────────────────────────────
+// One open campaign per issue · the agent closes a round by logging it · an observation points at numbers ·
+// a request can be satisfied in pieces and the remainder picked up by a successor.
+describe("ChangeCampaignService — one open campaign per issue, and the chain that follows", () => {
+  let store: FakeChangeCampaignStore;
+  let svc: ChangeCampaignService;
+  let n = 0;
+
+  beforeEach(() => {
+    store = new FakeChangeCampaignStore();
+    n = 0;
+    svc = new ChangeCampaignService({ store, newId: () => `cc-${++n}`, now: () => "2026-09-17T00:00:00.000Z" });
+  });
+
+  const open = (continues?: string) =>
+    svc.open("acme", "agent:builder", {
+      issueId: "i-1",
+      service: { repository: "acme/widget" },
+      criteria,
+      ...(continues !== undefined ? { continues } : {}),
+    });
+
+  it("refuses a second OPEN campaign for the same request, and names the one in the way", async () => {
+    const first = await open();
+    const second = svc.open("acme", "agent:builder", {
+      issueId: "i-1",
+      service: { repository: "acme/widget" },
+      criteria,
+    });
+    await expect(second).rejects.toThrow(/already has an open change campaign/);
+    await expect(second).rejects.toThrow(first.id); // it names the one in the way, not just the rule
+  });
+
+  it("lets the next one open once the first has ended, and records what it continues", async () => {
+    const first = await open();
+    await svc.close("acme", "alice", first.id, {
+      state: "partially_adopted",
+      reason: "the api landed, the app did not",
+      knowledge: ["k-1"],
+      landed: [{ repository: "acme/api" }],
+      remaining: [{ repository: "acme/mobile" }],
+    });
+    const second = await open(first.id);
+    expect(second.continues).toBe(first.id);
+    expect((await svc.get("acme", first.id)).state).toBe("partially_adopted");
+  });
+
+  it("refuses to continue a campaign that is still open, or one that does not exist", async () => {
+    const first = await open();
+    await expect(
+      svc.open("acme", "agent:builder", {
+        issueId: "i-2",
+        service: { repository: "acme/widget" },
+        criteria,
+        continues: first.id,
+      }),
+    ).rejects.toThrow(/continues one that has ENDED/);
+    await expect(
+      svc.open("acme", "agent:builder", {
+        issueId: "i-3",
+        service: { repository: "acme/widget" },
+        criteria,
+        continues: "cc-missing",
+      }),
+    ).rejects.toThrow(/does not exist/);
+  });
+
+  // The hole the per-campaign check left: a successor re-claiming its predecessor's commits, which made the
+  // request's lineage show one sha under two attempts.
+  it("refuses a commit the PREDECESSOR already claimed", async () => {
+    const first = await open();
+    await svc.logRound("acme", "agent:builder", first.id, {
+      hypothesis: "first campaign",
+      gateRuns: [GATE],
+      changes: changes("abc1234"),
+      answers: [met("tests"), notRun("device")],
+    });
+    await svc.close("acme", "alice", first.id, {
+      state: "abandoned",
+      reason: "wrong approach",
+      knowledge: ["k-1"],
+      landed: [],
+      remaining: [],
+    });
+    const second = await open(first.id);
+    await expect(
+      svc.logRound("acme", "agent:builder", second.id, {
+        hypothesis: "second campaign, same commit",
+        gateRuns: [GATE],
+        changes: changes("abc1234"),
+        answers: [met("tests"), met("device")],
+      }),
+    ).rejects.toThrow(/already claimed by round 1/);
+  });
+
+  it("refuses an observation that names no measurement", async () => {
+    const c = await open();
+    await expect(
+      svc.logRound("acme", "agent:builder", c.id, {
+        hypothesis: "green, trust me",
+        changes: changes("dd11111"),
+        answers: [{ criterionId: "tests", answer: "met", how: "observed", gateRunIds: [] }, notRun("device")],
+      }),
+    ).rejects.toThrow(/names no gate run/);
   });
 });

@@ -6,6 +6,7 @@ import {
   type ChangeJudgementAnswer,
   type ChangeRound,
   type ChangeSetEntry,
+  type GateRun,
 } from "@everdict/contracts";
 
 // The `change` grade's arithmetic and its refusals (docs/architecture/change-campaign-spec.md). Pure: the
@@ -45,9 +46,47 @@ export function assertAnswersCoverCriteria(criteria: ChangeCriterion[], answers:
     );
 }
 
+// ── AN `observed` ANSWER POINTS AT A MEASUREMENT ─────────────────────────────────────────────────────
+// The maintainer's rule: a repository gate's output is quantitative, whoever reads it. So `observed` — the
+// word that distinguishes "a command ran" from "I read the code and concluded" — has to be backed by a gate
+// run that reported numbers. Without this the two words are a self-description, and a round can claim the
+// stronger one for free.
+export function assertObservationsMeasured(answers: ChangeJudgementAnswer[], gateRuns: GateRun[]): void {
+  const byId = new Map(gateRuns.map((run) => [run.id, run]));
+  for (const answer of answers) {
+    if (answer.how !== "observed") {
+      if (answer.gateRunIds.length > 0)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { criterionId: answer.criterionId },
+          `criterion '${answer.criterionId}' is marked asserted but cites gate runs — if a command produced this answer, it is observed.`,
+        );
+      continue;
+    }
+    if (answer.gateRunIds.length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { criterionId: answer.criterionId },
+        `criterion '${answer.criterionId}' claims to be observed and names no gate run — an observation with no measurement is an assertion wearing the other word.`,
+      );
+    for (const id of answer.gateRunIds) {
+      const run = byId.get(id);
+      if (run === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { criterionId: answer.criterionId, gateRunId: id },
+          `criterion '${answer.criterionId}' cites gate run '${id}', which this round does not carry.`,
+        );
+    }
+  }
+}
+
 // ── A COMMIT BELONGS TO EXACTLY ONE ROUND ────────────────────────────────────────────────────────────
 // "Which attempt changed this" must have one answer. Without this, the second claim silently wins and a
 // round's change set slowly becomes a description of the branch rather than of the attempt.
+// `rounds` is the WHOLE CHAIN's rounds, not this campaign's: with one open campaign per issue and successors
+// that name what they continue, the walk is the unit "which attempt changed this" is asked over. Scoped to a
+// single campaign, a successor could re-claim its predecessor's commits and the lineage would show them twice.
 export function assertCommitsUnclaimed(rounds: ChangeRound[], changes: ChangeSetEntry[]): void {
   const claimed = new Map<string, number>();
   for (const round of rounds)
@@ -109,7 +148,22 @@ export function assertClosable(campaign: ChangeCampaignRecord, close: Omit<Chang
       {},
       "a campaign may not close in silence: name the knowledge entries it produced, or decline with `knowledgeDeclined` — a refusal someone can read is a decision, silence is not.",
     );
+  if (close.state === "partially_adopted") {
+    if (close.landed.length === 0 || close.remaining.length === 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { landed: close.landed.length, remaining: close.remaining.length },
+        "a partial adoption names BOTH what landed and what is still owed — one of them empty is an adoption or an abandonment wearing the middle word.",
+      );
+    return;
+  }
   if (close.state === "abandoned") return;
+  if (close.landed.length > 0 || close.remaining.length > 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      {},
+      "landed/remaining belong to a partial adoption — a full one leaves nothing owed, and saying otherwise is a second ending.",
+    );
   const round = campaign.rounds.find((r) => r.seq === close.roundSeq);
   if (round === undefined)
     throw new BadRequestError(
