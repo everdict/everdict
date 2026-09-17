@@ -1060,8 +1060,12 @@ describe("SandboxSessionService — agent worlds (W2: a repository in, commits o
     const clone = ctx.driver.execs.find((c) => c.includes("git clone"));
     expect(clone).toContain("git clone 'https://github.com/acme/app.git' 'work'");
     expect(clone).not.toContain("read-token"); // the credential is NEVER an argument
+    // BASIC, not Bearer: GitHub's git endpoint refuses an installation token as a bearer credential even
+    // though its REST API accepts one, so this assertion's old spelling is what a private clone failed on.
+    // The third sibling of one fix — the eval lane's `repo.test.ts` and the contract's own counterexample
+    // were the other two, and all three were TESTS pinning the wrong half of the contract.
     expect(ctx.driver.execEnvs.find((e) => e?.GIT_CONFIG_VALUE_0 !== undefined)?.GIT_CONFIG_VALUE_0).toBe(
-      "Authorization: Bearer read-token",
+      `Authorization: Basic ${btoa("x-access-token:read-token")}`,
     );
     expect(ctx.driver.execs.some((c) => c.includes("git checkout 'v1.2.0'"))).toBe(true);
     expect(ctx.driver.execs.some((c) => c.includes("git config user.email"))).toBe(true);

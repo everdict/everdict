@@ -133,6 +133,27 @@ export async function pullIssueAction(id: string): Promise<IssueActionResult> {
   }
 }
 
+// Link an issue that already exists here to an issue that already exists on GitHub. The link changes no text:
+// GitHub's title, description, labels and comments arrive on the first `pullIssueAction`, so the caller's next
+// offer is that pull rather than a silent rewrite.
+export async function attachIssueGithubAction(
+  id: string,
+  input: {
+    repository: string
+    host?: string
+    number: number
+    sync?: { pull: boolean; push: boolean }
+  }
+): Promise<IssueActionResult> {
+  const ctx = await authContext()
+  try {
+    const issue = issueSchema.parse(await controlPlane.attachIssueGithub(ctx, id, input))
+    return { ok: true, issue }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
 export async function setIssueGithubSyncAction(
   id: string,
   sync: { pull: boolean; push: boolean }

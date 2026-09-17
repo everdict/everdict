@@ -4,6 +4,7 @@ import { useTranslations } from 'next-intl'
 
 import { fmtMetricLabel, fmtMetricLabelCompact, fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { Link } from '@/shared/ui/link'
 
 // Metric summary chip — name (faint) + mean + optional pass rate. Same across lists/per-harness.
 // Judge metrics render human-readably ('judge <id> › <criterion>'); siblings disambiguate the 2-segment
@@ -134,6 +135,54 @@ export function EntityRef({
         {id}
         {version && <span className="text-faint">@{version}</span>}
       </span>
+    </span>
+  )
+}
+
+// A row of attribute chips (the issue detail's property column: capabilities, timeline links, mentions,
+// "mentioned by"). The row is BLOCK-level flex on purpose. It used to be `inline-flex`, which is shrink-to-fit:
+// a chip's `max-w-*` percentage then resolves against a width that is itself derived from that chip's content —
+// circular, so the browser treats the percentage as indefinite and nothing clamps a `truncate`d (nowrap) title.
+// Measured in Chrome on the real class chain: the row stood 380px wide inside a 188px column and ran off the
+// screen, ellipsis and all. A block-level flex row has the column's definite width, so the clamp below holds.
+export function LinkChipRow({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-center gap-1">{children}</div>
+}
+
+// One attribute chip: something this record points at, plus whatever control the editing surface hangs off it
+// (`trailing` — the unlink ✕; display-only where there is none, exactly like VersionTagChip).
+//
+// The width is capped as well as truncated. `max-w-full` alone is not enough: in the wide single-column layout
+// the property column IS the row, so one long title stretched the chip to 474px of ellipsised text — which is
+// the "it truncates and is still too long" half of the report. `min(100%, …)` keeps both bounds: the column
+// when the column is narrower, the cap when it is not.
+export function LinkChip({
+  href,
+  title,
+  children,
+  trailing,
+}: {
+  href: string
+  // The full text, for the hover tooltip — the chip shows a truncation, so the whole of it has to be reachable.
+  title: string
+  children: ReactNode
+  trailing?: ReactNode
+}) {
+  return (
+    <span
+      className={cn(
+        'inline-flex max-w-[min(100%,15rem)] items-center gap-1 rounded bg-secondary py-0.5 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border',
+        trailing ? 'pl-1.5 pr-1' : 'px-1.5'
+      )}
+    >
+      <Link
+        href={href}
+        title={title}
+        className="inline-flex min-w-0 items-center gap-1 transition-colors hover:text-foreground"
+      >
+        {children}
+      </Link>
+      {trailing}
     </span>
   )
 }

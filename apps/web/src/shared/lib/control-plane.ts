@@ -861,6 +861,14 @@ export const controlPlane = {
     call<T>(auth, '/issues/sync', { method: 'POST', body: JSON.stringify(body) }),
   pullIssue: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/sync`, { method: 'POST' }),
+  // Join an issue that already exists here to an issue that already exists on GitHub — the counterpart to
+  // import, which mints a new tracker issue instead. POST creates the link on the same address PUT sets the
+  // direction of and DELETE removes.
+  attachIssueGithub: <T>(auth: AuthContext, id: string, body: unknown) =>
+    call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   setIssueGithubSync: <T>(auth: AuthContext, id: string, body: unknown) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}/github`, {
       method: 'PUT',

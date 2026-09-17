@@ -7,7 +7,7 @@
 // ⚠️ AND THE KEY IS SCOPED, BECAUSE A BARE ONE IS SENT TO EVERY HOST. `http.extraheader` with no URL applies
 // to EVERY HTTP(S) request the git process makes. A clone whose tree carries a `.gitmodules` pointing
 // elsewhere, or a host answering with a cross-host 30x, therefore received
-// `Authorization: Bearer <installation-token>` — a live GitHub App token for the workspace's selected
+// the Authorization header carrying a live GitHub App installation token for the workspace's selected
 // repositories, handed to a host the workspace never named. The scoped form `http.<url>.extraheader` is
 // applied by git only to URLs under that prefix. Found by `pnpm scan` over files nobody had touched.
 
@@ -47,8 +47,23 @@ export function gitAuthEnv(token: string, remoteUrl: string): Record<string, str
     ...base,
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: `http.${scope}.extraheader`,
-    GIT_CONFIG_VALUE_0: `Authorization: Bearer ${token}`,
+    // ⚠️ BASIC, NOT BEARER — GitHub's git smart-HTTP endpoint refuses an installation token presented as a
+    // bearer credential, while its REST API accepts exactly that. So every isolated check passed (the App
+    // owns the installation, the mint returns 201 scoped to the repo, the branch is reachable with that very
+    // token) and the clone still answered `fatal: could not read Username` — git's message for "no usable
+    // credential", which names nothing about why. Measured in a live sandbox, same token, same scope, one
+    // header word apart: `Basic` cloned, `Bearer` did not.
+    //
+    // The username half is a constant GitHub documents for this: any non-empty user with the token as the
+    // password. `x-access-token` is the one it names.
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${base64(`x-access-token:${token}`)}`,
   };
+}
+
+// Base64 for the Basic credential. `btoa` is present in every runtime this package targets (Node 18+ and the
+// browser) and takes latin-1 — which is all a token and this fixed username are.
+function base64(value: string): string {
+  return btoa(value);
 }
 
 // The committer a machine-made commit carries when the caller named nobody. A session's commits are the

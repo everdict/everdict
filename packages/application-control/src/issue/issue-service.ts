@@ -2,6 +2,7 @@ import {
   BadRequestError,
   ConflictError,
   ForbiddenError,
+  type IssueGithub,
   type IssueGithubSync,
   type IssueGroupBy,
   type IssueGroupCount,
@@ -374,6 +375,13 @@ export class IssueService {
   async setGithubSync(tenant: string, id: string, sync: IssueGithubSync, actor: IssueActor): Promise<IssueRecord> {
     const record = await this.get(tenant, id);
     return this.applyTransition(record, Issue.from(record).setGithubSync(sync, actor.subject, this.now()), actor);
+  }
+
+  // The remote half arrives already resolved — GithubIssueSync read it from GitHub, because deciding WHICH
+  // remote issue this is takes a token and a network call, and neither belongs to a record's own transition.
+  async attachGithub(tenant: string, id: string, github: IssueGithub, actor: IssueActor): Promise<IssueRecord> {
+    const record = await this.get(tenant, id);
+    return this.applyTransition(record, Issue.from(record).attachGithub(github, actor.subject, this.now()), actor);
   }
 
   async detachGithub(tenant: string, id: string, actor: IssueActor): Promise<IssueRecord> {

@@ -2,10 +2,10 @@ import { redirect } from 'next/navigation'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Github, Link2 } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
 
-import { IssueLineageSection } from '@/widgets/issue-lineage'
 import { MentionInChatButton } from '@/widgets/infra-panel'
+import { IssueLineageSection } from '@/widgets/issue-lineage'
 import { CommentsSection } from '@/features/discuss'
-import { IssueGithubPanel } from '@/features/import-github-issues'
+import { IssueGithubPanel, LinkGithubIssueButton } from '@/features/import-github-issues'
 import { IssueEvaluationHistory, type IssueEvaluationEntry } from '@/features/issue-evaluation'
 import {
   IssueCapabilityControl,
@@ -32,10 +32,10 @@ import {
   ISSUE_MENTION_LINK_TYPES,
   issueAttachmentProxy,
   issueHref,
+  issueLineageSchema,
   issuePageSchema,
   IssuePriorityIcon,
   issueSchema,
-  issueLineageSchema,
   issueScorecardsSchema,
   IssueStatusIcon,
   type Issue,
@@ -64,7 +64,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
-import { EntityRef } from '@/shared/ui/chip'
+import { EntityRef, LinkChip, LinkChipRow } from '@/shared/ui/chip'
 import { CopyLinkButton } from '@/shared/ui/copy-link-button'
 import { Link } from '@/shared/ui/link'
 import { Markdown } from '@/shared/ui/markdown'
@@ -273,7 +273,10 @@ export default async function IssueDetailPage({
     controlPlane
       .getIssueLineage(ctx, current.id)
       .then((r) => ({ ok: true as const, lineage: issueLineageSchema.parse(r) }))
-      .catch((e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }))
+      .catch((e: unknown) => ({
+        ok: false as const,
+        error: e instanceof Error ? e.message : String(e),
+      })),
   ])
 
   // The issues this one mentions — the link holds only a UUID and says nothing by itself. Drawing it needs the identifier,
@@ -653,20 +656,19 @@ export default async function IssueDetailPage({
                 here (the same reason GitHub leaves a cross-reference on the timeline and does not let you delete it from there). None: no row. */}
             {mentionedBy.length > 0 && (
               <PropertyRow label={t('fieldMentionedBy')}>
-                <span className="inline-flex flex-wrap items-center gap-1">
+                <LinkChipRow>
                   {mentionedBy.map((issue) => (
-                    <Link
+                    <LinkChip
                       key={issue.id}
                       href={issueHref(workspace, issue.identifier, issue.title)}
                       title={`${issue.identifier} · ${issue.title}`}
-                      className="inline-flex max-w-full items-center gap-1 rounded bg-secondary py-0.5 px-1.5 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border transition-colors hover:text-foreground"
                     >
                       <IssueStatusIcon status={issue.status} />
                       <span className="shrink-0 font-mono">{issue.identifier}</span>
                       <span className="min-w-0 truncate">{issue.title}</span>
-                    </Link>
+                    </LinkChip>
                   ))}
-                </span>
+                </LinkChipRow>
               </PropertyRow>
             )}
             <PropertyRow label={t('metaCreated')}>
@@ -687,23 +689,29 @@ export default async function IssueDetailPage({
                 </time>
               </PropertyRow>
             )}
-            {/* `github` is attached by IMPORT only (there is no path for linking an existing issue later) — so this row says where
-                this issue came FROM rather than saying "GitHub". The full address goes in the title so a GHE host can be checked
-                too. */}
-            {current.github && (
-              <PropertyRow label={t('importedFrom')}>
-                <a
-                  href={current.github.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  title={current.github.url}
-                  className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
-                >
-                  <Github className="size-3.5 shrink-0 text-faint" />
-                  <span className="truncate">
-                    {current.github.repository}#{current.github.number}
-                  </span>
-                </a>
+            {/* The GitHub issue this one is. A record acquires that half two ways — born from an import, or linked here afterwards
+                — and the row cannot tell them apart afterwards, so it says "GitHub" rather than claiming where the issue came from.
+                The full address goes in the title so a GHE host can be checked too.
+                For a writer with no link yet the row is still drawn: it is the only place the first link can be made, which is the
+                same reason the labels row stands up empty. A reader with no link sees nothing (hide-empty). */}
+            {(current.github || canWrite) && (
+              <PropertyRow label={t('fieldGithub')}>
+                {current.github ? (
+                  <a
+                    href={current.github.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={current.github.url}
+                    className="inline-flex min-w-0 items-center gap-1.5 transition-colors hover:text-foreground"
+                  >
+                    <Github className="size-3.5 shrink-0 text-faint" />
+                    <span className="truncate">
+                      {current.github.repository}#{current.github.number}
+                    </span>
+                  </a>
+                ) : (
+                  <LinkGithubIssueButton workspace={workspace} issueId={current.id} />
+                )}
               </PropertyRow>
             )}
           </PropertyList>

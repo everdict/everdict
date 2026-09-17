@@ -1,5 +1,6 @@
 import {
   BadRequestError,
+  ConflictError,
   ISSUE_GITHUB_COMMENT_LIMIT,
   type IssueGithub,
   type IssueGithubSync,
@@ -27,6 +28,15 @@ export interface GithubRepositoryTokenSource {
     permissions: Record<string, string>,
     host?: string,
   ): Promise<{ token: string; host?: string }>;
+}
+
+// Which GitHub issue an EXISTING everdict issue is about. `sync` defaults to the same pull-on/push-off the
+// import path uses — one rule for what a linked copy does, not two.
+export interface AttachGithubIssueInput {
+  repository: string;
+  host?: string;
+  number: number;
+  sync?: IssueGithubSync;
 }
 
 export interface ImportGithubIssuesInput {
@@ -223,6 +233,48 @@ export class GithubIssueSync {
       created.push(await this.deps.issues.createImported(record, actor.agent));
     }
     return { created, skipped };
+  }
+
+  // Link an issue this workspace already holds to an issue that already exists on GitHub — the counterpart to
+  // import, which is how a record used to be ABLE to get a remote half (the only way, for a long time: the
+  // detail screen could unhook a link it had no way to make).
+  //
+  // Three things are refused, and each of them would otherwise corrupt the join the whole sync is addressed by:
+  // an issue that already carries a remote half (the aggregate's rule, so it is stated once — which is why the
+  // remote read happens first here rather than a cheap early return duplicating the predicate), a remote
+  // identity another issue in this workspace already holds, and a pull request. The last is the same exclusion
+  // import makes: GitHub serves PRs through the issues API, so without it a member could link an issue to a
+  // pull request and every later pull would reconcile the two.
+  async attach(tenant: string, id: string, input: AttachGithubIssueInput, actor: IssueActor): Promise<IssueRecord> {
+    const taken = await this.deps.store.getByGithub(tenant, input.repository, input.number, input.host);
+    if (taken)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: taken.id, identifier: taken.identifier, repository: input.repository, number: input.number },
+        `${input.repository}#${input.number} is already linked to ${taken.identifier}.`,
+      );
+    const writer = await this.writerFor(tenant, input.repository, { issues: "read" }, input.host);
+    const remote = await writer.getIssue(input.repository, input.number);
+    if (remote.isPullRequest)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { repository: input.repository, number: input.number },
+        `${input.repository}#${input.number} is a pull request, not an issue.`,
+      );
+    // Identity comes from what GitHub ANSWERED, never from what was asked for: the number and the url are the
+    // remote's own, so a redirect or a transferred issue is recorded where it actually lives.
+    const github: IssueGithub = {
+      ...(input.host !== undefined ? { host: input.host } : {}),
+      repository: input.repository,
+      number: remote.number,
+      url: remote.url,
+      state: remote.state === "closed" ? "closed" : "open",
+      sync: input.sync ?? DEFAULT_SYNC,
+      // No `syncedAt` and no thread: attaching states WHO the two records are, and the first pull is the visible
+      // moment GitHub takes over title/description/labels/comments. See Issue.attachGithub.
+      comments: [],
+    };
+    return this.deps.issues.attachGithub(tenant, id, github, actor);
   }
 
   async pullIssue(tenant: string, id: string, actor: IssueActor): Promise<IssueRecord> {

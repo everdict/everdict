@@ -25,7 +25,7 @@ describe("a git credential is scoped to the repository it was issued for", () =>
     // The bare key is the defect. Its presence means every host this process dials gets the token.
     expect(env.GIT_CONFIG_KEY_0).not.toBe("http.extraheader");
     expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/widgets.extraheader");
-    expect(env.GIT_CONFIG_VALUE_0).toBe("Authorization: Bearer ghs_secret");
+    expect(env.GIT_CONFIG_VALUE_0).toBe(`Authorization: Basic ${btoa("x-access-token:ghs_secret")}`);
     expect(env.GIT_CONFIG_COUNT).toBe("1");
   });
 
@@ -58,5 +58,31 @@ describe("a git credential is scoped to the repository it was issued for", () =>
       // The prompt suppression is not about the credential and stays either way.
       expect(env.GIT_TERMINAL_PROMPT).toBe("0");
     }
+  });
+
+  // ── AND THE SCHEME IS BASIC, BECAUSE GIT'S ENDPOINT IS NOT THE REST API ────────────────────────────
+  //
+  // This assertion used to read `Authorization: Bearer ghs_secret`, and it PASSED while every private clone
+  // in the product failed. GitHub's REST API accepts an installation token as a bearer credential; its git
+  // smart-HTTP endpoint does not. So each link verified on its own — the App owned the installation, the mint
+  // returned 201 scoped to the repository, the branch was reachable with that very token — and git answered
+  // `fatal: could not read Username for 'https://github.com'`, which is its message for "no usable
+  // credential" and names nothing about why.
+  //
+  // Measured in a live sandbox, same token, same scope, one word apart: `Basic` cloned, `Bearer` did not.
+  // The test was pinning the wrong half of the contract, which is why it protected the defect instead of
+  // catching it — a shape worth remembering: an assertion copied from the code cannot disagree with it.
+  it("presents the token as Basic with the username GitHub documents, not as a bearer", () => {
+    const env = gitAuthEnv("ghs_secret", "https://github.com/acme/widgets.git");
+    expect(env.GIT_CONFIG_VALUE_0).not.toContain("Bearer");
+    const [scheme, encoded] = (env.GIT_CONFIG_VALUE_0 ?? "").replace("Authorization: ", "").split(" ");
+    expect(scheme).toBe("Basic");
+    expect(atob(encoded ?? "")).toBe("x-access-token:ghs_secret");
+  });
+
+  // The value is the credential, so it may not be readable at a glance in a process listing or a log line.
+  it("does not carry the token in the clear", () => {
+    const env = gitAuthEnv("ghs_secret", "https://github.com/acme/widgets.git");
+    expect(env.GIT_CONFIG_VALUE_0).not.toContain("ghs_secret");
   });
 });

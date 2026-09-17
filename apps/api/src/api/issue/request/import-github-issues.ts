@@ -15,6 +15,15 @@ export const ImportGithubIssuesBodySchema = z.object({
   sync: IssueGithubSyncBodySchema.optional(),
 });
 
+// Which GitHub issue an issue that ALREADY EXISTS here is about. Same repository/host coordinate the import
+// takes, one number instead of a list — a link joins two records, so it cannot be a batch.
+export const AttachGithubIssueBodySchema = z.object({
+  repository: z.string().min(1).max(200), // "owner/name"
+  host: z.string().min(1).max(200).optional(), // unset = github.com
+  number: z.number().int().positive(),
+  sync: IssueGithubSyncBodySchema.optional(),
+});
+
 // The manual bulk pull over one repo's sync-enabled copies.
 export const PullGithubIssuesBodySchema = z.object({
   repository: z.string().min(1).max(200),

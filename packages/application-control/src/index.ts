@@ -345,6 +345,7 @@ export {
 export { type IssueBacklinkPort, withOriginBacklink } from "./issue/origin-backlink.js";
 export { REGRESSION_WATCH_ACTOR, regressionWatch, type RegressionWatchDeps } from "./issue/regression-watch.js";
 export {
+  type AttachGithubIssueInput,
   GithubIssueSync,
   type GithubIssueSyncDeps,
   type GithubRepositoryTokenSource,

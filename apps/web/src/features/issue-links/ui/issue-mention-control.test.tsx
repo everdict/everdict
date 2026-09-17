@@ -65,4 +65,18 @@ describe('issue mention control', () => {
     expect(out).not.toContain('aria-label="Unlink ENG-12"')
     expect(out).not.toContain('aria-expanded')
   })
+
+  // The reported defect, and the lane it was reported in. A reader's row used to be its own `inline-flex` box —
+  // shrink-to-fit, so the chip's percentage max-width resolved against a width derived from the chip's own
+  // content and clamped nothing: measured at 380px inside the 188px property column, ellipsis and all. Both
+  // branches go through the shared shell now, which is where the two bounds live (shared/ui/chip.test.tsx).
+  it('keeps a long title inside the property column, for a reader and for a writer alike', () => {
+    for (const out of [render([MENTIONED], false), render([MENTIONED], true)]) {
+      expect(out).toContain('max-w-[min(100%,15rem)]')
+      expect(out).not.toContain('inline-flex flex-wrap')
+      // The identifier is what the issue is cited by, so the title is the half that gives way.
+      expect(out).toContain('shrink-0 font-mono')
+      expect(out).toContain('min-w-0 truncate')
+    }
+  })
 })

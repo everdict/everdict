@@ -8,9 +8,9 @@ import { toast } from 'sonner'
 import { issueLinkHref, type IssueLink } from '@/entities/issue'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
+import { LinkChip, LinkChipRow } from '@/shared/ui/chip'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
-import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
@@ -59,7 +59,8 @@ export function IssueTimelineLinkControl({
   }
 
   const kind = tracker(`linkType.${type}`)
-  const labelOf = (id: string): string => options.find((option) => option.id === id)?.label ?? t('missingTarget')
+  const labelOf = (id: string): string =>
+    options.find((option) => option.id === id)?.label ?? t('missingTarget')
 
   function toggle(id: string): void {
     const linked = selected.includes(id)
@@ -84,34 +85,33 @@ export function IssueTimelineLinkControl({
   }
 
   const chips = selected.map((id) => (
-    <span
+    <LinkChip
       key={id}
-      className="inline-flex max-w-full items-center gap-1 rounded bg-secondary py-0.5 pl-1.5 pr-1 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
+      href={issueLinkHref(workspace, type, id)}
+      title={labelOf(id)}
+      {...(canWrite
+        ? {
+            trailing: (
+              <button
+                type="button"
+                onClick={() => toggle(id)}
+                disabled={pending}
+                aria-label={t('remove', { id: labelOf(id) })}
+                className="rounded p-0.5 text-faint transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+              >
+                <X className="size-3" />
+              </button>
+            ),
+          }
+        : {})}
     >
-      <Link
-        href={issueLinkHref(workspace, type, id)}
-        title={id}
-        className="min-w-0 truncate transition-colors hover:text-foreground"
-      >
-        {labelOf(id)}
-      </Link>
-      {canWrite && (
-        <button
-          type="button"
-          onClick={() => toggle(id)}
-          disabled={pending}
-          aria-label={t('remove', { id: labelOf(id) })}
-          className="rounded p-0.5 text-faint transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-        >
-          <X className="size-3" />
-        </button>
-      )}
-    </span>
+      <span className="min-w-0 truncate">{labelOf(id)}</span>
+    </LinkChip>
   ))
 
   if (!canWrite) {
     if (chips.length === 0) return null
-    return <span className="inline-flex flex-wrap items-center gap-1">{chips}</span>
+    return <LinkChipRow>{chips}</LinkChipRow>
   }
 
   const needle = query.trim().toLocaleLowerCase()
@@ -121,7 +121,7 @@ export function IssueTimelineLinkControl({
   const searchable = options.length > SEARCH_FROM
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <LinkChipRow>
       {chips}
       <DropdownMenu
         align="end"
@@ -180,6 +180,6 @@ export function IssueTimelineLinkControl({
           )}
         </div>
       </DropdownMenu>
-    </div>
+    </LinkChipRow>
   )
 }

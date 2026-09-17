@@ -3,6 +3,7 @@ import type { FastifySchema } from "fastify";
 import { z } from "zod";
 import { errorResponses, toJsonSchema } from "../openapi.js";
 import {
+  AttachGithubIssueBodySchema,
   ImportGithubIssuesBodySchema,
   IssueGithubSyncBodySchema,
   PullGithubIssuesBodySchema,
@@ -30,7 +31,7 @@ const GithubCandidateSchema = z.object({
 });
 
 export const issueGithubDocs: Record<
-  "candidates" | "import" | "pullRepository" | "pullIssue" | "setSync" | "detach" | "attachment",
+  "candidates" | "import" | "pullRepository" | "pullIssue" | "attach" | "setSync" | "detach" | "attachment",
   FastifySchema
 > = {
   candidates: {
@@ -98,6 +99,23 @@ export const issueGithubDocs: Record<
     response: {
       200: { description: "The refreshed issue", ...toJsonSchema(IssueRecordSchema) },
       ...errorResponses(400, 401, 403, 404),
+    },
+  },
+  attach: {
+    summary: "Link an existing issue to an existing GitHub issue",
+    description:
+      "The counterpart to import: join an issue this workspace already holds to an issue that already exists on " +
+      "GitHub. The link records WHO the two records are and nothing more — no `syncedAt` and no comment thread, " +
+      "so GitHub's title, description, labels and comments arrive on the first pull, which is a visible act " +
+      "somebody performs rather than a rewrite that lands on the next unrelated remote edit. Refused (409) when " +
+      "this issue already carries a GitHub half, or when that remote issue is already linked to another issue " +
+      "here; refused (400) when the number is a pull request. Sync defaults to pull-on / push-off, the same as " +
+      "import. Requires issues:write.",
+    tags: ["issue"],
+    body: toJsonSchema(AttachGithubIssueBodySchema),
+    response: {
+      200: { description: "The linked issue", ...toJsonSchema(IssueRecordSchema) },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   setSync: {

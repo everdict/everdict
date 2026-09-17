@@ -683,6 +683,40 @@ export class Issue {
     };
   }
 
+  // Join an issue that ALREADY EXISTS here to a GitHub issue that already exists there — the other way a record
+  // acquires its remote half (import is the first, and was for a long time the only one).
+  //
+  // It carries no `syncedAt`, and that is the point. A watermark would mean "we have already seen this remote",
+  // so the first Sync would be a no-op and GitHub's title/body/labels would land later, unannounced, on the
+  // first unrelated remote edit. Left unset, the link is INERT until a member pulls: attaching says who the two
+  // records are, and the pull is the visible moment the ownership split (GitHub owns title/description/labels/
+  // comments) takes effect. Same reason the thread is not fetched here — it arrives with that pull.
+  //
+  // Refusing an issue that already has one is not defensiveness: `github` is the join key both directions of the
+  // sync are addressed by, and silently replacing it would leave the previous remote pointing here with nothing
+  // pointing back.
+  attachGithub(github: IssueGithub, by: string, now: string): IssueTransition {
+    if (this.record.github !== undefined)
+      throw new ConflictError(
+        "CONFLICT",
+        { issue: this.record.id, linked: `${this.record.github.repository}#${this.record.github.number}` },
+        "This issue is already linked to a GitHub issue. Detach it before linking another.",
+      );
+    return {
+      patch: {
+        github,
+        history: appendHistory(this.record.history, {
+          at: now,
+          by,
+          event: "updated",
+          detail: { changed: ["github"], attached: `${github.repository}#${github.number}`, ...githubOrigin(github) },
+        }),
+        updatedAt: now,
+      },
+      facts: [],
+    };
+  }
+
   // Detaching removes the LIVE link, never the provenance: the entry carries the same addressable origin the
   // import entry did, so "where did this come from" still answers after someone unhooks the sync.
   detachGithub(by: string, now: string): IssueTransition {

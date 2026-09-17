@@ -4,6 +4,7 @@ import { agentAttributionFrom } from "../fs/fs-actor.js";
 import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
 import { issueGithubDocs } from "./issue-github.docs.js";
 import {
+  AttachGithubIssueBodySchema,
   ImportGithubIssuesBodySchema,
   IssueGithubSyncBodySchema,
   PullGithubIssuesBodySchema,
@@ -159,6 +160,40 @@ export function registerIssueGithubRoutes(app: FastifyInstance, deps: ServerDeps
       }
     },
   );
+
+  // Link an issue that already exists here to an issue that already exists on GitHub. PUT on this address sets
+  // the DIRECTION of a link and DELETE removes one, so creating one is the POST — and until this existed the
+  // detail screen could unhook a link it had no way to make (`github` was attached by import alone).
+  app.post<{ Params: { id: string } }>("/issues/:id/github", { schema: issueGithubDocs.attach }, async (req, reply) => {
+    if (!deps.issueSync)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "issue GitHub sync not configured" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "issues:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof AttachGithubIssueBodySchema>;
+    try {
+      body = AttachGithubIssueBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      const agent = agentAttributionFrom(req.headers);
+      return reply.send(
+        await deps.issueSync.attach(principal.workspace, req.params.id, body, {
+          subject: principal.subject,
+          ...(agent ? { agent } : {}),
+        }),
+      );
+    } catch (err) {
+      // already linked here, or that remote already taken by another issue → the service's 409; a pull
+      // request → its 400; no App installed on the repo → its 404.
+      return sendError(reply, err);
+    }
+  });
 
   app.put<{ Params: { id: string } }>("/issues/:id/github", { schema: issueGithubDocs.setSync }, async (req, reply) => {
     if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });

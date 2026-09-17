@@ -42,8 +42,15 @@ describe("RepoEnvironment", () => {
     const clone = calls.find((c) => c.cmd.includes("git clone"));
     // the token is never exposed on the command line (argv) (ps/log safe).
     expect(clone?.cmd).not.toContain("gho_secret_tok");
-    // auth goes via env (GIT_CONFIG_* → http.<url>.extraheader).
-    expect(clone?.opts?.env?.GIT_CONFIG_VALUE_0).toBe("Authorization: Bearer gho_secret_tok");
+    // auth goes via env (GIT_CONFIG_* → http.<url>.extraheader), as BASIC — GitHub's git smart-HTTP endpoint
+    // refuses an installation token presented as a bearer credential while its REST API accepts exactly that,
+    // so this lane's private clones failed with `fatal: could not read Username` for as long as the assertion
+    // below said `Bearer`. Measured live, same token, one word apart. The one-lane-only law again, and again
+    // with the sibling being a TEST: the session lane's clone was where it was found, and this assertion is
+    // what would have kept the eval lane broken after that fix.
+    expect(clone?.opts?.env?.GIT_CONFIG_VALUE_0).toBe(`Authorization: Basic ${btoa("x-access-token:gho_secret_tok")}`);
+    // The value is the credential — not readable at a glance in a process listing or a log line.
+    expect(clone?.opts?.env?.GIT_CONFIG_VALUE_0).not.toContain("gho_secret_tok");
     // ⚠️ SCOPED, and this assertion used to read `http.extraheader` with no URL — the spelling git applies to
     // EVERY host the process talks to. A clone whose tree carries a `.gitmodules` pointing elsewhere, or a
     // host answering with a cross-host 30x, therefore received a live installation token for somebody else's

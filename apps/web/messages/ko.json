@@ -5139,7 +5139,7 @@
     "copyLink": "링크 복사",
     "linkCopied": "이슈 링크를 복사했습니다.",
     "prevIssue": "이전 이슈",
-    "importedFrom": "가져온 곳",
+    "fieldGithub": "GitHub",
     "nextIssue": "다음 이슈",
     "labelSearchPlaceholder": "라벨 검색 또는 새로 만들기…",
     "labelCreate": "「{name}」 라벨 만들기",
@@ -5479,6 +5479,37 @@
     "pullFailed": "GitHub에서 동기화하지 못했습니다.",
     "pullErrorsTitle": "일부 이슈를 동기화하지 못했습니다",
     "pullErrorsHint": "나머지는 정상적으로 끝났습니다 — 다시 동기화하면 아래 이슈만 재시도합니다."
+  },
+  "linkGithubIssue": {
+    "open": "GitHub 이슈 연결",
+    "title": "GitHub 이슈 연결",
+    "titleTip": "연결은 이미 있는 두 기록을 잇는 것이고, 글은 건드리지 않습니다. GitHub의 제목·설명·라벨·댓글은 직접 누르는 첫 동기화 때 넘어옵니다.",
+    "description": "워크스페이스 GitHub 앱이 접근할 수 있는 저장소를 고르고, 이 이슈가 다루는 이슈를 고르세요. 이미 다른 이슈에 연결된 것은 목록에 없습니다.",
+    "stepRepository": "저장소",
+    "stepIssue": "이슈",
+    "reposLoading": "저장소를 불러오는 중…",
+    "reposLoadFailed": "GitHub 앱이 접근할 수 있는 저장소를 불러오지 못했습니다.",
+    "repoSearchPlaceholder": "저장소 검색",
+    "noSearchResults": "일치하는 저장소가 없습니다.",
+    "noRepos": "이 워크스페이스에는 연결할 GitHub 앱 설치가 없습니다.",
+    "noReposHint": "조직에 앱을 설치하고 연결할 저장소 권한을 주세요.",
+    "openIntegrations": "연동으로 이동",
+    "state": {
+      "open": "열림",
+      "closed": "닫힘",
+      "all": "전체"
+    },
+    "candidatesLoading": "이슈를 불러오는 중…",
+    "candidatesLoadFailed": "이 저장소의 이슈를 불러오지 못했습니다.",
+    "noCandidates": "이 저장소에는 연결할 수 있는 이슈가 없습니다.",
+    "noCandidatesHint": "여기 있는 이슈는 모두 이 워크스페이스의 다른 이슈에 연결돼 있습니다. 풀 리퀘스트는 애초에 목록에 없습니다.",
+    "pushLabel": "변경을 GitHub에도 반영",
+    "pushHint": "여기서 이 이슈를 해결하면 GitHub 이슈가 닫히고 이유를 설명하는 댓글이 달립니다. 기본은 꺼짐 — 읽기 전용 사본으로 두려면 그대로 두세요.",
+    "pullNote": "첫 동기화부터는 제목·설명·라벨·댓글의 주인이 GitHub입니다.",
+    "link": "연결",
+    "linked": "{repository}#{number}에 연결했습니다. 동기화를 누르면 GitHub 사본이 넘어옵니다.",
+    "linkFailed": "이 이슈를 연결하지 못했습니다.",
+    "close": "닫기"
   },
   "issueGithub": {
     "remoteState": {

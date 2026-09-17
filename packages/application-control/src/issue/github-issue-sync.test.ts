@@ -248,6 +248,136 @@ describe("GithubIssueSync — import", () => {
   });
 });
 
+describe("GithubIssueSync — attach", () => {
+  let store: FakeIssueStore;
+  let remote: RemoteState;
+
+  function build() {
+    const issues = new IssueService({ store, numbers: numberAllocator, now: () => NOW });
+    const sync = new GithubIssueSync({
+      store,
+      issues,
+      numbers: numberAllocator,
+      tokens: { tokenForRepository: async () => ({ token: "tok" }) },
+      writers: fakeWriters(remote),
+      labels: { resolveNames: async (_tenant: string, names: string[]) => names.map((n) => `lbl_${n}`) },
+      now: () => NOW,
+    });
+    return { issues, sync };
+  }
+
+  const fileLocally = (issues: IssueService, title = "Judge drops cost scores") =>
+    issues.create({ tenant: "acme", createdBy: "dana", title });
+
+  beforeEach(() => {
+    store = new FakeIssueStore();
+    remote = { issues: new Map(), comments: [], patched: [], postedComments: [], listCalls: [], assetCalls: [] };
+  });
+
+  it("joins an issue filed here to an issue that already exists on GitHub", async () => {
+    remote.issues.set(7, remoteIssue({ number: 7, title: "Cost is double-counted" }));
+    const { issues, sync } = build();
+    const local = await fileLocally(issues);
+
+    const linked = await sync.attach("acme", local.id, { repository: "acme/agent", number: 7 }, actor);
+
+    expect(linked.github).toMatchObject({
+      repository: "acme/agent",
+      number: 7,
+      url: "https://github.com/acme/agent/issues/7",
+      state: "open",
+      sync: { pull: true, push: false },
+    });
+    // The record keeps the text somebody wrote here. Attaching says who the two records are; it is not an edit.
+    expect(linked.title).toBe("Judge drops cost scores");
+  });
+
+  it("leaves the link INERT until someone pulls — no watermark, so the first sync is the one that applies GitHub", async () => {
+    remote.issues.set(7, remoteIssue({ number: 7, title: "Cost is double-counted", body: "remote body" }));
+    const { issues, sync } = build();
+    const local = await fileLocally(issues);
+
+    const linked = await sync.attach("acme", local.id, { repository: "acme/agent", number: 7 }, actor);
+    // A syncedAt here would be a claim we have already seen this remote: the echo-suppression watermark would
+    // then skip the first Sync, and GitHub's title/body would land later, on the first unrelated remote edit.
+    expect(linked.github?.syncedAt).toBeUndefined();
+    expect(linked.github?.comments).toEqual([]);
+
+    const pulled = await sync.pullIssue("acme", local.id, actor);
+    expect(pulled.title).toBe("Cost is double-counted");
+    expect(pulled.description).toBe("remote body");
+  });
+
+  it("refuses an issue that already carries a GitHub half, naming the one it has", async () => {
+    remote.issues.set(7, remoteIssue({ number: 7 }));
+    remote.issues.set(8, remoteIssue({ number: 8 }));
+    const { issues, sync } = build();
+    const local = await fileLocally(issues);
+    await sync.attach("acme", local.id, { repository: "acme/agent", number: 7 }, actor);
+
+    await expect(sync.attach("acme", local.id, { repository: "acme/agent", number: 8 }, actor)).rejects.toThrow(
+      /already linked/i,
+    );
+    expect((await store.get("acme", local.id))?.github?.number).toBe(7);
+  });
+
+  it("refuses a remote issue another issue in this workspace already holds — one GitHub issue, one record", async () => {
+    remote.issues.set(7, remoteIssue({ number: 7 }));
+    const { issues, sync } = build();
+    const first = await fileLocally(issues, "Filed first");
+    const second = await fileLocally(issues, "Filed second");
+    const linked = await sync.attach("acme", first.id, { repository: "acme/agent", number: 7 }, actor);
+
+    // Two local records pointing at one remote would make every pull and push fight over the same issue.
+    await expect(sync.attach("acme", second.id, { repository: "acme/agent", number: 7 }, actor)).rejects.toThrow(
+      linked.identifier,
+    );
+    expect((await store.get("acme", second.id))?.github).toBeUndefined();
+  });
+
+  it("refuses a pull request — GitHub serves those through the issues API too", async () => {
+    remote.issues.set(9, remoteIssue({ number: 9, isPullRequest: true }));
+    const { issues, sync } = build();
+    const local = await fileLocally(issues);
+
+    await expect(sync.attach("acme", local.id, { repository: "acme/agent", number: 9 }, actor)).rejects.toThrow(
+      /pull request/i,
+    );
+  });
+
+  it("records the link in the issue's own history, addressably", async () => {
+    remote.issues.set(7, remoteIssue({ number: 7 }));
+    const { issues, sync } = build();
+    const local = await fileLocally(issues);
+
+    const linked = await sync.attach("acme", local.id, { repository: "acme/agent", number: 7 }, actor);
+    const entry = linked.history.at(-1);
+
+    expect(entry?.event).toBe("updated");
+    expect(entry?.detail).toMatchObject({
+      attached: "acme/agent#7",
+      repository: "acme/agent",
+      number: 7,
+      url: "https://github.com/acme/agent/issues/7",
+    });
+  });
+
+  it("takes the push direction the caller chose, so linking is never a surprise write to someone else's tracker", async () => {
+    remote.issues.set(7, remoteIssue({ number: 7 }));
+    const { issues, sync } = build();
+    const local = await fileLocally(issues);
+
+    const linked = await sync.attach(
+      "acme",
+      local.id,
+      { repository: "acme/agent", number: 7, sync: { pull: false, push: true } },
+      actor,
+    );
+
+    expect(linked.github?.sync).toEqual({ pull: false, push: true });
+  });
+});
+
 describe("GithubIssueSync — pull", () => {
   let store: FakeIssueStore;
   let remote: RemoteState;

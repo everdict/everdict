@@ -13,10 +13,9 @@ import {
 } from '@/entities/issue'
 import { useRefresh } from '@/shared/lib/use-refresh'
 import { cn } from '@/shared/lib/utils'
-import { EntityRef } from '@/shared/ui/chip'
+import { EntityRef, LinkChip, LinkChipRow } from '@/shared/ui/chip'
 import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 import { Input } from '@/shared/ui/input'
-import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
@@ -113,38 +112,37 @@ export function IssueCapabilityControl({
   }
 
   const chips = selected.map((ref) => (
-    <span
+    <LinkChip
       key={ref.id}
-      className="inline-flex max-w-full items-center gap-1 rounded bg-secondary py-0.5 pl-1.5 pr-1 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
+      href={issueLinkHref(workspace, type, ref.id)}
+      title={ref.id}
+      {...(canWrite
+        ? {
+            trailing: (
+              <button
+                type="button"
+                onClick={() => toggle(ref.id)}
+                disabled={pending}
+                aria-label={t('remove', { id: ref.id })}
+                className="rounded p-0.5 text-faint transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+              >
+                <X className="size-3" />
+              </button>
+            ),
+          }
+        : {})}
     >
-      <Link
-        href={issueLinkHref(workspace, type, ref.id)}
-        title={ref.id}
-        className="min-w-0 transition-colors hover:text-foreground"
-      >
-        <EntityRef
-          id={ref.id}
-          {...(ref.version !== undefined ? { version: ref.version } : {})}
-          kind={ISSUE_LINK_REF_KIND[type]}
-        />
-      </Link>
-      {canWrite && (
-        <button
-          type="button"
-          onClick={() => toggle(ref.id)}
-          disabled={pending}
-          aria-label={t('remove', { id: ref.id })}
-          className="rounded p-0.5 text-faint transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-        >
-          <X className="size-3" />
-        </button>
-      )}
-    </span>
+      <EntityRef
+        id={ref.id}
+        {...(ref.version !== undefined ? { version: ref.version } : {})}
+        kind={ISSUE_LINK_REF_KIND[type]}
+      />
+    </LinkChip>
   ))
 
   if (!canWrite) {
     if (chips.length === 0) return null
-    return <span className="inline-flex flex-wrap items-center gap-1">{chips}</span>
+    return <LinkChipRow>{chips}</LinkChipRow>
   }
 
   const needle = query.trim().toLocaleLowerCase()
@@ -154,7 +152,7 @@ export function IssueCapabilityControl({
   const searchable = options.length > SEARCH_FROM
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <LinkChipRow>
       {chips}
       <DropdownMenu
         align="end"
@@ -217,6 +215,6 @@ export function IssueCapabilityControl({
           )}
         </div>
       </DropdownMenu>
-    </div>
+    </LinkChipRow>
   )
 }

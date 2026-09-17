@@ -13,8 +13,8 @@ import {
   type IssueOption,
 } from '@/entities/issue'
 import { useRefresh } from '@/shared/lib/use-refresh'
+import { LinkChip, LinkChipRow } from '@/shared/ui/chip'
 import { DropdownMenu } from '@/shared/ui/dropdown-menu'
-import { Link } from '@/shared/ui/link'
 
 import { addIssueLinkAction, removeIssueLinkAction } from '../api/links'
 
@@ -81,41 +81,42 @@ export function IssueMentionControl({
       () => removeIssueLinkAction(issueId, type, issue.id)
     )
 
+  // The identifier is what people cite, so it never shrinks; the title is the part that gives way (and the chip
+  // itself is capped — see LinkChip, which is where this row's width discipline lives).
   const chips = selected.map((issue) => (
-    <span
+    <LinkChip
       key={issue.id}
-      className="inline-flex max-w-full items-center gap-1 rounded bg-secondary py-0.5 pl-1.5 pr-1 text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
+      href={issueHref(workspace, issue.identifier, issue.title)}
+      title={`${issue.identifier} · ${issue.title}`}
+      {...(canWrite
+        ? {
+            trailing: (
+              <button
+                type="button"
+                onClick={() => remove(issue)}
+                disabled={pending}
+                aria-label={t('remove', { id: issue.identifier })}
+                className="rounded p-0.5 text-faint transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+              >
+                <X className="size-3" />
+              </button>
+            ),
+          }
+        : {})}
     >
-      <Link
-        href={issueHref(workspace, issue.identifier, issue.title)}
-        title={`${issue.identifier} · ${issue.title}`}
-        className="inline-flex min-w-0 items-center gap-1 transition-colors hover:text-foreground"
-      >
-        <IssueStatusIcon status={issue.status} />
-        <span className="shrink-0 font-mono">{issue.identifier}</span>
-        <span className="min-w-0 truncate">{issue.title}</span>
-      </Link>
-      {canWrite && (
-        <button
-          type="button"
-          onClick={() => remove(issue)}
-          disabled={pending}
-          aria-label={t('remove', { id: issue.identifier })}
-          className="rounded p-0.5 text-faint transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-        >
-          <X className="size-3" />
-        </button>
-      )}
-    </span>
+      <IssueStatusIcon status={issue.status} />
+      <span className="shrink-0 font-mono">{issue.identifier}</span>
+      <span className="min-w-0 truncate">{issue.title}</span>
+    </LinkChip>
   ))
 
   if (!canWrite) {
     if (chips.length === 0) return null
-    return <span className="inline-flex flex-wrap items-center gap-1">{chips}</span>
+    return <LinkChipRow>{chips}</LinkChipRow>
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <LinkChipRow>
       {chips}
       <DropdownMenu
         align="end"
@@ -148,6 +149,6 @@ export function IssueMentionControl({
           onSelect={add}
         />
       </DropdownMenu>
-    </div>
+    </LinkChipRow>
   )
 }

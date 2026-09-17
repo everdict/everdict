@@ -5139,7 +5139,7 @@
     "copyLink": "Copy link",
     "linkCopied": "Issue link copied.",
     "prevIssue": "Previous issue",
-    "importedFrom": "Imported from",
+    "fieldGithub": "GitHub",
     "nextIssue": "Next issue",
     "labelSearchPlaceholder": "Search or create a label…",
     "labelCreate": "Create label “{name}”",
@@ -5479,6 +5479,37 @@
     "pullFailed": "Couldn't pull from GitHub.",
     "pullErrorsTitle": "Some issues could not be pulled",
     "pullErrorsHint": "The rest of the batch finished — pull again to retry these."
+  },
+  "linkGithubIssue": {
+    "open": "Link a GitHub issue",
+    "title": "Link a GitHub issue",
+    "titleTip": "Linking joins two records that already exist; it changes no text. GitHub's title, description, labels and comments arrive on the first Sync, which you press yourself.",
+    "description": "Pick a repository the workspace GitHub App can reach, then the issue this one is about. An issue already linked to another issue here isn't offered.",
+    "stepRepository": "Repository",
+    "stepIssue": "Issue",
+    "reposLoading": "Loading repositories…",
+    "reposLoadFailed": "Couldn't load the repositories the GitHub App can reach.",
+    "repoSearchPlaceholder": "Search repositories",
+    "noSearchResults": "No matching repository.",
+    "noRepos": "This workspace has no GitHub App installation to link to.",
+    "noReposHint": "Install the App on your organization and grant it the repositories you want to link to.",
+    "openIntegrations": "Go to integrations",
+    "state": {
+      "open": "Open",
+      "closed": "Closed",
+      "all": "All"
+    },
+    "candidatesLoading": "Loading issues…",
+    "candidatesLoadFailed": "Couldn't load this repository's issues.",
+    "noCandidates": "No issue in this repository is free to link.",
+    "noCandidatesHint": "Every issue here is already linked to an issue in this workspace. Pull requests are never offered.",
+    "pushLabel": "Also write changes back to GitHub",
+    "pushHint": "Resolving this issue here will close the GitHub issue and post a comment explaining why. Off by default — leave it off to keep everdict a read-only copy.",
+    "pullNote": "GitHub owns the title, description, labels and comments from the first Sync onwards.",
+    "link": "Link",
+    "linked": "Linked to {repository}#{number}. Press Sync to bring the GitHub copy across.",
+    "linkFailed": "Couldn't link this issue.",
+    "close": "Close"
   },
   "issueGithub": {
     "remoteState": {

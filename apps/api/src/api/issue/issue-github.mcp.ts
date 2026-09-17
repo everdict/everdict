@@ -113,6 +113,45 @@ export function registerIssueGithubTools(server: McpServer, ctx: McpToolContext)
   );
 
   server.registerTool(
+    "link_github_issue",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Join an issue that ALREADY EXISTS in this workspace to an issue that already exists on GitHub — the " +
+        "counterpart to import_github_issues, which creates a new tracker issue instead. Use it when the record " +
+        "here was filed first and the GitHub issue is the same piece of work. The link itself changes no text: " +
+        "GitHub's title, description, labels and comments arrive on the first sync_github_issue, so run that next " +
+        "if the remote copy is the one that should win. Refused when this issue already has a GitHub half (detach " +
+        "it first), when that remote issue is already linked to another issue here, or when the number is a pull " +
+        "request. sync.push defaults to false — only turn it on when the workspace wants everdict to close and " +
+        "reopen the GitHub issue.",
+      inputSchema: {
+        id: z.string().describe("the everdict issue (id or identifier)"),
+        repository: z.string().describe('"owner/name"'),
+        number: z.number().int().positive().describe("the GitHub issue number"),
+        host: z.string().optional().describe("GitHub Enterprise host; omit for github.com"),
+        sync: z.object({ pull: z.boolean(), push: z.boolean() }).optional(),
+      },
+    },
+    (a) =>
+      run(principal, "issues:write", async () =>
+        ok(
+          await sync.attach(
+            ws,
+            a.id,
+            {
+              repository: a.repository,
+              number: a.number,
+              ...(a.host !== undefined ? { host: a.host } : {}),
+              ...(a.sync !== undefined ? { sync: a.sync } : {}),
+            },
+            actor,
+          ),
+        ),
+      ),
+  );
+
+  server.registerTool(
     "set_issue_github_sync",
     {
       annotations: { readOnlyHint: false },
