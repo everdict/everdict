@@ -32,9 +32,18 @@ export interface IssueDelegationBriefInput {
   commits: { repository: string; sha: string; note?: string }[];
   // Issues this one points at. Subjects only — see the exclusion above.
   related: { identifier: string; title: string; status: string }[];
-  // What the workspace knows about the anchors of this task (`get_task_context`). Titles and ids, because a
-  // brief that inlined every entry's body would be longer than the work.
-  knowledge: { id: string; title: string; kind: string }[];
+  // ── WHAT THE WORKSPACE ALREADY KNOWS ────────────────────────────────────────────────────────────
+  //
+  // ⚠️ THE BODY TRAVELS, not only the title, and the first version of this carried titles alone "because a
+  // brief that inlined every entry's body would be longer than the work". That reasoning was wrong about who
+  // the reader is. A delegate has NO CHANNEL to this control plane — no tool surface, no credential — so a
+  // title it cannot open is not a pointer, it is a rumour: it tells the delegate that something relevant
+  // exists and denies it the content, which is worse than silence because it invites guessing.
+  //
+  // The brief IS the read, performed at assembly time. Capped rather than omitted (`KNOWLEDGE_BODY_CHARS`),
+  // because a long entry truncated at a paragraph boundary still carries its claim, and a claim the delegate
+  // can act on beats a filename it cannot fetch.
+  knowledge: { id: string; title: string; kind: string; body?: string }[];
   // ⚠️ THE THIRD VALUE (rule `protocol` L2). "Nobody has learned anything about this yet" and "the knowledge
   // store could not be read" are the same empty array, and they mean opposite things to a delegate: the first
   // says go ahead, the second says you are about to repeat work somebody already did. So an unreadable store
@@ -43,6 +52,19 @@ export interface IssueDelegationBriefInput {
   knowledgeUnavailable?: string;
   // Checks the supervisor will apply beyond the repository's own gates. Free text in, criteria out.
   extraChecks?: string[];
+}
+
+// A knowledge entry's body is capped, not dropped. The cut lands on the last paragraph break before the
+// limit so the excerpt ends on a complete thought — a claim severed mid-sentence is the one thing worse than
+// a title, because the delegate cannot tell which half it is missing.
+const KNOWLEDGE_BODY_CHARS = 2500;
+
+function excerpt(body: string): string {
+  if (body.length <= KNOWLEDGE_BODY_CHARS) return body;
+  const cut = body.slice(0, KNOWLEDGE_BODY_CHARS);
+  const lastBreak = cut.lastIndexOf("\n\n");
+  const kept = lastBreak > KNOWLEDGE_BODY_CHARS / 2 ? cut.slice(0, lastBreak) : cut;
+  return `${kept}\n\n_(…this entry continues; ask the orchestrator if you need the rest.)_`;
 }
 
 // Semantic, not positional — an answer filed against `issue-symptom-gone` still binds when a criterion is
@@ -103,8 +125,14 @@ export function issueDelegationBrief(input: IssueDelegationBriefInput): Delegati
       "",
       "## What this workspace has already learned",
       "",
-      ...input.knowledge.map((k) => `- [${k.kind}] ${k.title}`),
+      "Read these before you form a theory. They are what somebody paid for the hard way, and a delegate that",
+      "rediscovers one of them has spent its turn on a question that was already answered.",
     );
+    for (const k of input.knowledge) {
+      context.push("", `### [${k.kind}] ${k.title}`);
+      const body = (k.body ?? "").trim();
+      if (body !== "") context.push("", excerpt(body));
+    }
   }
 
   const references: DelegationReference[] = [

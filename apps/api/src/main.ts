@@ -1929,7 +1929,14 @@ async function main(): Promise<void> {
         },
         commits,
         related,
-        knowledge: (context?.knowledge ?? []).map((k) => ({ id: k.id, title: k.title, kind: k.kind })),
+        // The BODY travels, not only the title: a delegate has no channel here, so a title it cannot open
+        // is a rumour rather than a pointer. The assembler caps it.
+        knowledge: (context?.knowledge ?? []).map((k) => ({
+          id: k.id,
+          title: k.title,
+          kind: k.kind,
+          ...(k.body !== undefined ? { body: k.body } : {}),
+        })),
         ...(knowledgeUnavailable !== undefined ? { knowledgeUnavailable } : {}),
       };
     },

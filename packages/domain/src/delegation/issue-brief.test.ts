@@ -36,12 +36,41 @@ describe("an issue's brief is derived from the record, not re-typed from it", ()
     expect(brief.context).not.toMatch(/resolution|resolved by|the fix was/i);
   });
 
-  it("hands over what the workspace already learned, as references it can look up", () => {
+  // ⚠️ THE BODY TRAVELS. An earlier version carried titles alone, on the reasoning that inlining bodies would
+  // make the brief longer than the work. That was wrong about who reads it: a delegate has NO CHANNEL to this
+  // control plane, so a title it cannot open is a rumour — it says something relevant exists and denies the
+  // content, which invites guessing and is worse than silence.
+  it("hands over what the workspace learned, body and all, because the delegate cannot fetch it", () => {
     const brief = issueDelegationBrief(
-      input({ knowledge: [{ id: "k1", title: "the sheet swallows wheel scroll", kind: "finding" }] }),
+      input({
+        knowledge: [
+          {
+            id: "k1",
+            title: "the sheet swallows wheel scroll",
+            kind: "finding",
+            body: "`enableContentPanningGesture={false}` is what lets the list scroll inside the sheet.",
+          },
+        ],
+      }),
     );
     expect(brief.context).toContain("[finding] the sheet swallows wheel scroll");
+    expect(brief.context).toContain("enableContentPanningGesture={false}");
+    expect(brief.context).toContain("rediscovers one of them has spent its turn");
     expect(brief.references).toContainEqual(expect.objectContaining({ type: "knowledge", id: "k1" }));
+  });
+
+  // A long entry is capped, never dropped — and the cut lands on a paragraph break so the excerpt ends on a
+  // complete thought. A claim severed mid-sentence is worse than a title: the delegate cannot tell which half
+  // it is missing.
+  it("caps a long entry at a paragraph break and says it continues", () => {
+    const para = `${"x".repeat(900)}\n\n`;
+    const brief = issueDelegationBrief(
+      input({ knowledge: [{ id: "k1", title: "long one", kind: "context", body: para.repeat(6) }] }),
+    );
+    expect(brief.context?.length ?? 0).toBeLessThan(4000);
+    expect(brief.context).toContain("this entry continues");
+    // Cut on a break, so the excerpt does not end mid-token.
+    expect(brief.context).not.toMatch(/x{2600}/);
   });
 
   it("warns that someone has already been here when commits are linked", () => {
