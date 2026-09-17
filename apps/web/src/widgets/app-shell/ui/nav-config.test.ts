@@ -46,9 +46,19 @@ describe('sidebar active state — at most one row owns a path', () => {
     expect(activeRows('/acme/harness/h1')).toEqual(['harnesses'])
     expect(activeRows('/acme/dataset/d1')).toEqual(['datasets'])
     expect(activeRows('/acme/judge/j1')).toEqual(['judges'])
-    // A resource with NO workspace-wide row (the all-issues list is palette-only) still lights nothing — a
-    // detail address must not invent an owner the collection never had.
-    expect(activeRows('/acme/issue/ENG-12')).toEqual([])
+    // …and one issue lights the Issues row, now that the collection has one.
+    expect(activeRows('/acme/issue/ENG-12')).toEqual(['issues'])
+  })
+
+  // The sidebar's stated job is to lead with the tracker — Initiative ⊃ Project ⊃ Issue — and for a while it
+  // did that with the LAST of the three missing: issues were palette-only, so the record every change campaign
+  // hangs off could be reached only by someone who remembered a keyboard shortcut. A containment chain with a
+  // hole in it is what this asserts against, because the hole was invisible in every other test: each one
+  // named the rows that existed.
+  it('gives every level of the tracker a row — a chain with a hole in it is a level nobody finds', () => {
+    for (const level of ['initiatives', 'projects', 'issues']) {
+      expect(activeRows(`/acme/${level}`)).toEqual([level])
+    }
   })
 
   // The agent authoring surface is still thin, so its sidebar row was dropped — which does not mean the address disappeared.

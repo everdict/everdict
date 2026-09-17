@@ -103,6 +103,19 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: FolderKanban,
         keywords: 'project milestone target date rollup 프로젝트 마일스톤 목표일',
       },
+      // Issues had NO row for a while and lived in the palette only, on the reasoning that Cmd+K reaches the
+      // list without leaving the screen. That was true and it is no longer the whole picture: an issue is the
+      // unit every change campaign hangs off (docs/architecture/change-campaign-spec.md) and the thing a
+      // session files when it starts work, so the record of what this workspace has DONE is a list of issues.
+      // A spine you can only reach by remembering a shortcut is a spine most readers never see — and the
+      // sidebar's own opening comment says it leads with the tracker, Initiative ⊃ Project ⊃ Issue, which it
+      // could not do while the last of the three was the only one missing.
+      {
+        href: '/issues',
+        labelKey: 'issues',
+        icon: CircleDot,
+        keywords: 'issue bug regression triage tracker all 이슈 회귀 트래커 전체',
+      },
       {
         href: '/views',
         labelKey: 'views',
@@ -223,15 +236,6 @@ export const RESOURCES_SECTION: NavSection = {
   ],
 }
 
-// The workspace-wide issue list has no sidebar row, but it stays in the palette: Cmd+K is where you reach it
-// without leaving the screen you are on.
-const WORKSPACE_ISSUES_ITEM: NavItem = {
-  href: '/issues',
-  labelKey: 'allIssues',
-  icon: CircleDot,
-  keywords: 'issue bug regression triage tracker all 이슈 회귀 트래커 전체',
-}
-
 // The agent fleet has no sidebar row for now: a permanent row is a promise that there is a day's work behind it,
 // and authoring an agent is still a thin surface. It keeps its palette entry and its route — whoever already
 // works with agents loses nothing — and the row comes back to the `agent` group when the authoring flow can
@@ -287,7 +291,6 @@ const CAMPAIGNS_ITEM: NavItem = {
 export const ALL_NAV_ITEMS: NavItem[] = [
   // Flattened down to the children too — reachable through Cmd+K even while collapsed.
   ...NAV_SECTIONS.flatMap((s) => s.items.flatMap((item) => item.children ?? [item])),
-  WORKSPACE_ISSUES_ITEM,
   AGENTS_ITEM,
   APPROVALS_ITEM,
   CHECKPOINTS_ITEM,
