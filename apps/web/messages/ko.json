@@ -6003,5 +6003,66 @@
     "componentsFillLatest": "전부 최신으로",
     "componentsSave": "구성 저장",
     "componentsError": "구성을 저장하지 못했습니다."
+  },
+  "lineage": {
+    "title": "계보",
+    "noRounds": "라운드 없음",
+    "continues": "· {id} 이어받음",
+    "viaRequest": "요청 경유",
+    "viaCampaigns": "{ids} 경유",
+    "answers": "충족 {met} · 미충족 {notMet} · 미실행 {notRun} · 관측 {observed} / 주장 {asserted}",
+    "unavailable": "여기서는 읽지 않음: {sources} — 이 배포에 배선되어 있지 않아, 계보의 그 부분은 비어 있는 것이 아니라 알 수 없음입니다.",
+    "state": {
+      "open": "열림",
+      "adopted": "채택",
+      "partially_adopted": "부분 채택",
+      "abandoned": "폐기",
+      "no_improvement": "개선 없음",
+      "budget_exhausted": "예산 소진",
+      "exam_inert": "시험 무반응"
+    },
+    "outcome": {
+      "adopted": "채택",
+      "rejected": "기각",
+      "judged": "판정됨",
+      "not_comparable": "비교 불가"
+    },
+    "answer": {
+      "met": "충족",
+      "not_met": "미충족",
+      "not_run": "미실행"
+    },
+    "attempts": "시도 {count}",
+    "attemptsUnread": "변경 캠페인을 읽지 못했습니다 ({error}) — 각 이슈의 시도는 없는 것이 아니라 알 수 없음입니다.",
+    "how": {
+      "observed": "관측",
+      "asserted": "주장"
+    },
+    "grade": {
+      "change": "변경",
+      "evaluated": "평가"
+    },
+    "attemptsTruncated": "가장 최근 {limit}건만 읽었습니다 — 이 창 밖의 시도는 없는 것이 아니라 여기서 보이지 않는 것입니다.",
+    "attemptsUnparsed": "{count}건은 이 화면이 읽을 수 없는 형태라 빠졌습니다."
+  },
+  "changeCampaignPage": {
+    "title": "변경 캠페인",
+    "theRequest": "요청으로",
+    "continues": "{id} 이어받음",
+    "criteria": "작업 전에 선언한 기준",
+    "rounds": "라운드",
+    "noRounds": "아직 라운드가 없습니다.",
+    "judgedBy": "{by} 판정",
+    "exitCode": "종료 {code}",
+    "learned": "배운 것: {text}",
+    "merged": "{sha} 병합됨",
+    "prOpen": "열림",
+    "howItEnded": "어떻게 끝났는가",
+    "landedAndOwed": "착지: {landed} · 남은 것: {remaining}",
+    "none": "—",
+    "knowledgeCount": "지식 {count}건",
+    "knowledgeDeclined": "지식 없음 — 사유: {reason}",
+    "unstated": "(미기재)",
+    "loadError": "변경 캠페인을 읽지 못했습니다: {error}"
   }
 }

@@ -1,5 +1,6 @@
-import { ChangeCampaignService, RunService } from "@everdict/application-control";
+import { ChangeCampaignService, type IssueRefResolver, RunService } from "@everdict/application-control";
 import type { Dispatcher } from "@everdict/backends";
+import { NotFoundError } from "@everdict/contracts";
 import { InMemoryChangeCampaignStore, InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { buildServer } from "../../server.js";
@@ -14,10 +15,19 @@ const unusedDispatcher: Dispatcher = {
 };
 const H = { "x-everdict-tenant": "acme" };
 
+// The routes' subject is the HTTP surface, not issue resolution — so the resolver answers for any ref that
+// looks like one of this file's issues and refuses the rest, which is the behaviour the routes depend on.
+const issues: IssueRefResolver = {
+  get: async (_tenant, ref) => {
+    if (!ref.startsWith("i-")) throw new NotFoundError("NOT_FOUND", { id: ref }, `issue '${ref}' not found.`);
+    return { id: ref } as Awaited<ReturnType<IssueRefResolver["get"]>>;
+  },
+};
+
 function build() {
   return buildServer({
     service: new RunService({ dispatcher: unusedDispatcher, store: new InMemoryRunStore() }),
-    changeCampaignService: new ChangeCampaignService({ store: new InMemoryChangeCampaignStore() }),
+    changeCampaignService: new ChangeCampaignService({ store: new InMemoryChangeCampaignStore(), issues }),
   });
 }
 

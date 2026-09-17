@@ -772,6 +772,19 @@ export const controlPlane = {
   },
   getIssue: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/issues/${encodeURIComponent(id)}`),
+  // The `change` grade: the campaigns a request opened, and one of them in full. Written by the agent that
+  // did the work; the web reads them.
+  listChangeCampaigns: <T>(auth: AuthContext, filter?: { issueId?: string; limit?: number }) => {
+    const q = new URLSearchParams()
+    // `!== undefined`, not truthiness: an empty id would otherwise DROP the filter and answer with the whole
+    // workspace's campaigns to a caller asking for one issue's.
+    if (filter?.issueId !== undefined) q.set('issueId', filter.issueId)
+    if (filter?.limit !== undefined) q.set('limit', String(filter.limit))
+    const qs = q.toString()
+    return call<T>(auth, `/change-campaigns${qs ? `?${qs}` : ''}`)
+  },
+  getChangeCampaign: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/change-campaigns/${encodeURIComponent(id)}`),
   // Everything a request caused, in one read — the campaigns of both grades, each round's commits, and the
   // knowledge reachable from the issue or from one of its campaigns.
   getIssueLineage: <T>(auth: AuthContext, id: string) =>

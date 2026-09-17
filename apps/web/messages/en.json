@@ -6003,5 +6003,66 @@
     "componentsFillLatest": "Fill with latest",
     "componentsSave": "Save composition",
     "componentsError": "Could not save the composition."
+  },
+  "lineage": {
+    "title": "Lineage",
+    "noRounds": "no rounds",
+    "continues": "· continues {id}",
+    "viaRequest": "via request",
+    "viaCampaigns": "via {ids}",
+    "answers": "{met} met · {notMet} not met · {notRun} not run · {observed} observed / {asserted} asserted",
+    "unavailable": "Not read here: {sources} — this deployment does not have them wired, so their part of the lineage is unknown rather than empty.",
+    "state": {
+      "open": "open",
+      "adopted": "adopted",
+      "partially_adopted": "partially adopted",
+      "abandoned": "abandoned",
+      "no_improvement": "no improvement",
+      "budget_exhausted": "budget exhausted",
+      "exam_inert": "exam inert"
+    },
+    "outcome": {
+      "adopted": "adopted",
+      "rejected": "rejected",
+      "judged": "judged",
+      "not_comparable": "not comparable"
+    },
+    "answer": {
+      "met": "met",
+      "not_met": "not met",
+      "not_run": "not run"
+    },
+    "attempts": "{count} {count, plural, one {attempt} other {attempts}}",
+    "attemptsUnread": "Change campaigns could not be read ({error}) — each issue's attempts are unknown here rather than none.",
+    "how": {
+      "observed": "observed",
+      "asserted": "asserted"
+    },
+    "grade": {
+      "change": "change",
+      "evaluated": "evaluated"
+    },
+    "attemptsTruncated": "Only the newest {limit} were read — attempts outside that window are invisible here rather than absent.",
+    "attemptsUnparsed": "{count} could not be read in the shape this screen knows, and are missing from the rows."
+  },
+  "changeCampaignPage": {
+    "title": "Change campaign",
+    "theRequest": "the request",
+    "continues": "continues {id}",
+    "criteria": "Criteria, declared before the work",
+    "rounds": "Rounds",
+    "noRounds": "No rounds yet.",
+    "judgedBy": "judged by {by}",
+    "exitCode": "exit {code}",
+    "learned": "learned: {text}",
+    "merged": "merged {sha}",
+    "prOpen": "open",
+    "howItEnded": "How it ended",
+    "landedAndOwed": "landed: {landed} · still owed: {remaining}",
+    "none": "—",
+    "knowledgeCount": "{count} knowledge {count, plural, one {entry} other {entries}}",
+    "knowledgeDeclined": "no knowledge — declined: {reason}",
+    "unstated": "(unstated)",
+    "loadError": "The change campaign could not be read: {error}"
   }
 }

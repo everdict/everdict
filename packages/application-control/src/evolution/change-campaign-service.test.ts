@@ -1,6 +1,12 @@
-import type { ChangeCampaignClose, ChangeCampaignRecord, ChangeRound } from "@everdict/contracts";
+import {
+  type ChangeCampaignClose,
+  type ChangeCampaignRecord,
+  type ChangeRound,
+  NotFoundError,
+} from "@everdict/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ChangeCampaignStore } from "../ports/change-campaign-store.js";
+import type { IssueRefResolver } from "../ports/issue-ref-resolver.js";
 import { ChangeCampaignService } from "./change-campaign-service.js";
 
 // The fake lives HERE rather than being imported from `@everdict/db`: the spine runs contracts ← domain ←
@@ -66,6 +72,18 @@ const notRun = (id: string) => ({
 });
 const changes = (sha: string) => [{ repository: "acme/widget", commits: [{ sha }] }];
 
+// Answers the way `IssueService.get` does: either spelling resolves to the SAME record, and an unknown ref
+// throws. A fake that echoed the ref back would hide the very defect these tests exist to pin.
+const ISSUE_IDS: Record<string, string> = { "ENG-12": "i-1", "i-1": "i-1" };
+const issues: IssueRefResolver = {
+  get: async (_tenant, ref) => {
+    const id = ISSUE_IDS[ref] ?? (ref.startsWith("i-") ? ref : undefined);
+    if (id === undefined) throw new NotFoundError("NOT_FOUND", { id: ref }, `issue '${ref}' not found.`);
+    // Only `id` is read by the service; the rest of the record is not this port's subject.
+    return { id } as Awaited<ReturnType<IssueRefResolver["get"]>>;
+  },
+};
+
 describe("ChangeCampaignService", () => {
   let store: FakeChangeCampaignStore;
   let svc: ChangeCampaignService;
@@ -74,7 +92,12 @@ describe("ChangeCampaignService", () => {
   beforeEach(() => {
     store = new FakeChangeCampaignStore();
     seq = 0;
-    svc = new ChangeCampaignService({ store, newId: () => `cc-${++seq}`, now: () => "2026-09-17T00:00:00.000Z" });
+    svc = new ChangeCampaignService({
+      store,
+      issues,
+      newId: () => `cc-${++seq}`,
+      now: () => "2026-09-17T00:00:00.000Z",
+    });
   });
 
   // Each campaign gets its own request: ONE OPEN CAMPAIGN PER ISSUE is the rule now, and a fixture that
@@ -90,6 +113,37 @@ describe("ChangeCampaignService", () => {
   it("opens against an issue with the criteria declared before the work", async () => {
     const c = await open();
     expect(c).toMatchObject({ issueId: "i-1", state: "open", criteria, rounds: [] });
+  });
+
+  // The join key. Every door takes `ENG-12` as readily as the uuid, and before this the service stored back
+  // whichever spelling arrived — so a campaign opened by identifier was filed under a key the lineage read
+  // (which asks by id) never looks up. Nothing failed; the campaign was simply not there, on the issue page
+  // and on the project board alike.
+  it("stores the id whichever spelling the request was named by", async () => {
+    const byIdentifier = await svc.open("acme", "agent:builder", {
+      issueId: "ENG-12",
+      service: { repository: "acme/widget" },
+      criteria,
+    });
+    expect(byIdentifier.issueId).toBe("i-1");
+    // And the one-open-per-issue rule therefore sees across the two spellings, instead of letting a second
+    // campaign open under the other name.
+    await expect(
+      svc.open("acme", "agent:builder", { issueId: "i-1", service: { repository: "acme/widget" }, criteria }),
+    ).rejects.toThrow(/already has an open change campaign/);
+    expect(await store.list("acme", { issueId: "i-1" })).toHaveLength(1);
+  });
+
+  it("refuses a request the workspace does not have, instead of pinning a campaign to nothing", async () => {
+    await expect(
+      svc.open("acme", "agent:builder", {
+        issueId: "NOPE-1",
+        service: { repository: "acme/widget" },
+        criteria,
+      }),
+    ).rejects.toThrow(/issue 'NOPE-1' not found/);
+    // The world is read back: a refusal that still wrote is not a refusal.
+    expect(await store.list("acme")).toHaveLength(0);
   });
 
   it("derives the round's outcome from the answers — `not_run` cannot be adopted through", async () => {
@@ -174,6 +228,7 @@ describe("ChangeCampaignService", () => {
     }
     const svcOnLoss = new ChangeCampaignService({
       store: new LosingStore(),
+      issues,
       newId: () => "cc-loss",
       now: () => "2026-09-17T00:00:00.000Z",
     });
@@ -263,7 +318,12 @@ describe("ChangeCampaignService — one open campaign per issue, and the chain t
   beforeEach(() => {
     store = new FakeChangeCampaignStore();
     n = 0;
-    svc = new ChangeCampaignService({ store, newId: () => `cc-${++n}`, now: () => "2026-09-17T00:00:00.000Z" });
+    svc = new ChangeCampaignService({
+      store,
+      issues,
+      newId: () => `cc-${++n}`,
+      now: () => "2026-09-17T00:00:00.000Z",
+    });
   });
 
   const open = (continues?: string) =>

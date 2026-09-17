@@ -418,11 +418,6 @@ async function main(): Promise<void> {
     receipts: fsRetrievalReceiptWriter(workspaceFs),
   });
 
-  // The `change` grade of campaign (docs/architecture/change-campaign-spec.md): every code change belongs to
-  // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
-  // one, memory otherwise — the same contract either way.
-  const changeCampaignService = new ChangeCampaignService({ store: changeCampaignStore });
-
   // One read from the request to everything it caused (docs/architecture/change-campaign-spec.md §Lineage).
   // Composed, never materialised: a lineage table would be a second authority that can disagree with the
   // records it summarises. Each source is optional and the read SAYS which ones it could not reach.
@@ -1356,6 +1351,18 @@ async function main(): Promise<void> {
     events: platformEventService,
     github: { pushStatus: async (record, actor) => githubSyncRef.current?.pushStatus(record, actor) },
   });
+  // The `change` grade of campaign (docs/architecture/change-campaign-spec.md): every code change belongs to
+  // one, judged by the agent that made it against criteria declared before the work. Postgres when there is
+  // one, memory otherwise — the same contract either way.
+  //
+  // Constructed HERE rather than beside its store, because it needs the tracker: a campaign is filed under the
+  // issue's ID, and every door lets an agent name that issue `EVD-12` instead. Resolving is what makes the
+  // campaign findable under the request it serves.
+  const changeCampaignService = new ChangeCampaignService({
+    store: changeCampaignStore,
+    issues: issueService,
+  });
+
   // Connect the registries' origin backlink now that the tracker exists (construction-order forwarder, like
   // lateEvents): from here on, registering a capability stamped `from: {type:"issue"}` also links it there.
   lateIssueLinks.bind(issueService);

@@ -797,7 +797,7 @@ export default async function IssueDetailPage({
           )}
 
           {lineage.ok ? (
-            <IssueLineageSection lineage={lineage.lineage} />
+            <IssueLineageSection lineage={lineage.lineage} workspace={workspace} />
           ) : (
             <p className="text-xs text-muted-foreground">
               Lineage could not be read ({lineage.error}) — unknown, not empty.

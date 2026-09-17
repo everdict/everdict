@@ -1,6 +1,9 @@
 import { GitCommit } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
+import { changeCampaignHref } from '@/entities/change-campaign'
 import type { IssueLineage } from '@/entities/issue'
+import { Link } from '@/shared/ui/link'
 
 // What a request caused, as one section: the campaigns opened against it, each round's commits per service,
 // and the knowledge reachable from the issue or from one of its campaigns.
@@ -14,14 +17,24 @@ const OUTCOME_TONE: Record<string, string> = {
   not_comparable: 'text-muted-foreground',
 }
 
-const STATE_LABEL: Record<string, string> = {
-  open: 'open',
-  adopted: 'adopted',
-  partially_adopted: 'partially adopted',
-  abandoned: 'abandoned',
-}
-
-export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
+export async function IssueLineageSection({
+  lineage,
+  workspace,
+}: {
+  lineage: IssueLineage
+  workspace: string
+}) {
+  const t = await getTranslations('lineage')
+  // `state` and `outcome` are free strings on the wire — the union of two grades' enums, which nothing in the
+  // types says. The catalog covers both (shared/i18n/lineage-vocabulary.test.ts pins that), and this is the
+  // case that test cannot reach: an API deployed AHEAD of this web, sending a word the catalog has never
+  // heard. Showing the raw value is ugly and true; showing `lineage.state.whatever` is a broken screen only a
+  // browser console would report.
+  const word = (key: string, raw: string) => (t.has(key) ? t(key) : raw)
+  // One campaign's page, chosen by grade — the evaluated grade is driven from the web, the change grade is
+  // written by an agent and read here. Used by the campaign's own link AND by its chain link.
+  const campaignHref = (grade: string, id: string) =>
+    grade === 'change' ? changeCampaignHref(workspace, id) : `/${workspace}/campaign/${id}`
   const unavailable = Object.entries(lineage.sources)
     .filter(([, state]) => state === 'unavailable')
     .map(([name]) => name)
@@ -31,14 +44,19 @@ export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-medium">Lineage</h2>
+      <h2 className="text-sm font-medium">{t('title')}</h2>
 
       {lineage.campaigns.map((campaign) => (
         <div key={campaign.id} className="rounded-md border p-3 text-sm">
           <div className="flex items-center gap-2">
-            <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{campaign.grade}</span>
+            <Link
+              href={campaignHref(campaign.grade, campaign.id)}
+              className="rounded bg-muted px-1.5 py-0.5 text-xs"
+            >
+              {word(`grade.${campaign.grade}`, campaign.grade)}
+            </Link>
             <span className="text-muted-foreground">
-              {STATE_LABEL[campaign.state] ?? campaign.state}
+              {word(`state.${campaign.state}`, campaign.state)}
             </span>
             {campaign.service ? (
               <span className="text-muted-foreground">
@@ -47,9 +65,12 @@ export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
               </span>
             ) : null}
             {campaign.continues ? (
-              <span className="text-xs text-muted-foreground">
-                · continues {campaign.continues.slice(0, 8)}
-              </span>
+              <Link
+                href={campaignHref(campaign.grade, campaign.continues)}
+                className="text-xs text-muted-foreground"
+              >
+                {t('continues', { id: campaign.continues.slice(0, 8) })}
+              </Link>
             ) : null}
           </div>
 
@@ -62,13 +83,18 @@ export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
                 <li key={round.seq} className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="text-muted-foreground">#{round.seq}</span>
                   {/* A rejected round stays on the page: what failed is what the next attempt was built on. */}
-                  <span className={OUTCOME_TONE[round.outcome] ?? ''}>{round.outcome}</span>
+                  <span className={OUTCOME_TONE[round.outcome] ?? ''}>
+                    {word(`outcome.${round.outcome}`, round.outcome)}
+                  </span>
                   {round.answers ? (
                     <span className="text-xs text-muted-foreground">
-                      {round.answers.met} met · {round.answers.notMet} not met ·{' '}
-                      {round.answers.notRun} not run
-                      {' · '}
-                      {round.answers.observed} observed / {round.answers.asserted} asserted
+                      {t('answers', {
+                        met: round.answers.met,
+                        notMet: round.answers.notMet,
+                        notRun: round.answers.notRun,
+                        observed: round.answers.observed,
+                        asserted: round.answers.asserted,
+                      })}
                     </span>
                   ) : null}
                   {changes.map((change) => (
@@ -86,7 +112,7 @@ export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
               )
             })}
             {campaign.rounds.length === 0 ? (
-              <li className="text-xs text-muted-foreground">no rounds</li>
+              <li className="text-xs text-muted-foreground">{t('noRounds')}</li>
             ) : null}
           </ol>
         </div>
@@ -104,10 +130,12 @@ export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
               </span>
               {/* Both edges, because an entry pinned to the issue AND a campaign is reachable twice. */}
               <span className="text-xs text-muted-foreground">
-                {entry.reachedBy.issue ? 'via request' : null}
+                {entry.reachedBy.issue ? t('viaRequest') : null}
                 {entry.reachedBy.issue && entry.reachedBy.campaigns.length > 0 ? ' · ' : null}
                 {entry.reachedBy.campaigns.length > 0
-                  ? `via ${entry.reachedBy.campaigns.map((id) => id.slice(0, 8)).join(', ')}`
+                  ? t('viaCampaigns', {
+                      ids: entry.reachedBy.campaigns.map((id) => id.slice(0, 8)).join(', '),
+                    })
                   : null}
               </span>
             </li>
@@ -119,8 +147,7 @@ export function IssueLineageSection({ lineage }: { lineage: IssueLineage }) {
         // Absent is a different claim from empty, and the page has to make it: a source this deployment does
         // not wire must not render as a request that caused nothing.
         <p className="text-xs text-muted-foreground">
-          Not read here: {unavailable.join(', ')} — this deployment does not have them wired, so
-          their part of the lineage is unknown rather than empty.
+          {t('unavailable', { sources: unavailable.join(', ') })}
         </p>
       ) : null}
     </section>

@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Flag } from 'lucide-react'
 import { getTimeZone, getTranslations } from 'next-intl/server'
+import { z } from 'zod'
 
 import { CommentsSection } from '@/features/discuss'
 import {
@@ -8,6 +9,7 @@ import {
   ProjectStatusControl,
   ProjectUpdatePanel,
 } from '@/features/manage-project'
+import { changeCampaignSchema, type ChangeCampaign } from '@/entities/change-campaign'
 import { initiativeHref, initiativesSchema, type Initiative } from '@/entities/initiative'
 import {
   ISSUE_STATUSES,
@@ -48,6 +50,16 @@ export const dynamic = 'force-dynamic'
 // most-recent-activity order is enough for the board — this is not a screen that has to pull the whole list.
 const PROJECT_ISSUE_ROWS = 200
 
+// How many of the workspace's newest change campaigns the board reads to find this project's. The list door
+// has no project facet, so the window is workspace-wide and the page says when it filled up.
+const ATTEMPT_WINDOW = 200
+
+// What the board knows about attempts. A union rather than a flag beside a list: a caller cannot read the
+// items and forget to ask whether they are the answer.
+type AttemptRead =
+  | { kind: 'read'; items: ChangeCampaign[]; unparsed: number; truncated: boolean }
+  | { kind: 'unknown'; reason: string }
+
 function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
     <Link
@@ -76,6 +88,7 @@ export default async function ProjectDetailPage({
   const { workspace, id } = await params
   const t = await getTranslations('projectsPage')
   const tracker = await getTranslations('tracker')
+  const lineageWords = await getTranslations('lineage')
   const timeZone = await getTimeZone()
   const { principal, ctx } = await currentPrincipal()
 
@@ -100,7 +113,7 @@ export default async function ProjectDetailPage({
 
   // Supplementary reads — the detail still renders if any of them fails, so they run together and a failure
   // degrades only its own slot.
-  const [issues, initiatives, members, updates] = await Promise.all([
+  const [issues, initiatives, members, updates, attempts] = await Promise.all([
     controlPlane
       // The project detail's per-status board — one project's issues fit in a single page, and the rollup numbers are derived separately by
       // the server (rollup). All that is needed here is the rows to draw.
@@ -120,7 +133,47 @@ export default async function ProjectDetailPage({
       .listProjectUpdates(ctx, id)
       .then((r) => projectUpdatesSchema.parse(r))
       .catch((): ProjectUpdate[] => []),
+    // What an agent actually attempted against each issue. A THIRD VALUE rather than `[]`: a deployment with
+    // no evolution store, or a read that failed, must not draw every issue as one nobody has worked on —
+    // that is the exact reading a person would take a decision from. The reason travels with the failure,
+    // because "could not be read" with no sentence leaves an operator nothing to act on.
+    //
+    // Parsed PER RECORD: one campaign whose stored body this mirror cannot read would otherwise collapse the
+    // whole board to "unknown", turning a one-row defect into a whole-page one.
+    controlPlane
+      .listChangeCampaigns(ctx, { limit: ATTEMPT_WINDOW })
+      .then((raw): AttemptRead => {
+        const rows = z.array(z.unknown()).parse(raw)
+        const items: ChangeCampaign[] = []
+        let unparsed = 0
+        for (const row of rows) {
+          const parsed = changeCampaignSchema.safeParse(row)
+          if (parsed.success) items.push(parsed.data)
+          else unparsed += 1
+        }
+        // The window is the whole workspace's newest campaigns, so a full page means there may be more that
+        // belong to THIS project and were never fetched. Saying so is the difference between "no attempts"
+        // and "no attempts in what we read".
+        return { kind: 'read', items, unparsed, truncated: rows.length >= ATTEMPT_WINDOW }
+      })
+      .catch(
+        (e): AttemptRead => ({
+          kind: 'unknown',
+          reason: e instanceof Error ? e.message : String(e),
+        })
+      ),
   ])
+
+  // issueId → the attempts against it, newest first (the list comes back in created-desc order). The key is
+  // the issue's ID on both sides: the control plane resolves an `EVD-12`-style ref to the id before it files
+  // a campaign, so there is one spelling here rather than two to try.
+  const attemptsByIssue = new Map<string, ChangeCampaign[]>()
+  if (attempts.kind === 'read')
+    for (const campaign of attempts.items) {
+      const bucket = attemptsByIssue.get(campaign.issueId)
+      if (bucket) bucket.push(campaign)
+      else attemptsByIssue.set(campaign.issueId, [campaign])
+    }
 
   const canWrite = can(principal?.roles ?? [], 'issues:write')
   // A project can sit under several umbrellas. The breadcrumb carries only the FIRST (a path has to be one), and the right attribute column
@@ -303,29 +356,64 @@ export default async function ProjectDetailPage({
           {grouped.length > 0 && (
             <section className="space-y-4">
               <SectionHeader title={t('issuesTitle', { count: issues.length })} />
+              {/* Absent is a different claim from empty: without these lines, a failed — or merely
+                  truncated — read draws a board on which nobody has attempted anything. */}
+              {attempts.kind === 'unknown' ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {lineageWords('attemptsUnread', { error: attempts.reason })}
+                </p>
+              ) : (
+                <>
+                  {attempts.truncated ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {lineageWords('attemptsTruncated', { limit: ATTEMPT_WINDOW })}
+                    </p>
+                  ) : null}
+                  {attempts.unparsed > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      {lineageWords('attemptsUnparsed', { count: attempts.unparsed })}
+                    </p>
+                  ) : null}
+                </>
+              )}
               {grouped.map((group) => (
                 <div key={group.status} className="space-y-2">
                   <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
                     {tracker(`issueStatus.${group.status}`)} · {group.items.length}
                   </p>
-                  {group.items.map((issue) => (
-                    <Link
-                      key={issue.id}
-                      href={issueHref(workspace, issue.identifier, issue.title)}
-                      className={cn(
-                        'flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
-                        issue.status === 'regressed' && 'border-destructive/40 bg-destructive/5'
-                      )}
-                    >
-                      <IssueStatusIcon status={issue.status} />
-                      <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
-                        {issue.title}
-                      </span>
-                      <time className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block">
-                        {fmtDateTime(issue.updatedAt, timeZone)}
-                      </time>
-                    </Link>
-                  ))}
+                  {group.items.map((issue) => {
+                    // What an agent has attempted against this issue. The chip is TEXT, not a second link:
+                    // a stretched-link row (the only way to nest a second destination in a card that is
+                    // itself one link) would be an idiom this app has nowhere else, and it shrinks the
+                    // keyboard focus surface from the whole card to the title. The attempt is one click
+                    // further — the issue's own page carries the full lineage, campaign links included.
+                    const rows = attemptsByIssue.get(issue.id)
+                    const latest = rows?.[0]
+                    return (
+                      <Link
+                        key={issue.id}
+                        href={issueHref(workspace, issue.identifier, issue.title)}
+                        className={cn(
+                          'flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated',
+                          issue.status === 'regressed' && 'border-destructive/40 bg-destructive/5'
+                        )}
+                      >
+                        <IssueStatusIcon status={issue.status} />
+                        <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+                          {issue.title}
+                        </span>
+                        {latest && rows ? (
+                          <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                            {lineageWords('attempts', { count: rows.length })} ·{' '}
+                            {lineageWords(`state.${latest.state}`)}
+                          </span>
+                        ) : null}
+                        <time className="hidden shrink-0 font-mono text-[11px] text-muted-foreground @md:block">
+                          {fmtDateTime(issue.updatedAt, timeZone)}
+                        </time>
+                      </Link>
+                    )
+                  })}
                 </div>
               ))}
             </section>

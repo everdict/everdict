@@ -18,9 +18,13 @@ import {
   deriveRoundOutcome,
 } from "@everdict/domain";
 import type { ChangeCampaignStore } from "../ports/change-campaign-store.js";
+import type { IssueRefResolver } from "../ports/issue-ref-resolver.js";
 
 export interface ChangeCampaignServiceDeps {
   store: ChangeCampaignStore;
+  // REQUIRED, not optional: what makes a campaign findable under its request is that the two sides hold the
+  // same key, and an optional resolver would let a deployment file campaigns nobody can join.
+  issues: IssueRefResolver;
   newId?: () => string;
   now?: () => string;
 }
@@ -59,15 +63,21 @@ export class ChangeCampaignService {
   }
 
   async open(tenant: string, actor: string, input: OpenChangeCampaignInput): Promise<ChangeCampaignRecord> {
+    // What gets STORED is always the id the resolution produced — the same rule `IssueService.update` follows
+    // for a parent ref. Every door accepts `ENG-12` as readily as the uuid, so without this the key a campaign
+    // is filed under depends on which spelling the agent typed, and the lineage read (which asks by id) simply
+    // does not find the ones typed the other way. It also makes an issue that does not exist a REFUSAL rather
+    // than a campaign pinned to nothing.
+    const issueId = (await this.deps.issues.get(tenant, input.issueId)).id;
     // ONE OPEN CAMPAIGN PER ISSUE (maintainer, 2026-09-17). A request's attempts are a CHAIN — the successor
     // names what it continues — rather than a set nobody can order. It is also what makes "which attempt
     // changed this commit" answerable across the whole walk instead of only inside one campaign.
-    const existing = (await this.deps.store.list(tenant, { issueId: input.issueId })).find((c) => c.state === "open");
+    const existing = (await this.deps.store.list(tenant, { issueId })).find((c) => c.state === "open");
     if (existing !== undefined)
       throw new ConflictError(
         "CONFLICT",
-        { issueId: input.issueId, openCampaignId: existing.id },
-        `issue '${input.issueId}' already has an open change campaign (${existing.id}) — close it (adopted · partially_adopted · abandoned) and open the next one naming it in \`continues\`.`,
+        { issueId, openCampaignId: existing.id },
+        `issue '${issueId}' already has an open change campaign (${existing.id}) — close it (adopted · partially_adopted · abandoned) and open the next one naming it in \`continues\`.`,
       );
     if (input.continues !== undefined) {
       const predecessor = await this.deps.store.get(tenant, input.continues);
@@ -88,7 +98,7 @@ export class ChangeCampaignService {
     const record: ChangeCampaignRecord = {
       id: this.newId(),
       tenant,
-      issueId: input.issueId,
+      issueId,
       service: { repository: input.service.repository, ...(input.service.path ? { path: input.service.path } : {}) },
       ...(input.continues !== undefined ? { continues: input.continues } : {}),
       criteria: input.criteria,

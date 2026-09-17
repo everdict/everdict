@@ -57,12 +57,11 @@ const DECIDED = new Map([
   // criterion. A person cannot supply any of them without retyping what an agent already holds, and a form
   // that let them would be a form for asserting someone else's observation.
   //
-  // What a PERSON needs from this grade is the read, and that is built: the request's lineage section on the
-  // issue page shows every campaign, every round with its outcome and answer counts, and the commits each one
-  // moved (`GET /issues/:id/lineage`, widgets/issue-lineage). The campaign's own list/detail doors would show
-  // the same rows one level further from the question anybody asks, which is "what did this request cause".
-  ["/change-campaigns", "the lineage section on the issue page is the human read of these rows"],
-  ["/change-campaigns/:p", "the lineage section on the issue page is the human read of these rows"],
+  // The two READS of this grade are wired — `listChangeCampaigns` + `getChangeCampaign`, reaching the lineage
+  // section on the issue page and `/[workspace]/change-campaign/[id]`. What stays decided is the two WRITES,
+  // and the reason is not "no page for it": a round and a close carry a session's observation of its own gate
+  // runs, and a browser form would let a person assert a measurement they did not take. The agent judges;
+  // the web reads what it judged.
   ["/change-campaigns/:p/rounds", "a round is logged by the agent that produced it; its fields are that session's"],
   ["/change-campaigns/:p/close", "the close carries the agent's judgement of its own criteria, not a person's"],
   // The session's account of what a retrieval was FOR. Only the session knows it, and it is filed through the
