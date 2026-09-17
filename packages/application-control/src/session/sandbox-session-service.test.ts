@@ -2359,3 +2359,110 @@ describe("SandboxSessionService — the CLI runs as a registered identity", () =
     expect(asked[1]?.ref?.id).toBe("team-ci");
   });
 });
+
+// ── A CLONE MAY NOT DESTROY WHAT ANOTHER STEP OWNS ───────────────────────────────────────────────────
+// Found live, 2026-09-17: booting a delegation profile WITH a repo left work/ holding .git and README and
+// neither BRIEF.md nor CLAUDE.md, while the trajectory recorded `seededTo: work/BRIEF.md`. The profile's
+// `workDir` and the clone's `DEFAULT_REPO_DIR` are both "work", and the clone began `rm -rf work`.
+
+describe("SandboxSessionService — cloning a repo leaves the delegation context alone", () => {
+  it("seeds the brief AFTER the clone, so a delegate handed a repository still gets its job", async () => {
+    const fake = fakeDelegationProfile({ workDir: "work" });
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      git: {
+        readToken: async () => "read-token",
+        writeToken: async () => "write-token",
+        openPullRequest: async () => ({ url: "https://github.com/acme/widget/pull/1", base: "main" }),
+      },
+    });
+
+    await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      repo: { git: "https://github.com/acme/widget.git" },
+      brief: { goal: "fix the thing", references: [], constraints: [], doneWhen: [] },
+    });
+
+    const cloneAt = driver.execs.findIndex((c) => c.includes("git clone"));
+    const briefAt = driver.written.findIndex((w) => w.path === "work/BRIEF.md");
+    expect(cloneAt).toBeGreaterThanOrEqual(0);
+    expect(briefAt).toBeGreaterThanOrEqual(0);
+    // The ordering assertion has to be about the WORLD, not the array indices of two different logs: what
+    // matters is that the write happens once the directory is the clone's.
+    expect(driver.written.find((w) => w.path === "work/BRIEF.md")?.data).toContain("fix the thing");
+    expect(driver.written.some((w) => w.path === "work/CLAUDE.md")).toBe(true);
+  });
+
+  // Even in the right order, a clone that begins by deleting the directory is one edit away from destroying
+  // the next thing that lands there. It clones INTO the directory instead; git refuses a non-empty one, which
+  // is the honest answer to two steps claiming the same place.
+  it("never deletes the directory it clones into", async () => {
+    const fake = fakeDelegationProfile({ workDir: "work" });
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      git: {
+        readToken: async () => "read-token",
+        writeToken: async () => "write-token",
+        openPullRequest: async () => ({ url: "https://github.com/acme/widget/pull/1", base: "main" }),
+      },
+    });
+
+    await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      repo: { git: "https://github.com/acme/widget.git" },
+    });
+
+    expect(driver.execs.some((c) => c.includes("rm -rf"))).toBe(false);
+  });
+
+  // "No installation for that owner" and "the credential read FAILED" are different, and collapsing them is
+  // why a private clone reported git's `could not read Username` — a message naming no link in the chain.
+  it("reports a credential read that failed, instead of cloning as nobody", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      git: {
+        readToken: async () => {
+          throw new Error("installation token mint refused");
+        },
+        writeToken: async () => "w",
+        openPullRequest: async () => ({ url: "https://github.com/acme/private/pull/1", base: "main" }),
+      },
+    });
+
+    await expect(
+      service.create({
+        tenant: "acme",
+        createdBy: "alice",
+        profile: { id: "fixer" },
+        repo: { git: "https://github.com/acme/private.git" },
+      }),
+    ).rejects.toThrow(/Could not resolve a credential.*installation token mint refused/);
+  });
+
+  // A public repo has no credential to resolve, and that absence is an ANSWER — it must still clone.
+  it("clones without a credential when the seam answers that there is none", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      git: {
+        readToken: async () => undefined,
+        writeToken: async () => "w",
+        openPullRequest: async () => ({ url: "https://github.com/acme/public/pull/1", base: "main" }),
+      },
+    });
+
+    await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      repo: { git: "https://github.com/acme/public.git" },
+    });
+
+    expect(driver.execs.some((c) => c.includes("git clone"))).toBe(true);
+  });
+});

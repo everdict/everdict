@@ -697,6 +697,18 @@ export class SandboxSessionService {
         delegation.harness.apiKeyEnv = { ...delegation.harness.apiKeyEnv, ...identity.identity.env };
       }
 
+      // Clone BEFORE the delegation context is seeded — the ORDER is the fix (2026-09-17).
+      //
+      // `cloneRepo` runs `rm -rf <dir> && git clone … <dir>`, and both default to "work": the profile's
+      // `workDir` and `DEFAULT_REPO_DIR` are the same directory. Seeding first therefore wrote CLAUDE.md and
+      // BRIEF.md and then deleted them, while the trajectory went on recording `seededTo: work/BRIEF.md`. A
+      // delegate handed a repository received no goal, no constraints and no standing instructions, and the
+      // delegator found out from an answer that did not match the job.
+      //
+      // Measured both ways on a live session: profile alone → work/ held BRIEF.md + CLAUDE.md; profile + repo →
+      // work/ held .git and README and neither file.
+      const repo = input.repo !== undefined ? await this.cloneRepo(input.tenant, handle, input.repo) : undefined;
+
       // The delegation's CONTEXT, seeded before the record for the same reason the install is: a delegate that
       // silently never received its brief is a failure the delegator would only discover from the answer.
       const briefMarkdown = input.brief !== undefined ? renderDelegationBrief(input.brief) : undefined;
@@ -722,9 +734,6 @@ export class SandboxSessionService {
           );
         }
       }
-      // Clone BEFORE the record too, and for the same reason: a session handed over without the repo it was
-      // asked for is a lie the member would only discover by looking.
-      const repo = input.repo !== undefined ? await this.cloneRepo(input.tenant, handle, input.repo) : undefined;
       const hibernate = resolved.world !== undefined ? (input.hibernate ?? true) : false;
       // A delegation is a conversation by definition — you do not hand work over one message at a time.
       const conversation =
@@ -1600,7 +1609,18 @@ export class SandboxSessionService {
     repo: { git: string; ref?: string; dir?: string },
   ): Promise<{ git: string; ref?: string; dir: string }> {
     const dir = repo.dir ?? DEFAULT_REPO_DIR;
-    const token = await this.deps.git?.readToken(tenant, repo.git).catch(() => undefined);
+    // A FAILED read is not "this workspace has no installation for that owner" (protocol L2). The swallowing
+    // catch that used to stand here collapsed both into `undefined`, so a private clone failed with git's own
+    // `could not read Username for 'https://github.com'` — a message that names no link in the chain, over a
+    // path where the App, the installation, the mint and the URL parse all verify individually. The absence is
+    // still an answer (a public repo clones without a credential); the failure now says which step it was.
+    const token = await this.deps.git?.readToken(tenant, repo.git).catch((err: unknown) => {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { repo: repo.git, step: "credential" },
+        `Could not resolve a credential for '${repo.git}': ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
     const env = token !== undefined ? gitAuthEnv(token, repo.git) : {};
     const fail = (step: string, result: { stdout: string; stderr: string }): never => {
       throw new UpstreamError(
@@ -1609,7 +1629,12 @@ export class SandboxSessionService {
         `Could not ${step} '${repo.git}': ${clamp(result.stderr || result.stdout)}`,
       );
     };
-    const cloned = await handle.exec(`rm -rf ${shq(dir)} && git clone ${shq(repo.git)} ${shq(dir)}`, {
+    // `git clone` INTO the directory, never `rm -rf` over it. The delete used to destroy whatever another step
+    // had already put there — and with `workDir` and `DEFAULT_REPO_DIR` both defaulting to "work", the thing it
+    // destroyed was the delegation's own brief and standing instructions. Cloning into an existing empty
+    // directory is something git does; a non-empty one it REFUSES, which is the honest answer to "two steps
+    // both think they own this directory" and far better than one of them silently winning.
+    const cloned = await handle.exec(`mkdir -p ${shq(dir)} && git clone ${shq(repo.git)} ${shq(dir)}`, {
       env,
       timeoutSec: GIT_TIMEOUT_SEC,
     });
