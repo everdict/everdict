@@ -57,8 +57,10 @@ describe("RepoEnvironment", () => {
     // repositories. The first version of the change that scoped `gitAuthEnv` left this sibling asserting the
     // broadcast form — the one-lane-only law in the shape it takes when the other lane is a test — and the
     // commit gate is what said so. The trailing `.git` is normalised away, so the same repository written
-    // either way produces one scope.
-    expect(clone?.opts?.env?.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/private.extraheader");
+    // either way produces one scope — WRONG, and corrected on 2026-09-17: git matches the remote as written.
+    // The scope keeps the remote's `.git` — git's `--get-urlmatch` compares URLs as given and normalises no
+    // suffix, so a scope stripped of it never matched the clone and every private clone asked for a username.
+    expect(clone?.opts?.env?.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/private.git.extraheader");
     expect(clone?.opts?.env?.GIT_TERMINAL_PROMPT).toBe("0");
   });
 

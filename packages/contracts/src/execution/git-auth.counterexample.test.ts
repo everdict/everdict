@@ -24,25 +24,37 @@ describe("a git credential is scoped to the repository it was issued for", () =>
     const env = gitAuthEnv("ghs_secret", "https://github.com/acme/widgets.git");
     // The bare key is the defect. Its presence means every host this process dials gets the token.
     expect(env.GIT_CONFIG_KEY_0).not.toBe("http.extraheader");
-    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/widgets.extraheader");
+    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/widgets.git.extraheader");
     expect(env.GIT_CONFIG_VALUE_0).toBe(`Authorization: Basic ${btoa("x-access-token:ghs_secret")}`);
     expect(env.GIT_CONFIG_COUNT).toBe("1");
   });
 
-  it("scopes to the same repository whether or not the caller wrote .git", () => {
-    const withSuffix = gitAuthEnv("t", "https://github.com/acme/widgets.git");
-    const without = gitAuthEnv("t", "https://github.com/acme/widgets");
-    expect(withSuffix.GIT_CONFIG_KEY_0).toBe(without.GIT_CONFIG_KEY_0);
+  // ⚠️ THIS ASSERTION USED TO REQUIRE THE OPPOSITE, and requiring it is what made every private clone fail.
+  // "One repository, one scope" is a reasonable instinct and git does not share it: `--get-urlmatch` compares
+  // the config's URL against the remote AS GIVEN, with no `.git` normalisation on either side. A scope written
+  // `…/widgets` therefore never matched a clone of `…/widgets.git`, git fell through to asking for a username,
+  // and the failure surfaced as `fatal: could not read Username` — which names neither the scope nor the URL.
+  //
+  // Measured in a live container: with the entry stored under `…/digo-mobile`, `--get-urlmatch` found it for
+  // the URL without the suffix and NOT for the one with it, while a host-only scope and a bare key both cloned.
+  // The scope must be the remote the clone will use, character for character.
+  it("scopes to the remote AS WRITTEN, because git does not normalise a .git suffix", () => {
+    expect(gitAuthEnv("t", "https://github.com/acme/widgets.git").GIT_CONFIG_KEY_0).toBe(
+      "http.https://github.com/acme/widgets.git.extraheader",
+    );
+    expect(gitAuthEnv("t", "https://github.com/acme/widgets").GIT_CONFIG_KEY_0).toBe(
+      "http.https://github.com/acme/widgets.extraheader",
+    );
   });
 
   it("keeps a port in the scope, because a different port is a different service", () => {
     const env = gitAuthEnv("t", "https://ghe.internal:8443/acme/widgets.git");
-    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://ghe.internal:8443/acme/widgets.extraheader");
+    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://ghe.internal:8443/acme/widgets.git.extraheader");
   });
 
   it("drops credentials, query and fragment from the scope rather than leaking them into config", () => {
     const env = gitAuthEnv("t", "https://user:pw@github.com/acme/widgets.git?ref=main#frag");
-    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/widgets.extraheader");
+    expect(env.GIT_CONFIG_KEY_0).toBe("http.https://github.com/acme/widgets.git.extraheader");
     expect(JSON.stringify(env)).not.toContain("pw");
   });
 

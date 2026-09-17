@@ -13,8 +13,17 @@
 
 /**
  * The URL prefix git matches this credential against: scheme, host, port and repository path, with the
- * caller's credentials, query and fragment dropped and a trailing `.git` normalised away so the same
- * repository written either way produces one scope.
+ * caller's credentials, query and fragment dropped.
+ *
+ * ⚠️ THE TRAILING `.git` IS KEPT, and removing it is what made every private clone fail. `git config
+ * --get-urlmatch` compares the config's URL against the remote as GIVEN; it does not normalise a `.git`
+ * suffix on either side. So a scope written `…/digo-mobile` never matched a clone of
+ * `…/digo-mobile.git` — the config section was stored exactly as intended, git simply considered it a
+ * different URL and fell through to asking for a username. Measured in a live container: same token, same
+ * Basic header, `--get-urlmatch` found the entry for the URL without the suffix and not for the one with it.
+ *
+ * Normalising was a reasonable instinct — one repository, one scope — but the thing on the other side of
+ * this string is git's matcher, not ours, and it does not share the instinct.
  *
  * Returns undefined when the remote is not an HTTP(S) URL. The token IS an HTTP credential, so there is
  * nothing to scope it to — and attaching it anyway is precisely what left a bare key in the environment.
@@ -27,7 +36,7 @@ function httpCredentialScope(remoteUrl: string): string | undefined {
     return undefined;
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-  return `${url.protocol}//${url.host}${url.pathname.replace(/\.git$/, "")}`;
+  return `${url.protocol}//${url.host}${url.pathname}`;
 }
 
 /**
