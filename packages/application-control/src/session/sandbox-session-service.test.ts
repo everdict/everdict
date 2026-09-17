@@ -12,6 +12,7 @@ import {
   clampWindow,
   pageOf,
 } from "../ports/trajectory-store.js";
+import type { SandboxDeliveryOutcome } from "./sandbox-session-service.js";
 import { SandboxSessionService, type SandboxSessionServiceDeps } from "./sandbox-session-service.js";
 
 // Local fakes — application-control cannot depend on @everdict/db (layer direction), so the store doubles
@@ -244,6 +245,15 @@ function build(over: Partial<SandboxSessionServiceDeps> = {}) {
 }
 
 const creator = { tenant: "acme", subject: "alice", isAdmin: false };
+
+// `submitTask` now answers WHAT IT DID — it started a turn, or it queued for one. These tests are about the
+// turn, so they unwrap; the unwrap ASSERTS the delivery rather than casting, so a change that starts queuing
+// where a test expected a turn fails here by name instead of at the first property read.
+async function started(outcome: Promise<SandboxDeliveryOutcome>): Promise<RunRecord> {
+  const r = await outcome;
+  if (r.delivered !== "started") throw new Error(`expected a turn to start, got ${r.delivered}`);
+  return r.run;
+}
 
 describe("SandboxSessionService — session runs on the universal ledger (P6)", () => {
   it("create boots the image and records a running sandbox run with its deadline ON THE ROW (run.submitted via E0)", async () => {
@@ -616,7 +626,7 @@ describe("SandboxSessionService — the harness playground (test cases in a live
       },
     };
     const { service, runStore, trajectories, session } = await boot({ budget, usage });
-    const child = await service.submitTask(creator, session.id, { task: "add a README" });
+    const child = await started(service.submitTask(creator, session.id, { task: "add a README" }));
     expect(child).toMatchObject({
       kind: "eval",
       class: "interactive",
@@ -644,15 +654,68 @@ describe("SandboxSessionService — the harness playground (test cases in a live
     expect(usageLines.every((l) => l.startsWith("acme:"))).toBe(true);
   });
 
-  it("one task at a time: a second submit while one runs is a 409 naming the active run", async () => {
+  // ⚠️ THIS TEST USED TO PIN THE 409, and the 409 is the defect. "A test case is already running — wait for
+  // it to finish" answered one question ("is it busy?") for three different intentions, and answered all of
+  // them the most disruptive way available: a supervisor with something to say to a working delegate could
+  // only wait or kill the container. Busy is a fact about TIMING, and timing is a refusal for none of them.
+  it("a second submit while one runs is QUEUED, not refused — busy is a moment to pick, not a door to close", async () => {
     const { service, session, runStore } = await boot({}, { hold: true });
-    const first = await service.submitTask(creator, session.id, { task: "one" });
-    await expect(service.submitTask(creator, session.id, { task: "two" })).rejects.toMatchObject({
-      status: 409,
-      extra: { activeRun: first.id },
-    });
+    const first = await started(service.submitTask(creator, session.id, { task: "one" }));
+
+    const queued = await service.submitTask(creator, session.id, { task: "two" });
+    expect(queued).toMatchObject({ delivered: "queued", queued: 1 });
+    // Still one turn in flight — queuing started nothing.
+    expect((await service.getSession(creator, session.id)).live?.busy).toBe(true);
+
+    // A plain message queues the same way and also starts nothing.
+    const noted = await service.submitTask(creator, session.id, { task: "fyi", delivery: "message" });
+    expect(noted).toMatchObject({ delivered: "queued", queued: 2 });
     await service.close(creator, session.id); // releases the held task
     await until(() => runStore.rows.get(first.id)?.status === "failed");
+  });
+
+  // ── STOP THE TURN, KEEP THE DELEGATE ─────────────────────────────────────────────────────────────
+  //
+  // Every turn has always held an `AbortController` wired to the drive's signal, and its only caller was
+  // teardown. So the one way to stop a delegate going the wrong way was to close the session — which killed
+  // the container and every uncommitted change in it. The cost of being wrong about "this is going badly" was
+  // the whole session, and the rational move was to wait and watch it finish.
+  it("interrupt stops the turn and leaves the delegate able to take the next one", async () => {
+    const { service, session, runStore } = await boot({}, { hold: true });
+    const first = await started(service.submitTask(creator, session.id, { task: "the wrong approach" }));
+
+    const state = await service.interruptTask(creator, session.id, "you are refactoring the wrong module");
+    expect(state).toMatchObject({ status: "interrupted", by: "alice", previous: "running" });
+    await until(() => runStore.rows.get(first.id)?.status === "failed");
+
+    // THE POINT: the session is still there, and it takes work immediately. Nothing was rebuilt, nothing
+    // re-cloned, and whatever the delegate had written is still in the container.
+    const view = await service.getSession(creator, session.id);
+    expect(view.live).toBeDefined();
+    expect(view.live?.busy).toBe(false);
+    const second = await service.submitTask(creator, session.id, { task: "try the other module" });
+    expect(second.delivered).toBe("started");
+
+    await service.close(creator, session.id);
+  });
+
+  it("interrupting twice keeps the original account of what was stopped", async () => {
+    const { service, session } = await boot({}, { hold: true });
+    await started(service.submitTask(creator, session.id, { task: "one" }));
+    await service.interruptTask(creator, session.id, "first");
+    // `previous` still says `running` — overwriting it with `interrupted` would leave a record that says
+    // nothing about what was ever in flight, and the first reason is the one explaining the container state.
+    expect(await service.interruptTask(creator, session.id, "second")).toMatchObject({
+      previous: "running",
+      reason: "second",
+    });
+    await service.close(creator, session.id);
+  });
+
+  it("interrupt refuses a session with no delegate rather than pretending it stopped something", async () => {
+    const plain = build({});
+    const rec = await plain.service.create({ tenant: "acme", createdBy: "alice", image: "ubuntu" });
+    await expect(plain.service.interruptTask(creator, rec.id)).rejects.toMatchObject({ status: 400 });
   });
 
   it("budget admission refuses at 402 BEFORE any child record exists", async () => {
@@ -666,7 +729,7 @@ describe("SandboxSessionService — the harness playground (test cases in a live
 
   it("closing the session mid-task aborts the drive: the child settles failed{CANCELLED} with its partial trace sealed", async () => {
     const { service, runStore, trajectories, session } = await boot({}, { hold: true });
-    const child = await service.submitTask(creator, session.id, { task: "long one" });
+    const child = await started(service.submitTask(creator, session.id, { task: "long one" }));
     await until(() => trajectories.sealed.size >= 0 && runStore.rows.get(child.id) !== undefined);
     await service.close(creator, session.id);
     await until(() => runStore.rows.get(child.id)?.status === "failed");
@@ -681,7 +744,7 @@ describe("SandboxSessionService — the harness playground (test cases in a live
 
   it("readTaskTrace pages by cursor while live, then serves the sealed trajectory after settle (refresh-proof)", async () => {
     const { service, runStore, session } = await boot();
-    const child = await service.submitTask(creator, session.id, { task: "cursor me" });
+    const child = await started(service.submitTask(creator, session.id, { task: "cursor me" }));
     await until(() => runStore.rows.get(child.id)?.status === "succeeded");
     const first = await service.readTaskTrace(creator, session.id, child.id, 0);
     expect(first.events.length).toBeGreaterThan(0);
@@ -707,7 +770,7 @@ describe("SandboxSessionService — the harness playground (test cases in a live
 
   it("listSessions returns only this tenant's live sessions with their task summaries (the reattach surface)", async () => {
     const { service, session } = await boot();
-    await service.submitTask(creator, session.id, { task: "a very long task ".repeat(30) });
+    await started(service.submitTask(creator, session.id, { task: "a very long task ".repeat(30) }));
     const mine = await service.listSessions(creator);
     expect(mine.map((v) => v.record.id)).toEqual([session.id]);
     expect(mine[0]?.live?.harness).toEqual({ id: "cc", kind: "process", version: "1.0.0" });
@@ -1769,9 +1832,9 @@ describe("SandboxSessionService — conversation sessions (multi-turn playground
 
   it("turns thread the resume token (turn 2 receives what turn 1 reported) and share ONE stable workdir", async () => {
     const { service, runStore, driver, fake, session } = await bootConversation();
-    const turn1 = await service.submitTask(creator, session.id, { task: "remember the number 7" });
+    const turn1 = await started(service.submitTask(creator, session.id, { task: "remember the number 7" }));
     await until(() => runStore.rows.get(turn1.id)?.status === "succeeded");
-    const turn2 = await service.submitTask(creator, session.id, { task: "what number did I say?" });
+    const turn2 = await started(service.submitTask(creator, session.id, { task: "what number did I say?" }));
     await until(() => runStore.rows.get(turn2.id)?.status === "succeeded");
 
     // Continuity: turn 1 started fresh; turn 2 resumed with the token turn 1 reported.
@@ -1786,9 +1849,9 @@ describe("SandboxSessionService — conversation sessions (multi-turn playground
 
   it("fresh starts a new thread — drops the resume token, keeps the workdir — and marks the turn", async () => {
     const { service, runStore, fake, session } = await bootConversation();
-    const turn1 = await service.submitTask(creator, session.id, { task: "hello" });
+    const turn1 = await started(service.submitTask(creator, session.id, { task: "hello" }));
     await until(() => runStore.rows.get(turn1.id)?.status === "succeeded");
-    const turn2 = await service.submitTask(creator, session.id, { task: "start over", fresh: true });
+    const turn2 = await started(service.submitTask(creator, session.id, { task: "start over", fresh: true }));
     await until(() => runStore.rows.get(turn2.id)?.status === "succeeded");
 
     expect(fake.resumes).toEqual([undefined, undefined]); // the reset really forgot the thread
@@ -1927,7 +1990,7 @@ describe("SandboxSessionService — front-door conversation sessions (service ha
 
   it("a turn drives the conversation and settles a 'turn' child whose evidence is marks + trace + the reply", async () => {
     const { service, runStore, trajectories, fake, session } = await bootFrontdoor();
-    const turn = await service.submitTask(creator, session.id, { task: "remember the number 7" });
+    const turn = await started(service.submitTask(creator, session.id, { task: "remember the number 7" }));
     await until(() => runStore.rows.get(turn.id)?.status === "succeeded");
 
     expect(turn).toMatchObject({
@@ -1965,7 +2028,7 @@ describe("SandboxSessionService — front-door conversation sessions (service ha
       harness: { id: "aegra" },
       runtime: "nomad-seoul",
     });
-    const first = await service.submitTask(creator, session.id, { task: "one" });
+    const first = await started(service.submitTask(creator, session.id, { task: "one" }));
     await expect(service.submitTask(creator, session.id, { task: "two" })).rejects.toMatchObject({
       status: 409,
       extra: { activeRun: first.id },
@@ -2161,7 +2224,7 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     const fake = fakeDelegationProfile();
     const { service, runStore, driver } = build({ resolveDelegationProfile: async () => fake.resolved });
     const session = await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, brief });
-    const turn = await service.submitTask(creator, session.id, { task: "read BRIEF.md and start" });
+    const turn = await started(service.submitTask(creator, session.id, { task: "read BRIEF.md and start" }));
     await until(() => runStore.rows.get(turn.id)?.status === "succeeded");
 
     expect(turn.caseId).toBe("turn-1");

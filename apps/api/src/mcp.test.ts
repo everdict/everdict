@@ -844,6 +844,7 @@ describe("MCP tools", () => {
       "ingest_scorecard",
       "inspect_runtime",
       "inspect_trace",
+      "interrupt_sandbox_task",
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",

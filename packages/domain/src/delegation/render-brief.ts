@@ -1,5 +1,10 @@
 import type { DelegationBrief } from "@everdict/contracts";
 
+// The file the delegate writes its report into. Named here because this renderer is what TELLS the delegate
+// the name, and the session service reads the same constant back — one spelling, or the delegate files a
+// report at a path nobody looks at.
+export const DELEGATE_REPORT_FILE = "REPORT.json";
+
 // The delegation brief, rendered as the markdown the delegate actually reads. ONE renderer, because the brief
 // reaches its reader through three doors — the file seeded into the sandbox, the marker sealed on the session's
 // trajectory, and (later) whatever surface shows a delegation — and a handoff that reads differently depending
@@ -32,5 +37,52 @@ export function renderDelegationBrief(brief: DelegationBrief): string {
     lines.push("", "Answer each of these by its id when you report back.", "");
     for (const d of brief.doneWhen) lines.push(`- \`${d.id}\` — ${d.statement}`);
   }
+
+  // ── HOW TO REPORT BACK ─────────────────────────────────────────────────────────────────────────────
+  //
+  // The delegate has no channel to the control plane — no tool surface, no credential — so a file in the
+  // working directory we already own is the only place it can put something we will reliably find. The brief
+  // came in as a file; the report leaves as one, and this section is where the delegate learns that.
+  //
+  // It is rendered ALWAYS, even for a brief with no `doneWhen`: a delegate that finishes without saying what
+  // it did leaves a supervisor to reconstruct the work from a trace, and the commonest reason for that is
+  // simply never having been told there was somewhere to write it.
+  lines.push(
+    "",
+    "## Reporting back",
+    "",
+    `When you are finished, write \`${DELEGATE_REPORT_FILE}\` in this directory. It is how the orchestrator`,
+    "learns what you did — there is no other channel, and a turn that ends without it reads as work nobody",
+    "can account for.",
+    "",
+    "```json",
+    "{",
+    '  "summary": "what you did, in a few sentences",',
+    '  "answers": [',
+    '    { "criterionId": "<an id from Done when>", "answer": "met", "how": "observed",',
+    '      "gateRunIds": ["g-tests"], "detail": "what you ran and what it said" },',
+    '    { "criterionId": "<another>", "answer": "not_met", "reason": "needs_environment",',
+    '      "how": "asserted", "gateRunIds": [], "detail": "why you could not" }',
+    "  ],",
+    '  "gateRuns": [{ "id": "g-tests", "command": "npm test", "exitCode": 0,',
+    '                 "metrics": [{ "name": "tests.passed", "value": 128 }] }],',
+    '  "changes": [{ "repository": "owner/name", "commits": [{ "sha": "abc1234", "message": "..." }] }],',
+    '  "learned": "what this taught that the next person would want to know",',
+    '  "blockers": []',
+    "}",
+    "```",
+    "",
+    "Rules that matter:",
+    "",
+    "- Answer EVERY id under Done when. A criterion you skipped is reported as unanswered, which reads worse",
+    "  than an honest `not_met` — being unable to meet one is ordinary, and hiding it is not.",
+    "- `answer` is `met` · `not_met` · `not_run`; the last two carry a `reason`:",
+    "  `attempted_and_failed` · `needs_information` · `needs_environment` · `blocked_elsewhere` · `descoped`.",
+    "- `how` is `observed` only when a command ran and you can name it in `gateRuns`. An observation citing a",
+    "  measurement that is not in the file is an assertion wearing the other word, and it is checked.",
+    "- Report honestly. Answering the brief is not the same as meeting it, and nothing here rewards a `met`",
+    "  you cannot support — the orchestrator reviews the answers against what you ran.",
+  );
+
   return `${lines.join("\n")}\n`;
 }

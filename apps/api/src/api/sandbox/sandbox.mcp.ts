@@ -1,4 +1,4 @@
-import { DelegationBriefSchema } from "@everdict/contracts";
+import { type DelegateDeliveryMode, DelegateDeliveryModeSchema, DelegationBriefSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
@@ -338,8 +338,17 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
         "Submit one ad-hoc test case into a live harness session (the playground): the session's harness runs " +
         "the task prompt in a fresh working directory of the warm container — no dataset, no graders. On a " +
         "CONVERSATION session (created with harness.conversation) each submit is one more turn of the same " +
-        "conversation instead. Returns the child run (kind eval, grouped to the session) immediately; poll " +
-        "read_sandbox_task_trace for live events. One task at a time per session (409 while busy). Creator-or-admin.",
+        "conversation instead.\n\n" +
+        "A BUSY DELEGATE IS NO LONGER A REFUSAL. `delivery` says what this does to the turn in flight:\n" +
+        "  `message`   — queue it; starts no turn and disturbs none. Use it for context the delegate should " +
+        "have but that does not deserve a derailment.\n" +
+        "  `task`      — the default and what every caller meant before: start a turn if the delegate is idle, " +
+        "otherwise queue it to start the moment the current turn ends.\n" +
+        "  `interrupt` — abort the current turn, then start this one. The session, container and working " +
+        "directory all survive; only the turn is stopped.\n\n" +
+        "The answer says WHICH happened — `{delivered:'started', run}` or `{delivered:'queued', queued, " +
+        "state}` — so you know whether there is a trace to poll. Queued messages are delivered together, in " +
+        "order, ahead of the next turn's prompt. Creator-or-admin.",
       inputSchema: {
         id: z.string().describe("The sandbox session's run id"),
         task: z.string().describe("The test-case prompt for the harness"),
@@ -348,18 +357,56 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           .boolean()
           .optional()
           .describe("Conversation sessions only: start a new conversation thread (same workdir); 400 otherwise"),
+        delivery: DelegateDeliveryModeSchema.optional().describe(
+          "message = queue without starting a turn · task (default) = start or queue · interrupt = stop the current turn first",
+        ),
       },
     },
-    ({ id, task, timeoutSec, fresh }: { id: string; task: string; timeoutSec?: number; fresh?: boolean }) =>
+    ({
+      id,
+      task,
+      timeoutSec,
+      fresh,
+      delivery,
+    }: {
+      id: string;
+      task: string;
+      timeoutSec?: number;
+      fresh?: boolean;
+      delivery?: DelegateDeliveryMode;
+    }) =>
       run(principal, "runs:submit", async () =>
         ok(
           await sessions.submitTask(actor(), id, {
             task,
             ...(timeoutSec !== undefined ? { timeoutSec } : {}),
             ...(fresh !== undefined ? { fresh } : {}),
+            ...(delivery !== undefined ? { delivery } : {}),
           }),
         ),
       ),
+  );
+
+  server.registerTool(
+    "interrupt_sandbox_task",
+    {
+      annotations: { readOnlyHint: false },
+      description:
+        "Stop the delegate's current turn and KEEP the session. The container, the working directory and the " +
+        "conversation all survive, so the delegate can take the next instruction immediately — this is the " +
+        "tool for 'you are solving the wrong problem', and it is not close_sandbox, which destroys the " +
+        "container and every uncommitted change in it.\n\n" +
+        "Returns the delegate's new state; `previous` names what was stopped. Interrupting something already " +
+        "interrupted keeps the ORIGINAL `previous`, because that first record is the one that explains the " +
+        "state the container was left in. Give a `reason` — it lands on the session's trajectory, and a " +
+        "supervisor reading back six interrupts wants to know why each one happened.",
+      inputSchema: {
+        id: z.string().describe("The sandbox session's run id"),
+        reason: z.string().max(1000).optional().describe("Why you are stopping it — recorded on the trajectory"),
+      },
+    },
+    ({ id, reason }: { id: string; reason?: string }) =>
+      run(principal, "runs:submit", async () => ok(await sessions.interruptTask(actor(), id, reason))),
   );
 
   server.registerTool(

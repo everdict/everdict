@@ -3,6 +3,7 @@ import { errorResponses, toJsonSchema } from "../openapi.js";
 import { CloseSandboxBodySchema } from "./request/close-sandbox.js";
 import { CreateSandboxBodySchema } from "./request/create-sandbox.js";
 import { ExecSandboxBodySchema } from "./request/exec-sandbox.js";
+import { InterruptSandboxBodySchema } from "./request/interrupt-sandbox.js";
 import { PushSandboxGitBodySchema } from "./request/push-sandbox-git.js";
 import { ReadSandboxTaskTraceQuerySchema } from "./request/read-sandbox-task-trace.js";
 import { SnapshotSandboxBodySchema } from "./request/snapshot-sandbox.js";
@@ -77,15 +78,39 @@ export const sandboxDocs: Record<string, FastifySchema> = {
       "class interactive, grouped to the session) is returned immediately (202, born running); poll its trace " +
       "via GET /sandboxes/:id/tasks/:taskId/trace. Each case gets a fresh working directory inside the warm " +
       "container; on a CONVERSATION session each submit is one more turn of the same conversation (shared " +
-      "workdir, group role 'turn'), and `fresh` starts a new thread (400 on a non-conversation session). One " +
-      "task at a time per session (409 while one runs); tenant budget admission applies (402). " +
-      "Creator-or-admin, checked before anything runs.",
+      "workdir, group role 'turn'), and `fresh` starts a new thread (400 on a non-conversation session). " +
+      "`delivery` says what this does to a turn already in flight — `message` queues without starting one, " +
+      "`task` (the default) queues for the next boundary when the delegate is busy and starts a turn when it " +
+      "is idle, and `interrupt` aborts the current turn first. The response says WHICH happened " +
+      "(`delivered: started|queued`), because a caller that cannot tell them apart cannot know whether there " +
+      "is a trace to poll. Tenant budget admission applies (402). Creator-or-admin, checked before anything runs.",
     tags: ["sandboxes"],
     params: idParams,
     body: toJsonSchema(SubmitSandboxTaskBodySchema),
     response: {
-      202: { description: "The child run's RunRecord (kind eval, status running, group → the session)" },
+      202: {
+        description:
+          "What the delivery did: `{delivered:'started', run}` with the child RunRecord, or " +
+          "`{delivered:'queued', queued, state}` when it went to the mailbox.",
+      },
       ...errorResponses(400, 401, 402, 403, 404, 409),
+    },
+  },
+  interrupt: {
+    summary: "Stop the delegate's current turn and keep the session",
+    description:
+      "Aborts the turn in flight and settles its child run, leaving the container, the working directory and " +
+      "the conversation intact — the delegate is immediately able to take the next message. This is NOT " +
+      "close_sandbox: before it existed, the only way to stop a delegate going the wrong way was to destroy " +
+      "the session and every uncommitted change in it. Returns the delegate's new state, whose `previous` " +
+      "names what was stopped. Interrupting something already interrupted keeps the ORIGINAL `previous`. " +
+      "Requires runs:submit; creator-or-admin.",
+    tags: ["sandboxes"],
+    params: idParams,
+    body: toJsonSchema(InterruptSandboxBodySchema),
+    response: {
+      200: { description: "The delegate's state after the interrupt" },
+      ...errorResponses(400, 401, 403, 404, 409),
     },
   },
   taskTrace: {

@@ -272,7 +272,11 @@ describe("sandbox playground routes — a harness in the session, test cases thr
       payload: { task: "add a README" },
     });
     expect(submitted.statusCode).toBe(202);
-    const child = submitted.json();
+    // The body says WHAT THE DELIVERY DID — a busy delegate now queues instead of refusing, so a caller that
+    // could not tell "started" from "queued" would not know whether there is a trace to poll.
+    const outcome = submitted.json();
+    expect(outcome.delivered).toBe("started");
+    const child = outcome.run;
     expect(child).toMatchObject({
       kind: "eval",
       class: "interactive",

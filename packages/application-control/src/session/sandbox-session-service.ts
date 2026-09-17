@@ -2,6 +2,10 @@ import {
   BadRequestError,
   type ComputeHandle,
   ConflictError,
+  type DelegateDeliveryMode,
+  type DelegateReport,
+  DelegateReportSchema,
+  type DelegateState,
   type DelegationBrief,
   type DomainFact,
   type Driver,
@@ -24,10 +28,13 @@ import {
 import {
   type BudgetTracker,
   type CliIdentityChoice,
+  DELEGATE_REPORT_FILE,
   IMAGE_REPOSITORY_NAME,
   Run,
   type UsageMeter,
+  interruptedFrom,
   pinDigest,
+  planDelivery,
   renderDelegationBrief,
 } from "@everdict/domain";
 import { admitCausedWork } from "../admission/admission.js";
@@ -257,10 +264,54 @@ interface ConversationState {
   threadSeq: number;
 }
 
+// ── THE MAILBOX ──────────────────────────────────────────────────────────────────────────────────────
+//
+// What a supervisor said to a delegate that was not ready to hear it. Before this existed there was no such
+// place: a message to a busy delegate was a `409`, so the supervisor's only options were to wait for the turn
+// to end or to kill the session, and the queue lived in the supervisor's head.
+//
+// ⚠️ OUR BOUNDARY IS THE END OF A TURN, NOT A MESSAGE BOUNDARY INSIDE ONE. codex can deliver mid-sampling
+// because it owns the model loop; we spawn a harness CLI and wait for it, so there is no seam to inject at.
+// The `task` mode therefore means "queued, and it starts the moment this turn finishes" rather than "handed
+// over while it works". That is still the difference between a supervisor who can hand off the next
+// instruction and one who must choose between waiting and interrupting — but it is not the same thing, and
+// saying it was would make the next reader look for an injection point that is not there.
+interface QueuedDelivery {
+  id: string;
+  mode: "message" | "task";
+  text: string;
+  at: string;
+  by: string;
+}
+
+// Everything the supervisor said while the delegate could not hear it, rendered ahead of the message that
+// starts this turn. Notes and work are kept APART in the prompt: a delegate that cannot tell "here is context"
+// from "here is your next task" will either act on the context or ignore the task, and both look like it
+// misread the instruction.
+function drainMailbox(mailbox: QueuedDelivery[], task: string): string {
+  if (mailbox.length === 0) return task;
+  const notes = mailbox.filter((m) => m.mode === "message");
+  const work = mailbox.filter((m) => m.mode === "task");
+  const body = [...work.map((w) => w.text), task].filter((t) => t.trim() !== "").join("\n\n");
+  if (notes.length === 0) return body;
+  const preamble = [
+    "## Messages that arrived while you were working",
+    "",
+    ...notes.map((n) => `- ${n.by}: ${n.text}`),
+  ].join("\n");
+  return body === "" ? preamble : `${preamble}\n\n---\n\n${body}`;
+}
+
 interface PlaygroundState {
   resolved: ResolvedSessionHarness;
   taskSeq: number;
   tasks: TaskEntry[];
+  // What the supervisor has said that the delegate has not yet read. Drained in order into the next turn.
+  mailbox: QueuedDelivery[];
+  // What this delegate IS, from the supervisor's side. Kept explicitly rather than derived from `active`,
+  // because three of the seven states (`interrupted`, `completed` with its report, `errored`) are facts about
+  // something that ALREADY happened and cannot be reconstructed from whether a promise is pending.
+  state: DelegateState;
   active?: { runId: string; abort: AbortController; done: Promise<void> };
   conversation?: ConversationState;
   // Present when this session was booted from a DELEGATION PROFILE: who was delegated to (for the read model)
@@ -333,6 +384,12 @@ export interface SandboxSessionView {
     tasks: SandboxTaskSummary[];
   };
 }
+
+// What reaching a delegate DID. A union because two of the three delivery modes start nothing, and a caller
+// that cannot tell "queued" from "started" cannot decide whether there is a trace to poll.
+export type SandboxDeliveryOutcome =
+  | { delivered: "started"; run: RunRecord; state?: DelegateState }
+  | { delivered: "queued"; queued: number; state: DelegateState };
 
 // One page of a task's live trace (the 2s poll target). `done` = terminal — stop polling; the same events
 // then serve from the sealed trajectory (GET /runs/:id/trajectory).
@@ -837,6 +894,8 @@ export class SandboxSessionService {
                 resolved: resolved.playground,
                 taskSeq: 0,
                 tasks: [],
+                mailbox: [],
+                state: { status: "pending_init" },
                 ...(conversation ? { conversation: { threadSeq: 1 } } : {}),
                 ...(delegation !== undefined
                   ? { delegation: { ref: delegation.ref, workDir: delegation.workDir } }
@@ -1167,18 +1226,38 @@ export class SandboxSessionService {
   // container workdir sequence, one warm toolchain — a second submit while one runs is a 409, not a queue.
   // The child run is born RUNNING on the ledger before the harness starts (its record is what the caller
   // monitors); the drive happens async — errors settle the child, never this call.
+  // ── REACHING A DELEGATE ──────────────────────────────────────────────────────────────────────────
+  //
+  // `delivery` says what this does to the turn the delegate is in — `planDelivery` (domain) owns that
+  // decision and this method executes it. Omitted it is `task`, which is what every existing caller meant.
+  //
+  // The outcome is a UNION rather than always a run, because two of the three modes deliberately start
+  // nothing: a queued message has no child run to hand back, and returning a stale one (or `undefined` where
+  // a record was promised) would make "I queued it" and "I started a turn" indistinguishable to the caller
+  // that has to decide whether to poll.
   async submitTask(
     actor: SandboxActor,
     runId: string,
-    input: { task: string; timeoutSec?: number; fresh?: boolean },
-  ): Promise<RunRecord> {
+    input: { task: string; timeoutSec?: number; fresh?: boolean; delivery?: DelegateDeliveryMode },
+  ): Promise<SandboxDeliveryOutcome> {
     this.sweep();
     const live = this.sessions.get(runId);
     if (!live || live.tenant !== actor.tenant)
       throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
     if (live.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can submit tasks.");
-    if (live.frontdoor) return this.submitTurn(actor, runId, live, live.frontdoor, input);
+    if (live.frontdoor) {
+      // The front-door lane has no mailbox and no delegate state — it is a service conversation, not a
+      // supervised handoff. Its one mode is "start a turn", so a delivery it cannot honour is refused here
+      // rather than silently downgraded to the one behaviour it has.
+      if (input.delivery !== undefined && input.delivery !== "task")
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { run: runId, delivery: input.delivery },
+          `A front-door conversation has no mailbox — '${input.delivery}' applies to delegate sessions only.`,
+        );
+      return { delivered: "started", run: await this.submitTurn(actor, runId, live, live.frontdoor, input) };
+    }
     const playground = live.playground;
     const handle = live.handle;
     if (!playground || !handle)
@@ -1187,7 +1266,12 @@ export class SandboxSessionService {
         { run: runId },
         "This session has no harness — create it with harness:{id} to submit test cases.",
       );
-    if (typeof input.task !== "string" || input.task.trim() === "")
+    // An empty task is legitimate for exactly one caller: the settle hook draining a mailbox that already
+    // holds queued work. Everywhere else it is a submit with nothing to say.
+    if (
+      typeof input.task !== "string" ||
+      (input.task.trim() === "" && !playground.mailbox.some((m) => m.mode === "task"))
+    )
       throw new BadRequestError("BAD_REQUEST", {}, "task is required.");
     const conversation = playground.conversation;
     if (input.fresh === true && conversation === undefined)
@@ -1196,12 +1280,41 @@ export class SandboxSessionService {
         { run: runId },
         "This session runs independent test cases — fresh applies only to conversation sessions.",
       );
-    if (playground.active)
-      throw new ConflictError(
-        "CONFLICT",
-        { run: runId, activeRun: playground.active.runId },
-        "A test case is already running in this session — wait for it to finish.",
-      );
+    // ⚠️ THIS REPLACES A FLAT 409. "A test case is already running — wait for it to finish" answered one
+    // question ("is it busy?") for three different intentions, and answered all of them the most disruptive
+    // way available: refuse, leaving the supervisor to choose between waiting and killing the container.
+    const delivery = input.delivery ?? "task";
+    const plan = planDelivery(playground.state, delivery);
+    if (plan.kind === "queue") {
+      const entry: QueuedDelivery = {
+        id: `m-${playground.mailbox.length + 1}`,
+        mode: delivery === "message" ? "message" : "task",
+        text: input.task,
+        at: this.now(),
+        by: actor.subject,
+      };
+      playground.mailbox.push(entry);
+      live.trace.push({
+        t: live.t++,
+        kind: "env_action",
+        action: "delegate.queued",
+        detail: { id: entry.id, mode: entry.mode, startsTurn: plan.startsTurn },
+      });
+      return { delivered: "queued", queued: playground.mailbox.length, state: playground.state };
+    }
+    if (plan.kind === "abortThenStart" && playground.active) {
+      // Stop the turn and let the drive settle its child before the next one starts. Without the wait the new
+      // turn races the old one's `finally`, and whichever lands second decides what `active` points at.
+      const stopping = playground.active;
+      stopping.abort.abort();
+      playground.state = {
+        status: "interrupted",
+        at: this.now(),
+        by: actor.subject,
+        previous: interruptedFrom(playground.state),
+      };
+      await Promise.race([stopping.done, new Promise((r) => setTimeout(r, TEARDOWN_TASK_GRACE_MS))]);
+    }
     this.deps.budget?.admit(actor.tenant); // 402 before any child record exists
     const timeoutSec = Math.min(input.timeoutSec ?? DEFAULT_TASK_TIMEOUT_SEC, MAX_TASK_TIMEOUT_SEC);
     // "Reset the chat, keep the environment": fresh drops the resume token (the next turn starts a new
@@ -1210,6 +1323,10 @@ export class SandboxSessionService {
       conversation.resume = undefined;
       conversation.threadSeq += 1;
     }
+    // The mailbox rides along. Everything the supervisor said while the delegate was busy is delivered here,
+    // in order, ahead of the message that starts this turn — which is the whole reason queuing beats refusing.
+    const prompt = drainMailbox(playground.mailbox, input.task);
+    playground.mailbox = [];
     const seq = ++playground.taskSeq;
     const caseId = conversation !== undefined ? `turn-${seq}` : `task-${seq}`;
     const id = this.newId();
@@ -1219,7 +1336,7 @@ export class SandboxSessionService {
       harness: { id: playground.resolved.id, version: playground.resolved.version },
       sessionRunId: runId,
       caseId,
-      task: input.task,
+      task: prompt,
       timeoutSec,
       createdBy: actor.subject,
       ...(conversation !== undefined ? { role: "turn" as const } : {}),
@@ -1242,7 +1359,7 @@ export class SandboxSessionService {
     const entry: TaskEntry = {
       runId: id,
       caseId,
-      task: input.task,
+      task: prompt,
       submittedAt: this.now(),
       status: "running",
       events: [],
@@ -1265,7 +1382,7 @@ export class SandboxSessionService {
             ? handle // the profile's workDir is already the adapter's cwd; scoping it again would move the delegate away from its brief
             : scopedComputeHandle(handle, conversation !== undefined ? "conversation" : `tasks/${seq}`),
         apiKeyEnv: playground.resolved.apiKeyEnv,
-        task: input.task,
+        task: prompt,
         timeoutSec,
         events: entry.events,
         signal: abort.signal,
@@ -1282,15 +1399,45 @@ export class SandboxSessionService {
       });
       entry.status = status;
       live.trace.push({ t: live.t++, kind: "env_action", action: "task.end", detail: { run: id, status } });
+      // A turn that was ABORTED leaves the delegate `interrupted` — the state the interrupt already wrote.
+      // Overwriting it with `completed` here would report a finish for a turn somebody stopped.
+      if (playground.state.status !== "interrupted") {
+        const report = await this.readDelegateReport(live, playground);
+        playground.state =
+          status === "succeeded"
+            ? { status: "completed", at: this.now(), ...(report ? { report } : {}) }
+            : { status: "errored", at: this.now(), message: `the turn settled ${status}` };
+        if (report)
+          live.trace.push({
+            t: live.t++,
+            kind: "env_action",
+            action: "delegate.reported",
+            detail: { run: id, answers: report.answers.length, blockers: report.blockers.length },
+          });
+      }
     })()
-      .catch(() => {
+      .catch((err: unknown) => {
         entry.status = "failed";
+        if (playground.state.status !== "interrupted")
+          playground.state = {
+            status: "errored",
+            at: this.now(),
+            message: err instanceof Error ? err.message : String(err),
+          };
       })
       .finally(() => {
         if (playground.active?.runId === id) playground.active = undefined;
+        // A queued TASK is work the supervisor already handed over; the turn ending is its boundary. Messages
+        // alone do not wake a delegate — they wait for the next task and ride along as context.
+        if (playground.mailbox.some((m) => m.mode === "task"))
+          void this.submitTask(actor, runId, { task: "", delivery: "task" }).catch(() => {
+            // The auto-start is best-effort: a session closed between the settle and here is the ordinary
+            // cause, and the queued text stays in the mailbox for whoever looks at the session next.
+          });
       });
     playground.active = { runId: id, abort, done };
-    return record;
+    playground.state = { status: "running", turnRunId: id, startedAt: this.now() };
+    return { delivered: "started", run: record, state: playground.state };
   }
 
   // Submit one TURN into a live front-door conversation session — the service-harness twin of the playground
@@ -1413,6 +1560,92 @@ export class SandboxSessionService {
   // One page of a task's trace since a cursor (the 2s poll). Live buffer first; after settle the sealed
   // trajectory serves the SAME events (a refresh mid-completion still answers). Tenant-scoped read — the
   // same visibility as GET /runs/:id/trajectory.
+  // ── THE REPORT COMES BACK THE WAY THE BRIEF WENT IN ──────────────────────────────────────────────
+  //
+  // The brief lands in the delegate's working directory as a FILE, because a delegate that has to hold its
+  // instructions in context loses them. The report leaves the same way, for the same reason and one more: the
+  // delegate has no channel to this control plane at all (no tool surface, no credential), so a file in the
+  // directory we already own is the only place it can put something we will reliably find.
+  //
+  // ⚠️ A MISSING OR MALFORMED REPORT IS NOT AN ERROR. A delegate may finish without filing one, and that is a
+  // fact the supervisor needs — `completed` with no report reads as "it stopped without telling me what it
+  // did", which is different from both "still running" and "it failed". Throwing here would turn a delegate's
+  // omission into a failure of the turn it may well have completed.
+  private async readDelegateReport(
+    live: LiveSession,
+    playground: PlaygroundState,
+  ): Promise<DelegateReport | undefined> {
+    const handle = live.handle;
+    const dir = playground.delegation?.workDir;
+    if (!handle || dir === undefined) return undefined;
+    try {
+      const path = `${dir}/${DELEGATE_REPORT_FILE}`;
+      const read = await handle.exec(`cat ${JSON.stringify(path)} 2>/dev/null`);
+      if (read.exitCode !== 0 || read.stdout.trim() === "") return undefined;
+      const parsed = DelegateReportSchema.safeParse(JSON.parse(read.stdout));
+      if (!parsed.success) {
+        // The delegate TRIED to report and the file does not parse. That is worth recording where the
+        // supervisor will see it — silently returning undefined would render as "it never reported".
+        live.trace.push({
+          t: live.t++,
+          kind: "env_action",
+          action: "delegate.report_unreadable",
+          detail: { path, problem: parsed.error.issues[0]?.message ?? "does not match the report schema" },
+        });
+        return undefined;
+      }
+      return parsed.data;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // ── STOP THE TURN, KEEP THE DELEGATE ─────────────────────────────────────────────────────────────
+  //
+  // Before this existed the only way to stop a delegate going the wrong way was `close_sandbox`, which killed
+  // the container and every uncommitted change in it. So the cost of being wrong about "this is going badly"
+  // was the whole session, and the rational move was to wait and watch it finish — which is not supervision.
+  //
+  // The machinery was already here: every turn holds an `AbortController` wired to the drive's signal, and
+  // the only caller was teardown. This is the same abort with the container left standing.
+  async interruptTask(actor: SandboxActor, runId: string, reason?: string): Promise<DelegateState> {
+    this.sweep();
+    const live = this.sessions.get(runId);
+    if (!live || live.tenant !== actor.tenant)
+      throw new NotFoundError("NOT_FOUND", { run: runId }, "No live sandbox session with that id.");
+    if (live.createdBy !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError("FORBIDDEN", { run: runId }, "Only the session's creator or an admin can interrupt it.");
+    const playground = live.playground;
+    if (!playground)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { run: runId },
+        "This session has no delegate to interrupt — it is a shell or a front-door conversation.",
+      );
+    // `interruptedFrom` refuses a delegate that has no turn to stop, and it keeps the ORIGINAL account when
+    // something already interrupted is interrupted again.
+    const previous = interruptedFrom(playground.state);
+    const active = playground.active;
+    playground.state = {
+      status: "interrupted",
+      at: this.now(),
+      by: actor.subject,
+      previous,
+      ...(reason !== undefined ? { reason } : {}),
+    };
+    live.trace.push({
+      t: live.t++,
+      kind: "env_action",
+      action: "delegate.interrupted",
+      detail: { previous, ...(reason !== undefined ? { reason } : {}), ...(active ? { run: active.runId } : {}) },
+    });
+    if (active) {
+      active.abort.abort();
+      await Promise.race([active.done, new Promise((r) => setTimeout(r, TEARDOWN_TASK_GRACE_MS))]);
+    }
+    return playground.state;
+  }
+
   async readTaskTrace(
     actor: SandboxActor,
     sessionRunId: string,
