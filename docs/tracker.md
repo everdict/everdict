@@ -2,7 +2,7 @@
 kind: wiki
 title: "The eval tracker — Initiative ⊃ Project ⊃ Issue"
 status: current
-updated: 2026-09-15
+updated: 2026-09-17
 anchors: [packages/domain/src/tracker/issue.ts, packages/contracts/src/records/tracker.ts, apps/api/src/api/issue/issue.docs.ts, packages/application-control/src/issue/regression-watch.ts, packages/application-control/src/issue/github-issue-sync.ts]
 ---
 # The eval tracker — Initiative ⊃ Project ⊃ Issue
@@ -362,14 +362,32 @@ number already imported is skipped, never duplicated, so re-running after a part
 issue lands as `todo`; a closed one lands as `done` with a note and **deliberately without a scorecard** —
 claiming evidence we do not have would poison every regression comparison that follows.
 
+**Link** (`POST /issues/:id/github`, MCP `link_github_issue`) is import's counterpart: it joins an issue this
+workspace ALREADY holds to an issue that already exists on GitHub. Until it existed, `github` could only be
+acquired at birth — an issue filed here could never name the GitHub issue it was about, while the detail screen
+happily offered to detach a link it had no way to make.
+
+The link records WHO the two records are and nothing else: no `syncedAt`, no comment thread, and not one
+character of the local title or description. That is deliberate. A watermark would claim we had already seen
+this remote, so the first Sync would be a no-op and GitHub's title, description, labels and comments would land
+later, unannounced, on the first unrelated remote edit. Left unset, the link is **inert until someone pulls** —
+and that pull is the visible moment the ownership split above takes effect. Three things are refused, each of
+them a way the join would otherwise stop being one: an issue that already carries a GitHub half (409 — detach
+first), a remote identity another issue in this workspace already holds (409, naming that issue), and a pull
+request (400 — GitHub serves those through the issues API too). Sync direction defaults to pull-on / push-off,
+the same constant import uses. The web entry is the issue detail's **GitHub** property row, which stands up
+empty for a writer because it is the only place the first link can be made.
+
 **Provenance is recorded twice, on purpose.** `record.github` is the LIVE link — sync direction, remote state,
 the thread — and a member can detach it (`DELETE /issues/:id/github`). Where the issue *came from* is not that
 block: it is the durable first history entry (`github_imported`) plus the `issue.created` fact, and both carry
 the **addressable** origin — `repository`, `number`, `url`, and `host` when the copy came from a GitHub
 Enterprise server. `owner/name#42` alone is not an address on GHE, so a consumer that reconstructs a
 github.com URL from it sends people to the wrong server; carrying the url is what lets the web link the
-provenance (imported entry, detach entry, the "Imported from" property row) without reading the live block.
-Detaching therefore removes the sync, never the answer to "where did this issue come from".
+provenance (imported entry, detach entry, the "GitHub" property row) without reading the live block.
+Detaching therefore removes the sync, never the answer to "where did this issue come from". The property row
+says "GitHub" rather than "Imported from" for the same reason a link can now be made after the fact: the live
+block cannot say which of the two ways the issue acquired it, and only the history can.
 
 **Pull** (`POST /issues/:id/sync`, or `POST /issues/sync` for a whole repo) is one incremental `since=` list
 call watermarked by the oldest copy's last-seen remote timestamp, then per-issue apply. Two properties matter:

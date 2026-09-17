@@ -1622,10 +1622,23 @@ export class SandboxSessionService {
       );
     });
     const env = token !== undefined ? gitAuthEnv(token, repo.git) : {};
+    // WHAT THE CREDENTIAL LOOKED LIKE, on the error and never in the clear. git's own message for a failed
+    // clone is `could not read Username`, which is what it says whether the credential was absent, scoped to
+    // the wrong prefix, or presented under a scheme the endpoint refuses — three different fixes behind one
+    // sentence. It cost a full session to tell those apart from outside, so the refusal now carries the shape:
+    // whether a token was resolved at all, and which config keys were handed to git. Never the value.
+    const credential = {
+      credentialResolved: token !== undefined,
+      gitConfigKeys: Object.keys(env).filter((k) => k.startsWith("GIT_CONFIG")),
+      ...(env.GIT_CONFIG_KEY_0 !== undefined ? { credentialScope: env.GIT_CONFIG_KEY_0 } : {}),
+      ...(env.GIT_CONFIG_VALUE_0 !== undefined
+        ? { credentialScheme: env.GIT_CONFIG_VALUE_0.replace(/^Authorization: (\S+).*$/, "$1") }
+        : {}),
+    };
     const fail = (step: string, result: { stdout: string; stderr: string }): never => {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
-        { repo: repo.git, step },
+        { repo: repo.git, step, ...credential },
         `Could not ${step} '${repo.git}': ${clamp(result.stderr || result.stdout)}`,
       );
     };
