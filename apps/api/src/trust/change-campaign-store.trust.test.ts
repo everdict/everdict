@@ -29,7 +29,10 @@ describe.skipIf(!TRUST_PG_ENABLED)("TRUST — the change campaign's conditional 
     tenant: "acme",
     issueId: `issue-${id}`,
     service: { repository: "acme/widget" },
-    criteria: [{ id: "tests", statement: "the suite is green" }],
+    criteria: [
+      { id: "tests", statement: "the suite is green", judges: { kind: "quality" } },
+      { id: "it-works", statement: "the request is answered", judges: { kind: "requirement", issueId: `issue-${id}` } },
+    ],
     rounds: [],
     state: "open",
     createdBy: "agent:builder",

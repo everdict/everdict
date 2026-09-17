@@ -1,8 +1,10 @@
 import {
   type ChangeCampaignClose,
   type ChangeCampaignRecord,
+  type ChangeCriterion,
   type ChangeRound,
   NotFoundError,
+  type UnmetReason,
 } from "@everdict/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ChangeCampaignStore } from "../ports/change-campaign-store.js";
@@ -52,9 +54,11 @@ class FakeChangeCampaignStore implements ChangeCampaignStore {
 // so these tests are about the two things a thin service still gets wrong: letting a refusal through, and
 // reporting a write that lost its race.
 
-const criteria = [
-  { id: "tests", statement: "the suite is green" },
-  { id: "device", statement: "verified on a device" },
+// ONE OF EACH KIND. A fixture whose criteria all judge the same thing exercises one branch and reports the
+// other as covered — and the drift worth catching here is a requirement that quietly reads as a quality gate.
+const criteria: ChangeCriterion[] = [
+  { id: "tests", statement: "the suite is green", judges: { kind: "quality" } },
+  { id: "device", statement: "verified on a device", judges: { kind: "requirement", issueId: "i-req" } },
 ];
 // `observed` must point at a measurement now, so the helper carries the gate run every round declares.
 const GATE = { id: "gates", command: "pnpm test", exitCode: 0, metrics: [{ name: "tests.passed", value: 4027 }] };
@@ -64,11 +68,12 @@ const met = (id: string) => ({
   how: "observed" as const,
   gateRunIds: [GATE.id],
 });
-const notRun = (id: string) => ({
+const notRun = (id: string, reason: UnmetReason = "needs_environment") => ({
   criterionId: id,
   answer: "not_run" as const,
   how: "asserted" as const,
   gateRunIds: [],
+  reason,
 });
 const changes = (sha: string) => [{ repository: "acme/widget", commits: [{ sha }] }];
 
@@ -413,8 +418,114 @@ describe("ChangeCampaignService — one open campaign per issue, and the chain t
       svc.logRound("acme", "agent:builder", c.id, {
         hypothesis: "green, trust me",
         changes: changes("dd11111"),
-        answers: [{ criterionId: "tests", answer: "met", how: "observed", gateRunIds: [] }, notRun("device")],
+        answers: [
+          { criterionId: "tests", answer: "met" as const, how: "observed" as const, gateRunIds: [] },
+          notRun("device"),
+        ],
       }),
     ).rejects.toThrow(/names no gate run/);
+  });
+});
+
+// ── WHAT THE CAMPAIGN IS FOR, AND HOW MUCH OF IT IS DONE ─────────────────────────────────────────────
+// A request is satisfied in pieces. Until a criterion said which piece it answers, "two of the five shipped"
+// was a sentence in a report and the record could not be asked.
+
+describe("ChangeCampaignService — requirements", () => {
+  let store: FakeChangeCampaignStore;
+  let svc: ChangeCampaignService;
+  let seq = 0;
+
+  beforeEach(() => {
+    store = new FakeChangeCampaignStore();
+    seq = 0;
+    svc = new ChangeCampaignService({
+      store,
+      issues,
+      newId: () => `cc-${++seq}`,
+      now: () => "2026-09-17T00:00:00.000Z",
+    });
+  });
+
+  // The same join key the campaign's own issue has. A criterion pinned to `ENG-12` is invisible to every
+  // reader that asks by id, and the failure renders exactly like "this requirement has no criterion".
+  it("stores the id a requirement pin resolves to, not the spelling it was written with", async () => {
+    const campaign = await svc.open("acme", "agent:builder", {
+      issueId: "i-9",
+      service: { repository: "acme/widget" },
+      criteria: [
+        { id: "r", statement: "the photo opens", judges: { kind: "requirement", issueId: "ENG-12" } },
+        { id: "q", statement: "the suite is no worse", judges: { kind: "quality" } },
+      ],
+    });
+
+    expect(campaign.criteria[0]?.judges).toEqual({ kind: "requirement", issueId: "i-1" });
+  });
+
+  it("refuses a requirement the workspace does not have, instead of counting an issue nobody can open", async () => {
+    await expect(
+      svc.open("acme", "agent:builder", {
+        issueId: "i-9",
+        service: { repository: "acme/widget" },
+        criteria: [{ id: "r", statement: "?", judges: { kind: "requirement", issueId: "NOPE-1" } }],
+      }),
+    ).rejects.toThrow(/issue 'NOPE-1' not found/);
+    expect(await store.list("acme", {})).toHaveLength(0);
+  });
+
+  // A campaign made only of quality gates passes without anyone saying what was asked for, and its count
+  // reads 0 of 0 forever.
+  it("refuses a campaign whose criteria never name a request", async () => {
+    await expect(
+      svc.open("acme", "agent:builder", {
+        issueId: "i-9",
+        service: { repository: "acme/widget" },
+        criteria: [{ id: "q", statement: "the suite is green", judges: { kind: "quality" } }],
+      }),
+    ).rejects.toThrow(/no criterion names a requirement/);
+  });
+
+  // The account the maintainer asked for: how many were asked, how many settled, and why each of the rest
+  // did not — as values a reader can count, off the record rather than out of a prose field.
+  it("reports how much of the request settled, and what is blocking the rest", async () => {
+    const campaign = await svc.open("acme", "agent:builder", {
+      issueId: "i-9",
+      service: { repository: "acme/widget" },
+      criteria: [
+        { id: "r1", statement: "place add works", judges: { kind: "requirement", issueId: "i-1" } },
+        { id: "r2", statement: "the photo opens", judges: { kind: "requirement", issueId: "i-2" } },
+        { id: "q", statement: "the suite is no worse", judges: { kind: "quality" } },
+      ],
+    });
+
+    await svc.logRound("acme", "agent:builder", campaign.id, {
+      hypothesis: "two of them are the same component",
+      changes: changes("aaaaaaa"),
+      gateRuns: [GATE],
+      answers: [notRun("r1", "needs_information"), met("r2"), met("q")],
+    });
+
+    const view = await svc.get("acme", campaign.id);
+    expect(view.requirements.total).toBe(2);
+    expect(view.requirements.settled).toBe(1);
+    expect(view.requirements.unsettled).toEqual([
+      {
+        issueId: "i-1",
+        criterionIds: ["r1"],
+        blockers: [{ criterionId: "r1", answer: "not_run", reason: "needs_information" }],
+      },
+    ]);
+  });
+
+  // "Opened, not attempted" is a real state and it is not "nothing was asked for".
+  it("settles nothing before the first round, without pretending the request is empty", async () => {
+    const campaign = await svc.open("acme", "agent:builder", {
+      issueId: "i-9",
+      service: { repository: "acme/widget" },
+      criteria: [{ id: "r1", statement: "place add works", judges: { kind: "requirement", issueId: "i-1" } }],
+    });
+
+    const view = await svc.get("acme", campaign.id);
+    expect(view.requirements).toMatchObject({ total: 1, settled: 0 });
   });
 });

@@ -6037,6 +6037,18 @@
       "observed": "관측",
       "asserted": "주장"
     },
+    "unmetReason": {
+      "attempted_and_failed": "해봤으나 못 미침",
+      "needs_information": "정보가 없어 판정 불가",
+      "needs_environment": "환경이 없어 판정 불가",
+      "blocked_elsewhere": "바깥이 막고 있음",
+      "descoped": "이번 캠페인에서 제외"
+    },
+    "judges": {
+      "requirement": "요구",
+      "quality": "품질",
+      "unclassified": "미분류"
+    },
     "grade": {
       "change": "변경",
       "evaluated": "평가"
@@ -6062,6 +6074,11 @@
     "knowledgeCount": "지식 {count}건",
     "knowledgeDeclined": "지식 없음 — 사유: {reason}",
     "unstated": "(미기재)",
-    "loadError": "변경 캠페인을 읽지 못했습니다: {error}"
+    "loadError": "변경 캠페인을 읽지 못했습니다: {error}",
+    "requirements": "요청한 것",
+    "requirementCount": "{total}개 중 {settled}개 해결 · {unsettled}개 남음",
+    "requirementsNone": "이 캠페인은 아직 아무 요구도 해결하지 못했습니다.",
+    "unclassifiedNote": "⚠️ 기준 {count}개는 무엇을 판정하는지 기록되기 전에 쓰여 이 수에 들어 있지 않습니다.",
+    "blockedBy": "{criterion}: {reason}"
   }
 }

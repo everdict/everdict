@@ -1,24 +1,39 @@
-import type { ChangeCampaignRecord, ChangeJudgementAnswer, ChangeRound } from "@everdict/contracts";
+import type {
+  ChangeCampaignRecord,
+  ChangeCriterion,
+  ChangeJudgementAnswer,
+  ChangeRound,
+  UnmetReason,
+} from "@everdict/contracts";
 import { describe, expect, it } from "vitest";
 import {
   assertAnswersCoverCriteria,
   assertClosable,
   assertCommitsUnclaimed,
+  assertDeclaresARequirement,
   assertObservationsMeasured,
   deriveRoundOutcome,
   summariseAnswers,
+  summariseRequirements,
 } from "./change-campaign.js";
 
-const criteria = [
-  { id: "tests", statement: "the suite is green" },
-  { id: "device", statement: "the gesture works on a real device" },
+// ONE OF EACH KIND, deliberately. A fixture set where every criterion judges the same thing exercises one
+// branch and reports the other as covered — the drift these tests exist to catch is exactly a requirement
+// that quietly reads as a quality gate.
+const criteria: ChangeCriterion[] = [
+  { id: "tests", statement: "the suite is green", judges: { kind: "quality" } },
+  { id: "device", statement: "the gesture works on a real device", judges: { kind: "requirement", issueId: "i-9" } },
 ];
 const answer = (
   criterionId: string,
   answerValue: ChangeJudgementAnswer["answer"],
   how: ChangeJudgementAnswer["how"] = "observed",
   gateRunIds: string[] = [],
-): ChangeJudgementAnswer => ({ criterionId, answer: answerValue, how, gateRunIds });
+  reason: UnmetReason = "attempted_and_failed",
+): ChangeJudgementAnswer =>
+  answerValue === "met"
+    ? { criterionId, answer: "met", how, gateRunIds }
+    : { criterionId, answer: answerValue, how, gateRunIds, reason };
 
 const gateRun = (id: string, metrics: { name: string; value: number }[] = [{ name: "passed", value: 1 }]) => ({
   id,
@@ -259,5 +274,125 @@ describe("change campaign — a request can be satisfied in pieces", () => {
         remaining: [],
       }),
     ).toThrow(/belong to a partial adoption/);
+  });
+});
+
+// ── THE REQUIREMENT AXIS ─────────────────────────────────────────────────────────────────────────────
+// The account a request owes its reader: how many things were asked for, how many shipped, and why each of
+// the rest did not. Before `judges` existed this lived in a prose `detail` field, so a campaign could close
+// with requests still owed and no query could find out.
+
+const requirement = (id: string, issueId: string): ChangeCriterion => ({
+  id,
+  statement: `${id} works`,
+  judges: { kind: "requirement", issueId },
+});
+const quality = (id: string): ChangeCriterion => ({ id, statement: `${id} holds`, judges: { kind: "quality" } });
+
+describe("change campaign — a campaign declares what it is for", () => {
+  it("refuses a campaign made only of quality gates", () => {
+    expect(() => assertDeclaresARequirement([quality("tests"), quality("lint")])).toThrow(
+      /no criterion names a requirement/,
+    );
+  });
+
+  it("accepts one whose single requirement is the request itself", () => {
+    expect(() => assertDeclaresARequirement([requirement("it-works", "i-1"), quality("tests")])).not.toThrow();
+  });
+});
+
+describe("change campaign — the requirement rollup", () => {
+  const five: ChangeCriterion[] = [
+    requirement("r1", "i-add-place"),
+    requirement("r2", "i-locked-row"),
+    requirement("r3", "i-rename-path"),
+    requirement("r4", "i-photo"),
+    requirement("r5", "i-done-button"),
+    quality("gates"),
+    quality("counterexamples"),
+  ];
+
+  // The case this whole field exists for: two shipped, three did not, and the three did not fail alike.
+  it("counts what was asked for and what settled, without the quality gates padding either side", () => {
+    const rollup = summariseRequirements(five, [
+      answer("r1", "not_run", "asserted", [], "needs_information"),
+      answer("r2", "met"),
+      answer("r3", "not_run", "asserted", [], "blocked_elsewhere"),
+      answer("r4", "met"),
+      answer("r5", "not_run", "asserted", [], "needs_environment"),
+      answer("gates", "met"),
+      answer("counterexamples", "met"),
+    ]);
+
+    expect(rollup.total).toBe(5);
+    expect(rollup.settled).toBe(2);
+    expect(rollup.unsettled.map((u) => u.issueId)).toEqual(["i-add-place", "i-rename-path", "i-done-button"]);
+  });
+
+  // "Why not" is the half a reader acts on, and the three reasons above call for three different next moves.
+  it("keeps each unmet requirement's reason, so the next action is readable per requirement", () => {
+    const rollup = summariseRequirements(five, [
+      answer("r1", "not_run", "asserted", [], "needs_information"),
+      answer("r2", "met"),
+      answer("r3", "not_run", "asserted", [], "blocked_elsewhere"),
+      answer("r4", "met"),
+      answer("r5", "not_run", "asserted", [], "needs_environment"),
+      answer("gates", "met"),
+      answer("counterexamples", "met"),
+    ]);
+
+    expect(rollup.unsettled.flatMap((u) => u.blockers.map((b) => b.reason))).toEqual([
+      "needs_information",
+      "blocked_elsewhere",
+      "needs_environment",
+    ]);
+  });
+
+  // A requirement that took two gates to settle is settled only when both came back — the round's own
+  // arithmetic, one level down.
+  it("settles a requirement only when every criterion pointed at it came back met", () => {
+    const pair = [requirement("a", "i-1"), requirement("b", "i-1")];
+    expect(summariseRequirements(pair, [answer("a", "met"), answer("b", "met")]).settled).toBe(1);
+
+    const half = summariseRequirements(pair, [answer("a", "met"), answer("b", "not_met")]);
+    expect(half.settled).toBe(0);
+    expect(half.unsettled[0]?.criterionIds).toEqual(["a", "b"]);
+    expect(half.unsettled[0]?.blockers.map((b) => b.criterionId)).toEqual(["b"]);
+  });
+
+  // Two criteria unmet for two different reasons is two different next actions. Folding them into a
+  // first-wins summary is how the second one disappears.
+  it("lists every blocker rather than the first one", () => {
+    const pair = [requirement("a", "i-1"), requirement("b", "i-1")];
+    const rollup = summariseRequirements(pair, [
+      answer("a", "not_met", "asserted", [], "attempted_and_failed"),
+      answer("b", "not_run", "asserted", [], "needs_environment"),
+    ]);
+    expect(rollup.unsettled[0]?.blockers).toEqual([
+      { criterionId: "a", answer: "not_met", reason: "attempted_and_failed" },
+      { criterionId: "b", answer: "not_run", reason: "needs_environment" },
+    ]);
+  });
+
+  // ⚠️ Criteria that predate the distinction. Counted apart and never as either kind — folding them into
+  // `quality` would report an unmet REQUEST as a passed gate (protocol L2: unknown is a third value).
+  it("counts pre-migration criteria apart instead of guessing which kind they were", () => {
+    const legacy: ChangeCriterion[] = [
+      requirement("r1", "i-1"),
+      { id: "old", statement: "written before judges existed", judges: { kind: "unclassified" } },
+    ];
+    const rollup = summariseRequirements(legacy, [answer("r1", "met"), answer("old", "met")]);
+
+    expect(rollup.total).toBe(1);
+    expect(rollup.settled).toBe(1);
+    expect(rollup.unclassifiedCriteria).toBe(1);
+  });
+
+  // "Opened, not attempted" is not "nothing was asked for".
+  it("settles nothing for a campaign that has no rounds yet", () => {
+    const rollup = summariseRequirements(five, []);
+    expect(rollup.total).toBe(5);
+    expect(rollup.settled).toBe(0);
+    expect(rollup.unsettled).toHaveLength(5);
   });
 });

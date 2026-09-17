@@ -3,7 +3,7 @@ kind: spec
 title: "Every code change is a campaign — one lineage from the request to what shipped and what it taught, enforced by the plugin"
 status: accepted
 updated: 2026-09-16
-anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/contracts/src/knowledge/node-type.ts, packages/contracts/src/records/tracker.ts, plugin/.claude-plugin/plugin.json, plugin/hooks/hooks.json]
+anchors: [packages/contracts/src/records/evolution-campaign.ts, packages/contracts/src/records/change-campaign.ts, packages/domain/src/evolution/change-campaign.ts, packages/contracts/src/knowledge/node-type.ts, packages/contracts/src/records/tracker.ts, plugin/.claude-plugin/plugin.json, plugin/hooks/hooks.json]
 ---
 # Every code change is a campaign — one lineage from the request to what shipped and what it taught
 
@@ -236,12 +236,72 @@ itself:
 That is the *observed vs asserted* split this spec asked for, already built: **a fact is what you can point
 at; everything else is a hypothesis, and the type refuses to let it claim otherwise.**
 
-What the platform does NOT yet enforce, and what the plugin therefore asks for (until the `change` grade
-carries it in a field):
+The `change` grade now carries these in fields, and they are enforced at the door rather than asked for:
 
-- **criteria declared before the work**, not assembled from what happened to pass;
+- **criteria declared before the work**, not assembled from what happened to pass — the list is immutable
+  once the campaign is open;
 - **every declared criterion answered** — `met` · `not met` · `not run`, with `not run` never counting as met;
-- **an empty criteria list is not a pass**.
+- **an empty criteria list is not a pass**;
+- **every criterion says what it judges** (`judges`) and **every unmet answer says why** (`reason`) — the two
+  fields below.
+
+### A criterion says what it judges, so the request can be counted
+
+*Maintainer, 2026-09-17, after a campaign that judged five feedback reports under one criterion.* A
+campaign's criteria are two different things wearing one name: some answer a REQUEST the issue made ("the
+photo opens"), others judge the WORK ("the suite is no worse"). Only the first kind can be counted against
+"how much of this is done", and while the distinction lived in the reader's head, so did the count — "three
+of the five shipped" was prose in a `detail` field that no query could reach.
+
+    judges: { kind: "requirement", issueId }   // answers one thing that was asked for
+          | { kind: "quality" }                // judges the change itself
+          | { kind: "unclassified" }           // ⚠️ migration only — see below
+
+`judges` is required, and a union rather than an optional `issueId`, because an optional pin makes "this
+criterion answers no request" and "the author did not say" the same value — the defect the protocol laws
+name. **At least one criterion must be a requirement**, or a campaign made entirely of quality gates passes
+without anyone saying what was asked for and its count reads 0 of 0 forever. When the request is atomic,
+that criterion names the campaign's own issue.
+
+Requirement pins are **resolved at open** like the campaign's own `issueId`: what is stored is the id the
+resolution produced, and a requirement the workspace does not have is a refusal rather than a count over
+issues nobody can open.
+
+The reading this buys is derived on every campaign read, never stored — a stored total would be a second
+opinion about the same answers:
+
+    requirements: { total, settled, unsettled: [{ issueId, criterionIds, blockers: [{criterionId, answer, reason}] }],
+                    unclassifiedCriteria }
+
+`unclassified` exists for criteria written before the distinction did (migration `0219`). It is deliberately
+not a synonym for either real kind: stamping them `quality` would report an unmet REQUEST as a passed gate,
+and `requirement` would invent a request nobody made. The rollup counts them apart and the campaign page says
+the count is incomplete — unknown is a third value (protocol L2), not a default. The request schema rejects
+it, so nothing new is born unclassified.
+
+**Scope a criterion to what its round can finish.** The campaign that prompted this declared "all five
+reports are diagnosed" as one criterion, could only diagnose three, answered `not_met`, and took the whole
+round down with it — two shipped fixes recorded inside a `rejected` round, and the three that were blocked
+each blocked differently with nothing saying so. What a round cannot finish belongs to the next round, to a
+separate issue, or to `remaining` at a partial close. Not to this round's gate.
+
+### An unmet answer says why, from a closed vocabulary
+
+"Which ones failed, and why" is the half a reader acts on, and `not_met` alone collapses answers that call
+for completely different next moves:
+
+| `reason` | what it means | what it asks of the reader |
+|---|---|---|
+| `attempted_and_failed` | the work ran and fell short | do the work again |
+| `needs_information` | a repro path, a log, the reporter's answer | go and get it |
+| `needs_environment` | a device, a staging service, real hardware | go and get it |
+| `blocked_elsewhere` | another team, repository or product decision | escalate |
+| `descoped` | dropped from THIS campaign | nothing — but it is still not met |
+
+Only the first means "try again". A closed list because the point is to COUNT them: free text cannot answer
+"how many of our unmet criteria are waiting on something we could just go and fetch". The answer is a union
+on `answer`, so an unmet criterion with no reason is unrepresentable rather than merely discouraged — and
+`met` carries no reason, because a reason on a met criterion is a second verdict with no way to choose.
 
 ### Independence is available, and it is a different call
 

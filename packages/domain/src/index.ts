@@ -526,10 +526,12 @@ export {
 export {
   assertAnswersCoverCriteria,
   assertClosable,
+  assertDeclaresARequirement,
   assertObservationsMeasured,
   assertCommitsUnclaimed,
   deriveRoundOutcome,
   summariseAnswers,
+  summariseRequirements,
 } from "./evolution/change-campaign.js";
 export { type SeedEvidence, seedLeakOf } from "./evolution/seed-leak.js";
 export { type HarnessSlot, type JudgedDiagnosis, attributeCase, diagnosesOf } from "./evolution/diagnosis.js";

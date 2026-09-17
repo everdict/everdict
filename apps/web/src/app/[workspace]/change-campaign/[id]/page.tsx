@@ -92,12 +92,64 @@ export default async function ChangeCampaignPage({
         }
       />
 
+      {/* THE COUNT, first — a request is satisfied in pieces, and "two of the five" is the sentence a person
+          opens this page to read. It is derived by the control plane from the criteria and the latest round's
+          answers, so this section can never disagree with the answers printed below it. */}
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium">{t('requirements')}</h2>
+        <p className="text-sm">
+          {t('requirementCount', {
+            total: campaign.requirements.total,
+            settled: campaign.requirements.settled,
+            unsettled: campaign.requirements.unsettled.length,
+          })}
+        </p>
+        {campaign.requirements.unsettled.length > 0 ? (
+          <ul className="space-y-1 text-sm">
+            {campaign.requirements.unsettled.map((requirement) => (
+              <li
+                key={requirement.issueId}
+                className="flex flex-wrap items-baseline gap-2"
+              >
+                {/* Each unmet requirement is its own issue, so "what is still owed" is a place to go rather
+                    than a line to read. */}
+                <Link href={issueHref(workspace, requirement.issueId)}>{requirement.issueId}</Link>
+                {requirement.blockers.map((blocker) => (
+                  <span key={blocker.criterionId} className="text-xs text-muted-foreground">
+                    {t('blockedBy', {
+                      criterion: blocker.criterionId,
+                      reason: words(`unmetReason.${blocker.reason}`),
+                    })}
+                  </span>
+                ))}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {/* ⚠️ An incomplete count says so. Criteria written before the record held what they judge cannot be
+            classified without guessing, and a guess here would report an unmet REQUEST as a passed gate. */}
+        {campaign.requirements.unclassifiedCriteria > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {t('unclassifiedNote', { count: campaign.requirements.unclassifiedCriteria })}
+          </p>
+        ) : null}
+      </section>
+
       <section className="space-y-2">
         <h2 className="text-sm font-medium">{t('criteria')}</h2>
         <ul className="space-y-1 text-sm">
           {campaign.criteria.map((criterion) => (
-            <li key={criterion.id}>
-              <span className="text-muted-foreground">{criterion.id}</span> — {criterion.statement}
+            <li key={criterion.id} className="flex flex-wrap items-baseline gap-2">
+              <Badge tone={criterion.judges.kind === 'requirement' ? 'info' : 'outline'}>
+                {words(`judges.${criterion.judges.kind}`)}
+              </Badge>
+              <span className="text-muted-foreground">{criterion.id}</span>
+              <span>— {criterion.statement}</span>
+              {criterion.judges.kind === 'requirement' ? (
+                <Link href={issueHref(workspace, criterion.judges.issueId)}>
+                  {criterion.judges.issueId}
+                </Link>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -133,6 +185,13 @@ export default async function ChangeCampaignPage({
                     <span className="text-xs text-muted-foreground">
                       {words(`how.${answer.how}`)}
                     </span>
+                    {/* "Why not" is the half a reader acts on: only `attempted_and_failed` means "do the work
+                        again", the rest name something to go and get. */}
+                    {answer.answer !== 'met' ? (
+                      <span className="text-xs text-muted-foreground">
+                        {words(`unmetReason.${answer.reason}`)}
+                      </span>
+                    ) : null}
                     {/* An observation must point at a measurement — so the page shows the numbers, not the word. */}
                     {answer.gateRunIds.map((runId) => {
                       const run = runs.get(runId)

@@ -32,12 +32,18 @@ function build() {
 }
 
 const CRITERIA = [
-  { id: "tests", statement: "the suite is green" },
-  { id: "device", statement: "verified on a device" },
+  { id: "tests", statement: "the suite is green", judges: { kind: "quality" } },
+  { id: "device", statement: "verified on a device", judges: { kind: "requirement", issueId: "i-1" } },
 ];
 const GATE = { id: "tests", command: "pnpm test", exitCode: 0, metrics: [{ name: "tests.passed", value: 4027 }] };
 const met = (id: string) => ({ criterionId: id, answer: "met", how: "observed", gateRunIds: ["tests"] });
-const notRun = (id: string) => ({ criterionId: id, answer: "not_run", how: "asserted", gateRunIds: [] });
+const notRun = (id: string) => ({
+  criterionId: id,
+  answer: "not_run",
+  how: "asserted",
+  gateRunIds: [],
+  reason: "needs_environment",
+});
 
 async function open(app: ReturnType<typeof build>, issueId = "i-1", over: Record<string, unknown> = {}) {
   const res = await app.inject({
@@ -173,5 +179,73 @@ describe("change campaigns over HTTP", () => {
     const res = await app.inject({ method: "GET", url: "/change-campaigns", headers: H });
     expect(res.statusCode).toBe(404);
     expect(res.json().message).toMatch(/not configured/);
+  });
+
+  // ── THE DOOR HOLDS THE TWO NEW SHAPES ──────────────────────────────────────────────────────────────
+  // Both are unrepresentable in TypeScript, so the compiler catches them for our own callers. Over HTTP the
+  // payload is JSON and nothing has typed it — the parse is the only thing standing there.
+
+  it("refuses an unmet answer that names no reason, so `why not` cannot be left to prose", async () => {
+    const app = build();
+    const opened = await open(app);
+    const id = opened.json<{ id: string }>().id;
+
+    const res = await app.inject({
+      method: "POST",
+      url: `/change-campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "h",
+        changes: [{ repository: "acme/widget", commits: [{ sha: "aaaaaaa" }] }],
+        gateRuns: [GATE],
+        answers: [met("tests"), { criterionId: "device", answer: "not_run", how: "asserted", gateRunIds: [] }],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  // `unclassified` exists so the rollup can say "these predate the distinction" about STORED criteria. A
+  // campaign being opened right now cannot claim it: nothing new is born unclassified.
+  it("refuses a criterion declared unclassified, which is a word about history only", async () => {
+    const app = build();
+    const res = await open(app, "i-2", {
+      criteria: [{ id: "old", statement: "?", judges: { kind: "unclassified" } }],
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  // A campaign made only of quality gates passes without anyone saying what was asked for, and its count
+  // reads 0 of 0 forever.
+  it("refuses a campaign whose criteria never name a request", async () => {
+    const app = build();
+    const res = await open(app, "i-3", {
+      criteria: [{ id: "tests", statement: "the suite is green", judges: { kind: "quality" } }],
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().message).toMatch(/no criterion names a requirement/);
+  });
+
+  // The account the request is owed, read off the HTTP surface rather than out of a report.
+  it("reports how much of the request settled, and what blocks the rest", async () => {
+    const app = build();
+    const opened = await open(app);
+    const id = opened.json<{ id: string }>().id;
+    await app.inject({
+      method: "POST",
+      url: `/change-campaigns/${id}/rounds`,
+      headers: H,
+      payload: {
+        hypothesis: "h",
+        changes: [{ repository: "acme/widget", commits: [{ sha: "bbbbbbb" }] }],
+        gateRuns: [GATE],
+        answers: [met("tests"), notRun("device")],
+      },
+    });
+
+    const read = await app.inject({ method: "GET", url: `/change-campaigns/${id}`, headers: H });
+    expect(read.json().requirements).toMatchObject({ total: 1, settled: 0, unclassifiedCriteria: 0 });
   });
 });

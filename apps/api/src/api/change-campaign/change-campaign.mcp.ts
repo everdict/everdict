@@ -1,12 +1,8 @@
-import {
-  ChangeCriterionSchema,
-  ChangeJudgementAnswerSchema,
-  ChangeSetEntrySchema,
-  GateRunSchema,
-} from "@everdict/contracts";
+import { ChangeJudgementAnswerSchema, ChangeSetEntrySchema, GateRunSchema } from "@everdict/contracts";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { type McpToolContext, ok, run } from "../mcp-context.js";
+import { DeclarableCriterionSchema } from "./request/change-campaign-requests.js";
 
 // The `change` grade's MCP half — the same service functions the routes call (BFF↔MCP parity is structural).
 export function registerChangeCampaignTools(server: McpServer, ctx: McpToolContext): void {
@@ -19,7 +15,7 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
     {
       annotations: { readOnlyHint: false },
       description:
-        "Open the `change` grade of campaign against an issue — the unit every code change belongs to. Name the service being changed and DECLARE THE ACCEPTANCE CRITERIA NOW: a criterion written after the work describes the outcome instead of judging it, and the list is immutable once open. If the change genuinely verifies nothing, say that as a criterion. The evaluated grade (open_campaign, a frozen exam over a harness/agent/environment) is the other grade and is untouched by this one.",
+        'Open the `change` grade of campaign against an issue — the unit every code change belongs to. Name the service being changed and DECLARE THE ACCEPTANCE CRITERIA NOW: a criterion written after the work describes the outcome instead of judging it, and the list is immutable once open. Every criterion says what it JUDGES: `{kind:"requirement", issueId}` answers one thing the request asked for — normally a sub-issue, ONE PER THING ASKED FOR, so "five were asked, two shipped" is a count rather than a sentence in a report; `{kind:"quality"}` judges the change itself (gates, regressions, counterexamples seen red) and is never counted as a requirement. At least one must be a requirement — when the request is atomic, that is the campaign\u2019s own issue. If the request bundles several things, SPLIT IT INTO SUB-ISSUES FIRST (create_issue with parentId) and give each one its own criterion: a criterion that spans several requests can only be answered all-or-nothing, so the ones that did ship disappear into its single not_met. The evaluated grade (open_campaign, a frozen exam over a harness/agent/environment) is the other grade and is untouched by this one.',
       inputSchema: {
         issue_id: z.string().min(1).describe("the request this change serves (id or identifier)"),
         repository: z.string().min(1).max(200).describe("owner/name"),
@@ -28,7 +24,7 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
           .max(200)
           .optional()
           .describe("the subpath inside a monorepo, when the service is one of several"),
-        criteria: z.array(ChangeCriterionSchema).min(1).max(100),
+        criteria: z.array(DeclarableCriterionSchema).min(1).max(100),
         continues: z
           .string()
           .min(1)
@@ -54,7 +50,7 @@ export function registerChangeCampaignTools(server: McpServer, ctx: McpToolConte
     {
       annotations: { readOnlyHint: false },
       description:
-        "Append one attempt — and logging it IS closing it, because you decide when the round is done. What it believed, the change set it produced (each service's commits, and the pull request when there is one), and YOUR answer to every criterion this campaign declared — `met` | `not_met` | `not_run`, each marked `observed` (a command ran; name it) or `asserted` (you read the code and concluded). Carry the repository's gate runs WITH THEIR NUMBERS in `gateRuns`; an `observed` answer must cite one by id, because an observation that names no measurement is an assertion wearing the other word. The round's outcome is DERIVED from the answers and cannot be sent: `not_run` is not `met`. Link the executor checkpoint you published with `checkpoint_id` so the claim's evidence travels with the round. Refused when the answers do not cover the declaration exactly, when a commit is already claimed by another round, or (409) when another round landed while yours was being judged.",
+        "Append one attempt — and logging it IS closing it, because you decide when the round is done. What it believed, the change set it produced (each service's commits, and the pull request when there is one), and YOUR answer to every criterion this campaign declared — `met` | `not_met` | `not_run`, each marked `observed` (a command ran; name it) or `asserted` (you read the code and concluded). Anything other than `met` carries a `reason` from a closed list, because \"why not\" is the half a reader acts on: `attempted_and_failed` (the work ran and fell short — redo it) · `needs_information` (a repro path, a log, the reporter\u2019s answer) · `needs_environment` (a device, a staging service) · `blocked_elsewhere` (another team, repo or product call) · `descoped` (dropped from THIS campaign). Only the first means \"try again\"; the rest name something to go and get. Carry the repository's gate runs WITH THEIR NUMBERS in `gateRuns`; an `observed` answer must cite one by id, because an observation that names no measurement is an assertion wearing the other word. The round's outcome is DERIVED from the answers and cannot be sent: `not_run` is not `met`. Link the executor checkpoint you published with `checkpoint_id` so the claim's evidence travels with the round. Refused when the answers do not cover the declaration exactly, when a commit is already claimed by another round, or (409) when another round landed while yours was being judged.",
       inputSchema: {
         id: z.string().min(1),
         hypothesis: z.string().min(1).max(2000),

@@ -11,11 +11,47 @@ import { z } from "zod";
 // reader of a gate to ask "is there an exam here at all", which is the defect this codebase names in its
 // protocol laws: the right noun consumed as an optional annotation. The trust harness rests on that record.
 
+// ── WHAT A CRITERION JUDGES (maintainer, 2026-09-17) ─────────────────────────────────────────────────
+//
+// A campaign's criteria are two different things wearing one name. Some answer a REQUEST the issue made ("the
+// photo opens"); others judge the WORK ITSELF ("the suite is no worse", "the counterexample was seen red").
+// Only the first kind can be counted against "how much of this request is done", and until the distinction
+// was in the type, it was in the reader's head — so "3 of the 5 things you asked for" lived in a prose
+// `detail` field and no query could reach it.
+//
+// The observed failure: a campaign declared one criterion "all five reports are diagnosed", answered it
+// `not_met`, and the round came back `rejected` — correct by the arithmetic, and useless as an account.
+// Nothing recorded that two of the five HAD shipped, nor that the other three were blocked for three
+// different reasons. The count is the product here: a request is satisfied in pieces, and a record that
+// cannot name the pieces cannot say which ones are still owed.
+//
+// `judges` is REQUIRED, and a discriminated union rather than an optional `issueId`. An optional pin would
+// make "this criterion answers no request" and "the author did not say" the same value, which is the defect
+// this codebase's protocol laws name: the right noun consumed as an optional annotation.
+export const CriterionSubjectSchema = z.discriminatedUnion("kind", [
+  // Answers a REQUEST — normally a sub-issue of the campaign's issue, one per thing that was asked for. The
+  // service resolves it at open (store the id, never the spelling) and refuses one the workspace does not
+  // have, so a criterion cannot be pinned to a requirement nobody can look up.
+  z.object({ kind: z.literal("requirement"), issueId: z.string().min(1) }),
+  // Judges the CHANGE — gates, regressions, counterexamples seen red. Never counted as a requirement, and
+  // saying so out loud is what keeps the requirement count honest in both directions: a campaign cannot pad
+  // it with quality gates, and it cannot hide an unmet request among them.
+  z.object({ kind: z.literal("quality") }),
+  // ⚠️ MIGRATION ONLY, and deliberately not a synonym for either of the above. Criteria written before this
+  // distinction existed cannot be classified without guessing, and guessing them into `quality` would report
+  // an unmet REQUEST as a passed gate. "We do not know" is a third value (protocol L2), so the rollup counts
+  // these separately and says so rather than folding them into an answer. The request schema does NOT accept
+  // it: nothing new may be born unclassified.
+  z.object({ kind: z.literal("unclassified") }),
+]);
+export type CriterionSubject = z.infer<typeof CriterionSubjectSchema>;
+
 // WHAT "DONE" MEANS, DECLARED BEFORE THE WORK. A criterion assembled afterwards from whatever happened to
 // pass is a description of the outcome, not a gate — the frozen-frame discipline applied to a weaker verdict.
 export const ChangeCriterionSchema = z.object({
   id: z.string().min(1).max(100),
   statement: z.string().min(1).max(2000),
+  judges: CriterionSubjectSchema,
 });
 export type ChangeCriterion = z.infer<typeof ChangeCriterionSchema>;
 
@@ -76,9 +112,34 @@ export const CriterionEvidenceKindSchema = z.enum(["observed", "asserted"]);
 export const CriterionAnswerSchema = z.enum(["met", "not_met", "not_run"]);
 export type CriterionAnswer = z.infer<typeof CriterionAnswerSchema>;
 
-export const ChangeJudgementAnswerSchema = z.object({
+// ── WHY IT IS NOT MET, AS A VALUE (maintainer, 2026-09-17) ───────────────────────────────────────────
+//
+// "Which ones failed, and why" is the second half of the account, and it was prose. `not_met` alone collapses
+// answers that call for completely different next actions: an attempt that ran and fell short is work to
+// redo; a criterion nobody could judge without a device or a repro path is not work at all — it is a REQUEST
+// for something the session did not have, and it stays invisible until someone re-reads the detail field.
+//
+// A closed vocabulary because the point is to COUNT them. Free text cannot answer "how many of our unmet
+// criteria are waiting on information we could just go and get".
+export const UnmetReasonSchema = z.enum([
+  // Tried, and the change did not achieve it. The only one that means "do the work again".
+  "attempted_and_failed",
+  // Cannot be judged without something the work does not have: a repro path, a log, the reporter's answer.
+  "needs_information",
+  // Cannot be judged without an environment this session lacks: a device, a staging service, real hardware.
+  "needs_environment",
+  // Depends on a decision or a change outside this service — another team, another repository, a product call.
+  "blocked_elsewhere",
+  // Deliberately dropped from THIS campaign. Still not met; the difference is that nobody is waiting on it.
+  "descoped",
+]);
+export type UnmetReason = z.infer<typeof UnmetReasonSchema>;
+
+// The answer is a union on `answer` so that an unmet criterion WITHOUT a reason is unrepresentable rather
+// than merely discouraged. `met` carries no reason for the same purpose in the other direction: a reason on a
+// met criterion would be a second verdict with no way to choose.
+const answerCommonShape = {
   criterionId: z.string().min(1),
-  answer: CriterionAnswerSchema,
   how: CriterionEvidenceKindSchema,
   // What was run, or what was read. Free text, because the shape of "how" differs per gate and pretending
   // otherwise would push every repository's checks through one schema that fits none of them.
@@ -86,7 +147,13 @@ export const ChangeJudgementAnswerSchema = z.object({
   // WHICH gate runs support this answer (`GateRun.id`). Required by the domain for an `observed` answer: an
   // observation that names no measurement is an assertion wearing the other word.
   gateRunIds: z.array(z.string().min(1)).max(20).default([]),
-});
+};
+
+export const ChangeJudgementAnswerSchema = z.discriminatedUnion("answer", [
+  z.object({ answer: z.literal("met"), ...answerCommonShape }),
+  z.object({ answer: z.literal("not_met"), reason: UnmetReasonSchema, ...answerCommonShape }),
+  z.object({ answer: z.literal("not_run"), reason: UnmetReasonSchema, ...answerCommonShape }),
+]);
 export type ChangeJudgementAnswer = z.infer<typeof ChangeJudgementAnswerSchema>;
 
 // THE JUDGEMENT IS THE AGENT'S, AND IT SAYS WHOSE. `checkpointId` points at the executor's claim
@@ -172,3 +239,41 @@ export const ChangeCampaignRecordSchema = z.object({
   updatedAt: z.string(),
 });
 export type ChangeCampaignRecord = z.infer<typeof ChangeCampaignRecordSchema>;
+
+// ── THE ACCOUNT A REQUEST IS OWED ────────────────────────────────────────────────────────────────────
+//
+// Derived from the criteria and the latest round's answers, never stored: a stored count is a second opinion
+// about the same rounds, and two numbers about one thing means a reader has to decide which one lies. It is
+// in the CONTRACTS because it crosses the wire — the campaign read returns it, and the web mirrors it.
+export const RequirementBlockerSchema = z.object({
+  criterionId: z.string().min(1),
+  answer: z.enum(["not_met", "not_run"]),
+  reason: UnmetReasonSchema,
+});
+export type RequirementBlocker = z.infer<typeof RequirementBlockerSchema>;
+
+export const UnsettledRequirementSchema = z.object({
+  issueId: z.string().min(1),
+  criterionIds: z.array(z.string().min(1)),
+  // EVERY blocker, not the first. Two criteria unmet for two different reasons is two different next
+  // actions, and picking one of them to show is how the other disappears.
+  blockers: z.array(RequirementBlockerSchema),
+});
+export type UnsettledRequirement = z.infer<typeof UnsettledRequirementSchema>;
+
+export const RequirementRollupSchema = z.object({
+  total: z.number().int().min(0),
+  settled: z.number().int().min(0),
+  unsettled: z.array(UnsettledRequirementSchema),
+  // ⚠️ Criteria written before `judges` existed, counted apart and never as either kind. A non-zero here
+  // tells the reader the count is INCOMPLETE, which is the whole difference between an unknown and a wrong
+  // answer (protocol L2).
+  unclassifiedCriteria: z.number().int().min(0),
+});
+export type RequirementRollup = z.infer<typeof RequirementRollupSchema>;
+
+// What a campaign READ returns: the record plus the count it exists to support.
+export const ChangeCampaignViewSchema = ChangeCampaignRecordSchema.extend({
+  requirements: RequirementRollupSchema,
+});
+export type ChangeCampaignView = z.infer<typeof ChangeCampaignViewSchema>;

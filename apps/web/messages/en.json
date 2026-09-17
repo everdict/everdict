@@ -6037,6 +6037,18 @@
       "observed": "observed",
       "asserted": "asserted"
     },
+    "unmetReason": {
+      "attempted_and_failed": "attempted and failed",
+      "needs_information": "needs information",
+      "needs_environment": "needs environment",
+      "blocked_elsewhere": "blocked elsewhere",
+      "descoped": "descoped"
+    },
+    "judges": {
+      "requirement": "requirement",
+      "quality": "quality",
+      "unclassified": "unclassified"
+    },
     "grade": {
       "change": "change",
       "evaluated": "evaluated"
@@ -6062,6 +6074,11 @@
     "knowledgeCount": "{count} knowledge {count, plural, one {entry} other {entries}}",
     "knowledgeDeclined": "no knowledge — declined: {reason}",
     "unstated": "(unstated)",
-    "loadError": "The change campaign could not be read: {error}"
+    "loadError": "The change campaign could not be read: {error}",
+    "requirements": "What was asked for",
+    "requirementCount": "{settled} of {total} settled · {unsettled} still owed",
+    "requirementsNone": "This campaign has settled none of what was asked for yet.",
+    "unclassifiedNote": "⚠️ {count} criteria predate the record of what they judge and are not in this count.",
+    "blockedBy": "{criterion}: {reason}"
   }
 }

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { type ServerDeps, gate, resolvePrincipal, sendError } from "../route-context.js";
+import { type ServerDeps, gate, resolvePrincipal, sendError, zodIssues } from "../route-context.js";
 import { changeCampaignDocs } from "./change-campaign.docs.js";
 import {
   CloseChangeCampaignBodySchema,
@@ -9,6 +9,12 @@ import {
 
 // The `change` grade of campaign (docs/architecture/change-campaign-spec.md) — the HTTP half of the slice;
 // `change-campaign.mcp.ts` is the other, and both call the same service functions.
+//
+// ⚠️ Bodies are `safeParse`d, never `.parse()`d. `sendError` maps an `AppError` to its own status and
+// EVERYTHING ELSE to 500, so a raw `ZodError` thrown out of `.parse()` reports the caller's malformed body as
+// our internal failure — a 500 tells a client to retry and tells us to go looking for an outage, and neither
+// is true. These four handlers did exactly that until a counterexample sent an answer with no `reason` and
+// got `500 INTERNAL` where 400 was the whole point.
 export function registerChangeCampaignRoutes(app: FastifyInstance, deps: ServerDeps): void {
   const service = () => deps.changeCampaignService;
 
@@ -19,7 +25,10 @@ export function registerChangeCampaignRoutes(app: FastifyInstance, deps: ServerD
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:run");
-      const body = OpenChangeCampaignBodySchema.parse(req.body);
+      const parsed = OpenChangeCampaignBodySchema.safeParse(req.body);
+      if (!parsed.success)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+      const body = parsed.data;
       return reply.code(201).send(await svc.open(principal.workspace, principal.subject, body));
     } catch (err) {
       return sendError(reply, err);
@@ -36,7 +45,10 @@ export function registerChangeCampaignRoutes(app: FastifyInstance, deps: ServerD
       if (!principal) return reply;
       try {
         gate(principal, "scorecards:run");
-        const body = LogChangeRoundBodySchema.parse(req.body);
+        const parsed = LogChangeRoundBodySchema.safeParse(req.body);
+        if (!parsed.success)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+        const body = parsed.data;
         const { record, round } = await svc.logRound(principal.workspace, principal.subject, req.params.id, body);
         return reply.code(201).send({ campaign: record, round });
       } catch (err) {
@@ -55,7 +67,10 @@ export function registerChangeCampaignRoutes(app: FastifyInstance, deps: ServerD
       if (!principal) return reply;
       try {
         gate(principal, "scorecards:run");
-        const body = CloseChangeCampaignBodySchema.parse(req.body);
+        const parsed = CloseChangeCampaignBodySchema.safeParse(req.body);
+        if (!parsed.success)
+          return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(parsed.error).join("; ") });
+        const body = parsed.data;
         return reply.send(await svc.close(principal.workspace, principal.subject, req.params.id, body));
       } catch (err) {
         return sendError(reply, err);

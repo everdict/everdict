@@ -2,6 +2,7 @@ import {
   BadRequestError,
   type ChangeCampaignClose,
   type ChangeCampaignRecord,
+  type ChangeCampaignView,
   type ChangeCriterion,
   type ChangeJudgementAnswer,
   type ChangeRound,
@@ -14,8 +15,10 @@ import {
   assertAnswersCoverCriteria,
   assertClosable,
   assertCommitsUnclaimed,
+  assertDeclaresARequirement,
   assertObservationsMeasured,
   deriveRoundOutcome,
+  summariseRequirements,
 } from "@everdict/domain";
 import type { ChangeCampaignStore } from "../ports/change-campaign-store.js";
 import type { IssueRefResolver } from "../ports/issue-ref-resolver.js";
@@ -94,6 +97,22 @@ export class ChangeCampaignService {
           "a campaign continues one that has ENDED — continuing an open campaign would make two of them live for one request.",
         );
     }
+    // EVERY REQUIREMENT PIN IS RESOLVED HERE, for the same reason the campaign's own `issueId` is: what gets
+    // stored is the id the resolution produced, never the spelling the agent typed. A criterion pinned to
+    // `DIGO-12` would be invisible to every reader that asks by id — and the failure is silent, because "this
+    // requirement has no criterion" and "its criterion is filed under another key" render identically.
+    // Resolution also turns a requirement nobody can look up into a REFUSAL, rather than a count over issues
+    // that do not exist.
+    const criteria = await Promise.all(
+      input.criteria.map(async (criterion) => {
+        if (criterion.judges.kind !== "requirement") return criterion;
+        const requirementId = (await this.deps.issues.get(tenant, criterion.judges.issueId)).id;
+        return { ...criterion, judges: { kind: "requirement" as const, issueId: requirementId } };
+      }),
+    );
+    // A campaign made only of quality gates passes without anyone saying what was asked for.
+    assertDeclaresARequirement(criteria);
+
     const at = this.now();
     const record: ChangeCampaignRecord = {
       id: this.newId(),
@@ -101,7 +120,7 @@ export class ChangeCampaignService {
       issueId,
       service: { repository: input.service.repository, ...(input.service.path ? { path: input.service.path } : {}) },
       ...(input.continues !== undefined ? { continues: input.continues } : {}),
-      criteria: input.criteria,
+      criteria,
       rounds: [],
       state: "open",
       createdBy: actor,
@@ -180,12 +199,12 @@ export class ChangeCampaignService {
     return this.require(tenant, id);
   }
 
-  async get(tenant: string, id: string): Promise<ChangeCampaignRecord> {
-    return this.require(tenant, id);
+  async get(tenant: string, id: string): Promise<ChangeCampaignView> {
+    return withRequirements(await this.require(tenant, id));
   }
 
-  async list(tenant: string, options?: { issueId?: string; limit?: number }): Promise<ChangeCampaignRecord[]> {
-    return this.deps.store.list(tenant, options);
+  async list(tenant: string, options?: { issueId?: string; limit?: number }): Promise<ChangeCampaignView[]> {
+    return (await this.deps.store.list(tenant, options)).map(withRequirements);
   }
 
   // Every round this request has already recorded, walking `continues` backwards. Bounded and cycle-safe:
@@ -210,4 +229,16 @@ export class ChangeCampaignService {
     if (!record) throw new NotFoundError("NOT_FOUND", { id }, `change campaign '${id}' not found.`);
     return record;
   }
+}
+
+// THE LATEST ROUND IS THE CURRENT STANDING, and it is the whole standing: `assertAnswersCoverCriteria` makes
+// every round answer every declared criterion, so the newest answer set is a complete picture rather than a
+// delta some reader has to fold over the earlier ones. A campaign with no rounds yet has nothing settled —
+// which is the truthful reading of "opened, not attempted", not an empty count.
+function withRequirements(record: ChangeCampaignRecord): ChangeCampaignView {
+  const latest = record.rounds.at(-1);
+  return {
+    ...record,
+    requirements: summariseRequirements(record.criteria, latest?.judgement.answers ?? []),
+  };
 }

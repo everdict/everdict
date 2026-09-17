@@ -28,7 +28,7 @@ the property to preserve; the tools are secondary.
 | Noun | What it is | Tools |
 |---|---|---|
 | **issue** | the request — what problem, and why it is worth work | `list_issues` · `create_issue` · `update_issue` · `set_issue_status` |
-| **campaign** | the change made under that request, and how it was judged | `list_campaigns` · `open_campaign` (evaluated grade) |
+| **campaign** | the change made under that request, and how it was judged | `open_change_campaign` · `log_change_round` · `close_change_campaign` (code changes) · `open_campaign` (evaluated grade) |
 | **knowledge** | what the work taught, as a durable claim | `list_knowledge_entries` · `create_knowledge_entry` |
 | **task** | work handed to a teammate or to your future self | `list_tasks` · `create_task` |
 
@@ -37,6 +37,32 @@ the property to preserve; the tools are secondary.
 Before touching code: `list_knowledge_entries` and `list_issues`. A convention already decided, a finding
 that already names this trap, an open request that already describes this work — reading them is cheaper
 than rediscovering them, and rediscovering them is what an unrecorded team does forever.
+
+## One issue per thing asked for — the count is the account
+
+A request is satisfied in pieces, and the reader's first question at the end is **"of the N things I asked
+for, how many are done, and why not the rest?"** That number has to be a query, not a sentence in your
+report — so it is made of records:
+
+1. **Split the bundle before you build.** Five feedback reports, three acceptance bullets, a list with "and
+   also" in it — each becomes a sub-issue (`create_issue { parentId }`). `list_issues { parent }` is then
+   the count, and each piece carries its own status and its own reason for being open.
+2. **Split by what the user would accept separately.** Two reports of the same defect are ONE requirement.
+   One report whose fix only removes the confusion — the screen now says why it refuses — is TWO: the
+   explanation you shipped, and the thing they actually wanted. Folding the second into the first is how a
+   half-answer gets counted as a whole one.
+3. **Each requirement gets its own criterion**, `judges: { kind: "requirement", issueId }`. Criteria about
+   the work itself — the gates, no regression, the counterexample seen red — are `{ kind: "quality" }` and
+   are never counted as requirements.
+4. **Scope each criterion to what this round can finish.** A criterion spanning work you cannot complete
+   comes back `not_met` and takes the whole round down with it, hiding everything that did ship. What you
+   cannot finish belongs to the next round, to a separate issue, or to `remaining` at a partial close.
+5. **Every unmet answer names WHY, from a closed list** — `attempted_and_failed` · `needs_information` ·
+   `needs_environment` · `blocked_elsewhere` · `descoped`. Only the first means "do the work again"; the
+   rest name something to go and get, and they are invisible if the reason is prose.
+
+`get_change_campaign` then returns the account derived from those records: `requirements.total`,
+`requirements.settled`, and each unsettled one with its blockers.
 
 ## You are the judge of your own gate — say so in a shape that can be answered
 
@@ -48,9 +74,10 @@ shape, so state it in one:
    happened to pass is a description of the outcome, not a gate.
 2. **Answer every one** at the end — `met` · `not met` · `not run`. **`not run` is never `met`**: a check you
    could not reach is an escalation, not a silence.
-3. **Mark how you know.** *Observed* = a command ran, and you can name it with its exit code. *Asserted* =
-   you read the code and concluded. Both are legitimate; a reader who cannot tell them apart can defend
-   neither.
+3. **Mark how you know.** *Observed* = a command ran, and you can name it with its exit code — and it must
+   cite a gate run carrying NUMBERS, because an observation that names no measurement is an assertion
+   wearing the other word. *Asserted* = you read the code and concluded. Both are legitimate; a reader who
+   cannot tell them apart can defend neither.
 4. **An empty criteria list is not a pass.** A change that verifies nothing says that.
 5. You judge; you do not authorize. Adoption, release and regression watching stay with the platform, and
    your judgement is what they will later confirm or contradict.

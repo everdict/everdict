@@ -7,6 +7,9 @@ import {
   type ChangeRound,
   type ChangeSetEntry,
   type GateRun,
+  type RequirementBlocker,
+  type RequirementRollup,
+  type UnsettledRequirement,
 } from "@everdict/contracts";
 
 // The `change` grade's arithmetic and its refusals (docs/architecture/change-campaign-spec.md). Pure: the
@@ -111,6 +114,79 @@ export function assertCommitsUnclaimed(rounds: ChangeRound[], changes: ChangeSet
 // round is adopted only when every declared criterion came back met, and the answers — not the caller — say so.
 export function deriveRoundOutcome(answers: ChangeJudgementAnswer[]): ChangeRound["outcome"] {
   return answers.every((a) => a.answer === "met") ? "adopted" : "rejected";
+}
+
+// ── A CAMPAIGN DECLARES WHAT IT IS FOR ───────────────────────────────────────────────────────────────
+// At least one criterion must answer a REQUEST. Without this a campaign can be opened entirely out of
+// quality gates — every one of them green, the round adopted, and the request it serves never mentioned. The
+// count would then read 0 of 0 forever, which is the shape that made "how much of this is done" unanswerable
+// in the first place. When the request is atomic the criterion names the campaign's own issue; that is one
+// word and it is the point, because "this campaign answers this request" stops being an inference.
+export function assertDeclaresARequirement(criteria: ChangeCriterion[]): void {
+  if (criteria.some((c) => c.judges.kind === "requirement")) return;
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    { criteria: criteria.length },
+    'no criterion names a requirement — a campaign made only of quality gates can pass without anyone saying what was asked for. Point at least one criterion at the issue it settles (`judges: { kind: "requirement", issueId }`); when the request is atomic, that is the campaign\'s own issue.',
+  );
+}
+
+// ── THE REQUIREMENT AXIS (maintainer, 2026-09-17) ────────────────────────────────────────────────────
+//
+// "Five things were asked for, two shipped, three did not — and here is why each one did not" is the account
+// a request owes its reader, and until criteria said what they judge, it could not be computed from the
+// record. It was prose in a `detail` field, so nothing could count it, compare it across rounds, or notice
+// that a campaign closed with requests still owed.
+//
+// Derived, never stored: the same reason the round's outcome is derived. A stored count would be a second
+// opinion about the answers, and two numbers about one thing means someone has to decide which lies.
+//
+// A requirement may carry SEVERAL criteria (a thing asked for that took two gates to settle). It is settled
+// only when every one of them came back met — the same arithmetic as the round, one level down. And every
+// blocker is listed rather than folded into a first-wins summary: two criteria unmet for two different
+// reasons is two different next actions, and picking one of them to show is how the other disappears.
+// The shapes live in `@everdict/contracts` because they cross the wire; this file owns the ARITHMETIC that
+// produces them. One declaration, one owner — a rollup type spelled here as well would grow its next field
+// in one of the two places (protocol L3: a predicate written twice has already diverged).
+
+export function summariseRequirements(
+  criteria: ChangeCriterion[],
+  answers: ChangeJudgementAnswer[],
+): RequirementRollup {
+  const answerById = new Map(answers.map((a) => [a.criterionId, a]));
+  const byIssue = new Map<string, { criterionIds: string[]; blockers: RequirementBlocker[] }>();
+
+  for (const criterion of criteria) {
+    if (criterion.judges.kind !== "requirement") continue;
+    const issueId = criterion.judges.issueId;
+    const bucket = byIssue.get(issueId) ?? { criterionIds: [], blockers: [] };
+    bucket.criterionIds.push(criterion.id);
+
+    const answer = answerById.get(criterion.id);
+    // An UNANSWERED criterion cannot settle a requirement. `assertAnswersCoverCriteria` refuses that shape at
+    // the write, so this arm is only reachable for a rollup computed over a partial answer set — and even
+    // then the honest reading is "not settled", never "settled by silence".
+    if (answer === undefined)
+      bucket.blockers.push({ criterionId: criterion.id, answer: "not_run", reason: "needs_information" });
+    else if (answer.answer !== "met")
+      bucket.blockers.push({ criterionId: criterion.id, answer: answer.answer, reason: answer.reason });
+
+    byIssue.set(issueId, bucket);
+  }
+
+  const unsettled: UnsettledRequirement[] = [];
+  let settled = 0;
+  for (const [issueId, bucket] of byIssue) {
+    if (bucket.blockers.length === 0) settled += 1;
+    else unsettled.push({ issueId, criterionIds: bucket.criterionIds, blockers: bucket.blockers });
+  }
+
+  return {
+    total: byIssue.size,
+    settled,
+    unsettled,
+    unclassifiedCriteria: criteria.filter((c) => c.judges.kind === "unclassified").length,
+  };
 }
 
 // A one-line reading for humans and for the issue's journal: what the round answered, in the vocabulary the

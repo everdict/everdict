@@ -10,7 +10,7 @@ const campaign = (id: string, issueId: string): ChangeCampaignRecord => ({
   tenant: "acme",
   issueId,
   service: { repository: "acme/widget" },
-  criteria: [{ id: "tests", statement: "green" }],
+  criteria: [{ id: "tests", statement: "green", judges: { kind: "requirement", issueId } }],
   rounds: [
     {
       seq: 1,
@@ -20,7 +20,15 @@ const campaign = (id: string, issueId: string): ChangeCampaignRecord => ({
       judgement: {
         at: "2026-09-17T00:00:00.000Z",
         by: "agent:builder",
-        answers: [{ criterionId: "tests", answer: "not_met", how: "observed", gateRunIds: ["gates"] }],
+        answers: [
+          {
+            criterionId: "tests",
+            answer: "not_met",
+            how: "observed",
+            gateRunIds: ["gates"],
+            reason: "attempted_and_failed",
+          },
+        ],
       },
       outcome: "rejected",
     },

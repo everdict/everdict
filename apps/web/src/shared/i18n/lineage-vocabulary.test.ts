@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import en from '../../../messages/en.json'
 import ko from '../../../messages/ko.json'
-import { changeCampaignSchema } from '../../entities/change-campaign/model/schema'
+import { changeCampaignSchema, unmetReasonSchema } from '../../entities/change-campaign/model/schema'
 
 // The lineage section draws ONE list from TWO grades, so `LineageCampaign.state` and `.outcome` are typed as
 // free `string` (packages/application-control issue-lineage-service.ts) — the union is the two grades' enums
@@ -46,14 +46,34 @@ describe('the lineage catalog covers every word the lineage can emit', () => {
     })
 
     it(`${locale} names every judgement answer and how`, () => {
-      const answers =
-        changeCampaignSchema.shape.rounds.unwrap().element.shape.judgement.shape.answers.element
-      expect(Object.keys(catalog.lineage.answer)).toEqual(
-        expect.arrayContaining([...answers.shape.answer.options])
+      // The answers are a union on `answer` now (an unmet criterion carries its reason), so the vocabulary is
+      // read from each branch's discriminator rather than from one shared `shape`.
+      const branches =
+        changeCampaignSchema.shape.rounds.unwrap().element.shape.judgement.shape.answers.element.options
+      expect(branches.length).toBeGreaterThan(0)
+      for (const branch of branches) {
+        expect(Object.keys(catalog.lineage.answer)).toContain(branch.shape.answer.value)
+        expect(Object.keys(catalog.lineage.how)).toEqual(
+          expect.arrayContaining([...branch.shape.how.options])
+        )
+      }
+    })
+
+    // A criterion says what it judges, and an unmet one says why not. Both are words the screen prints, so
+    // both need the catalog — the same trap the states were in: a lookup the compiler does not constrain is a
+    // partial function, and next-intl renders the missing key path into the page.
+    it(`${locale} names every reason a criterion can be unmet for`, () => {
+      const reasons = unmetReasonSchema.options
+      expect(reasons.length).toBeGreaterThan(0)
+      for (const reason of reasons) expect(Object.keys(catalog.lineage.unmetReason)).toContain(reason)
+    })
+
+    it(`${locale} names every kind a criterion can judge`, () => {
+      const kinds = changeCampaignSchema.shape.criteria.element.shape.judges.options.map(
+        (branch) => branch.shape.kind.value
       )
-      expect(Object.keys(catalog.lineage.how)).toEqual(
-        expect.arrayContaining([...answers.shape.how.options])
-      )
+      expect(kinds.length).toBeGreaterThan(0)
+      for (const kind of kinds) expect(Object.keys(catalog.lineage.judges)).toContain(kind)
     })
   }
 })
