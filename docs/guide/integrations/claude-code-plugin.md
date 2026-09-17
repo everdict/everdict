@@ -3,7 +3,7 @@ kind: wiki
 title: "Claude Code plugin"
 status: current
 updated: 2026-09-16
-anchors: [plugin/.mcp.json, plugin/.claude-plugin/plugin.json, plugin/commands/setup.md, plugin/commands/eval.md, plugin/commands/campaign.md, plugin/commands/record.md, plugin/hooks/hooks.json, plugin/skills/everdict-sdlc/SKILL.md, .claude-plugin/marketplace.json]
+anchors: [plugin/.mcp.json, plugin/.claude-plugin/plugin.json, plugin/commands/setup.md, plugin/commands/eval.md, plugin/commands/campaign.md, plugin/commands/record.md, plugin/commands/delegate.md, plugin/hooks/hooks.json, plugin/skills/everdict-sdlc/SKILL.md, .claude-plugin/marketplace.json]
 ---
 # Claude Code plugin
 
@@ -37,6 +37,7 @@ call `run_scorecard` but does not know what a harness is will flail. The plugin 
 | **`/everdict:eval`** | runs an evaluation end-to-end and reports the verdict |
 | **`/everdict:campaign`** | opens the request and the campaign the work belongs to |
 | **`/everdict:record`** | writes what the session learned back into Everdict |
+| **`/everdict:delegate`** | registers the account your delegates run as, then hands an issue to one and supervises it |
 
 The skill uses progressive disclosure: a short `SKILL.md` plus references
 (`domain-model.md`, `workflows.md`, `mcp-tools.md`) pulled in on demand, so it costs little until it is
