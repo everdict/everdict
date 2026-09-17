@@ -85,7 +85,28 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           .describe(
             "The handoff: what must be true when this is done, the evidence you are handing over, what the " +
               "delegate must not do, and the checks you will apply. Written into the delegate's working " +
-              "directory as BRIEF.md and sealed on the session's trajectory. Requires `profile`",
+              "directory as BRIEF.md and sealed on the session's trajectory. Each `doneWhen` check is given " +
+              "an id here (w1, w2, …) and the delegate ANSWERS THEM BY ID in REPORT.json, so 'three of four " +
+              "met, the fourth needs_environment' is a record rather than an impression. Requires `profile`; " +
+              "excludes `issue`",
+          ),
+        issue: z
+          .string()
+          .optional()
+          .describe(
+            "DELEGATE AN ISSUE — the high-level handoff. Name the issue (id or identifier) and the brief is " +
+              "ASSEMBLED from what the tracker already holds: the description, the commits already linked to " +
+              "it, the issues it points at, and what this workspace has learned about them. Prefer this over " +
+              "typing a brief, because typing one drops exactly the parts hardest to notice missing. Related " +
+              "issues contribute their SUBJECT and never their resolution — a delegate handed a previous fix " +
+              "applies that fix. Requires `profile`; excludes `brief`",
+          ),
+        extra_checks: z
+          .array(z.string())
+          .optional()
+          .describe(
+            "Your own checks beyond the repository's gates, for `issue`. They become criteria the delegate " +
+              "answers by id rather than prose it may or may not address.",
           ),
         image: z.string().optional().describe("Ad-hoc container image ref (must be pullable)"),
         environment: z
@@ -149,6 +170,8 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       profile,
       campaign_id,
       brief,
+      issue,
+      extra_checks,
       image,
       environment,
       harness,
@@ -168,6 +191,8 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
         constraints?: string[];
         doneWhen?: string[];
       };
+      issue?: string;
+      extra_checks?: string[];
       image?: string;
       environment?: { source?: string; id: string; version?: string };
       harness?: { id: string; version?: string; image?: string; conversation?: boolean };
@@ -187,7 +212,23 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(profile !== undefined ? { profile } : {}),
             // The tool's loose reference shape is validated into the contract here — one parse, so a bad
             // reference kind is refused by name instead of reaching the delegate as a broken brief.
-            ...(brief !== undefined ? { brief: DelegationBriefSchema.parse(brief) } : {}),
+            // ⚠️ THE CRITERION IDS ARE MINTED HERE, where the brief is BORN. Derived later from position they
+            // would silently re-number every answer the moment a check was inserted above another, so a report
+            // filed minutes earlier would score a different criterion while looking perfectly valid. A
+            // hand-written check has no semantic name to give it; an ASSEMBLED brief (issue, campaign) does,
+            // and its assembler names them.
+            ...(brief !== undefined
+              ? {
+                  brief: DelegationBriefSchema.parse({
+                    ...brief,
+                    ...(brief.doneWhen !== undefined
+                      ? { doneWhen: brief.doneWhen.map((statement, i) => ({ id: `w${i + 1}`, statement })) }
+                      : {}),
+                  }),
+                }
+              : {}),
+            ...(issue !== undefined ? { issueId: issue } : {}),
+            ...(extra_checks !== undefined ? { extraChecks: extra_checks } : {}),
             ...(image !== undefined ? { image } : {}),
             ...(environment !== undefined ? { environment } : {}),
             ...(harness !== undefined ? { harness } : {}),

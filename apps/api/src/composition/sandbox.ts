@@ -36,6 +36,11 @@ import type { ScopedSecretsFn } from "./types.js";
 // an eval case because nothing ends it but the clock.
 export function buildSandboxSessions(opts: {
   campaigns?: SandboxSessionServiceDeps["campaigns"];
+  // Delegating an ISSUE: the tracker read that assembles the brief. A narrow port rather than the
+  // IssueService — this lane needs to read an issue and the knowledge about it, and handing it a service that
+  // can also close one would make "the delegate must not record its own verdict" a matter of discipline
+  // instead of reach.
+  issueBriefSource?: SandboxSessionServiceDeps["issueBriefSource"];
   store: RunStore;
   trajectories?: TrajectoryStore;
   events?: PlatformEventEmitter;
@@ -376,6 +381,7 @@ export function buildSandboxSessions(opts: {
   const driverFor = (tenant: string, runtime: string) => opts.compute.computeFor(tenant, runtime);
   return new SandboxSessionService({
     ...(opts.campaigns ? { campaigns: opts.campaigns } : {}),
+    ...(opts.issueBriefSource ? { issueBriefSource: opts.issueBriefSource } : {}),
     store: opts.store,
     driver,
     driverFor,

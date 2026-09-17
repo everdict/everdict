@@ -12,7 +12,7 @@ import {
   clampWindow,
   pageOf,
 } from "../ports/trajectory-store.js";
-import type { SandboxDeliveryOutcome } from "./sandbox-session-service.js";
+import type { IssueBriefSource, SandboxDeliveryOutcome } from "./sandbox-session-service.js";
 import { SandboxSessionService, type SandboxSessionServiceDeps } from "./sandbox-session-service.js";
 
 // Local fakes — application-control cannot depend on @everdict/db (layer direction), so the store doubles
@@ -2132,6 +2132,91 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     constraints: ["do not touch the dataset"],
     doneWhen: [{ id: "targets-pass", statement: "the two cases pass" }],
   };
+
+  // ── DELEGATING AN ISSUE ──────────────────────────────────────────────────────────────────────────
+  //
+  // ⚠️ THESE DRIVE THE SERVICE, NOT THE ASSEMBLER. `issueDelegationBrief` has its own counterexamples and
+  // they prove the brief's SHAPE; none of them can see that the service never calls it, that the port is not
+  // wired, or that a caller may pass an issue and a brief together. That is the rule `testing` states: a
+  // counterexample for a protocol drives the production composition, not the helper.
+  const issueSource: IssueBriefSource = {
+    issue: {
+      identifier: "DIGO-6",
+      title: "imported trips are not visible",
+      description: "a user asked where their trip went",
+      status: "backlog",
+    },
+    commits: [{ repository: "PPP-Atelier/digo-mobile", sha: "e4fe66e8bfcb", note: "profile sheet" }],
+    related: [{ identifier: "DIGO-2", title: "dead controls", status: "done" }],
+    knowledge: [{ id: "k1", title: "the sheet swallows wheel scroll", kind: "finding" }],
+  };
+
+  it("assembles the brief from the tracker and writes it into the delegate's directory", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      issueBriefSource: { read: async () => issueSource },
+    });
+    await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      issueId: "DIGO-6",
+      extraChecks: ["the import row shows day_count > 0"],
+    });
+
+    // The bytes the delegate actually reads — not the object we built, which is what a test asserting on the
+    // return value would have checked while the file went somewhere else.
+    const written = driver.written.find((w) => w.path.endsWith("/BRIEF.md"))?.data ?? "";
+    expect(written).toContain("DIGO-6");
+    expect(written).toContain("a user asked where their trip went");
+    // The knowledge travelled: the part a hand-typed brief drops first and notices last.
+    expect(written).toContain("the sheet swallows wheel scroll");
+    // Somebody has already been here.
+    expect(written).toContain("e4fe66e");
+    // The related issue is NAMED and its resolution is not — a delegate handed a previous fix applies it.
+    expect(written).toContain("DIGO-2 (done)");
+    expect(written).toContain("deliberately not here");
+    // The supervisor's own check became a criterion with an id the delegate can answer.
+    expect(written).toContain("`supervisor-1` — the import row shows day_count > 0");
+    // And it was told where to put the answer.
+    expect(written).toContain("REPORT.json");
+  });
+
+  it("refuses an issue AND a brief rather than choosing between them", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      issueBriefSource: { read: async () => issueSource },
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, issueId: "DIGO-6", brief }),
+    ).rejects.toThrow(/two answers to the same question/);
+  });
+
+  it("refuses an issue with no profile — a brief with no delegate is a document nobody reads", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      issueBriefSource: { read: async () => issueSource },
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", issueId: "DIGO-6", image: "ubuntu" }),
+    ).rejects.toThrow(/needs a `profile`/);
+  });
+
+  // A silent fallback to an empty brief would produce a delegate briefed on nothing, and it would look like a
+  // successful delegation from every angle until somebody read the transcript.
+  it("refuses an issue it cannot read rather than briefing on nothing", async () => {
+    const fake = fakeDelegationProfile();
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      issueBriefSource: { read: async () => undefined },
+    });
+    await expect(
+      service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" }, issueId: "NOPE-1" }),
+    ).rejects.toMatchObject({ status: 404 });
+  });
 
   it("a campaign delegate receives a platform view and scoped credential, never a caller brief", async () => {
     const fake = fakeDelegationProfile();

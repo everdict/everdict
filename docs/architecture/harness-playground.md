@@ -169,6 +169,55 @@ context seeded beside it); the standing instructions and the rendered brief are 
 BEFORE the ledger row exists, and the brief is sealed on the trajectory as a `delegation.brief` marker.
 Design + the env-precedence rule: `docs/architecture/capability-store.md` §Fifth kind.
 
+### Supervising the delegate — three deliveries, an interrupt, and a report
+
+A delegation is a relationship, not a request. Four things make it supervisable, and each replaces something
+that used to have exactly one answer.
+
+**Reaching it.** `delivery` says what a message does to the turn the delegate is in: `message` queues without
+starting or disturbing one, `task` (the default) starts a turn when the delegate is idle and queues for the
+next boundary when it is not, `interrupt` aborts the turn first. `planDelivery` (`@everdict/domain`) owns the
+decision; the answer says which happened (`{delivered:'started', run}` · `{delivered:'queued', queued,
+state}`), because a caller that cannot tell them apart cannot know whether there is a trace to poll. Queued
+items are drained together, in order, ahead of the next turn's prompt, with notes kept apart from work.
+⚠️ The boundary is the END OF A TURN, not a message boundary inside one — we spawn a harness CLI and wait, so
+there is no seam to inject at.
+
+**Stopping it.** `POST /sandboxes/:id/interrupt` (`interrupt_sandbox_task`) aborts the turn and KEEPS the
+session: container, working directory and conversation all survive, and the delegate takes the next
+instruction immediately. Every turn has held an `AbortController` since the lane existed and teardown was its
+only caller, so the one way to stop a delegate going the wrong way was `close_sandbox` — which destroyed the
+container and every uncommitted change in it.
+
+**Its state.** `DelegateState` is a union of seven: `pending_init` · `running` · `interrupted` ·
+`completed{report?}` · `errored` · `closed` · `orphaned`. `completed` is deliberately not `closed` — a
+finished delegate stays addressable until the supervisor lets it go, and that gap IS the review seam.
+`orphaned` is the third value (rule `protocol` L2): the ledger has the session, this control plane does not
+hold it, and that is neither an ending nor an absence.
+
+**What comes back.** `doneWhen` criteria carry ids (`{id, statement}`), rendered into BRIEF.md so the delegate
+can answer them by name. The delegate writes `REPORT.json` in its working directory — the brief came in as a
+file and the report leaves as one, because a delegate has no channel to this control plane at all. The report
+is a PROPOSED change round: `ChangeSetEntry`, `GateRun` and `ChangeJudgementAnswer`, the campaign lane's own
+vocabulary rather than a second set of words for "what this work achieved". `reviewDelegateReport` pairs it
+against the brief — unanswered criteria, answers to ids nobody asked for, duplicates, and `observed` answers
+citing a measurement that is not in the file. It answers "is this even an answer?", never "is this good?".
+
+### Delegating an issue — the brief assembled from the record
+
+`POST /sandboxes {profile:{id}, issueId}` (`create_sandbox` with `issue`) is the high-level handoff: name the
+issue and the brief is DERIVED from what the tracker already holds — the description, the commits already
+linked to it, the issues it points at, and what the workspace has learned about them (`issueDelegationBrief`,
+the issue-shaped sibling of `campaignRoundBrief`). Typing a brief instead drops exactly the parts hardest to
+notice missing: the knowledge from a previous attempt, and the checks somebody would apply to the result.
+
+⚠️ Related issues contribute their SUBJECT and never their resolution. A previous fix reads as the answer, and
+a delegate handed one applies it — which is how one misdiagnosis becomes two. Same exclusion as the campaign
+brief's held-out ids and scores, in a quieter form.
+
+`issueId` and `brief` are mutually exclusive (two answers, no rule for choosing), `issueId` requires
+`profile`, and an issue that cannot be read is a 404 rather than a delegate briefed on nothing.
+
 ## Agent worlds (W1) ride the same session
 
 A sandbox session opened with `world:{id}` becomes a PERSISTENT environment: its filesystem is

@@ -21,6 +21,11 @@ export const CreateSandboxBodySchema = z
       })
       .optional(),
     brief: DelegationBriefSchema.optional(),
+    // DELEGATE AN ISSUE — the brief is assembled from the tracker instead of typed. Excludes `brief`; the
+    // service refuses both, because an assembled brief and a typed one are two answers with no rule for
+    // choosing between them.
+    issueId: z.string().min(1).max(200).optional(),
+    extraChecks: z.array(z.string().min(1).max(2000)).max(20).optional(),
     campaignId: z.string().min(1).optional(),
     image: z.string().min(1).max(400).optional(),
     environment: z

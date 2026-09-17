@@ -30,9 +30,11 @@ import {
   type CliIdentityChoice,
   DELEGATE_REPORT_FILE,
   IMAGE_REPOSITORY_NAME,
+  type IssueDelegationBriefInput,
   Run,
   type UsageMeter,
   interruptedFrom,
+  issueDelegationBrief,
   pinDigest,
   planDelivery,
   renderDelegationBrief,
@@ -182,6 +184,20 @@ export interface CreateSandboxInput {
   // the delegate's working directory as a file it reads, and sealed on the session trajectory as evidence.
   // Only meaningful with `profile`.
   brief?: DelegationBrief;
+  // ── DELEGATE AN ISSUE ────────────────────────────────────────────────────────────────────────────
+  //
+  // The high-level handoff: name the issue and the brief is ASSEMBLED from what the tracker already holds —
+  // the description, the commits already linked to it, the issues it points at, and what the workspace has
+  // learned about them. Excludes `brief`, because two briefs is a question with no rule for answering it.
+  //
+  // Why it belongs here rather than in a caller that reads the issue and types a brief: everything the
+  // assembly must NOT say (a related issue's resolution, which reads as the answer) is only enforceable
+  // where the assembly happens. A convention that says "do not paste the resolution" is advice, and advice
+  // at the seam where the next effect begins is the annotation failure rule `protocol` is about.
+  issueId?: string;
+  // The supervisor's own checks, beyond the repository's gates — they become criteria the delegate answers
+  // by id rather than prose it may or may not address.
+  extraChecks?: string[];
   campaignId?: string;
   environment?: { source?: string; id: string; version?: string };
   image?: string;
@@ -381,9 +397,21 @@ export interface SandboxSessionView {
     // Who this session delegates to, when it was booted from a delegation profile — so a surface can say
     // WHOSE environment is doing the work, not just which harness binary is running.
     profile?: { source: string; id: string; version: string };
+    // The delegate's own state, carrying its report when it has filed one. Absent for a shell session and a
+    // front-door conversation — neither is a supervised handoff.
+    delegate?: DelegateState;
+    // What the supervisor has said that the delegate has not read yet. The TEXT is deliberately not here:
+    // a monitor showing every queued instruction in full is a wall, and the one place the wording matters is
+    // the next turn's prompt, where it is already delivered verbatim.
+    mailbox?: { id: string; mode: "message" | "task"; at: string; by: string }[];
     tasks: SandboxTaskSummary[];
   };
 }
+
+// What the tracker hands over for an issue-shaped brief. Exactly the assembler's input and nothing more —
+// a port that returned the whole IssueRecord would let this lane read a resolution note it must not pass on,
+// and the exclusion would then depend on nobody noticing it could.
+export type IssueBriefSource = IssueDelegationBriefInput;
 
 // What reaching a delegate DID. A union because two of the three delivery modes start nothing, and a caller
 // that cannot tell "queued" from "started" cannot decide whether there is a trace to poll.
@@ -411,6 +439,12 @@ export interface WorldSnapshotResult {
 
 export interface SandboxSessionServiceDeps {
   campaigns?: Pick<CampaignService, "issueEvidenceGrant">;
+  // Reading the tracker for `issueId`. A narrow port rather than the IssueService itself: this lane needs to
+  // READ an issue and the knowledge about it, and handing it a service that can also close one would make
+  // "the delegate must not record its own verdict" a matter of discipline instead of reach.
+  issueBriefSource?: {
+    read: (tenant: string, id: string) => Promise<IssueBriefSource | undefined>;
+  };
   store: RunStore;
   // The deployment's default container compute. Optional since front-door conversations: a deployment with
   // registered runtimes but no local compute still serves conversations — the container lanes then refuse
@@ -607,6 +641,44 @@ export class SandboxSessionService {
   // run.submitted fact via the E0 outbox). The id is minted before the record so the map and the row agree.
   async create(rawInput: CreateSandboxInput): Promise<RunRecord> {
     let input = rawInput;
+
+    // ── DELEGATE AN ISSUE ────────────────────────────────────────────────────────────────────────
+    //
+    // Name the issue; the brief is assembled from what the tracker already holds. Before this, delegating an
+    // issue meant typing the issue back out, and the parts most likely to be dropped were the ones hardest
+    // to notice missing — the knowledge from a previous attempt, and the checks somebody would apply.
+    if (input.issueId !== undefined) {
+      if (input.brief !== undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { issue: input.issueId },
+          "Give an issue OR a brief, not both — an assembled brief and a typed one are two answers to the " +
+            "same question, and there is no rule for choosing between them.",
+        );
+      if (input.profile === undefined)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { issue: input.issueId },
+          "Delegating an issue needs a `profile` — the brief says what to do, the profile says who does it.",
+        );
+      if (!this.deps.issueBriefSource)
+        throw new BadRequestError("BAD_REQUEST", {}, "Delegating an issue is not configured on this deployment.");
+      const source = await this.deps.issueBriefSource.read(input.tenant, input.issueId);
+      if (!source)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { issue: input.issueId },
+          `No issue '${input.issueId}' this workspace can read.`,
+        );
+      input = {
+        ...input,
+        brief: issueDelegationBrief({
+          ...source,
+          ...(input.extraChecks !== undefined ? { extraChecks: input.extraChecks } : {}),
+        }),
+      };
+    }
+
     let campaignGrant: Awaited<ReturnType<CampaignService["issueEvidenceGrant"]>> | undefined;
     if (input.campaignId !== undefined) {
       if (!input.profile || input.brief || input.world || input.hibernate)
@@ -1710,6 +1782,11 @@ export class SandboxSessionService {
               kind: live.playground.resolved.kind,
             },
             ...(live.playground.delegation !== undefined ? { profile: live.playground.delegation.ref } : {}),
+            // WHAT THE DELEGATE IS, not merely whether a promise is pending. `busy` above cannot distinguish
+            // "finished and waiting for your review" from "you stopped it" from "it never started" — and
+            // those are three different next moves for the supervisor.
+            delegate: live.playground.state,
+            mailbox: live.playground.mailbox.map((m) => ({ id: m.id, mode: m.mode, at: m.at, by: m.by })),
             tasks: summaries(live.playground.tasks),
           }
         : live.frontdoor !== undefined

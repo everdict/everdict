@@ -602,6 +602,9 @@ export { renderDelegationBrief, DELEGATE_REPORT_FILE } from "./delegation/render
 // delegation — the two decisions a supervised handoff needs: what reaching a delegate does to its turn, and
 // whether a report even answers the brief it was given (the review seam, before any judgement of the work).
 export { planDelivery, interruptedFrom, type DeliveryPlan } from "./delegation/delivery.js";
+// The issue-shaped sibling of campaignRoundBrief: the handoff assembled from what the tracker already holds,
+// so a delegate is briefed on the record rather than on whatever prose someone re-typed from it.
+export { issueDelegationBrief, type IssueDelegationBriefInput } from "./delegation/issue-brief.js";
 export {
   reviewDelegateReport,
   tallyDelegateReport,

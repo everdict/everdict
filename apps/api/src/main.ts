@@ -74,7 +74,7 @@ import type {
   VerifierInvocation,
   VerifierJob,
 } from "@everdict/contracts";
-import { UpstreamError } from "@everdict/contracts";
+import { NotFoundError, UpstreamError } from "@everdict/contracts";
 import { type SeriesContractResolution, evaluateGate, refuseGateForInputTrust } from "@everdict/domain";
 import { makeGraders } from "@everdict/graders";
 import { InMemoryWorkspaceFs } from "@everdict/storage";
@@ -1871,8 +1871,73 @@ async function main(): Promise<void> {
   // (EVERDICT_SANDBOX_DRIVER=docker). Facts + trajectory ride the same stores as every run; the interval is
   // the in-process TTL reaper half (the durable reaper rung survives a process death). Sits BELOW the
   // capability service because agent worlds (W1) publish snapshots through it.
+  // ── DELEGATING AN ISSUE ──────────────────────────────────────────────────────────────────────────
+  //
+  // The tracker read that assembles a delegation brief. Composed HERE rather than inside the session lane
+  // because it joins three stores (the issue, its links, the knowledge about it) and the lane's job is to run
+  // the delegate, not to know what an issue is.
+  //
+  // ⚠️ IT HANDS OVER SUBJECTS, NEVER RESOLUTIONS. A related issue's resolution note reads as "here is the
+  // answer", and a delegate given a previous fix applies that fix — which is how one misdiagnosis becomes
+  // two. `issueDelegationBrief` is where that exclusion is enforced; this is where it is made possible, by
+  // never reading the note in the first place.
+  const issueBriefSource = {
+    read: async (tenant: string, id: string) => {
+      // NOT caught. "No such issue" is already a NotFound the caller turns into a 404; a store that FAILED
+      // must not become the same answer, because the next step is to boot a delegate on a brief nobody read.
+      const issue = await issueService.get(tenant, id);
+      const commits = issue.links
+        .filter((l) => l.type === "commit" && l.repository !== undefined)
+        .map((l) => ({
+          repository: l.repository ?? "",
+          sha: l.id,
+          ...(l.note !== undefined ? { note: l.note } : {}),
+        }));
+      // A link is an unvalidated pointer by design (docs/tracker.md), so a related issue that is GONE is
+      // ordinary and dropped. A read that failed for any other reason is not — it propagates, because a
+      // brief silently missing a related issue is the omission this assembler exists to prevent.
+      const related = (
+        await Promise.all(
+          issue.links
+            .filter((l) => l.type === "issue")
+            .map((l) =>
+              issueService.get(tenant, l.id).catch((err: unknown) => {
+                if (err instanceof NotFoundError) return undefined;
+                throw err;
+              }),
+            ),
+        )
+      )
+        .filter((r): r is NonNullable<typeof r> => r !== undefined)
+        .map((r) => ({ identifier: r.identifier, title: r.title, status: r.status }));
+      // The third value, carried rather than swallowed: an unreadable knowledge store and a workspace that
+      // has learned nothing are the same empty array, and they tell a delegate opposite things.
+      let knowledgeUnavailable: string | undefined;
+      const context = await knowledgeService
+        .assembleContext(tenant, "delegation", [{ type: "issue", key: issue.id }])
+        .catch((err: unknown) => {
+          knowledgeUnavailable = err instanceof Error ? err.message : String(err);
+          return undefined;
+        });
+      return {
+        issue: {
+          identifier: issue.identifier,
+          title: issue.title,
+          ...(issue.description !== undefined ? { description: issue.description } : {}),
+          status: issue.status,
+          ...(issue.github?.repository !== undefined ? { repository: issue.github.repository } : {}),
+        },
+        commits,
+        related,
+        knowledge: (context?.knowledge ?? []).map((k) => ({ id: k.id, title: k.title, kind: k.kind })),
+        ...(knowledgeUnavailable !== undefined ? { knowledgeUnavailable } : {}),
+      };
+    },
+  };
+
   const sandboxSessions = buildSandboxSessions({
     campaigns: campaignService,
+    issueBriefSource,
     store,
     trajectories: trajectoryStore,
     events: lateEvents,
