@@ -2041,7 +2041,7 @@ describe("SandboxSessionService — front-door conversation sessions (service ha
 // Delegation profiles: a registered work environment everdict hands work TO, with a structured brief.
 // ---------------------------------------------------------------------------------------------------
 
-import type { ResolvedDelegationProfile } from "./sandbox-session-service.js";
+import type { ResolvedCliIdentity, ResolvedDelegationProfile } from "./sandbox-session-service.js";
 
 function fakeDelegationProfile(over: Partial<ResolvedDelegationProfile> = {}) {
   const fake = fakeConversationalHarness();
@@ -2266,5 +2266,96 @@ describe("SandboxSessionService — delegation profiles (a registered environmen
     await expect(service.create({ tenant: "acme", createdBy: "alice", image: "img", brief })).rejects.toMatchObject({
       status: 400,
     });
+  });
+});
+
+// ── WHO THE CLI RUNS AS ──────────────────────────────────────────────────────────────────────────────
+// A registered identity is the answer to "whose account did this work". The parts worth pinning are the ones
+// that are invisible when wrong: an identity that does not outrank the flat tiers runs as the wrong account
+// and reports success, and files written inside workDir are deleted by the repo clone that follows.
+
+describe("SandboxSessionService — the CLI runs as a registered identity", () => {
+  const identity = (over: Partial<ResolvedCliIdentity> = {}): ResolvedCliIdentity => ({
+    ref: { source: "acme", id: "my-claude", version: "1.0.0" },
+    env: { CLAUDE_CODE_OAUTH_TOKEN: "sk-mine" },
+    home: [{ path: ".claude/settings.json", content: '{"theme":"dark"}' }],
+    ...over,
+  });
+
+  it("reproduces the identity's files under $HOME, OUTSIDE the working directory", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveCliIdentity: async () => ({ kind: "mine", identity: identity() }),
+    });
+
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+
+    const settings = driver.written.find((w) => w.path.endsWith("/.claude/settings.json"));
+    expect(settings?.data).toBe('{"theme":"dark"}');
+    // The clone does `rm -rf <workDir>`, so anything the identity put THERE would be gone the moment a repo
+    // is cloned in — which is exactly how the delegation brief is lost today.
+    expect(settings?.path.startsWith(`${fake.resolved.workDir}/`)).toBe(false);
+  });
+
+  it("lets the identity outrank the flat auth-env tiers — registering one is how a member says `this account`", async () => {
+    const fake = fakeDelegationProfile();
+    fake.resolved.harness.apiKeyEnv = { CLAUDE_CODE_OAUTH_TOKEN: "sk-the-workspaces" };
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveCliIdentity: async () => ({ kind: "mine", identity: identity() }),
+    });
+
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+
+    expect(fake.resolved.harness.apiKeyEnv.CLAUDE_CODE_OAUTH_TOKEN).toBe("sk-mine");
+  });
+
+  // "You registered none" is an answer, not a failure: the session opens and runs the way it did before.
+  it("opens without one when the submitter has registered none", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, driver } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveCliIdentity: async () => ({ kind: "none" }),
+    });
+
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+
+    expect(driver.written.some((w) => w.path.includes(".claude/settings.json"))).toBe(false);
+    expect(driver.written.some((w) => w.path.endsWith("/CLAUDE.md"))).toBe(true);
+  });
+
+  // A deployment with no identities configured must behave exactly as it did — nothing half-resolves.
+  it("is a no-op when the seam is not wired at all", async () => {
+    const fake = fakeDelegationProfile();
+    const { service, driver } = build({ resolveDelegationProfile: async () => fake.resolved });
+
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+
+    expect(driver.written.some((w) => w.path.endsWith("/BRIEF.md") || w.path.endsWith("/CLAUDE.md"))).toBe(true);
+  });
+
+  // The CLI is read from the profile's own harness — the caller never says it twice.
+  it("asks for the identity of the CLI the profile is about to run", async () => {
+    const fake = fakeDelegationProfile();
+    const asked: Array<{ cli: string; ref?: { id: string } }> = [];
+    const { service } = build({
+      resolveDelegationProfile: async () => fake.resolved,
+      resolveCliIdentity: async (_t, _s, want) => {
+        asked.push(want);
+        return { kind: "none" };
+      },
+    });
+
+    await service.create({ tenant: "acme", createdBy: "alice", profile: { id: "fixer" } });
+    expect(asked[0]?.cli).toBe(fake.resolved.harness.id);
+
+    await service.create({
+      tenant: "acme",
+      createdBy: "alice",
+      profile: { id: "fixer" },
+      identity: { id: "team-ci" },
+    });
+    expect(asked[1]?.ref?.id).toBe("team-ci");
   });
 });

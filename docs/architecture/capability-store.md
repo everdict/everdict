@@ -3,7 +3,7 @@ kind: wiki
 title: "Capability Store (SSOT)"
 status: current
 updated: 2026-09-15
-anchors: [packages/contracts/src/records/capability.ts, packages/domain/src/capability/capability-visibility.ts, apps/api/src/api/capability/capability.routes.ts, packages/application-control/src/agent/agent-capabilities.ts, apps/agent/src/code-tools.ts]
+anchors: [packages/contracts/src/records/capability.ts, packages/domain/src/capability/capability-visibility.ts, packages/domain/src/capability/cli-identity.ts, apps/api/src/api/capability/capability.routes.ts, packages/application-control/src/agent/agent-capabilities.ts, apps/agent/src/code-tools.ts]
 ---
 # Capability Store (SSOT)
 
@@ -27,7 +27,7 @@ MCP bridge.
 
 ```
 ① CATALOG    CapabilityRecord — what exists to adopt (browse · publish · version)
-             type ∈ { mcp | code | skill | environment | delegation }
+             type ∈ { mcp | code | skill | environment | delegation | cli-identity }
              reach: private | workspace | subset(sharedWith[]) | public
              immutable versions + a pure reach kernel in @everdict/domain
                      │  browse / publish
@@ -36,6 +36,7 @@ MCP bridge.
              skill     → copied into the workspace skill library (SkillRecord)
              environment → imported into WorkspaceSettings.adoptedEnvironments
              delegation  → named by POST /sandboxes {profile}
+             cli-identity→ resolved for the submitter at POST /sandboxes (or named by {identity})
                      │  resolve (cross-tenant, reach re-checked, best-effort)
                      ▼
 ③ RUNTIME    resolveAgentCapabilities (@everdict/application-control) decides the member's toolset;
@@ -459,3 +460,58 @@ A workspace skill carries its own semver, so "edit it in conversation, then stam
 - No marketplace economy (payments, ratings, reviews) and no operator review of `public` publications beyond the
   admin gate.
 - No isolated code runtime composed into the agent service (see "Security").
+
+## Sixth kind — `cli-identity` (WHOSE account a CLI runs as)
+
+*Maintainer, 2026-09-17: "register my Claude Code / Codex account once and every sandbox runs the CLI as me,
+with my settings."*
+
+The delegation profile says WHO does the work and WHERE. It does not say **whose account** does it — and for a
+subscription CLI that is the whole question, because the answer ends up on someone's invoice.
+
+**Why neither existing thing was this.** A `Model` is an ENDPOINT plus a key; a subscription login has no
+endpoint, and `Model` is an eval dimension ("which model did it run on") that a login would pollute. A
+`{secretRef}` under one of the `HARNESS_AUTH_ENV_VARS` is a FLAT NAMESPACE: one `CLAUDE_CODE_OAUTH_TOKEN` per
+tier, unnameable, unversioned, unreferenceable — and it resolves `secrets.workspace[name] ?? secrets.user[name]`,
+so the moment a team registers one, **no member's own login is reachable at all.** Neither can carry FILES, and
+a CLI's settings are files.
+
+**The shape.**
+
+```ts
+{ type: "cli-identity",
+  cli: "claude-code" | "codex",     // what it is FOR — matching, never a magic variable name
+  env:  Record<string, EnvValue>,   // what the CLI reads from the environment
+  home: [{ path, content } | { path, secretRef, scope }] }   // what it reads from disk, under $HOME
+```
+
+There is deliberately **no `credential` field**: Claude Code takes a headless token through the ENV
+(`claude setup-token`), Codex takes a FILE (`~/.codex/auth.json`). One field that is a credential for one CLI
+and a config file for the other fits neither, so both channels accept `{secretRef}` and the author puts the
+credential where their CLI reads it. An identity carrying neither is refused at the write
+(`assertCliIdentityHandsSomethingOver`) — it would register, resolve, boot, and leave the CLI logged out while
+the session reported success.
+
+**A headless token, not a copy of the live login.** `~/.claude/.credentials.json` carries an expiry the CLI
+refreshes IN PLACE, so a copy handed to a container decays and two parties then race to refresh one credential.
+`claude setup-token` is bound to the same subscription and does not.
+
+**Who a session runs as** (`chooseCliIdentity`), given the CLI the profile is about to run:
+
+| the submitter's own identities for that CLI | outcome |
+|---|---|
+| exactly one | used — nothing is named per call, which is the point of registering one |
+| none | `none`: the session opens and runs the way it did before |
+| two or more | **refused, naming both** — choosing would sign the work with an account nobody picked |
+
+An explicit `{identity}` on the call always wins ("run as the team's CI account"). The implicit lookup resolves
+the **submitter's own** identities and never the workspace's: repeating `workspace ?? user` here would defeat
+the reason the record exists. `private` in this store is creator-only, so each member registers their own and
+nobody else can consume it — that IS the multi-tenant property, inherited rather than rebuilt.
+
+**Where the files land.** Under the container's own `$HOME`, asked for rather than assumed. That also puts them
+outside `workDir` by construction, which matters in this exact lane: `cloneRepo` runs `rm -rf <workDir>` and
+that is how a delegation's brief is destroyed when a repo is cloned into the same directory.
+
+⚠️ Everdict now HOLDS a subscription credential. SecretStore encrypts at rest and the value never enters a
+spec, a record or a trajectory — but holding it is a trust the deployment takes on, not a detail.

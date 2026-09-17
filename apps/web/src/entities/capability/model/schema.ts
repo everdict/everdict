@@ -14,7 +14,14 @@ import { z } from 'zod'
 export const capabilityVisibilitySchema = z.enum(['private', 'workspace', 'subset', 'public'])
 export type CapabilityVisibility = z.infer<typeof capabilityVisibilitySchema>
 
-export const capabilityTypeSchema = z.enum(['mcp', 'code', 'skill', 'environment', 'delegation'])
+export const capabilityTypeSchema = z.enum([
+  'mcp',
+  'code',
+  'skill',
+  'environment',
+  'delegation',
+  'cli-identity',
+])
 export type CapabilityType = z.infer<typeof capabilityTypeSchema>
 
 // What an adopter must fill with their own secrets — name and description only, never a value.
@@ -125,12 +132,33 @@ const delegationProfileSpecSchema = z.object({
   ttlSec: z.number().optional(),
 })
 
+// cli-identity — WHO a CLI runs as, registered once (capability-store.md §Sixth kind). A subscription login is
+// not a Model (that is an endpoint, and an eval dimension) and not a secret under a fixed env name (that is a
+// flat namespace whose `workspace ?? user` precedence outranks the member's own login). `env` is what the CLI
+// reads from the environment and `home` what it reads from disk under $HOME; both accept {secretRef}, because
+// Claude Code takes a headless token through the env while Codex's credential IS a file.
+const cliIdentityFileSchema = z.union([
+  z.object({ path: z.string(), content: z.string() }),
+  z.object({
+    path: z.string(),
+    secretRef: z.string(),
+    scope: z.enum(['user', 'workspace']).optional(),
+  }),
+])
+const cliIdentitySpecSchema = z.object({
+  type: z.literal('cli-identity'),
+  cli: z.enum(['claude-code', 'codex']),
+  env: z.record(z.string(), delegationEnvValueSchema),
+  home: z.array(cliIdentityFileSchema),
+})
+
 export const capabilitySpecSchema = z.discriminatedUnion('type', [
   mcpToolSpecSchema,
   codeToolSpecSchema,
   skillCapabilitySpecSchema,
   environmentImageSpecSchema,
   delegationProfileSpecSchema,
+  cliIdentitySpecSchema,
 ])
 export type CapabilitySpec = z.infer<typeof capabilitySpecSchema>
 

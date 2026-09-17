@@ -3,6 +3,7 @@ import {
   Code2,
   Container,
   Globe,
+  KeyRound,
   Lock,
   Share2,
   Sparkles,
@@ -36,6 +37,7 @@ export const TYPE_ICON: Record<CapabilityType, typeof Boxes> = {
   skill: Sparkles,
   environment: Container,
   delegation: UserRoundCog, // who we hand work to — not a tool but a work environment we EMPLOY
+  "cli-identity": KeyRound, // WHOSE account the CLI runs as — a credential, not a capability the agent calls
 }
 
 export const VIS_ICON: Record<CapabilityVisibility, typeof Lock> = {

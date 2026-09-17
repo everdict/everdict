@@ -590,6 +590,12 @@ export {
   type CapabilityConsumer,
   canConsumeCapability,
 } from "./capability/capability-visibility.js";
+export {
+  type CliIdentityCandidate,
+  type CliIdentityChoice,
+  assertCliIdentityHandsSomethingOver,
+  chooseCliIdentity,
+} from "./capability/cli-identity.js";
 // delegation — the handoff brief rendered as the markdown the delegate reads (one renderer: the seeded file,
 // the trajectory marker and any later surface must not disagree about what was asked).
 export { renderDelegationBrief } from "./delegation/render-brief.js";

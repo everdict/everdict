@@ -120,6 +120,15 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
           .boolean()
           .optional()
           .describe("Auto-snapshot at teardown (default true for world sessions; ignored without world)"),
+        identity: z
+          .object({ source: z.string().optional(), id: z.string().min(1), version: z.string().optional() })
+          .optional()
+          .describe(
+            "Run as a NAMED cli-identity capability instead of your own. Omit it and the session uses the identity " +
+              "YOU registered for the CLI this profile runs — register once, never name it again. Two of your own for " +
+              "one CLI is a refusal naming both, because choosing would sign the work with an account you did not pick",
+          ),
+
         repo: z
           .object({ git: z.string(), ref: z.string().optional(), dir: z.string().optional() })
           .optional()
@@ -146,6 +155,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       world,
       hibernate,
       repo,
+      identity,
       runtime,
       ttlSec,
     }: {
@@ -164,6 +174,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
       world?: { id: string };
       hibernate?: boolean;
       repo?: { git: string; ref?: string; dir?: string };
+      identity?: { source?: string; id: string; version?: string };
       runtime?: string;
       ttlSec?: number;
     }) =>
@@ -183,6 +194,7 @@ export function registerSandboxTools(server: McpServer, ctx: McpToolContext): vo
             ...(world !== undefined ? { world } : {}),
             ...(hibernate !== undefined ? { hibernate } : {}),
             ...(repo !== undefined ? { repo } : {}),
+            ...(identity !== undefined ? { identity } : {}),
             ...(agent !== undefined ? { agent } : {}),
             ...(runtime !== undefined ? { runtime } : {}),
             ...(ttlSec !== undefined ? { ttlSec } : {}),

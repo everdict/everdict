@@ -24,7 +24,7 @@ export const CapabilityVisibilitySchema = z.enum(["private", "workspace", "subse
 export type CapabilityVisibility = z.infer<typeof CapabilityVisibilitySchema>;
 
 // The kind discriminant (also stored as an indexed column for browse-by-type). Derived from `spec.type`.
-export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill", "environment", "delegation"]);
+export const CapabilityTypeSchema = z.enum(["mcp", "code", "skill", "environment", "delegation", "cli-identity"]);
 export type CapabilityType = z.infer<typeof CapabilityTypeSchema>;
 
 // The reserved OWNER workspace for FIRST-PARTY (Everdict-authored) capabilities — the default-toolset tier. Mirrors
@@ -231,6 +231,18 @@ export type EnvironmentImageSpec = z.infer<typeof EnvironmentImageSpecSchema>;
 // adopts it, shares it, versions it and picks it from the store, exactly like the tools and skills it already
 // keeps there. The profile never re-implements the agent; it pins the environment the agent runs in, so any
 // adapter carrying the `conversational` marker qualifies.
+// A path under the container's $HOME — relative, and it may not climb out. `..` is refused rather than
+// normalised away: a caller who wrote it meant somewhere else, and quietly writing to a different place than
+// the spec says is worse than the refusal. (The skill kind's file path allows `..` through its character
+// class; that is its own gap, not a precedent.)
+export const HomeRelativePathSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((p) => !p.startsWith("/"), { message: "path is relative to $HOME — it may not start with '/'." })
+  .refine((p) => !p.split("/").includes(".."), { message: "path may not contain a '..' segment." })
+  .refine((p) => !p.includes("\u0000"), { message: "path may not contain a NUL byte." });
+
 export const DelegationProfileSpecSchema = z.object({
   type: z.literal("delegation"),
   // WHICH conversational agent runs (a built-in id like claude-code, or a registered harness).
@@ -268,12 +280,71 @@ export const DelegationProfileSpecSchema = z.object({
 });
 export type DelegationProfileSpec = z.infer<typeof DelegationProfileSpecSchema>;
 
+// ── A CLI'S IDENTITY, REGISTERED ONCE (maintainer, 2026-09-17) ────────────────────────────────────────
+//
+// "Register my Claude Code / Codex account once and every sandbox runs the CLI as me, with my settings."
+//
+// Two things already existed and neither was this. A `Model` is an ENDPOINT plus a key — a subscription login
+// has no endpoint, and `Model` is an eval dimension ("which model did it run on") that a login would pollute.
+// A `{secretRef}` under one of the `HARNESS_AUTH_ENV_VARS` is a FLAT NAMESPACE: one `CLAUDE_CODE_OAUTH_TOKEN`
+// per tier, unnameable, unversioned, unreferenceable — and its precedence is `workspace ?? user`, so the
+// moment a team registers one, no member's own login is reachable at all. That is the exact opposite of the
+// ask. Neither can carry FILES, and a CLI's settings are files.
+//
+// So: a capability, for the reasons the delegation profile is one — the store already supplies immutable
+// versions, four reach tiers, adoption, cross-tenant sharing and a UI. `private` there is creator-only, and
+// THAT is the multi-tenant property this needs: each member registers their own and nobody else can consume it.
+//
+// ⚠️ THERE IS DELIBERATELY NO `credential` FIELD. Claude Code takes a headless token through the ENVIRONMENT
+// (`claude setup-token`, bound to the same subscription); Codex takes a FILE (`~/.codex/auth.json`). A single
+// field that is a credential for one CLI and a config file for the other fits neither, so both channels —
+// `env` and `home` — accept `{secretRef}` and the author puts the credential wherever their CLI reads it.
+//
+// ⚠️ AND IT IS A HEADLESS TOKEN, NOT A COPY OF THE LIVE LOGIN. `~/.claude/.credentials.json` carries an expiry
+// the CLI refreshes IN PLACE, so a copy handed to a container decays and two parties then race to refresh one
+// credential. Rejected for that reason, 2026-09-17.
+
+// A file this identity reproduces under the container's $HOME. Either a literal (settings, config) or a
+// secret reference (a credential that happens to be a file) — the value is resolved at boot and never stored.
+export const CliIdentityFileSchema = z.union([
+  z.object({ path: HomeRelativePathSchema, content: z.string().max(262144) }).strict(),
+  z
+    .object({
+      path: HomeRelativePathSchema,
+      secretRef: z.string().min(1),
+      scope: z.enum(["user", "workspace"]).optional(),
+    })
+    .strict(),
+]);
+export type CliIdentityFile = z.infer<typeof CliIdentityFileSchema>;
+
+export const CLI_IDENTITY_KINDS = ["claude-code", "codex"] as const;
+
+export const CliIdentitySpecSchema = z.object({
+  type: z.literal("cli-identity"),
+  // WHICH CLI this identity is FOR. Used to match an identity to the harness a session is about to run —
+  // never to derive a magic variable name, because the two CLIs do not take their credential the same way.
+  cli: z.enum(CLI_IDENTITY_KINDS),
+  // What the CLI reads from the environment. Same vocabulary every other spec uses, so `{secretRef, scope}`
+  // resolves through the one resolver and an unresolvable reference is refused by name at boot.
+  env: z.record(z.string(), EnvValueSchema).default({}),
+  // What the CLI reads from disk, reproduced under $HOME at the paths it already looks in.
+  home: z.array(CliIdentityFileSchema).max(32).default([]),
+});
+
+// ⚠️ "hands something over" is a DOMAIN rule, not a `.refine` here: a refined schema is a ZodEffects and a
+// discriminated union takes only objects, so putting it on the shape would cost the union its discriminator —
+// which is the thing that makes every reader of a capability exhaustive. The rule lives in
+// `assertCliIdentityHandsSomethingOver` (@everdict/domain) and is applied where the record is written.
+export type CliIdentitySpec = z.infer<typeof CliIdentitySpecSchema>;
+
 export const CapabilitySpecSchema = z.discriminatedUnion("type", [
   McpToolSpecSchema,
   CodeToolSpecSchema,
   SkillCapabilitySpecSchema,
   EnvironmentImageSpecSchema,
   DelegationProfileSpecSchema,
+  CliIdentitySpecSchema,
 ]);
 export type CapabilitySpec = z.infer<typeof CapabilitySpecSchema>;
 

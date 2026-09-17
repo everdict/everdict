@@ -11,12 +11,20 @@ import type {
   TrajectoryStore,
   WorkspaceImages,
 } from "@everdict/application-control";
-import { type GithubAppService, SandboxSessionService } from "@everdict/application-control";
-import { BadRequestError, type HarnessSpec, NotFoundError, type RegistryAuth } from "@everdict/contracts";
+import { type GithubAppService, type ResolvedCliIdentity, SandboxSessionService } from "@everdict/application-control";
+import {
+  BadRequestError,
+  type CapabilityRecord,
+  ConflictError,
+  type HarnessSpec,
+  NotFoundError,
+  type RegistryAuth,
+} from "@everdict/contracts";
 import type { BudgetTracker, TrustZonePolicy, UsageMeter } from "@everdict/domain";
 import {
   assertHardenedIsolation,
   canConsumeCapability,
+  chooseCliIdentity,
   harnessAuthEnv,
   parseImageRef,
   resolveEnvValues,
@@ -364,6 +372,87 @@ export function buildSandboxSessions(opts: {
           },
         }
       : undefined;
+  // ── WHO THE CLI RUNS AS (DEFAUL-5) ──────────────────────────────────────────────────────────────────
+  //
+  // The submitter's OWN registered identity for the CLI about to run, or the one the caller named. Deliberately
+  // not the workspace's: the mechanism this replaces resolved `workspace ?? user`, so a team secret silently
+  // outranked every member's own login — which is the opposite of what registering an identity is for. A
+  // workspace-visible identity is something a caller NAMES.
+  //
+  // Absent `capabilities` or `scopedSecretsFor` = identities are not configured and the seam stays undefined,
+  // so a session runs exactly the way it did before (the flat auth-env tiers). Nothing half-resolves.
+  const resolveCliIdentity: SandboxSessionServiceDeps["resolveCliIdentity"] =
+    capabilities !== undefined && scopedSecretsFor !== undefined
+      ? async (tenant, subject, want) => {
+          const secrets = await scopedSecretsFor(tenant, subject);
+          const missing = new Set<string>();
+          const resolve = (record: CapabilityRecord): ResolvedCliIdentity => {
+            if (record.spec.type !== "cli-identity")
+              throw new BadRequestError(
+                "BAD_REQUEST",
+                { identity: record.id, type: record.spec.type },
+                `'${record.id}' is a ${record.spec.type} capability, not a CLI identity.`,
+              );
+            const env = resolveEnvValues(record.spec.env, secrets, missing);
+            const home = record.spec.home.map((file) => ({
+              path: file.path,
+              content:
+                "content" in file
+                  ? file.content
+                  : (resolveEnvValues(
+                      { v: { secretRef: file.secretRef, ...(file.scope ? { scope: file.scope } : {}) } },
+                      secrets,
+                      missing,
+                    ).v ?? ""),
+            }));
+            // Refused by NAME, at open, beside the profile's own missing-secret refusal — a CLI that starts
+            // with an empty credential file does not fail, it runs as nobody and reports success.
+            if (missing.size > 0)
+              throw new BadRequestError(
+                "BAD_REQUEST",
+                { identity: record.id, missing: [...missing] },
+                `CLI identity '${record.id}' needs secret(s) that are not set: ${[...missing].join(", ")}.`,
+              );
+            return {
+              ref: { source: record.tenant, id: record.id, version: record.version },
+              env,
+              home,
+            };
+          };
+
+          if (want.ref !== undefined) {
+            const record = await capabilities.get(want.ref.source ?? tenant, want.ref.id, want.ref.version);
+            // No existence leak: an identity the caller may not consume answers exactly like one that is not there.
+            if (!record || !canConsumeCapability(record, { tenant, subject }))
+              throw new NotFoundError(
+                "NOT_FOUND",
+                { identity: want.ref.id },
+                `No CLI identity '${want.ref.id}' this workspace can use.`,
+              );
+            return { kind: "explicit", identity: resolve(record) };
+          }
+
+          // The implicit half: MINE, for this CLI. `listVisible` also returns the workspace's and what other
+          // workspaces shared here, so the owner filter is what keeps "my account" from being outranked.
+          const mine = (await capabilities.listVisible(tenant, subject)).filter(
+            (c) => c.spec.type === "cli-identity" && c.spec.cli === want.cli && c.createdBy === subject,
+          );
+          const chosen = chooseCliIdentity({
+            mine: mine.map((c) => ({ id: c.id, version: c.version })),
+            cli: want.cli,
+          });
+          if (chosen.kind === "none") return { kind: "none" };
+          const record = mine.find((c) => c.id === chosen.identity.id);
+          if (!record)
+            throw new ConflictError(
+              "CONFLICT",
+              { identity: chosen.identity.id },
+              "the chosen identity was removed between the listing and the read — open the session again.",
+            );
+          return { kind: "mine", identity: resolve(record) };
+        }
+      : undefined;
+
   // A session on the WORKSPACE's own runtime — the resolver shared with file execution and the browser lane,
   // so which cluster, which credential and which trust zone have one answer for all of them.
   const driverFor = (tenant: string, runtime: string) => opts.compute.computeFor(tenant, runtime);
@@ -373,6 +462,7 @@ export function buildSandboxSessions(opts: {
     driver,
     driverFor,
     ...(git ? { git } : {}),
+    ...(resolveCliIdentity ? { resolveCliIdentity } : {}),
     ...(opts.trajectories ? { trajectories: opts.trajectories } : {}),
     ...(opts.events ? { events: opts.events } : {}),
     ...(opts.reaper ? { reaper: opts.reaper } : {}),

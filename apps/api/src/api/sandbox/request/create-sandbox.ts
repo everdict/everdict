@@ -44,6 +44,13 @@ export const CreateSandboxBodySchema = z
     hibernate: z.boolean().optional(),
     // W2: clone a repository into the session before it is handed over. A private repo needs the workspace's
     // GitHub App installed on its owner; a public one clones anonymously.
+    // WHO the CLI runs as, when the submitter wants a NAMED identity instead of their own — "run as the team's
+    // CI account". Omitted, the session resolves the submitter's registered identity for the CLI it is about to
+    // run; that is the point of registering one, and a caller who must name it every time has registered nothing.
+    identity: z
+      .object({ source: z.string().optional(), id: z.string().min(1), version: z.string().optional() })
+      .optional(),
+
     repo: z
       .object({
         git: z.string().url().max(1000),

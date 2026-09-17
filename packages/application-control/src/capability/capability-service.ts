@@ -12,6 +12,7 @@ import {
 } from "@everdict/contracts";
 import {
   assertCapabilityEffects,
+  assertCliIdentityHandsSomethingOver,
   canConsumeCapability,
   classifyImageRef,
   compareVersions,
@@ -180,6 +181,9 @@ export class CapabilityService {
   ): Promise<SaveCapabilityResult> {
     // O4 registration guard: a write-capable tool must declare its effect contract — refused before any write.
     assertCapabilityEffects(body.spec);
+    // An identity that hands nothing over would register, resolve, boot, and leave the CLI logged out. Refused
+    // here, where the author is still present, rather than discovered by a delegate with no account.
+    if (body.spec.type === "cli-identity") assertCliIdentityHandsSomethingOver(body.spec);
     // Computed on every save path (create / new version / idempotent no-op) — the author benefits either way.
     const warnings = await this.environmentImageWarnings(tenant, body.spec);
     const withWarnings = (result: SaveCapabilityResult): SaveCapabilityResult =>

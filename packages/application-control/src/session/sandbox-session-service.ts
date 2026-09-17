@@ -23,6 +23,7 @@ import {
 } from "@everdict/contracts";
 import {
   type BudgetTracker,
+  type CliIdentityChoice,
   IMAGE_REPOSITORY_NAME,
   Run,
   type UsageMeter,
@@ -152,6 +153,10 @@ function attributed(facts: DomainFact[], agent: SandboxAgentAttribution | undefi
 }
 
 export interface CreateSandboxInput {
+  // Run as a NAMED identity instead of the submitter's own — "run as the team's CI account". Omitted, the
+  // session resolves the submitter's registered identity for the CLI it is about to run, which is the whole
+  // point of registering one: register it once and no call has to name it again.
+  identity?: { source?: string; id: string; version?: string };
   tenant: string;
   createdBy: string;
   // What to boot: an adopted environment capability (resolved to its image via the injected resolver), an
@@ -211,6 +216,14 @@ export interface ResolvedSessionHarness {
 // A delegation profile resolved for session use — the registered environment (image + a harness whose adapter
 // already carries the profile's env/workDir) plus what the session must seed and stamp. Built by the
 // composition root behind the same injected-closure seam as resolveSessionHarness.
+// A registered CLI identity, already resolved: its secret references read, its files' contents in hand.
+// Secret VALUES live only here (process memory) — never on the record, the spec or the trajectory.
+export interface ResolvedCliIdentity {
+  ref: { source: string; id: string; version: string };
+  env: Record<string, string>;
+  home: Array<{ path: string; content: string }>;
+}
+
 export interface ResolvedDelegationProfile {
   ref: { source: string; id: string; version: string }; // what was delegated to, for the record + the evidence
   harness: ResolvedSessionHarness;
@@ -370,6 +383,19 @@ export interface SandboxSessionServiceDeps {
     subject: string,
     ref: { source?: string; id: string; version?: string },
   ) => Promise<ResolvedDelegationProfile | undefined>;
+  // Which registered CLI identity this session runs as — the submitter's own for the CLI about to run, or the
+  // one the caller named. apps/api wires it; absent = identities are not configured and a session runs the way
+  // it always did (the flat auth-env tiers).
+  //
+  // Returns the domain's THREE-VALUED choice, never `undefined` on failure: "you registered none" is an answer
+  // a session records and continues from, while a store that could not answer must THROW and stop the boot. The
+  // clone path in this same file is the counterexample — its `readToken(...).catch(() => undefined)` makes those
+  // two indistinguishable, and a private clone then fails with a git message that names nothing.
+  resolveCliIdentity?: (
+    tenant: string,
+    subject: string,
+    input: { cli: string; ref?: { source?: string; id: string; version?: string } },
+  ) => Promise<CliIdentityChoice<ResolvedCliIdentity>>;
   // harness ref → a bootable front-door CONVERSATION, when the ref is a kind:"service" harness (registry get
   // + secret resolution + the topology environment for the named runtime). Returns undefined for any other
   // kind — the process resolver above then answers. The resolver itself refuses a service harness with no
@@ -646,6 +672,31 @@ export class SandboxSessionService {
           );
         }
       }
+      // WHO THE CLI RUNS AS. Resolved once the container exists and before any turn, because a delegate that
+      // starts logged out fails at its first call — far from the person who could have registered an identity.
+      //
+      // The files land under the container's own $HOME, asked for rather than assumed: the paths a CLI reads
+      // are relative to it, and an image that runs as someone other than root would otherwise get its identity
+      // written into a directory nobody reads. They are also OUTSIDE `workDir` by construction, which matters
+      // here specifically — `cloneRepo` below does `rm -rf <workDir>`, and that is how a delegation's brief
+      // gets destroyed when a repo is cloned into the same directory.
+      const identity = delegation !== undefined ? await this.resolveIdentity(input, delegation) : undefined;
+      if (delegation !== undefined && identity !== undefined && identity.kind !== "none") {
+        const home = (await handle.exec('printf %s "$HOME"')).stdout.trim() || "/root";
+        try {
+          for (const file of identity.identity.home) await handle.writeFile(`${home}/${file.path}`, file.content);
+        } catch (err) {
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { identity: identity.identity.ref.id },
+            `Could not reproduce the identity's files in the session: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+        // The identity WINS over the flat auth-env tiers. Registering one is how a member says "this account,
+        // mine" — a workspace secret outranking it is the precedence this whole record exists to replace.
+        delegation.harness.apiKeyEnv = { ...delegation.harness.apiKeyEnv, ...identity.identity.env };
+      }
+
       // The delegation's CONTEXT, seeded before the record for the same reason the install is: a delegate that
       // silently never received its brief is a failure the delegator would only discover from the answer.
       const briefMarkdown = input.brief !== undefined ? renderDelegationBrief(input.brief) : undefined;
@@ -2041,6 +2092,20 @@ export class SandboxSessionService {
 
   // The delegation profile behind `input.profile` — resolved through the composition's seam (capability get +
   // consume gate + secrets + model binding + the adapter that carries them).
+  // The CLI about to run comes from the profile's own harness id — the caller never says it twice. An explicit
+  // `identity` on the call is passed through and always wins; the domain owns what happens when there are none
+  // or several (`chooseCliIdentity`).
+  private async resolveIdentity(
+    input: CreateSandboxInput,
+    delegation: ResolvedDelegationProfile,
+  ): Promise<CliIdentityChoice<ResolvedCliIdentity> | undefined> {
+    if (!this.deps.resolveCliIdentity) return undefined;
+    return this.deps.resolveCliIdentity(input.tenant, input.createdBy, {
+      cli: delegation.harness.id,
+      ...(input.identity !== undefined ? { ref: input.identity } : {}),
+    });
+  }
+
   private async resolveProfile(input: CreateSandboxInput): Promise<ResolvedDelegationProfile> {
     const ref = input.profile;
     if (!ref) throw new BadRequestError("BAD_REQUEST", {}, "profile is required.");

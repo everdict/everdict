@@ -611,6 +611,7 @@ export { withRegisteredFact } from "./platform-event/registry-facts.js";
 export { stampFacts, type StampedFact } from "./platform-event/outbox.js";
 export { withTracePerception } from "./observability/trace-perception.js";
 export {
+  type ResolvedCliIdentity,
   SandboxSessionService,
   type CreateSandboxInput,
   type ResolvedDelegationProfile,
