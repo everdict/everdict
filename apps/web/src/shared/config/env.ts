@@ -38,7 +38,9 @@ const schema = z.object({
   // onto the request host at pair time (shared/lib/runner-api-url.ts), so a co-located deploy is reachable with zero
   // config; set this (verbatim) to pin a public/proxied CP origin.
   CONTROL_PLANE_PUBLIC_URL: z.string().url().optional(),
-  // Keycloak (Auth.js)
+  // Keycloak (Auth.js). `EVERDICT_AUTH=off` turns the login gate off while LEAVING these values in place —
+  // see `keycloakConfigured` below for why the presence of a value is not the switch.
+  EVERDICT_AUTH: z.enum(['on', 'off']).optional(),
   AUTH_SECRET: z.string().optional(),
   KEYCLOAK_ISSUER: z.string().url().optional(), // e.g. http://localhost:8081/realms/everdict
   KEYCLOAK_CLIENT_ID: z.string().optional(),
@@ -61,10 +63,25 @@ export const env = schema.parse({
   WORKSPACE_URL_BASE: blankAsUnset(process.env.WORKSPACE_URL_BASE),
   CONTROL_PLANE_WS_URL: blankAsUnset(process.env.CONTROL_PLANE_WS_URL),
   CONTROL_PLANE_PUBLIC_URL: blankAsUnset(process.env.CONTROL_PLANE_PUBLIC_URL),
+  EVERDICT_AUTH: blankAsUnset(process.env.EVERDICT_AUTH),
   AUTH_SECRET: blankAsUnset(process.env.AUTH_SECRET),
   KEYCLOAK_ISSUER: blankAsUnset(process.env.KEYCLOAK_ISSUER),
   KEYCLOAK_CLIENT_ID: blankAsUnset(process.env.KEYCLOAK_CLIENT_ID),
   KEYCLOAK_CLIENT_SECRET: blankAsUnset(process.env.KEYCLOAK_CLIENT_SECRET),
 })
 
-export const keycloakConfigured = Boolean(env.KEYCLOAK_ISSUER && env.KEYCLOAK_CLIENT_ID)
+// Is the login gate ON for this deployment?
+//
+// It used to be exactly `ISSUER && CLIENT_ID` — the PRESENCE of two values decided a POLICY. That is how a
+// deployment locks itself out: `deploy/compose` starts Keycloak only under `--profile auth`, while the web
+// reads those two variables on EVERY profile, so an `.env` that still carries them (because auth was tried
+// once, or because the template filled them in) makes `middleware.ts` redirect every workspace URL to a
+// login page served by a container that is not running. No error, no way in, and nothing on the screen
+// saying which half is missing.
+//
+// So the switch is now explicit and the config is just config. It stays FAIL-CLOSED: an existing deployment
+// that sets neither variable is unaffected, and only `EVERDICT_AUTH=off` — a thing somebody has to write —
+// turns the gate off. `on` is accepted and means the same as leaving it unset, so a deployment can state its
+// intent rather than implying it.
+export const keycloakConfigured =
+  Boolean(env.KEYCLOAK_ISSUER && env.KEYCLOAK_CLIENT_ID) && env.EVERDICT_AUTH !== 'off'

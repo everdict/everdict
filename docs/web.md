@@ -2,8 +2,8 @@
 kind: wiki
 title: "SaaS web (apps/web)"
 status: current
-updated: 2026-09-16
-anchors: [apps/web/src/widgets/app-shell/ui/nav-config.ts, apps/web/src/widgets/app-shell/ui/settings-nav-config.ts, apps/web/src/middleware.ts, apps/web/src/shared/auth/can.ts, apps/web/src/widgets/infra-panel/model/infra-panel-context.tsx]
+updated: 2026-09-17
+anchors: [apps/web/src/widgets/app-shell/ui/nav-config.ts, apps/web/src/widgets/app-shell/ui/settings-nav-config.ts, apps/web/src/middleware.ts, apps/web/src/shared/auth/can.ts, apps/web/src/shared/config/env.ts, apps/web/src/widgets/infra-panel/model/infra-panel-context.tsx]
 ---
 # SaaS web (`apps/web`)
 
@@ -20,6 +20,13 @@ runs, and harnesses.
   from `GET /me`, never decoded from the token by the web. UI is role-gated off `/me` (mirror in
   `shared/auth/can.ts`), but enforcement is always the control plane's (403). Without Keycloak configured the web
   falls back to the dev `x-everdict-tenant=default` path. See `docs/auth.md`.
+  **The gate is a switch, not an inference** (`shared/config/env.ts` `keycloakConfigured`): it follows
+  `KEYCLOAK_ISSUER` + `KEYCLOAK_CLIENT_ID`, and `EVERDICT_AUTH=off` lowers it while LEAVING those values in
+  place. That variable exists because the two halves could disagree — `deploy/compose` starts Keycloak only
+  under `--profile auth` while the web read those values on every profile, so an `.env` still carrying them
+  sent every workspace URL to a login server nobody was running, with the control plane behind it open
+  (`EVERDICT_REQUIRE_AUTH` unset). `off` is the only word that lowers the gate; unset and `on` both mean it
+  follows the values, so nothing silently loosens on upgrade.
 - **Agents / MCP / CI → MCP or API keys**: the agent-facing **MCP server** (`@everdict/api` `/mcp`) exposes
   run/harness tools, OAuth-protected via Keycloak ("login like Linear MCP") or an `Authorization: Bearer ak_…`
   API key — same auth core, role-gated. See `docs/mcp.md`.

@@ -34,6 +34,11 @@
 #   then set EVERDICT_REQUIRE_AUTH=1 + the KEYCLOAK_*/PUBLIC_HOST values in .env (see the .env template).
 #   ⚠️ Keycloak issuer must be reachable at the SAME URL from BOTH the browser and the API/web containers — set
 #      PUBLIC_HOST to a real host/IP (not `localhost`) and update realm-everdict.json redirectUris to that origin.
+#   ⚠️ KEYCLOAK IS A PROFILE, ITS CONFIG IS NOT. The container starts only under `--profile auth`, while the web
+#      reads KEYCLOAK_ISSUER/KEYCLOAK_CLIENT_ID on EVERY profile — so a `.env` that still carries them from an
+#      earlier attempt makes the web redirect every workspace URL to a login page nobody is serving, with the
+#      control plane behind it wide open. Set EVERDICT_AUTH=off to lower the gate WITHOUT deleting the values
+#      (the web then runs its dev path: no login, tenant=default). `full.sh` says so when it sees the mismatch.
 name: everdict-full
 
 # Corporate-network build passthrough — `docker compose build` does NOT read the shell env for the predefined
@@ -524,6 +529,9 @@ services:
       # time (the Temporal UI is published on the same host as the web), so remote users get a reachable link.
       TEMPORAL_UI_URL: ${TEMPORAL_UI_URL:-http://localhost:${TEMPORAL_UI_PORT:-8233}}
       # Auth (enable with the `auth` profile). Unset → the web runs in dev mode (no login, tenant=default).
+      # EVERDICT_AUTH=off lowers the gate while KEEPING the values below, for a deployment that is configured
+      # for Keycloak but is not running it — the state that otherwise locks everybody out.
+      EVERDICT_AUTH: ${EVERDICT_AUTH:-}
       AUTH_SECRET: ${AUTH_SECRET:-}
       AUTH_URL: ${WEB_BASE_URL:-}
       KEYCLOAK_ISSUER: ${KEYCLOAK_ISSUER:-}

@@ -70,6 +70,18 @@ if [[ " $* " == *" images "* ]]; then
   ensure_secret IMAGE_STORE_REALM "http://127.0.0.1:${API_PORT:-8787}/v2/token"
 fi
 
+# The mismatch that locks a deployment out of itself: Keycloak is a PROFILE, its configuration is not. The
+# container starts only under `--profile auth`, while the web reads KEYCLOAK_ISSUER/KEYCLOAK_CLIENT_ID on every
+# profile — so an .env still carrying them (auth was tried once, the template was filled in) makes the web
+# redirect every workspace URL to a login server that is not running, while the control plane behind it stays
+# open. Nothing on the screen names the missing half, so the script names it here, where somebody can act.
+if [[ " $* " != *" auth "* ]]   && grep -qE '^KEYCLOAK_ISSUER=.+' "$ENV_FILE"   && grep -qE '^KEYCLOAK_CLIENT_ID=.+' "$ENV_FILE"   && ! grep -qE '^EVERDICT_AUTH=off' "$ENV_FILE"; then
+  echo "⚠️  $ENV_FILE configures Keycloak, but this bring-up has no \`auth\` profile — no Keycloak will run." >&2
+  echo "    The web will still send every page to a login server that is not there. Pick one:" >&2
+  echo "      • run with auth:  bash deploy/compose/full.sh --profile auth" >&2
+  echo "      • or lower the gate, keeping the settings:  echo 'EVERDICT_AUTH=off' >> $ENV_FILE" >&2
+fi
+
 docker compose -f docker-compose.full.yaml --env-file "$ENV_FILE" "$@" up -d --build
 
 # shellcheck disable=SC1090
