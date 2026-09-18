@@ -119,18 +119,29 @@ export function registerIssueRoutes(app: FastifyInstance, deps: ServerDeps): voi
   // One read from the request to everything it caused: the campaigns opened against it (both grades), the
   // commits each round moved in each service, and the knowledge pinned to the issue OR to one of its
   // campaigns. Composed from the records, never materialised — a lineage table would be a second authority.
-  app.get<{ Params: { id: string } }>("/issues/:id/lineage", { schema: issueDocs.lineage }, async (req, reply) => {
-    if (!deps.issueLineageService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "issue lineage service not configured" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "issues:read");
-      return reply.send(await deps.issueLineageService.assemble(principal.workspace, principal.subject, req.params.id));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
+  app.get<{ Params: { id: string }; Querystring: { depth?: string } }>(
+    "/issues/:id/lineage",
+    { schema: issueDocs.lineage },
+    async (req, reply) => {
+      if (!deps.issueLineageService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "issue lineage service not configured" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "issues:read");
+        // A depth that is not a number becomes NaN and the service REFUSES it — the range check is
+        // `Number.isInteger`, so an unparseable query fails closed rather than silently reading as the default.
+        const depth = req.query.depth === undefined ? undefined : Number(req.query.depth);
+        return reply.send(
+          await deps.issueLineageService.assemble(principal.workspace, principal.subject, req.params.id, {
+            ...(depth !== undefined ? { depth } : {}),
+          }),
+        );
+      } catch (err) {
+        return sendError(reply, err);
+      }
+    },
+  );
 
   app.get<{ Params: { id: string } }>("/issues/:id", { schema: issueDocs.get }, async (req, reply) => {
     if (!deps.issueService) return reply.code(404).send({ code: "NOT_FOUND", message: "issue service not configured" });

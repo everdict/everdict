@@ -40,6 +40,10 @@ export const lineageCampaignSchema = z.object({
   ),
   continues: z.string().optional(),
   closedAt: z.string().optional(),
+  // WHICH HOP reached it: 1 = it names the request itself, n = n-1 `continues` steps back. Optional because
+  // the web and the API deploy separately and a control plane that predates the walk sends neither this nor
+  // `walk` — an older API must render as "one hop", never as a broken screen.
+  depth: z.number().optional(),
 })
 
 export const issueLineageSchema = z.object({
@@ -52,10 +56,30 @@ export const issueLineageSchema = z.object({
       kind: z.string(),
       title: z.string(),
       status: z.string(),
-      // Every way in, not the first one found: an entry pinned to both is reachable twice.
-      reachedBy: z.object({ issue: z.boolean(), campaigns: z.array(z.string()) }),
+      // Every way in, not the first one found: an entry pinned to both is reachable twice. `supersededBy` is
+      // the way in that only the walk produces: an entry nobody pinned to this request is still its history
+      // when the request's own entry replaced it.
+      reachedBy: z.object({
+        issue: z.boolean(),
+        campaigns: z.array(z.string()),
+        supersededBy: z.string().optional(),
+      }),
+      supersedes: z.string().optional(),
+      depth: z.number().optional(),
     })
   ),
+  // WHAT THE WALK DID. Each field is a count the reader can act on rather than an absence to infer:
+  // `truncated` = ask again with more depth; `cycles` = a defect in the records; `unresolved` = a step the
+  // control plane could not fetch, which is "cannot find out" and not "there is none".
+  walk: z
+    .object({
+      requested: z.number(),
+      reached: z.number(),
+      truncated: z.boolean(),
+      cycles: z.number(),
+      unresolved: z.number(),
+    })
+    .optional(),
   // Which collaborators the control plane could not read. An unwired source must never render as a request
   // that caused nothing, so the UI says so rather than drawing an empty section.
   sources: z.object({

@@ -6089,7 +6089,12 @@
       "evaluated": "evaluated"
     },
     "attemptsTruncated": "Only the newest {limit} were read — attempts outside that window are invisible here rather than absent.",
-    "attemptsUnparsed": "{count} could not be read in the shape this screen knows, and are missing from the rows."
+    "attemptsUnparsed": "{count} could not be read in the shape this screen knows, and are missing from the rows.",
+    "hopsBack": "{n} back",
+    "viaSuperseded": "replaced by {id}",
+    "walkTruncated": "A chain still had more when depth {depth} ran out — this is where the walk stopped, not where the history ends.",
+    "walkCycles": "{count} chain(s) point back at something already walked — that is a defect in the records, not in the reading.",
+    "walkUnresolved": "{count} step(s) named a record this deployment could not fetch — unknown, not absent."
   },
   "changeCampaignPage": {
     "title": "Change campaign",

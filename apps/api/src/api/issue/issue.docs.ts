@@ -120,8 +120,24 @@ export const issueDocs: Record<
       "Everything this request caused, in one read: the campaigns opened against it (the `change` grade and " +
       "the evaluated one), each round with the commits it moved in each service, and the knowledge pinned to " +
       "the issue OR to one of its campaigns. `sources` names any collaborator this deployment could not read, " +
-      "because an unwired source must not read as a request that caused nothing. Requires issues:read.",
+      "because an unwired source must not read as a request that caused nothing. `depth` (1-5, default 1) walks " +
+      "BACK along the chains: a campaign `continues` the one whose remainder it picked up, and a knowledge entry " +
+      "`supersedes` the claim it corrected, so depth 2 reaches the retracted claim a depth-1 read cannot show. " +
+      "`walk` reports what the traversal did — `truncated` (a chain had more when the depth ran out), `cycles` " +
+      "and `unresolved` (a step this read could not fetch) — because a bounded walk that does not say it was " +
+      'bounded reports "there is no more" when it means "I stopped". Requires issues:read.',
     tags: ["issues"],
+    querystring: {
+      type: "object",
+      properties: {
+        depth: {
+          type: "integer",
+          minimum: 1,
+          maximum: 5,
+          description: "how many hops back to walk; 1 (default) is the request's own records",
+        },
+      },
+    },
     ...errorResponses,
   },
   get: {

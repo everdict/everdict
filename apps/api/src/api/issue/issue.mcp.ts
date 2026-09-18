@@ -32,10 +32,24 @@ export function registerIssueTools(server: McpServer, ctx: McpToolContext): void
       {
         annotations: { readOnlyHint: true },
         description:
-          "Everything a request caused, in one read: the campaigns opened against it (the `change` grade and the evaluated one), each round with the commits it moved in each service, and the knowledge pinned to the issue OR to one of its campaigns — the second edge exists because `campaign` is part of the reference vocabulary. Rejected rounds are included: what failed is what the next attempt was built on. `sources` names any source this deployment could not read, because an unwired one must not read as a request that caused nothing.",
-        inputSchema: { id: z.string().min(1).describe("issue id or identifier") },
+          'Everything a request caused AND how it came to be, in one read: the campaigns opened against it (the `change` grade and the evaluated one), each round with the commits it moved in each service, and the knowledge pinned to the issue OR to one of its campaigns — the second edge exists because `campaign` is part of the reference vocabulary. Rejected rounds are included: what failed is what the next attempt was built on. `depth` walks BACK along the stored chains — a campaign `continues` the one whose remainder it picked up, a knowledge entry `supersedes` the claim it corrected — so depth 2 reaches a retracted claim that depth 1 cannot show, and each item carries the hop that reached it. Read `walk` before concluding a history ended: `truncated` means a chain still had more when the depth ran out, `cycles` means the records point at themselves, and `unresolved` means a step could not be fetched — none of the three is the same as "there is no more". `sources` names any source this deployment could not read, because an unwired one must not read as a request that caused nothing.',
+        inputSchema: {
+          id: z.string().min(1).describe("issue id or identifier"),
+          depth: z
+            .number()
+            .int()
+            .min(1)
+            .max(5)
+            .optional()
+            .describe(
+              "how many hops back to walk the `continues`/`supersedes` chains; 1 (default) is the request's own records",
+            ),
+        },
       },
-      ({ id }) => run(principal, "issues:read", async () => ok(await lineage.assemble(ws, principal.subject, id))),
+      ({ id, depth }) =>
+        run(principal, "issues:read", async () =>
+          ok(await lineage.assemble(ws, principal.subject, id, { ...(depth !== undefined ? { depth } : {}) })),
+        ),
     );
   }
 

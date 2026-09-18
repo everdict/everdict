@@ -74,6 +74,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 import { PropertyList, PropertyRow } from '@/shared/ui/property-list'
 import { SectionHeader } from '@/shared/ui/section-header'
 
+// How far back the issue screen walks the lineage chains. See the fetch below for why 3.
+const ISSUE_LINEAGE_DEPTH = 3
+
 export const dynamic = 'force-dynamic'
 
 // The window of sibling issues up/down navigation sweeps. It re-reads the list screen's default order (most recent
@@ -271,8 +274,12 @@ export default async function IssueDetailPage({
       .catch((): Release[] => []),
     // A THIRD VALUE, not a swallow: a lineage that could not be read renders as "unknown", never as a request
     // that caused nothing. (The neighbours above predate that rule.)
+    // The SCREEN asks for a walk, not one hop. A person reading an issue is asking "how did this come to be",
+    // and the chain that answers it — a campaign continuing another, an entry superseding another — is one
+    // `continues`/`supersedes` step away. 3 is deep enough for a retraction chain and bounded enough that the
+    // section stays a section; `walk.truncated` tells the reader when there is more than that.
     controlPlane
-      .getIssueLineage(ctx, current.id)
+      .getIssueLineage(ctx, current.id, ISSUE_LINEAGE_DEPTH)
       .then((r) => ({ ok: true as const, lineage: issueLineageSchema.parse(r) }))
       .catch((e: unknown) => ({
         ok: false as const,

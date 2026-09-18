@@ -10,6 +10,17 @@ import { Link } from '@/shared/ui/link'
 //
 // Read-only and server-rendered — it has no controls, so it is a section rather than an island.
 
+// How far a walked ancestor is inset. A STATIC map because a class name built at runtime
+// (`ml-${n * 3}`) is never seen by the compiler and ships as no margin at all.
+const DEPTH_INSET: Record<number, string> = {
+  1: '',
+  2: 'ml-3 border-l pl-3',
+  3: 'ml-6 border-l pl-3',
+  4: 'ml-9 border-l pl-3',
+  5: 'ml-12 border-l pl-3',
+}
+const inset = (depth: number | undefined) => DEPTH_INSET[depth ?? 1] ?? DEPTH_INSET[5]
+
 const OUTCOME_TONE: Record<string, string> = {
   adopted: 'text-emerald-600 dark:text-emerald-400',
   rejected: 'text-amber-600 dark:text-amber-400',
@@ -47,7 +58,7 @@ export async function IssueLineageSection({
       <h2 className="text-sm font-medium">{t('title')}</h2>
 
       {lineage.campaigns.map((campaign) => (
-        <div key={campaign.id} className="rounded-md border p-3 text-sm">
+        <div key={campaign.id} className={`rounded-md border p-3 text-sm ${inset(campaign.depth)}`}>
           <div className="flex items-center gap-2">
             <Link
               href={campaignHref(campaign.grade, campaign.id)}
@@ -58,6 +69,12 @@ export async function IssueLineageSection({
             <span className="text-muted-foreground">
               {word(`state.${campaign.state}`, campaign.state)}
             </span>
+            {/* An ancestor says so on its own card — the chain is a chain here, not a link to elsewhere. */}
+            {campaign.depth !== undefined && campaign.depth > 1 ? (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                {t('hopsBack', { n: campaign.depth - 1 })}
+              </span>
+            ) : null}
             {campaign.service ? (
               <span className="text-muted-foreground">
                 · {campaign.service.repository}
@@ -121,7 +138,10 @@ export async function IssueLineageSection({
       {lineage.knowledge.length > 0 ? (
         <ul className="space-y-1 text-sm">
           {lineage.knowledge.map((entry) => (
-            <li key={entry.id} className="flex flex-wrap items-baseline gap-2">
+            <li
+              key={entry.id}
+              className={`flex flex-wrap items-baseline gap-2 ${inset(entry.depth)}`}
+            >
               <span className="rounded bg-muted px-1.5 py-0.5 text-xs">{entry.kind}</span>
               <span
                 className={entry.status === 'active' ? '' : 'text-muted-foreground line-through'}
@@ -137,10 +157,27 @@ export async function IssueLineageSection({
                       ids: entry.reachedBy.campaigns.map((id) => id.slice(0, 8)).join(', '),
                     })
                   : null}
+                {/* The way in that only the walk produces: nobody pinned this entry to the request — the
+                    request's own entry replaced it, which is what makes it history rather than noise. */}
+                {entry.reachedBy.supersededBy
+                  ? t('viaSuperseded', { id: entry.reachedBy.supersededBy.slice(0, 8) })
+                  : null}
               </span>
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {lineage.walk && (lineage.walk.truncated || lineage.walk.cycles > 0 || lineage.walk.unresolved > 0) ? (
+        // A bounded walk that does not say it was bounded reports "there is no more" when it means "I
+        // stopped". Each line below is a different thing for the reader to do about it.
+        <div className="space-y-0.5 text-xs text-muted-foreground">
+          {lineage.walk.truncated ? <p>{t('walkTruncated', { depth: lineage.walk.requested })}</p> : null}
+          {lineage.walk.cycles > 0 ? <p>{t('walkCycles', { count: lineage.walk.cycles })}</p> : null}
+          {lineage.walk.unresolved > 0 ? (
+            <p>{t('walkUnresolved', { count: lineage.walk.unresolved })}</p>
+          ) : null}
+        </div>
       ) : null}
 
       {unavailable.length > 0 ? (
