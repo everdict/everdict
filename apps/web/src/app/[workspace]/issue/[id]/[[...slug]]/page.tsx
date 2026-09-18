@@ -24,6 +24,7 @@ import {
   IssuePriorityControl,
   IssueProjectControl,
   IssueStatusControl,
+  IssueChainControl,
 } from '@/features/manage-issue'
 import { datasetsSchema, type DatasetSummary } from '@/entities/dataset'
 import { harnessesSchema, type Harness } from '@/entities/harness'
@@ -488,6 +489,11 @@ export default async function IssueDetailPage({
                   position: state.position,
                 }))}
               />
+            </PropertyRow>
+            {/* The chain is its own row beside the status, never inside it: the board says where the work is,
+                this says whether the request was designed, decided and shipped (DEFAUL-39). */}
+            <PropertyRow label={t('fieldChain')}>
+              <IssueChainControl id={current.id} chain={current.chain} canWrite={canWrite} />
             </PropertyRow>
             <PropertyRow label={t('fieldPriority')}>
               <IssuePriorityControl

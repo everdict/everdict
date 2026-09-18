@@ -5242,7 +5242,8 @@
       "assignee": "Unassigned",
       "project": "No project"
     },
-    "fieldMentionedBy": "Mentioned by"
+    "fieldMentionedBy": "Mentioned by",
+    "fieldChain": "Chain"
   },
   "issueLinks": {
     "add": "Add",
@@ -6125,5 +6126,32 @@
     "requirementsNone": "This campaign has settled none of what was asked for yet.",
     "unclassifiedNote": "⚠️ {count} criteria predate the record of what they judge and are not in this count.",
     "blockedBy": "{criterion}: {reason}"
+  },
+  "issueChain": {
+    "state": {
+      "none": "Not in the chain",
+      "draft": "Draft",
+      "accepted": "Accepted",
+      "rejected": "Rejected",
+      "shipped": "Shipped"
+    },
+    "move": {
+      "acceptWithSpec": "Accept — on a spec",
+      "acceptDeclining": "Accept — declining a design",
+      "reject": "Reject",
+      "ship": "Ship",
+      "redraft": "Back to draft"
+    },
+    "ask": {
+      "spec": "docs/specs/… — the spec that governs this",
+      "declined": "Why there is no design",
+      "reject": "Why this is turned down"
+    },
+    "declined": "No design — {why}",
+    "rejectedFor": "Turned down — {reason}",
+    "predatesTheChain": "This request predates the work chain. Accepting it dates the acceptance now, never backwards.",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "failed": "Could not move the chain."
   }
 }

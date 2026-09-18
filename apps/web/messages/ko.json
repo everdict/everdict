@@ -5242,7 +5242,8 @@
       "assignee": "담당자 없음",
       "project": "프로젝트 없음"
     },
-    "fieldMentionedBy": "언급한 이슈"
+    "fieldMentionedBy": "언급한 이슈",
+    "fieldChain": "체인"
   },
   "issueLinks": {
     "add": "추가",
@@ -6125,5 +6126,32 @@
     "requirementsNone": "이 캠페인은 아직 아무 요구도 해결하지 못했습니다.",
     "unclassifiedNote": "⚠️ 기준 {count}개는 무엇을 판정하는지 기록되기 전에 쓰여 이 수에 들어 있지 않습니다.",
     "blockedBy": "{criterion}: {reason}"
+  },
+  "issueChain": {
+    "state": {
+      "none": "체인 밖",
+      "draft": "초안",
+      "accepted": "수락됨",
+      "rejected": "반려됨",
+      "shipped": "배포됨"
+    },
+    "move": {
+      "acceptWithSpec": "수락 — 스펙을 근거로",
+      "acceptDeclining": "수락 — 설계 없음을 밝히고",
+      "reject": "반려",
+      "ship": "배포 처리",
+      "redraft": "초안으로 되돌리기"
+    },
+    "ask": {
+      "spec": "docs/specs/… — 이 요청을 규율하는 스펙",
+      "declined": "설계가 없는 이유",
+      "reject": "반려하는 이유"
+    },
+    "declined": "설계 없음 — {why}",
+    "rejectedFor": "반려 — {reason}",
+    "predatesTheChain": "이 요청은 작업 체인보다 앞섭니다. 수락하면 수락 시각은 지금으로 찍히며, 소급되지 않습니다.",
+    "confirm": "확인",
+    "cancel": "취소",
+    "failed": "체인을 옮기지 못했습니다."
   }
 }

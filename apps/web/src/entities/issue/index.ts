@@ -70,6 +70,7 @@ export {
   type IssueView,
   type IssueViewParams,
 } from './model/view'
+export { issueChainSchema, type IssueChain } from './model/schema'
 export { issueHref, issueSlug } from './lib/href'
 export { issueAttachmentProxy } from './lib/attachment-proxy'
 export {

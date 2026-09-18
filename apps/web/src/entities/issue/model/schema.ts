@@ -82,6 +82,9 @@ export const issueLinkSchema = z.object({
   dataset: z.string().optional(), // case links only
   repository: z.string().optional(), // commit links only — "owner/name"
   host: z.string().optional(), // commit links only — unset for github.com
+  // commit links only — the commit's AUTHOR DATE, the order witness (DEFAUL-39 §3). Mirrored because a
+  // wire field this schema omits is DROPPED at parse and the screen renders as though it was never sent.
+  committedAt: z.string().optional(),
   note: z.string().optional(),
   addedBy: z.string(),
   addedAt: z.string(),
@@ -128,6 +131,7 @@ export const issueResolutionSchema = z.object({
 
 export const issueGithubSchema = z.object({
   host: z.string().optional(),
+  committedAt: z.string().optional(),
   repository: z.string(),
   number: z.number(),
   url: z.string(),
@@ -148,6 +152,27 @@ export const issueGithubSchema = z.object({
     .object({ at: z.string(), op: z.enum(['pull', 'push']), message: z.string() })
     .optional(),
 })
+
+// ── THE WORK CHAIN (DEFAUL-39) ───────────────────────────────────────────────────────────────────────
+//
+// A SECOND AXIS beside `status`: has this request been DESIGNED, decided and shipped. ⚠️ ABSENT IS A THIRD
+// VALUE, not `draft` — an issue that predates the chain has none, and drawing it as a draft would say nobody
+// designed a request that already shipped.
+export const issueChainSchema = z.discriminatedUnion('state', [
+  z.object({ state: z.literal('draft') }),
+  z.object({
+    state: z.literal('accepted'),
+    at: z.string(),
+    by: z.string(),
+    design: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('spec'), path: z.string() }),
+      z.object({ kind: z.literal('declined'), why: z.string() }),
+    ]),
+  }),
+  z.object({ state: z.literal('rejected'), at: z.string(), by: z.string(), reason: z.string() }),
+  z.object({ state: z.literal('shipped'), at: z.string(), by: z.string() }),
+])
+export type IssueChain = z.infer<typeof issueChainSchema>
 
 export const issueSchema = z.object({
   id: z.string(),
@@ -175,6 +200,7 @@ export const issueSchema = z.object({
   labelIds: z.array(z.string()).default([]),
   links: z.array(issueLinkSchema).default([]),
   resolution: issueResolutionSchema.optional(),
+  chain: issueChainSchema.optional(),
   github: issueGithubSchema.optional(),
   history: z.array(trackerHistoryEntrySchema).default([]),
   createdBy: z.string(),
@@ -191,6 +217,7 @@ export const issuesSchema = z.array(issueSchema)
 // the GitHub copy to two facts ("which repository" and "is it syncing"). The whole record is on the detail (`getIssue`).
 export const issueSummaryGithubSchema = z.object({
   host: z.string().optional(),
+  committedAt: z.string().optional(),
   repository: z.string(),
   pull: z.boolean(),
 })
