@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { CaseResultSchema, EvalCaseSchema } from "../execution/eval-case.js";
 import { RunUsageSummarySchema } from "../execution/trace.js";
+import { DelegationBriefSchema } from "./delegation-brief.js";
+import { DelegateStateSchema } from "./delegation-session.js";
 
 // A run's lifecycle: accept → (scheduler queue/dispatch) → success/failure. The result store keeps this record.
 // `suspended` = stopped WITHOUT completing, resumably (an agent run halting at its envelope budget, or
@@ -162,6 +164,29 @@ export const RunSessionSchema = z.object({
   // Playground conversation mode: the session's turns continue ONE conversation (stable workdir + harness
   // resume / session-stable front-door wiring) instead of running independent cases. Set at boot, never flips.
   conversation: z.boolean().optional(),
+  // ── WHAT A DELEGATION SAID, ON THE ROW (DEFAUL-52) ─────────────────────────────────────────────────
+  //
+  // The report used to live only in `PlaygroundState`, an in-process Map, so a restart made a delegated
+  // change round unloggable: the row survived and what the delegate SAID did not. Same asymmetry DEFAUL-37
+  // closed for the steering channel, one lane over — and the lane already had a name for the result
+  // (`orphaned`), which is why it was invisible.
+  //
+  // `brief` is written at BOOT by the door that authored it, STRUCTURED rather than the rendered BRIEF.md:
+  // `doneWhen` ids are the change grade's join key, and re-deriving ids from rendered prose is the L3 failure
+  // that lane refuses. `state` is written when the delegate SETTLES, and only then.
+  //
+  // ⚠️ `state` ABSENT IS A THIRD VALUE. `pending_init` and `running` are facts about a promise a process
+  // holds, and a row claiming `running` after a restart would say something is in flight when the container
+  // died with the process. A brief with no state means "booted, and this control plane never saw it settle" —
+  // not completed, not errored, and not a report of nothing.
+  delegation: z
+    .object({
+      brief: DelegationBriefSchema,
+      // The SETTLED arms of the existing union, unchanged. A second spelling of `completed` would be two
+      // vocabularies at the seam where a supervisor decides whether to accept work.
+      state: DelegateStateSchema.optional(),
+    })
+    .optional(),
 });
 export type RunSession = z.infer<typeof RunSessionSchema>;
 

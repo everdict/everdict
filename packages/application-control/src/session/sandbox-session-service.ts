@@ -1019,6 +1019,13 @@ export class SandboxSessionService {
             }
           : {}),
       });
+      // The brief goes on the ROW at boot (DEFAUL-52): it exists now, it was authored by the door that just
+      // ran, and a settlement recorded later needs it to have a join key. Structured, never the rendered
+      // BRIEF.md — `doneWhen` ids are the change grade's key and re-deriving them from prose is L3's failure.
+      if (input.brief !== undefined) {
+        const booted = this.sessions.get(record.id);
+        if (booted) await this.persistDelegation(booted, record.id, { brief: input.brief });
+      }
       // Durable expiry (T-b): best-effort — a Temporal outage never blocks the session (the in-process
       // sweep still bounds the TTL while this process lives). Best-effort is not silent: a session whose
       // durable timer failed to arm is one crash away from a permanent `running` row, so the failure is
@@ -1181,6 +1188,41 @@ export class SandboxSessionService {
   // that RESTARTED holds the ledger row and no longer holds the report — which is `orphaned`, the state this
   // lane already has a name for. "The work is unreachable from here" and "there was no report" would then be
   // the same answer, and the second one silently lets a round be logged that claims work nobody can check.
+  // The row's copy of what a delegation IS (DEFAUL-52). Best-effort by contract: the caller has already made
+  // the change it is recording, and a failed write must not unmake it. The failure is LOGGED rather than
+  // swallowed — a delegation whose settlement never reached the row becomes a round nobody can log later, and
+  // that is worth a line in the operator's logs at the moment it happens.
+  private async persistDelegation(
+    live: LiveSession,
+    runId: string,
+    patch: { brief?: DelegationBrief; state?: DelegateState },
+  ): Promise<void> {
+    const current = live.playground?.delegation;
+    const brief = patch.brief ?? current?.brief;
+    if (brief === undefined) return; // not a delegation profile session — nothing to record
+    try {
+      const row = await this.deps.store.get(runId);
+      if (row?.session === undefined) return;
+      await this.deps.store.update(runId, {
+        session: {
+          ...row.session,
+          delegation: {
+            brief,
+            ...(patch.state !== undefined
+              ? { state: patch.state }
+              : row.session.delegation?.state !== undefined
+                ? { state: row.session.delegation.state }
+                : {}),
+          },
+        },
+      });
+    } catch (err) {
+      console.error(
+        `[sandbox] the delegation for ${runId} could not be recorded on its row, so a change round naming it will be refused after this process ends: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   async read(tenant: string, runId: string): Promise<ReadResult<DelegationWork>> {
     this.sweep();
     const live = this.sessions.get(runId);
@@ -1193,9 +1235,34 @@ export class SandboxSessionService {
       if (row.kind === "unknown") return row;
       const record = row.kind === "read" ? row.value : undefined;
       if (record === undefined || record.tenant !== tenant) return { kind: "absent" };
+      // ── THE ROW'S COPY (DEFAUL-52 §2) ────────────────────────────────────────────────────────────
+      //
+      // Not live here, but the row may still hold what the delegate said. Three answers, and they are three
+      // on purpose:
+      const persisted = record.session?.delegation;
+      // 4. Never a delegation at all — a shell or eval session this caller named by mistake.
+      if (persisted === undefined) return { kind: "absent" };
+      // 3. Booted, and this control plane never saw it settle. NOT `absent` (it WAS a delegation) and not an
+      //    empty report (that would read as a delegate which answered nothing): the container died with the
+      //    process that held it, so what it did is genuinely unknown (protocol L2).
+      if (persisted.state === undefined)
+        return {
+          kind: "unknown",
+          reason: `delegation session '${runId}' was booted on a process that is gone and never recorded a settlement, so what it did cannot be read`,
+        };
+      // 2. Settled, and the row kept it. This is the case the whole change exists for: the supervisor comes
+      //    back after a redeploy and the round is loggable, with the same answers the live read would give.
+      const settled = persisted.state;
+      const persistedReport =
+        settled.status === "completed" || settled.status === "awaiting" ? settled.report : undefined;
       return {
-        kind: "unknown",
-        reason: `delegation session '${runId}' is no longer live on this control plane, so its report cannot be read from here`,
+        kind: "read",
+        value: {
+          runId,
+          brief: persisted.brief,
+          status: settled.status,
+          ...(persistedReport !== undefined ? { report: persistedReport } : {}),
+        },
       };
     }
     const playground = live.playground;
@@ -1208,8 +1275,6 @@ export class SandboxSessionService {
         reason: `delegation session '${runId}' was booted without a structured brief, so there is nothing to join its report against`,
       };
     const state = playground.state;
-    // The report travels with the two settled states that HAVE one. Everything else has no report to read —
-    // which is a real absence of a report, not a failure to read it.
     // The report travels with the two settled states that HAVE one. A delegate that finished without filing
     // one is reported AS THAT — never as an empty report, which would read exactly like a delegate that
     // answered nothing.
@@ -1592,6 +1657,11 @@ export class SandboxSessionService {
               questions: report.questions.map((q) => q.id),
             },
           });
+        // ⚠️ AND IT GOES ON THE ROW (DEFAUL-52). The live state dies with this process; the supervisor who
+        // comes back after a redeploy still needs what the delegate said, and a change round naming this
+        // delegation is refused without it. Best-effort — a settled delegate whose row write failed is still
+        // settled HERE, and refusing to record the settlement would lose more than the write did.
+        await this.persistDelegation(live, runId, { state: playground.state });
       }
     })()
       .catch((err: unknown) => {
