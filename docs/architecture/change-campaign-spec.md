@@ -343,10 +343,27 @@ Four seams, all of them in the plugin because that is where a coding session act
    workspace says so; it does not guess one.
 2. **Before code changes** — the work belongs to an issue and a campaign. If none is open, the session opens
    them (`/everdict:campaign`), naming the issue it serves.
-3. **Stop** — a session that changed code and recorded nothing in Everdict **is refused once**, with the
+3. **Stop** — a session that changed code and left no **round** in Everdict **is refused once**, with the
    reason handed back to the model. The escape is a **break-glass**: a recorded reason, visible afterwards,
    never a silent skip. The loop guard is the hook's own `stop_hook_active` flag, so refusal happens once per
    session, not forever.
+
+   ⚠️ **A ROUND, not merely a record — and the difference is what the guard got wrong first.** Until
+   2026-09-18 any recording tool discharged the obligation, so one `create_issue` was enough, and the change
+   grade's own tools (`open_change_campaign`, `log_change_round`, `close_change_campaign`) were not even in
+   the vocabulary: a session that ran the change loop perfectly was refused for "recording nothing".
+
+   Measured that day on this repository: a session spent hours on nine commits across five packages, filed
+   five issues, closed them with resolution notes, wrote four knowledge entries — and `lint 0 · test 51/51 ·
+   build 51/51`, eight scanners and thirteen neutralizations seen red all ended up in git commit bodies,
+   outside Everdict, unqueryable and uncomparable to the next round. It was not a lazy session. The guard was
+   asking a weaker question than the one it exists to force.
+
+   The reason issues and knowledge cannot substitute: a person who asked for work wants **what problem · what
+   method · what result · what verification**, and only a round carries the fourth. `gateRuns` with exit
+   codes and metrics live there and nowhere else. So they stay necessary and stop being sufficient, and the
+   refusal names `/everdict:campaign` and shows the `log_change_round` shape rather than saying
+   "record something" — which is the refusal that produced the defect.
 4. **After** — the commits and pull request are linked to the campaign, and the campaign's close names the
    merged sha.
 
@@ -373,6 +390,7 @@ the seam that cannot be bypassed is the repository's own push gate, and moving i
 | Situation | Answer |
 |---|---|
 | Session changed code, recorded nothing | Stop refused once, with the reason and the break-glass named |
+| Session changed code, recorded but logged NO round | Stop refused once, naming the round and what it needs — issues and knowledge do not carry what was RUN |
 | Break-glass used | allowed, and the reason is written to the campaign as a `context` entry |
 | Workspace cannot be resolved | session told explicitly; no default workspace is assumed |
 | `change` campaign closed with no knowledge and no declared refusal | close refused |

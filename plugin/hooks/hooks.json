@@ -1,5 +1,5 @@
 {
-  "description": "The Everdict development loop: a session opens with the service's knowledge and may not end having changed code without recording what it learned (docs/architecture/change-campaign-spec.md).",
+  "description": "The Everdict development loop: a session opens with the service's knowledge and may not end having changed code without a ROUND on the record — what was run, with its numbers — beside what it learned (docs/architecture/change-campaign-spec.md).",
   "hooks": {
     "SessionStart": [
       {

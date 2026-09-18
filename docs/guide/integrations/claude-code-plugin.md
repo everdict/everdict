@@ -32,7 +32,7 @@ call `run_scorecard` but does not know what a harness is will flail. The plugin 
 | **MCP server** | the `everdict` tools, pointed at `${EVERDICT_MCP_URL}` |
 | **`everdict` skill** | the domain model and eval workflows, so the session knows what the entities are |
 | **`everdict-sdlc` skill** | where the work's record lives — request, campaign, change, knowledge |
-| **hooks** | session start loads the service's knowledge; Stop refuses a session that changed code and recorded nothing |
+| **hooks** | session start loads the service's knowledge; Stop refuses a session that changed code and left no ROUND — the record that carries what was run, with numbers |
 | **`/everdict:setup`** | walks a fresh session through connecting and registering its first harness |
 | **`/everdict:eval`** | runs an evaluation end-to-end and reports the verdict |
 | **`/everdict:campaign`** | opens the request and the campaign the work belongs to |

@@ -52,6 +52,7 @@ const CHANGED_AND_RECORDED = transcript("changed-and-recorded", [
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
   toolUse("mcp__everdict__write_file", { path: "knowledge/retrievals/2026-09-16/s-1/used.json" }),
+  toolUse("mcp__everdict__log_change_round", { id: "c-1", hypothesis: "h" }),
 ]);
 const COMMITTED_ONLY = transcript("committed-only", [toolUse("Bash", { command: "git commit -m x" })]);
 // A session whose record is its JUDGEMENT rather than a knowledge entry has recorded (the ownership
@@ -62,6 +63,7 @@ const CHANGED_AND_JUDGED = transcript("changed-and-judged", [
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__publish_checkpoint", { role: "executor" }),
   toolUse("mcp__everdict__write_file", { path: "knowledge/retrievals/2026-09-16/s-2/used.json" }),
+  toolUse("mcp__everdict__log_change_round", { id: "c-1", hypothesis: "h" }),
 ]);
 // Recorded, but never ASKED. The two halves fail differently and are repaired differently, so the refusal
 // has to say which one is missing — a session told "record something" when it already did learns nothing.
@@ -83,13 +85,37 @@ const USED_BY_TOOL = transcript("used-by-tool", [
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
   toolUse("mcp__everdict__record_retrieval_use", { assembly_path: "knowledge/retrievals/d/s/assembly-x.json" }),
+  toolUse("mcp__everdict__log_change_round", { id: "c-1", hypothesis: "h" }),
 ]);
 const USED_FILED = transcript("used-filed", [
   toolUse("Edit", { file_path: "/x/y.ts" }),
   toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
   toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
   toolUse("mcp__everdict__write_file", { path: "knowledge/retrievals/2026-09-16/s-42/used.json" }),
+  toolUse("mcp__everdict__log_change_round", { id: "c-1", hypothesis: "h" }),
 ]);
+// ⚠️ THE BRANCH THIS FILE EXISTS FOR AFTER 2026-09-18. A session that did everything the guard used to ask —
+// asked the workspace, filed issues, wrote knowledge, accounted for what it used — and logged NO ROUND. It
+// looks like a diligent session from every angle, and what it RAN is nowhere in Everdict. That is what
+// happened for hours on this repository before the rule existed.
+const RECORDED_BUT_NO_ROUND = transcript("recorded-no-round", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
+  toolUse("mcp__everdict__create_issue", { title: "the request" }),
+  toolUse("mcp__everdict__create_knowledge_entry", { kind: "finding" }),
+  toolUse("mcp__everdict__record_retrieval_use", { assembly_path: "knowledge/retrievals/d/s/assembly-x.json" }),
+]);
+// The change grade is the record. Nothing else in the transcript — no knowledge entry, no issue — because the
+// point is that these three tools were absent from the recording vocabulary entirely: a session that ran the
+// change loop perfectly was refused for having "recorded nothing".
+const CHANGE_GRADE_ONLY = transcript("change-grade-only", [
+  toolUse("Edit", { file_path: "/x/y.ts" }),
+  toolUse("mcp__everdict__get_task_context", { refs: [{ type: "repository", key: "acme/widget" }] }),
+  toolUse("mcp__everdict__open_change_campaign", { issue_id: "i-1" }),
+  toolUse("mcp__everdict__log_change_round", { id: "c-1", hypothesis: "h" }),
+  toolUse("mcp__everdict__record_retrieval_use", { assembly_path: "knowledge/retrievals/d/s/assembly-x.json" }),
+]);
+
 const READ_ONLY = transcript("read-only", [toolUse("Read", { file_path: "/x/y.ts" })]);
 
 const run = (hook, payload, env = {}) =>
@@ -139,6 +165,25 @@ check(
   run(hooks.capture, { cwd: work, transcript_path: CHANGED_AND_JUDGED }, { EVERDICT_WORKSPACE: "acme" }),
   allows,
   "no decision (the session filed its judgement)",
+);
+check(
+  "capture/recorded everything EXCEPT a round → blocked, naming what it RAN",
+  run(hooks.capture, { cwd: work, transcript_path: RECORDED_BUT_NO_ROUND }, { EVERDICT_WORKSPACE: "acme" }),
+  (out) =>
+    blocks(out) &&
+    out.reason.includes("logged no round") &&
+    out.reason.includes("log_change_round") &&
+    out.reason.includes("gateRuns") &&
+    // and it must NOT accuse the session of the things it actually did
+    !out.reason.includes("recorded nothing in Everdict") &&
+    !out.reason.includes("without asking what workspace"),
+  "a block about the ROUND only, telling the session what a round needs",
+);
+check(
+  "capture/the change grade IS recording — the three tools that were missing from the vocabulary",
+  run(hooks.capture, { cwd: work, transcript_path: CHANGE_GRADE_ONLY }, { EVERDICT_WORKSPACE: "acme" }),
+  allows,
+  "no decision — a session that ran the change loop recorded, and used to be refused for recording nothing",
 );
 check(
   "capture/recorded but never asked → blocked, naming the RETRIEVAL half",
