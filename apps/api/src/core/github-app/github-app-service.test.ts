@@ -156,14 +156,24 @@ function stubPullFiles(changedFiles: number, files: unknown[]): void {
   );
 }
 
+// The author date the forge reports for the landed commit (DEFAUL-55) — a value a caller READS rather than
+// composes, because it becomes a commit link's `committedAt` and the work chain compares it to an acceptance.
+const AUTHORED_AT = "2026-07-05T11:59:00Z";
+
 // Stub for the direct-commit path — access-token mint + repoHead (default branch + its sha) + branch creation +
-// the contents PUT (whose response names the commit). Records every mutating call so the ORDER is assertable.
-function stubCommit(calls: { method: string; url: string }[]): void {
+// the contents PUT (whose response names the commit) + the git-data commit read that carries the author date.
+// Records every mutating call so the ORDER is assertable. `dateReadFails` drives the arm where the bytes
+// landed and the date did not come back.
+function stubCommit(calls: { method: string; url: string }[], dateReadFails = false): void {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string | URL, init?: RequestInit) => {
       const s = String(url);
       const method = init?.method ?? "GET";
+      if (s.includes("/git/commits/"))
+        return dateReadFails
+          ? new Response("rate limited", { status: 403 })
+          : new Response(JSON.stringify({ author: { date: AUTHORED_AT } }), { status: 200 });
       // Only the REPOSITORY mutations are recorded — minting the installation token is also a POST, and it is
       // plumbing, not a write to anybody's repo.
       if (method !== "GET" && !s.endsWith("/access_tokens")) calls.push({ method, url: s });
@@ -501,6 +511,7 @@ describe("GithubAppService", () => {
       createdBranch: true,
       files: ["src/a.ts", "src/b.ts"],
       headSha: "headsha", // read from the BRANCH after the writes — the sha names what landed
+      committedAt: AUTHORED_AT, // and its author date, READ from the forge (DEFAUL-55)
     });
     // Branch first, then the files in the order given — never a file onto a branch that does not exist yet.
     expect(calls.map((c) => `${c.method} ${c.url.split("/repos/acme-org/api")[1]}`)).toEqual([
@@ -521,6 +532,44 @@ describe("GithubAppService", () => {
     });
     expect(out.createdBranch).toBe(false);
     expect(calls.map((c) => c.method)).toEqual(["PUT"]); // no POST /git/refs
+  });
+
+  // ── DEFAUL-55: THE ORDER WITNESS IS READ, NOT REMEMBERED ────────────────────────────────────────────
+  //
+  // `IssueLink.committedAt` is what the work chain compares against an acceptance — a commit authored BEFORE
+  // the request was accepted is refused. Nothing supplied it: the automatic backlinker handles
+  // harness/dataset/judge and never commit, and this call returned a sha and no date. So every commit link
+  // was hand-typed, and the guard caught a mistyped date and not a lie. This does not make the guarantee
+  // git's — a caller can still pass a false date — it removes the GUESSING.
+  //
+  // Seen RED with the read neutralized in `commitFiles`: "expected null to be '2026-07-05T11:59:00Z'" — the
+  // caller is back to composing the date, which is the defect.
+  it("commitFiles reads the landed commit's author date, so a link's order witness is not composed by hand", async () => {
+    const calls: { method: string; url: string }[] = [];
+    stubCommit(calls);
+    await installOrg();
+    const out = await svc.commitFiles("acme", "acme-org/api", {
+      branch: "main",
+      message: "m",
+      changes: [{ path: "src/a.ts", content: "a" }],
+    });
+    expect(out.committedAt).toBe(AUTHORED_AT);
+  });
+
+  // ⚠️ THE BYTES HAVE LANDED. A failed date read must not report a write that happened as one that did not —
+  // the same rule `branchHead` is read separately for. `null` says "supply the date yourself, and know that
+  // you did"; a throw here would leave a caller believing the commit never happened and writing it again.
+  it("commitFiles still reports the commit when the author date cannot be read, and says the date is missing", async () => {
+    const calls: { method: string; url: string }[] = [];
+    stubCommit(calls, true);
+    await installOrg();
+    const out = await svc.commitFiles("acme", "acme-org/api", {
+      branch: "main",
+      message: "m",
+      changes: [{ path: "src/a.ts", content: "a" }],
+    });
+    expect(out.headSha).toBe("headsha"); // the write is reported, in full
+    expect(out.committedAt).toBeNull(); // and the half that failed is named rather than invented
   });
 
   it("commitFiles refuses an empty change set rather than making an empty branch", async () => {

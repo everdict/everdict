@@ -53,6 +53,9 @@ function build(opts: { issues?: GithubIssue[]; tokenError?: Error } = {}) {
     async branchHead() {
       throw new Error("unused");
     },
+    async commitAuthoredAt(): Promise<never> {
+      throw new Error("unused in these tests");
+    },
     async openPr() {
       throw new Error("unused");
     },

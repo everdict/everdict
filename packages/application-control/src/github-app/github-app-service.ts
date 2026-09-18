@@ -297,7 +297,21 @@ export class GithubAppService {
     repository: string,
     opts: { branch: string; message: string; changes: { path: string; content: string }[] },
     host?: string,
-  ): Promise<{ branch: string; base: string; createdBranch: boolean; files: string[]; headSha: string }> {
+  ): Promise<{
+    branch: string;
+    base: string;
+    createdBranch: boolean;
+    files: string[];
+    headSha: string;
+    // WHEN THE COMMIT WAS AUTHORED (DEFAUL-55) — the value a caller passes as a commit link's `committedAt`,
+    // which is the order witness the work chain compares against an acceptance.
+    //
+    // ⚠️ `null` IS A REAL ANSWER, not an omission: the bytes have landed and this read failed. A caller that
+    // gets null must supply the date itself and knows it; a caller that got a string read it rather than
+    // remembering it, which is the whole difference this field buys. (It does not make the guarantee git's —
+    // a caller can still type a false date — it removes the GUESSING.)
+    committedAt: string | null;
+  }> {
     if (opts.changes.length === 0)
       throw new BadRequestError("BAD_REQUEST", { repository }, "a commit needs at least one file change.");
     const { token, host: resolved } = await this.tokenForRepository(workspace, repository, { contents: "write" }, host);
@@ -315,12 +329,26 @@ export class GithubAppService {
       });
     }
     // The branch's resulting head — read AFTER the writes, so the sha names what actually landed.
+    const landed = await writer.branchHead(repository, opts.branch);
+    // Read AFTER the sha, and its failure is contained: the commit exists whatever this answers, and throwing
+    // here would report a write that happened as a write that did not — the same rule `branchHead` is
+    // separated for. The failure is logged rather than swallowed, because a caller silently handed `null`
+    // will compose a date by hand and nobody will know why.
+    let committedAt: string | null = null;
+    try {
+      committedAt = await writer.commitAuthoredAt(repository, landed);
+    } catch (err) {
+      console.error(
+        `[github] commit ${landed} landed in ${repository} but its author date could not be read, so a commit link for it will need a hand-typed \`committedAt\`: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return {
       branch: opts.branch,
       base: defaultBranch,
       createdBranch,
       files: opts.changes.map((c) => c.path),
-      headSha: await writer.branchHead(repository, opts.branch),
+      headSha: landed,
+      committedAt,
     };
   }
 

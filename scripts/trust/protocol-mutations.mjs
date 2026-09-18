@@ -3866,6 +3866,19 @@ const MUTATIONS = [
     build: "@everdict/application-control",
     suite: ["--root", "packages/application-control", "src/issue/issue-lineage-service.test.ts"],
   },
+  {
+    // ── THE ORDER WITNESS IS READ FROM THE FORGE (DEFAUL-55) ────────────────────────────────────────
+    //
+    // A commit link's `committedAt` is what the work chain compares against the acceptance, and until this
+    // read existed nothing supplied it — so every one was hand-typed and the guard caught a mistyped date
+    // rather than a false one. Neutralized, the caller is back to composing it.
+    name: "DEFAUL-55 — the commit's author date is composed rather than read",
+    file: "packages/application-control/src/github-app/github-app-service.ts",
+    from: "      committedAt = await writer.commitAuthoredAt(repository, landed);",
+    to: "      committedAt = null;",
+    build: "@everdict/application-control",
+    suite: ["--root", "apps/api", "src/core/github-app/github-app-service.test.ts"],
+  },
 ];
 
 // ── ONE RUNG AT A TIME, FOR RE-AIMING (arch-review 65) ──────────────────────────────────────────────

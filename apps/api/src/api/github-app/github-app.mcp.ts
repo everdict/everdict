@@ -242,7 +242,7 @@ export function registerGithubAppTools(server: McpServer, ctx: McpToolContext): 
           "open_github_pr when the change is a PROPOSAL somebody should read first; use this for work on a branch " +
           "you already own, or when the member explicitly asked to commit. Naming the default branch here ships " +
           "straight to it. Each change carries the FULL new content of the file. Returns a commit sha per file. " +
-          "member+ (github:write).",
+          "member+ (github:write). ⚠️ IT RETURNS `committedAt` — the commit's AUTHOR DATE, read back from the forge. That is the value a commit link carries as its order witness (`add_issue_link { committedAt }`), and the work chain refuses a commit authored BEFORE its request was accepted. Pass what this returns rather than composing a timestamp: `null` means the bytes landed and the date could not be read, so you would have to supply it yourself — and know that you did.",
         inputSchema: {
           repository: z.string().min(1).describe('"owner/name"'),
           branch: z.string().min(1).describe("branch to commit on (created off the default branch if absent)"),

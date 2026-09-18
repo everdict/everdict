@@ -68,6 +68,15 @@ export interface GithubRepoWriter {
   // write nobody can verify, and one sha for the finished branch says more than a sha per file. Read separately
   // rather than returned by putFile on purpose — a completed write must not fail on how its receipt parsed.
   branchHead(repository: string, branch: string): Promise<string>;
+  // ── WHEN A COMMIT WAS AUTHORED (DEFAUL-55) ────────────────────────────────────────────────────────
+  //
+  // The order witness the tracker's commit links carry (`IssueLink.committedAt`) is the commit's AUTHOR DATE
+  // — not `addedAt`, which is when somebody made the link and is trivially after the acceptance. Nothing
+  // supplied it until now, so every commit link was hand-typed and the date was composed rather than read.
+  //
+  // Read SEPARATELY, for the same reason `branchHead` is: a completed write must not fail on how its receipt
+  // parsed, and this read happens after bytes have already landed in somebody's repository.
+  commitAuthoredAt(repository: string, sha: string): Promise<string>;
   // Open the PR; if one is already open for the head (422), return that PR instead.
   openPr(
     repository: string,

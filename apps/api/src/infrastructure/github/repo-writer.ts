@@ -141,6 +141,15 @@ export function githubRepoWriterFactory(fetchImpl?: typeof fetch): GithubRepoWri
             .parse(await (await gh(`${base}/repos/${repository}/git/ref/heads/${branch}`)).json());
           return head.object.sha;
         },
+        async commitAuthoredAt(repository, sha) {
+          // The git-data commit, not the REST commit: it is the smaller object and the author date is the
+          // same value. Parsed through zod like every other read here, so a shape change is a refusal
+          // rather than an `undefined` travelling on as a date.
+          const commit = z
+            .object({ author: z.object({ date: z.string() }) })
+            .parse(await (await gh(`${base}/repos/${repository}/git/commits/${sha}`)).json());
+          return commit.author.date;
+        },
         async openPr(repository, opts) {
           // Create PR — if one is already open (422), find and return the existing PR.
           const mkPr = await doFetch(`${base}/repos/${repository}/pulls`, {
